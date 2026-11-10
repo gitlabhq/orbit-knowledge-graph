@@ -1,5 +1,4 @@
 use compiler::{AccessLevel, AuthorizedPath, SecurityContext};
-use ontology::{DataType, Ontology};
 use query_data_model::{Catalog, ClickHouse, DuckDb};
 use std::sync::Arc;
 
@@ -16,68 +15,12 @@ pub fn admin_ctx() -> SecurityContext {
     .with_role(true, Some(AccessLevel::Owner as u32))
 }
 
-pub fn test_ontology() -> Arc<Ontology> {
-    Arc::new(
-        Ontology::new()
-            .with_nodes(["User", "Project", "Note", "Group"])
-            .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
-            .with_fields(
-                "User",
-                [
-                    ("username", DataType::String),
-                    ("state", DataType::String),
-                    ("created_at", DataType::DateTime),
-                ],
-            )
-            .with_fields(
-                "Note",
-                [
-                    ("confidential", DataType::Bool),
-                    ("created_at", DataType::DateTime),
-                    ("traversal_path", DataType::String),
-                ],
-            )
-            .with_fields(
-                "Project",
-                [
-                    ("name", DataType::String),
-                    ("traversal_path", DataType::String),
-                ],
-            )
-            .with_fields(
-                "Group",
-                [
-                    ("name", DataType::String),
-                    ("traversal_path", DataType::String),
-                ],
-            ),
-    )
-}
-
 pub fn embedded_model() -> Arc<Catalog<ClickHouse>> {
     Arc::new(Catalog::<ClickHouse>::embedded().expect("embedded packages must load"))
 }
 
 pub fn embedded_local_model() -> Arc<Catalog<DuckDb>> {
     Arc::new(Catalog::<DuckDb>::embedded().expect("embedded packages must load"))
-}
-
-pub fn model(ontology: &Ontology) -> Arc<Catalog<ClickHouse>> {
-    Arc::new(
-        query_data_model::from_ontology::clickhouse(ontology)
-            .expect("fixture ontology must produce a ClickHouse model"),
-    )
-}
-
-pub fn local_model(ontology: &Ontology) -> Arc<Catalog<DuckDb>> {
-    Arc::new(
-        query_data_model::from_ontology::duckdb(ontology)
-            .expect("fixture ontology must produce a DuckDB model"),
-    )
-}
-
-pub fn test_model() -> Arc<Catalog<ClickHouse>> {
-    model(&test_ontology())
 }
 
 pub fn compile_pair(

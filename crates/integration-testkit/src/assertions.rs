@@ -1,26 +1,36 @@
 use arrow::array::StringArray;
 use orbit_arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::{Catalog, ClickHouse};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use crate::context::TestContext;
 use crate::t;
 
-static ONTOLOGY: LazyLock<ontology::Ontology> =
-    LazyLock::new(|| ontology::Ontology::load_embedded().expect("embedded ontology should load"));
+static CATALOG: LazyLock<Catalog<ClickHouse>> =
+    LazyLock::new(|| Catalog::<ClickHouse>::embedded().expect("embedded packages should load"));
 
 pub(crate) fn edge_table(relationship_kind: &str, source_kind: &str, target_kind: &str) -> String {
-    t(ONTOLOGY
-        .edge_table_for_variant(relationship_kind, source_kind, target_kind)
-        .unwrap())
+    let variant = CATALOG
+        .graph()
+        .variant_named(relationship_kind, source_kind, target_kind)
+        .unwrap_or_else(|| {
+            panic!(
+                "relationship '{relationship_kind}' has no {source_kind} -> {target_kind} variant"
+            )
+        });
+    t(CATALOG.edge_table(variant.id).unwrap())
 }
 
 pub(crate) fn edge_tables(relationship_kind: &str) -> Vec<String> {
-    ONTOLOGY
-        .edge_tables_for_relationship(relationship_kind)
-        .into_iter()
-        .map(t)
+    let Some(relationship) = CATALOG.graph().relationship_id(relationship_kind) else {
+        return Vec::new();
+    };
+    CATALOG
+        .edge_tables(&[relationship])
+        .iter()
+        .map(|table| t(table))
         .collect()
 }
 

@@ -7,6 +7,7 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use query_engine::compiler::ParameterizedQuery;
+use sha2::{Digest as _, Sha256};
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
@@ -192,12 +193,15 @@ impl TestContext {
     }
 
     pub fn fork_database_name(&self, name: &str) -> String {
-        let hash = ontology::migrations::sha256_hex(name);
+        let hash: String = Sha256::digest(name)
+            .iter()
+            .take(4)
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         format!(
-            "{}_{}_{}",
+            "{}_{}_{hash}",
             self.config.database,
             database_label(name).chars().take(24).collect::<String>(),
-            &hash[..8]
         )
     }
 

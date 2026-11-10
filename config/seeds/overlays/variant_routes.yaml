@@ -1,0 +1,28 @@
+- file: gitlab/graph.yaml
+  find: |4
+          description: Call relationships in source code representing function/method invocations
+  replace: |4
+          description: Calls with variant storage routes
+- file: gitlab/authorization.yaml
+  find: |4
+        CALLS: same_namespace
+  replace: |4
+        CALLS: {variants: {Definition -> Definition: same_namespace, File -> Definition: same_namespace}}
+- file: gitlab/graph_store.yaml
+  find: |4
+              - Dependency
+              - Group
+  replace: |4
+              - Dependency
+              - File
+              - Group
+- file: gitlab/graph_store.yaml
+  find: |4
+        CALLS: {columns: {project_id: project_id, branch: branch}}
+  replace: |4
+        CALLS:
+          variants:
+            Definition -> Definition: {columns: {project_id: project_id, branch: branch}}
+            File -> Definition: {backend: {table: gl_edge}}
+            Definition -> ImportedSymbol: {columns: {project_id: project_id, branch: branch}}
+            File -> ImportedSymbol: {backend: {table: gl_edge}}

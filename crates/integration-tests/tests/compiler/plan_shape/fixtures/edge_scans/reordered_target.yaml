@@ -1,5 +1,5 @@
 name: A target selector uses the target-oriented edge layout
-ontology_overlay: reordered_edges
+model_overlay: reordered_edges
 
 query:
   json: |

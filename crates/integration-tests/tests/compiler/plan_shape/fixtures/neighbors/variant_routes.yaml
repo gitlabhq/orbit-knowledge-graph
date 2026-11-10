@@ -1,5 +1,5 @@
 name: Incoming neighbors include all tables containing compatible variants
-ontology_overlay: variant_routes
+model_overlay: variant_routes
 
 query:
   json: |

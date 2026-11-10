@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ontology::archive::OntologyArchive;
+use orbit_migrations::archive::ModelArchive;
 
 fn config_directory() -> &'static Path {
     Path::new(env!("ORBIT_CONFIG_DIR"))
@@ -64,12 +64,12 @@ fn migration_ledger_and_current_archives_are_committed() {
 }
 
 #[test]
-fn current_ontology_archive_is_bundled() {
+fn current_model_archive_is_bundled() {
     let current_version = orbit_versions::VERSIONS.schema;
-    let versions = OntologyArchive::bundled_versions().unwrap_or_else(|error| panic!("{error}"));
+    let versions = ModelArchive::bundled_versions().unwrap_or_else(|error| panic!("{error}"));
     assert!(
         versions.contains(&current_version),
         "{} is missing; run `mise schema:bump` to write the current archive.",
-        OntologyArchive::path(config_directory(), current_version).display()
+        ModelArchive::path(config_directory(), current_version).display()
     );
 }

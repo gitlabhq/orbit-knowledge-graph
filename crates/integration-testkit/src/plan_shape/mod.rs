@@ -24,7 +24,7 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 struct Scenario {
     name: String,
-    ontology_overlay: Option<String>,
+    model_overlay: Option<String>,
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
@@ -480,7 +480,7 @@ fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
             failures.push(format!("{}: {error}", path.display()));
             continue;
         }
-        let overlay = scenario.ontology_overlay.as_ref().map(|name| {
+        let overlay = scenario.model_overlay.as_ref().map(|name| {
             let model = Arc::new(Model::load(&crate::overlay_fragments(name)).unwrap());
             (
                 Catalog::<ClickHouse>::from_model(&model).unwrap(),

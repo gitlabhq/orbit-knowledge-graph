@@ -1873,28 +1873,6 @@ mod tests {
     }
 
     #[test]
-    fn variant_table_overrides_domain_route() {
-        let ontology = Ontology::load_embedded_with_overlay(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../config/seeds/overlays/variant_routes"
-        ))
-        .unwrap();
-
-        assert_eq!(
-            ontology
-                .edge_table_for_variant("CALLS", "Definition", "Definition")
-                .unwrap(),
-            "gl_code_edge"
-        );
-        assert_eq!(
-            ontology
-                .edge_table_for_variant("CALLS", "File", "Definition")
-                .unwrap(),
-            "gl_edge"
-        );
-    }
-
-    #[test]
     fn security_edges_route_to_gl_sec_edge() {
         let ontology = Ontology::load_embedded().expect("embedded ontology should load");
 

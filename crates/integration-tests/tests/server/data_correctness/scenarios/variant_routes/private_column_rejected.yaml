@@ -1,7 +1,7 @@
 description: Physical system columns remain unavailable as relationship filters
 
 config:
-  ontology_overlay: variant_routes
+  model_overlay: variant_routes
 
 query:
   json: |

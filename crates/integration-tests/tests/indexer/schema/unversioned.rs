@@ -1,14 +1,15 @@
-use std::{collections::BTreeSet, time::Duration};
+use std::time::Duration;
 
 use clickhouse_client::FromArrowColumn;
 use indexer::schema::version::{SCHEMA_VERSION, ensure_version_table, mark_version_active};
 use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, t};
+use query_data_model::implementations::clickhouse::schema::GraphTable;
 
 const GLOBAL_TOP_LEVEL_NAMESPACE: &str = "0/";
 
 struct NamespaceStorageSnapshotScenario {
     context: TestContext,
-    ontology: ontology::Ontology,
+    schema: orbit_migrations::schema::Schema,
 }
 
 struct NamespaceStorageAttributionFixture {
@@ -72,7 +73,7 @@ impl NamespaceStorageSnapshotScenario {
         mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
         Self {
             context,
-            ontology: ontology::Ontology::load_embedded().unwrap(),
+            schema: integration_testkit::embedded_schema(),
         }
     }
 
@@ -232,23 +233,7 @@ impl NamespaceStorageSnapshotScenario {
     }
 
     async fn insert_rows_into_all_namespace_attributable_tables(&self) -> Vec<String> {
-        let mut logical_tables = self
-            .ontology
-            .nodes()
-            .filter(|node| node.has_traversal_path)
-            .map(|node| node.destination_table.clone())
-            .collect::<BTreeSet<_>>();
-        logical_tables.extend(
-            self.ontology
-                .edge_tables()
-                .into_iter()
-                .filter(|table| {
-                    self.ontology
-                        .edge_table_config(table)
-                        .is_some_and(ontology::EdgeTableConfig::has_traversal_path)
-                })
-                .map(str::to_owned),
-        );
+        let logical_tables = self.graph_tables(|table| table.has_path_column && !table.global);
         for logical_table in &logical_tables {
             let physical_table = t(logical_table);
             self.context
@@ -257,16 +242,20 @@ impl NamespaceStorageSnapshotScenario {
                 ))
                 .await;
         }
-        logical_tables.into_iter().collect()
+        logical_tables
+    }
+
+    fn graph_tables(&self, keep: impl Fn(&GraphTable) -> bool) -> Vec<String> {
+        self.schema
+            .graph_tables()
+            .iter()
+            .filter(|table| keep(table))
+            .map(|table| table.name.clone())
+            .collect()
     }
 
     async fn insert_rows_into_all_global_tables(&self) -> Vec<String> {
-        let global_tables = self
-            .ontology
-            .global_tables()
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
+        let global_tables = self.graph_tables(|table| table.global);
         for logical_table in &global_tables {
             let physical_table = t(logical_table);
             self.context

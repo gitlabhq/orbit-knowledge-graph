@@ -7,7 +7,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use clickhouse_client::FromArrowColumn;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Histogram, ObservableGauge};
-use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::catalog::ModelCatalog;
 use orbit_migrations::completion::SIPHON_SOURCE;
 use orbit_migrations::version::read_active_version;
 use orbit_observability::indexer::sdlc;
@@ -49,7 +49,7 @@ ON enabled.root_namespace_id = enrolled.root_namespace_id",
 pub struct NamespaceFreshness {
     graph: ArrowClickHouseClient,
     datalake: ArrowClickHouseClient,
-    catalog: OntologyCatalog,
+    catalog: ModelCatalog,
     scan_window: TimeDelta,
     lag: Histogram<f64>,
     oldest_sync: Arc<Mutex<Vec<(String, i64)>>>,
@@ -79,7 +79,7 @@ impl NamespaceFreshness {
     pub fn new(
         graph: ArrowClickHouseClient,
         datalake: ArrowClickHouseClient,
-        catalog: OntologyCatalog,
+        catalog: ModelCatalog,
         config: NamespaceFreshnessConfig,
         sweep_interval_secs: u64,
     ) -> Self {

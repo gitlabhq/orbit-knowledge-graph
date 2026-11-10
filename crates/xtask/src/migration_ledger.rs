@@ -3,14 +3,12 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};
-use ontology::archive::OntologyArchive;
-use ontology::migrations::embedded_sources;
-use orbit_migrations::archive::{ModelArchive, Release};
+use orbit_migrations::archive::ModelArchive;
 use orbit_migrations::diff::derive_scope;
 use orbit_migrations::ledger::{
     LEDGER_FILE, MigrationEntry, MigrationLedger, verify_committed,
@@ -219,13 +217,9 @@ pub fn bump(
 
     let previous = read_model_archive(final_version - 1)?;
     let packages = Packages::embedded();
-    if is_new
-        && explicit.is_none()
-        && previous.matches(&packages)
-        && read_ontology_archive(working_version)?.matches_sources(&embedded_sources())
-    {
+    if is_new && explicit.is_none() && previous.matches(&packages) {
         bail!(
-            "nothing changed since the v{working_version} archives. Pass --scope to re-index \
+            "nothing changed since the v{working_version} archive. Pass --scope to re-index \
              for a change the model cannot show, such as indexer code."
         );
     }
@@ -254,7 +248,7 @@ pub fn bump(
         .validate(&catalog, final_version)
         .map_err(|e| anyhow!(e))?;
 
-    write_release(&embedded_release(final_version)?, !is_new)?;
+    write_archive(&embedded_archive(final_version)?, !is_new)?;
     if is_new {
         write_schema_version(final_version)?;
     }
@@ -270,38 +264,17 @@ pub fn bump(
     Ok(())
 }
 
-fn read_ontology_archive(version: u32) -> Result<OntologyArchive> {
-    let path = OntologyArchive::path(&config_dir(), version);
-    let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
-    Ok(OntologyArchive::from_bytes(version, &bytes)?)
+fn embedded_archive(version: u32) -> Result<ModelArchive> {
+    let archive = ModelArchive::from_packages(version, &Packages::embedded())?;
+    load(&archive)?;
+    Ok(archive)
 }
 
-fn embedded_release(version: u32) -> Result<Release> {
-    let release = Release::new(
-        OntologyArchive::from_sources(version, &embedded_sources())?,
-        ModelArchive::from_packages(version, &Packages::embedded())?,
-    )?;
-    release.load()?;
-    Ok(release)
-}
-
-fn write_release(release: &Release, replace: bool) -> Result<()> {
-    let version = release.schema_version();
-    write_archive(
-        &OntologyArchive::path(&config_dir(), version),
-        release.ontology_archive().bytes(),
-        replace,
-    )?;
-    write_archive(
-        &ModelArchive::path(&config_dir(), version),
-        release.model_archive().bytes(),
-        replace,
-    )
-}
-
-fn write_archive(path: &Path, bytes: &[u8], replace: bool) -> Result<()> {
+fn write_archive(archive: &ModelArchive, replace: bool) -> Result<()> {
+    let path = ModelArchive::path(&config_dir(), archive.schema_version());
+    let bytes = archive.bytes();
     if path.exists() {
-        let existing = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        let existing = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
         if existing == bytes {
             return Ok(());
         }
@@ -312,7 +285,7 @@ fn write_archive(path: &Path, bytes: &[u8], replace: bool) -> Result<()> {
             );
         }
     }
-    fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))
+    fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))
 }
 
 #[cfg(test)]

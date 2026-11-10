@@ -8,8 +8,8 @@ use futures::TryStreamExt;
 use named_queries::{Language, NamedQueries, NamedQuery};
 use opentelemetry::KeyValue;
 use orbit_log_fields::{info, warn};
-use orbit_migrations::archive::Release;
-use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::archive::ModelArchive;
+use orbit_migrations::catalog::ModelCatalog;
 use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::AppConfig;
@@ -29,8 +29,8 @@ impl ActiveSchema {
     pub fn spawn(
         active: &Arc<Self>,
         graph: Arc<ArrowClickHouseClient>,
-        embedded: Release,
-        catalog: OntologyCatalog,
+        embedded: ModelArchive,
+        catalog: ModelCatalog,
         config: &AppConfig,
         shutdown: CancellationToken,
     ) {
@@ -202,8 +202,8 @@ impl SchemaSnapshot {
 
 struct SnapshotLoader {
     graph: Arc<ArrowClickHouseClient>,
-    embedded: Release,
-    catalog: OntologyCatalog,
+    embedded: ModelArchive,
+    catalog: ModelCatalog,
 }
 
 impl SnapshotLoader {
@@ -218,7 +218,7 @@ impl SnapshotLoader {
 
     async fn load(&self, version: u32) -> anyhow::Result<Arc<SchemaSnapshot>> {
         let catalogued;
-        let release = if version == self.embedded.schema_version() {
+        let archive = if version == self.embedded.schema_version() {
             &self.embedded
         } else {
             catalogued = self.catalog.load(version).await?;
@@ -226,7 +226,7 @@ impl SnapshotLoader {
         };
         let prefix = table_prefix(version);
         let data_model = Arc::new(Catalog::<ClickHouse>::versioned(
-            &release.packages(),
+            &archive.packages(),
             &prefix,
         )?);
         let physical = data_model.schema()?.clone();

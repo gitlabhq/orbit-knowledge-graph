@@ -1,0 +1,96 @@
+- file: gitlab/graph_store.yaml
+  find: |4
+          tables:
+            namespace_storage_snapshot:
+  replace: |4
+          joins:
+            gl_denorm_approved:
+              sort_key: [traversal_path, t2_id, t0_id]
+              sources:
+              - table: gl_user
+                columns:
+                  avatar_url: t0_avatar_url
+                  created_at: t0_created_at
+                  email: t0_email
+                  first_name: t0_first_name
+                  id: t0_id
+                  is_admin: t0_is_admin
+                  is_auditor: t0_is_auditor
+                  is_external: t0_is_external
+                  last_activity_on: t0_last_activity_on
+                  last_name: t0_last_name
+                  name: t0_name
+                  preferred_language: t0_preferred_language
+                  private_profile: t0_private_profile
+                  public_email: t0_public_email
+                  state: t0_state
+                  updated_at: t0_updated_at
+                  user_type: t0_user_type
+                  username: t0_username
+              - table: gl_edge
+                path_column: traversal_path
+                columns:
+                  relationship_kind: t1_relationship_kind
+                  source_id: t1_source_id
+                  source_kind: t1_source_kind
+                  source_tags: t1_source_tags
+                  target_id: t1_target_id
+                  target_kind: t1_target_kind
+                  target_tags: t1_target_tags
+                  traversal_path: traversal_path
+                "on": {previous: id, column: source_id}
+                filter: {relationship_kind: APPROVED, source_kind: User, target_kind: MergeRequest}
+              - table: gl_merge_request
+                path_column: t2_traversal_path
+                columns:
+                  added_lines: t2_added_lines
+                  author_id: t2_author_id
+                  closed_by_id: t2_closed_by_id
+                  commits_count: t2_commits_count
+                  created_at: t2_created_at
+                  description: t2_description
+                  diff_size: t2_diff_size
+                  discussion_locked: t2_discussion_locked
+                  draft: t2_draft
+                  first_approved_at: t2_first_approved_at
+                  first_comment_at: t2_first_comment_at
+                  first_commit_at: t2_first_commit_at
+                  first_contribution: t2_first_contribution
+                  first_deployed_to_production_at: t2_first_deployed_to_production_at
+                  first_reassigned_at: t2_first_reassigned_at
+                  head_pipeline_id: t2_head_pipeline_id
+                  id: t2_id
+                  iid: t2_iid
+                  last_commit_at: t2_last_commit_at
+                  last_edited_by_id: t2_last_edited_by_id
+                  latest_build_finished_at: t2_latest_build_finished_at
+                  latest_build_started_at: t2_latest_build_started_at
+                  latest_closed_at: t2_latest_closed_at
+                  latest_merge_request_diff_id: t2_latest_merge_request_diff_id
+                  merge_commit_sha: t2_merge_commit_sha
+                  merge_status: t2_merge_status
+                  merge_user_id: t2_merge_user_id
+                  merged_at: t2_merged_at
+                  merged_commit_id: t2_merged_commit_id
+                  milestone_id: t2_milestone_id
+                  modified_paths_size: t2_modified_paths_size
+                  prepared_at: t2_prepared_at
+                  project_id: t2_project_id
+                  removed_lines: t2_removed_lines
+                  reviewer_first_assigned_at: t2_reviewer_first_assigned_at
+                  source_branch: t2_source_branch
+                  source_project_id: t2_source_project_id
+                  squash: t2_squash
+                  state: t2_state
+                  target_branch: t2_target_branch
+                  title: t2_title
+                  traversal_path: t2_traversal_path
+                  updated_at: t2_updated_at
+                  updated_by_id: t2_updated_by_id
+                "on": {previous: target_id, column: id}
+              nodes:
+              - {entity: User, source: 0, key: t0_id}
+              - {entity: MergeRequest, source: 2, key: t2_id}
+              relationships: [{relationship: APPROVED, source: 0, target: 1, edge: 1}]
+          tables:
+            namespace_storage_snapshot:

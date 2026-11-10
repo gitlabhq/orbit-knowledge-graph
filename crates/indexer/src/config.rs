@@ -99,7 +99,7 @@ pub enum DispatcherError {
     Layout(#[from] query_data_model::DataModelError),
     #[error("the model declares no {0} source")]
     MissingSource(&'static str),
-    #[error("ontology archive error: {0}")]
+    #[error("model archive error: {0}")]
     Archive(#[from] orbit_migrations::catalog::CatalogError),
 
     #[error("schema version error: {0}")]

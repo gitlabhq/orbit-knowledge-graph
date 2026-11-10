@@ -36,7 +36,7 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 ### Schema migration
 
-The **dispatcher** publishes its ontology archive and requires the active archive before migration.
+The **dispatcher** publishes its model archive and requires the active archive before migration.
 Missing active archives are bootstrapped from the test-validated release bundle; existing entries
 are never replaced, and unsupported missing versions fail before versioned DDL.
 See the [pre-rewrite schema management doc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md) for rollout prerequisites and recovery.

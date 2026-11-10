@@ -5,12 +5,12 @@ pub fn render_refreshable_view_select(
     schema: &Schema,
     version: u32,
     version_prefix: &str,
-) -> Result<String, ontology::sql_template::Error> {
-    ontology::sql_template::render(
+) -> Result<String, query_data_model::sql_template::Error> {
+    query_data_model::sql_template::render(
         template,
-        ontology::sql_template::context! {
-            schema => ontology::sql_template::context! { version => version },
-            graph => ontology::sql_template::context! {
+        query_data_model::sql_template::context! {
+            schema => query_data_model::sql_template::context! { version => version },
+            graph => query_data_model::sql_template::context! {
                 tables => table_contexts(schema, version_prefix)
             },
         },

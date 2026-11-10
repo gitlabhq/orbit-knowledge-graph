@@ -12,7 +12,7 @@ use indexer::schema::version::{
 };
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
-use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::catalog::ModelCatalog;
 use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_server_config::{AppConfig, NatsConfiguration};
 use query_data_model::catalog::sources::EtlScope;
@@ -43,13 +43,13 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     })
     .await
     .unwrap();
-    let catalog = OntologyCatalog::open(services.nats_client.clone())
+    let catalog = ModelCatalog::open(services.nats_client.clone())
         .await
         .unwrap();
     // A served version that differs from this binary's proves the task reads what users query.
     let served = *SCHEMA_VERSION - 1;
     catalog
-        .publish(&integration_testkit::embedded_release(served))
+        .publish(&integration_testkit::embedded_archive(served))
         .await
         .unwrap();
 

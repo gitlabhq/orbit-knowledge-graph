@@ -11,6 +11,8 @@ pub mod plan;
 pub mod spec;
 pub mod sql_template;
 pub mod surface;
+#[cfg(feature = "testkit")]
+pub mod testkit;
 mod types;
 
 pub use catalog::{Catalog, Model, StorageBackend};

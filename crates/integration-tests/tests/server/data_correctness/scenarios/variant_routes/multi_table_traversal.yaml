@@ -1,7 +1,7 @@
 description: Variable-depth traversal follows CALLS variants across both edge tables
 
 config:
-  ontology_overlay: variant_routes
+  model_overlay: variant_routes
   extra_seed:
     gl_file:
       - { id: 11000, path: "crates/compiler/src/lib.rs", project_id: 1000, branch: main, traversal_path: "1/100/1000/" }

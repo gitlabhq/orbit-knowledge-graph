@@ -8,10 +8,9 @@ use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::schema;
 use indexer::{DispatcherConfig, IndexerConfig};
-use ontology::archive::OntologyArchive;
 use orbit_billing::{QuotaService, SnowplowBillingTracker};
 use orbit_log_fields::{info, warn};
-use orbit_migrations::archive::{ModelArchive, Release};
+use orbit_migrations::archive::ModelArchive;
 use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::{ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker};
@@ -28,13 +27,10 @@ use query_engine::compiler::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
 
-fn embedded_release() -> anyhow::Result<Release> {
-    Ok(Release::new(
-        OntologyArchive::from_bytes(
-            *SCHEMA_VERSION,
-            include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
-        )?,
-        ModelArchive::from_bytes(*SCHEMA_VERSION, include_bytes!(env!("MODEL_ARCHIVE_PATH")))?,
+fn embedded_archive() -> anyhow::Result<ModelArchive> {
+    Ok(ModelArchive::from_bytes(
+        *SCHEMA_VERSION,
+        include_bytes!(env!("MODEL_ARCHIVE_PATH")),
     )?)
 }
 
@@ -89,9 +85,6 @@ async fn main() -> anyhow::Result<()> {
         warn!("metrics.prometheus.port is deprecated, use probe_server.bind_address");
     }
 
-    let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
-    ontology::constants::validate_ontology_constants(&ontology);
-
     info!(
         safe(SERVER_MODE) = args.mode.service_name(),
         safe(AWS_LC_VERSION) = aws_lc_version,
@@ -106,14 +99,14 @@ async fn main() -> anyhow::Result<()> {
             Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config).await,
             Mode::DispatchIndexing => {
                 config.schema.validate()?;
-                let release = embedded_release()?;
+                let archive = embedded_archive()?;
 
                 let graph = config.graph.build_client("graph");
                 info!("initializing schema version table");
                 schema::version::init(&graph).await?;
 
                 let dispatcher_config = DispatcherConfig::from(&config);
-                indexer::run_dispatcher(&dispatcher_config, &release, serving, shutdown)
+                indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown)
                     .await
                     .map_err(Into::into)
             }
@@ -206,11 +199,11 @@ async fn run_webserver(
             .await
             .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
     );
-    let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats).await?;
+    let catalog = orbit_migrations::catalog::ModelCatalog::open(nats).await?;
     ActiveSchema::spawn(
         &active_schema,
         Arc::new(graph.clone()),
-        embedded_release()?,
+        embedded_archive()?,
         catalog,
         config,
         shutdown.clone(),

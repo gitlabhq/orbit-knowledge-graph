@@ -26,11 +26,10 @@ use indexer::schema::version::{
 };
 use indexer::topic::{CODE_INDEXING_TASK_SUBJECT_PATTERN, INDEXER_STREAM};
 use nats_client::KvPutOptions;
-use ontology::archive::OntologyArchive;
-use ontology::migrations::embedded_sources;
-use orbit_migrations::archive::Release;
-use orbit_migrations::catalog::{MODEL_ARCHIVES_BUCKET, ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
+use orbit_migrations::archive::ModelArchive;
+use orbit_migrations::catalog::{MODEL_ARCHIVES_BUCKET, ModelCatalog};
 use orbit_migrations::execute;
+use orbit_migrations::schema::Schema;
 use orbit_server_config::NatsConfiguration;
 use serde::Deserialize;
 use testcontainers_modules::nats::Nats;
@@ -53,8 +52,8 @@ struct TestContext {
     _nats: testcontainers::ContainerAsync<Nats>,
     nats_url: String,
     scheduler_services: SchedulerServices,
-    ontology: Arc<ontology::Ontology>,
-    catalog: OntologyCatalog,
+    schema: Schema,
+    catalog: ModelCatalog,
     campaign: Arc<CampaignState>,
 }
 
@@ -70,7 +69,7 @@ impl TestContext {
         })
         .await
         .unwrap();
-        let catalog = OntologyCatalog::open(scheduler_services.nats_client.clone())
+        let catalog = ModelCatalog::open(scheduler_services.nats_client.clone())
             .await
             .unwrap();
         Self {
@@ -78,7 +77,7 @@ impl TestContext {
             _nats: nats,
             nats_url,
             scheduler_services,
-            ontology: Arc::new(ontology::Ontology::load_embedded().unwrap()),
+            schema: integration_testkit::embedded_schema(),
             catalog,
             campaign: Arc::new(CampaignState::new()),
         }
@@ -153,8 +152,8 @@ impl TestContext {
 
     fn target_view_name(&self) -> String {
         let view = self
-            .ontology
-            .refreshable_materialized_views()
+            .schema
+            .refreshable_views()
             .iter()
             .find(|view| view.versioned)
             .unwrap();
@@ -182,13 +181,11 @@ impl TestContext {
     }
 
     async fn restore_archive(&self, version: u32) {
-        for bucket in [ONTOLOGY_ARCHIVES_BUCKET, MODEL_ARCHIVES_BUCKET] {
-            self.scheduler_services
-                .nats_client
-                .kv_delete(bucket, &version.to_string())
-                .await
-                .unwrap();
-        }
+        self.scheduler_services
+            .nats_client
+            .kv_delete(MODEL_ARCHIVES_BUCKET, &version.to_string())
+            .await
+            .unwrap();
         self.catalog
             .publish(&embedded_archive(version))
             .await
@@ -314,24 +311,27 @@ impl ArchiveCase {
         let archive_key = version.to_string();
         let client = &context.scheduler_services.nats_client;
         client
-            .kv_delete(ONTOLOGY_ARCHIVES_BUCKET, &archive_key)
+            .kv_delete(MODEL_ARCHIVES_BUCKET, &archive_key)
             .await
             .unwrap();
 
         let payload = match self {
             ArchiveCase::Missing => None,
-            ArchiveCase::BadGzip => Some(Bytes::from_static(b"not an ontology archive")),
+            ArchiveCase::BadGzip => Some(Bytes::from_static(b"not a model archive")),
             ArchiveCase::InvalidYaml => {
-                let mut sources = embedded_sources();
-                sources.insert("schema.yaml".into(), "not: [valid yaml".into());
-                let archive = OntologyArchive::from_sources(version, &sources).unwrap();
+                let mut sources = query_data_model::Packages::embedded().sources().clone();
+                sources.insert("gitlab/graph.yaml".into(), "not: [valid yaml".into());
+                let archive = integration_testkit::model_archive(
+                    version,
+                    &query_data_model::Packages::new(sources),
+                );
                 Some(Bytes::copy_from_slice(archive.bytes()))
             }
         };
         if let Some(payload) = payload {
             client
                 .kv_put(
-                    ONTOLOGY_ARCHIVES_BUCKET,
+                    MODEL_ARCHIVES_BUCKET,
                     &archive_key,
                     payload,
                     KvPutOptions::default(),
@@ -687,7 +687,7 @@ async fn migration_completion_preserves_state_until_target_archive_is_usable() {
         assert!(
             error
                 .to_string()
-                .contains("verify ontology archive before promotion"),
+                .contains("verify model archive before promotion"),
             "{error}"
         );
         assert_eq!(context.promotion_state().await, preserved_state);
@@ -716,13 +716,13 @@ async fn dispatcher_bootstraps_bundled_active_archive_before_migration() {
 
     let context = TestContext::new().await;
     let graph = context.clickhouse.create_client();
-    let legacy_version = OntologyArchive::bundled_versions()
+    let legacy_version = ModelArchive::bundled_versions()
         .unwrap()
         .into_iter()
         .filter(|version| *version < *SCHEMA_VERSION)
         .min()
         .expect("a supported legacy archive must be bundled");
-    let legacy_archive = Release::bundled(legacy_version).unwrap().unwrap();
+    let legacy_archive = ModelArchive::bundled(legacy_version).unwrap().unwrap();
     let config = dispatcher_config(&context);
     execute::drop_all_version_entities(&graph, *SCHEMA_VERSION)
         .await
@@ -753,24 +753,12 @@ async fn dispatcher_bootstraps_bundled_active_archive_before_migration() {
     migration_started.expect("dispatcher must start migration after bootstrapping the archive");
 
     assert_eq!(
-        context
-            .catalog
-            .load(legacy_version)
-            .await
-            .unwrap()
-            .ontology_archive()
-            .bytes(),
-        legacy_archive.ontology_archive().bytes()
+        context.catalog.load(legacy_version).await.unwrap().bytes(),
+        legacy_archive.bytes()
     );
     assert_eq!(
-        context
-            .catalog
-            .load(*SCHEMA_VERSION)
-            .await
-            .unwrap()
-            .ontology_archive()
-            .bytes(),
-        archive.ontology_archive().bytes()
+        context.catalog.load(*SCHEMA_VERSION).await.unwrap().bytes(),
+        archive.bytes()
     );
     assert_eq!(
         read_active_version(&graph).await.unwrap(),
@@ -813,14 +801,8 @@ async fn dispatcher_rejects_unbundled_missing_active_archive_before_migration() 
     ));
 
     assert_eq!(
-        context
-            .catalog
-            .load(*SCHEMA_VERSION)
-            .await
-            .unwrap()
-            .ontology_archive()
-            .bytes(),
-        archive.ontology_archive().bytes()
+        context.catalog.load(*SCHEMA_VERSION).await.unwrap().bytes(),
+        archive.bytes()
     );
     assert_eq!(
         read_active_version(&graph).await.unwrap(),
@@ -863,14 +845,8 @@ async fn dispatcher_rejects_corrupt_active_archive_before_migration() {
         ))
     ));
     assert_eq!(
-        context
-            .catalog
-            .load(*SCHEMA_VERSION)
-            .await
-            .unwrap()
-            .ontology_archive()
-            .bytes(),
-        archive.ontology_archive().bytes()
+        context.catalog.load(*SCHEMA_VERSION).await.unwrap().bytes(),
+        archive.bytes()
     );
     assert_eq!(
         read_active_version(&graph).await.unwrap(),
@@ -879,8 +855,8 @@ async fn dispatcher_rejects_corrupt_active_archive_before_migration() {
     assert_eq!(read_migrating_version(&graph).await.unwrap(), None);
 }
 
-fn embedded_archive(version: u32) -> Release {
-    integration_testkit::embedded_release(version)
+fn embedded_archive(version: u32) -> ModelArchive {
+    integration_testkit::embedded_archive(version)
 }
 
 fn dispatcher_config(context: &TestContext) -> DispatcherConfig {

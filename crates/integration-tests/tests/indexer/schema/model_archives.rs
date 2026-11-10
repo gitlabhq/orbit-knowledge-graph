@@ -4,9 +4,8 @@ use std::time::Duration;
 use bytes::Bytes;
 use indexer::config::{DispatcherConfig, DispatcherError};
 use nats_client::{KvPutOptions, NatsClient};
-use ontology::migrations::embedded_sources;
-use orbit_migrations::archive::Release;
-use orbit_migrations::catalog::{CatalogError, ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
+use orbit_migrations::archive::ModelArchive;
+use orbit_migrations::catalog::{CatalogError, MODEL_ARCHIVES_BUCKET, ModelCatalog};
 use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_server_config::NatsConfiguration;
 use testcontainers::ContainerAsync;
@@ -22,7 +21,9 @@ const LEGACY_SCHEMA_VERSION: u32 = 93;
 async fn missing_legacy_archive_is_bootstrapped_and_survives_restart() {
     let mut context = TestContext::new().await;
     let (_, catalog) = context.connect_catalog().await;
-    let expected = Release::bundled(LEGACY_SCHEMA_VERSION).unwrap().unwrap();
+    let expected = ModelArchive::bundled(LEGACY_SCHEMA_VERSION)
+        .unwrap()
+        .unwrap();
     assert!(matches!(
         catalog.load(LEGACY_SCHEMA_VERSION).await,
         Err(CatalogError::Missing(_))
@@ -34,16 +35,11 @@ async fn missing_legacy_archive_is_bootstrapped_and_survives_restart() {
     catalog.ensure_archive(LEGACY_SCHEMA_VERSION).await.unwrap();
 
     assert_eq!(
-        catalog
-            .load(LEGACY_SCHEMA_VERSION)
-            .await
-            .unwrap()
-            .ontology_archive()
-            .bytes(),
-        expected.ontology_archive().bytes()
+        catalog.load(LEGACY_SCHEMA_VERSION).await.unwrap().bytes(),
+        expected.bytes()
     );
     let stored = client
-        .kv_get(ONTOLOGY_ARCHIVES_BUCKET, &LEGACY_SCHEMA_VERSION.to_string())
+        .kv_get(MODEL_ARCHIVES_BUCKET, &LEGACY_SCHEMA_VERSION.to_string())
         .await
         .unwrap()
         .unwrap();
@@ -63,18 +59,19 @@ async fn concurrent_bootstraps_publish_the_exact_bundle_only_once() {
     first.unwrap();
     second.unwrap();
 
-    let expected = Release::bundled(LEGACY_SCHEMA_VERSION).unwrap().unwrap();
+    let expected = ModelArchive::bundled(LEGACY_SCHEMA_VERSION)
+        .unwrap()
+        .unwrap();
     assert_eq!(
         first_catalog
             .load(LEGACY_SCHEMA_VERSION)
             .await
             .unwrap()
-            .ontology_archive()
             .bytes(),
-        expected.ontology_archive().bytes()
+        expected.bytes()
     );
     let stored = client
-        .kv_get(ONTOLOGY_ARCHIVES_BUCKET, &LEGACY_SCHEMA_VERSION.to_string())
+        .kv_get(MODEL_ARCHIVES_BUCKET, &LEGACY_SCHEMA_VERSION.to_string())
         .await
         .unwrap()
         .unwrap();
@@ -85,19 +82,14 @@ async fn concurrent_bootstraps_publish_the_exact_bundle_only_once() {
 async fn an_existing_valid_archive_is_reused_even_when_the_bundle_differs() {
     let context = TestContext::new().await;
     let (_, catalog) = context.connect_catalog().await;
-    let existing = archive_with_distinct_ontology(LEGACY_SCHEMA_VERSION);
+    let existing = archive_with_distinct_model(LEGACY_SCHEMA_VERSION);
     catalog.publish(&existing).await.unwrap();
 
     catalog.ensure_archive(LEGACY_SCHEMA_VERSION).await.unwrap();
 
     assert_eq!(
-        catalog
-            .load(LEGACY_SCHEMA_VERSION)
-            .await
-            .unwrap()
-            .ontology_archive()
-            .bytes(),
-        existing.ontology_archive().bytes()
+        catalog.load(LEGACY_SCHEMA_VERSION).await.unwrap().bytes(),
+        existing.bytes()
     );
 }
 
@@ -119,13 +111,8 @@ async fn an_unbundled_version_requires_an_existing_valid_archive() {
     catalog.publish(&archive).await.unwrap();
     catalog.ensure_archive(unbundled_version).await.unwrap();
     assert_eq!(
-        catalog
-            .load(unbundled_version)
-            .await
-            .unwrap()
-            .ontology_archive()
-            .bytes(),
-        archive.ontology_archive().bytes()
+        catalog.load(unbundled_version).await.unwrap().bytes(),
+        archive.bytes()
     );
 }
 
@@ -133,12 +120,8 @@ async fn an_unbundled_version_requires_an_existing_valid_archive() {
 async fn bootstrap_never_replaces_corrupt_or_mismatched_entries() {
     for bytes in [
         b"not an archive".to_vec(),
-        embedded_archive(LEGACY_SCHEMA_VERSION + 1)
-            .ontology_archive()
-            .bytes()
-            .to_vec(),
+        embedded_archive(LEGACY_SCHEMA_VERSION + 1).bytes().to_vec(),
         archive_with_invalid_schema(LEGACY_SCHEMA_VERSION)
-            .ontology_archive()
             .bytes()
             .to_vec(),
     ] {
@@ -147,7 +130,7 @@ async fn bootstrap_never_replaces_corrupt_or_mismatched_entries() {
         let key = LEGACY_SCHEMA_VERSION.to_string();
         client
             .kv_put(
-                ONTOLOGY_ARCHIVES_BUCKET,
+                MODEL_ARCHIVES_BUCKET,
                 &key,
                 Bytes::copy_from_slice(&bytes),
                 KvPutOptions::create_only(),
@@ -157,10 +140,10 @@ async fn bootstrap_never_replaces_corrupt_or_mismatched_entries() {
 
         assert!(matches!(
             catalog.ensure_archive(LEGACY_SCHEMA_VERSION).await,
-            Err(CatalogError::Archive(_))
+            Err(CatalogError::Archive(_) | CatalogError::DataModel(_))
         ));
         let stored = client
-            .kv_get(ONTOLOGY_ARCHIVES_BUCKET, &key)
+            .kv_get(MODEL_ARCHIVES_BUCKET, &key)
             .await
             .unwrap()
             .unwrap();
@@ -203,27 +186,21 @@ async fn published_archives_survive_a_nats_restart() {
     context.restart_nats().await;
     let (_, catalog) = context.connect_catalog().await;
 
-    assert_eq!(
-        catalog.load(1).await.unwrap().ontology_archive().bytes(),
-        archive.ontology_archive().bytes()
-    );
+    assert_eq!(catalog.load(1).await.unwrap().bytes(), archive.bytes());
 }
 
 #[tokio::test]
-async fn concurrent_identical_publications_return_the_archived_ontology() {
+async fn concurrent_identical_publications_return_the_archived_model() {
     let context = TestContext::new().await;
     let (_, catalog) = context.connect_catalog().await;
-    let archive = archive_with_distinct_ontology(1);
-    let expected = archive.load_ontology().unwrap();
+    let archive = archive_with_distinct_model(1);
+    let expected = archive.packages().load().unwrap().id();
 
     let (first, retry) = tokio::join!(catalog.publish(&archive), catalog.publish(&archive));
 
-    assert_eq!(first.unwrap().ontology, expected);
-    assert_eq!(retry.unwrap().ontology, expected);
-    assert_eq!(
-        catalog.load(1).await.unwrap().ontology_archive().bytes(),
-        archive.ontology_archive().bytes()
-    );
+    assert_eq!(first.unwrap().id(), expected);
+    assert_eq!(retry.unwrap().id(), expected);
+    assert_eq!(catalog.load(1).await.unwrap().bytes(), archive.bytes());
 }
 
 #[tokio::test]
@@ -238,10 +215,7 @@ async fn published_versions_cannot_be_overwritten() {
         catalog.publish(&conflicting).await,
         Err(CatalogError::Conflict(1))
     ));
-    assert_eq!(
-        catalog.load(1).await.unwrap().ontology_archive().bytes(),
-        archive.ontology_archive().bytes()
-    );
+    assert_eq!(catalog.load(1).await.unwrap().bytes(), archive.bytes());
 }
 
 #[tokio::test]
@@ -254,14 +228,8 @@ async fn new_versions_do_not_replace_previous_archives() {
 
     catalog.publish(&next_version).await.unwrap();
 
-    assert_eq!(
-        catalog.load(1).await.unwrap().ontology_archive().bytes(),
-        archive.ontology_archive().bytes()
-    );
-    assert_eq!(
-        catalog.load(2).await.unwrap().ontology_archive().bytes(),
-        next_version.ontology_archive().bytes()
-    );
+    assert_eq!(catalog.load(1).await.unwrap().bytes(), archive.bytes());
+    assert_eq!(catalog.load(2).await.unwrap().bytes(), next_version.bytes());
 }
 
 #[tokio::test]
@@ -285,13 +253,8 @@ async fn dispatcher_rejects_conflicting_archives_before_migration() {
         Err(DispatcherError::Archive(CatalogError::Conflict(_)))
     ));
     assert_eq!(
-        catalog
-            .load(*SCHEMA_VERSION)
-            .await
-            .unwrap()
-            .ontology_archive()
-            .bytes(),
-        archive.ontology_archive().bytes()
+        catalog.load(*SCHEMA_VERSION).await.unwrap().bytes(),
+        archive.bytes()
     );
 }
 
@@ -311,18 +274,10 @@ async fn dispatcher_rejects_invalid_archives_before_migration() {
     )
     .await;
 
-    assert!(matches!(
-        result,
-        Err(DispatcherError::Archive(CatalogError::Archive(_)))
-    ));
+    assert!(matches!(result, Err(DispatcherError::Layout(_))));
     assert_eq!(
-        catalog
-            .load(*SCHEMA_VERSION)
-            .await
-            .unwrap()
-            .ontology_archive()
-            .bytes(),
-        archive.ontology_archive().bytes()
+        catalog.load(*SCHEMA_VERSION).await.unwrap().bytes(),
+        archive.bytes()
     );
 }
 
@@ -348,7 +303,7 @@ impl TestContext {
         Self { server, config }
     }
 
-    async fn connect_catalog(&self) -> (Arc<NatsClient>, OntologyCatalog) {
+    async fn connect_catalog(&self) -> (Arc<NatsClient>, ModelCatalog) {
         const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
         const RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -362,7 +317,7 @@ impl TestContext {
         })
         .await
         .expect("NATS did not become ready");
-        let catalog = OntologyCatalog::open(client.clone()).await.unwrap();
+        let catalog = ModelCatalog::open(client.clone()).await.unwrap();
         (client, catalog)
     }
 
@@ -381,36 +336,39 @@ impl TestContext {
     }
 }
 
-fn embedded_archive(version: u32) -> Release {
-    integration_testkit::embedded_release(version)
+fn embedded_archive(version: u32) -> ModelArchive {
+    integration_testkit::embedded_archive(version)
 }
 
-fn archive_with_ontology_sources(
+fn archive_with_sources(
     version: u32,
     edit: impl FnOnce(&mut std::collections::BTreeMap<String, String>),
-) -> Release {
-    let mut sources = embedded_sources();
+) -> ModelArchive {
+    let mut sources = query_data_model::Packages::embedded().sources().clone();
     edit(&mut sources);
-    integration_testkit::release(version, &sources, &query_data_model::Packages::embedded())
+    integration_testkit::model_archive(version, &query_data_model::Packages::new(sources))
 }
 
-fn archive_with_extra_newline(version: u32) -> Release {
-    archive_with_ontology_sources(version, |sources| {
-        sources.get_mut("schema.yaml").unwrap().push('\n')
+fn archive_with_extra_newline(version: u32) -> ModelArchive {
+    archive_with_sources(version, |sources| {
+        sources.get_mut("gitlab/graph.yaml").unwrap().push('\n')
     })
 }
 
-fn archive_with_invalid_schema(version: u32) -> Release {
-    archive_with_ontology_sources(version, |sources| {
-        sources.insert("schema.yaml".into(), "[".into());
+fn archive_with_invalid_schema(version: u32) -> ModelArchive {
+    archive_with_sources(version, |sources| {
+        sources.insert("gitlab/graph.yaml".into(), "[".into());
     })
 }
 
-fn archive_with_distinct_ontology(version: u32) -> Release {
-    archive_with_ontology_sources(version, |sources| {
-        let schema = sources.get_mut("schema.yaml").unwrap();
-        let mut document: serde_json::Value = orbit_utils::yaml::from_str(schema).unwrap();
-        document["schema_version"] = serde_json::json!("archived-schema");
-        *schema = orbit_utils::yaml::to_string(&document).unwrap();
+fn archive_with_distinct_model(version: u32) -> ModelArchive {
+    archive_with_sources(version, |sources| {
+        let graph = sources.get_mut("gitlab.core/graph.yaml").unwrap();
+        assert!(graph.contains("domain_description: Entities"));
+        *graph = graph.replacen(
+            "domain_description: Entities",
+            "domain_description: Archived entities",
+            1,
+        );
     })
 }

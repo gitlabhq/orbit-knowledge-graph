@@ -24,9 +24,10 @@ thiserror = { workspace = true }
 
 [features]
 from-ontology = ["dep:ontology", "dep:serde-saphyr"]
+testkit = []
 
 [dev-dependencies]
-query-data-model = { path = ".", features = ["from-ontology"] }
+query-data-model = { path = ".", features = ["from-ontology", "testkit"] }
 
 [lints]
 workspace = true

@@ -165,7 +165,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
 async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, presets: &Path) {
     let (config, steps) = scenario.into_steps();
     let database = (!config.extra_seed.is_empty()
-        || config.ontology_overlay.is_some()
+        || config.model_overlay.is_some()
         || steps.iter().any(|step| !step.seed.is_empty()))
     .then(|| scenario::database_name(name));
     let outcome = AssertUnwindSafe(run_case(
@@ -200,7 +200,7 @@ async fn run_case(
 ) {
     let ctx = if let Some(database) = database {
         let forked = ctx.fork(database).await;
-        if let Some(overlay) = &cfg.ontology_overlay {
+        if let Some(overlay) = &cfg.model_overlay {
             let schema = crate::graph_schema(&crate::overlay_fragments(overlay));
             let credentials = orbit_migrations::schema::DictionaryCredentials {
                 database: forked.config.database.clone(),
@@ -259,7 +259,7 @@ async fn run_case(
         resolve_preset("redaction", &Some(redaction_with_default), presets, name);
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
-    let data_model = match &cfg.ontology_overlay {
+    let data_model = match &cfg.model_overlay {
         Some(name) => crate::versioned_data_model(crate::overlay_fragments(name)),
         None => load_data_model(),
     };

@@ -32,37 +32,17 @@ pub use context::{CLICKHOUSE_IMAGE, CLICKHOUSE_TAG, TestContext};
 pub use seed::load_seed;
 pub use seeded_resolver::SeededColumnResolver;
 
-/// `GKG_TEST_ONTOLOGY_OVERLAY=<name>` merges `config/seeds/overlays/<name>/` over the ontology.
+/// `GKG_TEST_MODEL_OVERLAY=<name>` applies `config/seeds/overlays/<name>.yaml` to the packages.
 fn overlay_name() -> Option<String> {
-    std::env::var("GKG_TEST_ONTOLOGY_OVERLAY")
+    std::env::var("GKG_TEST_MODEL_OVERLAY")
         .ok()
         .filter(|v| !v.is_empty())
 }
 
-pub(crate) fn load_unprefixed_ontology() -> ontology::Ontology {
-    match overlay_name() {
-        Some(name) => load_ontology_overlay(&name),
-        None => ontology::Ontology::load_embedded().expect("embedded ontology should load"),
-    }
-}
-
-pub fn load_ontology_overlay(name: &str) -> ontology::Ontology {
-    let dir = format!("{}/overlays/{name}", env!("SEEDS_DIR"));
-    assert!(
-        std::path::Path::new(&dir).is_dir(),
-        "ontology overlay '{name}' not found at {dir}"
-    );
-    ontology::Ontology::load_embedded_with_overlay(&dir)
-        .unwrap_or_else(|e| panic!("ontology overlay '{name}' failed to load: {e}"))
-}
-
-pub fn load_ontology() -> std::sync::Arc<ontology::Ontology> {
-    std::sync::Arc::new(load_unprefixed_ontology().with_schema_version_prefix(&TABLE_PREFIX))
-}
-
 pub fn overlay_fragments(name: &str) -> Vec<query_data_model::spec::Fragment> {
-    query_data_model::from_ontology::from_ontology(&load_ontology_overlay(name))
-        .unwrap_or_else(|e| panic!("ontology overlay '{name}' has no model: {e}"))
+    query_data_model::testkit::overlay(name)
+        .fragments()
+        .unwrap_or_else(|e| panic!("model overlay '{name}' does not parse: {e}"))
 }
 
 fn unprefixed_fragments() -> Vec<query_data_model::spec::Fragment> {
@@ -80,12 +60,22 @@ fn load_model(
     std::sync::Arc::new(query_data_model::Model::load(fragments).expect("test model should load"))
 }
 
+fn versioned_fragments(
+    fragments: Vec<query_data_model::spec::Fragment>,
+) -> Vec<query_data_model::spec::Fragment> {
+    query_data_model::implementations::clickhouse::versioned(fragments, &TABLE_PREFIX)
+        .expect("test tables should take the schema prefix")
+}
+
+/// The prefixed fragments behind [`load_data_model`].
+pub fn load_fragments() -> Vec<query_data_model::spec::Fragment> {
+    versioned_fragments(unprefixed_fragments())
+}
+
 pub fn versioned_data_model(
     fragments: Vec<query_data_model::spec::Fragment>,
 ) -> std::sync::Arc<query_data_model::Catalog<query_data_model::ClickHouse>> {
-    let fragments =
-        query_data_model::implementations::clickhouse::versioned(fragments, &TABLE_PREFIX)
-            .expect("test tables should take the schema prefix");
+    let fragments = versioned_fragments(fragments);
     std::sync::Arc::new(
         query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&load_model(
             &fragments,
@@ -283,36 +273,40 @@ macro_rules! run_subtests_shared {
     }};
 }
 
-pub fn release(
+pub fn model_archive(
     version: u32,
-    sources: &std::collections::BTreeMap<String, String>,
     packages: &query_data_model::Packages,
-) -> orbit_migrations::archive::Release {
-    orbit_migrations::archive::Release::new(
-        ontology::archive::OntologyArchive::from_sources(version, sources)
-            .expect("test ontology archive should build"),
-        orbit_migrations::archive::ModelArchive::from_packages(version, packages)
-            .expect("test model archive should build"),
-    )
-    .expect("test archives should form one release")
+) -> orbit_migrations::archive::ModelArchive {
+    orbit_migrations::archive::ModelArchive::from_packages(version, packages)
+        .expect("test model archive should build")
 }
 
-pub fn embedded_release(version: u32) -> orbit_migrations::archive::Release {
-    release(
-        version,
-        &ontology::migrations::embedded_sources(),
-        &query_data_model::Packages::embedded(),
-    )
+pub fn embedded_archive(version: u32) -> orbit_migrations::archive::ModelArchive {
+    model_archive(version, &query_data_model::Packages::embedded())
 }
 
-pub fn derived_release(
-    version: u32,
-    sources: &std::collections::BTreeMap<String, String>,
-) -> orbit_migrations::archive::Release {
-    let ontology = ontology::archive::OntologyArchive::from_sources(version, sources)
-        .and_then(|archive| archive.load_ontology())
-        .expect("test ontology should load");
-    let packages = query_data_model::from_ontology::packages(&ontology)
-        .expect("test ontology should convert to packages");
-    release(version, sources, &packages)
+/// The one prefixed edge table that stores every variant of `relationship`.
+pub fn edge_table_for(relationship: &str) -> String {
+    let model = load_data_model();
+    let id = model
+        .graph()
+        .relationship_id(relationship)
+        .unwrap_or_else(|| panic!("unknown relationship {relationship}"));
+    match model.edge_tables(&[id]).as_slice() {
+        [table] => table.clone(),
+        tables => panic!("{relationship} is stored in {tables:?}, not one table"),
+    }
+}
+
+/// The prefixed edge table of the `source -> target` variant of `relationship`.
+pub fn variant_edge_table(relationship: &str, source: &str, target: &str) -> String {
+    let model = load_data_model();
+    let variant = model
+        .graph()
+        .variant_named(relationship, source, target)
+        .unwrap_or_else(|| panic!("{relationship} has no {source} -> {target} variant"));
+    model
+        .edge_table(variant.id)
+        .unwrap_or_else(|| panic!("{relationship} {source} -> {target} has no edge table"))
+        .to_string()
 }

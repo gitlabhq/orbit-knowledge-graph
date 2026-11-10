@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use ontology::Ontology;
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
 pub use query_engine::compiler::compile;
@@ -13,7 +12,7 @@ use query_engine::pipeline::{QueryPipelineContext, TypeMap};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
 pub use integration_testkit::{
-    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_data_model, load_ontology,
+    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, edge_table_for, load_data_model,
 };
 
 pub fn test_security_context() -> SecurityContext {

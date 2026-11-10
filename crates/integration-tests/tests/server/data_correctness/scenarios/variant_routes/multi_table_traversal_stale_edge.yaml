@@ -1,7 +1,7 @@
 description: Variable-depth traversal across both edge tables skips edges whose latest version is a tombstone in either table
 
 config:
-  ontology_overlay: variant_routes
+  model_overlay: variant_routes
   unmerged_seed: true
   extra_seed:
     gl_file:

@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use crate::common::compile;
 use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, TestContext, compile_and_execute, load_ontology,
+    GRAPH_SCHEMA_SQL, MockRedactionService, TestContext, compile_and_execute, edge_table_for,
     resolve_owners, run_redaction, test_security_context,
 };
 use integration_testkit::{load_data_model, run_subtests, run_subtests_shared, t};
@@ -28,15 +28,6 @@ fn table_merge_requests() -> String {
 }
 fn table_edges() -> String {
     t("gl_edge")
-}
-
-fn edge_table_for(relationship: &str) -> String {
-    let ontology = load_ontology();
-    // load_ontology() already applies the schema version prefix.
-    ontology
-        .edge_table_for_relationship(relationship)
-        .unwrap()
-        .to_string()
 }
 
 const ALL_USER_IDS: &[i64] = &[1, 2, 3, 4, 5];

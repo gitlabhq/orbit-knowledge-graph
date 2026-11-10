@@ -9,8 +9,8 @@ pass, so `Limit` shows the fetched rows (the page plus one probe row) and
 `Offset` shows the lowered SKIP. In the logical tree, `Limit` and `Offset` show
 the requested LIMIT and SKIP.
 
-Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
-for one fixture. Other fixtures keep the default ontology.
+Set `model_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved.yaml`
+for one fixture. Other fixtures keep the embedded model.
 
 Both `query.json` and `query.gql` are required. If a frontend cannot express the
 tested plan, declare its reason under `missing_frontends`. The runner rejects

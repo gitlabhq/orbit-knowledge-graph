@@ -307,9 +307,9 @@ cases:
     expect: { node_count: 0 }
 ```
 
-A scenario can set `config.ontology_overlay` to a name under
+A scenario can set `config.model_overlay` to a file name under
 `config/seeds/overlays/`. The overlay changes the query catalog for that scenario.
-Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL.
+Use the suite-wide `GKG_TEST_MODEL_OVERLAY` when the overlay also changes DDL.
 
 ### `QueryScenario` format
 

@@ -1,19 +1,18 @@
-use ontology::FieldSource;
-use query_data_model::from_ontology;
-use query_data_model::implementations::clickhouse::schema::Schema;
-use query_data_model::{Catalog, ClickHouse, DuckDb, Packages};
+use std::sync::Arc;
 
-fn overlay_ontology(name: &str) -> ontology::Ontology {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../config/seeds/overlays")
-        .join(name);
-    ontology::Ontology::load_embedded_with_overlay(&path).unwrap()
+use query_data_model::catalog::sources::Writer;
+use query_data_model::implementations::clickhouse::schema::Schema;
+use query_data_model::testkit::overlay;
+use query_data_model::{Catalog, ClickHouse, DuckDb, Model, Packages};
+
+fn overlay_model(name: &str) -> Arc<Model> {
+    overlay(name).load().unwrap()
 }
 
 #[test]
 fn reordered_tables_retain_source_columns_and_dependencies() {
-    let ontology = overlay_ontology("reordered_edges");
-    let model = from_ontology::clickhouse(&ontology).unwrap();
+    let overlay = overlay_model("reordered_edges");
+    let model = Catalog::<ClickHouse>::from_model(&overlay).unwrap();
     let catalog = &model;
     assert_eq!(
         catalog.copies_of("gl_code_edge"),
@@ -23,7 +22,7 @@ fn reordered_tables_retain_source_columns_and_dependencies() {
     let copy = catalog.table_facts("gl_code_edge_by_target").unwrap();
     assert_eq!(&copy.columns, source);
     assert_eq!(copy.sort_key[1], "target_id");
-    let storage = from_ontology::schema(&ontology).unwrap();
+    let storage = Schema::from_model(&overlay).unwrap();
     assert_eq!(
         storage.dependencies()["gl_code_edge_by_target"],
         std::collections::BTreeSet::from(["gl_code_edge".to_string()])
@@ -32,9 +31,9 @@ fn reordered_tables_retain_source_columns_and_dependencies() {
 
 #[test]
 fn catalog_routes_preserve_variant_endpoints_on_each_backend() {
-    let ontology = overlay_ontology("variant_routes");
-    let remote = from_ontology::clickhouse(&ontology).unwrap();
-    let local = from_ontology::duckdb(&ontology).unwrap();
+    let overlay = overlay_model("variant_routes");
+    let remote = Catalog::<ClickHouse>::from_model(&overlay).unwrap();
+    let local = Catalog::<DuckDb>::from_model(&overlay).unwrap();
     for (source, target, table) in [
         ("Definition", "Definition", "gl_code_edge"),
         ("File", "Definition", "gl_edge"),
@@ -76,7 +75,7 @@ fn writer_catalog_tracks_exact_node_mapping_routes() {
 
 #[test]
 fn materialized_bindings_resolve_graph_identities_and_source_columns() {
-    let model = from_ontology::clickhouse(&overlay_ontology("denorm_approved")).unwrap();
+    let model = Catalog::<ClickHouse>::from_model(&overlay_model("denorm_approved")).unwrap();
     let approved = model
         .joins()
         .iter()
@@ -87,7 +86,7 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
     assert_eq!(approved.sources, ["gl_user", "gl_edge", "gl_merge_request"]);
 
     let approved_project_model =
-        from_ontology::clickhouse(&overlay_ontology("denorm_approved_project")).unwrap();
+        Catalog::<ClickHouse>::from_model(&overlay_model("denorm_approved_project")).unwrap();
     let approved_project = approved_project_model
         .joins()
         .iter()
@@ -181,21 +180,24 @@ fn resolves_relationship_variants_and_foreign_keys_to_ids() {
 
 #[test]
 fn keeps_extraction_sources_separate_from_query_columns() {
-    let ontology = ontology::Ontology::load_embedded().unwrap();
     let model = Catalog::<ClickHouse>::embedded().unwrap();
     let entity = model.graph().entity_id("MergeRequest").unwrap();
     let property = model.graph().property_id(entity, "project_id").unwrap();
     let table = model.table_of(entity).unwrap();
 
-    let source = &ontology
-        .get_node("MergeRequest")
-        .unwrap()
-        .fields
+    let pipeline = model
+        .model()
+        .sources()
+        .pipelines()
         .iter()
-        .find(|field| field.name == "project_id")
-        .unwrap()
-        .source;
-    assert!(matches!(source, FieldSource::DatabaseColumn(source) if source == "target_project_id"));
+        .find(|pipeline| pipeline.writer == Writer::Entity(entity))
+        .unwrap();
+    let source = pipeline
+        .columns
+        .iter()
+        .find(|column| column.property == property)
+        .unwrap();
+    assert_eq!(source.column, "target_project_id");
     assert_eq!(model.column(property), Some("project_id"));
     let types = &model.table_facts(table).unwrap().column_types;
     assert!(types.contains_key("project_id"));

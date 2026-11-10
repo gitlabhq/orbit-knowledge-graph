@@ -43,7 +43,6 @@ orbit-log-fields = { workspace = true }
 tracing-subscriber = { workspace = true }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
-ontology = { path = "../ontology" }
 schemars = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }

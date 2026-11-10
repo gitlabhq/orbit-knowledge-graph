@@ -1,15 +1,10 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use ontology::Ontology;
-use ontology::archive::OntologyArchive;
 use orbit_utils::source_archive::{
     ArchiveLayout, SourceArchive, SourceArchiveError, file_name, parse_file_name,
 };
-use query_data_model::{Model, Packages};
+use query_data_model::Packages;
 use rust_embed::Embed;
-
-use crate::catalog::CatalogError;
 
 const LAYOUT: ArchiveLayout = ArchiveLayout {
     directory: "model-archives",
@@ -70,66 +65,5 @@ impl ModelArchive {
 
     pub fn write_atomic(&self, path: &Path) -> Result<(), SourceArchiveError> {
         self.0.write_atomic(path)
-    }
-}
-
-#[derive(Debug)]
-pub struct Release {
-    ontology: OntologyArchive,
-    model: ModelArchive,
-}
-
-pub struct LoadedRelease {
-    pub ontology: Ontology,
-    pub model: Arc<Model>,
-}
-
-impl Release {
-    pub fn new(ontology: OntologyArchive, model: ModelArchive) -> Result<Self, CatalogError> {
-        if ontology.schema_version() != model.schema_version() {
-            return Err(CatalogError::SplitRelease {
-                ontology: ontology.schema_version(),
-                model: model.schema_version(),
-            });
-        }
-        Ok(Self { ontology, model })
-    }
-
-    pub fn bundled(schema_version: u32) -> Result<Option<Self>, CatalogError> {
-        match (
-            OntologyArchive::bundled(schema_version)?,
-            ModelArchive::bundled(schema_version)?,
-        ) {
-            (Some(ontology), Some(model)) => Self::new(ontology, model).map(Some),
-            (None, None) => Ok(None),
-            _ => Err(CatalogError::Missing(schema_version)),
-        }
-    }
-
-    pub fn schema_version(&self) -> u32 {
-        self.ontology.schema_version()
-    }
-
-    pub fn ontology_archive(&self) -> &OntologyArchive {
-        &self.ontology
-    }
-
-    pub fn model_archive(&self) -> &ModelArchive {
-        &self.model
-    }
-
-    pub fn load_ontology(&self) -> Result<Ontology, CatalogError> {
-        Ok(self.ontology.load_ontology()?)
-    }
-
-    pub fn packages(&self) -> Packages {
-        self.model.packages()
-    }
-
-    pub fn load(&self) -> Result<LoadedRelease, CatalogError> {
-        Ok(LoadedRelease {
-            ontology: self.load_ontology()?,
-            model: self.packages().load()?,
-        })
     }
 }

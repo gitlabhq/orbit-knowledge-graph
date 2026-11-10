@@ -1,5 +1,5 @@
 name: Typed edge scans select the endpoint variant while local storage stays unified
-ontology_overlay: variant_routes
+model_overlay: variant_routes
 
 query:
   json: |

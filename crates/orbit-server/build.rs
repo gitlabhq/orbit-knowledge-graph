@@ -1,26 +1,21 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    export_current_archive_paths();
+    export_current_archive_path();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
 }
 
-fn export_current_archive_paths() {
-    for (variable, directory) in [
-        ("ONTOLOGY_ARCHIVE_PATH", "ontology-archives"),
-        ("MODEL_ARCHIVE_PATH", "model-archives"),
-    ] {
-        let directory = std::path::Path::new(env!("ORBIT_CONFIG_DIR")).join(directory);
-        println!("cargo:rerun-if-changed={}", directory.display());
-        let current_path = directory.join(format!("v{}.tar.gz", orbit_versions::VERSIONS.schema));
-        let resolved = current_path.canonicalize().unwrap_or_else(|_| {
-            panic!(
-                "{} is missing; run `mise schema:bump` to write the current archive.",
-                current_path.display()
-            )
-        });
-        println!("cargo:rustc-env={variable}={}", resolved.display());
-    }
+fn export_current_archive_path() {
+    let directory = std::path::Path::new(env!("ORBIT_CONFIG_DIR")).join("model-archives");
+    println!("cargo:rerun-if-changed={}", directory.display());
+    let current_path = directory.join(format!("v{}.tar.gz", orbit_versions::VERSIONS.schema));
+    let resolved = current_path.canonicalize().unwrap_or_else(|_| {
+        panic!(
+            "{} is missing; run `mise schema:bump` to write the current archive.",
+            current_path.display()
+        )
+    });
+    println!("cargo:rustc-env=MODEL_ARCHIVE_PATH={}", resolved.display());
 }
 
 #[cfg(feature = "regenerate-protos")]

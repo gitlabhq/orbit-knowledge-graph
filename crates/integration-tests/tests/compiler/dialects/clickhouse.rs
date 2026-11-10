@@ -1,6 +1,4 @@
-use crate::compiler::setup::{
-    compile_pair, embedded_model, model, test_ctx, test_model, test_ontology,
-};
+use crate::compiler::setup::{compile_pair, embedded_model, test_ctx};
 use crate::compiler::utils::has_param_value;
 use compiler::gql::{PreparedStatement, prepare};
 use compiler::{DynamicColumnMode, Frontend, QueryError, compile};
@@ -15,7 +13,6 @@ fn gql_statement(query: &str) -> compiler::Result<query_data_model::surface::Sta
     compiler::surface::parse(query, Frontend::Gql, catalog)
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn compile_to_ast_works() {
     let orbit_query = "MATCH (u:User {id: 1}) RETURN u.username LIMIT 10";
@@ -25,12 +22,12 @@ fn compile_to_ast_works() {
         "limit": 10
     }"#;
 
-    let compiled = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let compiled = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     assert!(compiled.base.sql.contains("LIMIT 11"));
     assert!(compiled.base.sql.contains("SELECT"));
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn traversal_query() {
     let orbit_query = "MATCH (n:Note {confidential: true})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username ORDER BY n.created_at DESC LIMIT 25";
@@ -45,7 +42,7 @@ fn traversal_query() {
         "order_by": "-n.created_at"
     }"#;
 
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_edge"));
@@ -57,7 +54,6 @@ fn traversal_query() {
     ));
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn bool_filter_value_is_preserved() {
     let orbit_query = "MATCH (n:Note {confidential: true}) RETURN n.confidential LIMIT 5";
@@ -72,14 +68,13 @@ fn bool_filter_value_is_preserved() {
         "limit": 5
     }"#;
 
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     assert!(has_param_value(
         &result.base.params,
         &serde_json::Value::Bool(true)
     ));
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn aggregation_query() {
     let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id, .username}, count(n) AS note_count LIMIT 10";
@@ -95,24 +90,22 @@ fn aggregation_query() {
         "limit": 10
     }"#;
 
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
     assert!(rendered.contains("GROUP BY"));
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn gql_count_distinct_renders_distinct_aggregates() {
     let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id}, count(n) AS notes, count(DISTINCT n) AS distinct_notes, count(DISTINCT n.confidential) AS flags LIMIT 10";
-    let result = compile(orbit_query, Frontend::Gql, &test_model(), &test_ctx()).unwrap();
+    let result = compile(orbit_query, Frontend::Gql, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert_eq!(rendered.matches("countDistinct").count(), 2, "{rendered}");
     assert!(rendered.contains("AS notes"), "{rendered}");
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn json_distinct_count_matches_gql_count_distinct() {
     let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id}, count(DISTINCT n.confidential) AS flags LIMIT 10";
@@ -128,11 +121,11 @@ fn json_distinct_count_matches_gql_count_distinct() {
         "limit": 10
     }"#;
 
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     assert_eq!(result.base.render().matches("countDistinct").count(), 1);
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn group_by_property_truncate_month_wraps_column() {
     let orbit_query = "MATCH (u:Note {confidential: false}) RETURN date_trunc('month', u.created_at), count(u) AS n LIMIT 50";
@@ -145,7 +138,7 @@ fn group_by_property_truncate_month_wraps_column() {
         "group_by": [{"key": "u.created_at", "truncate": "month"}],
         "limit": 50
     }"#;
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("toDate32(toStartOfMonth(u.created_at))"),
@@ -157,7 +150,7 @@ fn group_by_property_truncate_month_wraps_column() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn group_by_property_truncate_all_units_compile() {
     for unit in ["minute", "hour", "day", "week", "month", "quarter", "year"] {
@@ -175,7 +168,7 @@ fn group_by_property_truncate_all_units_compile() {
                 "limit": 10
             }}"#
         );
-        let result = compile_pair(&json, &orbit_query, &test_model(), &test_ctx())
+        let result = compile_pair(&json, &orbit_query, &embedded_model(), &test_ctx())
             .unwrap_or_else(|e| panic!("compile failed for unit {unit}: {e:?}"));
         let rendered = result.base.render();
         // Sub-daily units cast to DateTime64, daily+ to Date32, so the key
@@ -197,7 +190,6 @@ fn group_by_property_truncate_all_units_compile() {
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn group_by_truncate_minute_without_selectivity_rejected() {
     let orbit_query =
@@ -211,7 +203,7 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
         "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
-    let err = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap_err();
+    let err = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap_err();
     let msg = format!("{err:?}");
     assert!(
         msg.contains("requires either node_ids") && msg.contains("minute"),
@@ -219,7 +211,7 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn group_by_truncate_minute_with_node_ids_accepted() {
     let orbit_query = "MATCH (u:Note) WHERE u.id IN [1, 2] RETURN date_trunc('minute', u.created_at), count(u) AS n LIMIT 10";
@@ -232,7 +224,7 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
         "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     assert!(
         result
             .base
@@ -241,7 +233,7 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn group_by_truncate_hour_with_property_filter_accepted() {
     let orbit_query = "MATCH (u:Note) WHERE u.created_at >= '2026-04-01T00:00:00Z' RETURN date_trunc('hour', u.created_at), count(u) AS n LIMIT 50";
@@ -254,7 +246,7 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
         "group_by": [{"key": "u.created_at", "truncate": "hour"}],
         "limit": 50
     }"#;
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     assert!(
         result
             .base
@@ -263,7 +255,7 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn group_by_truncate_on_non_date_property_rejected() {
     let orbit_query =
@@ -277,7 +269,7 @@ fn group_by_truncate_on_non_date_property_rejected() {
         "group_by": [{"key": "u.confidential", "truncate": "month"}],
         "limit": 10
     }"#;
-    let err = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap_err();
+    let err = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap_err();
     let msg = format!("{err:?}");
     assert!(
         msg.contains("requires a Date or DateTime property"),
@@ -285,7 +277,7 @@ fn group_by_truncate_on_non_date_property_rejected() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn group_by_truncate_custom_alias_preserved() {
     let orbit_query = "MATCH (u:Note {id: 1}) RETURN date_trunc('month', u.created_at) AS bucket, count(u) AS n LIMIT 10";
@@ -298,7 +290,7 @@ fn group_by_truncate_custom_alias_preserved() {
         "group_by": [{"key": "u.created_at", "truncate": "month", "as": "bucket"}],
         "limit": 10
     }"#;
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS bucket"),
@@ -306,7 +298,6 @@ fn group_by_truncate_custom_alias_preserved() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn path_finding_query() {
     let orbit_query = "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN p";
@@ -320,7 +311,7 @@ fn path_finding_query() {
                  "rel_types": ["CONTAINS"]}
     }"#;
 
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -347,7 +338,6 @@ fn path_finding_query() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn path_finding_depth_control() {
     let shallow = r#"{
@@ -370,11 +360,11 @@ fn path_finding_depth_control() {
 
     let shallow_orbit_query = "MATCH p = ANY SHORTEST (start:Project {id: 1})-[:CONTAINS|MEMBER_OF*1]->(`end`:Project {id: 2}) RETURN p";
     let deep_orbit_query = "MATCH p = ANY SHORTEST (start:Project {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 2}) RETURN p";
-    let shallow_sql = compile_pair(shallow, shallow_orbit_query, &test_model(), &test_ctx())
+    let shallow_sql = compile_pair(shallow, shallow_orbit_query, &embedded_model(), &test_ctx())
         .unwrap()
         .base
         .render();
-    let deep_sql = compile_pair(deep, deep_orbit_query, &test_model(), &test_ctx())
+    let deep_sql = compile_pair(deep, deep_orbit_query, &embedded_model(), &test_ctx())
         .unwrap()
         .base
         .render();
@@ -397,7 +387,7 @@ fn path_finding_depth_control() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn neighbors_query() {
     let orbit_query = "MATCH (u:User {id: 100})--(n) RETURN n";
@@ -407,7 +397,7 @@ fn neighbors_query() {
         "neighbors": {"direction": "both"}
     }"#;
 
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_neighbor_node"));
@@ -460,7 +450,6 @@ fn neighbors_project_the_edge_path_only_when_it_is_the_neighbors_own() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn filter_operators() {
     let orbit_query = "MATCH (u:User) WHERE u.created_at >= '2024-01-01' AND u.state IN ['active', 'blocked'] AND u.username CONTAINS 'admin' RETURN u.username, u.state, u.created_at LIMIT 30";
@@ -479,7 +468,7 @@ fn filter_operators() {
         "limit": 30
     }"#;
 
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("LIMIT 1 BY"));
@@ -515,20 +504,18 @@ fn missing_required_fields_rejected() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn sql_injection_in_node_id() {
     let err = compile(
         r#"{"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --"}]}"#,
         Frontend::JsonDsl,
-        &test_model(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn sql_injection_in_relationship() {
     let err = compile(
@@ -538,7 +525,7 @@ fn sql_injection_in_relationship() {
         "relationships": [{"type": "REL", "from": "a' OR '1'='1", "to": "b"}]
     }"#,
         Frontend::JsonDsl,
-        &test_model(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
@@ -558,20 +545,18 @@ fn empty_node_id_rejected() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn id_starting_with_number_rejected() {
     let err = compile(
         r#"{"query_type": "traversal", "nodes": [{"id": "123abc"}]}"#,
         Frontend::JsonDsl,
-        &test_model(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn sql_injection_in_filter_property() {
     let err = compile(
@@ -580,14 +565,14 @@ fn sql_injection_in_filter_property() {
         "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]
     }"#,
         Frontend::JsonDsl,
-        &test_model(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn valid_identifiers_produce_renderable_sql() {
     let json = r#"{
@@ -604,7 +589,7 @@ fn valid_identifiers_produce_renderable_sql() {
             {"type": "MEMBER_OF", "from": "user_node", "to": "node123"}
         ]
     }"#;
-    let result = compile(json, Frontend::JsonDsl, &test_model(), &test_ctx()).unwrap();
+    let result = compile(json, Frontend::JsonDsl, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(!rendered.contains("{p"));
@@ -614,30 +599,7 @@ fn valid_identifiers_produce_renderable_sql() {
     assert!(rendered.contains("_orbit_node123_id"));
 }
 
-fn multi_table_ontology() -> std::sync::Arc<ontology::Ontology> {
-    use ontology::DataType;
-    std::sync::Arc::new(
-        ontology::Ontology::new()
-            .with_nodes(["User", "Project", "File", "Definition"])
-            .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
-            .with_edge_table("gl_code_edge")
-            .with_edge_for_table("DEFINES", "gl_code_edge")
-            .with_edge_for_table("IMPORTS", "gl_code_edge")
-            .with_fields(
-                "User",
-                [("username", DataType::String), ("state", DataType::String)],
-            )
-            .with_default_columns("User", ["username"])
-            .with_fields("Project", [("name", DataType::String)])
-            .with_default_columns("Project", ["name"])
-            .with_fields("File", [("path", DataType::String)])
-            .with_default_columns("File", ["path"])
-            .with_fields("Definition", [("name", DataType::String)])
-            .with_default_columns("Definition", ["name"]),
-    )
-}
-
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn multi_table_single_type_routes_to_default() {
     let orbit_query = "MATCH (u:User {id: 1})-[:AUTHORED]->(p:Project) RETURN u, p LIMIT 25";
@@ -650,13 +612,7 @@ fn multi_table_single_type_routes_to_default() {
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile_pair(
-        json,
-        orbit_query,
-        &model(&multi_table_ontology()),
-        &test_ctx(),
-    )
-    .unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge"),
@@ -668,7 +624,6 @@ fn multi_table_single_type_routes_to_default() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn multi_table_code_edge_routes_to_code_table() {
     let orbit_query = "MATCH (f:File {id: 1})-[:DEFINES]->(d:Definition) RETURN f, d LIMIT 25";
@@ -681,13 +636,7 @@ fn multi_table_code_edge_routes_to_code_table() {
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
         "limit": 25
     }"#;
-    let result = compile_pair(
-        json,
-        orbit_query,
-        &model(&multi_table_ontology()),
-        &test_ctx(),
-    )
-    .unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -699,7 +648,6 @@ fn multi_table_code_edge_routes_to_code_table() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn multi_table_wildcard_keeps_the_default_table_scan() {
     let orbit_query = "MATCH (u:User {id: 1})-->(p:Project) RETURN u, p LIMIT 25";
@@ -712,17 +660,11 @@ fn multi_table_wildcard_keeps_the_default_table_scan() {
         "relationships": [{"type": "*", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let compiled = compile_pair(
-        json,
-        orbit_query,
-        &model(&multi_table_ontology()),
-        &test_ctx(),
-    )
-    .unwrap();
+    let compiled = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     assert!(compiled.base.render().contains("FROM gl_edge"));
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn multi_table_mixed_types_scan_every_route() {
     let orbit_query =
@@ -736,13 +678,7 @@ fn multi_table_mixed_types_scan_every_route() {
         "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile_pair(
-        json,
-        orbit_query,
-        &model(&multi_table_ontology()),
-        &test_ctx(),
-    )
-    .unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(rendered.contains("FROM gl_code_edge"), "{rendered}");
     assert!(rendered.contains("FROM gl_edge"), "{rendered}");
@@ -751,7 +687,7 @@ fn multi_table_mixed_types_scan_every_route() {
     assert!(!rendered.contains(" FINAL"), "{rendered}");
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn single_table_ontology_no_union() {
     let orbit_query = "MATCH (u:User {id: 1})-[:AUTHORED]->(p:Project) RETURN u, p LIMIT 25";
@@ -764,7 +700,7 @@ fn single_table_ontology_no_union() {
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         !rendered.contains("UNION ALL"),
@@ -772,7 +708,7 @@ fn single_table_ontology_no_union() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn multi_table_path_finding_scans_all_tables() {
     let orbit_query = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|DEFINES*1..3]->(`end`:Definition {id: 100}) RETURN path";
@@ -784,13 +720,7 @@ fn multi_table_path_finding_scans_all_tables() {
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "DEFINES"]}
     }"#;
-    let result = compile_pair(
-        json,
-        orbit_query,
-        &model(&multi_table_ontology()),
-        &test_ctx(),
-    )
-    .unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
@@ -798,20 +728,9 @@ fn multi_table_path_finding_scans_all_tables() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
     let orbit_query = "MATCH (f:File)--(n) WHERE f.path CONTAINS 'labkit' RETURN n";
-    use ontology::DataType;
-    let ontology = std::sync::Arc::new(
-        ontology::Ontology::new()
-            .with_nodes(["File"])
-            .with_edges(["DEFINES"])
-            .with_fields("File", [("path", DataType::String)])
-            .with_default_columns("File", ["path"])
-            .with_redaction("File", "project", "project_id"),
-    );
-
     let json = r#"{
         "query_type": "neighbors",
         "nodes": [{
@@ -821,7 +740,7 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
         }],
         "neighbors": {"direction": "both"}
     }"#;
-    let result = compile_pair(json, orbit_query, &model(&ontology), &test_ctx()).unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     let gl_file_refs = rendered.matches("gl_file").count();
@@ -835,7 +754,6 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
     );
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn multi_table_neighbors_scans_all_tables() {
     let orbit_query = "MATCH (p:Project {id: 1})--(n) RETURN n";
@@ -844,13 +762,7 @@ fn multi_table_neighbors_scans_all_tables() {
         "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
         "neighbors": {"direction": "both"}
     }"#;
-    let result = compile_pair(
-        json,
-        orbit_query,
-        &model(&multi_table_ontology()),
-        &test_ctx(),
-    )
-    .unwrap();
+    let result = compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
@@ -1026,7 +938,6 @@ fn orbit_query_bounded_hops_and_relationship_filters() {
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_id_selectors_preserve_additional_predicates() {
     let cases = [
@@ -1068,15 +979,13 @@ fn orbit_query_id_selectors_preserve_additional_predicates() {
         ),
     ];
     for (json, orbit_query) in cases {
-        compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+        compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_id_list_and_range_promote_independently() {
     let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2,3,5],"id_range":{"start":1,"end":3},"filters":{"state":"active"}}]}"#;
-    let ontology = test_ontology();
     let context = test_ctx();
     for list in ["u.id IN [1, 2, 3, 5]", "u.id IN ['1', '2', '3', '5']"] {
         for bounds in [["u.id >= 1", "u.id <= 3"], ["u.id > 0", "u.id < 4"]] {
@@ -1101,13 +1010,12 @@ fn orbit_query_id_list_and_range_promote_independently() {
                 assert_eq!(anchor.range, Some((1, 3)), "{query}");
                 let id = |fact: &compiler::logical::facts::Fact<'_>| matches!(fact.left, query_data_model::plan::logical::Expr::Property { property, .. } if logical.property_name(property) == "id");
                 assert!(!anchor.filters.iter().any(id), "{query}");
-                compile_pair(json, &query, &model(&ontology), &context).unwrap();
+                compile_pair(json, &query, &embedded_model(), &context).unwrap();
             }
         }
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_aggregate_functions_property_groups_and_ordering() {
     let json = r#"{
@@ -1118,19 +1026,17 @@ fn orbit_query_aggregate_functions_property_groups_and_ordering() {
         "aggregation_sort":"-n","limit":10
     }"#;
     let orbit_query = "MATCH (u:Note) WHERE u.id IN [1, 2] RETURN u.confidential AS confidential, count(u) AS n, sum(u.id), avg(u.id), min(u.created_at), max(u.created_at) ORDER BY n DESC LIMIT 10";
-    compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_null_predicates_and_all_columns() {
     let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":"*","filters":{"created_at":{"is_not_null":true},"state":{"is_null":true}}}]}"#;
     let orbit_query =
         "MATCH (u:User) WHERE u.created_at IS NOT NULL AND u.state IS NULL RETURN properties(u)";
-    compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_m23_literals_and_comments() {
     let cases = [
@@ -1156,7 +1062,7 @@ fn orbit_query_m23_literals_and_comments() {
         ),
     ];
     for (json, orbit_query) in cases {
-        compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+        compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
     }
 }
 
@@ -1449,7 +1355,6 @@ fn orbit_query_undirected_relationships_require_neighbors() {
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_rejects_unsupported_syntax_and_shapes() {
     let queries = [
@@ -1510,8 +1415,13 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User {username: '\\uD800'}) RETURN u",
     ];
     for query in queries {
-        let error = compiler::compile(query, compiler::Frontend::Gql, &test_model(), &test_ctx())
-            .expect_err(query);
+        let error = compiler::compile(
+            query,
+            compiler::Frontend::Gql,
+            &embedded_model(),
+            &test_ctx(),
+        )
+        .expect_err(query);
         assert!(error.is_client_safe(), "{query}: {error}");
     }
 }
@@ -1553,7 +1463,6 @@ fn orbit_query_preserves_ontology_validation_and_security() {
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_nesting_guard_sees_through_escaped_names() {
     let hidden = format!(
@@ -1566,7 +1475,7 @@ fn orbit_query_nesting_guard_sees_through_escaped_names() {
 
     let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":5}"#;
     let orbit_query = "MATCH (`u`:`User` {`id`: 1}) RETURN `u` LIMIT 5";
-    compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap();
+    compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap();
 }
 
 #[test]
@@ -1621,7 +1530,6 @@ fn orbit_query_caps_reject_during_lowering() {
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_schema_caps_reject_with_the_json_category() {
     let cases = [
@@ -1643,7 +1551,7 @@ fn orbit_query_schema_caps_reject_with_the_json_category() {
         ),
     ];
     for (json, orbit_query) in cases {
-        compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap_err();
+        compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap_err();
     }
 
     let long_identifier = "a".repeat(65);
@@ -1663,21 +1571,19 @@ fn orbit_query_schema_caps_reject_with_the_json_category() {
         ),
     ];
     for (json, orbit_query) in &bounded {
-        compile_pair(json, orbit_query, &test_model(), &test_ctx()).unwrap_err();
+        compile_pair(json, orbit_query, &embedded_model(), &test_ctx()).unwrap_err();
     }
     compile_pair(
         r#"{"query_type":"traversal","nodes":[{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","entity":"User","node_ids":[1]}]}"#,
         "MATCH (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:User {id: 1}) RETURN aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        &test_model(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_path_depth_caps_match_json() {
-    let ontology = test_ontology();
     let ctx = test_ctx();
     for depth in [0, 1, 3, 4, u32::MAX] {
         let json = format!(
@@ -1686,7 +1592,7 @@ fn orbit_query_path_depth_caps_match_json() {
         let query = format!(
             "MATCH p = ANY SHORTEST (a:Project {{id: 1}})-[:CONTAINS*1..{depth}]->(b:Project {{id: 2}}) RETURN p"
         );
-        let result = compile_pair(&json, &query, &model(&ontology), &ctx);
+        let result = compile_pair(&json, &query, &embedded_model(), &ctx);
         if (1..=3).contains(&depth) {
             result.unwrap();
         } else {
@@ -1695,10 +1601,9 @@ fn orbit_query_path_depth_caps_match_json() {
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
+#[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]
 #[test]
 fn orbit_query_neighbors_relationship_type_caps_match_json() {
-    let ontology = test_ontology();
     let ctx = test_ctx();
     for (direction, left, right) in [
         ("outgoing", "-", "->"),
@@ -1717,7 +1622,7 @@ fn orbit_query_neighbors_relationship_type_caps_match_json() {
                 "MATCH (u:User {{id: 1}}){left}[:{}]{right}(n) RETURN n",
                 kinds.join("|")
             );
-            let result = compile_pair(&json, &query, &model(&ontology), &ctx);
+            let result = compile_pair(&json, &query, &embedded_model(), &ctx);
             if count <= 10 {
                 result.unwrap();
             } else {
@@ -1912,14 +1817,13 @@ fn orbit_query_digit_string_ids_and_aggregated_identity_columns() {
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_debug_and_dynamic_properties_match_json_options() {
     let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"options":{"include_debug_sql":true}}"#;
     let compiled = compile_pair(
         json,
         "MATCH (u:User {id: 1}) RETURN u DEBUG",
-        &test_model(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
@@ -1929,7 +1833,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
     let compiled = compile_pair(
         json,
         "MATCH (g:Group {id: 100})--(n) RETURN g, properties(n)",
-        &test_model(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
@@ -1939,14 +1843,13 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
     let compiled = compile_pair(
         json,
         "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN properties(p)",
-        &test_model(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();
     assert_eq!(compiled.stats.dynamic_columns, DynamicColumnMode::All);
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_optional_clauses_preserve_options() {
     for order in ["", " ORDER BY u.id"] {
@@ -1958,7 +1861,8 @@ fn orbit_query_optional_clauses_preserve_options() {
         ] {
             for debug in ["", " DEBUG"] {
                 let query = format!("MATCH (u:User {{id: 1}}) RETURN u{order}{limit}{debug}");
-                let compiled = compile(&query, Frontend::Gql, &test_model(), &test_ctx()).unwrap();
+                let compiled =
+                    compile(&query, Frontend::Gql, &embedded_model(), &test_ctx()).unwrap();
                 assert_eq!(compiled.debug, !debug.is_empty(), "{query}");
                 assert_eq!(compiled.stats.has_order_by, !order.is_empty(), "{query}");
                 assert_eq!(compiled.shape.skip, skip, "{query}");
@@ -1970,7 +1874,6 @@ fn orbit_query_optional_clauses_preserve_options() {
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_debug_in_literals_and_comments_stays_data() {
     for (literal, value) in [
@@ -1984,7 +1887,7 @@ fn orbit_query_debug_in_literals_and_comments_stays_data() {
     ] {
         for comment in ["", " /* DEBUG */", " // DEBUG"] {
             let query = format!("MATCH (u:User {{username: {literal}}}) RETURN u{comment}");
-            let compiled = compile(&query, Frontend::Gql, &test_model(), &test_ctx()).unwrap();
+            let compiled = compile(&query, Frontend::Gql, &embedded_model(), &test_ctx()).unwrap();
             assert!(!compiled.debug, "{query}");
             assert!(
                 has_param_value(&compiled.base.params, &serde_json::json!(value)),
@@ -1995,14 +1898,13 @@ fn orbit_query_debug_in_literals_and_comments_stays_data() {
     }
 }
 
-#[ignore = "fixture ontology fails the data model load checks"]
 #[test]
 fn orbit_query_reserved_skip_words_need_backticks() {
     assert!(
         compile(
             "MATCH (offset:User {id: 1}) RETURN offset",
             Frontend::Gql,
-            &test_model(),
+            &embedded_model(),
             &test_ctx()
         )
         .is_err()
@@ -2010,7 +1912,7 @@ fn orbit_query_reserved_skip_words_need_backticks() {
     compile(
         "MATCH (`offset`:User {id: 1}) RETURN `offset`",
         Frontend::Gql,
-        &test_model(),
+        &embedded_model(),
         &test_ctx(),
     )
     .unwrap();

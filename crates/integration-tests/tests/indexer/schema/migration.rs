@@ -23,6 +23,7 @@ use orbit_migrations::version::{
     STATUS_ACTIVE, STATUS_RETIRED, promote_version, read_all_versions,
 };
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::{Catalog, ClickHouse, Model, Packages};
 
 fn dictionary_credentials(
     config: &orbit_server_config::ClickHouseConfiguration,
@@ -34,29 +35,27 @@ fn dictionary_credentials(
     }
 }
 
-async fn setup() -> (TestContext, ontology::Ontology, MigrationMetrics) {
+async fn setup() -> (TestContext, Arc<Model>, MigrationMetrics) {
     let ctx = TestContext::new(&[]).await;
-    let ontology = ontology::Ontology::load_embedded().unwrap();
+    let model = Packages::embedded().load().unwrap();
     let metrics = MigrationMetrics::new();
 
     // Mirror indexer startup: version table must exist before migration runs.
     ensure_version_table(&ctx.create_client()).await.unwrap();
 
-    (ctx, ontology, metrics)
+    (ctx, model, metrics)
 }
 
-fn catalog(
-    ontology: &ontology::Ontology,
-) -> query_data_model::Catalog<query_data_model::ClickHouse> {
-    query_data_model::from_ontology::clickhouse(ontology).unwrap()
+fn catalog(model: &Arc<Model>) -> Catalog<ClickHouse> {
+    Catalog::<ClickHouse>::from_model(model).unwrap()
 }
 
-fn physical(ontology: &ontology::Ontology) -> orbit_migrations::schema::Schema {
-    query_data_model::from_ontology::schema(ontology).unwrap()
+fn physical(model: &Arc<Model>) -> orbit_migrations::schema::Schema {
+    orbit_migrations::schema::Schema::from_model(model).unwrap()
 }
 
-fn test_schema(ontology: &ontology::Ontology) -> GraphSchema {
-    GraphSchema::new(physical(ontology), false)
+fn test_schema(model: &Arc<Model>) -> GraphSchema {
+    GraphSchema::new(physical(model), false)
 }
 
 fn lock() -> Arc<dyn LockService> {
@@ -69,8 +68,10 @@ fn campaign() -> indexer::campaign::CampaignState {
 
 #[test]
 fn reordered_table_declarations_do_not_change_deployed_schema() {
-    let base = ontology::Ontology::load_embedded().unwrap();
-    let overlay = integration_testkit::load_ontology_overlay("reordered_edges");
+    let base = Packages::embedded().load().unwrap();
+    let overlay = query_data_model::testkit::overlay("reordered_edges")
+        .load()
+        .unwrap();
     let base_schema = test_schema(&base);
     let overlay_schema = test_schema(&overlay);
     assert_eq!(
@@ -107,15 +108,15 @@ fn reordered_table_declarations_do_not_change_deployed_schema() {
 
 #[tokio::test]
 async fn fresh_install_creates_tables_and_records_version() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
 
     migration::run_if_needed(
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -127,7 +128,7 @@ async fn fresh_install_creates_tables_and_records_version() {
         Some(*SCHEMA_VERSION)
     );
 
-    let expected_schema = test_schema(&ontology);
+    let expected_schema = test_schema(&model);
 
     let result = ctx
         .query(&format!(
@@ -141,7 +142,7 @@ async fn fresh_install_creates_tables_and_records_version() {
     assert_eq!(
         count,
         vec![expected_schema.tables.len() as i64],
-        "fresh install should create all ontology tables"
+        "fresh install should create all model tables"
     );
 
     let result = ctx
@@ -154,13 +155,13 @@ async fn fresh_install_creates_tables_and_records_version() {
     assert_eq!(
         dict_count,
         vec![expected_schema.dictionaries.len() as i64],
-        "fresh install should create all ontology dictionaries"
+        "fresh install should create all model dictionaries"
     );
 }
 
 #[tokio::test]
 async fn matching_version_is_noop() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
     mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
 
@@ -168,8 +169,8 @@ async fn matching_version_is_noop() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -183,8 +184,8 @@ async fn matching_version_is_noop() {
 }
 
 #[tokio::test]
-async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
-    let (ctx, ontology, metrics) = setup().await;
+async fn mismatch_creates_all_model_tables_and_marks_migrating() {
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
     mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
@@ -194,15 +195,15 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
     .await
     .unwrap();
 
-    let expected_schema = test_schema(&ontology);
+    let expected_schema = test_schema(&model);
 
     let result = ctx
         .query(&format!(
@@ -218,7 +219,7 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
     assert_eq!(
         created_names.len(),
         expected_schema.tables.len(),
-        "expected {} tables from ontology, got {}: {created_names:?}",
+        "expected {} tables from the model, got {}: {created_names:?}",
         expected_schema.tables.len(),
         created_names.len(),
     );
@@ -243,7 +244,7 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
 
 #[tokio::test]
 async fn created_tables_have_correct_columns() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
     mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
@@ -253,8 +254,8 @@ async fn created_tables_have_correct_columns() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -282,7 +283,7 @@ async fn created_tables_have_correct_columns() {
 
 #[tokio::test]
 async fn idempotent_rerun_succeeds() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
     mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
@@ -294,8 +295,8 @@ async fn idempotent_rerun_succeeds() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock_svc,
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -306,8 +307,8 @@ async fn idempotent_rerun_succeeds() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock_svc,
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -317,7 +318,7 @@ async fn idempotent_rerun_succeeds() {
 
 #[tokio::test]
 async fn lock_released_after_migration() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
     mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
@@ -330,8 +331,8 @@ async fn lock_released_after_migration() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock_svc,
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -343,7 +344,7 @@ async fn lock_released_after_migration() {
 
 #[tokio::test]
 async fn held_lock_causes_timeout() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
     mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
@@ -360,8 +361,8 @@ async fn held_lock_causes_timeout() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock_svc,
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -376,7 +377,7 @@ async fn held_lock_causes_timeout() {
 
 #[tokio::test]
 async fn mismatch_opens_campaign_steady_state_does_not() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
     mark_version_active(&client, *SCHEMA_VERSION - 1)
         .await
@@ -387,8 +388,8 @@ async fn mismatch_opens_campaign_steady_state_does_not() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &migrating_campaign,
     )
@@ -406,8 +407,8 @@ async fn mismatch_opens_campaign_steady_state_does_not() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &matching_campaign,
     )
@@ -422,15 +423,15 @@ async fn mismatch_opens_campaign_steady_state_does_not() {
 
 #[tokio::test]
 async fn rollback_reactivates_directly_when_embedded_tables_are_intact() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
 
     migration::run_if_needed(
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -445,8 +446,8 @@ async fn rollback_reactivates_directly_when_embedded_tables_are_intact() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -490,7 +491,7 @@ async fn rollback_reactivates_directly_when_embedded_tables_are_intact() {
 
 #[tokio::test]
 async fn rollback_rebuilds_when_embedded_tables_are_gone() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
 
     mark_version_active(&client, *SCHEMA_VERSION + 1)
@@ -501,8 +502,8 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -529,7 +530,7 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
         "a rebuild rollback marks the embedded version migrating, same as a forward migration"
     );
 
-    let expected_schema = test_schema(&ontology);
+    let expected_schema = test_schema(&model);
     let result = ctx
         .query(&format!(
             "SELECT name FROM system.tables \
@@ -550,15 +551,15 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
 
 #[tokio::test]
 async fn rollback_rebuild_clears_stale_objects_before_recreating() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
 
     migration::run_if_needed(
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -582,8 +583,8 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -605,7 +606,7 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
     );
 
     let prefix = table_prefix(*SCHEMA_VERSION);
-    let expected_schema = test_schema(&ontology);
+    let expected_schema = test_schema(&model);
     let result = ctx
         .query(&format!(
             "SELECT name FROM system.tables \
@@ -638,15 +639,15 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
 
 #[tokio::test]
 async fn lock_released_after_rollback_reactivation() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
 
     migration::run_if_needed(
         &client,
         &dictionary_credentials(&ctx.config),
         &lock(),
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -664,8 +665,8 @@ async fn lock_released_after_rollback_reactivation() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock_svc,
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -682,7 +683,7 @@ async fn lock_released_after_rollback_reactivation() {
 
 #[tokio::test]
 async fn lock_released_after_rollback_rebuild() {
-    let (ctx, ontology, metrics) = setup().await;
+    let (ctx, model, metrics) = setup().await;
     let client = ctx.create_client();
 
     mark_version_active(&client, *SCHEMA_VERSION + 1)
@@ -696,8 +697,8 @@ async fn lock_released_after_rollback_rebuild() {
         &client,
         &dictionary_credentials(&ctx.config),
         &lock_svc,
-        &catalog(&ontology),
-        &physical(&ontology),
+        &catalog(&model),
+        &physical(&model),
         &metrics,
         &campaign(),
     )
@@ -958,7 +959,7 @@ fn sdlc_keeping_edge_rows(entities: &[&str]) -> MigrationScope {
 
 struct MigrationScenario {
     ctx: TestContext,
-    ontology: ontology::Ontology,
+    model: Arc<Model>,
     #[expect(dead_code, reason = "held to keep Prometheus metrics registered")]
     metrics: MigrationMetrics,
     active_version: u32,
@@ -966,11 +967,11 @@ struct MigrationScenario {
 
 impl MigrationScenario {
     async fn migrating_from_active() -> Self {
-        let (ctx, ontology, metrics) = setup().await;
+        let (ctx, model, metrics) = setup().await;
         let active_version = *SCHEMA_VERSION - 1;
         let scenario = Self {
             ctx,
-            ontology,
+            model,
             metrics,
             active_version,
         };
@@ -979,20 +980,20 @@ impl MigrationScenario {
     }
 
     async fn migrating_from_missing_active() -> Self {
-        let (ctx, ontology, metrics) = setup().await;
+        let (ctx, model, metrics) = setup().await;
         Self {
             ctx,
-            ontology,
+            model,
             metrics,
             active_version: *SCHEMA_VERSION - 1,
         }
     }
 
     async fn at_new_version() -> Self {
-        let (ctx, ontology, metrics) = setup().await;
+        let (ctx, model, metrics) = setup().await;
         let scenario = Self {
             ctx,
-            ontology,
+            model,
             metrics,
             active_version: *SCHEMA_VERSION,
         };
@@ -1060,7 +1061,7 @@ impl MigrationScenario {
 
     async fn precreate_empty_target(&self, unprefixed: &str) {
         let prefix = table_prefix(*SCHEMA_VERSION);
-        let schema = test_schema(&self.ontology);
+        let schema = test_schema(&self.model);
         let table = schema
             .tables
             .iter()
@@ -1074,10 +1075,10 @@ impl MigrationScenario {
     }
 
     async fn migrate(&self, scope: MigrationScope) {
-        let schema = test_schema(&self.ontology);
+        let schema = test_schema(&self.model);
         orbit_migrations::execute::create_tables_with_selective_cloning(
             &self.ctx.create_client(),
-            &catalog(&self.ontology),
+            &catalog(&self.model),
             &schema,
             &dictionary_credentials(&self.ctx.config),
             &scope,
@@ -1182,7 +1183,7 @@ impl MigrationScenario {
     ) -> orbit_migrations::completion::SdlcReindexProgress {
         orbit_migrations::completion::check_sdlc_reindex_progress(
             &self.ctx.create_client(),
-            &catalog(&self.ontology),
+            &catalog(&self.model),
             &scope,
             *SCHEMA_VERSION,
             enabled_namespace_ids,
@@ -1193,7 +1194,7 @@ impl MigrationScenario {
 
     async fn create_tables(&self, prefix: &str) {
         let client = self.ctx.create_client();
-        let schema = test_schema(&self.ontology);
+        let schema = test_schema(&self.model);
         for table in &schema.tables {
             client.execute(&table.to_create_sql(prefix)).await.unwrap();
         }
@@ -1220,10 +1221,8 @@ impl MigrationScenario {
     }
 
     async fn run_code_stale_sweep(&self) {
-        let table_names = CodeTableNames::from_catalog(
-            &query_data_model::from_ontology::clickhouse(&self.ontology).unwrap(),
-        )
-        .expect("code tables must resolve");
+        let table_names =
+            CodeTableNames::from_catalog(&catalog(&self.model)).expect("code tables must resolve");
         let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
             self.ctx.config.build_client("graph"),
         )));
@@ -1601,7 +1600,7 @@ async fn gate_requires_every_invalidated_pipeline_including_global() {
 
 #[tokio::test]
 async fn garbage_collection_keeps_most_recent_retired_version_by_created_at() {
-    let (ctx, _ontology, _metrics) = setup().await;
+    let (ctx, _model, _metrics) = setup().await;
     let client = ctx.create_client();
 
     ctx.execute(
@@ -1633,7 +1632,7 @@ async fn garbage_collection_keeps_most_recent_retired_version_by_created_at() {
 
 #[tokio::test]
 async fn garbage_collection_drops_only_objects_of_dead_versions() {
-    let (ctx, _ontology, _metrics) = setup().await;
+    let (ctx, _model, _metrics) = setup().await;
     let client = ctx.create_client();
 
     ctx.execute(

@@ -1,5 +1,5 @@
 name: Target-anchored bounded hops expand from the target layout
-ontology_overlay: reordered_edges
+model_overlay: reordered_edges
 
 query:
   json: |

@@ -10,7 +10,6 @@ async-nats = { workspace = true }
 bytes = { workspace = true }
 clickhouse-client = { workspace = true }
 futures = { workspace = true }
-ontology = { path = "../ontology" }
 orbit-log-fields = { workspace = true }
 query-data-model = { path = "../query-data-model" }
 nats-client = { path = "../nats-client" }

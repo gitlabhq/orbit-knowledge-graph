@@ -7,8 +7,8 @@ use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use integration_testkit::TestContext;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use nats_client::{KvPutOptions, NatsClient};
-use orbit_migrations::archive::Release;
-use orbit_migrations::catalog::{MODEL_ARCHIVES_BUCKET, ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
+use orbit_migrations::archive::ModelArchive;
+use orbit_migrations::catalog::{ACTIVE_VERSION_BUCKET, MODEL_ARCHIVES_BUCKET, ModelCatalog};
 use orbit_migrations::schema::{GraphSchema, Schema};
 use orbit_migrations::version::{
     ensure_version_table, mark_version_migrating, mark_version_retired, promote_version,
@@ -25,7 +25,6 @@ use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use orbit_server::proto::orbit_service_server::OrbitServiceServer;
 use orbit_server::proto::*;
 use orbit_server_config::AppConfig;
-use orbit_utils::yaml;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use testcontainers_modules::nats::Nats;
@@ -41,9 +40,43 @@ const WAIT_LIMIT: Duration = Duration::from_secs(30);
 const RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const NEW_PROPERTY_VALUE: &str = "new property";
 
-const PROPERTIES_ADDED_IN_V2: [(&str, &str); 2] = [
-    ("nodes/core/project.yaml", "description"),
-    ("nodes/code_review/merge_request.yaml", "merged_at"),
+/// Removes `Project.description` and `MergeRequest.merged_at`, which v2 adds.
+const V1_EDITS: [(&str, &str, &str); 7] = [
+    (
+        "gitlab.core/graph.yaml",
+        "(e.g. gitlab-org/gitlab)., unique: true}\n      name: {type: string, description: Display name.}\n      description: {type: string, description: Description text.}\n",
+        "(e.g. gitlab-org/gitlab)., unique: true}\n      name: {type: string, description: Display name.}\n",
+    ),
+    (
+        "gitlab.core/graph_store.yaml",
+        "        description: {default: \"''\", codec: [ZSTD(3)]}\n        visibility_level: {default: \"''\", codec: [LZ4]}\n        full_path: {default: \"''\", codec: [ZSTD(3)]}\n        created_at: {codec: [Delta(8), ZSTD(1)]}\n        updated_at: {codec: [Delta(8), ZSTD(1)]}\n        archived:",
+        "        visibility_level: {default: \"''\", codec: [LZ4]}\n        full_path: {default: \"''\", codec: [ZSTD(3)]}\n        created_at: {codec: [Delta(8), ZSTD(1)]}\n        updated_at: {codec: [Delta(8), ZSTD(1)]}\n        archived:",
+    ),
+    (
+        "gitlab.core/graph_store.yaml",
+        "        archived: minmax\n        id: bloom_filter(0.0001)\n        name: text\n        full_path: bloom_filter(0.0001)\n        description: text\n",
+        "        archived: minmax\n        id: bloom_filter(0.0001)\n        name: text\n        full_path: bloom_filter(0.0001)\n",
+    ),
+    (
+        "gitlab.code_review/graph.yaml",
+        "      merged_at: {type: timestamp?, description: Merge timestamp.}\n",
+        "",
+    ),
+    (
+        "gitlab.code_review/graph_store.yaml",
+        "        merged_at: {codec: [Delta(8), ZSTD(1)]}\n",
+        "",
+    ),
+    (
+        "gitlab.code_review/graph_store.yaml",
+        "      - merged_at\n",
+        "",
+    ),
+    (
+        "gitlab.code_review/source.yaml",
+        "      merged_at: metric_merged_at\n",
+        "",
+    ),
 ];
 
 #[tokio::test]
@@ -52,11 +85,19 @@ async fn split_route_archive_is_served_by_variant_aware_queries() {
     cluster.create_tables(&[1, 2]).await;
     cluster.promote(1).await;
     cluster.await_serving(Some(1)).await;
-    let mut sources = ontology::migrations::embedded_sources();
-    let mut calls: Value = yaml::from_str(&sources["edges/calls.yaml"]).unwrap();
-    calls["variants"][0]["table"] = json!("gl_edge");
-    sources.insert("edges/calls.yaml".into(), yaml::to_string(&calls).unwrap());
-    let archive = integration_testkit::derived_release(2, &sources);
+    let packages = query_data_model::testkit::patched([
+        (
+            "gitlab/graph_store.yaml",
+            "        - Dependency\n",
+            "        - Definition\n        - Dependency\n",
+        ),
+        (
+            "gitlab/graph_store.yaml",
+            "  CALLS: {columns: {project_id: project_id, branch: branch}}\n",
+            "  CALLS:\n    variants:\n      Definition -> Definition: {backend: {table: gl_edge}}\n      File -> Definition: {columns: {project_id: project_id, branch: branch}}\n      Definition -> ImportedSymbol: {columns: {project_id: project_id, branch: branch}}\n      File -> ImportedSymbol: {columns: {project_id: project_id, branch: branch}}\n",
+        ),
+    ]);
+    let archive = integration_testkit::model_archive(2, &packages);
     cluster.catalog.publish(&archive).await.unwrap();
     cluster.promote(2).await;
     cluster.await_serving(Some(2)).await;
@@ -248,7 +289,7 @@ async fn catalog_loss_keeps_the_last_usable_schema() {
     cluster.promote(1).await;
     cluster.await_serving(Some(1)).await;
 
-    cluster.drop_catalog_bucket().await;
+    cluster.drop_catalog_buckets().await;
     sleep(RETRY_INTERVAL * 2).await;
     assert_eq!(cluster.ready_status().await, StatusCode::OK);
     let result = cluster.run_query(project_query(1)).await.unwrap();
@@ -263,7 +304,7 @@ async fn catalog_loss_keeps_the_last_usable_schema() {
 struct Cluster {
     graph: TestContext,
     config: AppConfig,
-    catalog: OntologyCatalog,
+    catalog: ModelCatalog,
     nats_client: Arc<NatsClient>,
     client: OrbitServiceClient<Channel>,
     probe_url: String,
@@ -279,7 +320,7 @@ impl Cluster {
         let (nats, nats_address) = start_nats().await;
         let config = webserver_config(&graph, &nats_address);
         let nats_client = Arc::new(NatsClient::connect(&config.nats).await.unwrap());
-        let catalog = OntologyCatalog::open(nats_client.clone()).await.unwrap();
+        let catalog = ModelCatalog::open(nats_client.clone()).await.unwrap();
 
         let shutdown = CancellationToken::new();
         let active_schema = Arc::new(ActiveSchema::default());
@@ -322,25 +363,19 @@ impl Cluster {
 
     async fn corrupt_archive(&self, version: u32) {
         let corrupt = bytes::Bytes::from_static(b"corrupt archive");
-        self.overwrite_archive(ONTOLOGY_ARCHIVES_BUCKET, version, corrupt)
-            .await;
+        self.overwrite_archive(version, corrupt).await;
     }
 
     async fn restore_archive(&self, version: u32) {
-        let release = test_archive(version);
-        for (bucket, bytes) in [
-            (ONTOLOGY_ARCHIVES_BUCKET, release.ontology_archive().bytes()),
-            (MODEL_ARCHIVES_BUCKET, release.model_archive().bytes()),
-        ] {
-            self.overwrite_archive(bucket, version, bytes::Bytes::copy_from_slice(bytes))
-                .await;
-        }
+        let archive = test_archive(version);
+        self.overwrite_archive(version, bytes::Bytes::copy_from_slice(archive.bytes()))
+            .await;
     }
 
-    async fn overwrite_archive(&self, bucket: &str, version: u32, contents: bytes::Bytes) {
+    async fn overwrite_archive(&self, version: u32, contents: bytes::Bytes) {
         self.nats_client
             .kv_put(
-                bucket,
+                MODEL_ARCHIVES_BUCKET,
                 &version.to_string(),
                 contents,
                 KvPutOptions::default(),
@@ -410,18 +445,18 @@ impl Cluster {
             .unwrap();
     }
 
-    async fn drop_catalog_bucket(&self) {
-        self.nats_client
-            .jetstream()
-            .delete_key_value(ONTOLOGY_ARCHIVES_BUCKET)
-            .await
-            .unwrap();
+    async fn drop_catalog_buckets(&self) {
+        for bucket in [ACTIVE_VERSION_BUCKET, MODEL_ARCHIVES_BUCKET] {
+            self.nats_client
+                .jetstream()
+                .delete_key_value(bucket)
+                .await
+                .unwrap();
+        }
     }
 
     async fn reopen_catalog(&self) {
-        OntologyCatalog::open(self.nats_client.clone())
-            .await
-            .unwrap();
+        ModelCatalog::open(self.nats_client.clone()).await.unwrap();
     }
 
     async fn mark_migrating(&self, version: u32) {
@@ -780,27 +815,13 @@ fn project_has_description_in(version: u32) -> bool {
     version > 1
 }
 
-fn test_archive(version: u32) -> Release {
-    let mut sources = ontology::migrations::embedded_sources();
-    if version == 1 {
-        for (path, property) in PROPERTIES_ADDED_IN_V2 {
-            let mut node: Value = yaml::from_str(&sources[path]).unwrap();
-            node["properties"]
-                .as_object_mut()
-                .unwrap()
-                .remove(property)
-                .unwrap();
-            node["storage"]["columns"]
-                .as_array_mut()
-                .unwrap()
-                .retain(|column| column["name"] != property);
-            if let Some(indexes) = node["storage"]["indexes"].as_array_mut() {
-                indexes.retain(|index| index["column"] != property);
-            }
-            sources.insert(path.into(), yaml::to_string(&node).unwrap());
-        }
-    }
-    integration_testkit::derived_release(version, &sources)
+fn test_archive(version: u32) -> ModelArchive {
+    let packages = if version == 1 {
+        query_data_model::testkit::patched(V1_EDITS)
+    } else {
+        query_data_model::Packages::embedded()
+    };
+    integration_testkit::model_archive(version, &packages)
 }
 
 fn webserver_config(graph: &TestContext, nats_address: &str) -> AppConfig {

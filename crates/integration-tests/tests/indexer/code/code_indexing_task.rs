@@ -511,11 +511,9 @@ async fn indexes_calls_and_extends_edges() {
     )
     .await;
 
-    // Both edges land in gl_code_edge per ontology routing
     // (the schema version prefix is added at runtime).
-    let ontology = integration_testkit::load_ontology();
-    let calls_table = ontology.edge_table_for_relationship("CALLS").unwrap();
-    let extends_table = ontology.edge_table_for_relationship("EXTENDS").unwrap();
+    let calls_table = integration_testkit::edge_table_for("CALLS");
+    let extends_table = integration_testkit::edge_table_for("EXTENDS");
     assert!(
         calls_table.ends_with("gl_code_edge"),
         "CALLS must route to gl_code_edge, got {calls_table}"
@@ -539,8 +537,6 @@ async fn indexes_calls_and_extends_edges() {
 
     // Now run a real query through the compiler against the indexed data:
     // CALLS traversal Definition -> Definition. The compiler resolves the
-    // CALLS edge through the embedded ontology (proves schema.yaml
-    // registration works) and the SQL must hit gl_code_edge.
     let json = format!(
         r#"{{
         "query_type": "traversal",
@@ -1712,13 +1708,12 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
         definitions.first().is_none_or(|b| b.num_rows() == 0),
         "no definitions should be written for an empty-archive project"
     );
-    let ontology = integration_testkit::load_ontology();
     let defines_edges = clickhouse
         .query(&format!(
             "SELECT source_id FROM {} \
              WHERE relationship_kind = 'DEFINES' \
              AND source_id IN (SELECT id FROM {} WHERE project_id = {project_id})",
-            ontology.edge_table_for_relationship("DEFINES").unwrap(),
+            integration_testkit::edge_table_for("DEFINES"),
             t("gl_definition")
         ))
         .await;
@@ -2187,10 +2182,7 @@ async fn count_active_directories_at_path(
 async fn edges_from_directories_that_no_longer_exist(
     clickhouse: &integration_testkit::TestContext,
 ) -> usize {
-    let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology
-        .edge_table_for_variant("CONTAINS", "Directory", "Directory")
-        .unwrap();
+    let edge_table = integration_testkit::variant_edge_table("CONTAINS", "Directory", "Directory");
     let result = clickhouse
         .query(&format!(
             "SELECT source_id FROM {edge_table} FINAL \
@@ -2235,10 +2227,7 @@ async fn insert_stale_canary_edge(
     branch: &str,
     source_id: i64,
 ) {
-    let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology
-        .edge_table_for_variant("CONTAINS", "Directory", "File")
-        .unwrap();
+    let edge_table = integration_testkit::variant_edge_table("CONTAINS", "Directory", "File");
     let sql = format!(
         "INSERT INTO {edge_table} \
          (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, \
@@ -2253,10 +2242,7 @@ async fn count_canary_edges(
     clickhouse: &integration_testkit::TestContext,
     source_id: i64,
 ) -> usize {
-    let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology
-        .edge_table_for_variant("CONTAINS", "Directory", "File")
-        .unwrap();
+    let edge_table = integration_testkit::variant_edge_table("CONTAINS", "Directory", "File");
     let result = clickhouse
         .query(&format!(
             "SELECT target_id FROM {edge_table} FINAL \
@@ -2588,10 +2574,7 @@ async fn assert_contains_edge_between_directory_and_file(
     directory_path: &str,
     file_path: &str,
 ) {
-    let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology
-        .edge_table_for_variant("CONTAINS", "Directory", "File")
-        .unwrap();
+    let edge_table = integration_testkit::variant_edge_table("CONTAINS", "Directory", "File");
     let result = clickhouse
         .query(&format!(
             "SELECT e.source_id FROM {edge_table} AS e FINAL \
@@ -2660,10 +2643,7 @@ async fn count_active_edges(
     project_id: i64,
     relationship_kind: &str,
 ) -> usize {
-    let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology
-        .edge_table_for_relationship(relationship_kind)
-        .unwrap();
+    let edge_table = integration_testkit::edge_table_for(relationship_kind);
     let result = clickhouse
         .query(&format!(
             "SELECT source_id FROM {edge_table} FINAL \

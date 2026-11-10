@@ -4,7 +4,7 @@ use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use orbit_arrow::ArrowUtils;
 use orbit_log_fields::{info, warn};
-use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::catalog::ModelCatalog;
 use orbit_migrations::completion::SIPHON_SOURCE;
 use orbit_migrations::schema::Schema;
 use orbit_migrations::scope::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
@@ -65,7 +65,7 @@ pub struct MigrationCompletionChecker {
     _task_metrics: ScheduledTaskMetrics,
     campaign: Arc<CampaignState>,
     nats_client: async_nats::Client,
-    catalog: OntologyCatalog,
+    catalog: ModelCatalog,
 }
 
 impl MigrationCompletionChecker {
@@ -84,7 +84,7 @@ impl MigrationCompletionChecker {
         task_metrics: ScheduledTaskMetrics,
         campaign: Arc<CampaignState>,
         nats_client: async_nats::Client,
-        catalog: OntologyCatalog,
+        catalog: ModelCatalog,
     ) -> Self {
         Self {
             graph,
@@ -190,7 +190,7 @@ impl MigrationCompletionChecker {
             .verify_archive(migrating_version)
             .await
             .map_err(|error| {
-                TaskError::new(format!("verify ontology archive before promotion: {error}"))
+                TaskError::new(format!("verify model archive before promotion: {error}"))
             })?;
 
         {

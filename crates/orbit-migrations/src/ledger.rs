@@ -2,8 +2,6 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use ontology::archive::OntologyArchive;
-use ontology::migrations::embedded_sources;
 use query_data_model::{Catalog, ClickHouse, Model, Packages};
 use serde::{Deserialize, Serialize};
 
@@ -175,7 +173,7 @@ impl MigrationLedger {
 
 const REMEDIATION: &str = "Run `mise schema:bump` to record the change.";
 
-/// Checks the committed ledger and the current version's archives against the embedded packages.
+/// Checks the committed ledger and the current version's archive against the embedded packages.
 pub fn verify_committed(config_dir: &Path, schema_version: u32) -> Result<MigrationLedger, String> {
     let path = config_dir.join(LEDGER_FILE);
     let ledger = MigrationLedger::parse(
@@ -185,29 +183,15 @@ pub fn verify_committed(config_dir: &Path, schema_version: u32) -> Result<Migrat
     let catalog = Catalog::<ClickHouse>::embedded().map_err(|error| error.to_string())?;
     ledger.validate(&catalog, schema_version)?;
 
-    let read = |path: &Path| {
-        std::fs::read(path).map_err(|error| {
-            format!(
-                "reading {}: {error}. Run `mise schema:bump` to write the current archives.",
-                path.display()
-            )
-        })
-    };
-    let ontology = OntologyArchive::from_bytes(
-        schema_version,
-        &read(&OntologyArchive::path(config_dir, schema_version))?,
-    )
-    .map_err(|error| error.to_string())?;
-    if !ontology.matches_sources(&embedded_sources()) {
-        return Err(format!(
-            "ontology archive v{schema_version} is stale. {REMEDIATION}"
-        ));
-    }
-    let model = ModelArchive::from_bytes(
-        schema_version,
-        &read(&ModelArchive::path(config_dir, schema_version))?,
-    )
-    .map_err(|error| error.to_string())?;
+    let path = ModelArchive::path(config_dir, schema_version);
+    let bytes = std::fs::read(&path).map_err(|error| {
+        format!(
+            "reading {}: {error}. Run `mise schema:bump` to write the current archive.",
+            path.display()
+        )
+    })?;
+    let model =
+        ModelArchive::from_bytes(schema_version, &bytes).map_err(|error| error.to_string())?;
     if !model.matches(&Packages::embedded()) {
         return Err(format!(
             "model archive v{schema_version} does not match the packages. {REMEDIATION}"

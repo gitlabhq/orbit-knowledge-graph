@@ -61,7 +61,7 @@ use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
 use orbit_log_fields::{info, warn};
-use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::catalog::ModelCatalog;
 use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
@@ -232,12 +232,12 @@ pub async fn run(
 
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
-    release: &orbit_migrations::archive::Release,
+    archive: &orbit_migrations::archive::ModelArchive,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
     let candidate = query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(
-        &release.packages().load()?,
+        &archive.packages().load()?,
     )?;
     let code_tables = modules::code::config::CodeTableNames::from_catalog(&candidate)?;
     let siphon = candidate
@@ -252,13 +252,13 @@ pub async fn run_dispatcher(
 
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
-    let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
-    let model = catalog.publish(release).await?.model;
+    let catalog = ModelCatalog::open(services.nats_client.clone()).await?;
+    let model = catalog.publish(archive).await?;
     let physical = orbit_migrations::schema::Schema::from_model(&model)?;
 
     let graph = clients.graph.clone();
     if let Some(active_version) = orbit_migrations::version::read_active_version(&graph).await?
-        && active_version != release.schema_version()
+        && active_version != archive.schema_version()
     {
         catalog.ensure_archive(active_version).await?;
     }
