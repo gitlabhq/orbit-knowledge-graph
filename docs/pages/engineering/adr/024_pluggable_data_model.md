@@ -38,9 +38,9 @@ Agent memory needs custom node types for one tenant.
 
 **A data model of versioned packages replaces the ontology. A loader checks the packages once, and every compiler pipeline builds, rewrites and renders its plans through the model's checked catalogs.**
 
-1. **Packages replace the ontology.** A package is a set of fragments of five kinds: graph, authorization, storage, source and service. Every fragment refers to the graph, and the graph knows nothing about tables. The platform, each integration and each tenant overlay ship their own packages.
+1. **Packages replace the ontology.** A package is a set of fragments of five kinds: graph, authorization, storage, source and service. The fragments form layers around the graph, and each layer names only the layers inside it. The platform, each integration and each tenant overlay ship their own packages.
 2. **The loader does the work once, and infers nothing.** It resolves every name to an ID, checks every rule, and fails once with every error and its package. Every table, column, storage type and immutable column is declared; a property its home store neither stores nor excludes fails the load. It resolves every declared access policy and checks that each backend can enforce it. A hash of the packages identifies the model, and every plan carries it.
-3. **Packages load at runtime from a registry keyed by package.** Each package has its own version line. A tenant's model is the active version of every package that applies to it. A new version needs no rebuild and no deploy. A package's origin bounds what it may declare, and the loader enforces it: platform packages may declare anything, integration packages may declare provider checks but not trusted stores, Rails checks or global scope, and tenant overlays may declare only namespace- or user-scoped entities.
+3. **Packages load at runtime from a registry keyed by package.** Each package has its own version line and declares the packages it requires. A tenant's model is the active version of every package that applies to it. A new version needs no rebuild and no deploy. A package's origin bounds what it may declare, and the loader enforces it: platform packages may declare anything, integration packages may declare provider checks but not trusted stores, Rails checks or global scope, and tenant overlays may declare only namespace- or user-scoped entities.
 4. **A version goes live after its backfill.** The migration scope is the diff between the new version's storage and source fragments and the active one's. The indexing engine of ADR 023 backfills the tables in scope, then the registry promotes the version and the query engine swaps models atomically.
 5. **A backend implements one trait.** A catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. Shared code reads capabilities and never checks a backend name.
 6. **Every plan is built through a checked catalog builder.** There is one logical plan language and one physical plan language per kind of backend. Shared tracking checks every connection as it is made, and rewrites use the same builder, so no phase can leave an invalid plan.
@@ -115,6 +115,7 @@ A package is a directory of fragments, and the registry holds one version line p
 ```plaintext
 packages/
 ├── gitlab/
+│   ├── package.yaml
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
@@ -126,6 +127,7 @@ packages/
 │       ├── siphon.yaml
 │       └── system_note.sql.j2
 ├── gitlab.code_review/
+│   ├── package.yaml
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
@@ -134,6 +136,7 @@ packages/
 │       ├── siphon.yaml
 │       └── merge_request.sql.j2
 ├── gitlab.source_code/
+│   ├── package.yaml
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
@@ -142,6 +145,7 @@ packages/
 │   └── sources/
 │       └── siphon.yaml
 ├── integration.jira/
+│   ├── package.yaml
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
@@ -149,69 +153,55 @@ packages/
 │   └── sources/
 │       └── data_lake.yaml
 ├── integration.slack/
+│   ├── package.yaml
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   └── storage/
 │       └── live.yaml
 └── tenant.agent_memory/
+    ├── package.yaml
     ├── graph.yaml
     ├── authorization.yaml
     └── storage/
         └── clickhouse.yaml
 ```
 
-Each package has one `graph.yaml` and one `authorization.yaml`. The `storage/`, `services/` and `sources/` directories hold one fragment per store, service or source. A storage fragment is named after its backend, and a service or source fragment after its service or source. A source fragment can name query templates, which sit next to it.
+Each package has one `package.yaml`, one `graph.yaml` and one `authorization.yaml`. The `storage/`, `services/` and `sources/` directories hold one fragment per store, service or source. A storage fragment is named after its backend, and a service or source fragment after its service or source. A source fragment can name query templates, which sit next to it.
 
 ```plantuml
 @startuml
-set separator none
 skinparam shadowing false
-skinparam nodesep 60
-skinparam ranksep 70
-skinparam classAttributeIconSize 0
-hide empty members
+skinparam defaultFontSize 13
+skinparam rectangleBorderColor #8A94A6
+skinparam rectangleFontColor #1F2937
+skinparam rectangleFontStyle plain
 
-package "gitlab.code_review" {
-  class "graph" as G {
-    MergeRequest
-    properties, types, default values
-    AUTHORED (User -> MergeRequest, one to many)
+rectangle "<b>Tenant model</b>  (one ModelId)\nthe active version of every package that applies to the tenant" as M #FFFFFF {
+  rectangle "<b>Tenant overlays</b>\nnamespace- or user-scoped only" as T3 #F8FAFC {
+    rectangle "tenant.agent_memory" as O #F1F5F9
   }
-  class "authorization" as A {
-    scope: namespace
-    role: reporter
-    enforce: clickhouse path filter
-    checks: Rails read_merge_request
+  rectangle "<b>Integration packages</b>\nprovider checks, no trusted stores" as T2 #F8FAFC {
+    rectangle "integration.slack\nintegration.jira" as I #F1F5F9
   }
-  class "storage" as ST {
-    store: graph
-    table, every column with its type
-    immutable columns, codecs, sort key
-    AUTHORED: foreign key author_id
-  }
-  class "source" as SO {
-    source: siphon
-    tables, query, column map
-  }
-  class "service" as SV {
-    lookups for virtual
-    properties
+  rectangle "<b>Platform packages</b>\nmay declare anything" as T1 #F8FAFC {
+    rectangle "<b>package gitlab.code_review</b>\npackage.yaml: requires gitlab, gitlab.core" as P #F1F5F9 {
+      rectangle "<b>Layer 2: authorization, source</b>\nenforce per backend: clickhouse path filter\nchecks: Rails read_merge_request\nsource: siphon tables, query, column map" as L2 #E2E8F0 {
+        rectangle "<b>Layer 1: storage, service</b>\ntable gl_merge_request, every column and type\nAUTHORED: foreign key author_id\naccess hints, immutable columns" as L1 #CBD5E1 {
+          rectangle "<b>Layer 0: graph</b>\nMergeRequest: properties, types, defaults\nAUTHORED: User -> MergeRequest, one to many" as L0 #FFFFFF
+        }
+      }
+    }
   }
 }
-
-A --> G : refers to
-ST --> G : binds
-SO --> G : feeds
-SV --> G : provides
 @enduml
 ```
 
-Every fragment refers to the graph and to nothing else, so a new store, a new source or a new access rule never edits the graph.
+Each layer names only the layers inside it, and the loader checks them from the inside out. The graph names nothing, so a new store, source or access rule never edits it. Authorization names graph names and backend kinds, and the loader checks it against storage. A source writes into the tables its storage binding names. A package names other packages only through `requires` in its `package.yaml`.
 The graph owns what a property means: its type and its default value. Storage owns how it is kept: its table, column, storage type, whether it is immutable, and how it is queried. A storage fragment states, in backend-neutral terms, which columns are filtered, text-searched or ordered on, and each backend turns that into its own indexes and sort keys; a `backend` block overrides the result only where a platform package needs to. Nothing is inferred, so a forgotten column fails the load instead of a query.
 The graph holds topology only: which entities a relationship connects, how many sit on each side, and the attributes that belong to the edge itself. Storage binds every variant to how it is kept: a foreign key column on one endpoint's table, or rows in a named edge table. An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy. There is no default edge table, so an unbound variant fails the load.
 A relationship that a foreign key already carries, such as `AUTHORED` through `author_id`, needs no source entry.
 
-Packages compose under four rules: a package cannot redeclare an entity another package owns, cannot add a second authorization entry, can add variants to a platform relationship, and can bind its own entities to a store another package declares.
+A name from another package must come from a package listed in `requires`, and the registry activates a version only when every package it requires is active. Packages compose under four rules: a package cannot redeclare an entity another package owns, cannot add a second authorization entry, can add variants to a platform relationship, and can bind its own entities to a store another package declares.
 
 ### 2. The loader checks every package once
 
