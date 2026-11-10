@@ -55,6 +55,17 @@ test("plain words, repeated terms and Orbit lookups are skipped", async () => {
   assert.equal(lookups, 1);
 });
 
+test("a busy graph does not mark the term handled", async () => {
+  let lookups = 0;
+  const handler = guard(async () => {
+    lookups++;
+    return { busy: true };
+  });
+  assert.equal(await handler(call("rg parse_widget"), ctx), undefined);
+  assert.equal(await handler(call("rg parse_widget"), ctx), undefined);
+  assert.equal(lookups, 2);
+});
+
 test("a failed lookup stops lookups for the session", async () => {
   let lookups = 0;
   const handler = guard(async () => {

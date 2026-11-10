@@ -106,10 +106,19 @@ test("a refused state directory writes nothing, not even in the project", async 
   const elsewhere = mkdtempSync(join(tmpdir(), "search-guard-real-"));
   const linked = join(elsewhere, "link");
   symlinkSync(elsewhere, linked);
-  const before = readdirSync(stub.repo).sort();
-  const output = await run(search(stub.repo, "rg parse_widget"), { CLAUDE_PLUGIN_DATA: linked });
+  const hookCwd = mkdtempSync(join(tmpdir(), "search-guard-cwd-"));
+  const savedCwd = process.cwd();
+  process.chdir(hookCwd);
+  let output;
+  try {
+    output = await run(search(stub.repo, "rg parse_widget"), { CLAUDE_PLUGIN_DATA: linked });
+  } finally {
+    process.chdir(savedCwd);
+  }
   assert.ok(output);
-  assert.deepEqual(readdirSync(stub.repo).sort(), before);
+  assert.deepEqual(readdirSync(hookCwd), []);
+  assert.deepEqual(readdirSync(stub.repo).sort(), [".git", "lib.rs"]);
+  rmSync(hookCwd, { recursive: true, force: true });
   assert.deepEqual(readdirSync(elsewhere), ["link"]);
   rmSync(elsewhere, { recursive: true, force: true });
 });
