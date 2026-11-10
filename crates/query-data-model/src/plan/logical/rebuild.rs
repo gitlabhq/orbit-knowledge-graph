@@ -19,19 +19,13 @@ impl<'m> Rebuilder for LogicalBuilder<'m> {
         rows.inner()
     }
 
-    fn replay(
+    fn apply(
         &mut self,
         operation: LogicalOperation,
         inputs: Vec<Rows<'m>>,
         outputs: Outputs<LogicalType>,
     ) -> Result<Rows<'m>, PlanError> {
-        match operation {
-            LogicalOperation::Read(body) => {
-                let body = self.construction_ref().body(body)?;
-                self.read(body)
-            }
-            operation => self.connect(operation, inputs, |_, _, _| Ok(outputs)),
-        }
+        LogicalBuilder::apply(self, operation, inputs, outputs)
     }
 
     fn bodies(operation: &mut LogicalOperation, visit: &mut dyn FnMut(&mut BodyId)) {

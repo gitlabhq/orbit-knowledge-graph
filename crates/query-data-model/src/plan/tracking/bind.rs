@@ -32,7 +32,7 @@ impl<Q: Rebuilder> Rebuild<'_, Q> {
                     .collect::<Result<_, _>>()?,
             ),
         };
-        let rows = q.replay(operation, inputs, outputs)?;
+        let rows = q.apply(operation, inputs, outputs)?;
         let fresh = q.construction().own(Q::rows(&rows))?;
         for (old, new) in spec.own().into_iter().zip(fresh) {
             self.refs.insert(plan.handle(old), new);

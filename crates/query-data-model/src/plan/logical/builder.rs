@@ -38,10 +38,6 @@ impl<'m> LogicalBuilder<'m> {
         &mut self.construction
     }
 
-    pub(super) fn construction_ref(&self) -> &Construction<Logical> {
-        &self.construction
-    }
-
     pub(super) fn view(&self, rows: tracking::Rows) -> Result<Rows<'m>, PlanError> {
         Rows::view(self.catalog, &self.construction, rows)
     }
@@ -72,6 +68,22 @@ impl<'m> LogicalBuilder<'m> {
             let connected = construction.connect(operation, inputs, outputs)?;
             Rows::view(catalog, construction, connected.rows)
         })
+    }
+
+    /// Appends `operation` with the outputs it declares, under the tracking checks only.
+    pub(super) fn apply(
+        &mut self,
+        operation: LogicalOperation,
+        inputs: Vec<Rows<'m>>,
+        outputs: Outputs<LogicalType>,
+    ) -> Result<Rows<'m>, PlanError> {
+        match operation {
+            LogicalOperation::Read(body) => {
+                let body = self.construction.body(body)?;
+                self.read(body)
+            }
+            operation => self.connect(operation, inputs, |_, _, _| Ok(outputs)),
+        }
     }
 
     pub(super) fn attempt<T>(

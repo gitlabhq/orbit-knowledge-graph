@@ -15,7 +15,8 @@ pub trait Rebuilder: Sized {
     fn plan(old: &Self::Old) -> &Plan<Self::Language>;
     fn construction(&mut self) -> &mut Construction<Self::Language>;
     fn rows(rows: &Self::Rows) -> &Rows;
-    fn replay(
+    /// Checks one operation on its inputs and appends it, the one entry every typed call uses.
+    fn apply(
         &mut self,
         operation: Op<Self>,
         inputs: Vec<Self::Rows>,

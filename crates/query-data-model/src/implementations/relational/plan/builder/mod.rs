@@ -1,8 +1,9 @@
+mod apply;
 mod bodies;
 mod check;
 mod clauses;
 mod materialize;
-mod replay;
+mod rebuild;
 mod sources;
 mod tail;
 

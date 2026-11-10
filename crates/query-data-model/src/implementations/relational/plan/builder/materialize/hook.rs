@@ -37,12 +37,10 @@ impl<'c, B: RelationalBackend> Hook<RelationalBuilder<'c, B>> for Share<'_, B> {
                     }
                     _ => rebuild.visit(self, q, inputs[1])?,
                 };
-                let Operation::Join(kind) = rebuild.operation(self, q, node)? else {
-                    return Err(RelationalError::Incomplete("a join"));
-                };
+                let operation = rebuild.operation(self, q, node)?;
                 let mut pending = self.pending.remove(&left.rows.node()).unwrap_or_default();
                 pending.extend(self.pending.remove(&right.rows.node()).unwrap_or_default());
-                let rows = q.join(left, right, kind)?;
+                let rows = rebuild.replay(q, node, operation, vec![left, right])?;
                 self.defer(&rows, pending);
                 Ok(rows)
             }

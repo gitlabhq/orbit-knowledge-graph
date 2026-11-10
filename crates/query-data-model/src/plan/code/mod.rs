@@ -1,3 +1,4 @@
+mod apply;
 mod builder;
 mod pattern;
 
