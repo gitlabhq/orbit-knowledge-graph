@@ -340,3 +340,204 @@ fn format_property(property: &Property) -> String {
         None => type_text(property),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GRAPH: &str = "
+kind: graph
+package: test
+domain: core
+entities:
+  Project:
+    properties:
+      id: {type: int64, description: Unique ID.}
+      name: string
+      traversal_path: string
+  MergeRequest:
+    properties:
+      id: {type: int64, description: Unique ID.}
+      state: {type: enum, values: {1: opened, 2: merged}}
+      title: string?
+      body: string
+      project_id: int64
+      traversal_path: string
+relationships:
+  IN_PROJECT: {variants: [MergeRequest -> Project]}
+  RELATES_TO: {variants: [MergeRequest -> MergeRequest, MergeRequest -> Project]}
+";
+
+    const AUTHORIZATION: &str = "
+kind: authorization
+package: test
+entities:
+  Project: {scope: namespace, role: reporter, redaction: {resource: project, ability: read_project}}
+  MergeRequest: {scope: namespace, role: reporter, redaction: {resource: merge_request, ability: read_merge_request}}
+relationships:
+  IN_PROJECT: namespace_anchor
+  RELATES_TO: same_namespace
+properties:
+  Project.traversal_path: {hidden: true, filterable: false}
+  MergeRequest.traversal_path: {hidden: true, filterable: false}
+";
+
+    const GRAPH_STORE: &str = "
+kind: storage
+package: test
+store: graph
+engine:
+  kind: clickhouse
+  connection: main
+  table: gl_{entity}
+  path_column: traversal_path
+  backend:
+    version_column: _version
+    deleted_column: _deleted
+    sort_key: [traversal_path, id]
+    edge_tables:
+      gl_edge: {default: true, sort_key: [traversal_path, source_id, relationship_kind, target_id]}
+entities:
+  Project: {}
+  MergeRequest: {}
+";
+
+    const LOCAL_STORE: &str = "
+kind: storage
+package: test
+store: local
+engine:
+  kind: duckdb
+  connection: local
+  trusted: true
+  path_column: traversal_path
+  backend:
+    edge_tables:
+      gl_edge:
+        default: true
+        sort_key: [traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind]
+        columns:
+          source_id: int64
+          source_kind: string
+          relationship_kind: string
+          target_id: int64
+          target_kind: string
+          traversal_path: string
+entities:
+  MergeRequest: {table: gl_merge_request, exclude: [body]}
+";
+
+    fn model() -> Model {
+        Model::from_yaml([
+            ("graph.yaml", GRAPH),
+            ("authorization.yaml", AUTHORIZATION),
+            ("graph_store.yaml", GRAPH_STORE),
+            ("local_store.yaml", LOCAL_STORE),
+        ])
+        .unwrap()
+    }
+
+    fn json(response: &SchemaResponse) -> serde_json::Value {
+        serde_json::to_value(response).unwrap()
+    }
+
+    #[test]
+    fn full_form_expands_named_nodes_with_descriptions() {
+        let response =
+            build_schema_response(&model(), IntrospectionScope::All, &["MergeRequest".into()])
+                .unwrap();
+        assert_eq!(
+            json(&response),
+            serde_json::json!({
+                "domains": [{"name": "core", "nodes": [
+                    {
+                        "name": "MergeRequest",
+                        "props": ["id:int — Unique ID.", "state:enum", "title:string?", "body:string", "project_id:int"],
+                        "out": ["IN_PROJECT → [Project]", "RELATES_TO → [MergeRequest, Project]"],
+                        "in": ["RELATES_TO ← [MergeRequest]"],
+                    },
+                    "Project",
+                ]}],
+                "edges": ["IN_PROJECT", "RELATES_TO"],
+            })
+        );
+    }
+
+    #[test]
+    fn compact_form_lists_types_and_enum_values() {
+        let response =
+            build_compact_schema_response(&model(), IntrospectionScope::All, Some("MergeRequest"));
+        assert_eq!(
+            json(&response),
+            serde_json::json!({
+                "domains": [{"name": "core", "nodes": [{
+                    "name": "MergeRequest",
+                    "props": ["id:int", "state:enum (opened|merged)", "title:string?", "body:string", "project_id:int"],
+                    "out": ["IN_PROJECT → [Project]", "RELATES_TO → [MergeRequest, Project]"],
+                    "in": ["RELATES_TO ← [MergeRequest]"],
+                }]}],
+                "edges": [],
+            })
+        );
+    }
+
+    #[test]
+    fn local_scope_lists_local_entities_and_their_store_columns() {
+        let model = model();
+        assert_eq!(
+            json(&build_compact_schema_response(
+                &model,
+                IntrospectionScope::All,
+                None
+            )),
+            serde_json::json!({
+                "domains": [{"name": "core", "nodes": [
+                    {"name": "MergeRequest", "props": "id, state (opened|merged), title, body, project_id"},
+                    {"name": "Project", "props": "id, name"},
+                ]}],
+                "edges": [
+                    "(MergeRequest)-[:IN_PROJECT]->(Project)",
+                    "(MergeRequest)-[:RELATES_TO]->(MergeRequest|Project)",
+                ],
+            })
+        );
+        assert_eq!(
+            json(&build_compact_schema_response(
+                &model,
+                IntrospectionScope::Local,
+                None
+            )),
+            serde_json::json!({
+                "domains": [{"name": "core", "nodes": [
+                    {"name": "MergeRequest", "props": "id, state (opened|merged), title, project_id, traversal_path"},
+                ]}],
+                "edges": ["(MergeRequest)-[:RELATES_TO]->(MergeRequest)"],
+            })
+        );
+    }
+
+    #[test]
+    fn unknown_and_out_of_scope_nodes_fail_alike() {
+        let model = model();
+        let error = |scope, name: &str| {
+            build_schema_response(&model, scope, &[name.into()])
+                .unwrap_err()
+                .to_string()
+        };
+        assert_eq!(
+            error(IntrospectionScope::Local, "Project"),
+            "unknown node(s): Project. Valid nodes: MergeRequest"
+        );
+        assert_eq!(
+            error(IntrospectionScope::Local, "Nope"),
+            "unknown node(s): Nope. Valid nodes: MergeRequest"
+        );
+        assert_eq!(
+            error(IntrospectionScope::All, "Nope"),
+            "unknown node(s): Nope. Valid nodes: MergeRequest, Project"
+        );
+        assert!(
+            build_schema_response(&model, IntrospectionScope::All, &["Project".into()]).is_ok()
+        );
+    }
+}

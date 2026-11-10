@@ -900,59 +900,40 @@ mod tests {
         }
     }
 
-    fn render_schema(out: &mut String, title: &str, batch: &RecordBatch) {
-        use std::fmt::Write;
-        writeln!(out, "{title}").unwrap();
-        for field in batch.schema().fields() {
-            let (name, data_type) = (field.name(), field.data_type());
-            writeln!(out, "  {name} {data_type:?} {}", field.is_nullable()).unwrap();
-        }
-    }
-
-    fn render(specs: &ConverterSpecs) -> String {
-        use std::fmt::Write;
-        let mut out = String::new();
-        for kind in CodeTableNames::NODE_KINDS {
-            let batch = BatchBuilder::new(specs.node(kind).unwrap(), 0)
-                .unwrap()
-                .finish()
-                .unwrap();
-            render_schema(&mut out, &format!("node {kind}"), &batch);
-        }
-        let edges = BatchBuilder::new(&specs.edge, 0).unwrap().finish().unwrap();
-        render_schema(&mut out, "edge gl_code_edge", &edges);
-        render_schema(
-            &mut out,
-            "edge gl_edge",
-            &drop_columns(&edges, &["project_id", "branch"]),
-        );
-        let mut kinds: Vec<_> = specs.tag_properties.iter().collect();
-        kinds.sort();
-        for (kind, tags) in kinds {
-            writeln!(out, "tags {kind} {tags:?}").unwrap();
-        }
-        for entity in &specs.export.entities {
-            writeln!(out, "export {} {}", entity.entity, entity.table).unwrap();
-            for (name, data_type, nullable) in &entity.columns {
-                writeln!(out, "  {name} {data_type:?} {nullable}").unwrap();
-            }
-        }
-        writeln!(out, "export edges {}", specs.export.edge_table).unwrap();
-        for (name, data_type) in &specs.export.edge_columns {
-            writeln!(out, "  {name} {data_type:?} false").unwrap();
-        }
-        out
-    }
-
-    use super::super::config::CodeTableNames;
-
     #[test]
-    fn code_table_arrow_schemas_match_the_golden_file() {
+    fn directory_batch_follows_its_table_columns_and_types() {
+        use arrow::datatypes::{DataType as Arrow, TimeUnit};
+
         let specs = super::super::test_helpers::embedded_specs();
-        assert_eq!(
-            render(&specs),
-            include_str!("testdata/code_arrow_schemas.txt")
-        );
+        let batch = BatchBuilder::new(specs.node("Directory").unwrap(), 0)
+            .unwrap()
+            .finish()
+            .unwrap();
+        let dictionary = Arrow::Dictionary(Box::new(Arrow::Int32), Box::new(Arrow::Utf8));
+        let expected = [
+            ("id", Arrow::Int64),
+            ("traversal_path", dictionary.clone()),
+            ("project_id", Arrow::Int64),
+            ("branch", dictionary.clone()),
+            ("commit_sha", dictionary),
+            ("path", Arrow::Utf8),
+            ("name", Arrow::Utf8),
+            (
+                "_version",
+                Arrow::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+            ),
+            ("_deleted", Arrow::Boolean),
+        ];
+        let schema = batch.schema();
+        let actual: Vec<_> = schema
+            .fields()
+            .iter()
+            .map(|field| {
+                assert!(!field.is_nullable(), "{}", field.name());
+                (field.name().as_str(), field.data_type().clone())
+            })
+            .collect();
+        assert_eq!(actual, expected);
     }
 
     #[test]

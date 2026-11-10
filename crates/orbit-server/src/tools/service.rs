@@ -329,3 +329,55 @@ impl GetGraphSchemaArgs {
         nodes
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use query_data_model::Packages;
+    use query_data_model::introspection::build_compact_schema_response;
+
+    use super::*;
+
+    fn toon(response: &SchemaResponse) -> String {
+        ToolService::encode_schema_toon(response).unwrap()
+    }
+
+    #[test]
+    fn compact_node_encodes_as_toon() {
+        let model = Packages::embedded().load().unwrap();
+        let response =
+            build_compact_schema_response(&model, IntrospectionScope::Local, Some("Directory"));
+        assert_eq!(
+            toon(&response),
+            r#"domains[1]:
+  - name: source_code
+    nodes[1]:
+      - name: Directory
+        props[7]: "id:int","traversal_path:string","project_id:int","branch:string","commit_sha:string","path:string","name:string"
+        out[1]: "CONTAINS → [Directory, File]"
+        in[1]: "CONTAINS ← [Directory]"
+edges[0]:"#
+        );
+    }
+
+    #[test]
+    fn full_schema_encodes_expanded_and_named_nodes_as_toon() {
+        let model = Packages::embedded().load().unwrap();
+        let response =
+            build_schema_response(&model, IntrospectionScope::Local, &["Directory".into()])
+                .unwrap();
+        assert_eq!(
+            toon(&response),
+            r#"domains[1]:
+  - name: source_code
+    nodes[4]:
+      - Definition
+      - name: Directory
+        props[7]: "id:int — Unique ID.","traversal_path:string — Namespace path for authz.","project_id:int — Owning project ID.","branch:string — Git branch.","commit_sha:string — Indexed commit SHA.","path:string — Relative path within the repository.","name:string — Directory name."
+        out[1]: "CONTAINS → [Directory, File]"
+        in[1]: "CONTAINS ← [Directory]"
+      - File
+      - ImportedSymbol
+edges[5]: CALLS,CONTAINS,DEFINES,EXTENDS,IMPORTS"#
+        );
+    }
+}

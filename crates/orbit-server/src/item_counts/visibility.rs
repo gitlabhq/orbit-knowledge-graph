@@ -61,3 +61,43 @@ pub fn get_visibility(
         entities,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use query_engine::compiler::AuthorizedPath;
+
+    use super::*;
+
+    #[test]
+    fn entities_need_a_path_column_and_a_scope_at_their_role_floor() {
+        let data_model = Catalog::<ClickHouse>::embedded().unwrap();
+        let security_context = SecurityContext::new_with_roles(
+            1,
+            vec![
+                AuthorizedPath::new("1/20/", 20),
+                AuthorizedPath::new("1/30/", 30),
+            ],
+        )
+        .unwrap();
+        let scopes = ["1/20/", "1/30/", "1/99/"].map(TraversalPath::new_unchecked);
+        let scopes: Vec<&TraversalPath> = scopes.iter().collect();
+        let visible = get_visibility(&data_model, &security_context, &scopes);
+
+        let scopes_of = |name: &str| {
+            visible
+                .entities
+                .iter()
+                .find(|entity| entity.name == name)
+                .map(|entity| {
+                    (
+                        entity.table.as_str(),
+                        &visible.scope_groups[entity.scope_group],
+                    )
+                })
+        };
+        assert_eq!(scopes_of("Project"), Some(("gl_project", &vec![0, 1])));
+        assert_eq!(scopes_of("Finding"), Some(("gl_finding", &vec![1])));
+        assert_eq!(scopes_of("User"), None);
+        assert!(visible.entities_in_scope(2).is_empty());
+    }
+}

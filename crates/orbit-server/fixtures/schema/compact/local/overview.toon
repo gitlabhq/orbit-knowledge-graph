@@ -1,4 +1,0 @@
-domains[1]:
-  - name: source_code
-    nodes[4]: Definition,Directory,File,ImportedSymbol
-edges[8]: "(Definition)-[:CALLS]->(Definition|ImportedSymbol)","(Definition)-[:DEFINES]->(Definition)","(Definition)-[:EXTENDS]->(Definition)","(Directory)-[:CONTAINS]->(Directory|File)","(File)-[:CALLS]->(Definition|ImportedSymbol)","(File)-[:DEFINES]->(Definition)","(File)-[:IMPORTS]->(ImportedSymbol)","(ImportedSymbol)-[:IMPORTS]->(Definition)"

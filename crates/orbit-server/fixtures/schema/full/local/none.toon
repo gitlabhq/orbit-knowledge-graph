@@ -1,4 +1,0 @@
-domains[1]:
-  - name: source_code
-    nodes[4]: Definition,Directory,File,ImportedSymbol
-edges[5]: CALLS,CONTAINS,DEFINES,EXTENDS,IMPORTS

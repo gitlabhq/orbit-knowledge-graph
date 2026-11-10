@@ -1,8 +1,0 @@
-(Definition)-[:CALLS]->(Definition|ImportedSymbol)
-(Definition)-[:DEFINES]->(Definition)
-(Definition)-[:EXTENDS]->(Definition)
-(Directory)-[:CONTAINS]->(Directory|File)
-(File)-[:CALLS]->(Definition|ImportedSymbol)
-(File)-[:DEFINES]->(Definition)
-(File)-[:IMPORTS]->(ImportedSymbol)
-(ImportedSymbol)-[:IMPORTS]->(Definition)
