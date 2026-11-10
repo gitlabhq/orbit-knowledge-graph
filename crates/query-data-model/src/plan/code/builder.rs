@@ -113,10 +113,6 @@ impl<'c> CodeBuilder<'c> {
         })
     }
 
-    pub fn operation(&self, matches: &Matches) -> Result<&CodeOperation, CodeError> {
-        Ok(self.construction.operation(&matches.rows)?)
-    }
-
     fn connect(
         &mut self,
         operation: CodeOperation,

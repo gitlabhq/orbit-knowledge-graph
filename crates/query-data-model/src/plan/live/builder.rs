@@ -101,10 +101,6 @@ impl<'c> LiveBuilder<'c> {
         Ok(Calls { rows, fields })
     }
 
-    pub fn operation(&self, calls: &Calls) -> Result<&LiveOperation, LiveError> {
-        Ok(self.construction.operation(&calls.rows)?)
-    }
-
     fn connect(
         &mut self,
         operation: LiveOperation,

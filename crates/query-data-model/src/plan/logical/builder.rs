@@ -87,10 +87,6 @@ impl<'m> LogicalBuilder<'m> {
         self.catalog
     }
 
-    pub fn operation(&self, rows: &Rows<'m>) -> Result<&LogicalOperation, PlanError> {
-        Ok(self.construction.operation(rows.inner())?)
-    }
-
     pub fn internal_name(&mut self, purpose: &str) -> Result<InternalName, PlanError> {
         let plain = purpose
             .chars()
