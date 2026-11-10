@@ -4,6 +4,7 @@ use std::sync::Arc;
 use serde::de::DeserializeOwned;
 
 use super::{Access, Diagnostics, Model, Source, Store};
+use crate::plan::tracking::{Language, Plan};
 use crate::spec::{BackendOptions, decode_options, parse_variant};
 use crate::{DataModelError, EntityId, GraphCatalog, RelationshipId, RelationshipVariantId};
 
@@ -15,6 +16,15 @@ pub trait StorageBackend: Sized {
     type Store: Debug;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
+}
+
+/// A catalog renders the plans it builds into its backend's native request.
+pub trait Render {
+    type Language: Language;
+    type Request;
+    type Error;
+
+    fn render(&self, plan: &Plan<Self::Language>) -> Result<Self::Request, Self::Error>;
 }
 
 pub struct SourceInput<'a, O> {

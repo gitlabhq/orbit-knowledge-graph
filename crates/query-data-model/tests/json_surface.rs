@@ -19,7 +19,9 @@ fn operations(query: serde_json::Value) -> Result<Vec<String>, SurfaceError> {
             LogicalOperation::Select(_) => "select",
             LogicalOperation::Order(_) => "order",
             LogicalOperation::Limit { .. } => "limit",
-            LogicalOperation::Union | LogicalOperation::Read(_) => "other",
+            LogicalOperation::Union
+            | LogicalOperation::Read(_)
+            | LogicalOperation::Structural(_) => "other",
         })
         .map(str::to_string)
         .collect())

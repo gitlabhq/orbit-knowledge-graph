@@ -1,0 +1,149 @@
+mod builder;
+mod pattern;
+
+pub use builder::{CodeBuilder, Field, Matches, Trigrams};
+pub use pattern::{Language, Pattern};
+
+use crate::EntityId;
+use crate::catalog::Catalog;
+use crate::implementations::orbit_code::OrbitCode;
+use crate::plan::tracking::{self, Construction, Declared, Plan, Ref, Rejected};
+
+#[derive(Debug)]
+pub struct CodeLanguage;
+
+pub type CodePlan = Plan<CodeLanguage>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeValue {
+    Path,
+    Line,
+    Capture,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Index {
+    pub(crate) store: usize,
+    pub entity: EntityId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodeOperation {
+    Repositories { index: Index, projects: Vec<i64> },
+    Restrict(Vec<i64>),
+    Languages(Vec<Language>),
+    Prefilter(Vec<String>),
+    Structural(Pattern),
+    Top(u64),
+    Select(Vec<Ref>),
+}
+
+impl tracking::Language for CodeLanguage {
+    type Operation = CodeOperation;
+    type Value = CodeValue;
+
+    fn references(operation: &mut CodeOperation, visit: &mut dyn FnMut(&mut Ref)) {
+        if let CodeOperation::Select(fields) = operation {
+            fields.iter_mut().for_each(visit);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CodeError {
+    #[error(transparent)]
+    Rejected(#[from] Rejected),
+    #[error("unknown code index {name}; available: {}", .available.join(", "))]
+    UnknownIndex {
+        name: String,
+        available: Vec<String>,
+    },
+    #[error("a code search names at least one repository")]
+    NoRepositories,
+    #[error("the caller can read none of the requested repositories")]
+    NoReadableRepository,
+    #[error("{0} narrows files, so it comes before the structural match")]
+    AfterMatch(&'static str),
+    #[error("{0} is not searchable by {1}")]
+    Unsupported(String, &'static str),
+    #[error("trigram atom {0:?} is shorter than three characters")]
+    ShortAtom(String),
+    #[error("invalid pattern {pattern:?}: {reason}")]
+    Pattern { pattern: String, reason: String },
+    #[error("unknown language {0}")]
+    UnknownLanguage(String),
+    #[error("unknown field {name}; available: {}", .available.join(", "))]
+    UnknownField {
+        name: String,
+        available: Vec<String>,
+    },
+    #[error("unknown capture {name}; available: {}", .available.join(", "))]
+    UnknownCapture {
+        name: String,
+        available: Vec<String>,
+    },
+    #[error("top keeps at least one match")]
+    EmptyTop,
+    #[error("a code request needs {0}")]
+    Incomplete(&'static str),
+}
+
+impl Catalog<OrbitCode> {
+    pub fn index(&self, store: &str, entity: &str) -> Result<Declared<Index>, CodeError> {
+        let model = self.model();
+        let found = model
+            .stores()
+            .iter()
+            .position(|candidate| {
+                candidate.name == store && candidate.connection == self.connection()
+            })
+            .and_then(|index| {
+                let entity = model.graph().entity_id(entity)?;
+                model.stores()[index].source(entity)?;
+                Some(Index {
+                    store: index,
+                    entity,
+                })
+            });
+        found
+            .map(|index| Declared::new(model.id(), index))
+            .ok_or_else(|| CodeError::UnknownIndex {
+                name: format!("{store}.{entity}"),
+                available: self
+                    .stores()
+                    .flat_map(|(store, _)| {
+                        store.sources().map(move |source| {
+                            format!(
+                                "{}.{}",
+                                store.name,
+                                model.graph().entity(source.entity).name
+                            )
+                        })
+                    })
+                    .collect(),
+            })
+    }
+
+    pub fn build<'c>(
+        &'c self,
+        construct: impl FnOnce(&mut CodeBuilder<'c>) -> Result<Matches, CodeError>,
+    ) -> Result<CodePlan, CodeError> {
+        let mut builder = CodeBuilder::new(self, Construction::new(self.model().id()));
+        let root = construct(&mut builder);
+        builder.finish(root)
+    }
+
+    pub fn rewrite<'c>(
+        &'c self,
+        plan: CodePlan,
+        mut visit: impl FnMut(&mut CodeBuilder<'c>, Matches) -> Result<Matches, CodeError>,
+    ) -> Result<CodePlan, CodeError> {
+        let construction = Construction::rewrite(plan, self.model().id())?;
+        let mut builder = CodeBuilder::new(self, construction);
+        let root = tracking::rewrite(&mut builder, CodeBuilder::construction, |q, rows| {
+            let matches = q.view(rows)?;
+            visit(q, matches).map(Matches::into_inner)
+        });
+        builder.finish_rows(root)
+    }
+}

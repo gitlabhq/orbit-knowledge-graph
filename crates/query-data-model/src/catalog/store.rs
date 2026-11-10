@@ -240,15 +240,11 @@ impl Store {
                 diagnostics.error(package, format!("store {} binds {name} twice", self.name));
                 continue;
             }
-            let table = spec.table.clone().or_else(|| {
-                let pattern = engine.table.as_ref()?;
-                Some(pattern.replace("{entity}", &snake_case(name)))
-            });
-            let Some(table) = diagnostics.require(table, package, || {
-                format!("store {} has no table for {name}", self.name)
-            }) else {
-                continue;
-            };
+            let pattern = engine.table.as_deref().unwrap_or("{entity}");
+            let table = spec
+                .table
+                .clone()
+                .unwrap_or_else(|| pattern.replace("{entity}", &snake_case(name)));
             let columns = self.stored_columns(entity, spec, served, graph, package, diagnostics);
             for (property, column) in columns {
                 self.columns[property.index()] = Some(column);

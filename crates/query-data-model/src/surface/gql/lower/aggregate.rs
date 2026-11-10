@@ -94,6 +94,12 @@ pub(super) fn project<'m>(
                     "grouping by relationship type is not supported yet",
                 ));
             }
+            Expression::Match(field) => {
+                return Err(invalid(
+                    field.span,
+                    "structural matches cannot be aggregated",
+                ));
+            }
         }
     }
     let names: Vec<_> = groups

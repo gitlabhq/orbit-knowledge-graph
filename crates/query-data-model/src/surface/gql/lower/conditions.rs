@@ -19,6 +19,9 @@ pub(super) fn referenced(predicates: &[BooleanExpression<Leaf<'_>>]) -> HashSet<
                     into.insert(rhs.node.value.clone());
                 }
             }
+            BooleanExpression::Leaf(Leaf::Structural { property, .. }) => {
+                into.insert(property.node.value.clone());
+            }
             BooleanExpression::Leaf(Leaf::RelationshipType { .. }) => {}
             BooleanExpression::And(all) => all.iter().for_each(|tree| visit(tree, into)),
             BooleanExpression::Not(inner) => visit(inner, into),
@@ -70,6 +73,12 @@ pub(super) fn entries(
 fn leaf(leaf: Leaf<'_>, rows: &Rows<'_>, scope: &Scope<'_>) -> Result<Predicate, SurfaceError> {
     let comparison = match leaf {
         Leaf::Comparison(comparison) => *comparison,
+        Leaf::Structural { span, .. } => {
+            return Err(invalid(
+                span,
+                "MATCHES ast(...) must be a top-level condition of a single-node match",
+            ));
+        }
         Leaf::RelationshipType {
             span,
             variable,

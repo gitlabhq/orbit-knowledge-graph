@@ -30,6 +30,8 @@ pub struct EntityAccess {
     pub redaction: Option<Redaction>,
     /// A foreign key to the namespace entity that holds the row; a filter on it bounds the entity.
     pub anchor: Option<PropertyId>,
+    /// The backend applies the caller's own visibility through the caller's sign-in.
+    pub delegated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +188,7 @@ impl Access {
                     role,
                     redaction,
                     anchor,
+                    delegated: spec.delegated,
                 })
                 .is_some()
             {

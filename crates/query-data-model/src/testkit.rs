@@ -45,3 +45,14 @@ pub fn overlay(name: &str) -> Packages {
         )
     }))
 }
+
+/// The embedded packages plus the demo packages of `config/demo`, whose connections no server
+/// opens.
+pub fn with_demo() -> Packages {
+    let root = concat!(env!("ORBIT_CONFIG_DIR"), "/demo");
+    let demo = Packages::read_dir(std::path::Path::new(root))
+        .unwrap_or_else(|error| panic!("reading {root}: {error}"));
+    let mut sources = Packages::embedded().sources().clone();
+    sources.extend(demo.sources().clone());
+    Packages::new(sources)
+}

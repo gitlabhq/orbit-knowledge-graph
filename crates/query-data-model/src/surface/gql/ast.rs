@@ -119,6 +119,12 @@ pub(super) struct Range<'i> {
 
 pub(super) enum Predicate<'i> {
     Comparison(Box<Comparison<'i>>),
+    Structural {
+        span: Span<'i>,
+        property: Property<'i>,
+        pattern: String,
+        language: String,
+    },
     RelationshipType {
         span: Span<'i>,
         variable: Name<'i>,
@@ -175,6 +181,7 @@ pub(super) enum Expression<'i> {
     },
     Property(Property<'i>),
     Variable(Name<'i>),
+    Match(Name<'i>),
 }
 
 pub(super) enum Target<'i> {

@@ -3,8 +3,10 @@ use super::{
     Binding, Expr, Literal, Logical, LogicalCatalog, LogicalOperation, LogicalPlan, LogicalType,
     PlanError, Predicate, Rows, Step, filter,
 };
+use super::{MATCH_LINE, Structural};
+use crate::plan::code::{Language as CodeLanguage, Pattern};
 use crate::plan::tracking::{self, Body, Construction, Declare, Declared, Outputs, Ref};
-use crate::{Direction, EntityId, RelationshipId};
+use crate::{DataType, Direction, EntityId, RelationshipId};
 
 pub struct LogicalBuilder<'m> {
     catalog: LogicalCatalog<'m>,
@@ -137,6 +139,66 @@ impl<'m> LogicalBuilder<'m> {
                 Ok(Outputs::preserve())
             },
         )
+    }
+
+    /// Matches an ast-grep pattern against a string property and declares `match.line` and one
+    /// `match.<NAME>` column per capture.
+    pub fn structural(
+        &mut self,
+        rows: Rows<'m>,
+        target: Expr,
+        pattern: &str,
+        language: &str,
+    ) -> Result<Rows<'m>, PlanError> {
+        let invalid = |reason: String| PlanError::Invalid {
+            expr: pattern.to_string(),
+            reason,
+        };
+        let parsed = Pattern::ast_grep(pattern).map_err(|error| invalid(error.to_string()));
+        let parsed = self.attempt(|_, _| parsed)?;
+        let language = language
+            .parse::<CodeLanguage>()
+            .map_err(|_| invalid(format!("unknown language {language}")));
+        let language = self.attempt(|_, _| language)?;
+        let declared: Vec<Declare<LogicalType>> = std::iter::once(Declare::named(
+            MATCH_LINE,
+            LogicalType::Scalar(DataType::Int),
+        ))
+        .chain(parsed.captures().iter().map(|capture| {
+            Declare::named(
+                format!("match.{capture}"),
+                LogicalType::Scalar(DataType::String),
+            )
+        }))
+        .collect();
+        let operation = LogicalOperation::Structural(Structural {
+            target,
+            pattern: parsed,
+            language,
+        });
+        self.connect(operation, vec![rows], move |catalog, _, inputs| {
+            if inputs.iter().any(|rows| rows.column(MATCH_LINE).is_ok()) {
+                return Err(PlanError::Duplicate("a structural match".into()));
+            }
+            let property = match target {
+                Expr::Property { property, .. } => catalog.model().graph().property(property),
+                other => {
+                    return Err(PlanError::Type {
+                        expr: format!("{other:?}"),
+                        expected: "a property".into(),
+                        found: "another expression".into(),
+                    });
+                }
+            };
+            if property.data_type != DataType::String {
+                return Err(PlanError::Type {
+                    expr: property.name.clone(),
+                    expected: "a string".into(),
+                    found: format!("{:?}", property.data_type),
+                });
+            }
+            Ok(Outputs::extend(declared))
+        })
     }
 
     pub fn pin(&mut self, rows: Rows<'m>, key: Expr, ids: &[i64]) -> Result<Rows<'m>, PlanError> {

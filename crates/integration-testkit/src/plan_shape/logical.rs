@@ -157,6 +157,17 @@ impl Render<'_> {
             }
             LogicalOperation::Union => (Operator::Union, String::new()),
             LogicalOperation::Read(_) => (Operator::Scan, String::new()),
+            LogicalOperation::Structural(structural) => {
+                let language: &str = structural.language.into();
+                (
+                    Operator::Structural,
+                    format!(
+                        "{} MATCHES ast('{}', '{language}')",
+                        self.expr(structural.target),
+                        structural.pattern.text()
+                    ),
+                )
+            }
         };
         Tree::node(label, text, inputs)
     }

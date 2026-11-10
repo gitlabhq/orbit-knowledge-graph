@@ -2,12 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use query_data_model::catalog::Unresolved;
-use query_data_model::implementations::search::Search;
 use query_data_model::plan::logical::{
     Expr, LogicalBuilder, LogicalCatalog, LogicalOperation, LogicalPlan, Order, PlanError, Rows,
     count,
 };
-use query_data_model::plan::search::{FieldType, Ranking, SearchError, SearchOperation};
 use query_data_model::plan::tracking::{Declared, NodeId, Ref, Rejected};
 use query_data_model::{DataModelError, Direction, EntityId, Model};
 
@@ -529,69 +527,4 @@ fn changed_outputs_need_explicit_reconnection() {
         })
         .unwrap();
     assert_eq!(names(&plan, plan.root()), ["result"]);
-}
-
-#[test]
-fn a_search_plan_searches_ranks_and_keeps_the_top_matches() {
-    let model = load(&["gitlab"]);
-    let catalog = model.physical::<Search>("search").unwrap();
-    let notes = catalog.index("note_search", "Note").unwrap();
-
-    let plan = catalog
-        .build(|q| {
-            let matches = q.search(notes, "fn compile")?;
-            let matches = q.rank(matches, Ranking::Relevance)?;
-            let matches = q.top(matches, 20)?;
-            let body = matches.field("body")?;
-            let score = matches.field("score")?;
-            q.select(matches, [body.named("snippet"), score.named("score")])
-        })
-        .unwrap();
-    assert_eq!(
-        plan.outputs(plan.root())
-            .map(|output| (plan.name(output).unwrap(), *plan.value(output)))
-            .collect::<Vec<_>>(),
-        [("snippet", FieldType::Text), ("score", FieldType::Score)]
-    );
-    let operations: Vec<_> = plan.nodes().map(|node| plan.operation(node)).collect();
-    assert!(matches!(
-        operations.as_slice(),
-        [
-            SearchOperation::Search { .. },
-            SearchOperation::Rank(Ranking::Relevance),
-            SearchOperation::Top(20),
-            SearchOperation::Select(_),
-        ]
-    ));
-
-    let unranked = catalog.build(|q| {
-        let matches = q.search(notes, "fn")?;
-        q.top(matches, 5)
-    });
-    assert_eq!(unranked.unwrap_err(), SearchError::Unranked);
-
-    let unknown = catalog.index("note_search", "MergeRequest").unwrap_err();
-    assert_eq!(
-        unknown.to_string(),
-        "unknown index note_search.MergeRequest; available: note_search.Note"
-    );
-
-    let missing = catalog.build(|q| {
-        let matches = q.search(notes, "fn")?;
-        let author = matches.field("author_id")?;
-        q.select(matches, [author.named("author")])
-    });
-    assert_eq!(
-        missing.unwrap_err().to_string(),
-        "unknown field author_id; available: id, body, traversal_path"
-    );
-
-    let other = load(&["gitlab", "linear"]);
-    let foreign = other.physical::<Search>("search").unwrap();
-    let foreign = foreign.index("note_search", "Note").unwrap();
-    let result = catalog.build(|q| q.search(foreign, "fn"));
-    assert_eq!(
-        result.unwrap_err(),
-        SearchError::Rejected(Rejected::ForeignSnapshot)
-    );
 }

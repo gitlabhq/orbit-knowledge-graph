@@ -14,6 +14,7 @@ pub(super) enum Item {
     Node(String, Option<Vec<String>>, bool),
     Edge(String, String),
     Type(String, String),
+    Match(String, String),
 }
 
 #[derive(Default)]
@@ -189,6 +190,20 @@ impl Returned {
                 }
                 Ok(())
             }
+            Expression::Match(field) => {
+                let column = format!("match.{}", field.value);
+                let name = alias.clone().unwrap_or_else(|| column.clone());
+                if self
+                    .items
+                    .iter()
+                    .any(|item| matches!(item, Item::Match(other, _) if *other == name))
+                {
+                    return Err(invalid(field.span, "duplicate RETURN column name"));
+                }
+                self.alias(field.span, alias, None)?;
+                self.items.push(Item::Match(name, column));
+                Ok(())
+            }
         }
     }
 
@@ -225,9 +240,10 @@ impl Returned {
         }
         let written = alias.clone().unwrap_or_else(|| name.clone());
         if self.items.iter().any(|item| match item {
-            Item::Node(other, ..) | Item::Edge(other, _) | Item::Type(other, _) => {
-                *other == written
-            }
+            Item::Node(other, ..)
+            | Item::Edge(other, _)
+            | Item::Type(other, _)
+            | Item::Match(other, _) => *other == written,
         }) || scope.node(&written).is_some()
         {
             return Err(invalid(span, "duplicate RETURN column name"));
@@ -383,6 +399,10 @@ impl Returned {
                 }
                 Item::Edge(name, edge) => (name, edge, Some(Columns::Default)),
                 Item::Type(name, edge) => (name, edge, None),
+                Item::Match(name, column) => {
+                    items.push(Projection::Value(rows.column(column)?).named(name));
+                    continue;
+                }
             };
             let bound = rows.binding(binding)?;
             items.push(match projection {

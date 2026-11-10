@@ -73,7 +73,7 @@ NotExpression = { Negation{0,33} ~ Predicate }
 Negation = { ^"NOT" ~ !IdentifierPart ~ SP? }
 
 // Specialized predicates precede the generic function fallback because their prefixes overlap.
-Predicate = _{ ParenthesizedExpression | TokenPredicate | ComparisonExpression | TypePredicate | FunctionPredicate }
+Predicate = _{ ParenthesizedExpression | TokenPredicate | StructuralPredicate | ComparisonExpression | TypePredicate | FunctionPredicate }
 ParenthesizedExpression = { "(" ~ SP? ~ AndExpression ~ SP? ~ ")" }
 ComparisonExpression = { PropertyExpression ~ Comparison }
 TypePredicate = { RelationshipType ~ Comparison }
@@ -97,6 +97,9 @@ NullOperator = { ^"IS" ~ SP ~ Not? ~ ^"NULL" }
 Not = { ^"NOT" ~ SP }
 
 TokenPredicate = { TokenFunction ~ SP? ~ "(" ~ SP? ~ PropertyExpression ~ SP? ~ "," ~ SP? ~ Value ~ SP? ~ ")" }
+
+// An ast-grep pattern and its language. RETURN match.line and match.CAPTURE read the matches.
+StructuralPredicate = { PropertyExpression ~ SP ~ ^"MATCHES" ~ SP ~ ^"ast" ~ SP? ~ "(" ~ SP? ~ StringLiteral ~ SP? ~ "," ~ SP? ~ StringLiteral ~ SP? ~ ")" }
 TokenFunction = @{ ^"token_match" | ^"all_tokens" | ^"any_tokens" }
 
 Return = { ^"RETURN" ~ SP ~ ProjectionItems }
@@ -106,7 +109,8 @@ Star = { "*" }
 ProjectionItem = { ProjectionExpression ~ (SP ~ ^"AS" ~ SP ~ Variable)? }
 
 // Specific function and map forms precede properties and variables because their prefixes overlap.
-ProjectionExpression = { Aggregate | DateTrunc | AllProperties | RelationshipType | FunctionCall | NodeProjection | PropertyExpression | Variable }
+ProjectionExpression = { Aggregate | DateTrunc | AllProperties | RelationshipType | FunctionCall | NodeProjection | MatchField | PropertyExpression | Variable }
+MatchField = { ^"match" ~ SP? ~ "." ~ SP? ~ SchemaName }
 
 // Fifty-one properties are recognized so shared validation can report the fifty-column limit.
 NodeProjection = { Variable ~ SP? ~ "{" ~ SP? ~ ProjectionProperty ~ (SP? ~ "," ~ SP? ~ ProjectionProperty){0,50} ~ SP? ~ "}" }

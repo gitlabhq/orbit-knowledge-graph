@@ -1,0 +1,11 @@
+kind: graph
+package: integration.slack
+entities:
+  SlackMessage:
+    label: text
+    properties:
+      id: {type: string, immutable: true}
+      channel: {type: string}
+      author: {type: string}
+      text: {type: string}
+      sent_at: {type: timestamp}

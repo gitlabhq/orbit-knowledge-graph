@@ -28,6 +28,7 @@ pub use measure::{Columns, Measure, Order, Projection, count};
 pub use predicate::{Comparison, Conjunct, Matching, Predicate};
 pub use step::{Hops, Step};
 
+use crate::plan::code::{Language as CodeLanguage, Pattern};
 use crate::plan::tracking::{Body, Language, Plan, Ref};
 use crate::{Direction, EntityId, Hop, RelationshipId};
 
@@ -79,6 +80,17 @@ pub enum LogicalOperation {
     },
     Union,
     Read(Body),
+    Structural(Structural),
+}
+
+pub const MATCH_LINE: &str = "match.line";
+
+/// A structural code pattern over a text property, with its line and captures as columns.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Structural {
+    pub target: Expr,
+    pub pattern: Pattern,
+    pub language: CodeLanguage,
 }
 
 impl Language for Logical {
@@ -108,6 +120,7 @@ impl Language for Logical {
             LogicalOperation::Order(keys) => {
                 keys.iter_mut().for_each(|(key, _)| key.references(visit))
             }
+            LogicalOperation::Structural(structural) => structural.target.references(visit),
             LogicalOperation::Entities(_)
             | LogicalOperation::Limit { .. }
             | LogicalOperation::Union

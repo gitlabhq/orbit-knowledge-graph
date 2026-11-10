@@ -7,8 +7,9 @@ migrations:
     store routes only the variants it holds and declares its column defaults, entities
     carry UI style and graph fragments domain descriptions, the indexer reads ETL
     from source fragments in the packages, and the source-code entities declare
-    project_id as a Project reference and namespace anchor; DDL, extract SQL and indexed
-    rows unchanged
+    project_id as a Project reference and namespace anchor; gitlab.source_code binds File to
+    an orbit_code store on the code_indexing connection; DDL, extract SQL and
+    indexed rows unchanged
 - version: 118
   scope: "*"
   note: >-

@@ -50,4 +50,5 @@ operators! {
     Distinct => "Distinct",
     Neighbors => "Neighbors",
     Insert => "Insert",
+    Structural => "Structural",
 }

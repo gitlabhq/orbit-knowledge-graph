@@ -39,17 +39,8 @@ impl Packages {
         let mut sources = BTreeMap::new();
         for package in std::fs::read_dir(root)? {
             let package = package?.path();
-            if !package.is_dir() {
-                continue;
-            }
-            for file in std::fs::read_dir(&package)? {
-                let file = file?.path();
-                let name = file.to_string_lossy();
-                if name.ends_with(".yaml") || name.ends_with(TEMPLATE_EXTENSION) {
-                    let relative = file.strip_prefix(root).map_err(std::io::Error::other)?;
-                    let key = relative.to_string_lossy().into_owned();
-                    sources.insert(key, std::fs::read_to_string(&file)?);
-                }
+            if package.is_dir() {
+                read_package(root, &package, &mut sources)?;
             }
         }
         Ok(Self::new(sources))
@@ -70,4 +61,23 @@ impl Packages {
     pub fn load(&self) -> Result<Arc<Model>, DataModelError> {
         Model::load(&self.fragments()?).map(Arc::new)
     }
+}
+
+fn read_package(
+    root: &Path,
+    directory: &Path,
+    sources: &mut BTreeMap<String, String>,
+) -> std::io::Result<()> {
+    for file in std::fs::read_dir(directory)? {
+        let file = file?.path();
+        let name = file.to_string_lossy();
+        if file.is_dir() {
+            read_package(root, &file, sources)?;
+        } else if name.ends_with(".yaml") || name.ends_with(TEMPLATE_EXTENSION) {
+            let relative = file.strip_prefix(root).map_err(std::io::Error::other)?;
+            let key = relative.to_string_lossy().into_owned();
+            sources.insert(key, std::fs::read_to_string(&file)?);
+        }
+    }
+    Ok(())
 }

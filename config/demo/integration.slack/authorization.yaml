@@ -1,0 +1,4 @@
+kind: authorization
+package: integration.slack
+entities:
+  SlackMessage: {scope: namespace, role: reporter, delegated: true}

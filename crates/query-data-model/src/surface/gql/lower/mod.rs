@@ -5,6 +5,7 @@ mod returns;
 mod scope;
 
 use super::ast::{BooleanExpression, Predicate as Leaf, Query};
+use super::errors;
 use crate::RelationshipId;
 use crate::plan::logical::{LogicalBuilder, LogicalCatalog, PlanError, Predicate, Rows, Step};
 use crate::plan::tracking::Declared;
@@ -13,6 +14,7 @@ use scope::{Node, Scope, Shape};
 
 type Built<'m> = Result<Rows<'m>, SurfaceError>;
 type Conditions<'i> = Vec<BooleanExpression<Leaf<'i>>>;
+type Pattern<'i> = (pest::Span<'i>, super::ast::Property<'i>, String, String);
 
 const DEFAULT_LIMIT: u32 = 30;
 
@@ -98,6 +100,7 @@ fn matched<'m>(
     scope: &Scope<'_>,
     predicates: Conditions<'_>,
 ) -> Built<'m> {
+    let (patterns, predicates) = structural(predicates);
     let first = &scope.nodes[0];
     let mut rows = bind(q, first)?;
     let mut bound = vec![first.alias.as_str()];
@@ -133,7 +136,49 @@ fn matched<'m>(
         rows = inline(q, rows, target)?;
         bound.push(far);
     }
-    filtered(q, rows, scope, predicates)
+    let mut rows = filtered(q, rows, scope, predicates)?;
+    for (span, property, pattern, language) in patterns {
+        if !scope.edges.is_empty() {
+            return Err(errors::invalid(
+                span,
+                "MATCHES ast(...) must be a top-level condition of a single-node match",
+            ));
+        }
+        let target = rows
+            .binding(&property.node.value)?
+            .property(&property.property.value)?;
+        rows = q.structural(rows, target, &pattern, &language)?;
+    }
+    Ok(rows)
+}
+
+/// Splits top-level structural matches from the other conditions; without one, the conditions
+/// stay as written.
+fn structural(predicates: Conditions<'_>) -> (Vec<Pattern<'_>>, Conditions<'_>) {
+    fn top_level(tree: &BooleanExpression<Leaf<'_>>) -> bool {
+        match tree {
+            BooleanExpression::Leaf(Leaf::Structural { .. }) => true,
+            BooleanExpression::And(all) => all.iter().any(top_level),
+            _ => false,
+        }
+    }
+    if !predicates.iter().any(top_level) {
+        return (Vec::new(), predicates);
+    }
+    let mut patterns = Vec::new();
+    let mut rest = Vec::new();
+    for conjunct in flatten(predicates) {
+        match conjunct {
+            BooleanExpression::Leaf(Leaf::Structural {
+                span,
+                property,
+                pattern,
+                language,
+            }) => patterns.push((span, property, pattern, language)),
+            other => rest.push(other),
+        }
+    }
+    (patterns, rest)
 }
 
 fn flatten(predicates: Conditions<'_>) -> Conditions<'_> {

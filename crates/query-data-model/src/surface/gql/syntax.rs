@@ -344,6 +344,33 @@ impl QueryParser {
         Ok(leaf(comparison))
     }
 
+    #[alias(predicate)]
+    fn StructuralPredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
+        let span = input.as_span();
+        let (property, pattern, language) = match_nodes!(input.into_children();
+            [PropertyExpression(property), value(pattern), value(language)] => (property, pattern, language),
+        );
+        let text = |value: Value| match value {
+            Value::String(text) => Ok(text),
+            _ => Err(error_at(
+                span,
+                "ast() takes a pattern and a language string",
+            )),
+        };
+        Ok(BooleanExpression::Leaf(Predicate::Structural {
+            span,
+            property,
+            pattern: text(pattern)?,
+            language: text(language)?,
+        }))
+    }
+
+    fn MatchField(input: Node) -> Result<Name> {
+        Ok(match_nodes!(input.into_children();
+            [SchemaName(field)] => field,
+        ))
+    }
+
     fn TokenFunction(input: Node) -> Result<FilterOp> {
         Ok(match input.as_str().to_ascii_lowercase().as_str() {
             "token_match" => FilterOp::TokenMatch,
@@ -436,6 +463,7 @@ impl QueryParser {
             [RelationshipType(variable)] => Expression::RelationshipType { span, variable },
             [FunctionCall(_)] => unreachable!("FunctionCall always errors"),
             [NodeProjection(expression)] => expression,
+            [MatchField(field)] => Expression::Match(field),
             [PropertyExpression(property)] => Expression::Property(property),
             [Variable(variable)] => Expression::Variable(variable),
         ))

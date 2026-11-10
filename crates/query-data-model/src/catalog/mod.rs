@@ -9,7 +9,7 @@ mod store;
 pub use access::{
     Access, EntityAccess, Guard, PathHop, PropertyAccess, Redaction, RowFilter, Scope,
 };
-pub use backend::{Catalog, RouteInput, SourceInput, StorageBackend, StoreInput};
+pub use backend::{Catalog, Render, RouteInput, SourceInput, StorageBackend, StoreInput};
 pub use diagnostics::{Diagnostics, SpecError};
 pub use frontend::{Reversed, Unresolved};
 pub use lookups::{Lookup, Lookups};

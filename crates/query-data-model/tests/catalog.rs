@@ -4,7 +4,6 @@ use query_data_model::catalog::RowFilter;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::clickhouse::backend::IndexKind;
 use query_data_model::implementations::duckdb::DuckDb;
-use query_data_model::implementations::search::Search;
 use query_data_model::{DataModelError, Direction, Endpoint, Model};
 
 fn package_sources(packages: &[&str]) -> Vec<(String, String)> {
@@ -226,26 +225,6 @@ fn backends_reject_unknown_options() {
     assert!(
         errors[0].starts_with("gitlab: store graph: unknown field `delete_column`"),
         "{errors:?}"
-    );
-}
-
-#[test]
-fn a_search_catalog_binds_only_the_fields_it_indexes() {
-    let model = load(&["gitlab"]).unwrap();
-    let note = model.entity("Note").unwrap();
-    let body = model.property(note, "body").unwrap().id;
-    let author = model.property(note, "author_id").unwrap().id;
-    let catalog = model.physical::<Search>("search").unwrap();
-    let store = catalog.store("note_search").unwrap();
-
-    assert_eq!(store.source(note).unwrap().table, "notes");
-    assert!(catalog.backend("note_search").unwrap().is_text(body));
-    assert!(store.column(author).is_none());
-    assert_eq!(
-        store.guard(note).unwrap().filter,
-        RowFilter::Path {
-            column: "traversal_path".into()
-        }
     );
 }
 

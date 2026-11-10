@@ -1,0 +1,10 @@
+kind: storage
+package: gitlab.source_code
+store: code
+engine:
+  kind: orbit_code
+  connection: code_indexing
+entities:
+  File:
+    backend:
+      search: {content: [trigram, structural], path: [trigram]}

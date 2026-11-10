@@ -1,0 +1,13 @@
+kind: storage
+package: integration.slack
+store: slack
+engine:
+  kind: live
+  connection: data_extraction
+  path_column: traversal_path
+entities:
+  SlackMessage:
+    backend:
+      operation: search.messages
+      filters: [channel, author, sent_at]
+      text: text
