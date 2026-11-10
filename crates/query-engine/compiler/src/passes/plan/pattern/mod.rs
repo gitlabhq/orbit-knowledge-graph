@@ -120,11 +120,12 @@ impl<'a, B: SqlBackend> Pattern<'a, B> {
     pub(crate) fn new(query: Query<'a>, model: &'a Catalog<B>) -> Result<Self> {
         let facts = query.leaves();
         let nodes = nodes::build_nodes(query, &query.anchors(&facts), model);
+        let relations = relations::build_relations(query, &facts, model, &nodes);
         let mut pattern = Self {
             query,
-            conditions: conditions::conditions(query)?,
+            conditions: conditions::conditions(query, &relations, &nodes, model)?,
             model,
-            relations: relations::build_relations(query, &facts, model, &nodes),
+            relations,
             nodes,
             denormalized: super::filters::denormalized_facts(query, model),
             scans: Vec::new(),

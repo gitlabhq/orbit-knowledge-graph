@@ -44,15 +44,6 @@ pub fn polarized(predicate: &Predicate) -> Vec<Boolean<Leaf<'_>>> {
     walk(predicate, false)
 }
 
-pub fn json(literal: &Literal) -> Value {
-    match literal {
-        Literal::String(text) | Literal::Temporal(text) => Value::String(text.clone()),
-        Literal::Int(number) => Value::from(*number),
-        Literal::Float(number) => Value::from(*number),
-        Literal::Bool(flag) => Value::Bool(*flag),
-    }
-}
-
 impl Leaf<'_> {
     pub fn left(&self) -> Expr {
         match &*self.predicate {
@@ -107,16 +98,8 @@ impl Leaf<'_> {
         }
     }
 
-    /// The compared value or the IN list.
     pub fn literals(&self) -> &[Literal] {
-        match &*self.predicate {
-            Predicate::Compare {
-                right: Operand::Literal(literal),
-                ..
-            } => std::slice::from_ref(literal),
-            Predicate::In { values, .. } => values,
-            _ => &[],
-        }
+        self.predicate.literals()
     }
 
     /// The literal operand: the compared value, the IN list, or the text needle.
@@ -125,8 +108,8 @@ impl Leaf<'_> {
             Predicate::Compare {
                 right: Operand::Literal(literal),
                 ..
-            } => Some(json(literal)),
-            Predicate::In { values, .. } => Some(Value::Array(values.iter().map(json).collect())),
+            } => Some(Value::from(literal)),
+            Predicate::In { values, .. } => Some(values.iter().map(Value::from).collect()),
             Predicate::Text { needle, .. } => Some(Value::String(needle.clone())),
             _ => None,
         }

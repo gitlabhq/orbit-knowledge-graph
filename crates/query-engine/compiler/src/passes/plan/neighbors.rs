@@ -196,7 +196,7 @@ impl<'p> Neighbors<'p> {
                         direction,
                     };
                     let facts = model.denormalized(key)?;
-                    let values = filter.test.tags(&facts.tag_key)?;
+                    let values = filter.tags(&facts.tag_key)?;
                     Some(Tag { facts, values })
                 };
                 CenterFilter {

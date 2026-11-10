@@ -1,4 +1,4 @@
-//! Binds a filter test to the backend facts about its property (sort key, text index, selectivity,
+//! Binds a filter leaf to the backend facts about its property (sort key, text index, selectivity,
 //! uniqueness, mutability). Those facts decide where the planner may apply the filter.
 
 use crate::passes::codegen::SqlBackend;
@@ -8,7 +8,7 @@ use crate::tp_bounds::anchor_keys;
 use query_data_model::Catalog;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::plan::logical::{
-    Comparison, Expr as Logical, Literal, Matching, Operand, Predicate as Leaf,
+    Comparison, Expr as Logical, Literal, Operand, Predicate as Leaf,
 };
 use serde_json::Value as Json;
 
@@ -26,89 +26,13 @@ pub struct NullAsEpoch {
     pub rhs: Option<query_data_model::DataType>,
 }
 
-/// What a filter tests on its column, with any complement already folded into the operator.
+/// A filter leaf bound to the storage facts of the column it tests. The leaf is positive: a NOT
+/// either folded into it or stays in the tree above it.
 #[derive(Clone, PartialEq)]
-pub enum Test {
-    Compare(Comparison, Literal),
-    Column(Comparison, Column),
-    In(Vec<Literal>),
-    Null(bool),
-    Text(Matching, String),
-}
-
-impl Test {
-    pub fn of(leaf: &Leaf, rhs: impl FnOnce(Logical) -> Option<Column>) -> Option<Self> {
-        Some(match leaf {
-            Leaf::Compare {
-                comparison,
-                right: Operand::Literal(literal),
-                ..
-            } => Self::Compare(*comparison, literal.clone()),
-            Leaf::Compare {
-                comparison,
-                right: Operand::Expr(right),
-                ..
-            } => Self::Column(*comparison, rhs(*right)?),
-            Leaf::In { values, .. } => Self::In(values.clone()),
-            Leaf::Null { null, .. } => Self::Null(*null),
-            Leaf::Text {
-                matching, needle, ..
-            } => Self::Text(*matching, needle.clone()),
-            Leaf::And(_) | Leaf::Not(_) => return None,
-        })
-    }
-
-    pub fn rhs(&self) -> Option<&Column> {
-        match self {
-            Self::Column(_, rhs) => Some(rhs),
-            _ => None,
-        }
-    }
-
-    pub fn rhs_mut(&mut self) -> Option<&mut Column> {
-        match self {
-            Self::Column(_, rhs) => Some(rhs),
-            _ => None,
-        }
-    }
-
-    pub fn matches_values(&self) -> bool {
-        matches!(self, Self::Compare(Comparison::Eq, _) | Self::In(_))
-    }
-
-    pub fn literals(&self) -> &[Literal] {
-        match self {
-            Self::Compare(_, literal) => std::slice::from_ref(literal),
-            Self::In(values) => values,
-            _ => &[],
-        }
-    }
-
-    pub fn tags(&self, key: &str) -> Option<Vec<String>> {
-        let tag = |literal: &Literal| match json(literal) {
-            Json::String(text) => format!("{key}:{text}"),
-            value => format!("{key}:{value}"),
-        };
-        match self {
-            Self::Compare(Comparison::Eq, literal) => Some(vec![tag(literal)]),
-            Self::In(values) if !values.is_empty() => Some(values.iter().map(tag).collect()),
-            _ => None,
-        }
-    }
-}
-
-pub fn json(literal: &Literal) -> Json {
-    match literal {
-        Literal::String(text) | Literal::Temporal(text) => Json::String(text.clone()),
-        Literal::Int(number) => Json::from(*number),
-        Literal::Float(number) => Json::from(*number),
-        Literal::Bool(flag) => Json::Bool(*flag),
-    }
-}
-
-#[derive(Clone)]
 pub struct BoundFilter {
-    pub test: Test,
+    pub leaf: Leaf,
+    /// The column a comparison across columns reads on its right.
+    pub rhs: Option<Column>,
     pub property: Option<query_data_model::PropertyId>,
     pub data_type: Option<query_data_model::DataType>,
     pub selectivity: query_data_model::FieldSelectivity,
@@ -127,26 +51,51 @@ impl BoundFilter {
             return false;
         }
         let high = self.selectivity == query_data_model::FieldSelectivity::High;
-        match self.test {
-            Test::Column(..) | Test::Compare(Comparison::Ne, _) | Test::Null(false) => false,
-            Test::Text(..) => self.text_indexed,
-            Test::Compare(Comparison::Eq, _) | Test::In(_) => high || self.text_indexed,
-            Test::Compare(..) | Test::Null(true) => high,
+        match &self.leaf {
+            Leaf::Compare {
+                right: Operand::Expr(_),
+                ..
+            }
+            | Leaf::Compare {
+                comparison: Comparison::Ne,
+                ..
+            }
+            | Leaf::Null { null: false, .. } => false,
+            Leaf::Text { .. } => self.text_indexed,
+            Leaf::Compare {
+                comparison: Comparison::Eq,
+                ..
+            }
+            | Leaf::In { .. } => high || self.text_indexed,
+            Leaf::Compare { .. } | Leaf::Null { .. } => high,
+            Leaf::And(_) | Leaf::Not(_) => false,
         }
     }
 
+    pub fn matches_values(&self) -> bool {
+        matches!(
+            self.leaf,
+            Leaf::Compare {
+                comparison: Comparison::Eq,
+                right: Operand::Literal(_),
+                ..
+            } | Leaf::In { .. }
+        )
+    }
+
+    pub fn tags(&self, key: &str) -> Option<Vec<String>> {
+        let tag = |literal: &Literal| match Json::from(literal) {
+            Json::String(text) => format!("{key}:{text}"),
+            value => format!("{key}:{value}"),
+        };
+        let values = self.leaf.literals();
+        (self.matches_values() && !values.is_empty()).then(|| values.iter().map(tag).collect())
+    }
+
     pub fn at(&self, column: Column) -> Predicate {
-        Predicate::Property {
+        Predicate::Filter {
             column,
-            test: self.test.clone(),
-            data_type: self.data_type,
-            selective: self.is_selective(),
-            in_sort_key: self.in_sort_key,
-            text_indexed: self.text_indexed,
-            unique: self.unique,
-            immutable: self.immutable,
-            foreign_key: self.foreign_key,
-            null_as_epoch: self.null_as_epoch,
+            filter: self.clone(),
         }
     }
 }
@@ -160,7 +109,7 @@ pub enum FilterOwner<'a> {
 pub fn unindex_if_key_narrowed(filters: &mut [(String, BoundFilter)]) {
     if filters
         .iter()
-        .any(|(_, filter)| filter.in_sort_key && filter.test.matches_values())
+        .any(|(_, filter)| filter.in_sort_key && filter.matches_values())
     {
         for (_, filter) in filters {
             filter.text_indexed = false;
@@ -170,7 +119,8 @@ pub fn unindex_if_key_narrowed(filters: &mut [(String, BoundFilter)]) {
 
 pub fn bind_filter(
     property: &str,
-    test: Test,
+    leaf: Leaf,
+    rhs: Option<Column>,
     owner: &FilterOwner<'_>,
     model: &Catalog<impl SqlBackend>,
 ) -> BoundFilter {
@@ -204,7 +154,8 @@ pub fn bind_filter(
     };
     let (property_id, data_type) = metadata.unwrap_or_default();
     BoundFilter {
-        test,
+        leaf,
+        rhs,
         property: property_id,
         data_type,
         selectivity: property_id
@@ -255,7 +206,7 @@ pub fn lowerable_denorm<'a>(
             property: filter.property?,
             direction,
         })
-        .filter(|facts| filter.test.tags(&facts.tag_key).is_some())
+        .filter(|facts| filter.tags(&facts.tag_key).is_some())
 }
 
 /// The denormalized facts of every property a filter or condition tests on a binding.
@@ -301,15 +252,13 @@ pub fn bind_facts<B: SqlBackend>(
                 return None;
             };
             let name = &graph.property(property).name;
-            let mut rhs = None;
-            let test = Test::of(&fact.predicate, |right| {
-                let Logical::Property { property, .. } = right else {
-                    return None;
-                };
-                rhs = Some(property);
-                Some(Column::new(alias, &graph.property(property).name))
-            })?;
-            let mut bound = bind_filter(name, test, &owner, model);
+            let rhs = match fact.right() {
+                Some(Logical::Property { property, .. }) => Some(property),
+                Some(_) => return None,
+                None => None,
+            };
+            let column = rhs.map(|rhs| Column::new(alias, &graph.property(rhs).name));
+            let mut bound = bind_filter(name, (*fact.predicate).clone(), column, &owner, model);
             bound.null_as_epoch.rhs = rhs
                 .filter(|rhs| model.null_as_epoch(*rhs))
                 .map(|rhs| graph.property(rhs).data_type);

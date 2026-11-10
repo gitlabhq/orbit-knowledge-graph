@@ -17,7 +17,7 @@ use crate::error::{QueryError, Result};
 use crate::logical::Query;
 use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::Term;
-use crate::passes::plan::build::expr::{id_list, id_range, ids, relationship_kinds};
+use crate::passes::plan::build::expr::{self, id_list, id_range, ids, relationship_kinds};
 use crate::passes::plan::build::sources::{Scope, columns, dedup, final_edge_scan, select};
 use crate::passes::plan::build::{
     Built, and, binary, call, col, computed, conjoin, eq, filtered, int, membership, stored, string,
@@ -171,7 +171,12 @@ fn anchor<B: RelationalBackend>(
         let (rows, live) = dedup(q, alias, table, &inner, |scope| {
             let mut parts = Vec::new();
             for (property, filter) in &node.filters {
-                parts.push(filter.lower::<B>(scope, &Column::new(alias, property))?);
+                parts.push(expr::filter::<B>(
+                    scope,
+                    &Column::new(alias, property),
+                    filter,
+                    false,
+                )?);
             }
             if let Some(pinned) = &node.pinned {
                 let id = col(scope, alias, DEFAULT_PRIMARY_KEY)?;

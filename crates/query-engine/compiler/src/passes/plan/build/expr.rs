@@ -2,25 +2,16 @@ use orbit_utils::query_types::{SqlType, TimeZone};
 use query_data_model::constants::{DELETED_COLUMN, RELATIONSHIP_KIND_COLUMN};
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
-    BinaryOp, Expr, Function, Relation, TextMatch, UnaryOp,
+    BinaryOp, Expr, Function, Relation, RelationalError, TextMatch, UnaryOp,
 };
 use serde_json::Value;
 
-use query_data_model::plan::logical::{Comparison, Matching};
+use query_data_model::plan::logical::{Comparison, Matching, Operand, Predicate};
 
 use super::{Built, and, binary, call, col, conjoin, eq, param};
-use crate::passes::plan::filters::{NullAsEpoch, Test, json};
-use crate::passes::plan::predicates::Column;
 
-pub(crate) struct Filter<'a> {
-    pub column: &'a Column,
-    pub test: &'a Test,
-    pub data_type: Option<&'a query_data_model::DataType>,
-    pub in_sort_key: bool,
-    pub text_indexed: bool,
-    pub null_as_epoch: NullAsEpoch,
-    pub negated: bool,
-}
+use crate::passes::plan::filters::BoundFilter;
+use crate::passes::plan::predicates::Column;
 
 pub(crate) fn parameter_type(data_type: Option<&query_data_model::DataType>) -> SqlType {
     match data_type {
@@ -73,18 +64,33 @@ fn unary(op: UnaryOp, value: Expr) -> Expr {
     }
 }
 
-pub(crate) fn filter<B: RelationalBackend>(scope: &[&Relation], f: Filter<'_>) -> Built<Expr> {
-    let raw = col(scope, &f.column.source, &f.column.name)?;
+/// The one lowering of a filter leaf, under `negated` NOTs that stay above it. Null-as-epoch
+/// columns and the lower() text-index twin are applied here only.
+pub(crate) fn filter<B: RelationalBackend>(
+    scope: &[&Relation],
+    column: &Column,
+    f: &BoundFilter,
+    negated: bool,
+) -> Built<Expr> {
+    let raw = col(scope, &column.source, &column.name)?;
     let epochs = f.null_as_epoch;
-    let value = read::<B>(raw.clone(), epochs.column.filter(|_| f.negated));
-    let data_type = parameter_type(f.data_type);
-    let expression = match f.test {
-        Test::Column(comparison, rhs) => {
+    let value = read::<B>(raw.clone(), epochs.column.filter(|_| negated));
+    let data_type = parameter_type(f.data_type.as_ref());
+    let expression = match &f.leaf {
+        Predicate::Compare {
+            comparison,
+            right: Operand::Expr(_),
+            ..
+        } => {
+            let rhs = f
+                .rhs
+                .as_ref()
+                .ok_or(RelationalError::Incomplete("a compared column"))?;
             let rhs = read::<B>(col(scope, &rhs.source, &rhs.name)?, epochs.rhs);
             let left = read::<B>(raw, epochs.column);
             return Ok(binary(binary_op(*comparison), left, rhs));
         }
-        Test::Null(null) => match (null, epochs.column) {
+        Predicate::Null { null, .. } => match (null, epochs.column) {
             (true, Some(epoch_type)) => return Ok(eq(raw, epoch::<B>(epoch_type))),
             (false, Some(epoch_type)) => {
                 return Ok(binary(BinaryOp::Ne, raw, epoch::<B>(epoch_type)));
@@ -92,16 +98,22 @@ pub(crate) fn filter<B: RelationalBackend>(scope: &[&Relation], f: Filter<'_>) -
             (true, None) => unary(UnaryOp::IsNull, value),
             (false, None) => unary(UnaryOp::IsNotNull, value),
         },
-        Test::Compare(comparison, literal) => binary(
+        Predicate::Compare {
+            comparison,
+            right: Operand::Literal(literal),
+            ..
+        } => binary(
             binary_op(*comparison),
             value,
-            param::<B>(data_type, json(literal)),
+            param::<B>(data_type, literal.into()),
         ),
-        Test::In(values) => {
-            let values = values.iter().map(json).collect();
+        Predicate::In { values, .. } => {
+            let values = values.iter().map(Value::from).collect();
             in_list::<B>(value, data_type, values).expect("validated non-empty IN list")
         }
-        Test::Text(matching, needle) => {
+        Predicate::Text {
+            matching, needle, ..
+        } => {
             let fold = |expr: Expr| match f.in_sort_key {
                 true => expr,
                 false => call(Function::Lower, vec![expr]),
@@ -122,23 +134,26 @@ pub(crate) fn filter<B: RelationalBackend>(scope: &[&Relation], f: Filter<'_>) -
                 query: Box::new(needle),
             }
         }
+        Predicate::And(_) | Predicate::Not(_) => {
+            return Err(RelationalError::Incomplete("a filter leaf"));
+        }
     };
     let expression = match epochs.column {
-        Some(epoch_type) if !f.negated => and(
+        Some(epoch_type) if !negated => and(
             expression,
             binary(BinaryOp::Ne, raw.clone(), epoch::<B>(epoch_type)),
         ),
         _ => expression,
     };
-    if !(f.text_indexed && f.test.matches_values()) {
+    if !(f.text_indexed && f.matches_values()) {
         return Ok(expression);
     }
     let lower = |expr| call(Function::Lower, vec![expr]);
     let mut candidates: Vec<_> = f
-        .test
+        .leaf
         .literals()
         .iter()
-        .map(|literal| lower(param::<B>(data_type, json(literal))))
+        .map(|literal| lower(param::<B>(data_type, literal.into())))
         .collect();
     let matched = match candidates.len() {
         1 => eq(lower(raw), candidates.remove(0)),

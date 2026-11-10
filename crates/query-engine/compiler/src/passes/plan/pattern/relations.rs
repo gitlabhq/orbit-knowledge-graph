@@ -19,7 +19,7 @@ use crate::error::{QueryError, Result};
 use crate::logical::Leaf;
 use crate::logical::Query;
 use crate::passes::plan::filters::{
-    BoundFilter, FilterOwner, Test, bind_filter, unindex_if_key_narrowed,
+    BoundFilter, FilterOwner, bind_filter, unindex_if_key_narrowed,
 };
 
 /// The edge tables storing a variant of `relationships` from `source` to `target`; any relationship when none is named.
@@ -269,8 +269,10 @@ where
                 }
                 _ => return None,
             };
-            let test = Test::of(&fact.predicate, |_| None)?;
-            let bound = bind_filter(&name, test, &owner, model);
+            if fact.right().is_some() {
+                return None;
+            }
+            let bound = bind_filter(&name, (*fact.predicate).clone(), None, &owner, model);
             Some((name, bound))
         })
         .collect();

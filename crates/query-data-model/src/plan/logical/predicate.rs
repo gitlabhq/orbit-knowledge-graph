@@ -170,6 +170,18 @@ impl Predicate {
         })
     }
 
+    /// The compared value or the IN list.
+    pub fn literals(&self) -> &[Literal] {
+        match self {
+            Self::Compare {
+                right: Operand::Literal(literal),
+                ..
+            } => std::slice::from_ref(literal),
+            Self::In { values, .. } => values,
+            _ => &[],
+        }
+    }
+
     pub fn leaves(&self) -> usize {
         match self {
             Self::And(all) => all.iter().map(Self::leaves).sum(),
