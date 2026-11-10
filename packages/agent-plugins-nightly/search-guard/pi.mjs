@@ -29,6 +29,7 @@ export function registerSearchGuard(pi, lookup = lookupDefinition) {
 
   pi.on("tool_result", async (event, ctx) => {
     try {
+      if (event.parentToolCallId) return;
       if (event.toolName.toLowerCase() === "bash" && typeof event.input.command === "string") {
         const queried = orbitTerms(event.input.command);
         if (queried.length > 0) {
@@ -49,7 +50,7 @@ export function registerSearchGuard(pi, lookup = lookupDefinition) {
       });
       if (failed) tripped = true;
       if (!text) return;
-      return { content: [...event.content, { type: "text", text: `\n\n${text}` }] };
+      return { content: [...event.content, { type: "text", text: `\n\n${text}` }], structuredContent: event.structuredContent };
     } catch {}
   });
 }

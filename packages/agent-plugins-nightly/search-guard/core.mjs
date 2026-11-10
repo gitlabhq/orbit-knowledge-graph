@@ -19,7 +19,14 @@ export function isGuardDisabled(value) {
 }
 
 export function lookupTimeoutMs(value) {
-  return Math.min(Number(value) || DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
+  const requested = Number(value);
+  return requested > 0 ? Math.min(requested, MAX_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
+}
+
+// Orbit stores native paths (`C:\repo`); git prints `C:/repo`.
+function samePath(left, right) {
+  const normal = (path) => (process.platform === "win32" ? path.replace(/\\/g, "/").toLowerCase() : path);
+  return normal(String(left)) === normal(right);
 }
 
 function cut(block, maxChars) {
@@ -107,7 +114,7 @@ async function existingIndex(exec, launchers, cwd) {
     if (list === FAILED || list.status !== 0) continue;
     try {
       const rows = JSON.parse(list.stdout).filter(
-        (row) => row.repo_path === top && row.commit_sha === head && row.status === "indexed",
+        (row) => samePath(row.repo_path, top) && row.commit_sha === head && row.status === "indexed",
       );
       rows.sort((a, b) => String(b.last_indexed_at).localeCompare(String(a.last_indexed_at)));
       return typeof rows[0]?.database_path === "string" ? { launcher, database: rows[0].database_path, top } : undefined;

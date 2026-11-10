@@ -3,7 +3,14 @@ use std::process::{Command, Output};
 
 fn git(dir: &Path, args: &[&str]) {
     let status = Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
         .args(args)
         .current_dir(dir)
         .status()
@@ -142,4 +149,67 @@ fn grep_and_context_print_the_shapes_the_search_guard_parses() {
         "  <-- caller  [calls]  (lib.rs:2)",
         "{context}"
     );
+}
+
+fn indexed_database(repo: &Path, data: &Path) -> String {
+    let indexed = orbit(repo, data, &["index"]);
+    assert!(
+        indexed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&indexed.stderr)
+    );
+    let listed = orbit(repo, data, &["workspace", "list", "--format", "json"]);
+    let rows: serde_json::Value = serde_json::from_slice(&listed.stdout).expect("json rows");
+    rows[0]["database_path"]
+        .as_str()
+        .expect("database_path")
+        .to_string()
+}
+
+fn assert_refused(repo: &Path, data: &Path, database: &str) {
+    for command in ["grep", "context"] {
+        let output = orbit(
+            repo,
+            data,
+            &[command, "--no-index", "--db", database, "parse_widget"],
+        );
+        assert!(
+            !output.status.success(),
+            "{command} read a database it should refuse"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("--no-index does not build one"),
+            "{command}: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn no_index_refuses_a_database_whose_file_is_gone_and_does_not_recreate_it() {
+    let (repo, data) = (repo(), tempfile::tempdir().expect("tempdir"));
+    let database = indexed_database(repo.path(), data.path());
+    std::fs::remove_file(&database).expect("remove database");
+
+    assert_refused(repo.path(), data.path(), &database);
+    assert!(
+        !Path::new(&database).exists(),
+        "--no-index recreated {database}"
+    );
+}
+
+#[test]
+fn no_index_refuses_a_database_with_a_stale_code_index_revision() {
+    let (repo, data) = (repo(), tempfile::tempdir().expect("tempdir"));
+    let database = indexed_database(repo.path(), data.path());
+    let client = duckdb_client::DuckDbClient::open(Path::new(&database)).expect("open database");
+    client
+        .execute(
+            "UPDATE _orbit_meta SET value = '0' WHERE key = 'code_index_revision'",
+            &[],
+        )
+        .expect("age the revision");
+    drop(client);
+
+    assert_refused(repo.path(), data.path(), &database);
 }

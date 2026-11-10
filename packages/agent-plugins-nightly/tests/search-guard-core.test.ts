@@ -44,6 +44,7 @@ test("with several definitions the block is picked by location", () => {
 test("the latency budget defaults to 1.5 s and is capped", () => {
   assert.equal(lookupTimeoutMs(undefined), DEFAULT_TIMEOUT_MS);
   assert.equal(lookupTimeoutMs("junk"), DEFAULT_TIMEOUT_MS);
+  assert.equal(lookupTimeoutMs("-5"), DEFAULT_TIMEOUT_MS);
   assert.equal(lookupTimeoutMs("250"), 250);
   assert.equal(lookupTimeoutMs("999999"), MAX_TIMEOUT_MS);
 });

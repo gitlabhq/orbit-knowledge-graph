@@ -153,9 +153,7 @@ pub struct IndexedRepo {
 }
 
 pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Option<IndexedRepo> {
-    let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
-    let git = git_info(&git_toplevel(&repo_path).ok()?).ok()?;
-    let db_path = resolve_db_path(db, &git).ok()?;
+    let (git, db_path) = locate_graph(repo, &db).ok()?;
     if graph_lacks_commit(&db_path, &git.commit_sha).unwrap_or(true) {
         return None;
     }

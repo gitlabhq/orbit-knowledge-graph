@@ -28,6 +28,19 @@ test("a single-identifier search gets the definition appended, with the budget a
   assert.deepEqual(seen[0][2].launchers, [["{{orbit}}"]]);
 });
 
+test("nested codemode calls are left alone and structured content is kept", async () => {
+  let lookups = 0;
+  const handler = guard(async () => {
+    lookups++;
+    return { text: "DEF" };
+  });
+  const nested = { ...call("rg -l parse_widget"), parentToolCallId: "call_1", structuredContent: { files: ["lib.rs"] } };
+  assert.equal(await handler(nested, ctx), undefined);
+  assert.equal(lookups, 0);
+  const top = { ...call("rg parse_widget"), structuredContent: { files: ["lib.rs"] } };
+  assert.deepEqual((await handler(top, ctx) as { structuredContent: unknown }).structuredContent, { files: ["lib.rs"] });
+});
+
 test("plain words, repeated terms and Orbit lookups are skipped", async () => {
   let lookups = 0;
   const handler = guard(async () => {
