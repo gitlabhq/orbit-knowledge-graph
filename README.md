@@ -82,7 +82,7 @@ For the components, see [how GitLab Orbit works](docs/docs-gitlab-com/how-it-wor
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 `CONTRIBUTING.md` has the setup, the `mise` tasks, good first issues, and the MR conventions.
-Many tasks need no deep Rust knowledge, for example documentation, ontology YAML, and test fixtures for a language.
+Many tasks need no deep Rust knowledge, for example documentation, data model YAML, and test fixtures for a language.
 
 | Guide | Use it to |
 |-------|-----------|

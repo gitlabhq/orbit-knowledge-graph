@@ -47,7 +47,7 @@ impl From<RefKind> for NoteableKind {
     }
 }
 
-/// Values must mirror the edge YAML filenames under `config/ontology/edges/`.
+/// Values must mirror relationship names in the model's `graph` fragments.
 pub mod edge_kinds {
     pub const MENTIONS: &str = "MENTIONS";
     pub const CLOSED: &str = "CLOSED";

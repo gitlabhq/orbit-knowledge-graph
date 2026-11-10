@@ -8,8 +8,8 @@ const DOMAIN: &str = "query.engine";
 
 /// Counter for every query the compiler rejects before execution.
 /// `failure_reason` is a closed enum mapped from the [`QueryError`] discriminant:
-/// `parse`, `schema`, `reference`, `ontology`, `ontology_internal`,
-/// `authorization`, `depth`, `limit`, `security`, `lowering`, `codegen`, `pipeline`.
+/// `parse`, `schema`, `reference`, `ontology`, `authorization`, `restrict`,
+/// `depth`, `limit`, `security`, `lowering`, `codegen`, `pipeline`.
 pub const COMPILER_REJECTED: MetricSpec = MetricSpec::counter(
     "gkg.query.engine.compiler.rejected",
     "Total queries the compiler rejected before execution, labelled by failure reason.",

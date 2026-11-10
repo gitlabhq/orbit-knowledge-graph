@@ -37,7 +37,7 @@ in. Two placeholder kinds keep the queries portable across environments:
 
 The `corpus_smoke` test (`crates/integration-tests/tests/server/corpus_smoke.rs`)
 runs in the `corpus-smoke-test` CI job. It starts ClickHouse with the graph schema
-from the ontology. Then it compiles and runs three families of queries:
+from the data model. Then it compiles and runs three families of queries:
 
 - every entry in this directory, as GQL. An `expect: error` entry must fail.
 - every named query in `config/named_queries`, in JSON and in GQL.

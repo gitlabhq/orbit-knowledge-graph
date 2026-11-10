@@ -54,10 +54,9 @@ orbit-perf:
     - crates/query-engine/**/*
     - crates/query-data-model/**/*
     - crates/clickhouse-client/**/*
-    - crates/ontology/**/*
     - crates/orbit-server/src/pipeline/**/*
     - crates/orbit-server/src/redaction/**/*
-    - config/ontology/**/*
+    - config/model/**/*
     - config/graph.sql
     - crates/integration-tests/tests/server/performance/**/*
     - crates/xtask/src/loadtest.rs

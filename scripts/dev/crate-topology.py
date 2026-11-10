@@ -4,7 +4,7 @@
 Usage:
     python3 scripts/dev/crate-topology.py
     python3 scripts/dev/crate-topology.py --exclude code-graph treesitter-visit --days 30
-    python3 scripts/dev/crate-topology.py --measure --touch config/ontology/nodes/agents/agent_session.yaml
+    python3 scripts/dev/crate-topology.py --measure --touch config/model/gitlab.agents/graph.yaml
 
 Commit counts cover each crate's src/, build.rs and Cargo.toml. Files that a build
 script watches outside the crate are not counted; pass them to --measure with --touch.

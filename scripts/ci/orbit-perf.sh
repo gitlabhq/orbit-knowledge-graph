@@ -133,18 +133,10 @@ log "     synth output: $ORG_DIR ($(ls "$ORG_DIR" | tr '\n' ' ')) "
 # Node ids the scenarios pin, as <entity> TAB <id> TAB <label>; checked after the load.
 xtask loadtest --list-node-ids > "$NODE_IDS"
 
-# Authoritative parquet-file -> ClickHouse table map, straight from the ontology
-# the generator used. filename = node_type.lower()+'.parquet'; table =
-# destination_table (explicit) or the gl_<name> default. edges.parquet -> gl_edge.
-# Pure shell (the rust build image ships no python3).
 {
   echo "edges=gl_edge"
-  find "$ROOT/config/ontology/nodes" -name '*.yaml' | while read -r f; do
-    nt="$(grep -m1 -E '^node_type:' "$f" | awk '{print $2}')"
-    [ -n "$nt" ] || continue
-    dt="$(grep -m1 -E '^destination_table:' "$f" | awk '{print $2}')"
-    lc="$(printf '%s' "$nt" | tr '[:upper:]' '[:lower:]')"
-    echo "${lc}=${dt:-gl_${lc}}"
+  sed -n 's/^CREATE TABLE IF NOT EXISTS \(gl_[a-z_]*\) (.*/\1/p' "$ROOT/config/graph.sql" | while read -r t; do
+    echo "$(printf '%s' "${t#gl_}" | tr -d _)=$t"
   done
 } > "$MAP_FILE"
 

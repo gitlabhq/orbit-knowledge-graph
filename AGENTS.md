@@ -15,7 +15,6 @@ Use mise for all tasks.
 | CLI integration tests | `mise test:cli` |
 | Check or fix code | `mise lint:code`, `mise lint:code:fix` |
 | Check docs | `mise lint:docs` |
-| Validate ontology | `mise ontology:validate` |
 | Start or dispatch the server | `mise server:start`, `mise server:dispatch` |
 
 `docs-locale/` is generated. Never read, edit, or reference it.

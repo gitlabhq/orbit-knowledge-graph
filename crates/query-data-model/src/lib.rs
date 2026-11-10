@@ -1,8 +1,6 @@
 pub mod catalog;
 pub mod constants;
 mod error;
-#[cfg(feature = "from-ontology")]
-pub mod from_ontology;
 pub mod generic;
 pub mod implementations;
 pub mod introspection;

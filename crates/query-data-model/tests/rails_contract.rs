@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use ontology::{Ontology, RequiredRole};
+use query_data_model::{Catalog, ClickHouse, RequiredRole};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -61,45 +61,48 @@ impl Snapshot {
     }
 
     fn violations(&self) -> Vec<String> {
-        let ontology = Ontology::load_embedded().expect("embedded ontology must load");
+        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded model must load");
         let mut violations = Vec::new();
         let mut abilities_by_type: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-        for node in ontology.nodes() {
-            let config = node.redaction.as_ref().unwrap_or_else(|| {
+        for entity in catalog.graph().entities() {
+            let (Some(redaction), Some(floor)) =
+                (catalog.redaction(entity.id), catalog.role_floor(entity.id))
+            else {
                 panic!(
-                    "{} has no redaction block, so Rails never checks it",
-                    node.name
+                    "{} has no redaction entry, so Rails never checks it",
+                    entity.name
                 )
-            });
-            let (node, ability) = (&node.name, config.ability.as_str());
+            };
+            let (entity, ability) = (&entity.name, redaction.ability.as_str());
             abilities_by_type
-                .entry(&config.resource_type)
+                .entry(&redaction.resource)
                 .or_default()
                 .insert(ability);
             if !ability.starts_with("read_") {
                 violations.push(format!(
-                    "{node}: ability {ability:?} is not an explicit read_ ability"
+                    "{entity}: ability {ability:?} is not an explicit read_ ability"
                 ));
             }
-            let Some(resource_type) = self.resource_types.get(&config.resource_type) else {
+            let Some(resource_type) = self.resource_types.get(&redaction.resource) else {
                 violations.push(format!(
-                    "{node}: resource_type {:?} is not registered in Rails",
-                    config.resource_type
+                    "{entity}: resource_type {:?} is not registered in Rails",
+                    redaction.resource
                 ));
                 continue;
             };
             for class in &resource_type.classes {
                 if !self.policy_enables(&self.classes[class].policy, ability, &mut BTreeSet::new())
                 {
-                    violations.push(format!("{node}: Rails {class} cannot be granted {ability}"));
+                    violations.push(format!(
+                        "{entity}: Rails {class} cannot be granted {ability}"
+                    ));
                 }
             }
             if let Some(rails_floor) = self.lowest_role(ability)
-                && config.required_role.as_access_level() < rails_floor
+                && floor < rails_floor
             {
                 violations.push(format!(
-                    "{node}: required_role {:?} is below the lowest Rails role for {ability} ({rails_floor})",
-                    config.required_role
+                    "{entity}: role floor {floor} is below the lowest Rails role for {ability} ({rails_floor})"
                 ));
             }
         }
@@ -156,7 +159,7 @@ fn checker_reports_each_rule() {
     for expected in [
         "Note: resource_type \"note\" is not registered in Rails",
         "Job: Rails Ci::Build cannot be granted read_build",
-        "Vulnerability: required_role SecurityManager is below the lowest Rails role for read_vulnerability (30)",
+        "Vulnerability: role floor 25 is below the lowest Rails role for read_vulnerability (30)",
     ] {
         assert!(
             violations.contains(expected),

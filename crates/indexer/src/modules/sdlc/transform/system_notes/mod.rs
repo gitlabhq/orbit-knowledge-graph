@@ -1,7 +1,7 @@
 //! SystemNotes `BlockTransform` implementation (ADR 013, ADR 015).
 //!
-//! Parses system-note bodies extracted by the ontology-driven query plan
-//! (`config/ontology/derived/core/system_note.yaml`), resolves GFM reference
+//! Parses system-note bodies extracted by the model's derived `SystemNote` pipeline
+//! (`config/model/gitlab/source.yaml`), resolves GFM reference
 //! tokens against the datalake, and emits `gl_edge` rows. Rides the shared
 //! SDLC pipeline — only the transform body is custom Rust; extraction,
 //! paging, checkpointing, and writing are all inherited.
@@ -42,8 +42,8 @@ use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::catalog::sources::DataSource;
 
-/// Registry key for this transform; also the `etl.transform` value in
-/// `config/ontology/derived/core/system_note.yaml`.
+/// Registry key for this transform; also the `SystemNote` `transform` value in
+/// `config/model/gitlab/source.yaml`.
 pub(in crate::modules::sdlc) const TRANSFORM_NAME: &str = "system_notes";
 
 use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};

@@ -50,7 +50,7 @@ Run `mise lint:docs` before pushing any documentation changes.
 - Comments explain why. Do not narrate what the code shows.
 - Reuse existing infrastructure before adding new infrastructure.
 - Before changing an area, read its design document and the crate-local `AGENTS.md`, if present.
-- Treat the ontology as the single source of truth for graph-shape facts.
+- Treat the data model as the single source of truth for graph-shape facts.
 - Read `docs/pages/engineering/development/sox-billing-boundary.md` before changing billing.
 
 ## Documentation conventions

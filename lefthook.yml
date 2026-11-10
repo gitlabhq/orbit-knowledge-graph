@@ -77,9 +77,6 @@ pre-commit:
       glob:
         - ".gitlab-ci.yml"
         - ".gitlab/ci/**/*.yml"
-    - name: ontology-schema
-      run: mise run ontology:validate
-      glob: "config/ontology/**/*.yaml"
     - name: pinned-version-check
       run: bash ./scripts/checks/check-pinned-version.sh
       glob:
@@ -97,9 +94,9 @@ pre-commit:
     - name: query-language-docs-check
       run: mise run docs:query-language:check
       glob:
-        - "config/ontology/**/*.yaml"
+        - "config/model/**/*.yaml"
+        - "crates/query-data-model/src/**/*.rs"
         - "crates/xtask/src/query_docs.rs"
-        - "crates/ontology/src/lib.rs"
         - "docs/docs-gitlab-com/queries/query-language.md"
     - name: secrets-detection
       run: .lefthook/gitleaks.sh pre-commit

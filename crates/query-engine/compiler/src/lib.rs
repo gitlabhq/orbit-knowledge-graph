@@ -55,7 +55,6 @@ pub use error::{QueryError, RejectionReason, Result};
 pub use logical::DynamicColumnMode;
 pub use logical::facts::FilterOp;
 pub use metrics::{METRICS, QueryEngineMetrics};
-pub use ontology::{Ontology, OntologyError};
 pub use query_data_model::Direction;
 use query_data_model::{Catalog, ClickHouse, DuckDb};
 pub use types::QueryType;

@@ -1843,7 +1843,6 @@ dependencies = [
  "chrono",
  "compiler-pipeline-macros",
  "named-queries",
- "ontology",
  "opentelemetry",
  "orbit-observability",
  "orbit-server-config",
@@ -1960,27 +1959,6 @@ dependencies = [
  "getrandom 0.2.17",
  "once_cell",
  "tiny-keccak",
-]
-
-[[package]]
-name = "const_format"
-version = "0.2.37"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3decb4d6965448659923544a634a0571ba44cede4e11ef15a5a317126840454"
-dependencies = [
- "const_format_proc_macros",
- "konst",
-]
-
-[[package]]
-name = "const_format_proc_macros"
-version = "0.2.37"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "941b570269a642506f08cb5b688c04bfa6cfd41a26f8bcdc49db8fd00c0ab659"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-xid",
 ]
 
 [[package]]
@@ -4867,21 +4845,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "konst"
-version = "0.2.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "128133ed7824fcd73d6e7b17957c5eb7bacb885649bd8c69708b2331a10bcefb"
-dependencies = [
- "konst_macro_rules",
-]
-
-[[package]]
-name = "konst_macro_rules"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
-
-[[package]]
 name = "kqueue"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5774,23 +5737,6 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
-
-[[package]]
-name = "ontology"
-version = "0.1.0"
-dependencies = [
- "const_format",
- "indexmap 2.14.2",
- "minijinja",
- "orbit-utils",
- "rust-embed",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "strum 0.28.0",
- "tempfile",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "oorandom"
@@ -7489,7 +7435,6 @@ dependencies = [
  "indexmap 2.14.2",
  "jsonschema",
  "minijinja",
- "ontology",
  "orbit-utils",
  "pest",
  "pest_consume",
@@ -7497,7 +7442,6 @@ dependencies = [
  "query-data-model",
  "rust-embed",
  "serde",
- "serde-saphyr 1.1.0",
  "serde_json",
  "sha2 0.11.0",
  "strum 0.28.0",

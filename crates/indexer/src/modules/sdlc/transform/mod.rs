@@ -1,6 +1,6 @@
 //! The pluggable transform stage. The SQL projection for `data_fusion` plans comes
 //! from an injected [`SqlTransformFactory`]. Other transforms are registered by
-//! name and resolved from the ontology's `etl.transform` field (e.g. `system_notes`).
+//! name and resolved from a model pipeline's `transform` field (e.g. `system_notes`).
 
 pub(in crate::modules::sdlc) mod system_notes;
 

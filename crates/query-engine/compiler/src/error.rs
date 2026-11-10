@@ -4,7 +4,6 @@
 //! Adding a new variant that represents a security-relevant rejection? Update
 //! [`crate::metrics::failure_reason`] to wire it to the right instrument.
 
-use ontology::OntologyError;
 use query_data_model::implementations::relational::plan::RelationalError;
 use query_data_model::plan::logical::{ErrorClass, PlanError};
 use query_data_model::surface::SurfaceError;
@@ -47,9 +46,6 @@ pub enum QueryError {
 
     #[error("pipeline invariant violated: {0}")]
     PipelineInvariant(String),
-
-    #[error("ontology error: {0}")]
-    Ontology(#[from] OntologyError),
 }
 
 impl QueryError {
@@ -77,7 +73,6 @@ impl QueryError {
             Self::AllowlistRejected(_) => RejectionReason::Ontology,
             Self::Authorization(_) => RejectionReason::Authorization,
             Self::Restrict(_) => RejectionReason::Restrict,
-            Self::Ontology(_) => RejectionReason::OntologyInternal,
             Self::DepthExceeded(_) => RejectionReason::Depth,
             Self::LimitExceeded(_) => RejectionReason::Limit,
             Self::Security(_) => RejectionReason::Security,
@@ -128,7 +123,6 @@ pub enum RejectionReason {
     Ontology,
     Authorization,
     Restrict,
-    OntologyInternal,
     Depth,
     Limit,
     Security,
@@ -161,10 +155,6 @@ mod tests {
             (QueryError::Codegen("bad".into()), false),
             (QueryError::Security("bad".into()), false),
             (QueryError::PipelineInvariant("bad".into()), false),
-            (
-                QueryError::Ontology(OntologyError::Validation("bad".into())),
-                false,
-            ),
         ];
 
         for (error, expected) in cases {

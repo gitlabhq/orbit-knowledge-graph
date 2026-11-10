@@ -141,7 +141,7 @@ and the formatted `GraphResponse`:
 use integration_testkit::visitor::{ResponseView, NodeExt};
 use compiler::{compile, Frontend};
 
-let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
+let compiled = compile(json, Frontend::JsonDsl, &catalog, &security_ctx).unwrap();
 // ... run pipeline, get response ...
 let resp = ResponseView::for_query(&compiled.stats, response);
 ```

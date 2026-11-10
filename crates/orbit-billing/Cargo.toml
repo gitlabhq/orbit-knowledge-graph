@@ -38,7 +38,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
-query-data-model = { path = "../query-data-model", features = ["from-ontology"] }
+query-data-model = { path = "../query-data-model" }
 rustls = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 

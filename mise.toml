@@ -403,10 +403,6 @@ description = "Run check_script for every vendored dependency that has one"
 run = "uvx check-jsonschema --verbose --schemafile config/schemas/versions.schema.json config/versions.yaml"
 description = "Validate config/versions.yaml against JSON schema"
 
-[tasks."ontology:validate"]
-run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
-description = "Validate ontology YAML files against JSON schema"
-
 [tasks."named-queries:validate"]
 run = "find config/named_queries -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/named_query.schema.json"
 description = "Validate named query YAML files against JSON schema"
@@ -437,8 +433,8 @@ run = "cargo xtask migration-ledger check"
 description = "Fail if the migration ledger or the current archives drifted from the packages"
 
 [tasks."rails-contract:check"]
-run = "test -s \"${RAILS_CONTRACT_SNAPSHOT:?run mise run rails-contract:export first}\" && cargo test -p ontology --test rails_contract"
-description = "Fail if the ontology redaction config does not match the Rails contract in RAILS_CONTRACT_SNAPSHOT"
+run = "test -s \"${RAILS_CONTRACT_SNAPSHOT:?run mise run rails-contract:export first}\" && cargo test -p query-data-model --test rails_contract"
+description = "Fail if the model redaction config does not match the Rails contract in RAILS_CONTRACT_SNAPSHOT"
 
 [tasks."rails-contract:export"]
 run = "cd \"${GITLAB_DIR:?set GITLAB_DIR to a GitLab checkout}\" && bundle exec rails runner - < \"$MISE_PROJECT_ROOT/scripts/rails-contract/export.rb\" | sed -n '/^{$/,/^}$/p' > \"${RAILS_CONTRACT_SNAPSHOT:-/tmp/rails-contract.json}\""
@@ -462,7 +458,7 @@ description = "Fail if the committed dashboards are out of date"
 
 [tasks."docs:query-language"]
 run = "cargo xtask query-docs"
-description = "Regenerate the ontology-derived tables in docs/docs-gitlab-com/queries/query-language.md"
+description = "Regenerate the model-derived tables in docs/docs-gitlab-com/queries/query-language.md"
 
 [tasks."docs:query-language:check"]
 run = "cargo xtask query-docs --check"
@@ -470,26 +466,26 @@ description = "Fail if the query-language.md text-indexed properties table is ou
 
 [tasks."schema:generate:ddl"]
 depends = ["schema:generate:ddl:remote", "schema:generate:ddl:local"]
-description = "Regenerate ClickHouse (versioned + persistent) and DuckDB DDL from ontology"
+description = "Regenerate ClickHouse (versioned + persistent) and DuckDB DDL from the model"
 
 [tasks."schema:generate:ddl:remote"]
 depends = [
     "schema:generate:ddl:remote:versioned",
     "schema:generate:ddl:remote:persistent",
 ]
-description = "Regenerate the versioned and persistent ClickHouse DDL from ontology"
+description = "Regenerate the versioned and persistent ClickHouse DDL from the model"
 
 [tasks."schema:generate:ddl:remote:versioned"]
 run = "cargo xtask ddl --target remote 2>/dev/null > config/graph.sql.tmp && mv config/graph.sql.tmp config/graph.sql"
-description = "Regenerate config/graph.sql (versioned ClickHouse) from ontology"
+description = "Regenerate config/graph.sql (versioned ClickHouse) from the model"
 
 [tasks."schema:generate:ddl:remote:persistent"]
 run = "cargo xtask ddl --target remote-persistent 2>/dev/null > config/graph_persistent.sql.tmp && mv config/graph_persistent.sql.tmp config/graph_persistent.sql"
-description = "Regenerate config/graph_persistent.sql (durable unversioned ClickHouse) from ontology"
+description = "Regenerate config/graph_persistent.sql (durable unversioned ClickHouse) from the model"
 
 [tasks."schema:generate:ddl:local"]
 run = "cargo xtask ddl --target local 2>/dev/null > config/graph_local.sql.tmp && mv config/graph_local.sql.tmp config/graph_local.sql"
-description = "Regenerate config/graph_local.sql (DuckDB) from ontology"
+description = "Regenerate config/graph_local.sql (DuckDB) from the model"
 
 [tasks."site:dev"]
 run = "bun run --filter @orbit/site dev"

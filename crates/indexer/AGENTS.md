@@ -27,7 +27,7 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 |--------|-----------|---------|
 | `code::register_handlers` | `modules/code/` | Git repository indexing via Rails internal API, call graph extraction |
 | `sdlc::register_handlers` | `modules/sdlc/` | SDLC entity indexing (projects, MRs, CI, issues, etc.) |
-| `namespace_deletion::register_handlers` | `modules/namespace_deletion/` | Soft-deletes all graph data for a namespace across ontology-driven tables |
+| `namespace_deletion::register_handlers` | `modules/namespace_deletion/` | Soft-deletes all graph data for a namespace across model-driven tables |
 
 ### Traits
 
@@ -61,7 +61,7 @@ completion clears it.
 Indexers do not run DDL. Before consuming, the indexer calls `schema::version::wait_until_ready()`.
 It polls `gkg_schema_version` with backoff until its version is `active`/`migrating`. It exits
 non-zero (→ restart) if the budget is exhausted or the binary is outdated. All write paths
-(checkpoints, namespace deletion, ontology-driven tables) use
+(checkpoints, namespace deletion, model-driven tables) use
 `prefixed_table_name(table, SCHEMA_VERSION)` so they always target the current schema version's
 table-set.
 
@@ -87,7 +87,7 @@ stale FK-derived edges. A mutable-FK "latest" edge (e.g. `HAS_LATEST_DIFF`) orph
 the FK changes. The reason: `target_id` is part of the `ReplacingMergeTree` identity. So the prior
 `(source, old_target)` row is never replaced. The task runs one idempotent `INSERT … SELECT` per
 `(relationship_kind, FK-owner)` variant against the changed-owner set (`_version >= cursor`). A dual
-`IN` on the edge PK prunes it to the changed set. The swept set is ontology-derived (edges marked
+`IN` on the edge PK prunes it to the changed set. The swept set is model-derived (edges marked
 `mutable: true`), as is each variant's metadata. It runs directly in the dispatcher (not dispatched to indexer workers):
 one cheap global sweep, off the insert hot path. See
 the [pre-rewrite SDLC indexing doc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md) ("Stale FK-edge reconciliation").
@@ -146,7 +146,7 @@ preventable feedback (see #2772, !1416). Check each of these first:
 - **Edge/node `RecordBatch` specs:** derive column specs from the model. Use `ConverterSpecs`
   in `modules/code/arrow_converter.rs`, which reads the ClickHouse catalog and its table schemas. Do
   not hardcode them; hardcoded specs silently drift from `config/graph.sql`.
-- **Extraction SQL:** declare the source shape in ontology pipelines. Use `query: generated` for
+- **Extraction SQL:** declare the source shape in the model's source pipelines (`config/model/*/source.yaml`). Use `query: generated` for
   single-table projections and extracts with point lookups. Generated extracts list only their base
   table; standalone edges put their base projection in `extract.fields`. Lookup tables resolve from
   the referenced node pipelines. Nodes may declare
@@ -156,7 +156,7 @@ preventable feedback (see #2772, !1416). Check each of these first:
   their ID fields. Explicit lookup `fields` and endpoint `properties` remain escape hatches. The
   indexer builds lookup joins without reading transform mappings. Use an `extract.filter` for row
   predicates. Use a co-located `.sql.j2` file (`query: <name>.sql.j2`) only for genuinely complex
-  joins or materialized arrays. Then rows you discard never cross the wire. The ontology carries a
+  joins or materialized arrays. Then rows you discard never cross the wire. The model carries a
   `.sql.j2` file's raw content verbatim as `ExtractQuery::Sql`. The indexer's `plan/extract/sql.rs`
   renders `{{version_column}}`/`{{watermark_column}}`/`{{deleted_column}}` through MiniJinja at plan
   build. It derives the qualified watermark expression from the file's `AS _version`. It recovers
@@ -169,10 +169,10 @@ preventable feedback (see #2772, !1416). Check each of these first:
   They are not a duplicated planning type. Transform endpoint property bindings determine which batch
   fields form denormalized edge tags; no extraction metadata side channel exists.
   `extract/lookup.rs` derives its internal `_eN` joins only from the extract declaration.
-  `extract/` imports nothing from `transform`. None of the SQL generation lives in the ontology crate.
+  `extract/` imports nothing from `transform`. None of the SQL generation lives in `query-data-model`.
 - **Concurrency:** independent datalake lookups (routes / MR / work-item) should run concurrently
   (e.g. `tokio::try_join!`), not sequentially.
-- **Constants:** prefer deriving values from the ontology or a typed config field over hardcoding
+- **Constants:** prefer deriving values from the model or a typed config field over hardcoding
   magic numbers. If a value is environment-dependent, make it a `HandlersConfiguration` field.
 - **Siphon columns:** hand-written datalake SQL must read the `version`, `watermark`, and
   `deleted` columns of the model's `siphon` `DataSource`
@@ -200,7 +200,7 @@ it is justified when it needs:
 - **cross-row or free-text work** SQL can't do. Examples: parsing note bodies, or fanning one source
   row into several edge kinds.
 
-If the transform is a per-row projection of one extracted batch, express it as an ontology plan +
+If the transform is a per-row projection of one extracted batch, express it as a model pipeline +
 `datafusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
 `docs/pages/engineering/adr/015_pluggable_entity_pipelines.md`.
 

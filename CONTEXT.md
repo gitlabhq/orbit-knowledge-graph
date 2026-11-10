@@ -37,24 +37,24 @@ A data model where typed **Nodes** carry properties and typed directed **Relatio
 _Avoid_: knowledge graph (too vague), graph database (refers to the storage layer)
 
 **Node**:
-A typed entity in the property graph representing a GitLab object (e.g., Project, MergeRequest, File, Definition). Each node type is defined in the **Ontology** and stored in a dedicated table (ClickHouse in **GitLab Orbit**, DuckDB in the **Local graph**). Called `entity` in the **Query DSL**.
+A typed entity in the property graph representing a GitLab object (e.g., Project, MergeRequest, File, Definition). Each node type is defined in the **Data model** and stored in a dedicated table (ClickHouse in **GitLab Orbit**, DuckDB in the **Local graph**). Called `entity` in the **Query DSL**.
 _Avoid_: vertex
 
 **Relationship**:
-A typed directed connection between two **Nodes** (e.g., `AUTHORED`, `CONTAINS`, `IN_PROJECT`). Defined in the **Ontology** with one or more source→target **Node** type variants. Stored in physical edge tables.
+A typed directed connection between two **Nodes** (e.g., `AUTHORED`, `CONTAINS`, `IN_PROJECT`). Defined in the **Data model** with one or more source→target **Node** type variants. Stored in physical edge tables.
 _Avoid_: interaction, link
 
 **Derived Entity**:
-A third **Ontology** shape alongside **Node** and **Relationship**: one or more **Pipelines** with no node table. A named Rust transform turns their extracted rows into **Relationships**. Declared per domain in `schema.yaml` and implemented in `config/ontology/derived/`. A derived entity stays dormant until its `transform.type` is registered in Rust. Used for entities (e.g. SystemNote) whose graph shape can't be a SQL row-projection. They need multi-hop datalake reads or free-text parsing. See ADR 015.
+A third **Data model** shape alongside **Node** and **Relationship**: one or more **Pipelines** with no node table. A named Rust transform turns their extracted rows into **Relationships**. Declared under `derived` in a package's `source.yaml` (e.g. `config/model/gitlab/source.yaml`). A derived entity stays dormant until its `transform` is registered in Rust. Used for entities (e.g. SystemNote) whose graph shape can't be a SQL row-projection. They need multi-hop datalake reads or free-text parsing. See ADR 015.
 _Avoid_: storageless node, derived node
 
 **Pipeline**:
-An **Ontology** ETL unit with `extract` and `transform` sections. Nodes, **Relationships**, and **Derived Entities** all use this shape. The extract names source tables and cursor ordering. It uses either a `.sql.j2` template next to the YAML that references it, or `query: generated` (optionally with an `extract.filter` predicate). The transform is `datafusion` or a registered Rust transform.
+A **Data model** ETL unit, declared in a package's `source.yaml`. Nodes, **Relationships**, and **Derived Entities** all use this shape. It names source tables, fields and cursor ordering. It uses either a `.sql.j2` template next to the YAML that references it, or `query: generated` (optionally with a `filter` predicate). The transform is `datafusion` or a registered Rust transform.
 _Avoid_: old-style `etl` block
 
-**Ontology**:
-The YAML-defined schema of the property graph. Declares all **Node** types, **Relationship** types, **Derived Entity** definitions, their properties, and valid source→target pairings. Lives in `config/ontology/`. The single source of truth for what the graph can contain.
-_Avoid_: schema (too generic), data model (refers to the broader design)
+**Data model**:
+The YAML-defined schema of the property graph, loaded and checked once by `query-data-model`. Packages under `config/model/` hold fragments of one kind each. A `graph` fragment declares **Node** types, **Relationship** types and their source→target pairings. An `authorization` fragment declares scope, role floor and redaction. A `storage` fragment declares tables and columns per store. A `source` fragment declares **Pipelines** and **Derived Entity** definitions, and a `service` fragment declares external lookups. The single source of truth for what the graph can contain. See ADR 024.
+_Avoid_: ontology (the YAML tree it replaced), schema (too generic)
 
 **WorkItem**:
 The unified **Node** type for all trackable units of work: issues, epics, tasks, incidents, test cases, requirements, objectives, key results. Distinguished by the `work_item_type` property. There are no separate Issue or Epic node types.
@@ -133,7 +133,7 @@ A compiler-level interface for Orbit's read-only graph language. The `gql` front
 _Avoid_: Describing Orbit Query as the default query language
 
 **Named Query**:
-A graph query defined in YAML under `config/named_queries/` and invoked by name. Each definition carries a JSON **Query DSL** spelling and a GQL spelling of the same shape; Rails sets `QUERY_TYPE_NAMED` and a separate `QueryLanguage` value. That language selects both the spelling and the matching compiler frontend. Trusted templates encode client values and bind caller identity separately. Both rendered examples compile against the ontology in `orbit-server` unit tests so drift fails CI.
+A graph query defined in YAML under `config/named_queries/` and invoked by name. Each definition carries a JSON **Query DSL** spelling and a GQL spelling of the same shape; Rails sets `QUERY_TYPE_NAMED` and a separate `QueryLanguage` value. That language selects both the spelling and the matching compiler frontend. Trusted templates encode client values and bind caller identity separately. Both rendered examples compile against the data model in `orbit-server` unit tests so drift fails CI.
 _Avoid_: preset query, query template
 
 **Hop**:

@@ -9,25 +9,22 @@ chrono = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 jsonschema = { workspace = true }
 minijinja = { workspace = true }
-ontology = { path = "../ontology", optional = true }
 orbit-utils = { path = "../utils" }
 pest = { workspace = true }
 pest_consume = { workspace = true }
 pest_derive = { workspace = true }
 rust-embed = { workspace = true, features = ["include-exclude"] }
 serde = { workspace = true }
-serde-saphyr = { workspace = true, optional = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 
 [features]
-from-ontology = ["dep:ontology", "dep:serde-saphyr"]
 testkit = []
 
 [dev-dependencies]
-query-data-model = { path = ".", features = ["from-ontology", "testkit"] }
+query-data-model = { path = ".", features = ["testkit"] }
 
 [lints]
 workspace = true

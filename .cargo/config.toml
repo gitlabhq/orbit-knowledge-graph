@@ -8,7 +8,6 @@ VERSIONS_FILE = { value = "config/versions.yaml", relative = true }
 LOCKFILE = { value = "Cargo.lock", relative = true }
 FIXTURES_DIR = { value = "fixtures", relative = true }
 SCHEMA_DIR = { value = "config/schemas", relative = true }
-ONTOLOGY_DIR = { value = "config/ontology", relative = true }
 NAMED_QUERIES_DIR = { value = "config/named_queries", relative = true }
 PROMPTS_DIR = { value = "config/prompts", relative = true }
 SEEDS_DIR = { value = "config/seeds", relative = true }
