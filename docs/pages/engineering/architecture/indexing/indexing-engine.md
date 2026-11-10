@@ -6,9 +6,6 @@ authors:
   - jgdoyon1
 ---
 
-The engine is being built in [epic 21](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/21).
-This page changes as each part ships.
-
 ## What the engine does
 
 The indexing engine runs all indexing work in Orbit.

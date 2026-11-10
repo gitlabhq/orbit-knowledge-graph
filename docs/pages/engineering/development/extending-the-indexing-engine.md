@@ -1,6 +1,5 @@
 # Extending the indexing engine
 
-The engine is being built in [epic 21](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/21).
 This guide shows its API, and it changes with the code.
 [The indexing engine](../architecture/indexing/indexing-engine.md) explains how the engine works.
 [ADR 023](../adr/023_self_contained_indexing_engine.md) records why.
