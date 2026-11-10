@@ -79,6 +79,28 @@ fn assert_panics(assertion: impl FnOnce() + std::panic::UnwindSafe, message: &st
 }
 
 #[test]
+fn filtered_returned_nodes_require_a_filter_check() {
+    let query = json!({"gql": "MATCH (d:Definition) WHERE d.name STARTS WITH 'alp' RETURN d.name"});
+    run_suite(
+        query.clone(),
+        "nodes: {Definition: {filters: {name: {starts_with: alp}}}}",
+    );
+    run_suite(
+        query.clone(),
+        "nodes: {Definition: {rows: [{id: 1, name: alpha}]}}",
+    );
+    rejects(
+        query,
+        "node_count: 1",
+        "Definition nodes return the filtered field name",
+    );
+    run_suite(
+        json!({"gql": "MATCH (d:Definition) WHERE d.name = 'none' RETURN d.name"}),
+        "node_count: 0",
+    );
+}
+
+#[test]
 fn compound_filters_check_every_operator() {
     let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
     run_suite(

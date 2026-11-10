@@ -40,6 +40,10 @@ query:
 expect:
   node_count: 2
   nodes:
+    MergeRequest:
+      ids: [9401]
+      filters:
+        state: merged
     Project:
       ids: [1003]
   edge_exists:

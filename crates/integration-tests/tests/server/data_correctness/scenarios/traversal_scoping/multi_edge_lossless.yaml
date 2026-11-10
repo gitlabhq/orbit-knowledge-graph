@@ -33,6 +33,8 @@ expect:
   nodes:
     MergeRequest:
       ids: [2000]
+      filters:
+        project_id: 1000
     MergeRequestDiff:
       ids: [5000]
     MergeRequestDiffFile:

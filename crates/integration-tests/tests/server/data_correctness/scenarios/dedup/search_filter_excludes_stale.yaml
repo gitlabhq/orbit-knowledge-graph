@@ -25,3 +25,5 @@ expect:
   nodes:
     User:
       absent: [9011]
+      filters:
+        state: active

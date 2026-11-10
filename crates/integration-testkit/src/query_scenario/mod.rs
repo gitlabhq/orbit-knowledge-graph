@@ -16,10 +16,10 @@ use std::sync::Arc;
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, QueryType, ResultContext,
     SecurityContext,
 };
-use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
+use query_engine::formatters::{GqlFormatter, GraphFormatter, GraphResponse, ResultFormatter};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
 };
@@ -566,7 +566,38 @@ fn pipeline_output(
 fn assert_response(input: &Input, response: serde_json::Value, expect: &QueryExpect, label: &str) {
     expect.validate_response_type(input.query_type, label);
     let response = validate_response(input, response, label);
+    assert_filters_checked(input, &response, expect, label);
     apply_expect(&ResponseView::from_response(response), expect, label);
+}
+
+fn assert_filters_checked(
+    input: &Input,
+    response: &GraphResponse,
+    expect: &QueryExpect,
+    label: &str,
+) {
+    if input.query_type == QueryType::Aggregation {
+        return;
+    }
+    for node in &input.nodes {
+        let Some(entity) = &node.entity else { continue };
+        let checked = expect.nodes.get(entity);
+        for field in node.filters.keys() {
+            let returned = response.nodes.iter().any(|returned| {
+                &returned.entity_type == entity
+                    && returned
+                        .properties
+                        .get(field)
+                        .is_some_and(|value| !value.is_null())
+            });
+            assert!(
+                !returned
+                    || checked.is_some_and(|nodes| nodes.filters.contains_key(field)
+                        || nodes.rows.iter().any(|row| row.contains_key(field))),
+                "{label}: {entity} nodes return the filtered field {field}; check it under nodes.{entity}.filters or rows"
+            );
+        }
+    }
 }
 
 fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) {
