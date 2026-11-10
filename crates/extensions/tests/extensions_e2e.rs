@@ -178,3 +178,65 @@ async fn a_request_without_a_valid_jwt_is_rejected() {
         .expect_err("a wrong key is rejected");
     assert!(format!("{error}").contains("authenticated") || format!("{error}").contains("token"));
 }
+
+#[tokio::test]
+async fn bootstrap_merges_a_live_provider_into_the_model() {
+    let key = vec![9u8; 32];
+    let digest = extensions::package::short_digest(WIDGETS);
+    let addr = spawn_provider(key.clone(), digest).await;
+
+    let key_dir = tempfile::tempdir().unwrap();
+    let key_path = key_dir.path().join("provider.key");
+    std::fs::write(&key_path, &key).unwrap();
+
+    let config = ProviderConfig {
+        name: "example".into(),
+        url: format!("http://{addr}"),
+        jwt_key_file: key_path.to_str().unwrap().to_string(),
+        refresh_secs: 60,
+    };
+    let model = extensions::bootstrap::load_provider_model(
+        std::slice::from_ref(&config),
+        orbit_versions::VERSIONS.schema,
+    )
+    .await
+    .expect("provider model loads");
+
+    assert_eq!(model.scopes_tables, vec![SCOPES_TABLE.to_string()]);
+    let names: Vec<&str> = model.ontology.nodes().map(|n| n.name.as_str()).collect();
+    assert!(
+        names.contains(&"Widget") && names.contains(&"Gadget"),
+        "provider entities merged"
+    );
+    assert!(names.contains(&"Project"), "core entities still present");
+}
+
+#[tokio::test]
+async fn bootstrap_serves_core_when_a_provider_is_unreachable() {
+    let config = ProviderConfig {
+        name: "down".into(),
+        url: "http://127.0.0.1:1".into(),
+        jwt_key_file: "/nonexistent".into(),
+        refresh_secs: 60,
+    };
+    let model = extensions::bootstrap::load_provider_model(
+        std::slice::from_ref(&config),
+        orbit_versions::VERSIONS.schema,
+    )
+    .await
+    .expect("an unreachable provider still yields the core model");
+
+    assert!(
+        model.packages.is_empty(),
+        "no packages from a down provider"
+    );
+    let names: Vec<&str> = model.ontology.nodes().map(|n| n.name.as_str()).collect();
+    assert!(
+        names.contains(&"Project"),
+        "core served despite the provider being down"
+    );
+    assert!(
+        !names.contains(&"Widget"),
+        "no extension entities without a reachable provider"
+    );
+}

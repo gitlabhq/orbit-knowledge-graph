@@ -11,6 +11,7 @@ regenerate-protos = ["dep:tonic-prost-build"]
 
 [dependencies]
 ontology = { path = "../ontology" }
+orbit-log-fields = { workspace = true }
 orbit-migrations = { path = "../orbit-migrations" }
 orbit-utils = { path = "../utils" }
 

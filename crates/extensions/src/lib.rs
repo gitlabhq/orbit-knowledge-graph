@@ -8,6 +8,7 @@
 //! ([`storage`]). The provider client ([`provider`]) fetches manifests and
 //! packages, signs a short-lived JWT per call, and refreshes on a digest change.
 
+pub mod bootstrap;
 pub mod loader;
 pub mod package;
 pub mod proto;

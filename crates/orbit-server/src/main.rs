@@ -113,9 +113,13 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(Into::into),
             Mode::Indexer => {
                 let indexer_config = IndexerConfig::from(&config);
+                // The indexer runs no migration, so it indexes with the merged
+                // model directly. With no providers this is the core ontology, so
+                // default behavior is unchanged.
+                let indexer_ontology = indexer_ontology(&config, ontology).await?;
                 indexer::run(
                     &indexer_config,
-                    ontology,
+                    indexer_ontology,
                     serving,
                     shutdown,
                     indexer_duckdb::sql_transform()?,
@@ -146,6 +150,38 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+/// The ontology the indexer registers handlers with. With configured providers
+/// this is the core model merged with their packages, so extension entities are
+/// indexed; with none it is the core model handed in, unchanged.
+async fn indexer_ontology(
+    config: &AppConfig,
+    core: Arc<ontology::Ontology>,
+) -> anyhow::Result<Arc<ontology::Ontology>> {
+    if !config.extensions.is_enabled() {
+        return Ok(core);
+    }
+    let model = extensions::bootstrap::load_provider_model(
+        &extension_provider_configs(config),
+        *SCHEMA_VERSION,
+    )
+    .await?;
+    Ok(Arc::new(model.ontology))
+}
+
+fn extension_provider_configs(config: &AppConfig) -> Vec<extensions::provider::ProviderConfig> {
+    config
+        .extensions
+        .providers
+        .iter()
+        .map(|provider| extensions::provider::ProviderConfig {
+            name: provider.name.clone(),
+            url: provider.url.clone(),
+            jwt_key_file: provider.jwt_key_file.clone(),
+            refresh_secs: provider.refresh_secs,
+        })
+        .collect()
 }
 
 async fn run_webserver(
