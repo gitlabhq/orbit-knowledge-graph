@@ -147,7 +147,7 @@ entities:
 
 The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit. A filter the operation cannot push down is a construction error.
 
-```plaintext
+```cypher
 MATCH (m:SlackMessage)
 WHERE m.channel = 'orbit-dev' AND m.text CONTAINS 'deploy'
 RETURN m.author, m.text LIMIT 20
@@ -226,7 +226,7 @@ entities:
 
 A query for every call to `compile` in a project's Rust files plans into a code plan:
 
-```plaintext
+```cypher
 MATCH (f:File)
 WHERE f.project_id = 42 AND f.content MATCHES ast('compile($$$ARGS)', 'rust')
 RETURN f.path, match.line, match.ARGS LIMIT 50

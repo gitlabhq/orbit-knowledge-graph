@@ -54,7 +54,7 @@ Agent memory needs custom node types for one tenant.
 
 This section describes how a new version of the `gitlab.code_review` package goes live, and how the following query then runs against it.
 
-```plaintext
+```cypher
 MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
 WHERE mr.state = 'opened'
 RETURN u.username, mr.title LIMIT 10
@@ -396,7 +396,7 @@ Plan tests assert three checked stages of every query: the logical plan, the phy
 
 Some queries need data from more than one connection. This one joins open merge requests, which live in ClickHouse, with code that Orbit Next keeps on S3 in its trigram index, commit manifests and code graph:
 
-```plaintext
+```cypher
 MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_BRANCH]->(b:Branch)
       -[:HAS_COMMIT {head: true}]->(:Commit)-[:HAS_FILE]->(f:File)
 WHERE f.content CONTAINS EXACT 'TODO(security)'
