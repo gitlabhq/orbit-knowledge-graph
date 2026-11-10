@@ -195,6 +195,11 @@ struct GrepArgs {
     /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
+
+    /// Read the existing index as is: never build or refresh it, and fail when the commit has
+    /// none.
+    #[arg(long)]
+    no_index: bool,
 }
 
 async fn run_grep(args: GrepArgs) -> Result<()> {
@@ -237,6 +242,7 @@ async fn run_grep(args: GrepArgs) -> Result<()> {
             (_, _, true) => Output::Count,
             _ => Output::Lines,
         },
+        no_index: args.no_index,
     };
     commands::grep::run(query, args.repo, args.db, paths, options).await
 }
@@ -390,6 +396,11 @@ struct ContextArgs {
     /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
+
+    /// Read the existing index as is: never build or refresh it, and fail when the commit has
+    /// none.
+    #[arg(long)]
+    no_index: bool,
 }
 
 #[derive(Args, Debug, PartialEq)]
