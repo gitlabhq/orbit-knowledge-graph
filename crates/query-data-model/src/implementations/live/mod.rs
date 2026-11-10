@@ -4,11 +4,16 @@ pub use render::{ExtractionRequest, RequestFilter, Window};
 
 use serde::Deserialize;
 
-use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
+use crate::catalog::{Diagnostics, ExecuteError, Row, StorageBackend, StoreInput};
 use crate::{EntityId, PropertyId};
 
 #[derive(Debug, Clone)]
 pub struct Live;
+
+/// The Data Extraction Service, which runs a request with the signed-in user's own credentials.
+pub trait DataExtraction {
+    fn extract(&self, user: &str, request: &ExtractionRequest) -> Result<Vec<Row>, ExecuteError>;
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]

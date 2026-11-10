@@ -9,7 +9,7 @@ mod selectivity;
 
 use crate::passes::codegen::SqlBackend;
 use query_data_model::Catalog;
-use query_data_model::plan::logical::{Expr, Predicate, TimeUnit};
+use query_data_model::plan::logical::{Expr, LogicalOperation, Predicate, TimeUnit};
 
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
@@ -17,6 +17,14 @@ use crate::logical::Query;
 use crate::logical::facts::{self, Anchor, Fact};
 
 pub fn admit(query: Query<'_>, model: &Catalog<impl SqlBackend>, selectivity: bool) -> Result<()> {
+    if query
+        .operations()
+        .any(|(_, operation)| matches!(operation, LogicalOperation::Structural(_)))
+    {
+        return Err(QueryError::Validation(
+            "structural matches run on the code connection, not in SQL".into(),
+        ));
+    }
     let facts = facts::facts(query);
     let anchors = facts::anchors(query, &facts);
     limits::predicates(&facts)?;

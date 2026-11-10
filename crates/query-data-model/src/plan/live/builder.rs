@@ -59,6 +59,10 @@ impl Calls {
             })
     }
 
+    pub fn fields(&self) -> &[Field] {
+        &self.fields
+    }
+
     pub(super) fn into_inner(self) -> tracking::Rows {
         self.rows
     }

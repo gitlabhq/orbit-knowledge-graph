@@ -4,8 +4,11 @@ mod context;
 pub mod mock_redaction;
 pub mod plan_shape;
 pub mod query_scenario;
+#[cfg(test)]
+mod remote_scenarios;
 pub mod scenario;
 mod seed;
+pub mod seeded_remote;
 pub mod seeded_resolver;
 pub mod visitor;
 

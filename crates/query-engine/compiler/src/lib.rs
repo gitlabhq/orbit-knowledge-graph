@@ -43,6 +43,7 @@ pub mod types;
 pub mod config;
 pub mod logical;
 pub mod passes;
+pub mod remote;
 pub mod surface;
 
 pub use ast::ddl;

@@ -5,7 +5,7 @@ pub use builder::{CodeBuilder, Field, Matches, Trigrams};
 pub use pattern::{Language, Pattern};
 
 use crate::EntityId;
-use crate::catalog::Catalog;
+use crate::catalog::{Catalog, Guard};
 use crate::implementations::orbit_code::OrbitCode;
 use crate::plan::tracking::{self, Construction, Declared, Plan, Ref, Rejected};
 
@@ -122,6 +122,10 @@ impl Catalog<OrbitCode> {
                     })
                     .collect(),
             })
+    }
+
+    pub fn guard(&self, index: Index) -> Option<&Guard> {
+        self.model().stores()[index.store].guard(index.entity)
     }
 
     pub fn build<'c>(

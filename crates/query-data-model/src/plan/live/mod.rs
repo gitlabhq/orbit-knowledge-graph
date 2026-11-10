@@ -2,7 +2,7 @@ mod builder;
 
 pub use builder::{Calls, Conditions, Field, LiveBuilder};
 
-use crate::catalog::Catalog;
+use crate::catalog::{Catalog, Guard};
 use crate::implementations::live::{Endpoint, Live};
 use crate::plan::logical::Literal;
 use crate::plan::tracking::{self, Construction, Declared, Plan, Ref, Rejected};
@@ -144,6 +144,10 @@ impl Catalog<Live> {
 
     pub fn endpoint(&self, entity: EntityId) -> Option<&Endpoint> {
         self.home(entity)?.1.endpoint(entity)
+    }
+
+    pub fn guard(&self, operation: Operation) -> Option<&Guard> {
+        self.model().stores()[operation.store].guard(operation.entity)
     }
 
     pub fn build<'c>(

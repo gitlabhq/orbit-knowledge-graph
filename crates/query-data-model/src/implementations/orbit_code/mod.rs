@@ -5,11 +5,16 @@ pub use render::{RequestField, StructuralSearchRequest};
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
+use crate::catalog::{Diagnostics, ExecuteError, Row, StorageBackend, StoreInput};
 use crate::{EntityId, PropertyId};
 
 #[derive(Debug, Clone)]
 pub struct OrbitCode;
+
+/// The code indexing web servers, which run a structural search request.
+pub trait CodeSearch {
+    fn search(&self, request: &StructuralSearchRequest) -> Result<Vec<Row>, ExecuteError>;
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -33,9 +38,12 @@ pub struct CodeSource {
     pub search: IndexMap<String, Vec<SearchMode>>,
 }
 
+/// The search modes of each property of one entity.
+type Searched = Vec<(PropertyId, Vec<SearchMode>)>;
+
 #[derive(Debug, Default)]
 pub struct CodeStore {
-    indexes: Vec<(EntityId, Vec<(PropertyId, Vec<SearchMode>)>)>,
+    indexes: Vec<(EntityId, Searched)>,
 }
 
 impl CodeStore {

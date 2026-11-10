@@ -8,6 +8,7 @@ pub mod hydrate;
 pub mod normalize;
 pub mod page;
 pub mod plan;
+pub mod remote_security;
 pub mod response_policy;
 pub mod restrict;
 pub mod result_contract;

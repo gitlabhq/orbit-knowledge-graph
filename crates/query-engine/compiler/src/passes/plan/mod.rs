@@ -16,6 +16,7 @@ mod node;
 mod path_finding;
 pub(crate) mod pattern;
 pub mod predicates;
+pub mod remote;
 pub mod rows;
 mod traversal;
 

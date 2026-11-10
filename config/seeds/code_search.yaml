@@ -1,0 +1,27 @@
+repositories:
+  42:
+    traversal_path: 1/9970/42/
+    matches:
+      - pattern: compile($$$ARGS)
+        language: rust
+        path: crates/query-engine/compiler/src/lib.rs
+        line: 120
+        captures: {ARGS: "raw, fe, &data_model, &ctx"}
+      - pattern: compile($$$ARGS)
+        language: rust
+        path: crates/orbit-server/src/query.rs
+        line: 48
+        captures: {ARGS: "&text, Frontend::Gql, &catalog, &security"}
+      - pattern: compile($$$ARGS)
+        language: ruby
+        path: lib/orbit/compile.rb
+        line: 3
+        captures: {ARGS: "query"}
+  77:
+    traversal_path: 1/555/77/
+    matches:
+      - pattern: compile($$$ARGS)
+        language: rust
+        path: src/vault.rs
+        line: 9
+        captures: {ARGS: "secret_token"}

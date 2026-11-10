@@ -18,6 +18,13 @@ pub trait StorageBackend: Sized {
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
 }
 
+/// One result row of a backend service, keyed by the request's field names.
+pub type Row = serde_json::Map<String, serde_json::Value>;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct ExecuteError(pub String);
+
 /// A catalog renders the plans it builds into its backend's native request.
 pub trait Render {
     type Language: Language;

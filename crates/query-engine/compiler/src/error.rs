@@ -5,6 +5,8 @@
 //! [`crate::metrics::failure_reason`] to wire it to the right instrument.
 
 use query_data_model::implementations::relational::plan::RelationalError;
+use query_data_model::plan::code::CodeError;
+use query_data_model::plan::live::LiveError;
 use query_data_model::plan::logical::{ErrorClass, PlanError};
 use query_data_model::surface::SurfaceError;
 use thiserror::Error;
@@ -111,6 +113,32 @@ impl From<RelationalError> for QueryError {
 impl From<PlanError> for QueryError {
     fn from(error: PlanError) -> Self {
         SurfaceError::Plan(error).into()
+    }
+}
+
+impl From<CodeError> for QueryError {
+    fn from(error: CodeError) -> Self {
+        let message = error.to_string();
+        match error {
+            CodeError::NoReadableRepository => Self::Authorization(message),
+            CodeError::Rejected(_) | CodeError::Incomplete(_) => Self::PipelineInvariant(message),
+            CodeError::UnknownField { .. } | CodeError::UnknownCapture { .. } => {
+                Self::ReferenceError(message)
+            }
+            _ => Self::Validation(message),
+        }
+    }
+}
+
+impl From<LiveError> for QueryError {
+    fn from(error: LiveError) -> Self {
+        let message = error.to_string();
+        match error {
+            LiveError::NoWorkspace => Self::Authorization(message),
+            LiveError::Rejected(_) | LiveError::Incomplete(_) => Self::PipelineInvariant(message),
+            LiveError::UnknownField { .. } => Self::ReferenceError(message),
+            _ => Self::Validation(message),
+        }
     }
 }
 
