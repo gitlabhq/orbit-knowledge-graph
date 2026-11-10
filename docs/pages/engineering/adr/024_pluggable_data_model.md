@@ -38,14 +38,14 @@ Agent memory needs custom node types for one tenant.
 
 **A data model of versioned packages replaces the ontology. A loader checks the packages once, and every compiler pipeline builds, rewrites and renders its plans through the model's checked catalogs.**
 
-1. **Packages replace the ontology.** A package is a set of fragments of five kinds: graph, authorization, storage, source and service. The fragments form layers around the graph, and each layer names only the layers inside it. The platform, each integration and each tenant overlay ship their own packages.
-2. **The loader does the work once, and infers nothing.** It resolves every name to an ID, checks every rule, and fails once with every error and its package. Every table, column, storage type and immutable column is declared; a property its home store neither stores nor excludes fails the load. It resolves every declared access policy and checks that each backend can enforce it. A hash of the packages identifies the model, and every plan carries it.
-3. **Packages load at runtime from a registry keyed by package.** Each package has its own version line and declares the packages it requires. A tenant's model is the active version of every package that applies to it. A new version needs no rebuild and no deploy. A package's origin bounds what it may declare, and the loader enforces it: platform packages may declare anything, integration packages may declare provider checks but not trusted stores, Rails checks or global scope, and tenant overlays may declare only namespace- or user-scoped entities.
+1. **Packages replace the ontology.** A package is a set of fragments: graph, storage, service, authorization and source. They form layers around the graph, and each layer names only the layers inside it.
+2. **The loader does the work once, and infers nothing.** It resolves every name to an ID, checks every rule, and fails once with every error. Every column, relationship binding and access policy is declared. A hash of the packages identifies the model, and every plan carries it.
+3. **Packages load at runtime from a registry keyed by package.** Each package has its own version line and declares the packages it requires. A new version needs no rebuild and no deploy. The publisher's tier bounds what a package may declare.
 4. **A version goes live after its backfill.** The migration scope is the diff between the new version's storage and source fragments and the active one's. The indexing engine of ADR 023 backfills the tables in scope, then the registry promotes the version and the query engine swaps models atomically.
 5. **A backend implements one trait.** A catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. Shared code reads capabilities and never checks a backend name.
 6. **Every plan is built through a checked catalog builder.** There is one logical plan language and one physical plan language per kind of backend. Shared tracking checks every connection as it is made, and rewrites use the same builder, so no phase can leave an invalid plan.
 7. **Surfaces parse, and the compiler plans.** A surface turns text into a logical plan, and construction errors replace the validation pass. The planning phase reads the logical plan and builds the physical plan in one step, with no intermediate plan description.
-8. **Authorization is declared per backend, and security enforces it in its own phase.** An authorization fragment declares, for each backend that stores an entity, the policy that backend enforces, and the checks that run outside every backend, such as Rails redaction. The security phase applies each policy as ordinary plan operations, and a final check proves that every read carries it.
+8. **Authorization is declared per backend, and security enforces it in its own phase.** Each backend that stores an entity has its own policy, and checks such as Rails redaction run on the returned rows. A final check proves that every read carries its policy.
 9. **The catalog renders its own plans.** The catalog that builds a plan renders it, into SQL with parameters or into the backend's native request.
 10. **A query that spans connections runs as an execution DAG.** The planner splits it into stages, one per connection, connected by key sets and rows. The query engine runs the DAG and applies the final order, limit and pagination.
 11. **Plans are tested in three stages.** Plan tests assert the logical plan, the physical plan right after planning, and the physical plan after every phase.
@@ -72,7 +72,7 @@ flowchart TB
     L["Loader"]
     IX["Indexing engine<br/>(ADR 023)"]
     S["Surfaces (GQL)"]
-    M["Model<br/>(graph, access, sources,<br/>stores, guards, ModelId)"]
+    M["Model<br/>(graph, stores, policies,<br/>sources, ModelId)"]
     LC["Logical catalog"]
     PC["Physical catalogs<br/>(one per connection)"]
     T["Shared tracking"]
@@ -166,7 +166,7 @@ packages/
         └── clickhouse.yaml
 ```
 
-Each package has one `package.yaml`, one `graph.yaml` and one `authorization.yaml`. The `storage/`, `services/` and `sources/` directories hold one fragment per store, service or source. A storage fragment is named after its backend, and a service or source fragment after its service or source. A source fragment can name query templates, which sit next to it.
+A storage fragment is named after its backend, a service or source fragment after its service or source, and query templates sit next to the source that names them.
 
 ```plantuml
 @startuml
@@ -196,12 +196,36 @@ rectangle "<b>Tenant model</b>  (one ModelId)\nthe active version of every packa
 @enduml
 ```
 
-Each layer names only the layers inside it, and the loader checks them from the inside out. The graph names nothing, so a new store, source or access rule never edits it. Authorization names graph names and backend kinds, and the loader checks it against storage. A source writes into the tables its storage binding names. A package names other packages only through `requires` in its `package.yaml`.
-The graph owns what a property means: its type and its default value. Storage owns how it is kept: its table, column, storage type, whether it is immutable, and how it is queried. A storage fragment states, in backend-neutral terms, which columns are filtered, text-searched or ordered on, and each backend turns that into its own indexes and sort keys; a `backend` block overrides the result only where a platform package needs to. Nothing is inferred, so a forgotten column fails the load instead of a query.
-The graph holds topology only: which entities a relationship connects, how many sit on each side, and the attributes that belong to the edge itself. Storage binds every variant to how it is kept: a foreign key column on one endpoint's table, or rows in a named edge table. An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy. There is no default edge table, so an unbound variant fails the load.
-A relationship that a foreign key already carries, such as `AUTHORED` through `author_id`, needs no source entry.
+Each layer names only the layers inside it, and the loader checks them from the inside out:
 
-A name from another package must come from a package listed in `requires`, and the registry activates a version only when every package it requires is active. Packages compose under four rules: a package cannot redeclare an entity another package owns, cannot add a second authorization entry, can add variants to a platform relationship, and can bind its own entities to a store another package declares.
+| Layer | Fragment | Names | Owns |
+|---|---|---|---|
+| 0 | graph | nothing | entities, properties, types, defaults; relationship variants, their cardinality and edge-owned attributes |
+| 1 | storage | the graph | tables, columns, storage types, immutable columns, access hints; a foreign key or an edge table for every variant |
+| 1 | service | the graph | lookups for virtual properties |
+| 2 | authorization | the graph, backend kinds | scope, role floor, one policy per backend that stores the entity, checks on returned rows |
+| 2 | source | the graph | source tables, query templates, column map; rows land in the tables storage binds |
+| package | `package.yaml` | other packages | name, `requires` |
+
+Nothing is inferred: a forgotten column, an unbound variant or a backend without a policy fails the load.
+Storage access hints are backend-neutral, and each backend turns them into its own indexes and sort keys. A `backend` block overrides that only where a platform package needs to.
+An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
+
+The registry records each package's tier from its publisher, and the loader enforces it:
+
+| Tier | May declare | May not declare |
+|---|---|---|
+| Platform | anything | |
+| Integration | provider checks | trusted stores, Rails checks, global scope |
+| Tenant overlay | namespace- and user-scoped entities | trusted stores, Rails or provider checks, global scope |
+
+Packages compose under five rules:
+
+- A name from another package must come from a package in `requires`, and a version activates only when every package it requires is active.
+- A package cannot redeclare an entity that another package owns.
+- A package cannot add a second authorization entry.
+- A package can add variants to a platform relationship.
+- A package can bind its own entities to a store that another package declares.
 
 ### 2. The loader checks every package once
 
@@ -234,12 +258,26 @@ endif
 @enduml
 ```
 
-Later stages read facts by ID and never search by name.
-An access policy has two parts. `enforce` holds one policy per backend kind, in that backend's terms: a path filter or an owner check in a relational store, a repository restriction in Orbit Next, a workspace precondition on a live call. `checks` hold what runs outside every backend on the returned rows: a batch Rails ability check that fails closed, or a provider that filters again through the caller's own sign-in.
-Policies name graph properties and relationships, never columns. `MergeRequest` enforces a path filter on `traversal_path` in ClickHouse, and a `Commit` reaches its project's path through `IN_PROJECT`. `User` is global, so its policy is a role floor alone.
-A user-scoped entity, such as a todo, enforces an owner check through its relationship to `User`, and the graph must allow one owner per row. Storage decides whether that check reads a column or an edge.
-An entity with no policy in a backend says so with `none`, and must then declare a check, so a redaction-only entity is always explicit.
-Every plan carries the `ModelId` it was built against, so no plan is ever checked against a different model.
+Later stages read facts by ID, and every plan carries the `ModelId` it was built against.
+
+An access policy names graph properties and relationships, never columns. `enforce` holds one policy per backend kind:
+
+| Backend kind | Policy | Example |
+|---|---|---|
+| Relational | path filter, directly or through a relationship | `MergeRequest`: `{path: traversal_path}`; `Commit`: `{path: {via: IN_PROJECT}}` |
+| Relational | owner check for a user-scoped entity | todo: `{owner: OWNS}`; storage decides whether it reads a column or an edge |
+| Code | repository restriction | `File`: `{repositories: project_id}` |
+| Live | workspace precondition | `SlackMessage`: `{workspaces: installed_in_namespace}` |
+| Any | `none`, allowed only with a check | a redaction-only entity |
+
+`checks` run outside every backend, on the returned rows:
+
+| Check | What it does | On failure |
+|---|---|---|
+| `by: rails` | one batch ability check against GitLab | drops the rows, and fails closed if GitLab does not answer |
+| `by: provider` | the provider filters again through the caller's own sign-in | the provider returns nothing |
+
+`User` is global, so its policy is a role floor alone.
 
 ### 3. A new version goes live after its backfill
 
@@ -276,7 +314,7 @@ end
 @enduml
 ```
 
-The registry keeps one version line per package, and a tenant's model is the active version of every package that applies to it.
+A tenant's model is the active version of every package that applies to it.
 The migration scope is the diff of the physical catalogs and the source fragments. It is a floor: a ledger entry can widen it but never narrow it.
 A shared edge table is cloned intact. Only its in-scope writers re-emit their rows, and after each namespace finishes, a sweep tombstones that writer's older rows in the namespace.
 The query engine never sees a model whose tables are not built yet, and the indexer and the query engine always agree on one package version.
@@ -352,8 +390,8 @@ note right of C
   username left to hydration
 end note
 E -> C : rewrite: paginate, result contract,\nmaterialize shared reads, settings
-E -> C : security: add each read's guard
-E -> E : security check: every read has its guard
+E -> C : security: add each read's policy
+E -> E : security check: every read has its policy
 E -> C : render
 C --> E : SQL and parameters
 E -> CH : execute
@@ -362,34 +400,19 @@ CH --> Caller : rows
 ```
 
 The surface records what the caller asked for and makes no planning decisions.
-The planning phase decides and builds in one step, with no intermediate plan description, and every later phase rewrites through the same builder.
-The rewrite contract is fixed: inputs before consumers, each shared body once, no revisiting inserted operations, and explicit reconnection when outputs change.
-A phase therefore cannot produce a plan the builder would reject.
-
-Security is its own phase.
-It adds each read's declared policy as ordinary plan operations, so the `MergeRequest` read gets its path filter and the `User` read its role floor. The Rails checks run on the rows that come back.
-A final check proves every read carries its guard before anything leaves the query engine.
+The planning phase decides and builds in one step, and every later phase rewrites through the same builder.
+The rewrite contract is fixed: inputs before consumers, each shared body once, no revisiting inserted operations, and explicit reconnection when outputs change. So no phase can produce a plan the builder would reject.
+Security adds each read's policy as plan operations: a path filter on the `MergeRequest` read and a role floor on the `User` read. The Rails checks run on the rows that come back.
 
 ### 6. The same path for every backend
 
-```mermaid
-%%{init: {"flowchart": {"curve": "linear"}}}%%
-flowchart LR
-    accTitle: The same path for every backend
-    accDescr: The planning phase turns one logical plan into a relational plan for ClickHouse and DuckDB, a code plan for Orbit Next, or a live plan for Slack. Each physical plan renders into its backend's request.
-    LP["Logical plan"] --> P["Planning phase"]
-    P -->|ClickHouse, DuckDB| RP["Relational plan"]
-    P -->|Orbit Next| CP["Code plan"]
-    P -->|Slack| VP["Live plan"]
-    RP -->|render| SQL["SQL and parameters"]
-    CP -->|render| GRPC["gRPC structural<br/>search request"]
-    VP -->|render| CALL["Data Extraction<br/>Service call"]
-```
+The planning phase turns one logical plan into the physical plan of the connection that holds the data:
 
-The planner chooses the target connection from where the requested data lives.
-Each physical language has its own planning decisions: a foreign key over an edge table in a relational plan, a trigram prefilter before an ast-grep pass in a code plan, a push-down filter in a live call.
-The guard takes the form each backend understands: a path filter in SQL, a repository restriction for Orbit Next, and a namespace precondition on a Slack call, whose results Slack then filters again through the caller's own sign-in.
-Plan tests assert three checked stages of every query: the logical plan, the physical plan right after planning, and the physical plan after every phase.
+| Backend | Plan language | A planning decision | Policy | Request |
+|---|---|---|---|---|
+| ClickHouse, DuckDB | relational | a foreign key instead of an edge table | path filter | SQL and parameters |
+| Orbit Next | code | a trigram prefilter before the ast-grep pass | repository restriction | gRPC structural search |
+| Slack | live | a push-down filter | workspace precondition, then the provider check | Data Extraction Service call |
 
 ### 7. A query that spans connections runs as a DAG of stages
 
@@ -422,12 +445,11 @@ flowchart LR
     class S3 engine
 ```
 
-Each stage is an ordinary physical plan in its own catalog's language: a relational plan for stage 1 and a code plan for stage 2.
-An edge carries either a key set, which the next stage reads as an `IN` input, or rows that a later stage joins.
-The planner picks the stage order from selectivity: here the open merge requests are few, so they bound the code search to the branches they name.
-The content filter runs in an earlier stage than the order, limit and pagination, so those apply to the matched rows only.
-Security runs on every stage: stage 1 gets its path filter, stage 2 its repository restriction, and the check proves each stage carries its guard.
-Plan tests assert the logical plan, the planned DAG and the emitted DAG.
+Each stage is an ordinary physical plan in its catalog's language.
+An edge carries a key set, which the next stage reads as an `IN` input, or rows that a later stage joins.
+The planner orders stages by selectivity: the few open merge requests bound the code search to their branches.
+The content match runs before order, limit and pagination, so those apply to matched rows only.
+Every stage gets its own policy, and plan tests assert the logical plan, the planned DAG and the emitted DAG.
 
 [Extending the data model](../development/extending-the-data-model.md) documents each extension with its packages and code: a GitLab entity, Jira, Slack, Orbit Next, agent memory and a new query language.
 
