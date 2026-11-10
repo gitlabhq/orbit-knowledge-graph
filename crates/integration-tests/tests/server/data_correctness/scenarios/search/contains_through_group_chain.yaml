@@ -6,11 +6,10 @@ config:
     gl_merge_request:
       - { id: 2100, iid: 7, title: Unrelated work, state: opened, source_branch: other, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
 
-query:
-  gql: |
-    MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)
-    WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS 'SHIP FEAT'
-    RETURN mr.title ORDER BY mr.id LIMIT 10
+query: |
+  MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)
+  WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS 'SHIP FEAT'
+  RETURN mr.title ORDER BY mr.id LIMIT 10
 
 expect:
   sql_contains: ["AS MATERIALIZED", "multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])"]

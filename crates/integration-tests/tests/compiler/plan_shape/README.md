@@ -2,7 +2,7 @@
 
 Run `mise test:plan-shape`. The runner discovers YAML files recursively under
 `fixtures/`. Each fixture checks normalized input, selected requirements, and/or
-the emitted SQL AST. Most fixtures run through both JSON and GQL.
+the emitted SQL AST.
 
 The emitted AST includes the ClickHouse text-excerpt pass and the row window
 pass, so `Limit` shows the fetched rows (the page plus one probe row) and
@@ -12,14 +12,8 @@ the requested LIMIT and SKIP.
 Set `model_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved.yaml`
 for one fixture. Other fixtures keep the embedded model.
 
-Both `query.json` and `query.gql` are required. If a frontend cannot express the
-tested plan, declare its reason under `missing_frontends`. The runner rejects
-missing, blank, unknown, or redundant exception entries.
-
-```yaml
-missing_frontends:
-  json: The JSON frontend does not expose property-to-property comparisons.
-```
+Each fixture has one GQL `query`. The optional `logical` block asserts the
+logical plan, and `physical` asserts each backend.
 
 A file can hold several fixtures in a `cases` list. Every other top-level key
 is a default for each case, and each case needs its own `name`.
@@ -60,8 +54,6 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 
 ## Coverage boundaries
 
-- JSON incoming variable hops have a dedicated fixture. GQL normalizes the
-  equivalent pattern into outgoing edges, so it exercises a different plan.
 - The testkit's `hydration_planning_selects_paths_before_sql_rendering` test
   checks 256/257 dynamic paths, 257 static paths, and budget-driven mode changes.
   The YAML fixture independently covers the large dynamic mode.

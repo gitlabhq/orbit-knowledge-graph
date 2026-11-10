@@ -1,7 +1,6 @@
 use std::sync::LazyLock;
 
 use bolero::check;
-use compiler::Frontend;
 use orbit_fuzz::grammar::{Bytes, Grammar};
 use query_data_model::{Catalog, ClickHouse};
 
@@ -14,7 +13,7 @@ fn main() {
         let Some(text) = Grammar::orbit().derive("Query", &mut Bytes(input)) else {
             return;
         };
-        if let Err(error) = compiler::surface::parse(&text, Frontend::Gql, catalog) {
+        if let Err(error) = compiler::surface::parse(&text, catalog) {
             assert!(error.is_client_safe(), "{text:?}\n{error}");
             assert!(
                 !error.to_string().contains("Orbit query syntax"),

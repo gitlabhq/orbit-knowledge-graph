@@ -15,13 +15,7 @@ pub(super) async fn long_node_text_is_excerpted_only_on_wide_pages(ctx: &TestCon
     let full_text = format!("{}tail", "🙂".repeat(10_000));
     let query_with_limit = |limit: u32| {
         format!(
-            r#"{{
-            "query_type": "traversal",
-            "nodes": [{{"id": "n", "entity": "Note", "node_ids": [3002],
-                       "columns": ["note", "discussion_id"],
-                       "filters": {{"note": {{"ends_with": "tail"}}}}}}],
-            "limit": {limit}
-        }}"#
+            "MATCH (n:Note {{id: 3002}}) WHERE n.note ENDS WITH 'tail' RETURN n{{.note, .discussion_id}} LIMIT {limit}"
         )
     };
 
@@ -51,16 +45,7 @@ pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_
 ) {
     let (_compiled, result) = compile_and_execute(
         ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "Definition", "filters": {"name": {"eq": "compile"}}},
-                {"id": "end", "entity": "Definition", "filters": {"name": {"eq": "run_query"}}}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["CALLS"]},
-            "limit": 10
-        }"#,
+        "MATCH path = ANY SHORTEST (start:Definition {name: 'compile'})-[:CALLS*1..3]->(`end`:Definition {name: 'run_query'}) RETURN path LIMIT 10",
     )
     .await;
 

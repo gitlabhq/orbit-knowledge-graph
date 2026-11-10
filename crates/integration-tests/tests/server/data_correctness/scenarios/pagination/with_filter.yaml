@@ -1,8 +1,7 @@
 description: SKIP pages with an active-only filter cover 6 active users
 
-query:
-  gql: |
-    MATCH (u:User {state: 'active'}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.state ORDER BY u.id SKIP 0 LIMIT 2
+query: |
+  MATCH (u:User {state: 'active'}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.state ORDER BY u.id SKIP 0 LIMIT 2
 
 expect:
   all_pages:

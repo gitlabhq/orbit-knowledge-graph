@@ -14,10 +14,9 @@ config:
     gl_edge:
       - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: APPROVED, target_id: 99000, target_kind: MergeRequest, _version: "2026-01-01 00:00:00", _deleted: false }
 
-query:
-  gql: |
-    MATCH (u:User {id: 99002})-[:APPROVED]->(mr:MergeRequest)
-    RETURN mr
+query: |
+  MATCH (u:User {id: 99002})-[:APPROVED]->(mr:MergeRequest)
+  RETURN mr
 
 expect:
   node_count: 2

@@ -17,18 +17,16 @@ config:
 cases:
   - name: stale_tag_excluded
     description: A user whose old membership edge carried the blocked tag does not match a blocked filter
-    query:
-      gql: |
-        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'blocked' RETURN u, g LIMIT 10
+    query: |
+      MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'blocked' RETURN u, g LIMIT 10
     expect:
       skip_requirements: ["node_ids", "filter:state", "relationship:MEMBER_OF"]
       node_count: 0
 
   - name: latest_tag_included
     description: The same user matches the filter on its latest tag value
-    query:
-      gql: |
-        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'active' RETURN u.state, g LIMIT 10
+    query: |
+      MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'active' RETURN u.state, g LIMIT 10
     expect:
       skip_requirements: [node_count]
       nodes:
@@ -44,9 +42,8 @@ cases:
 
   - name: stale_tag_not_counted
     description: The old blocked tag adds nothing to the blocked member count
-    query:
-      gql: |
-        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'blocked' RETURN count(u) AS n
+    query: |
+      MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'blocked' RETURN count(u) AS n
     expect:
       skip_requirements: ["node_ids", "filter:state"]
       row_count: 1
@@ -54,9 +51,8 @@ cases:
 
   - name: latest_tag_counted
     description: The latest active tag counts the user once with the other active members
-    query:
-      gql: |
-        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'active' RETURN count(u) AS n
+    query: |
+      MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'active' RETURN count(u) AS n
     expect:
       skip_requirements: ["node_ids", "filter:state"]
       row_count: 1

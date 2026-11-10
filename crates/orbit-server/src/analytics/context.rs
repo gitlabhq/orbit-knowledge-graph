@@ -579,12 +579,12 @@ mod tests {
     }
 
     fn compiled_metrics(gql: &str) -> ExecMetrics {
-        use query_engine::compiler::{Frontend, SecurityContext, compile};
+        use query_engine::compiler::{SecurityContext, compile};
         let model = std::sync::Arc::new(
             query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
         );
         let ctx = SecurityContext::new(1, vec!["1/22/".into()]).unwrap();
-        let compiled = compile(gql, Frontend::Gql, &model, &ctx).unwrap();
+        let compiled = compile(gql, &model, &ctx).unwrap();
         ExecMetrics {
             stats: Some(compiled.stats),
             hydration: Some(compiled.hydration),

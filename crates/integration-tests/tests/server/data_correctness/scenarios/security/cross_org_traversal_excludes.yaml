@@ -3,19 +3,8 @@ description: Org-1 traversal from User 1 excludes MR 9100 authored in org 2
 config:
   security: { org_id: 1, paths: ["1/"] }
 
-query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "node_ids": [1]},
-        {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
-      ],
-      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-      "limit": 50
-    }
-  gql: |
-    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr.title LIMIT 50
+query: |
+  MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr.title LIMIT 50
 
 expect:
   node_count: 3

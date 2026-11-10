@@ -14,7 +14,6 @@ use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
 use query_data_model::introspection::SchemaResponse;
-use query_engine::compiler::Frontend;
 use query_engine::pipeline::{
     MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
@@ -29,7 +28,6 @@ use super::stages::{
 
 pub struct RawQuery {
     pub text: String,
-    pub frontend: Frontend,
     pub settings: Vec<(String, String)>,
 }
 
@@ -119,7 +117,6 @@ impl QueryPipelineService {
         }
 
         let mut ctx = QueryPipelineContext {
-            frontend: query.frontend,
             query_json: query.text,
             compiled: None,
             security_context: None,

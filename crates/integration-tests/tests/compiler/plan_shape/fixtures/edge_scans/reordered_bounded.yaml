@@ -1,16 +1,12 @@
 name: Target-anchored bounded hops expand from the target layout
 model_overlay: reordered_edges
 
-query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"callee","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"callee","hops":[1,3]}]}
-  gql: |
-    MATCH (caller:Definition)-[:CALLS*1..3]->(callee:Definition {id: 12001}) RETURN caller, callee
+query: |
+  MATCH (caller:Definition)-[:CALLS*1..3]->(callee:Definition {id: 12001}) RETURN caller, callee
 
 logical:
-  gql:
-    expect:
-      - (Filter callee.id = 12001 (Follow CALLS caller->callee AS e0 HOPS 1..3 (Entities Definition AS caller)))
+  expect:
+    - (Filter callee.id = 12001 (Follow CALLS caller->callee AS e0 HOPS 1..3 (Entities Definition AS caller)))
 
 physical:
   clickhouse:

@@ -1,9 +1,8 @@
 description: Grouping by a nullable DateTime returns one null group instead of a 1970 group
 
-query:
-  gql: |
-    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005
-    RETURN mr.merged_at AS merged, count(mr) AS n ORDER BY merged
+query: |
+  MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005
+  RETURN mr.merged_at AS merged, count(mr) AS n ORDER BY merged
 
 expect:
   skip_requirements: [node_ids, aggregation_sort]

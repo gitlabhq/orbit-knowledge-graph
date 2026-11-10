@@ -1,10 +1,7 @@
 name: Dynamic hydration prunes an ancestor to one prefix
 
-query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["path"]}]}
-  gql: |
-    MATCH (f:File {id: 1}) RETURN f.path
+query: |
+  MATCH (f:File {id: 1}) RETURN f.path
 
 hydration:
   dynamic: true
@@ -12,9 +9,8 @@ hydration:
     f: ["1/", "1/100/"]
 
 logical:
-  gql:
-    expect:
-      - (Limit 30 (Select f{path} (Filter f.id = 1 (Entities File AS f))))
+  expect:
+    - (Limit 30 (Select f{path} (Filter f.id = 1 (Entities File AS f))))
 
 physical:
   clickhouse:

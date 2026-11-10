@@ -66,11 +66,7 @@ impl Harness {
 }
 
 fn billable_project_query() -> Request<impl tokio_stream::Stream<Item = ExecuteQueryMessage>> {
-    let query = serde_json::json!({
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-        "limit": 10
-    });
+    let query = "MATCH (p:Project {id: 1}) RETURN p LIMIT 10";
     let message = ExecuteQueryMessage {
         content: Some(execute_query_message::Content::Request(
             ExecuteQueryRequest {
@@ -140,11 +136,7 @@ async fn does_not_bill_a_query_the_client_abandoned() {
 fn self_managed_query(
     license_checksum: Option<&str>,
 ) -> Request<impl tokio_stream::Stream<Item = ExecuteQueryMessage>> {
-    let query = serde_json::json!({
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-        "limit": 10
-    });
+    let query = "MATCH (p:Project {id: 1}) RETURN p LIMIT 10";
     let message = ExecuteQueryMessage {
         content: Some(execute_query_message::Content::Request(
             ExecuteQueryRequest {

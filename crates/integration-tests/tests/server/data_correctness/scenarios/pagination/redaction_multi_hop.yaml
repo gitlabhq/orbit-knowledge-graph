@@ -9,9 +9,8 @@ config:
     deny:
       group: [101]
 
-query:
-  gql: |
-    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p SKIP 0 LIMIT 3
+query: |
+  MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p SKIP 0 LIMIT 3
 
 expect:
   all_pages:

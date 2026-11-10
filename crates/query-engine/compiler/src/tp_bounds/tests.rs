@@ -7,14 +7,14 @@ use query_data_model::{Catalog, ClickHouse};
 use super::TpBounds;
 use super::keys::{TpLookupKey, TpLookupValue, keys};
 use crate::logical::Query;
-use crate::surface::{self, Frontend};
+use crate::surface;
 
 static MODEL: LazyLock<Catalog<ClickHouse>> =
     LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
 
 fn plan(gql: &str) -> LogicalPlan {
     let model = MODEL.model();
-    surface::parse(gql, Frontend::Gql, model.logical().as_admin())
+    surface::parse(gql, model.logical().as_admin())
         .unwrap()
         .plan
 }

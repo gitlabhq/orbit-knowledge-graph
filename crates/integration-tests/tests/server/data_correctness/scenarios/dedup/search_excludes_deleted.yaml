@@ -10,16 +10,8 @@ config:
     allow:
       user: [1, 2, 3, 4, 5, 6, 7, 9002]
 
-query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "columns": ["username"],
-                 "node_ids": [9002]}],
-      "limit": 10
-    }
-  gql: |
-    MATCH (u:User {id: 9002}) RETURN u.username LIMIT 10
+query: |
+  MATCH (u:User {id: 9002}) RETURN u.username LIMIT 10
 
 expect:
   skip_requirements: [node_ids]

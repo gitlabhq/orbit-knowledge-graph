@@ -1,8 +1,7 @@
 description: First page without order_by is deterministic across runs
 
-query:
-  gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 0 LIMIT 3
+query: |
+  MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 0 LIMIT 3
 
 expect:
   repeat_count: 2

@@ -2,7 +2,6 @@ use std::io::Read;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
 
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, RemoteError};
@@ -88,37 +87,41 @@ fn build_query_request(
 
     #[derive(Deserialize)]
     struct Envelope {
-        query: Option<Box<RawValue>>,
+        query: Option<serde_json::Value>,
         response_format: Option<String>,
     }
 
     let envelope: Envelope = serde_json::from_slice(body).map_err(|e| {
         RemoteError::new(EXIT_GENERIC, format!("query body is not valid JSON: {e}"))
     })?;
-    let query = envelope.query.ok_or_else(|| {
-        RemoteError::new(
-            EXIT_GENERIC,
-            "query body must contain a top-level `query` field",
-        )
-    })?;
-
-    let response_format = match format_override {
+    let query = match envelope.query {
+        Some(serde_json::Value::String(query)) => query,
+        Some(_) => {
+            return Err(RemoteError::new(
+                EXIT_GENERIC,
+                "the top-level `query` field must be a GQL string; run `glab orbit skills get orbit-gql-migration` to convert a JSON query",
+            ));
+        }
+        None => {
+            return Err(RemoteError::new(
+                EXIT_GENERIC,
+                "query body must contain a top-level `query` field",
+            ));
+        }
+    };
+    let format = match format_override {
         Some(format) => format.as_str().to_string(),
         None => envelope
             .response_format
             .unwrap_or_else(|| DEFAULT_QUERY_FORMAT.to_string()),
     };
-
-    #[derive(Serialize)]
-    struct Request<'a> {
-        query: &'a RawValue,
-        response_format: String,
+    if query.trim().is_empty() {
+        return Err(RemoteError::new(EXIT_GENERIC, "query body is empty"));
     }
-
-    serialize_request(&Request {
-        query: &query,
-        response_format,
-    })
+    serialize_request(&serde_json::json!({
+        "query": query,
+        "response_format": format,
+    }))
 }
 
 fn serialize_request(request: &impl Serialize) -> Result<Vec<u8>, RemoteError> {
@@ -134,48 +137,54 @@ fn serialize_request(request: &impl Serialize) -> Result<Vec<u8>, RemoteError> {
 mod tests {
     use super::*;
 
+    const QUERY: &str = "MATCH (p:Project {id: 1}) RETURN p";
+
+    fn body(rest: &str) -> Vec<u8> {
+        format!(r#"{{"query":"{QUERY}"{rest}}}"#).into_bytes()
+    }
+
     #[test]
     fn query_flag_overrides_body_and_default() {
         let out = build_query_request(
-            br#"{"query":{"a":1},"response_format":"raw"}"#,
+            &body(r#","response_format":"raw""#),
             Some(ResponseFormat::Llm),
         )
         .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(value["response_format"], "llm");
-        assert_eq!(value["query"]["a"], 1);
+        assert_eq!(value["query"], QUERY);
     }
 
     #[test]
     fn query_body_format_used_when_no_flag() {
-        let out = build_query_request(br#"{"query":{},"response_format":"raw"}"#, None).unwrap();
+        let out = build_query_request(&body(r#","response_format":"raw""#), None).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(value["response_format"], "raw");
     }
 
     #[test]
     fn query_defaults_to_llm_when_unspecified() {
-        let out = build_query_request(br#"{"query":{}}"#, None).unwrap();
+        let out = build_query_request(&body(""), None).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(value["response_format"], "llm");
     }
 
     #[test]
-    fn query_preserves_nested_query_verbatim() {
-        let out = build_query_request(
-            br#"{"query":{"node":{"entity":"Project","email":"a@b.com"}}}"#,
-            None,
-        )
-        .unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(value["query"]["node"]["email"], "a@b.com");
+    fn query_object_is_rejected() {
+        let err =
+            build_query_request(br#"{"query":{"query_type":"traversal"}}"#, None).unwrap_err();
+        assert!(
+            err.message.contains("must be a GQL string"),
+            "{}",
+            err.message
+        );
     }
 
     #[test]
     fn query_strips_leading_utf8_bom() {
-        let mut body = vec![0xEF, 0xBB, 0xBF];
-        body.extend_from_slice(br#"{"query":{}}"#);
-        let out = build_query_request(&body, None).unwrap();
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(&body(""));
+        let out = build_query_request(&bytes, None).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(value["response_format"], "llm");
     }

@@ -15,7 +15,7 @@ pub struct QueryScenario {
     #[serde(default)]
     pub config: ScenarioConfig,
     #[serde(default)]
-    pub query: BTreeMap<String, String>,
+    pub query: Option<String>,
     #[serde(default)]
     pub expect: Option<QueryExpect>,
     #[serde(default)]
@@ -29,21 +29,21 @@ pub struct QueryScenario {
 pub struct QueryStep {
     #[serde(default)]
     pub seed: Seed,
-    pub query: BTreeMap<String, String>,
+    pub query: String,
     pub expect: QueryExpect,
 }
 
 impl QueryScenario {
     pub fn into_steps(self) -> (ScenarioConfig, Vec<QueryStep>) {
-        let steps = match (self.query.is_empty(), self.steps.is_empty()) {
-            (false, true) => vec![QueryStep {
+        let steps = match (self.query, self.steps.is_empty()) {
+            (Some(query), true) => vec![QueryStep {
                 seed: Seed::default(),
-                query: self.query,
+                query,
                 expect: self.expect.expect("scenario declares query without expect"),
             }],
-            (true, false) => self.steps,
-            (false, false) => panic!("scenario declares both query/expect and steps:"),
-            (true, true) => panic!("scenario declares neither query nor steps:"),
+            (None, false) => self.steps,
+            (Some(_), false) => panic!("scenario declares both query/expect and steps:"),
+            (None, true) => panic!("scenario declares neither query nor steps:"),
         };
         (self.config, steps)
     }
@@ -64,7 +64,7 @@ pub struct ScenarioConfig {
     #[serde(default)]
     pub duckdb: bool,
     #[serde(default)]
-    pub skip: BTreeMap<String, String>,
+    pub skip: Option<String>,
 }
 
 /// Either a preset name (string) or an inline value.
@@ -126,9 +126,9 @@ pub struct QueryExpect {
     #[serde(default)]
     pub compile_error: Option<CompileErrorExpect>,
     #[serde(default)]
-    pub compile_error_contains: MessageExpect,
+    pub compile_error_contains: Vec<String>,
     #[serde(default)]
-    pub compile_error_not_contains: MessageExpect,
+    pub compile_error_not_contains: Vec<String>,
     #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
@@ -325,8 +325,8 @@ impl QueryExpect {
                 page.repeat_count.is_none()
                     && !page.compile_only
                     && page.compile_error.is_none()
-                    && !page.compile_error_contains.is_configured()
-                    && !page.compile_error_not_contains.is_configured()
+                    && page.compile_error_contains.is_empty()
+                    && page.compile_error_not_contains.is_empty()
                     && page.hydration.is_none()
                     && page.settings.is_empty()
                     && page.sql_contains.is_empty()
@@ -405,51 +405,13 @@ impl QueryExpect {
 pub enum CompileErrorExpect {
     Flag(bool),
     Substring(String),
-    PerFrontend(BTreeMap<String, String>),
 }
 
 impl CompileErrorExpect {
-    pub fn substring_for(&self, frontend_key: &str) -> Option<&str> {
+    pub fn substring(&self) -> Option<&str> {
         match self {
             Self::Flag(_) => None,
             Self::Substring(sub) => Some(sub),
-            Self::PerFrontend(by_frontend) => Some(
-                by_frontend
-                    .get(frontend_key)
-                    .unwrap_or_else(|| panic!("compile_error missing frontend '{frontend_key}'"))
-                    .as_str(),
-            ),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum MessageExpect {
-    All(Vec<String>),
-    PerFrontend(BTreeMap<String, Vec<String>>),
-}
-
-impl Default for MessageExpect {
-    fn default() -> Self {
-        Self::All(Vec::new())
-    }
-}
-
-impl MessageExpect {
-    fn is_configured(&self) -> bool {
-        !matches!(self, Self::All(fragments) if fragments.is_empty())
-    }
-
-    pub fn for_frontend(&self, frontend_key: &str) -> &[String] {
-        match self {
-            Self::All(fragments) => fragments,
-            Self::PerFrontend(by_frontend) => by_frontend
-                .get(frontend_key)
-                .unwrap_or_else(|| {
-                    panic!("compile error message expectation missing frontend '{frontend_key}'")
-                })
-                .as_slice(),
         }
     }
 }

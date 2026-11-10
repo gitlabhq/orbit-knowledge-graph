@@ -40,15 +40,12 @@ mod tests {
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use query_engine::compiler::{EntityAuthConfig, Frontend, ResultContext};
+    use query_engine::compiler::{EntityAuthConfig, ResultContext};
     use query_engine::pipeline::NoOpObserver;
     use query_engine::types::{QueryResult, ResourceAuthorization};
     use std::sync::Arc;
 
-    fn seed_ctx(
-        frontend: Frontend,
-        authorizations: Vec<ResourceAuthorization>,
-    ) -> QueryPipelineContext {
+    fn seed_ctx(authorizations: Vec<ResourceAuthorization>) -> QueryPipelineContext {
         let schema = Arc::new(Schema::new(vec![
             Field::new("_orbit_p_id", DataType::Int64, false),
             Field::new("_orbit_p_type", DataType::Utf8, false),
@@ -76,7 +73,6 @@ mod tests {
         );
 
         let mut ctx = QueryPipelineContext {
-            frontend,
             query_json: String::new(),
             compiled: None,
             security_context: None,
@@ -92,29 +88,25 @@ mod tests {
 
     #[tokio::test]
     async fn denied_rows_are_redacted() {
-        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
-            let auth = vec![ResourceAuthorization {
-                resource_type: "project".to_string(),
-                authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
-            }];
-            let mut ctx = seed_ctx(frontend, auth);
-            let mut obs = NoOpObserver;
+        let auth = vec![ResourceAuthorization {
+            resource_type: "project".to_string(),
+            authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
+        }];
+        let mut ctx = seed_ctx(auth);
+        let mut obs = NoOpObserver;
 
-            let output = RedactionStage.execute(&mut ctx, &mut obs).await.unwrap();
-            assert_eq!(output.redacted_count, 1, "{frontend:?}");
-            assert_eq!(output.query_result.authorized_count(), 2, "{frontend:?}");
-        }
+        let output = RedactionStage.execute(&mut ctx, &mut obs).await.unwrap();
+        assert_eq!(output.redacted_count, 1);
+        assert_eq!(output.query_result.authorized_count(), 2);
     }
 
     #[tokio::test]
     async fn no_authorizations_redacts_all() {
-        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
-            let mut ctx = seed_ctx(frontend, vec![]);
-            let mut obs = NoOpObserver;
+        let mut ctx = seed_ctx(vec![]);
+        let mut obs = NoOpObserver;
 
-            let output = RedactionStage.execute(&mut ctx, &mut obs).await.unwrap();
-            assert_eq!(output.redacted_count, 3, "{frontend:?}");
-            assert_eq!(output.query_result.authorized_count(), 0, "{frontend:?}");
-        }
+        let output = RedactionStage.execute(&mut ctx, &mut obs).await.unwrap();
+        assert_eq!(output.redacted_count, 3);
+        assert_eq!(output.query_result.authorized_count(), 0);
     }
 }

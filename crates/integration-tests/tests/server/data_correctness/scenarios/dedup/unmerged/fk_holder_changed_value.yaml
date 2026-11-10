@@ -12,9 +12,8 @@ config:
       - { id: 99041, iid: 41, sha: sha41, ref: main, status: success, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
       - { id: 99042, iid: 42, sha: sha42, ref: main, status: canceled, project_id: 1000, auto_canceled_by_id: 99041, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
 
-query:
-  gql: |
-    MATCH (a:Pipeline)-[:AUTO_CANCELED_BY]->(b:Pipeline {id: 99041}) RETURN a, b LIMIT 10
+query: |
+  MATCH (a:Pipeline)-[:AUTO_CANCELED_BY]->(b:Pipeline {id: 99041}) RETURN a, b LIMIT 10
 
 expect:
   node_count: 2

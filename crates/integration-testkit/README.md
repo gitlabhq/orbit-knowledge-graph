@@ -139,9 +139,9 @@ and the formatted `GraphResponse`:
 
 ```rust
 use integration_testkit::visitor::{ResponseView, NodeExt};
-use compiler::{compile, Frontend};
+use compiler::compile;
 
-let compiled = compile(json, Frontend::JsonDsl, &catalog, &security_ctx).unwrap();
+let compiled = compile(query, &catalog, &security_ctx).unwrap();
 // ... run pipeline, get response ...
 let resp = ResponseView::for_query(&compiled.stats, response);
 ```
@@ -319,9 +319,9 @@ Use the suite-wide `GKG_TEST_MODEL_OVERLAY` when the overlay also changes DDL.
 |---|---|---|---|
 | `description` | string | no | Human-readable summary |
 | `config` | `ScenarioConfig` | no | Security, redaction, and seed overrides |
-| `query` | map | one of `query`/`steps` | Query strings keyed by frontend (`json`, `gql`) |
+| `query` | string | one of `query`/`steps` | The GQL query |
 | `expect` | `QueryExpect` | with `query` | Assertions on the result |
-| `steps` | [`QueryStep`] | one of `query`/`steps` | Ordered steps, each with an optional `seed` (rows inserted before the step runs), a `query` map, and an `expect`. Use it when a later query must observe a write made after an earlier one |
+| `steps` | [`QueryStep`] | one of `query`/`steps` | Ordered steps, each with an optional `seed` (rows inserted before the step runs), a `query`, and an `expect`. Use it when a later query must observe a write made after an earlier one |
 
 #### `config` — `ScenarioConfig`
 
@@ -396,9 +396,9 @@ only IDs and the relationship type.
 | Field | Type | Description |
 |---|---|---|
 | `compile_only` | bool | Only compile, skip execution |
-| `compile_error` | bool / string / {frontend: string} | Expect compile failure |
-| `compile_error_contains` | [string] / {frontend: [string]} | Error must contain every listed fragment |
-| `compile_error_not_contains` | [string] / {frontend: [string]} | Error must NOT contain |
+| `compile_error` | bool / string | Expect compile failure |
+| `compile_error_contains` | [string] | Error must contain every listed fragment |
+| `compile_error_not_contains` | [string] | Error must NOT contain |
 | `sql_contains` | [string] | Rendered SQL must contain these |
 | `sql_not_contains` | [string] | Rendered SQL must NOT contain these |
 | `indexes_used` | [{table, index}] | ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply on the named table (`gl_user`, matched against the `ReadFromMergeTree` step) and that must each prune granules. Seed non-matching rows with `unmerged_seed` so there are parts to prune |
@@ -461,13 +461,11 @@ Row values support `{repeat: str, count: N, suffix: str}` for expansion.
 | `no_duplicate_edges` | bool | Reject repeated typed edges across pages |
 | `matches_unpaginated` | bool | Compare combined typed node IDs, typed edges, group rows, and paths with the same query without `SKIP` |
 
-Paginated scenarios are GQL-only and must end with `SKIP 0 LIMIT N`. The runner
+Paginated scenarios must end with `SKIP 0 LIMIT N`. The runner
 replaces `SKIP 0` with `SKIP N`, `SKIP 2N`, and so on for later pages, and checks
 that `has_more` is false only on the last page. Unpaginated comparisons use a
 limit of 1000 and fail if results exceed it.
 Node properties are checked per page because excerpt lengths depend on page size.
-
-Per-frontend error expectations must include every frontend in the scenario.
 
 ### Preset system
 
@@ -499,20 +497,11 @@ parses every file with no Docker.
 ```yaml
 description: User search returns correct properties
 
-query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username", "state"]}],
-      "order_by": "u.id",
-      "limit": 10
-    }
-  gql: |
-    MATCH (u:User)
-    WHERE u.id >= 1 AND u.id <= 10000
-    RETURN u.username, u.state
-    ORDER BY u.id LIMIT 10
+query: |
+  MATCH (u:User)
+  WHERE u.id >= 1 AND u.id <= 10000
+  RETURN u.username, u.state
+  ORDER BY u.id LIMIT 10
 
 expect:
   node_count: 7
@@ -525,5 +514,5 @@ expect:
 ```
 
 This scenario queries users by ID range, asserts 7 nodes returned in order, and
-spot-checks properties on two of them. Both JSON and GQL frontends are tested.
+spot-checks properties on two of them.
 The default security and redaction presets apply since `config` is omitted.

@@ -1,8 +1,7 @@
 description: First SKIP 0 page returns correct count and has_more
 
-query:
-  gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id SKIP 0 LIMIT 2
+query: |
+  MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id SKIP 0 LIMIT 2
 
 expect:
   node_count: 2

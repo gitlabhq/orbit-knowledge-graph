@@ -15,7 +15,7 @@ use crate::passes::{
     admit, codegen, hydrate, normalize, page, response_policy, restrict, result_contract, security,
     security_check, settings,
 };
-use crate::surface::{self, Frontend};
+use crate::surface;
 use crate::types::QueryType;
 use crate::types::SecurityContext;
 use query_data_model::surface::Statement;
@@ -44,23 +44,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     phases {
-        json_dsl_parse {
-            reads_env: [security_ctx, data_model]
-            mutates: [raw, statement]
-        }
         gql_parse {
             reads_env: [security_ctx, data_model]
             mutates: [raw, statement]
         }
-        json_dsl_parse_trusted {
-            reads_env: [data_model]
-            mutates: [raw, statement]
-        }
         gql_parse_trusted {
-            reads_env: [data_model]
-            mutates: [raw, statement]
-        }
-        json_dsl_parse_local {
             reads_env: [data_model]
             mutates: [raw, statement]
         }
@@ -148,12 +136,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     pipelines {
-        clickhouse_json_dsl {
-            backend: query_data_model::ClickHouse
-            env: [security_ctx]
-            state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse, normalize, restrict, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
-        }
         clickhouse_gql {
             backend: query_data_model::ClickHouse
             env: [security_ctx]
@@ -165,12 +147,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             env: [security_ctx]
             state: [tp_bounds, hydration, plan_metadata, query_config, relational, hydration_query]
             phases: [restrict_hydration, plan, settings, security, security_check, render_hydration]
-        }
-        duckdb_json_dsl {
-            backend: query_data_model::DuckDb
-            env: []
-            state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
-            phases: [json_dsl_parse_local, normalize, admit_local, plan, result_contract, paginate, materialize, codegen]
         }
         duckdb_gql {
             backend: query_data_model::DuckDb
@@ -184,57 +160,33 @@ compiler_pipeline_macros::define_compiler_ctx! {
             state: [raw, statement]
             phases: [gql_parse_trusted, normalize, admit]
         }
-        check_json_dsl {
-            backend: query_data_model::ClickHouse
-            env: []
-            state: [raw, statement]
-            phases: [json_dsl_parse_trusted, normalize, admit]
-        }
     }
 }
 
-fn parse<C: CompilerCtx>(
-    ctx: &mut C,
-    frontend: Frontend,
-    admin: bool,
-    all_columns: bool,
-) -> Result<()> {
+fn parse<C: CompilerCtx>(ctx: &mut C, admin: bool, all_columns: bool) -> Result<()> {
     if let Some(raw) = ctx.take_raw() {
         let catalog = surface::catalog(ctx.data_model(), admin);
         let catalog = match all_columns {
             true => catalog.with_all_columns(),
             false => catalog,
         };
-        ctx.set_statement(surface::parse(&raw, frontend, catalog)?);
+        ctx.set_statement(surface::parse(&raw, catalog)?);
     }
     Ok(())
 }
 
-fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let admin = ctx.security_ctx().admin;
-    parse(ctx, Frontend::JsonDsl, admin, false)
-}
-
 fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
     let admin = ctx.security_ctx().admin;
-    parse(ctx, Frontend::Gql, admin, false)
-}
-
-fn json_dsl_parse_trusted(ctx: &mut impl CompilerCtx) -> Result<()> {
-    parse(ctx, Frontend::JsonDsl, true, false)
+    parse(ctx, admin, false)
 }
 
 fn gql_parse_trusted(ctx: &mut impl CompilerCtx) -> Result<()> {
-    parse(ctx, Frontend::Gql, true, false)
+    parse(ctx, true, false)
 }
 
 /// The local CLI returns every property of a node that lists no columns.
-fn json_dsl_parse_local(ctx: &mut impl CompilerCtx) -> Result<()> {
-    parse(ctx, Frontend::JsonDsl, true, true)
-}
-
 fn gql_parse_local(ctx: &mut impl CompilerCtx) -> Result<()> {
-    parse(ctx, Frontend::Gql, true, true)
+    parse(ctx, true, true)
 }
 
 fn admit_with(ctx: &mut impl CompilerCtx, selectivity: bool) -> Result<()> {

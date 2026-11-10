@@ -181,38 +181,30 @@ async fn seed(ctx: &TestContext) {
     ctx.optimize_all().await;
 }
 
-async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService) -> Value {
-    run_pipeline_with_security(ctx, json, svc, test_security_context()).await
+async fn run_pipeline(ctx: &TestContext, query: &str, svc: &MockRedactionService) -> Value {
+    run_pipeline_with_security(ctx, query, svc, test_security_context()).await
 }
 
 async fn run_pipeline_with_security(
     ctx: &TestContext,
-    json: &str,
+    query: &str,
     svc: &MockRedactionService,
     security_ctx: SecurityContext,
 ) -> Value {
-    let value = GraphFormatter.format(&pipeline_output(ctx, json, svc, security_ctx).await);
+    let value = GraphFormatter.format(&pipeline_output(ctx, query, svc, security_ctx).await);
     assert_valid(&value);
     value
 }
 
 pub(super) async fn pipeline_output(
     ctx: &TestContext,
-    json: &str,
+    query: &str,
     svc: &MockRedactionService,
     security_ctx: SecurityContext,
 ) -> PipelineOutput {
     let data_model = load_data_model();
     let client = Arc::new(ctx.create_client());
-    let compiled = Arc::new(
-        compile(
-            json,
-            query_engine::compiler::Frontend::JsonDsl,
-            &data_model,
-            &security_ctx,
-        )
-        .unwrap(),
-    );
+    let compiled = Arc::new(compile(query, &data_model, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
@@ -222,7 +214,6 @@ pub(super) async fn pipeline_output(
     server_extensions.insert(client);
     server_extensions.insert(data_model);
     let mut pipeline_ctx = QueryPipelineContext {
-        frontend: query_engine::compiler::Frontend::JsonDsl,
         query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),
         security_context: Some(security_ctx),
@@ -269,11 +260,7 @@ fn allow_all() -> MockRedactionService {
 async fn search_exact_properties(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state", "name"]}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username, .state, .name} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -317,11 +304,7 @@ async fn search_exact_properties(ctx: &TestContext) {
 async fn search_unicode_properties(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"]}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username, .name} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -338,11 +321,7 @@ async fn search_redaction_exact(ctx: &TestContext) {
 
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username} LIMIT 10",
         &svc,
     )
     .await;
@@ -366,11 +345,7 @@ async fn search_redaction_exact(ctx: &TestContext) {
 async fn search_no_authorization_returns_empty(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username} LIMIT 10",
         &MockRedactionService::new(),
     )
     .await;
@@ -381,15 +356,7 @@ async fn search_no_authorization_returns_empty(ctx: &TestContext) {
 async fn traversal_single_hop_exact(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "limit": 50
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, g{.name} LIMIT 50",
         &allow_all(),
     )
     .await;
@@ -470,15 +437,7 @@ async fn traversal_redaction_removes_unauthorized_paths(ctx: &TestContext) {
 
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "limit": 50
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, g{.name} LIMIT 50",
         &svc,
     )
     .await;
@@ -508,15 +467,7 @@ async fn traversal_redaction_removes_unauthorized_paths(ctx: &TestContext) {
 async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-                {"id": "g", "entity": "Group"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "limit": 50
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 50",
         &allow_all(),
     )
     .await;
@@ -538,15 +489,7 @@ async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
 async fn traversal_with_filter(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username", "state"], "filters": {"state": "blocked"}},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "limit": 50
-        }"#,
+        "MATCH (u:User {state: 'blocked'})-[:MEMBER_OF]->(g:Group) RETURN u{.username, .state}, g{.name} LIMIT 50",
         &allow_all(),
     )
     .await;
@@ -574,17 +517,7 @@ async fn traversal_with_filter(ctx: &TestContext) {
 async fn aggregation_count_exact(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["u"],
-            "aggregations": [{"count": "g", "as": "group_count"}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(g) AS group_count LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -636,17 +569,7 @@ async fn aggregation_redaction(ctx: &TestContext) {
 
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["u"],
-            "aggregations": [{"count": "g", "as": "group_count"}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(g) AS group_count LIMIT 10",
         &svc,
     )
     .await;
@@ -669,14 +592,7 @@ async fn aggregation_redaction(ctx: &TestContext) {
 async fn path_finding_exact_path(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }"#,
+        "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000}) RETURN path",
         &allow_all(),
     )
     .await;
@@ -746,14 +662,7 @@ async fn path_finding_redaction_blocks_path(ctx: &TestContext) {
 
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-        }"#,
+        "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000}) RETURN path",
         &svc,
     )
     .await;
@@ -768,14 +677,7 @@ async fn path_finding_redaction_blocks_path(ctx: &TestContext) {
 async fn path_finding_max_depth(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Note", "node_ids": [3000]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["AUTHORED", "HAS_NOTE"]}
-        }"#,
+        "MATCH path = ANY SHORTEST (start:User {id: 1})-[:AUTHORED|HAS_NOTE*1..3]->(`end`:Note {id: 3000}) RETURN path",
         &allow_all(),
     )
     .await;
@@ -795,11 +697,7 @@ async fn path_finding_max_depth(ctx: &TestContext) {
 async fn neighbors_outgoing_exact(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"direction": "outgoing"}
-        }"#,
+        "MATCH (u:User {id: 1})-->(neighbor) RETURN u, neighbor",
         &allow_all(),
     )
     .await;
@@ -857,11 +755,7 @@ async fn neighbors_outgoing_exact(ctx: &TestContext) {
 async fn neighbors_incoming_exact(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "g", "entity": "Group", "node_ids": [101]}],
-            "neighbors": {"direction": "incoming"}
-        }"#,
+        "MATCH (g:Group {id: 101})<--(neighbor) RETURN g, neighbor",
         &allow_all(),
     )
     .await;
@@ -901,11 +795,7 @@ async fn neighbors_incoming_exact(ctx: &TestContext) {
 async fn neighbors_both_exact(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
-            "neighbors": {"direction": "both"}
-        }"#,
+        "MATCH (g:Group {id: 100})--(neighbor) RETURN g, neighbor",
         &allow_all(),
     )
     .await;
@@ -967,11 +857,7 @@ async fn neighbors_both_exact(ctx: &TestContext) {
 async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"direction": "both"}
-        }"#,
+        "MATCH (u:User {id: 1})--(neighbor) RETURN u, neighbor",
         &allow_all(),
     )
     .await;
@@ -990,11 +876,7 @@ async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
 async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}],
-            "neighbors": {"direction": "both"}
-        }"#,
+        "MATCH (mr:MergeRequest {id: 2000})--(neighbor) RETURN mr, neighbor",
         &allow_all(),
     )
     .await;
@@ -1037,11 +919,7 @@ async fn neighbors_redaction(ctx: &TestContext) {
 
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"direction": "outgoing"}
-        }"#,
+        "MATCH (u:User {id: 1})-->(neighbor) RETURN u, neighbor",
         &svc,
     )
     .await;
@@ -1070,14 +948,7 @@ async fn neighbors_redaction(ctx: &TestContext) {
 async fn giant_string_survives_pipeline(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [2]},
-                {"id": "end", "entity": "Note", "node_ids": [3001]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["AUTHORED", "HAS_NOTE"]}
-        }"#,
+        "MATCH path = ANY SHORTEST (start:User {id: 2})-[:AUTHORED|HAS_NOTE*1..3]->(`end`:Note {id: 3001}) RETURN path",
         &allow_all(),
     )
     .await;
@@ -1095,14 +966,7 @@ async fn giant_string_survives_pipeline(ctx: &TestContext) {
 async fn sql_injection_string_preserved(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "MergeRequest", "node_ids": [2000]},
-                {"id": "end", "entity": "Note", "node_ids": [3002]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["AUTHORED", "HAS_NOTE"]}
-        }"#,
+        "MATCH path = ANY SHORTEST (start:MergeRequest {id: 2000})-[:AUTHORED|HAS_NOTE*1..2]->(`end`:Note {id: 3002}) RETURN path",
         &allow_all(),
     )
     .await;
@@ -1124,17 +988,7 @@ async fn sql_injection_string_preserved(ctx: &TestContext) {
 async fn aggregation_sum(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [{"sum": "u.id", "as": "id_sum"}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.name}, sum(u.id) AS id_sum LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1172,17 +1026,7 @@ async fn aggregation_sum(ctx: &TestContext) {
 async fn aggregation_avg(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [{"avg": "u.id", "as": "avg_id"}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.name}, avg(u.id) AS avg_id LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1213,20 +1057,7 @@ async fn aggregation_avg(ctx: &TestContext) {
 async fn aggregation_min_max(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [
-                {"min": "u.id", "as": "min_id"},
-                {"max": "u.id", "as": "max_id"}
-            ],
-            "limit": 10
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.name}, min(u.id) AS min_id, max(u.id) AS max_id LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1246,21 +1077,7 @@ async fn aggregation_min_max(ctx: &TestContext) {
 async fn aggregation_multiple_functions(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [
-                {"count": "u", "as": "member_count"},
-                {"avg": "u.id", "as": "avg_id"},
-                {"min": "u.id", "as": "min_id"}
-            ],
-            "limit": 10
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.name}, count(u) AS member_count, avg(u.id) AS avg_id, min(u.id) AS min_id LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1304,12 +1121,7 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
 async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [{"count": "g", "as": "total"}],
-            "limit": 10
-        }"#,
+        "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN count(g) AS total LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1337,16 +1149,7 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
 async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [
-                {"count": "g", "as": "total"},
-                {"min": "g.id", "as": "min_id"},
-                {"max": "g.id", "as": "max_id"}
-            ],
-            "limit": 10
-        }"#,
+        "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN count(g) AS total, min(g.id) AS min_id, max(g.id) AS max_id LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1372,17 +1175,7 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
 async fn grouped_aggregation_uses_node_group_rows(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["u"],
-            "aggregations": [{"count": "g", "as": "group_count"}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(g) AS group_count LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1414,12 +1207,7 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
 
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [{"count": "g", "as": "total"}],
-            "limit": 10
-        }"#,
+        "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN count(g) AS total LIMIT 10",
         &svc,
     )
     .await;
@@ -1437,15 +1225,7 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
 async fn traversal_incoming_direction(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User", "columns": ["username"]}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "g", "to": "u", "direction": "incoming"}],
-            "limit": 50
-        }"#,
+        "MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.name}, u{.username} LIMIT 50",
         &allow_all(),
     )
     .await;
@@ -1474,38 +1254,6 @@ async fn traversal_incoming_direction(ctx: &TestContext) {
     }
 }
 
-async fn traversal_both_direction(ctx: &TestContext) {
-    let value = run_pipeline(
-        ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "g1", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "g2", "entity": "Group", "columns": ["name"]}
-            ],
-            "relationships": [{"type": "CONTAINS", "from": "g1", "to": "g2", "direction": "both"}],
-            "limit": 50
-        }"#,
-        &allow_all(),
-    )
-    .await;
-
-    let edges = value["edges"].as_array().unwrap();
-    assert!(!edges.is_empty());
-    assert!(edges.iter().all(|e| e["type"] == "CONTAINS"));
-
-    let nodes = value["nodes"].as_array().unwrap();
-    assert!(
-        node_ids(nodes, "Group").contains(&100),
-        "group 100 in hierarchy chain"
-    );
-
-    for edge in edges {
-        assert!(edge["from_id"].is_string());
-        assert!(edge["to_id"].is_string());
-    }
-}
-
 async fn traversal_shared_target_node(ctx: &TestContext) {
     seed(ctx).await;
 
@@ -1518,19 +1266,7 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
 
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "n", "entity": "Note", "columns": ["note"]},
-                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "n"},
-                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
-            ],
-            "limit": 50
-        }"#,
+        "MATCH (u:User)-[:AUTHORED]->(n:Note), (mr:MergeRequest)-[:HAS_NOTE]->(n) WHERE u.id >= 1 AND u.id <= 10000 AND mr.id >= 1 AND mr.id <= 10000 RETURN u{.username}, n{.note}, mr{.title} LIMIT 50",
         &allow_all(),
     )
     .await;
@@ -1559,11 +1295,7 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
 async fn search_boolean_columns(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "confidential", "internal"]}],
-            "limit": 10
-        }"#,
+        "MATCH (n:Note) WHERE n.id >= 1 AND n.id <= 10000 RETURN n{.note, .confidential, .internal} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1590,15 +1322,7 @@ async fn search_boolean_columns(ctx: &TestContext) {
 async fn traversal_hydrated_boolean_columns(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "columns": ["title"]},
-                {"id": "n", "entity": "Note", "columns": ["note", "internal", "confidential"]}
-            ],
-            "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
-            "limit": 10
-        }"#,
+        "MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) RETURN mr{.title}, n{.note, .internal, .confidential} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1629,11 +1353,7 @@ async fn search_datetime_columns(ctx: &TestContext) {
 
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [9000]}],
-            "limit": 10
-        }"#,
+        "MATCH (n:Note {id: 9000}) RETURN n{.note, .created_at} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1661,11 +1381,7 @@ async fn search_datetime_columns(ctx: &TestContext) {
 async fn search_nullable_columns(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [3000]}],
-            "limit": 10
-        }"#,
+        "MATCH (n:Note {id: 3000}) RETURN n{.note, .created_at} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1686,11 +1402,7 @@ async fn search_nullable_columns(ctx: &TestContext) {
 async fn search_wildcard_columns(ctx: &TestContext) {
     let value = run_pipeline_with_security(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User {id: 1}) RETURN properties(u) LIMIT 10",
         &allow_all(),
         admin_security_context(),
     )
@@ -1720,14 +1432,7 @@ async fn search_wildcard_columns(ctx: &TestContext) {
 async fn path_finding_with_rel_types(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF"]}
-        }"#,
+        "MATCH path = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF*1..3]->(`end`:Project {id: 1000}) RETURN path",
         &allow_all(),
     )
     .await;
@@ -1741,11 +1446,7 @@ async fn path_finding_with_rel_types(ctx: &TestContext) {
 async fn neighbors_with_rel_types_filter(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"direction": "outgoing", "rel_types": ["AUTHORED"]}
-        }"#,
+        "MATCH (u:User {id: 1})-[:AUTHORED]->(neighbor) RETURN u, neighbor",
         &allow_all(),
     )
     .await;
@@ -1786,12 +1487,7 @@ async fn neighbors_with_rel_types_filter(ctx: &TestContext) {
 async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
-            "options": {"dynamic_columns": "*"}
-        }"#,
+        "MATCH (u:User {id: 1})-[:MEMBER_OF]->(neighbor) RETURN u, properties(neighbor)",
         &allow_all(),
     )
     .await;
@@ -1829,11 +1525,7 @@ async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
 async fn filter_in_operator(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"in": ["alice", "charlie"]}}}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.username IN ['alice', 'charlie'] RETURN u{.username} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1854,11 +1546,7 @@ async fn filter_in_operator(ctx: &TestContext) {
 async fn filter_contains_operator(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"contains": "lic"}}}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.username CONTAINS 'lic' RETURN u{.username} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1878,11 +1566,7 @@ async fn filter_contains_operator(ctx: &TestContext) {
 async fn filter_starts_with_operator(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"starts_with": "ali"}}}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.username STARTS WITH 'ali' RETURN u{.username} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1898,11 +1582,7 @@ async fn filter_starts_with_operator(ctx: &TestContext) {
 async fn filter_is_null_operator(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username", "created_at"], "filters": {"created_at": {"is_null": true}}}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.created_at IS NULL RETURN u{.username, .created_at} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1926,11 +1606,7 @@ async fn filter_is_null_operator(ctx: &TestContext) {
 async fn search_node_ids_filtering(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [2, 4]}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.id IN [2, 4] RETURN u{.username} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1954,12 +1630,7 @@ async fn search_node_ids_filtering(ctx: &TestContext) {
 async fn search_with_order_by(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-            "order_by": "-u.username",
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username} ORDER BY u.username DESC LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1978,11 +1649,7 @@ async fn search_with_order_by(ctx: &TestContext) {
 async fn empty_result_all_fields_present(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User {id: 99999}) RETURN u{.username} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -1997,20 +1664,7 @@ async fn empty_result_all_fields_present(ctx: &TestContext) {
 async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
-            ],
-            "relationships": [{
-                "type": ["MEMBER_OF", "CONTAINS"],
-                "from": "u",
-                "to": "g",
-                "hops": [1, 2]
-            }],
-            "limit": 50
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF|CONTAINS*1..2]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, g{.name} LIMIT 50",
         &allow_all(),
     )
     .await;
@@ -2039,20 +1693,7 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
 async fn traversal_variable_length_floor_skips_shallow(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
-            ],
-            "relationships": [{
-                "type": ["MEMBER_OF", "CONTAINS"],
-                "from": "u",
-                "to": "g",
-                "hops": [2, 3]
-            }],
-            "limit": 50
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF|CONTAINS*2..3]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, g{.name} LIMIT 50",
         &allow_all(),
     )
     .await;
@@ -2078,20 +1719,7 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
 
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
-            ],
-            "relationships": [{
-                "type": ["MEMBER_OF", "CONTAINS"],
-                "from": "u",
-                "to": "g",
-                "hops": [1, 3]
-            }],
-            "limit": 50
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF|CONTAINS*1..3]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, g{.name} LIMIT 50",
         &svc,
     )
     .await;
@@ -2115,19 +1743,7 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
 async fn traversal_chain_user_group_project(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]},
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
-            ],
-            "relationships": [
-                {"type": "MEMBER_OF", "from": "u", "to": "g"},
-                {"type": "CONTAINS", "from": "g", "to": "p"}
-            ],
-            "limit": 50
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group), (g)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u{.username}, g{.name}, p{.name} LIMIT 50",
         &allow_all(),
     )
     .await;
@@ -2161,19 +1777,7 @@ async fn traversal_chain_user_group_project(ctx: &TestContext) {
 async fn traversal_chain_user_mr_note(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]},
-                {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note"]}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
-            ],
-            "limit": 50
-        }"#,
+        "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest), (mr)-[:HAS_NOTE]->(n:Note) WHERE u.id >= 1 AND u.id <= 10000 AND n.id >= 1 AND n.id <= 10000 RETURN u{.username}, mr{.title}, n{.note} LIMIT 50",
         &allow_all(),
     )
     .await;
@@ -2204,11 +1808,7 @@ async fn traversal_chain_user_mr_note(ctx: &TestContext) {
 async fn pagination_complete_within_limit(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username} LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -2224,11 +1824,7 @@ async fn pagination_complete_within_limit(ctx: &TestContext) {
 async fn pagination_truncates_at_limit(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-            "limit": 3
-        }"#,
+        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username} LIMIT 3",
         &allow_all(),
     )
     .await;
@@ -2248,17 +1844,7 @@ async fn pagination_truncates_at_limit(ctx: &TestContext) {
 async fn no_alias_grouped_count_uses_derived_name(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["u"],
-            "aggregations": [{"count": "g"}],
-            "limit": 10
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(g) LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -2283,12 +1869,7 @@ async fn no_alias_grouped_count_uses_derived_name(ctx: &TestContext) {
 async fn no_alias_ungrouped_count_uses_derived_name(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [{"count": "g"}],
-            "limit": 10
-        }"#,
+        "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN count(g) LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -2307,21 +1888,7 @@ async fn no_alias_ungrouped_count_uses_derived_name(ctx: &TestContext) {
 async fn no_alias_multi_agg_each_uses_own_derived_name(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [
-                {"count": "u"},
-                {"min": "u.id"},
-                {"max": "u.id"}
-            ],
-            "limit": 10
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.name}, count(u), min(u.id), max(u.id) LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -2351,18 +1918,7 @@ async fn no_alias_multi_agg_each_uses_own_derived_name(ctx: &TestContext) {
 async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [{"count": "u"}],
-            "aggregation_sort": "-count_u",
-            "limit": 10
-        }"#,
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.name}, count(u) ORDER BY count_u DESC LIMIT 10",
         &allow_all(),
     )
     .await;
@@ -2412,7 +1968,6 @@ async fn graph_formatter_e2e() {
         traversal_variable_length_floor_skips_shallow,
         traversal_variable_length_with_redaction_at_depth,
         traversal_incoming_direction,
-        traversal_both_direction,
         traversal_chain_user_group_project,
         traversal_chain_user_mr_note,
         aggregation_count_exact,

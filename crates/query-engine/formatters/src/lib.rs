@@ -72,7 +72,7 @@ pub(crate) fn compiled(gql: &str) -> compiler::CompiledQueryContext {
     );
     let paths = vec![compiler::AuthorizedPath::new("1/", 30)];
     let ctx = compiler::SecurityContext::new_with_roles(1, paths).unwrap();
-    compiler::compile(gql, compiler::Frontend::Gql, &model, &ctx).unwrap()
+    compiler::compile(gql, &model, &ctx).unwrap()
 }
 
 #[cfg(test)]

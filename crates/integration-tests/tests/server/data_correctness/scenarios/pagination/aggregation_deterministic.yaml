@@ -1,8 +1,7 @@
 description: Aggregation SKIP without sort returns deterministic first page
 
-query:
-  gql: |
-    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.id, .username}, count(mr) AS mr_count SKIP 0 LIMIT 2
+query: |
+  MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.id, .username}, count(mr) AS mr_count SKIP 0 LIMIT 2
 
 expect:
   repeat_count: 2

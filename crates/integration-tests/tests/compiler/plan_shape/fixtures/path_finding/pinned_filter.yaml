@@ -1,16 +1,12 @@
 name: Direct path anchors retain filters on pinned global nodes
 
-query:
-  json: |
-    {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"username":"nonexistent"}},{"id":"g","entity":"Group","node_ids":[100]}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["MEMBER_OF"]}}
-  gql: |
-    MATCH p = ANY SHORTEST (u:User {id: 1, username: 'nonexistent'})-[:MEMBER_OF*1..2]->(g:Group {id: 100})
-    RETURN p
+query: |
+  MATCH p = ANY SHORTEST (u:User {id: 1, username: 'nonexistent'})-[:MEMBER_OF*1..2]->(g:Group {id: 100})
+  RETURN p
 
 logical:
-  gql:
-    expect:
-      - (Limit 30 (Select p (Shortest MEMBER_OF u->g DEPTH 2 (Filter u.id = 1, u.username = 'nonexistent' (Entities User AS u)) (Filter g.id = 100 (Entities Group AS g)))))
+  expect:
+    - (Limit 30 (Select p (Shortest MEMBER_OF u->g DEPTH 2 (Filter u.id = 1, u.username = 'nonexistent' (Entities User AS u)) (Filter g.id = 100 (Entities Group AS g)))))
 
 physical:
   clickhouse:

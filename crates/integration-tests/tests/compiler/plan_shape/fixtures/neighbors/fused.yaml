@@ -1,15 +1,11 @@
 name: Split IN_PROJECT variants use directional table unions
 
-query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1000]}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT"]}}
-  gql: |
-    MATCH (p:Project {id: 1000})-[:IN_PROJECT]-(neighbor) RETURN p, neighbor
+query: |
+  MATCH (p:Project {id: 1000})-[:IN_PROJECT]-(neighbor) RETURN p, neighbor
 
 logical:
-  gql:
-    expect:
-      - (Limit 30 (Select p, neighbor (Neighbors IN_PROJECT p--neighbor (Filter p.id = 1000 (Entities Project AS p)))))
+  expect:
+    - (Limit 30 (Select p, neighbor (Neighbors IN_PROJECT p--neighbor (Filter p.id = 1000 (Entities Project AS p)))))
 
 physical:
   clickhouse:

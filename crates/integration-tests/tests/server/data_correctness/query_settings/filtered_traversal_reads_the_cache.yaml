@@ -5,8 +5,7 @@ config:
   redaction: { allow: { group: [100, 101, 102, 200, 300, 998] } }
 
 steps:
-  - query:
-      gql: "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 10"
+  - query: "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 10"
     expect:
       settings: { use_query_cache: 1, query_cache_ttl: 10, query_cache_nondeterministic_function_handling: ignore }
       node_count: 5
@@ -15,8 +14,7 @@ steps:
   - seed:
       gl_group:
         - { id: 998, name: Late Group, full_path: late-group, visibility_level: public, traversal_path: "1/998/" }
-    query:
-      gql: "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 10"
+    query: "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 10"
     expect:
       settings: { use_query_cache: 1 }
       node_count: 5

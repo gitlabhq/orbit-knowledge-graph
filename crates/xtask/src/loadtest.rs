@@ -82,7 +82,7 @@ pub struct ClickHouseOptions {
 /// Minimal view of a scenario file; unknown fields are ignored on purpose.
 #[derive(Debug, Deserialize)]
 struct ScenarioFile {
-    query: BTreeMap<String, String>,
+    query: Option<String>,
 }
 
 struct LoadQuery {
@@ -160,7 +160,7 @@ pub async fn run(opts: Options) -> Result<()> {
         queries.retain(|q| q.label.contains(filter));
     }
     if queries.is_empty() {
-        bail!("no runnable scenarios found (need a `query.json` body)");
+        bail!("no runnable scenarios found (need a top-level `query`)");
     }
 
     let spec = |phase, rounds| PassSpec {
@@ -864,8 +864,8 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
         let text = std::fs::read_to_string(&path)?;
         let scenario: ScenarioFile = orbit_utils::yaml::from_str(&text)
             .with_context(|| format!("parsing {}", path.display()))?;
-        let Some(body) = scenario.query.get("json") else {
-            continue; // gql-only or non-executable scenario
+        let Some(body) = scenario.query else {
+            continue;
         };
         let label = path
             .strip_prefix(root)
@@ -873,35 +873,29 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
             .with_extension("")
             .to_string_lossy()
             .into_owned();
-        out.push(LoadQuery {
-            label,
-            body: body.clone(),
-        });
+        out.push(LoadQuery { label, body });
     }
     Ok(())
 }
 
-/// Minimal view of a query body: the entity and pinned ids of each node.
-#[derive(Deserialize)]
-struct QueryNodes {
-    #[serde(default)]
-    nodes: Vec<QueryNode>,
-}
-
-#[derive(Deserialize)]
-struct QueryNode {
-    entity: String,
-    #[serde(default)]
-    node_ids: Vec<i64>,
-}
-
-/// `(entity, id)` for every pinned node id in a query body, deduplicated.
-fn node_refs(body: &str) -> Result<Vec<(String, i64)>> {
-    let parsed: QueryNodes = serde_json::from_str(body).context("parsing query.json")?;
-    let mut refs: Vec<(String, i64)> = parsed
-        .nodes
+/// `(entity, id)` for every pinned node id in a query, deduplicated.
+fn node_refs(query: &str) -> Result<Vec<(String, i64)>> {
+    use query_engine::compiler::logical::{Query, facts};
+    let model = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()?;
+    let catalog = model.model().logical().as_admin();
+    let statement = query_engine::compiler::surface::parse(query, catalog)?;
+    let query = Query::new(&statement.plan, model.model());
+    let facts = facts::facts(query);
+    let mut refs: Vec<(String, i64)> = facts::anchors(query, &facts)
         .into_iter()
-        .flat_map(|n| n.node_ids.into_iter().map(move |id| (n.entity.clone(), id)))
+        .flat_map(|anchor| {
+            let entity = query.entity_name(anchor.binding.output).unwrap_or_default();
+            anchor
+                .pinned
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |id| (entity.to_string(), id))
+        })
         .collect();
     refs.sort();
     refs.dedup();
@@ -1114,20 +1108,13 @@ mod tests {
 
     #[test]
     fn node_refs_lists_pinned_ids_per_entity() {
-        let body = r#"{"query_type":"path_finding","nodes":[
-            {"id":"u1","entity":"User","node_ids":[2,1]},
-            {"id":"u2","entity":"User","node_ids":[2]},
-            {"id":"p","entity":"Project"}]}"#;
+        let query = "MATCH (u1:User)-[:MEMBER_OF]->(g:Group), (u2:User {id: 2})-[:MEMBER_OF]->(g) WHERE u1.id IN [2, 1] RETURN u1, u2, g";
         assert_eq!(
-            node_refs(body).unwrap(),
+            node_refs(query).unwrap(),
             [("User".to_string(), 1), ("User".to_string(), 2)]
         );
-        assert!(
-            node_refs(r#"{"query_type":"traversal"}"#)
-                .unwrap()
-                .is_empty()
-        );
-        assert!(node_refs("not json").is_err());
+        assert!(node_refs("MATCH (p:Project) RETURN p").unwrap().is_empty());
+        assert!(node_refs("not a query").is_err());
     }
 
     #[test]
@@ -1302,20 +1289,20 @@ mod tests {
     }
 
     #[test]
-    fn scenarios_missing_json_body_are_skipped() {
+    fn scenarios_without_a_query_are_skipped() {
         let dir = std::env::temp_dir().join(format!("xtask-loadtest-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
-            dir.join("with_json.yaml"),
-            "query:\n  json: '{\"query_type\":\"traversal\"}'\n",
+            dir.join("with_query.yaml"),
+            "query: 'MATCH (n:User) RETURN n'\n",
         )
         .unwrap();
-        std::fs::write(dir.join("gql_only.yaml"), "query:\n  gql: 'MATCH (n)'\n").unwrap();
+        std::fs::write(dir.join("steps_only.yaml"), "steps: []\n").unwrap();
 
         let queries = load_scenarios(&dir).unwrap();
         std::fs::remove_dir_all(&dir).ok();
 
         assert_eq!(queries.len(), 1);
-        assert_eq!(queries[0].label, "with_json");
+        assert_eq!(queries[0].label, "with_query");
     }
 }

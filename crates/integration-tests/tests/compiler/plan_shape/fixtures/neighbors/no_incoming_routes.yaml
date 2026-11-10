@@ -1,15 +1,11 @@
 name: Both-direction neighbors of a center no edge targets scan only the outgoing arm
 
-query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}
-  gql: |
-    MATCH (u:User {id: 1})--(neighbor) RETURN u, neighbor
+query: |
+  MATCH (u:User {id: 1})--(neighbor) RETURN u, neighbor
 
 logical:
-  gql:
-    expect:
-      - (Limit 30 (Select u, neighbor (Neighbors APPROVED|ASSIGNED|AUTHORED|CLOSED|CONFIRMED_BY|CONTAINS|CREATOR|DEPLOYED_BY|DISMISSED_BY|LAST_EDITED_BY|MEMBER_OF|MERGED|OWNER|REOPENED|RESOLVED_BY|REVIEWER|TRIGGERED|UPDATED_BY u--neighbor (Filter u.id = 1 (Entities User AS u)))))
+  expect:
+    - (Limit 30 (Select u, neighbor (Neighbors APPROVED|ASSIGNED|AUTHORED|CLOSED|CONFIRMED_BY|CONTAINS|CREATOR|DEPLOYED_BY|DISMISSED_BY|LAST_EDITED_BY|MEMBER_OF|MERGED|OWNER|REOPENED|RESOLVED_BY|REVIEWER|TRIGGERED|UPDATED_BY u--neighbor (Filter u.id = 1 (Entities User AS u)))))
 
 physical:
   clickhouse:

@@ -1,17 +1,7 @@
-description: JSON rejects incoming containment from a branch to its project
+description: Incoming containment from a branch to its project is rejected
 
-query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "p", "entity": "Project", "node_ids": [7000]},
-        {"id": "b", "entity": "Branch"}
-      ],
-      "relationships": [{"type": "CONTAINS", "from": "p", "to": "b", "direction": "incoming"}],
-      "aggregations": [{"count": "b", "as": "c"}],
-      "limit": 10
-    }
+query: |
+  MATCH (p:Project {id: 7000})<-[:CONTAINS]-(b:Branch) RETURN count(b) AS c LIMIT 10
 
 expect:
   compile_error: "no CONTAINS relationship connects Project to Branch"

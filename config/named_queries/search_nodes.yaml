@@ -10,17 +10,8 @@ parameters:
   text:
     schema: { type: string, minLength: 3, maxLength: 1024 }
     example: gitlab
-query:
-  json:
-    query_type: traversal
-    nodes:
-      - id: n
-        entity: { $param: entity }
-        filters:
-          "$param:field": { contains: { $param: text } }
-    limit: 50
-  gql: |
-    MATCH (n:{{ identifier("entity") }})
-    WHERE n.{{ identifier("field") }} CONTAINS {{ param("text") }}
-    RETURN n
-    LIMIT 50
+query: |
+  MATCH (n:{{ identifier("entity") }})
+  WHERE n.{{ identifier("field") }} CONTAINS {{ param("text") }}
+  RETURN n
+  LIMIT 50

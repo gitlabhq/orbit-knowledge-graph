@@ -18,8 +18,8 @@ use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use query_engine::compiler::subquery_statements;
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, ParameterizedQuery, QueryStats,
-    Realm, ResultContext, SecurityContext,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, ParameterizedQuery, QueryStats, Realm,
+    ResultContext, SecurityContext,
 };
 use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
@@ -91,16 +91,15 @@ fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
 
 pub async fn run_query(
     ctx: &TestContext,
-    frontend: Frontend,
     query: &str,
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> ResponseView {
     let data_model = load_data_model();
-    let compiled = compile_like_server(query, frontend, &data_model, security)
+    let compiled = compile_like_server(query, &data_model, security)
         .await
         .expect("query should compile");
-    let output = execute_output(ctx, frontend, &compiled, &data_model, security, redaction).await;
+    let output = execute_output(ctx, &compiled, &data_model, security, redaction).await;
     assert_pagination(&output, "run_query");
     let response = validate_response(&compiled.stats, GraphFormatter.format(&output), "run_query");
     ResponseView::for_query(&compiled.stats, response)
@@ -278,24 +277,18 @@ async fn run_case(
             ctx.optimize_if_needed().await;
         }
         let name = &step_label(name, index, steps.len());
-        for (frontend_key, query_str) in &step.query {
-            if cfg.skip.contains_key(frontend_key) {
-                continue;
-            }
-            let frontend = frontend_key
-                .parse::<Frontend>()
-                .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));
-            run_frontend(
-                (&ctx, &data_model),
-                (frontend, frontend_key),
-                query_str,
-                &security,
-                &redaction,
-                &step.expect,
-                name,
-            )
-            .await;
+        if cfg.skip.is_some() {
+            continue;
         }
+        run_query_step(
+            (&ctx, &data_model),
+            &step.query,
+            &security,
+            &redaction,
+            &step.expect,
+            name,
+        )
+        .await;
     }
 }
 
@@ -307,23 +300,22 @@ pub(super) fn step_label(name: &str, index: usize, steps: usize) -> String {
     }
 }
 
-async fn run_frontend(
+async fn run_query_step(
     (ctx, data_model): (
         &TestContext,
         &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     ),
-    (frontend, frontend_key): (Frontend, &str),
     query: &str,
     security: &SecurityContext,
     redaction: &MockRedactionService,
     expect: &QueryExpect,
     name: &str,
 ) {
-    let label = &format!("{name} [{frontend_key}]");
+    let label = name;
     expect.validate_pages_exclusive(label);
 
-    let compiled = compile_like_server(query, frontend, data_model, security).await;
-    let Some(compiled) = assert_compilation(compiled, expect, frontend_key, label) else {
+    let compiled = compile_like_server(query, data_model, security).await;
+    let Some(compiled) = assert_compilation(compiled, expect, label) else {
         return;
     };
 
@@ -334,7 +326,7 @@ async fn run_frontend(
     if !expect.indexes_used.is_empty() {
         assert_indexes_used(
             ctx,
-            (query, frontend, data_model, security),
+            (query, data_model, security),
             &compiled,
             &expect.indexes_used,
             label,
@@ -343,42 +335,37 @@ async fn run_frontend(
     }
 
     if !expect.pages.is_empty() {
-        run_pages(
-            ctx, frontend, query, data_model, security, redaction, expect, label,
-        )
-        .await;
+        run_pages(ctx, query, data_model, security, redaction, expect, label).await;
         return;
     }
 
-    let output = execute_output(ctx, frontend, &compiled, data_model, security, redaction).await;
-    let baseline = assert_output(&output, frontend, expect, label);
+    let output = execute_output(ctx, &compiled, data_model, security, redaction).await;
+    let baseline = assert_output(&output, expect, label);
     let count = repeat_count(expect, label);
     for run in 2..=count {
-        let compiled = compile_like_server(query, frontend, data_model, security).await;
-        let compiled = assert_compilation(compiled, expect, frontend_key, label)
-            .expect("repeated query should compile");
+        let compiled = compile_like_server(query, data_model, security).await;
+        let compiled =
+            assert_compilation(compiled, expect, label).expect("repeated query should compile");
         if !expect.indexes_used.is_empty() {
             assert_indexes_used(
                 ctx,
-                (query, frontend, data_model, security),
+                (query, data_model, security),
                 &compiled,
                 &expect.indexes_used,
                 label,
             )
             .await;
         }
-        let output =
-            execute_output(ctx, frontend, &compiled, data_model, security, redaction).await;
-        let rerun = assert_output(&output, frontend, expect, label);
+        let output = execute_output(ctx, &compiled, data_model, security, redaction).await;
+        let rerun = assert_output(&output, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
     }
 }
 
 async fn assert_indexes_used(
     ctx: &TestContext,
-    (raw, frontend, data_model, security): (
+    (raw, data_model, security): (
         &str,
-        Frontend,
         &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         &SecurityContext,
     ),
@@ -388,7 +375,7 @@ async fn assert_indexes_used(
 ) {
     let query = &compiled.base;
     let plan = ctx.explain_plan(query).await;
-    let ctes = subquery_statements(raw, frontend, data_model, security).expect("subqueries render");
+    let ctes = subquery_statements(raw, data_model, security).expect("subqueries render");
     for ExpectedIndex { table, index } in expected {
         let mut cte_plans = Vec::new();
         let mut scans = Vec::new();
@@ -490,7 +477,6 @@ fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_
 #[allow(clippy::too_many_arguments)]
 async fn run_pages(
     ctx: &TestContext,
-    frontend: Frontend,
     base_query: &str,
     data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &SecurityContext,
@@ -502,15 +488,14 @@ async fn run_pages(
 
     for (i, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", i + 1);
-        let query_str = page_query(frontend, base_query, i);
+        let query_str = page_query(base_query, i);
 
-        let compiled = compile_like_server(&query_str, frontend, data_model, security)
+        let compiled = compile_like_server(&query_str, data_model, security)
             .await
             .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}"));
 
-        let output =
-            execute_output(ctx, frontend, &compiled, data_model, security, redaction).await;
-        let response = assert_output(&output, frontend, page_expect, &page_label);
+        let output = execute_output(ctx, &compiled, data_model, security, redaction).await;
+        let response = assert_output(&output, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
         assert_page_bounds(&response, i, expect.pages.len(), &page_label);
@@ -519,12 +504,11 @@ async fn run_pages(
     if let Some(all_pages) = &expect.all_pages {
         collected.assert_expect(all_pages, label);
         if all_pages.matches_unpaginated {
-            let query = unpaginated(frontend, base_query);
-            let compiled = compile_like_server(&query, frontend, data_model, security)
+            let query = unpaginated(base_query);
+            let compiled = compile_like_server(&query, data_model, security)
                 .await
                 .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
-            let output =
-                execute_output(ctx, frontend, &compiled, data_model, security, redaction).await;
+            let output = execute_output(ctx, &compiled, data_model, security, redaction).await;
             assert_pagination(&output, label);
             let response =
                 validate_response(&compiled.stats, GraphFormatter.format(&output), label);
@@ -535,7 +519,6 @@ async fn run_pages(
 
 async fn compile_like_server(
     query: &str,
-    frontend: Frontend,
     data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &SecurityContext,
 ) -> Result<Arc<CompiledQueryContext>, PipelineError> {
@@ -543,7 +526,6 @@ async fn compile_like_server(
     server_extensions.insert(Arc::clone(data_model));
     server_extensions.insert(claims_for(security));
     let mut pipeline_ctx = QueryPipelineContext {
-        frontend,
         query_json: query.to_owned(),
         compiled: None,
         security_context: Some(security.clone()),
@@ -564,7 +546,6 @@ async fn compile_like_server(
 
 async fn execute_output(
     ctx: &TestContext,
-    frontend: Frontend,
     compiled: &Arc<CompiledQueryContext>,
     data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &SecurityContext,
@@ -585,7 +566,6 @@ async fn execute_output(
     server_extensions.insert(resolver_registry);
 
     let mut pipeline_ctx = QueryPipelineContext {
-        frontend,
         query_json: String::new(),
         compiled: Some(Arc::clone(compiled)),
         security_context: Some(security.clone()),
@@ -1278,38 +1258,11 @@ mod tests {
         let security = build_security(&None);
         compile_like_server(
             "MATCH (u:User {id: 1}) RETURN u.username LIMIT 5",
-            Frontend::Gql,
             &data_model,
             &security,
         )
         .await
         .unwrap();
-    }
-
-    #[test]
-    fn json_and_gql_keys_map_to_their_frontends() {
-        assert_eq!("json".parse(), Ok(Frontend::JsonDsl));
-        assert_eq!("gql".parse(), Ok(Frontend::Gql));
-        assert!("sql".parse::<Frontend>().is_err());
-    }
-
-    #[test]
-    fn both_frontends_compile_the_same_query_identically() {
-        let data_model = load_data_model();
-        let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let json = compile(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":5}"#, Frontend::JsonDsl, &data_model, &security)
-        .unwrap();
-        let gql = compile(
-            "MATCH (u:User {id: 1}) RETURN u.username LIMIT 5",
-            Frontend::Gql,
-            &data_model,
-            &security,
-        )
-        .unwrap();
-        assert_eq!(json.base.sql, gql.base.sql);
-        assert_eq!(json.base.params, gql.base.params);
-        assert_eq!(json.query_type, gql.query_type);
-        assert_eq!(json.hydration, gql.hydration);
     }
 
     #[test]
@@ -1323,7 +1276,7 @@ mod tests {
                 "line 2, column",
             ),
         ] {
-            let error = compile(raw, Frontend::Gql, &data_model, &security).unwrap_err();
+            let error = compile(raw, &data_model, &security).unwrap_err();
             let message = error.to_string();
             assert!(error.is_client_safe(), "{message}");
             assert!(message.contains("Orbit query syntax"), "{message}");

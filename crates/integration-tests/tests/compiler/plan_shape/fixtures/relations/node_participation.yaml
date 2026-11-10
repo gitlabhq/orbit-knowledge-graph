@@ -1,12 +1,9 @@
 cases:
   - name: Stored aggregation uses exact keys for an uncovered endpoint filter
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"title":{"starts_with":"Fix"}}}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"}],"aggregations":[{"count":"mr","as":"n"}]}
-      gql: |
-        MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
-        WHERE mr.title STARTS WITH 'Fix'
-        RETURN count(mr) AS n
+    query: |
+      MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
+      WHERE mr.title STARTS WITH 'Fix'
+      RETURN count(mr) AS n
     logical:
       expect:
         - "(Aggregate COUNT(mr) AS n (Filter starts_with(mr.title, 'Fix') (Follow APPROVED u->mr AS e0 (Filter ... (Entities User AS u)))))"
@@ -19,13 +16,10 @@ cases:
             - (Filter _orbit_edge_0.target_id IN $mrs.id, ... (_))
 
   - name: Endpoint IDs and ranges remain visible on the edge relation
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","node_ids":[1000,1001],"id_range":{"start":1000,"end":1001},"columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
-      gql: |
-        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
-        WHERE p.id IN [1000, 1001] AND p.id >= 1000 AND p.id <= 1001
-        RETURN mr.title, p.name
+    query: |
+      MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+      WHERE p.id IN [1000, 1001] AND p.id >= 1000 AND p.id <= 1001
+      RETURN mr.title, p.name
     logical:
       expect:
         - "(Filter p.id IN [1000, 1001], p.id >= 1000, p.id <= 1001 (Follow IN_PROJECT mr->p AS e0 (Entities MergeRequest AS mr)))"
@@ -37,13 +31,10 @@ cases:
             - (Scan Table(gl_merge_request) AS mr)
 
   - name: Every id equality and IN list intersects into the pins and every id bound joins the range
-    query:
-      gql: |
-        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
-        WHERE p.id IN [1000, 1001, 1002] AND p.id IN [1001, 1002] AND p.id > 999 AND p.id <= 2000 AND p.id < 1500 AND p.id <> 1002
-        RETURN mr.title, p.name
-    missing_frontends:
-      json: JSON DSL deprecated
+    query: |
+      MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+      WHERE p.id IN [1000, 1001, 1002] AND p.id IN [1001, 1002] AND p.id > 999 AND p.id <= 2000 AND p.id < 1500 AND p.id <> 1002
+      RETURN mr.title, p.name
     logical:
       expect:
         - "(Filter ... (Follow IN_PROJECT mr->p AS e0 (Entities MergeRequest AS mr)))"
@@ -54,12 +45,9 @@ cases:
             - (Filter mr.project_id IN [1001, 1002], mr.project_id >= 1000, mr.project_id <= 1499, ... (_))
 
   - name: Nullable aggregate properties retain current node rows and arguments
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"}],"aggregations":[{"count":"mr.merged_at","as":"n"}]}
-      gql: |
-        MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
-        RETURN count(mr.merged_at) AS n
+    query: |
+      MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
+      RETURN count(mr.merged_at) AS n
     logical:
       expect:
         - "(Aggregate COUNT(mr.merged_at) AS n (Follow APPROVED u->mr AS e0 (Filter ... (Entities User AS u))))"

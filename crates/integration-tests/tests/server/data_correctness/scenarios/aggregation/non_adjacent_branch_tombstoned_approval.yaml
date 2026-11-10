@@ -8,11 +8,10 @@ cases:
       extra_seed:
         gl_edge:
           - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: APPROVED, target_id: 2001, target_kind: MergeRequest, source_tags: [], target_tags: ["state:opened"], _version: "2024-01-01 00:00:00" }
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project),
-              (u)-[:APPROVED]->(mr:MergeRequest)
-        RETURN g{.id, .name}, count(mr) AS approval_count LIMIT 20
+    query: |
+      MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project),
+            (u)-[:APPROVED]->(mr:MergeRequest)
+      RETURN g{.id, .name}, count(mr) AS approval_count LIMIT 20
     expect:
       skip_requirements: ["node_ids"]
       groups:
@@ -32,11 +31,10 @@ cases:
         gl_edge:
           - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: APPROVED, target_id: 2001, target_kind: MergeRequest, source_tags: [], target_tags: ["state:opened"], _version: "2024-01-01 00:00:00" }
           - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: APPROVED, target_id: 2001, target_kind: MergeRequest, _version: "2024-06-01 00:00:00", _deleted: true }
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project),
-              (u)-[:APPROVED]->(mr:MergeRequest)
-        RETURN g{.id, .name}, count(mr) AS approval_count LIMIT 20
+    query: |
+      MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project),
+            (u)-[:APPROVED]->(mr:MergeRequest)
+      RETURN g{.id, .name}, count(mr) AS approval_count LIMIT 20
     expect:
       skip_requirements: ["node_ids"]
       groups:

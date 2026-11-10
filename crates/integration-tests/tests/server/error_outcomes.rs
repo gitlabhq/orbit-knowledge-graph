@@ -25,7 +25,7 @@ use orbit_server::proto::{
 };
 use orbit_server_config::AppConfig;
 use query_engine::shared::content::ColumnResolverRegistry;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tonic::transport::Channel;
@@ -41,7 +41,7 @@ const ALL_FILES: [i64; 4] = [5001, 5002, 5003, 5004];
 async fn successful_query_is_a_success() {
     let mut server = Server::start().await;
 
-    server.run(project_query(json!({}))).await.unwrap();
+    server.run(project_query("")).await.unwrap();
 
     server.assert_recorded("ok", "success").await;
 }
@@ -61,7 +61,7 @@ async fn caller_without_enabled_namespaces_is_a_caller_error() {
     )
     .unwrap();
     let mut call = tonic::Request::new(tokio_stream::iter([ExecuteQueryMessage {
-        content: Some(Content::Request(project_query(json!({})))),
+        content: Some(Content::Request(project_query(""))),
     }]));
     call.metadata_mut()
         .insert("authorization", format!("Bearer {token}").parse().unwrap());
@@ -88,8 +88,8 @@ async fn unparsable_datetime_filter_is_rejected_before_execution() {
     let mut server = Server::start().await;
 
     for value in ["garbage", "2026-09-30T00:00:00+00:00"] {
-        let filters = json!({"created_at": {"gte": value}});
-        let error = server.run(project_query(filters)).await.unwrap_err();
+        let condition = format!(" AND p.created_at >= '{value}'");
+        let error = server.run(project_query(&condition)).await.unwrap_err();
 
         assert_eq!(error.code, "compile_error");
         assert!(
@@ -106,7 +106,7 @@ async fn unparsable_datetime_filter_is_rejected_before_execution() {
 #[tokio::test]
 async fn closing_the_request_stream_during_redaction_is_a_caller_error() {
     let mut server = Server::start().await;
-    let mut query = server.open(project_query(json!({}))).await;
+    let mut query = server.open(project_query("")).await;
     query.await_authorization_request().await;
 
     let QueryStream {
@@ -133,7 +133,7 @@ async fn closing_the_request_stream_during_redaction_is_a_caller_error() {
 #[tokio::test]
 async fn mismatched_redaction_response_is_a_server_error() {
     let mut server = Server::start().await;
-    let mut query = server.open(project_query(json!({}))).await;
+    let mut query = server.open(project_query("")).await;
     query.await_authorization_request().await;
 
     let mismatched = RedactionResponse {
@@ -160,7 +160,7 @@ async fn mismatched_redaction_response_is_a_server_error() {
 #[tokio::test]
 async fn dropping_the_call_during_redaction_is_a_caller_error() {
     let mut server = Server::start().await;
-    let mut query = server.open(project_query(json!({}))).await;
+    let mut query = server.open(project_query("")).await;
     query.await_authorization_request().await;
 
     drop(query);
@@ -222,11 +222,7 @@ async fn content_batch_over_the_cap_with_limit_at_the_cap_is_a_server_error() {
 #[tokio::test]
 async fn invalid_query_is_a_caller_error() {
     let mut server = Server::start().await;
-    let query = json!({
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["no_such_column"]}],
-        "limit": 10
-    });
+    let query = "MATCH (p:Project {id: 1000}) RETURN p{.no_such_column} LIMIT 10".to_string();
 
     let error = server.run(request(query)).await.unwrap_err();
 
@@ -362,27 +358,23 @@ async fn seed(graph: &TestContext) {
     graph.optimize_all().await;
 }
 
-fn request(query: Value) -> ExecuteQueryRequest {
+fn request(query: String) -> ExecuteQueryRequest {
     ExecuteQueryRequest {
-        query: query.to_string(),
+        query,
         ..Default::default()
     }
 }
 
-fn project_query(filters: Value) -> ExecuteQueryRequest {
-    request(json!({
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "p", "entity": "Project", "node_ids": [1000, 1001], "columns": ["name"], "filters": filters
-        }],
-        "limit": 10
-    }))
+fn project_query(condition: &str) -> ExecuteQueryRequest {
+    request(format!(
+        "MATCH (p:Project) WHERE p.id IN [1000, 1001]{condition} RETURN p{{.name}} LIMIT 10"
+    ))
 }
 
 fn file_content_query(node_ids: &[i64], limit: usize) -> ExecuteQueryRequest {
-    request(json!({
-        "query_type": "traversal",
-        "nodes": [{"id": "f", "entity": "File", "node_ids": node_ids, "columns": ["path", "content"]}],
-        "limit": limit
-    }))
+    let ids: Vec<String> = node_ids.iter().map(i64::to_string).collect();
+    request(format!(
+        "MATCH (f:File) WHERE f.id IN [{}] RETURN f{{.path, .content}} LIMIT {limit}",
+        ids.join(", ")
+    ))
 }

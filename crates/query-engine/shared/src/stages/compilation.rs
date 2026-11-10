@@ -29,9 +29,7 @@ impl PipelineStage for CompilationStage {
             })
             .and_then(|data_model| match parsed {
                 Some(query) => compiler::gql::compile_query(query, data_model, security_context),
-                None => {
-                    compiler::compile(&ctx.query_json, ctx.frontend, data_model, security_context)
-                }
+                None => compiler::compile(&ctx.query_json, data_model, security_context),
             })
             .map_err(PipelineError::from)
             .inspect_err(|e| obs.record_error(e))?;

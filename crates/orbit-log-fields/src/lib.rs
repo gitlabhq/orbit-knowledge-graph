@@ -89,7 +89,6 @@ pub mod safe {
         LICENSE_CHECKSUM_PRESENT = "license_checksum_present";
         FEATURE_QUALIFIED_NAME = "feature_qualified_name";
         QUERY_TYPE = "query_type";
-        QUERY_FRONTEND = "query_frontend";
         RESPONSE_FORMAT = "response_format";
         METADATA_ONLY = "metadata_only";
         /// Only names that Orbit defines, such as scheduled or named queries.

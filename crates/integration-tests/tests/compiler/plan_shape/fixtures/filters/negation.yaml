@@ -1,15 +1,11 @@
 cases:
   - name: "A NOT tree on a query without relationships binds into that node's scan"
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","id_range":{"start":1,"end":10},"not":{"id":{"in":[3,4]}},"columns":["name"]}]}
-      gql: |
-        MATCH (d:Definition)
-        WHERE d.id >= 1 AND d.id <= 10 AND NOT d.id IN [3, 4]
-        RETURN d.name
+    query: |
+      MATCH (d:Definition)
+      WHERE d.id >= 1 AND d.id <= 10 AND NOT d.id IN [3, 4]
+      RETURN d.name
     logical:
-      gql:
-        expect: ["(Filter d.id >= 1, d.id <= 10, NOT (d.id IN [3, 4]) (Entities Definition AS d))"]
+      expect: ["(Filter d.id >= 1, d.id <= 10, NOT (d.id IN [3, 4]) (Entities Definition AS d))"]
     physical:
       clickhouse:
         planned:
@@ -17,30 +13,23 @@ cases:
             - (Filter NOT(d.id IN [3, 4]), d._deleted = false (Bind d (Deduplicate LimitBy ... (Sort d.traversal_path, d.project_id, d.branch, d.id, d._version DESC (Project * (Filter d.id >= 1, d.id <= 10 (_)))))))
 
   - name: A complemented NOT becomes an ordinary node filter
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000]},{"id":"b","entity":"Definition","filters":{"name":{"ne":"skip"}},"columns":["name"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
-      gql: |
-        MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition)
-        WHERE NOT b.name = 'skip'
-        RETURN b.name
+    query: |
+      MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition)
+      WHERE NOT b.name = 'skip'
+      RETURN b.name
     logical:
-      gql:
-        expect:
-          - "(Filter NOT (b.name = 'skip') (Follow CALLS a->b AS e0 (Filter a.id = 12000 (Entities Definition AS a))))"
+      expect:
+        - "(Filter NOT (b.name = 'skip') (Follow CALLS a->b AS e0 (Filter a.id = 12000 (Entities Definition AS a))))"
     physical:
       clickhouse:
         planned:
           expect: ["(Filter b.name != 'skip', ... (_))"]
 
   - name: A doubly negated leaf reads its column like an unnegated one
-    query:
-      gql: |
-        MATCH (j:Job)
-        WHERE j.project_id = 1 AND NOT (j.name = 'build' AND NOT j.finished_at >= '2026-10-10')
-        RETURN j.name
-    missing_frontends:
-      json: JSON DSL deprecated
+    query: |
+      MATCH (j:Job)
+      WHERE j.project_id = 1 AND NOT (j.name = 'build' AND NOT j.finished_at >= '2026-10-10')
+      RETURN j.name
     logical:
       expect: ["(Filter ... (Entities Job AS j))"]
     physical:

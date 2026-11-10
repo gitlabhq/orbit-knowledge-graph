@@ -1,8 +1,7 @@
 description: Pages across NULL merged_at sort keys cover all 6 MRs
 
-query:
-  gql: |
-    MATCH (mr:MergeRequest) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN mr.title ORDER BY mr.merged_at SKIP 0 LIMIT 2
+query: |
+  MATCH (mr:MergeRequest) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN mr.title ORDER BY mr.merged_at SKIP 0 LIMIT 2
 
 expect:
   all_pages:

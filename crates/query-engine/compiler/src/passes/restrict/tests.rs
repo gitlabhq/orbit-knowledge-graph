@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 
 use query_data_model::{Catalog, ClickHouse};
 
-use crate::surface::{self, Frontend};
+use crate::surface;
 use crate::testkit::{admin_ctx, non_admin_ctx};
 use crate::types::{AccessLevel, AuthorizedPath, SecurityContext};
 use crate::{QueryError, Result};
@@ -24,7 +24,7 @@ const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
 
 fn restrict(gql: &str, ctx: &SecurityContext) -> Result<()> {
     let model = MODEL.model();
-    let statement = surface::parse(gql, Frontend::Gql, model.logical().as_admin())?;
+    let statement = surface::parse(gql, model.logical().as_admin())?;
     super::restrict(&statement.plan, model, &*MODEL, ctx)
 }
 

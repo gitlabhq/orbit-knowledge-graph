@@ -8,11 +8,10 @@ config:
     gl_definition:
       - { id: 99010, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: function, fqn: function, definition_type: function }
 
-query:
-  gql: |
-    MATCH (a:Definition {id: 99010})-[:CALLS]->(b:Definition)
-    WHERE a.definition_type = 'function' AND a.definition_type = 'function'
-    RETURN count(b) AS n
+query: |
+  MATCH (a:Definition {id: 99010})-[:CALLS]->(b:Definition)
+  WHERE a.definition_type = 'function' AND a.definition_type = 'function'
+  RETURN count(b) AS n
 
 expect:
   skip_requirements: [node_ids, "filter:definition_type"]

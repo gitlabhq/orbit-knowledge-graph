@@ -11,7 +11,6 @@ fn prompt(key: &str) -> &'static orbit_prompts::Prompt {
 }
 
 mod registry;
-mod schema;
 mod service;
 
 pub use registry::{CommandRegistry, ToolDefinition, ToolRegistry};

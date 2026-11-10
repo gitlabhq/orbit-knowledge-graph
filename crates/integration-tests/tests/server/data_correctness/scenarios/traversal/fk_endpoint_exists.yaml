@@ -13,11 +13,10 @@ cases:
           - { id: 2200, iid: 2200, title: Null FK, state: opened, source_branch: "null", target_branch: main, project_id: 1000, author_id: 1, traversal_path: "1/100/1000/" }
           - { id: 2201, iid: 2201, title: Missing FK target, state: opened, source_branch: missing, target_branch: main, project_id: 1000, author_id: 1, head_pipeline_id: 9999, traversal_path: "1/100/1000/" }
           - { id: 2202, iid: 2202, title: Live FK target, state: opened, source_branch: live, target_branch: main, project_id: 1000, author_id: 1, head_pipeline_id: 1101, traversal_path: "1/100/1000/" }
-    query:
-      gql: |
-        MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(p:Pipeline)
-        WHERE mr.id >= 2200 AND mr.id <= 2202
-        RETURN mr, p LIMIT 10
+    query: |
+      MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(p:Pipeline)
+      WHERE mr.id >= 2200 AND mr.id <= 2202
+      RETURN mr, p LIMIT 10
     expect:
       sql_contains: ["head_pipeline_id IN (SELECT _orbit_relation_"]
       node_count: 2
@@ -39,11 +38,10 @@ cases:
           - { id: 4100, iid: 4100, title: Fix project namespace, state: opened, work_item_type: issue, confidential: false, project_id: 1000, author_id: 1, namespace_id: 1000, traversal_path: "1/100/1000/" }
           - { id: 4101, iid: 4101, title: Fix missing group, state: opened, work_item_type: issue, confidential: false, project_id: 1000, author_id: 1, namespace_id: 9999, traversal_path: "1/100/1000/" }
           - { id: 4102, iid: 4102, title: Fix live group, state: opened, work_item_type: issue, confidential: false, project_id: 1000, author_id: 1, namespace_id: 100, traversal_path: "1/100/" }
-    query:
-      gql: |
-        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group)
-        WHERE w.id >= 4100 AND w.id <= 4102
-        RETURN w, g LIMIT 10
+    query: |
+      MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group)
+      WHERE w.id >= 4100 AND w.id <= 4102
+      RETURN w, g LIMIT 10
     expect:
       sql_contains: ["namespace_id IN (SELECT _orbit_relation_"]
       node_count: 2

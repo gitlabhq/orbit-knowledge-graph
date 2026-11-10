@@ -165,7 +165,6 @@ async fn chunked_results_over_the_limit_fail_before_any_chunk() {
 
     let schema = ExecuteQueryRequest {
         query: "CALL db.schema()".into(),
-        language: QueryLanguage::Gql as i32,
         chunked_result: true,
         ..Default::default()
     };
@@ -551,7 +550,6 @@ impl Cluster {
             .invoke_agent_command(authenticated(InvokeAgentCommandRequest {
                 command_name: "get_graph_schema".into(),
                 parameters_json: json!({"format": "raw", "expand_nodes": ["Project"]}).to_string(),
-                language: QueryLanguage::Json as i32,
             }))
             .await;
         let response = match command {
@@ -788,17 +786,12 @@ fn expected_project_row(version: u32) -> ProjectRow {
 
 fn project_query(version: u32) -> ExecuteQueryRequest {
     let columns = if project_has_description_in(version) {
-        json!(["name", "description"])
+        ".name, .description"
     } else {
-        json!(["name"])
+        ".name"
     };
     ExecuteQueryRequest {
-        query: json!({
-            "query_type": "traversal",
-            "nodes": [{"id": "project", "entity": "Project", "node_ids": [1], "columns": columns}],
-            "limit": 10
-        })
-        .to_string(),
+        query: format!("MATCH (project:Project {{id: 1}}) RETURN project{{{columns}}} LIMIT 10"),
         ..Default::default()
     }
 }

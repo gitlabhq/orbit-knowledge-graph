@@ -18,10 +18,9 @@ config:
 cases:
   - name: count
     description: A count over a tombstoned edge is zero
-    query:
-      gql: |
-        MATCH (u:User {id: 99002})-[:APPROVED]->(mr:MergeRequest)
-        RETURN count(mr) AS n
+    query: |
+      MATCH (u:User {id: 99002})-[:APPROVED]->(mr:MergeRequest)
+      RETURN count(mr) AS n
 
     expect:
       skip_requirements: ["node_ids"]
@@ -30,10 +29,9 @@ cases:
 
   - name: grouped
     description: A grouped aggregation over a tombstoned edge returns no group rather than a zero count
-    query:
-      gql: |
-        MATCH (u:User {id: 99002})-[:APPROVED]->(mr:MergeRequest)
-        RETURN mr.state, count(mr) AS n
+    query: |
+      MATCH (u:User {id: 99002})-[:APPROVED]->(mr:MergeRequest)
+      RETURN mr.state, count(mr) AS n
 
     expect:
       skip_requirements: ["node_ids"]

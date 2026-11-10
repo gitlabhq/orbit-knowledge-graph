@@ -1,15 +1,7 @@
 description: Hydrated neighbor properties read a stored epoch date as null
 
-query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "wi", "entity": "WorkItem", "node_ids": [4000]}],
-      "neighbors": {"direction": "outgoing", "rel_types": ["IN_MILESTONE"]},
-      "options": {"dynamic_columns": "*"}
-    }
-  gql: |
-    MATCH (wi:WorkItem {id: 4000})-[:IN_MILESTONE]->(n) RETURN wi, properties(n)
+query: |
+  MATCH (wi:WorkItem {id: 4000})-[:IN_MILESTONE]->(n) RETURN wi, properties(n)
 
 expect:
   node_count: 2

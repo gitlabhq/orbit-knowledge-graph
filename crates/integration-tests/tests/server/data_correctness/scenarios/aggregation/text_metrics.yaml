@@ -6,21 +6,15 @@ config:
 cases:
   - name: min_text_rejected
     description: MIN rejects a text property
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[9001]}],"aggregations":[{"min":"w.description","as":"v"}]}
-      gql: |
-        MATCH (w:WorkItem {id: 9001}) RETURN min(w.description) AS v
+    query: |
+      MATCH (w:WorkItem {id: 9001}) RETURN min(w.description) AS v
     expect:
       compile_error: not an ordered scalar
 
   - name: grouped_max_text_rejected
     description: A node-grouped MAX rejects a text property
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000]},{"id":"w","entity":"WorkItem"}],"relationships":[{"type":"IN_PROJECT","from":"w","to":"p"}],"group_by":["p"],"aggregations":[{"max":"w.title","as":"v"}]}
-      gql: |
-        MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN p, max(w.title) AS v
+    query: |
+      MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN p, max(w.title) AS v
     expect:
       compile_error: not an ordered scalar
 
@@ -31,36 +25,30 @@ cases:
         org_id: 1
         paths: [1/100/]
         access_level: 25
-    query:
-      gql: |
-        MATCH (o:VulnerabilityOccurrence {id: 1}) RETURN max(o.uuid) AS v
+    query: |
+      MATCH (o:VulnerabilityOccurrence {id: 1}) RETURN max(o.uuid) AS v
     expect:
       compile_error: not an ordered scalar
 
   - name: scalar_metrics_compile
     description: MIN and MAX still accept timestamps, integers, and booleans
-    query:
-      gql: |
-        MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000})
-        RETURN p, min(w.created_at) AS first_created, max(w.weight) AS max_weight, max(w.confidential) AS any_confidential
+    query: |
+      MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000})
+      RETURN p, min(w.created_at) AS first_created, max(w.weight) AS max_weight, max(w.confidential) AS any_confidential
     expect:
       compile_only: true
 
   - name: enum_metrics_rejected
     description: MIN and MAX reject enums, whose values have no order
-    query:
-      gql: |
-        MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000})
-        RETURN p, min(w.state) AS min_state
+    query: |
+      MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000})
+      RETURN p, min(w.state) AS min_state
     expect:
       compile_error: because enum values have no order
 
   - name: categorical_group_keys_compile
     description: Grouping still accepts enums, low-selectivity strings, and truncated timestamps
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"group_by":["mr.state","mr.merge_status",{"key":"mr.created_at","truncate":"month"}],"aggregations":[{"count":"mr","as":"n"}]}
-      gql: |
-        MATCH (mr:MergeRequest {id: 2000}) RETURN mr.state AS state, mr.merge_status AS merge_status, count(mr) AS n
+    query: |
+      MATCH (mr:MergeRequest {id: 2000}) RETURN mr.state AS state, mr.merge_status AS merge_status, count(mr) AS n
     expect:
       compile_only: true

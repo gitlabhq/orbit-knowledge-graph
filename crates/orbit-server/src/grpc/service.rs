@@ -10,7 +10,6 @@ use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::introspection::SchemaResponse;
 use query_data_model::{DEFAULT_PRIMARY_KEY, EntityId, GraphCatalog, Model};
-use query_engine::compiler::Frontend;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -35,15 +34,15 @@ use crate::proto::{
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse,
     GetIndexingStatusRequest, GetIndexingStatusResponse, GetItemCountsRequest,
-    GetItemCountsResponse, GetQueryDslRequest, GetQueryDslResponse, GetResponseFormatRequest,
-    GetResponseFormatResponse, GetSkillRequest, GetSkillResponse, InvokeAgentCommandRequest,
-    InvokeAgentCommandResponse, ListAgentCommandsRequest, ListAgentCommandsResponse,
-    ListNamedQueriesRequest, ListNamedQueriesResponse, ListSkillsRequest, ListSkillsResponse,
-    ListToolsRequest, ListToolsResponse, NamedQueryDefinition, QueryLanguage, QueryMetadata,
-    QueryType, ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
-    SchemaNode, SchemaNodeStyle, SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary,
-    StructuredSchema, ToolDefinition as ProtoToolDefinition, get_graph_schema_response,
-    get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
+    GetItemCountsResponse, GetResponseFormatRequest, GetResponseFormatResponse, GetSkillRequest,
+    GetSkillResponse, InvokeAgentCommandRequest, InvokeAgentCommandResponse,
+    ListAgentCommandsRequest, ListAgentCommandsResponse, ListNamedQueriesRequest,
+    ListNamedQueriesResponse, ListSkillsRequest, ListSkillsResponse, ListToolsRequest,
+    ListToolsResponse, NamedQueryDefinition, QueryMetadata, QueryType, ResponseFormat,
+    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
+    SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary, StructuredSchema,
+    ToolDefinition as ProtoToolDefinition, get_graph_schema_response, get_response_format_response,
+    invoke_agent_command_response,
 };
 use crate::skills::{get_skill, list_skills};
 use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
@@ -52,45 +51,27 @@ use query_engine::formatters::{
     FormatName, GqlFormatter, GraphFormatter, ResultFormatter, ToonFormatter,
 };
 
-fn query_frontend(language: i32) -> Result<Frontend, String> {
-    match QueryLanguage::try_from(language) {
-        Ok(QueryLanguage::Json) => Ok(Frontend::JsonDsl),
-        Ok(QueryLanguage::Gql) => Ok(Frontend::Gql),
-        Err(_) => Err(format!("Unknown language: {language}")),
-    }
-}
-
 fn resolve_raw_query(
     query_type: i32,
     query: String,
-    language: i32,
     named_queries: &named_queries::NamedQueries,
     values: &named_queries::BindingValues,
 ) -> Result<RawQuery, String> {
     let query_type =
         QueryType::try_from(query_type).map_err(|_| format!("Unknown query_type: {query_type}"))?;
-    let frontend = query_frontend(language)?;
     let rendered = match query_type {
-        QueryType::Json => named_queries::RenderedQuery {
+        QueryType::Raw => named_queries::RenderedQuery {
             text: query,
             settings: Vec::new(),
         },
         QueryType::Named => named_queries
-            .render_request_language(&query, named_language(frontend), values)
+            .render_request(&query, values)
             .map_err(|e| e.to_string())?,
     };
     Ok(RawQuery {
         text: rendered.text,
-        frontend,
         settings: rendered.settings,
     })
-}
-
-fn named_language(frontend: Frontend) -> named_queries::Language {
-    match frontend {
-        Frontend::JsonDsl => named_queries::Language::Json,
-        Frontend::Gql => named_queries::Language::Gql,
-    }
 }
 
 fn schema_query_result(
@@ -239,8 +220,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
-        let frontend =
-            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
         let inline_catalog = ctx.claims.source_type == SourceType::Dws;
         let schema = inline_catalog
             .then(|| {
@@ -257,7 +236,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             })
             .flatten();
         let tools = ToolRegistry::tools_with_catalog(
-            frontend,
             inline_catalog,
             schema
                 .as_ref()
@@ -284,9 +262,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             "Listing requested agent commands for user"
         );
 
-        let all_commands = CommandRegistry::commands_for(
-            query_frontend(req.language).map_err(Status::invalid_argument)?,
-        );
+        let all_commands = CommandRegistry::commands();
         let commands: Vec<_> = if requested.is_empty() {
             all_commands
         } else {
@@ -334,7 +310,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
-        let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
         if req.command_name.trim().is_empty() {
             return Err(Status::invalid_argument("command_name is required"));
         }
@@ -363,12 +338,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 let schema = self.active_schema.snapshot()?;
                 ToolService::render_graph_schema(schema.data_model.model(), &expand_nodes, format)
             }
-            AgentCommand::QueryLanguage { .. } if frontend == Frontend::Gql => {
-                Err(ExecutorError::NotFound(
-                    "get_query_dsl is unavailable with GQL; run CALL db.schema()".into(),
-                ))
-            }
-            AgentCommand::QueryLanguage { format } => ToolService::render_query_language(format),
             AgentCommand::ResponseFormat { format } => ToolService::render_response_format(format),
         }
         .map_err(command_error_to_status)?;
@@ -426,7 +395,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 let resolved = resolve_raw_query(
                     req.query_type,
                     req.query,
-                    req.language,
                     &schema.named_queries,
                     &named_queries::BindingValues {
                         current_user_id: ctx.claims.user_id,
@@ -562,51 +530,13 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(response))
     }
 
-    async fn get_query_dsl(
-        &self,
-        request: Request<GetQueryDslRequest>,
-    ) -> Result<Response<GetQueryDslResponse>, Status> {
-        extract_request_context(&request, &self.validator)?;
-
-        let req = request.get_ref();
-        if query_frontend(req.language).map_err(Status::invalid_argument)? == Frontend::Gql {
-            return Err(Status::not_found(
-                "GQL has no query DSL document; run CALL db.schema() for the graph shape",
-            ));
-        }
-        info!(
-            safe(RESPONSE_FORMAT) = req.format,
-            "Fetching query DSL grammar for user"
-        );
-
-        let response = if req.format == ResponseFormat::Llm as i32 {
-            let toon =
-                ToolService::build_query_dsl_toon().map_err(|e| Status::internal(e.to_string()))?;
-            GetQueryDslResponse {
-                version: ToolService::build_query_dsl_version().to_string(),
-                content: Some(get_query_dsl_response::Content::FormattedText(toon)),
-            }
-        } else {
-            GetQueryDslResponse {
-                version: ToolService::build_query_dsl_version().to_string(),
-                content: Some(get_query_dsl_response::Content::RawJsonSchema(
-                    ToolService::build_query_dsl_raw().to_string(),
-                )),
-            }
-        };
-
-        Ok(Response::new(response))
-    }
-
     async fn list_skills(
         &self,
         request: Request<ListSkillsRequest>,
     ) -> Result<Response<ListSkillsResponse>, Status> {
         extract_request_context(&request, &self.validator)?;
-        let frontend =
-            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
 
-        let skills: Vec<SkillSummary> = list_skills(frontend)
+        let skills: Vec<SkillSummary> = list_skills()
             .into_iter()
             .map(|skill| SkillSummary {
                 name: skill.name,
@@ -630,15 +560,13 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
-        let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
         info!(
             expanded(REQUESTED_NAME) = %req.name,
             safe(METADATA_ONLY) = req.metadata_only,
-            safe(QUERY_FRONTEND) = <&str>::from(frontend),
             "Fetching embedded skill"
         );
 
-        let skill = get_skill(&req.name, frontend, req.metadata_only)
+        let skill = get_skill(&req.name, req.metadata_only)
             .map_err(|error| Status::not_found(error.to_string()))?;
         let files = skill
             .files
@@ -666,13 +594,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     ) -> Result<Response<ListNamedQueriesResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
 
-        let frontend =
-            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
         let values = named_queries::BindingValues {
             current_user_id: ctx.claims.user_id,
         };
         let schema = self.active_schema.snapshot()?;
-        let queries = named_query_definitions(&schema.named_queries, frontend, &values)
+        let queries = named_query_definitions(&schema.named_queries, &values)
             .map_err(|e| Status::internal(e.to_string()))?;
 
         info!(safe(COUNT) = queries.len(), "Listing named queries");
@@ -899,10 +825,8 @@ impl OrbitServiceImpl {
 
 fn named_query_definitions(
     named_queries: &named_queries::NamedQueries,
-    frontend: Frontend,
     values: &named_queries::BindingValues,
 ) -> Result<Vec<NamedQueryDefinition>, named_queries::NamedQueryError> {
-    let language = named_language(frontend);
     let mut queries: Vec<_> = named_queries
         .iter()
         .filter(|query| query.example_parameters().is_empty())
@@ -912,7 +836,7 @@ fn named_query_definitions(
     queries
         .into_iter()
         .map(|query| {
-            let raw_query = query.render_language(language, values, &query.example_parameters())?;
+            let raw_query = query.render(values, &query.example_parameters())?;
             Ok(NamedQueryDefinition {
                 name: query.name.clone(),
                 description: query.description.clone(),
@@ -1391,29 +1315,18 @@ mod tests {
     }
 
     #[test]
-    fn resolve_raw_query_selects_frontend_by_language() {
+    fn resolve_raw_query_renders_named_queries() {
         let queries = named_queries::NamedQueries::load_embedded().unwrap();
         let bindings = named_queries::BindingValues {
             current_user_id: 73,
         };
-        for (language, frontend, raw) in [
-            (
-                QueryLanguage::Json,
-                Frontend::JsonDsl,
-                r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"User"}]}"#,
-            ),
-            (QueryLanguage::Gql, Frontend::Gql, "MATCH (n:User) RETURN n"),
-        ] {
-            let resolve = |kind, text: &str| {
-                resolve_raw_query(kind, text.into(), language as i32, &queries, &bindings).unwrap()
-            };
-            assert_eq!(resolve(QueryType::Json as i32, raw).frontend, frontend);
-            let named = resolve(QueryType::Named as i32, r#"{"name":"my_neighbors"}"#);
-            assert_eq!(named.frontend, frontend);
-            assert!(named.text.contains("73"));
-        }
-        assert!(resolve_raw_query(99, "".into(), 0, &queries, &bindings).is_err());
-        assert!(resolve_raw_query(0, "".into(), 99, &queries, &bindings).is_err());
+        let resolve =
+            |kind, text: &str| resolve_raw_query(kind, text.into(), &queries, &bindings).unwrap();
+        let raw = "MATCH (n:User) RETURN n";
+        assert_eq!(resolve(QueryType::Raw as i32, raw).text, raw);
+        let named = resolve(QueryType::Named as i32, r#"{"name":"my_neighbors"}"#);
+        assert!(named.text.contains("73"));
+        assert!(resolve_raw_query(99, "".into(), &queries, &bindings).is_err());
     }
 
     #[test]
@@ -1421,14 +1334,7 @@ mod tests {
         let queries = named_queries::NamedQueries::load_embedded().unwrap();
         let bindings = named_queries::BindingValues { current_user_id: 1 };
         let resolve = |kind: QueryType, text: &str| {
-            resolve_raw_query(
-                kind as i32,
-                text.into(),
-                QueryLanguage::Gql as i32,
-                &queries,
-                &bindings,
-            )
-            .unwrap()
+            resolve_raw_query(kind as i32, text.into(), &queries, &bindings).unwrap()
         };
 
         let named = resolve(
@@ -1443,7 +1349,7 @@ mod tests {
             )]
         );
         assert!(
-            resolve(QueryType::Json, "MATCH (n:User) RETURN n")
+            resolve(QueryType::Raw, "MATCH (n:User) RETURN n")
                 .settings
                 .is_empty()
         );

@@ -15,19 +15,8 @@ config:
       user: [1, 2, 3, 4, 5, 6, 7, 9003]
       merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9101]
 
-query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "node_ids": [9003]},
-        {"id": "mr", "entity": "MergeRequest"}
-      ],
-      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-      "limit": 10
-    }
-  gql: |
-    MATCH (u:User {id: 9003})-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr LIMIT 10
+query: |
+  MATCH (u:User {id: 9003})-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr LIMIT 10
 
 expect:
   node_count: 2

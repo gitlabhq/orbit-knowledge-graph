@@ -3,11 +3,8 @@ description: Physical system columns remain unavailable as relationship filters
 config:
   model_overlay: variant_routes
 
-query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"file","entity":"File","node_ids":[11000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"file","to":"callee","filters":{"_deleted":false}}]}
-  gql: |
-    MATCH (file:File {id: 11000})-[call:CALLS]->(callee:Definition) WHERE call._deleted = false RETURN file, callee
+query: |
+  MATCH (file:File {id: 11000})-[call:CALLS]->(callee:Definition) WHERE call._deleted = false RETURN file, callee
 
 expect:
   compile_error: unknown column _deleted

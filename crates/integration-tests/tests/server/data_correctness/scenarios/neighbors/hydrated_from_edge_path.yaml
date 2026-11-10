@@ -17,10 +17,9 @@ cases:
         gl_edge:
           - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: AUTHORED, target_id: 99000, target_kind: MergeRequest }
           - { traversal_path: "1/200/1001/", source_id: 99002, source_kind: User, relationship_kind: AUTHORED, target_id: 99001, target_kind: MergeRequest }
-    query:
-      gql: |
-        MATCH (u:User {id: 99002})-[:AUTHORED]->(neighbor)
-        RETURN u, neighbor
+    query: |
+      MATCH (u:User {id: 99002})-[:AUTHORED]->(neighbor)
+      RETURN u, neighbor
     expect:
       node_count: 3
       nodes:
@@ -51,10 +50,9 @@ cases:
         gl_ci_edge:
           - { traversal_path: "1/100/1000/", source_id: 99200, source_kind: Job, relationship_kind: IN_PIPELINE, target_id: 99100, target_kind: Pipeline }
           - { traversal_path: "1/200/1001/", source_id: 99200, source_kind: Job, relationship_kind: TRIGGERS_PIPELINE, target_id: 99101, target_kind: Pipeline }
-    query:
-      gql: |
-        MATCH (j:Job {id: 99200})-[:IN_PIPELINE|TRIGGERS_PIPELINE]->(neighbor)
-        RETURN j, neighbor
+    query: |
+      MATCH (j:Job {id: 99200})-[:IN_PIPELINE|TRIGGERS_PIPELINE]->(neighbor)
+      RETURN j, neighbor
     expect:
       node_count: 3
       nodes:

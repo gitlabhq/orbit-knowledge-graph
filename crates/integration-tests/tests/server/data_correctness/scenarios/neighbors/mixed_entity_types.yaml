@@ -1,15 +1,7 @@
 description: Bidirectional neighbors of MR 2000 span multiple entity types with dynamic columns
 
-query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}],
-      "neighbors": {"direction": "both"},
-      "options": {"dynamic_columns": "*"}
-    }
-  gql: |
-    MATCH (mr:MergeRequest {id: 2000})--(n) RETURN mr, properties(n)
+query: |
+  MATCH (mr:MergeRequest {id: 2000})--(n) RETURN mr, properties(n)
 
 expect:
   node_count: 10

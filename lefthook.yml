@@ -81,10 +81,8 @@ pre-commit:
       run: bash ./scripts/checks/check-pinned-version.sh
       glob:
         - "crates/query-engine/formatters/src/**/*.rs"
-        - "crates/query-engine/compiler/src/input.rs"
-        - "crates/query-engine/compiler/src/passes/validate.rs"
+        - "crates/query-data-model/src/surface/gql/query.pest"
         - "config/schemas/query_response.json"
-        - "config/schemas/graph_query.schema.json"
     - name: metrics-catalog-check
       run: mise run metrics:catalog:check
       glob:

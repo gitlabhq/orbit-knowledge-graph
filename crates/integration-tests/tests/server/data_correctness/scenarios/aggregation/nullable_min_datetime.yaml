@@ -1,9 +1,8 @@
 description: min and count over a nullable DateTime ignore the rows whose stored epoch stands for null
 
-query:
-  gql: |
-    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005
-    RETURN min(mr.merged_at) AS first_merge, count(mr.merged_at) AS merged
+query: |
+  MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005
+  RETURN min(mr.merged_at) AS first_merge, count(mr.merged_at) AS merged
 
 expect:
   skip_requirements: [node_ids]

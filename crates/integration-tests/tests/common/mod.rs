@@ -5,9 +5,7 @@ use std::sync::Arc;
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
 pub use query_engine::compiler::compile;
-use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext,
-};
+use query_engine::compiler::{AccessLevel, AuthorizedPath, CompiledQueryContext, SecurityContext};
 use query_engine::pipeline::{QueryPipelineContext, TypeMap};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
@@ -30,11 +28,11 @@ pub fn admin_security_context() -> SecurityContext {
 
 pub async fn compile_and_execute(
     ctx: &TestContext,
-    json: &str,
+    query: &str,
 ) -> (CompiledQueryContext, QueryResult) {
     let data_model = load_data_model();
     let security_ctx = test_security_context();
-    let compiled = compile(json, Frontend::JsonDsl, &data_model, &security_ctx).unwrap();
+    let compiled = compile(query, &data_model, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&compiled.base).await;
     let result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
     (compiled, result)
@@ -95,7 +93,6 @@ pub async fn resolve_owners(
     server_extensions.insert(Arc::new(ctx.create_client()));
     server_extensions.insert(load_data_model());
     let mut pipeline_ctx = QueryPipelineContext {
-        frontend: Frontend::JsonDsl,
         query_json: String::new(),
         compiled: Some(Arc::new(compiled.clone())),
         security_context: Some(test_security_context()),

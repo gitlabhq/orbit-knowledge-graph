@@ -1,16 +1,16 @@
-use compiler::{Frontend, QueryError, compile, compile_local};
+use compiler::{QueryError, compile, compile_local};
 
 use super::setup::{embedded_local_model, embedded_model, test_ctx};
 
-fn rejected(query: &str, frontend: Frontend) -> String {
-    match compile(query, frontend, &embedded_model(), &test_ctx()) {
+fn rejected(query: &str) -> String {
+    match compile(query, &embedded_model(), &test_ctx()) {
         Err(error) => error.to_string(),
         Ok(_) => panic!("{query} must be rejected"),
     }
 }
 
-fn assert_rejected(query: &str, frontend: Frontend, expected: &str) {
-    let message = rejected(query, frontend);
+fn assert_rejected(query: &str, expected: &str) {
+    let message = rejected(query);
     assert!(message.contains(expected), "{query}: {message}");
 }
 
@@ -20,7 +20,6 @@ const CONSTANT: &str = "every condition must compare a property of a matched nod
 fn property_compared_with_itself_is_rejected() {
     assert_rejected(
         "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) WHERE mr.iid = mr.iid RETURN mr",
-        Frontend::Gql,
         CONSTANT,
     );
 }
@@ -31,7 +30,7 @@ fn empty_in_list_is_rejected() {
         "MATCH (mr:MergeRequest) WHERE mr.state IN [] RETURN mr",
         "MATCH (mr:MergeRequest) WHERE mr.id IN [] RETURN mr",
     ] {
-        assert_rejected(query, Frontend::Gql, "IN requires 1-100 values");
+        assert_rejected(query, "IN requires 1-100 values");
     }
 }
 
@@ -41,12 +40,10 @@ fn nested_id_lists_keep_the_in_list_cap() {
     let ids = ids.join(", ");
     assert_rejected(
         &format!("MATCH (p:Project) WHERE p.name = 'x' AND NOT p.id IN [{ids}] RETURN p"),
-        Frontend::Gql,
         "an IN list is 150; the maximum is 100",
     );
     compile(
         &format!("MATCH (p:Project) WHERE p.id IN [{ids}] RETURN p"),
-        Frontend::Gql,
         &embedded_model(),
         &test_ctx(),
     )
@@ -57,7 +54,6 @@ fn nested_id_lists_keep_the_in_list_cap() {
 fn text_operators_on_relationship_columns_are_rejected() {
     assert_rejected(
         "MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE r.source_kind STARTS WITH 'Use' RETURN mr",
-        Frontend::Gql,
         "does not support substring matching",
     );
 }
@@ -65,7 +61,7 @@ fn text_operators_on_relationship_columns_are_rejected() {
 #[test]
 fn measure_inputs_must_be_stored() {
     let query = "MATCH (d:Definition) WHERE d.id = 1 RETURN max(d.content) AS longest";
-    let error = compile_local(query, Frontend::Gql, &embedded_local_model())
+    let error = compile_local(query, &embedded_local_model())
         .expect_err("the local store does not hold Definition.content");
     assert!(
         matches!(&error, QueryError::AllowlistRejected(message)
@@ -85,7 +81,7 @@ fn relationship_variables_and_type_conditions_compile() {
         "MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE type(r) = 'MEMBER_OF' RETURN p",
         "MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 102}) WHERE type(r) IN ['MEMBER_OF', 'CONTAINS'] RETURN p",
     ] {
-        compile(query, Frontend::Gql, &embedded_model(), &test_ctx())
+        compile(query, &embedded_model(), &test_ctx())
             .unwrap_or_else(|error| panic!("{query}: {error}"));
     }
 }
@@ -94,12 +90,10 @@ fn relationship_variables_and_type_conditions_compile() {
 fn shortest_path_type_conditions_keep_their_rejections() {
     assert_rejected(
         "MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE NOT type(r) = 'MEMBER_OF' RETURN p",
-        Frontend::Gql,
         "shortest paths require named relationship types",
     );
     assert_rejected(
         "MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF*1]->(`end`:Group {id: 100}) WHERE type(r) <> 'MEMBER_OF' RETURN p",
-        Frontend::Gql,
         "type(r) excludes every relationship type the pattern allows",
     );
 }
@@ -110,7 +104,7 @@ fn virtual_properties_are_rejected_under_not() {
         "MATCH (f:File {id: 13000}) WHERE NOT f.content = 'secret' RETURN f.name",
         "MATCH (f:File {id: 13000}) WHERE NOT NOT f.content = 'secret' RETURN f.name",
     ] {
-        let message = rejected(query, Frontend::Gql);
+        let message = rejected(query);
         assert!(message.contains("virtual column"), "{query}: {message}");
         assert!(!message.contains("secret"), "{query}: {message}");
     }
@@ -160,6 +154,6 @@ fn rejections_keep_their_hints() {
             "r has a variable length and binds a list",
         ),
     ] {
-        assert_rejected(query, Frontend::Gql, hint);
+        assert_rejected(query, hint);
     }
 }

@@ -1,11 +1,11 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
 use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
 use query_data_model::{Catalog, DuckDb};
-use query_engine::compiler::{CompiledQueryContext, Frontend, compile_local, generate_local_ddl};
+use query_engine::compiler::{CompiledQueryContext, compile_local, generate_local_ddl};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::shared::PipelineOutput;
 
@@ -37,12 +37,15 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
             .unwrap_or_else(|e| panic!("{name}: local DDL: {e}"));
         let (config, steps) = scenario.into_steps();
         seed_local(&database, [&base, &config.extra_seed], &name);
+        if config.skip.is_some() {
+            continue;
+        }
         for (index, step) in steps.iter().enumerate() {
             seed_local(&database, [&step.seed], &name);
             run_step(
                 &database,
                 &data_model,
-                (step, &config.skip),
+                step,
                 &step_label(&name, index, steps.len()),
             );
         }
@@ -54,68 +57,59 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
 fn run_step(
     database: &DuckDbClient,
     data_model: &Arc<Catalog<DuckDb>>,
-    (step, skip): (&QueryStep, &BTreeMap<String, String>),
+    step: &QueryStep,
     name: &str,
 ) {
-    for (key, query) in step
-        .query
-        .iter()
-        .filter(|(key, _)| !skip.contains_key(*key))
-    {
-        let frontend: Frontend = key
-            .parse()
-            .unwrap_or_else(|_| panic!("{name}: unknown query language '{key}'"));
-        let label = format!("{name} [{key} on duckdb]");
-        let expect = &step.expect;
-        expect.validate_pages_exclusive(&label);
-        let compiled = compile_local(query, frontend, data_model).map(Arc::new);
-        let Some(compiled) = assert_compilation(compiled, expect, key, &label) else {
-            continue;
-        };
-        if expect.compile_only {
-            continue;
-        }
-        if expect.pages.is_empty() {
+    let query = &step.query;
+    let label = format!("{name} [duckdb]");
+    let expect = &step.expect;
+    expect.validate_pages_exclusive(&label);
+    let compiled = compile_local(query, data_model).map(Arc::new);
+    let Some(compiled) = assert_compilation(compiled, expect, &label) else {
+        return;
+    };
+    if expect.compile_only {
+        return;
+    }
+    if expect.pages.is_empty() {
+        let output = execute(database, &compiled, &label);
+        let baseline = assert_output(&output, expect, &label);
+        for run in 2..=repeat_count(expect, &label) {
+            let compiled = compile_local(query, data_model).map(Arc::new);
+            let compiled = assert_compilation(compiled, expect, &label)
+                .expect("repeated query should compile");
             let output = execute(database, &compiled, &label);
-            let baseline = assert_output(&output, frontend, expect, &label);
-            for run in 2..=repeat_count(expect, &label) {
-                let compiled = compile_local(query, frontend, data_model).map(Arc::new);
-                let compiled = assert_compilation(compiled, expect, key, &label)
-                    .expect("repeated query should compile");
-                let output = execute(database, &compiled, &label);
-                let response = assert_output(&output, frontend, expect, &label);
-                assert_repeated_response(&baseline, &response, run, &label);
-            }
-            continue;
+            let response = assert_output(&output, expect, &label);
+            assert_repeated_response(&baseline, &response, run, &label);
         }
-        let mut collected = PageCollection::default();
-        for (index, page_expect) in expect.pages.iter().enumerate() {
-            let page_label = format!("{label} page {}", index + 1);
-            let compiled = Arc::new(
-                compile_local(&page_query(frontend, query, index), frontend, data_model)
-                    .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}")),
-            );
-            let output = execute(database, &compiled, &page_label);
-            let response = assert_output(&output, frontend, page_expect, &page_label);
-            let response = serde_json::from_value(response).expect("response should deserialize");
-            collected.push(&response);
-            assert_page_bounds(&response, index, expect.pages.len(), &page_label);
-        }
-        if let Some(all_pages) = &expect.all_pages {
-            collected.assert_expect(all_pages, &label);
-            if all_pages.matches_unpaginated {
-                let query = unpaginated(frontend, query);
-                let compiled = Arc::new(
-                    compile_local(&query, frontend, data_model).unwrap_or_else(|error| {
-                        panic!("{label}: unpaginated compile failed: {error}")
-                    }),
-                );
-                let output = execute(database, &compiled, &label);
-                assert_pagination(&output, &label);
-                let response =
-                    validate_response(&compiled.stats, GraphFormatter.format(&output), &label);
-                collected.assert_matches(&response, &label);
-            }
+        return;
+    }
+    let mut collected = PageCollection::default();
+    for (index, page_expect) in expect.pages.iter().enumerate() {
+        let page_label = format!("{label} page {}", index + 1);
+        let compiled = Arc::new(
+            compile_local(&page_query(query, index), data_model)
+                .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}")),
+        );
+        let output = execute(database, &compiled, &page_label);
+        let response = assert_output(&output, page_expect, &page_label);
+        let response = serde_json::from_value(response).expect("response should deserialize");
+        collected.push(&response);
+        assert_page_bounds(&response, index, expect.pages.len(), &page_label);
+    }
+    if let Some(all_pages) = &expect.all_pages {
+        collected.assert_expect(all_pages, &label);
+        if all_pages.matches_unpaginated {
+            let query = unpaginated(query);
+            let compiled =
+                Arc::new(compile_local(&query, data_model).unwrap_or_else(|error| {
+                    panic!("{label}: unpaginated compile failed: {error}")
+                }));
+            let output = execute(database, &compiled, &label);
+            assert_pagination(&output, &label);
+            let response =
+                validate_response(&compiled.stats, GraphFormatter.format(&output), &label);
+            collected.assert_matches(&response, &label);
         }
     }
 }

@@ -16,16 +16,6 @@ pest_meta = "2.9.1"
 [dev-dependencies]
 
 [[test]]
-name = "fuzz_compile"
-path = "tests/fuzz_compile/fuzz_target.rs"
-harness = false
-
-[[test]]
-name = "fuzz_compile_structured"
-path = "tests/fuzz_compile_structured/fuzz_target.rs"
-harness = false
-
-[[test]]
 name = "fuzz_gql"
 path = "tests/fuzz_gql/fuzz_target.rs"
 harness = false

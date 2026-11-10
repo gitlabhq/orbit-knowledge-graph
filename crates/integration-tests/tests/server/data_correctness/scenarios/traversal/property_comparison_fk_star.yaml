@@ -1,10 +1,9 @@
 description: FK traversal joins target properties used only by a cross-node predicate
 
-query:
-  gql: |
-    MATCH (mr:MergeRequest {project_id: 1000})-[:IN_PROJECT]->(p:Project)
-    WHERE mr.id > p.id AND mr.title <> p.name
-    RETURN mr, p LIMIT 20
+query: |
+  MATCH (mr:MergeRequest {project_id: 1000})-[:IN_PROJECT]->(p:Project)
+  WHERE mr.id > p.id AND mr.title <> p.name
+  RETURN mr, p LIMIT 20
 
 expect:
   node_count: 5

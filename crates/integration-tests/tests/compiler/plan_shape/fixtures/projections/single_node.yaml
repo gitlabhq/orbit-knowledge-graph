@@ -1,14 +1,7 @@
 name: Single node retains its filter and requested projection
 
-query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "f", "entity": "File", "columns": ["id", "path"], "filters": {"language": "rust"}}],
-      "limit": 10
-    }
-  gql: |
-    MATCH (f:File {language: 'rust'}) RETURN f.id, f.path LIMIT 10
+query: |
+  MATCH (f:File {language: 'rust'}) RETURN f.id, f.path LIMIT 10
 
 logical:
   expect:

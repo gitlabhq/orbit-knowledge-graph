@@ -74,7 +74,6 @@ mod tests {
         let mut extensions = TypeMap::default();
         extensions.insert(claims);
         QueryPipelineContext {
-            frontend: query_engine::compiler::Frontend::JsonDsl,
             query_json: String::new(),
             compiled: None,
             security_context: None,
@@ -118,7 +117,6 @@ mod tests {
     #[tokio::test]
     async fn missing_claims_returns_security_error() {
         let mut ctx = QueryPipelineContext {
-            frontend: query_engine::compiler::Frontend::JsonDsl,
             query_json: String::new(),
             compiled: None,
             security_context: None,

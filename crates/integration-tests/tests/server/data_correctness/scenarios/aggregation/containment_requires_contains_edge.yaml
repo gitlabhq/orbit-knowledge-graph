@@ -18,9 +18,8 @@ config:
 cases:
   - name: count
     description: Only the project with a CONTAINS edge is counted
-    query:
-      gql: |
-        MATCH (g:Group {id: 700})-[:CONTAINS]->(p:Project) RETURN count(p) AS c
+    query: |
+      MATCH (g:Group {id: 700})-[:CONTAINS]->(p:Project) RETURN count(p) AS c
     expect:
       skip_requirements: ["node_ids"]
       row_count: 1
@@ -28,9 +27,8 @@ cases:
 
   - name: grouped
     description: Grouping by project lists only the project with a CONTAINS edge
-    query:
-      gql: |
-        MATCH (g:Group {id: 700})-[:CONTAINS]->(p:Project) RETURN p, count(g) AS n LIMIT 10
+    query: |
+      MATCH (g:Group {id: 700})-[:CONTAINS]->(p:Project) RETURN p, count(g) AS n LIMIT 10
     expect:
       skip_requirements: ["node_ids"]
       groups:

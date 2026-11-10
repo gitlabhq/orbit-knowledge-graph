@@ -3,18 +3,8 @@ description: Path finding scoped to 1/100/ finds path to 1000 but not 1004 in 1/
 config:
   security: { org_id: 1, paths: ["1/100/"] }
 
-query:
-  json: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {"id": "start", "entity": "User", "node_ids": [1]},
-        {"id": "end", "entity": "Project", "node_ids": [1000, 1004]}
-      ],
-      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }
-  gql: |
-    MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [1000, 1004] RETURN p
+query: |
+  MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [1000, 1004] RETURN p
 
 expect:
   referential_integrity: true

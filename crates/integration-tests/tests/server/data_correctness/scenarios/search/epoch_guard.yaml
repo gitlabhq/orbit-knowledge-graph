@@ -1,20 +1,18 @@
 cases:
   - name: numeric_epoch_value_rejected
     description: A value that ClickHouse reads as unix seconds is not a date and is rejected
-    query:
-      gql: |
-        MATCH (mr:MergeRequest)
-        WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.merged_at = '0.0'
-        RETURN mr.title LIMIT 10
+    query: |
+      MATCH (mr:MergeRequest)
+      WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.merged_at = '0.0'
+      RETURN mr.title LIMIT 10
     expect:
       compile_error: is not a valid date
 
   - name: numeric_pre_epoch_bound_rejected
     description: A lower bound written as negative unix seconds is not a date and is rejected
-    query:
-      gql: |
-        MATCH (mr:MergeRequest)
-        WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.merged_at >= '-86400'
-        RETURN mr.title, mr.merged_at ORDER BY mr.id LIMIT 10
+    query: |
+      MATCH (mr:MergeRequest)
+      WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.merged_at >= '-86400'
+      RETURN mr.title, mr.merged_at ORDER BY mr.id LIMIT 10
     expect:
       compile_error: is not a valid date

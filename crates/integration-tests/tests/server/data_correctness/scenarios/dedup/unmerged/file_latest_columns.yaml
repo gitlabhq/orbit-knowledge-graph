@@ -10,9 +10,8 @@ config:
 cases:
   - name: commit_sha_of_an_old_version
     description: A File filter on commit_sha matches only the latest version of the file
-    query:
-      gql: |
-        MATCH (f:File) WHERE f.project_id = 1000 AND f.commit_sha = 'aaa' RETURN f.id
+    query: |
+      MATCH (f:File) WHERE f.project_id = 1000 AND f.commit_sha = 'aaa' RETURN f.id
 
     expect:
       skip_requirements: ["filter:project_id", "filter:commit_sha"]
@@ -20,9 +19,8 @@ cases:
 
   - name: size_bytes_of_an_old_version
     description: A File filter on size_bytes matches only the latest version of the file
-    query:
-      gql: |
-        MATCH (f:File) WHERE f.project_id = 1000 AND f.size_bytes = 10 RETURN f.id
+    query: |
+      MATCH (f:File) WHERE f.project_id = 1000 AND f.size_bytes = 10 RETURN f.id
 
     expect:
       skip_requirements: ["filter:project_id", "filter:size_bytes"]
@@ -30,9 +28,8 @@ cases:
 
   - name: latest_values_match
     description: A File filter on the latest commit_sha and size_bytes returns the file once
-    query:
-      gql: |
-        MATCH (f:File) WHERE f.project_id = 1000 AND f.commit_sha = 'bbb' AND f.size_bytes = 20 RETURN f.id, f.commit_sha, f.size_bytes
+    query: |
+      MATCH (f:File) WHERE f.project_id = 1000 AND f.commit_sha = 'bbb' AND f.size_bytes = 20 RETURN f.id, f.commit_sha, f.size_bytes
 
     expect:
       skip_requirements: ["filter:project_id"]

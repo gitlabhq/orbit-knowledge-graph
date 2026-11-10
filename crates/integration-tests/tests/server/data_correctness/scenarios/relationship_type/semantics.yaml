@@ -2,12 +2,11 @@ cases:
   - name: alias_orders_descending
     description: RETURN type(r) AS kind names the gql column kind, and ORDER BY kind DESC sorts by edge
       type
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE type(r) IN ['AUTHORED', 'APPROVED']
-        RETURN mr.title, type(r) AS kind
-        ORDER BY kind DESC LIMIT 10
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE type(r) IN ['AUTHORED', 'APPROVED']
+      RETURN mr.title, type(r) AS kind
+      ORDER BY kind DESC LIMIT 10
     expect:
       node_count: 4
       nodes:
@@ -25,10 +24,9 @@ cases:
   - name: columns_follow_return
     description: Two type() columns, written as TYPE(r2) and type(r1), keep their written names and follow
       RETURN order around the node columns
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r1:AUTHORED]->(mr:MergeRequest)-[r2:IN_PROJECT]->(p:Project)
-        RETURN TYPE(r2), mr.title, type(r1) LIMIT 10
+    query: |
+      MATCH (u:User {id: 1})-[r1:AUTHORED]->(mr:MergeRequest)-[r2:IN_PROJECT]->(p:Project)
+      RETURN TYPE(r2), mr.title, type(r1) LIMIT 10
     expect:
       node_count: 4
       nodes:
@@ -50,11 +48,10 @@ cases:
 
   - name: double_not
     description: NOT NOT type(r) = 'APPROVED' cancels and narrows the relationship to APPROVED
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE NOT NOT type(r) = 'APPROVED'
-        RETURN u, mr.title LIMIT 50
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE NOT NOT type(r) = 'APPROVED'
+      RETURN u, mr.title LIMIT 50
     expect:
       node_count: 2
       nodes:
@@ -67,21 +64,10 @@ cases:
 
   - name: filter
     description: WHERE type(r) IN [...] on an untyped relationship returns the same edges as -[:AUTHORED|APPROVED]->
-    query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
-          ],
-          "relationships": [{"type": ["AUTHORED", "APPROVED"], "from": "u", "to": "mr"}],
-          "limit": 50
-        }
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE type(r) IN ['AUTHORED', 'APPROVED']
-        RETURN u, mr.title, type(r) LIMIT 50
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE type(r) IN ['AUTHORED', 'APPROVED']
+      RETURN u, mr.title, type(r) LIMIT 50
     expect:
       node_count: 4
       referential_integrity: true
@@ -107,10 +93,9 @@ cases:
       extra_seed:
         gl_vulnerability_scanner:
           - { id: 8500, external_id: gemnasium, name: Gemnasium, vendor: GitLab, project_id: 1000, traversal_path: 1/100/1000/ }
-    query:
-      gql: |
-        MATCH (s:VulnerabilityScanner)-[r:SCANS]->(p:Project {id: 1000})
-        RETURN s, p, type(r) LIMIT 10
+    query: |
+      MATCH (s:VulnerabilityScanner)-[r:SCANS]->(p:Project {id: 1000})
+      RETURN s, p, type(r) LIMIT 10
     expect:
       node_count: 2
       referential_integrity: true
@@ -126,12 +111,11 @@ cases:
   - name: gql_column_ordered
     description: RETURN type(r) with ORDER BY type(r) adds a type(r) column to the gql table, sorted by
       edge type
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE type(r) IN ['AUTHORED', 'APPROVED']
-        RETURN mr.title, type(r)
-        ORDER BY type(r) LIMIT 10
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE type(r) IN ['AUTHORED', 'APPROVED']
+      RETURN mr.title, type(r)
+      ORDER BY type(r) LIMIT 10
     expect:
       node_count: 4
       nodes:
@@ -149,10 +133,9 @@ cases:
   - name: keeps_fk_hop
     description: RETURN type(r) on a hop that the planner answers from a foreign key still returns its edges
       and types
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[r:IN_PROJECT]->(p:Project {id: 1000})
-        RETURN mr.title, type(r) LIMIT 10
+    query: |
+      MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[r:IN_PROJECT]->(p:Project {id: 1000})
+      RETURN mr.title, type(r) LIMIT 10
     expect:
       node_count: 4
       referential_integrity: true
@@ -173,15 +156,8 @@ cases:
 
   - name: neighbors_filter
     description: Neighbors with WHERE type(r) = 'MEMBER_OF' returns the same edges as <-[:MEMBER_OF]-
-    query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
-          "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]}
-        }
-      gql: |
-        MATCH (g:Group {id: 100})<-[r]-(n) WHERE type(r) = 'MEMBER_OF' RETURN g, n, type(r)
+    query: |
+      MATCH (g:Group {id: 100})<-[r]-(n) WHERE type(r) = 'MEMBER_OF' RETURN g, n, type(r)
     expect:
       node_count: 4
       nodes:
@@ -197,15 +173,8 @@ cases:
 
   - name: neighbors_not_complement
     description: Neighbors with NOT type(r) = 'MEMBER_OF' keep the other incoming relationship types
-    query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
-          "neighbors": {"direction": "incoming", "rel_types": ["IN_GROUP"]}
-        }
-      gql: |
-        MATCH (g:Group {id: 100})<-[r]-(n) WHERE NOT type(r) = 'MEMBER_OF' RETURN g, n
+    query: |
+      MATCH (g:Group {id: 100})<-[r]-(n) WHERE NOT type(r) = 'MEMBER_OF' RETURN g, n
     expect:
       node_count: 3
       nodes:
@@ -221,11 +190,10 @@ cases:
 
   - name: not_complement
     description: NOT type(r) = 'AUTHORED' keeps every other relationship type the pattern allows
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE NOT type(r) = 'AUTHORED'
-        RETURN u, mr.title, type(r) LIMIT 50
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE NOT type(r) = 'AUTHORED'
+      RETURN u, mr.title, type(r) LIMIT 50
     expect:
       node_count: 2
       referential_integrity: true
@@ -248,11 +216,10 @@ cases:
 
   - name: not_equal
     description: type(r) <> 'AUTHORED' is the same complement as NOT type(r) = 'AUTHORED'
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE type(r) <> 'AUTHORED'
-        RETURN u, mr.title LIMIT 50
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE type(r) <> 'AUTHORED'
+      RETURN u, mr.title LIMIT 50
     expect:
       node_count: 2
       nodes:
@@ -272,11 +239,10 @@ cases:
 
   - name: not_in_complement
     description: NOT type(r) IN [...] removes the listed types from the types the pattern declares
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest)
-        WHERE NOT type(r) IN ['APPROVED']
-        RETURN u, mr.title, type(r) LIMIT 50
+    query: |
+      MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest)
+      WHERE NOT type(r) IN ['APPROVED']
+      RETURN u, mr.title, type(r) LIMIT 50
     expect:
       node_count: 3
       referential_integrity: true
@@ -293,11 +259,10 @@ cases:
 
   - name: not_with_property_not
     description: NOT type(r) combines with a negated property group on the same query
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE NOT type(r) = 'APPROVED' AND NOT (mr.state = 'opened' AND mr.title = 'Fix bug B')
-        RETURN u, mr.title, type(r) LIMIT 50
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE NOT type(r) = 'APPROVED' AND NOT (mr.state = 'opened' AND mr.title = 'Fix bug B')
+      RETURN u, mr.title, type(r) LIMIT 50
     expect:
       node_count: 2
       referential_integrity: true
@@ -320,12 +285,11 @@ cases:
 
   - name: ordered_pages
     description: ORDER BY type(r) pages through every edge once, in edge-type order
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE type(r) IN ['AUTHORED', 'APPROVED']
-        RETURN mr.title, type(r)
-        ORDER BY type(r) SKIP 0 LIMIT 1
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE type(r) IN ['AUTHORED', 'APPROVED']
+      RETURN mr.title, type(r)
+      ORDER BY type(r) SKIP 0 LIMIT 1
     expect:
       all_pages:
         edge_count: 3
@@ -355,12 +319,11 @@ cases:
   - name: ordered_pages_descending
     description: ORDER BY kind DESC, the alias of type(r), pages through every edge once in descending edge-type
       order
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE type(r) IN ['AUTHORED', 'APPROVED']
-        RETURN mr.title, type(r) AS kind
-        ORDER BY kind DESC SKIP 0 LIMIT 2
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE type(r) IN ['AUTHORED', 'APPROVED']
+      RETURN mr.title, type(r) AS kind
+      ORDER BY kind DESC SKIP 0 LIMIT 2
     expect:
       all_pages:
         edge_count: 3
@@ -383,19 +346,8 @@ cases:
 
   - name: path_filter_single_hop
     description: WHERE type(r) on a one-hop shortest path restricts it like -[r:MEMBER_OF*1]->
-    query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Group", "node_ids": [100]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
-                   "rel_types": ["MEMBER_OF"]}
-        }
-      gql: |
-        MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE type(r) = 'MEMBER_OF' RETURN p
+    query: |
+      MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE type(r) = 'MEMBER_OF' RETURN p
     expect:
       referential_integrity: true
       path_count: 1
@@ -404,19 +356,8 @@ cases:
 
   - name: path_returned
     description: RETURN p, type(r) on a one-hop shortest path is accepted; the path shows the edge type
-    query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Group", "node_ids": [100]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
-                   "rel_types": ["MEMBER_OF"]}
-        }
-      gql: |
-        MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF*1]->(`end`:Group {id: 100}) RETURN p, type(r)
+    query: |
+      MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF*1]->(`end`:Group {id: 100}) RETURN p, type(r)
     expect:
       referential_integrity: true
       path_count: 1
@@ -437,11 +378,10 @@ cases:
             target_kind: MergeRequest
             source_tags: []
             target_tags: ["state:opened"]
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest {id: 2000})
-        WHERE type(r) IN ['AUTHORED', 'APPROVED']
-        RETURN mr.title, type(r) SKIP 0 LIMIT 1
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest {id: 2000})
+      WHERE type(r) IN ['AUTHORED', 'APPROVED']
+      RETURN mr.title, type(r) SKIP 0 LIMIT 1
     expect:
       all_pages: { edge_count: 2, page_count: 2 }
       pages:
@@ -461,12 +401,11 @@ cases:
   - name: variable_and_type_columns
     description: RETURN r AS rel, type(r) adds a renamed relationship column and a type column in RETURN
       order
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE type(r) IN ['AUTHORED', 'APPROVED']
-        RETURN mr, r AS rel, type(r)
-        ORDER BY type(r) LIMIT 10
+    query: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE type(r) IN ['AUTHORED', 'APPROVED']
+      RETURN mr, r AS rel, type(r)
+      ORDER BY type(r) LIMIT 10
     expect:
       node_count: 4
       nodes:
@@ -486,19 +425,8 @@ cases:
   - name: variable_returns_edges
     description: RETURN r in a traversal is accepted; the edges table lists its edges and the gql table
       adds an r column
-    query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
-          ],
-          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-          "limit": 50
-        }
-      gql: |
-        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, r, mr.title LIMIT 50
+    query: |
+      MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, r, mr.title LIMIT 50
     expect:
       node_count: 3
       referential_integrity: true

@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::TryStreamExt;
-use named_queries::{Language, NamedQueries, NamedQuery};
+use named_queries::{NamedQueries, NamedQuery};
 use opentelemetry::KeyValue;
 use orbit_log_fields::{info, warn};
 use orbit_migrations::archive::ModelArchive;
@@ -15,7 +15,7 @@ use orbit_migrations::version::{read_active_version, table_prefix, version_table
 use orbit_server_config::AppConfig;
 use query_data_model::introspection::{IntrospectionScope, build_relationship_patterns};
 use query_data_model::{Catalog, ClickHouse};
-use query_engine::compiler::{Frontend, check};
+use query_engine::compiler::check;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
@@ -246,15 +246,8 @@ fn fits_data_model(
     query: &NamedQuery,
     data_model: &Arc<Catalog<ClickHouse>>,
 ) -> Result<(), String> {
-    let json = query
-        .render_example_language(Language::Json)
-        .map_err(|error| error.to_string())?;
-    check(&json, Frontend::JsonDsl, data_model).map_err(|error| error.to_string())?;
-    let gql = query
-        .render_example_language(Language::Gql)
-        .map_err(|error| error.to_string())?;
-    check(&gql, Frontend::Gql, data_model).map_err(|error| error.to_string())?;
-    Ok(())
+    let gql = query.render_example().map_err(|error| error.to_string())?;
+    check(&gql, data_model).map_err(|error| error.to_string())
 }
 
 fn register_state_gauge(active: &Arc<ActiveSchema>) {

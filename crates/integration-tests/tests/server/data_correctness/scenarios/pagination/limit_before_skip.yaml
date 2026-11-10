@@ -1,8 +1,7 @@
 description: LIMIT before SKIP pages the same as SKIP before LIMIT
 
-query:
-  gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id LIMIT 2 SKIP 2
+query: |
+  MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id LIMIT 2 SKIP 2
 
 expect:
   node_count: 2

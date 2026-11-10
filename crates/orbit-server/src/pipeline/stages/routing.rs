@@ -4,7 +4,7 @@ use query_data_model::introspection::{IntrospectionScope, SchemaResponse};
 use query_data_model::{Catalog, ClickHouse};
 
 use crate::auth::Claims;
-use query_engine::compiler::{Frontend, gql::RoutedStatement};
+use query_engine::compiler::gql::RoutedStatement;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
@@ -44,15 +44,12 @@ impl PipelineStage for RoutingStage {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        match ctx.frontend {
-            Frontend::JsonDsl => Ok(RoutingOutput::Query),
-            Frontend::Gql => match Self::route(ctx).inspect_err(|error| obs.record_error(error))? {
-                RoutedStatement::Query(query) => {
-                    ctx.phases.insert(*query);
-                    Ok(RoutingOutput::Query)
-                }
-                RoutedStatement::Schema(response) => Ok(RoutingOutput::Schema(response)),
-            },
+        match Self::route(ctx).inspect_err(|error| obs.record_error(error))? {
+            RoutedStatement::Query(query) => {
+                ctx.phases.insert(*query);
+                Ok(RoutingOutput::Query)
+            }
+            RoutedStatement::Schema(response) => Ok(RoutingOutput::Schema(response)),
         }
     }
 }

@@ -1,23 +1,12 @@
 name: Code relationships retain endpoint filtering on both backends
 
-query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "caller", "entity": "Definition", "node_ids": [1], "columns": ["id"]},
-        {"id": "callee", "entity": "Definition", "columns": ["id"]}
-      ],
-      "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}]
-    }
-  gql: |
-    MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition)
-    RETURN caller.id, callee.id
+query: |
+  MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition)
+  RETURN caller.id, callee.id
 
 logical:
-  gql:
-    expect:
-      - (Select caller{id}, callee{id} (Follow CALLS caller->callee AS e0 (Filter caller.id = 1 (Entities Definition AS caller))))
+  expect:
+    - (Select caller{id}, callee{id} (Follow CALLS caller->callee AS e0 (Filter caller.id = 1 (Entities Definition AS caller))))
 
 physical:
   clickhouse:

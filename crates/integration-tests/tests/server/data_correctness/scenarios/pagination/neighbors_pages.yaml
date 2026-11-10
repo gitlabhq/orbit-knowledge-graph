@@ -1,8 +1,7 @@
 description: Neighbor pages cover all edges from Group 100
 
-query:
-  gql: |
-    MATCH (g:Group {id: 100})--(n) RETURN g, n SKIP 0 LIMIT 2
+query: |
+  MATCH (g:Group {id: 100})--(n) RETURN g, n SKIP 0 LIMIT 2
 
 expect:
   all_pages:

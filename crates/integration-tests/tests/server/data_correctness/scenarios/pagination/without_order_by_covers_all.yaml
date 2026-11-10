@@ -1,8 +1,7 @@
 description: SKIP without ORDER BY covers all users via synthesized PK tie-breaker
 
-query:
-  gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 0 LIMIT 2
+query: |
+  MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 0 LIMIT 2
 
 expect:
   all_pages:

@@ -63,7 +63,7 @@ fn assert_panics(assertion: impl FnOnce() + std::panic::UnwindSafe, message: &st
 
 #[test]
 fn compound_filters_check_every_operator() {
-    let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    let query = json!("MATCH (d:Definition {id: 1}) RETURN d.name");
     run_suite(
         query.clone(),
         "node_count: 1\nnodes: {Definition: {ids: [1], filters: {name: {starts_with: al, ends_with: ha}}}}",
@@ -77,7 +77,8 @@ fn compound_filters_check_every_operator() {
 
 #[test]
 fn typed_edges_check_endpoint_types_and_keep_pair_support() {
-    let query = json!({"gql": "MATCH (d:Definition {id: 1})-[:CALLS]->(t:Definition) RETURN d.name, t.name"});
+    let query =
+        json!("MATCH (d:Definition {id: 1})-[:CALLS]->(t:Definition) RETURN d.name, t.name");
     run_suite(
         query.clone(),
         "node_count: 2\nnodes: {Definition: {ids: [1, 2]}}\nedge_exists: {CALLS: [[1, 2], {from: Definition, from_id: 1, to: Definition, to_id: 2}]}\nedge_absent: {CALLS: [{from: File, from_id: 1, to: Definition, to_id: 2}]}",
@@ -95,32 +96,22 @@ fn typed_edges_check_endpoint_types_and_keep_pair_support() {
 }
 
 #[test]
-fn compile_errors_require_all_fragments_and_frontend_configuration() {
-    let query = json!({"gql": "CREATE (d:Definition)"});
+fn compile_errors_require_all_fragments() {
+    let query = json!("CREATE (d:Definition)");
     run_suite(
         query.clone(),
-        "compile_error_contains: {gql: ['Orbit query syntax', 'line 1, column 1']}\ncompile_error_not_contains: [CREATE]",
-    );
-    rejects(
-        query.clone(),
-        "compile_error: true\ncompile_error_contains: ['Orbit query syntax', impossible-message]",
-        "does not contain 'impossible-message'",
-    );
-    rejects(
-        query.clone(),
-        "compile_error: {json: error}",
-        "compile_error missing frontend 'gql'",
+        "compile_error_contains: ['Orbit query syntax', 'line 1, column 1']\ncompile_error_not_contains: [CREATE]",
     );
     rejects(
         query,
-        "compile_error: true\ncompile_error_not_contains: {json: []}",
-        "expectation missing frontend 'gql'",
+        "compile_error: true\ncompile_error_contains: ['Orbit query syntax', impossible-message]",
+        "does not contain 'impossible-message'",
     );
 }
 
 #[test]
 fn exact_null_and_string_properties_do_not_accept_missing_or_other_types() {
-    let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    let query = json!("MATCH (d:Definition {id: 1}) RETURN d.name");
     rejects(
         query.clone(),
         "nodes: {Definition: {ids: [1], rows: [{id: 1, missing: null}]}}",
@@ -135,7 +126,7 @@ fn exact_null_and_string_properties_do_not_accept_missing_or_other_types() {
 
 #[test]
 fn pages_check_exhaustion_and_global_node_order() {
-    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name ORDER BY d.id SKIP 0 LIMIT 2"});
+    let query = json!("MATCH (d:Definition) RETURN d.name ORDER BY d.id SKIP 0 LIMIT 2");
     let pages = "pages:\n  - {node_count: 2, nodes: {Definition: {order: [1, 2]}}}\n  - {node_count: 2, nodes: {Definition: {order: [3, 4]}}}";
     run_suite(
         query.clone(),
@@ -157,7 +148,9 @@ fn pages_check_exhaustion_and_global_node_order() {
 
 #[test]
 fn page_uniqueness_checks_group_nodes_and_typed_edges() {
-    let grouped = json!({"gql": "MATCH (d:Definition {id: 2})-[:CALLS]->(t:Definition) RETURN d, t, count(t) AS total SKIP 0 LIMIT 1"});
+    let grouped = json!(
+        "MATCH (d:Definition {id: 2})-[:CALLS]->(t:Definition) RETURN d, t, count(t) AS total SKIP 0 LIMIT 1"
+    );
     let pages = "pages:\n  - {groups: {d: {entity: Definition, ids: [2], count: 1}, t: {entity: Definition, ids: [3]}}}\n  - {groups: {d: {entity: Definition, ids: [2], count: 1}, t: {entity: Definition, ids: [4]}}}";
     run_suite(
         grouped.clone(),
@@ -169,7 +162,9 @@ fn page_uniqueness_checks_group_nodes_and_typed_edges() {
         "duplicate d:Definition IDs",
     );
 
-    let traversal = json!({"gql": "MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) RETURN a.name, b.name, c.name SKIP 0 LIMIT 1"});
+    let traversal = json!(
+        "MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) RETURN a.name, b.name, c.name SKIP 0 LIMIT 1"
+    );
     let pages = "pages:\n  - {node_count: 3, nodes: {Definition: {ids: [1, 2, 3]}}, edges: {CALLS: [[1, 2], [2, 3]]}}\n  - {node_count: 3, nodes: {Definition: {ids: [1, 2, 4]}}, edges: {CALLS: [[1, 2], [2, 4]]}}";
     run_suite(
         traversal.clone(),
@@ -184,7 +179,7 @@ fn page_uniqueness_checks_group_nodes_and_typed_edges() {
 
 #[test]
 fn repeated_aggregation_runs_check_row_values() {
-    let query = json!({"gql": "MATCH (d:Definition) RETURN d.definition_type, count(d) AS total"});
+    let query = json!("MATCH (d:Definition) RETURN d.definition_type, count(d) AS total");
     run_suite(
         query,
         "repeat_count: 3\nrow_count: 1\nrow_values: [{total: 4}]",
@@ -195,9 +190,7 @@ fn repeated_aggregation_runs_check_row_values() {
 fn repeated_responses_reject_changes_that_individual_expectations_allow() {
     use crate::visitor::tests::sample_grouped_aggregation_response;
 
-    let input = crate::test_stats(
-        r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#,
-    );
+    let input = crate::test_stats("MATCH (u:User) RETURN u, count(u) AS c");
     let expect = orbit_utils::yaml::from_str("groups: {u: {entity: User, count: 2}}").unwrap();
     let baseline = serde_json::to_value(sample_grouped_aggregation_response()).unwrap();
     super::assert_response(&input, baseline.clone(), &expect, "baseline");
@@ -251,7 +244,7 @@ fn repeated_nodes_preserve_order_within_each_entity_type() {
 
 #[test]
 fn page_expectations_reject_fields_that_are_not_executed() {
-    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
+    let query = json!("MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2");
     for field in [
         "repeat_count: 2",
         "sql_contains: [SELECT]",
@@ -275,7 +268,7 @@ fn page_expectations_reject_fields_that_are_not_executed() {
 
 #[test]
 fn compile_only_rejects_runtime_expectations() {
-    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name"});
+    let query = json!("MATCH (d:Definition) RETURN d.name");
     run_suite(query.clone(), "compile_only: true\nsql_contains: [SELECT]");
     for field in [
         "node_count: 4",
@@ -296,9 +289,7 @@ fn compile_only_rejects_runtime_expectations() {
 fn empty_aggregation_requires_rows_and_column_metadata() {
     use crate::visitor::tests::sample_grouped_aggregation_response;
 
-    let input = crate::test_stats(
-        r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#,
-    );
+    let input = crate::test_stats("MATCH (u:User) RETURN u, count(u) AS c");
     let expect = orbit_utils::yaml::from_str("empty_aggregation: true").unwrap();
     let mut baseline = serde_json::to_value(sample_grouped_aggregation_response()).unwrap();
     baseline["rows"] = json!([]);
@@ -315,7 +306,7 @@ fn empty_aggregation_requires_rows_and_column_metadata() {
 
 #[test]
 fn traversal_rejects_aggregation_and_path_assertions() {
-    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name"});
+    let query = json!("MATCH (d:Definition) RETURN d.name");
     rejects(
         query.clone(),
         "node_count: 4\nrow_count: 0",
@@ -332,8 +323,7 @@ fn traversal_rejects_aggregation_and_path_assertions() {
 fn pagination_coverage_compares_typed_node_identities_without_excerpt_values() {
     use crate::visitor::tests::sample_search_response;
 
-    let input =
-        crate::test_stats(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}"#);
+    let input = crate::test_stats("MATCH (u:User) RETURN u");
     let mut full = serde_json::to_value(sample_search_response()).unwrap();
     full["pagination"] = json!({"has_more": false, "truncated": false});
     let mut page = full.clone();
@@ -362,9 +352,7 @@ fn numeric_metric_assertions_reject_numeric_strings() {
         |view: &ResponseView| view.assert_aggregation_value_i64("c", 2),
     ] {
         let check = |metric: Value| {
-            let input = crate::test_stats(
-                r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"aggregations":[{"count":"u","as":"c"}]}"#,
-            );
+            let input = crate::test_stats("MATCH (u:User) RETURN count(u) AS c");
             let mut response = sample_aggregation_response();
             response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
             assertion(&ResponseView::for_query(&input, response));
@@ -374,9 +362,7 @@ fn numeric_metric_assertions_reject_numeric_strings() {
     }
 
     let check_group = |metric: Value| {
-        let input = crate::test_stats(
-            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#,
-        );
+        let input = crate::test_stats("MATCH (u:User) RETURN u, count(u) AS c");
         let mut response = sample_grouped_aggregation_response();
         response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
         ResponseView::for_query(&input, response)
@@ -386,9 +372,7 @@ fn numeric_metric_assertions_reject_numeric_strings() {
     assert_panics(|| check_group(json!("2")), "column 'c' is not an integer");
 
     let check_average = |metric: Value| {
-        let input = crate::test_stats(
-            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"avg":"u.id","as":"c"}]}"#,
-        );
+        let input = crate::test_stats("MATCH (u:User) RETURN u, avg(u.id) AS c");
         let mut response = sample_grouped_aggregation_response();
         response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
         ResponseView::for_query(&input, response)
@@ -400,7 +384,9 @@ fn numeric_metric_assertions_reject_numeric_strings() {
 
 #[test]
 fn path_pages_compare_complete_signatures_against_unpaginated_output() {
-    let query = json!({"gql": "MATCH path = ANY SHORTEST (source:Definition {id: 1})-[:CALLS*1..3]->(destination:Definition) WHERE destination.id IN [3, 4] RETURN path SKIP 0 LIMIT 1"});
+    let query = json!(
+        "MATCH path = ANY SHORTEST (source:Definition {id: 1})-[:CALLS*1..3]->(destination:Definition) WHERE destination.id IN [3, 4] RETURN path SKIP 0 LIMIT 1"
+    );
     run_suite(
         query,
         "pages:\n  - {node_count: 3, path_count: 1, path_destinations: {Definition: [3]}}\n  - {node_count: 3, path_count: 1, path_destinations: {Definition: [4]}}\nall_pages: {matches_unpaginated: true, edge_count: 3}",

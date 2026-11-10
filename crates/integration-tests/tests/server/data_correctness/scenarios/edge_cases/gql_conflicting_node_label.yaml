@@ -1,9 +1,8 @@
 description: A repeated node cannot change its entity label
 
-query:
-  gql: |
-    MATCH (u:User), (u:Project)
-    RETURN u
+query: |
+  MATCH (u:User), (u:Project)
+  RETURN u
 
 expect:
   compile_error: "original label"

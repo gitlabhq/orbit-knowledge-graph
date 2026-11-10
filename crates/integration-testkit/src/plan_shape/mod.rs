@@ -25,53 +25,10 @@ use serde::Deserialize;
 struct Scenario {
     name: String,
     model_overlay: Option<String>,
-    query: BTreeMap<String, String>,
-    #[serde(default)]
-    missing_frontends: BTreeMap<String, String>,
-    logical: Logical,
+    query: String,
+    logical: Option<Assertions>,
     physical: BTreeMap<String, PhysicalAssertions>,
     hydration: Option<HydrationSetup>,
-}
-
-impl Scenario {
-    fn validate_frontends(&self) -> Result<(), String> {
-        for language in self.query.keys().chain(self.missing_frontends.keys()) {
-            if !matches!(language.as_str(), "json" | "gql") {
-                return Err(format!("unknown frontend {language}"));
-            }
-        }
-        for language in ["json", "gql"] {
-            match (
-                self.query.get(language),
-                self.missing_frontends.get(language),
-            ) {
-                (Some(query), None) if !query.trim().is_empty() => {}
-                (None, Some(reason)) if !reason.trim().is_empty() => {}
-                _ => {
-                    return Err(format!(
-                        "supply query.{language} or a nonempty missing_frontends.{language} reason, but not both"
-                    ));
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Logical {
-    Shared(Assertions),
-    Surfaces(BTreeMap<String, Assertions>),
-}
-
-impl Logical {
-    fn surface(&self, language: &str) -> Option<&Assertions> {
-        match self {
-            Self::Shared(assertions) => Some(assertions),
-            Self::Surfaces(surfaces) => surfaces.get(language),
-        }
-    }
 }
 
 #[derive(Default, Deserialize)]
@@ -256,100 +213,75 @@ fn check<B: SqlBackend>(
     backend: &str,
     path: &Path,
 ) -> Result<(), Vec<String>> {
-    let mut failures = Vec::new();
-    for (language, raw) in &scenario.query {
-        let label = format!(
-            "{}: {} [{language}/{backend}]",
-            path.display(),
-            scenario.name
-        );
-        let frontend = match language.as_str() {
-            "json" => compiler::Frontend::JsonDsl,
-            "gql" => compiler::Frontend::Gql,
-            _ => {
-                failures.push(format!("{label}: unknown frontend"));
-                continue;
-            }
-        };
-        let catalog = model.model().logical().as_admin();
-        let parsed = compiler::surface::parse(raw, frontend, catalog).and_then(|statement| {
-            let plan = normalize::normalize(statement.plan, catalog.model(), model)?;
-            Ok(query_data_model::surface::Statement { plan, ..statement })
-        });
-        let statement = match parsed {
-            Ok(parsed) => parsed,
-            Err(error) => {
-                failures.push(format!("{label}: {error}"));
-                continue;
-            }
-        };
-        let hydration = match scenario
-            .hydration
-            .as_ref()
-            .map(|setup| hydration_request(&statement.plan, catalog, setup))
-            .transpose()
-        {
-            Ok(hydration) => hydration,
-            Err(error) => {
-                failures.push(format!("{label}: {error}"));
-                continue;
-            }
-        };
-        if let Some(logical) = scenario.logical.surface(language)
-            && let Err(error) = logical.check(
-                &logical::logical(&statement.plan, catalog.model()),
-                &format!("{label}.logical"),
-            )
-        {
-            failures.push(error);
-            continue;
-        }
-        let query = compiler::logical::Query::new(&statement.plan, catalog.model());
-        let tp_bounds = (backend == "clickhouse" && scenario.hydration.is_none())
-            .then(|| compiler::tp_bounds::TpBounds::derive(query, model));
-        let request = match &hydration {
-            Some(hydration) => plan::Request::Hydration(hydration),
-            None => plan::Request::Query(query),
-        };
-        let relational = plan::plan(request, tp_bounds.as_ref(), model)
-            .and_then(|planned| {
-                let tree = emitted::tree(&planned.plan, model);
-                Ok((tree, passes(planned, scenario, backend, model, query)?))
-            })
-            .map_err(|error| error.to_string());
-        let assertions = &scenario.physical[backend];
-        if let Some(rejected) = &assertions.rejected {
-            match relational {
-                Err(error) if error.contains(rejected.as_str()) => {}
-                Err(error) => failures.push(format!("{label}: expected {rejected}, got {error}")),
-                Ok(_) => failures.push(format!("{label}: expected {rejected}, got a plan")),
-            }
-            continue;
-        }
-        if assertions.planned.is_none() && assertions.emitted.is_none() {
-            failures.push(format!("{label}: missing assertion targets"));
-            continue;
-        }
-        let (planned_tree, relational) = match relational {
-            Ok(relational) => relational,
-            Err(error) => {
-                failures.push(format!("{label}: {error}"));
-                continue;
-            }
-        };
-        let emitted = emitted::tree(&relational, model);
-        for (phase, assertions, actual) in [
-            ("planned", &assertions.planned, planned_tree),
-            ("emitted", &assertions.emitted, emitted),
-        ] {
-            if let Some(assertions) = assertions
-                && let Err(error) =
-                    assertions.check(&actual, &format!("{label}.physical.{backend}.{phase}"))
-            {
-                failures.push(error);
-            }
-        }
+    let raw = &scenario.query;
+    let label = format!("{}: {} [{backend}]", path.display(), scenario.name);
+    let catalog = model.model().logical().as_admin();
+    let parsed = compiler::surface::parse(raw, catalog).and_then(|statement| {
+        let plan = normalize::normalize(statement.plan, catalog.model(), model)?;
+        Ok(query_data_model::surface::Statement { plan, ..statement })
+    });
+    let statement = match parsed {
+        Ok(parsed) => parsed,
+        Err(error) => return Err(vec![format!("{label}: {error}")]),
+    };
+    let hydration = match scenario
+        .hydration
+        .as_ref()
+        .map(|setup| hydration_request(&statement.plan, catalog, setup))
+        .transpose()
+    {
+        Ok(hydration) => hydration,
+        Err(error) => return Err(vec![format!("{label}: {error}")]),
+    };
+    if let Some(logical) = &scenario.logical
+        && let Err(error) = logical.check(
+            &logical::logical(&statement.plan, catalog.model()),
+            &format!("{label}.logical"),
+        )
+    {
+        return Err(vec![error]);
     }
+    let query = compiler::logical::Query::new(&statement.plan, catalog.model());
+    let tp_bounds = (backend == "clickhouse" && scenario.hydration.is_none())
+        .then(|| compiler::tp_bounds::TpBounds::derive(query, model));
+    let request = match &hydration {
+        Some(hydration) => plan::Request::Hydration(hydration),
+        None => plan::Request::Query(query),
+    };
+    let relational = plan::plan(request, tp_bounds.as_ref(), model)
+        .and_then(|planned| {
+            let tree = emitted::tree(&planned.plan, model);
+            Ok((tree, passes(planned, scenario, backend, model, query)?))
+        })
+        .map_err(|error| error.to_string());
+    let assertions = &scenario.physical[backend];
+    if let Some(rejected) = &assertions.rejected {
+        return match relational {
+            Err(error) if error.contains(rejected.as_str()) => Ok(()),
+            Err(error) => Err(vec![format!("{label}: expected {rejected}, got {error}")]),
+            Ok(_) => Err(vec![format!("{label}: expected {rejected}, got a plan")]),
+        };
+    }
+    if assertions.planned.is_none() && assertions.emitted.is_none() {
+        return Err(vec![format!("{label}: missing assertion targets")]);
+    }
+    let (planned_tree, relational) = match relational {
+        Ok(relational) => relational,
+        Err(error) => return Err(vec![format!("{label}: {error}")]),
+    };
+    let emitted = emitted::tree(&relational, model);
+    let failures: Vec<String> = [
+        ("planned", &assertions.planned, planned_tree),
+        ("emitted", &assertions.emitted, emitted),
+    ]
+    .into_iter()
+    .filter_map(|(phase, assertions, actual)| {
+        assertions
+            .as_ref()?
+            .check(&actual, &format!("{label}.physical.{backend}.{phase}"))
+            .err()
+    })
+    .collect();
     if failures.is_empty() {
         Ok(())
     } else {
@@ -469,15 +401,11 @@ fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
             .map(move |(_, scenario)| (path, scenario))
     }) {
         cases += 1;
-        if scenario.physical.is_empty() || scenario.query.is_empty() {
+        if scenario.physical.is_empty() || scenario.query.trim().is_empty() {
             failures.push(format!(
-                "{}: missing query arms or backend assertions",
+                "{}: missing query or backend assertions",
                 path.display()
             ));
-            continue;
-        }
-        if let Err(error) = scenario.validate_frontends() {
-            failures.push(format!("{}: {error}", path.display()));
             continue;
         }
         let overlay = scenario.model_overlay.as_ref().map(|name| {
@@ -520,38 +448,6 @@ fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
 }
 
 #[test]
-fn yaml_requires_both_frontends_or_an_explicit_exception() {
-    for (query, exceptions, valid) in [
-        ("{json: query, gql: query}", "{}", true),
-        (
-            "{json: query}",
-            "{gql: Normalizes the tested direction}",
-            true,
-        ),
-        (
-            "{gql: query}",
-            "{json: Cannot express property comparisons}",
-            true,
-        ),
-        ("{json: query}", "{}", false),
-        ("{json: query}", "{gql: ' '}", false),
-        (
-            "{json: query, gql: query}",
-            "{gql: Redundant exception}",
-            false,
-        ),
-        ("{json: query, gql: query, sql: query}", "{}", false),
-        ("{json: query, gql: ' '}", "{}", false),
-    ] {
-        let yaml = format!(
-            "name: frontends\nquery: {query}\nmissing_frontends: {exceptions}\nlogical: {{}}\nphysical: {{}}"
-        );
-        let scenario: Scenario = orbit_utils::yaml::from_str(&yaml).unwrap();
-        assert_eq!(scenario.validate_frontends().is_ok(), valid, "{yaml}");
-    }
-}
-
-#[test]
 fn directory_runner_reports_every_fixture_failure() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -559,9 +455,7 @@ fn directory_runner_reports_every_fixture_failure() {
         r#"
 cases:
   - name: first failure
-    query:
-      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}]}'
-      gql: 'MATCH (u:User {id: 1}) RETURN u'
+    query: 'MATCH (u:User {id: 1}) RETURN u'
     logical:
       expect: ['(Neighbors (...))']
     physical:
@@ -569,9 +463,7 @@ cases:
         planned:
           expect: ['(Scan Table(gl_user) AS u)']
   - name: second failure
-    query:
-      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]}]}'
-      gql: 'MATCH (p:Project {id: 1}) RETURN p'
+    query: 'MATCH (p:Project {id: 1}) RETURN p'
     logical:
       expect: ['(Neighbors (...))']
     physical:
@@ -584,27 +476,14 @@ cases:
 
     let failures = check_dir(directory.path()).unwrap_err();
 
-    assert_eq!(failures.len(), 4);
-    assert!(
-        failures
-            .iter()
-            .any(|failure| failure.contains("first failure [gql/clickhouse]"))
-    );
-    assert!(
-        failures
-            .iter()
-            .any(|failure| failure.contains("first failure [json/clickhouse]"))
-    );
-    assert!(
-        failures
-            .iter()
-            .any(|failure| failure.contains("second failure [gql/clickhouse]"))
-    );
-    assert!(
-        failures
-            .iter()
-            .any(|failure| failure.contains("second failure [json/clickhouse]"))
-    );
+    assert_eq!(failures.len(), 2);
+    for name in ["first failure", "second failure"] {
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains(&format!("{name} [clickhouse]")))
+        );
+    }
 }
 
 #[test]

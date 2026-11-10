@@ -1,10 +1,9 @@
 description: Project scope does not exclude ancestor groups or their membership edges
 
-query:
-  gql: |
-    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
-    WHERE p.id IN [1000, 1002]
-    RETURN u, g, p LIMIT 20
+query: |
+  MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+  WHERE p.id IN [1000, 1002]
+  RETURN u, g, p LIMIT 20
 
 expect:
   node_count: 6

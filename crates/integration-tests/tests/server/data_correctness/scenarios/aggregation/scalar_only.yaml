@@ -1,25 +1,22 @@
 cases:
   - name: min_file_path_rejected
     description: MIN rejects a file path
-    query:
-      gql: |
-        MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN min(f.path) AS v
+    query: |
+      MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN min(f.path) AS v
     expect:
       compile_error: not an ordered scalar
 
   - name: max_definition_name_rejected
     description: MAX rejects a definition name
-    query:
-      gql: |
-        MATCH (d:Definition) WHERE d.project_id = 1000 RETURN max(d.name) AS v
+    query: |
+      MATCH (d:Definition) WHERE d.project_id = 1000 RETURN max(d.name) AS v
     expect:
       compile_error: not an ordered scalar
 
   - name: group_by_file_path_counts
     description: A free-text group key buckets each file
-    query:
-      gql: |
-        MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN f.path AS path, count(f) AS n ORDER BY path
+    query: |
+      MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN f.path AS path, count(f) AS n ORDER BY path
     expect:
       skip_requirements: [node_ids, aggregation_sort]
       row_values:
@@ -29,9 +26,8 @@ cases:
 
   - name: group_by_file_language_counts
     description: A categorical text group key still buckets files
-    query:
-      gql: |
-        MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN f.language AS language, count(f) AS n ORDER BY n DESC
+    query: |
+      MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN f.language AS language, count(f) AS n ORDER BY n DESC
     expect:
       skip_requirements: [node_ids, aggregation_sort]
       row_count: 2
@@ -41,9 +37,8 @@ cases:
 
   - name: max_file_id_counts
     description: MAX still reads an integer property
-    query:
-      gql: |
-        MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN max(f.id) AS top
+    query: |
+      MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN max(f.id) AS top
     expect:
       skip_requirements: [node_ids]
       row_count: 1

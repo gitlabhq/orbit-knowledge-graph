@@ -22,9 +22,8 @@ config:
 cases:
   - name: search
     description: A single-node lookup on the swapped name returns only the current holder
-    query:
-      gql: |
-        MATCH (u:User {username: 'swap_x'}) RETURN u.username LIMIT 10
+    query: |
+      MATCH (u:User {username: 'swap_x'}) RETURN u.username LIMIT 10
     expect:
       node_count: 1
       nodes:
@@ -37,9 +36,8 @@ cases:
 
   - name: traversal
     description: A traversal from the swapped name follows only the current holder
-    query:
-      gql: |
-        MATCH (u:User {username: 'swap_x'})-[:AUTHORED]->(mr:MergeRequest) RETURN u.username, mr LIMIT 10
+    query: |
+      MATCH (u:User {username: 'swap_x'})-[:AUTHORED]->(mr:MergeRequest) RETURN u.username, mr LIMIT 10
     expect:
       node_count: 2
       nodes:

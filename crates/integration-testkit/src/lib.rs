@@ -12,16 +12,14 @@ pub mod seeded_remote;
 pub mod seeded_resolver;
 pub mod visitor;
 
-/// The stats of a normalized JSON DSL query on the embedded ClickHouse model, before admission.
+/// The stats of a normalized query on the embedded ClickHouse model, before admission.
 #[cfg(test)]
-pub(crate) fn test_stats(json: &str) -> query_engine::compiler::QueryStats {
-    use query_engine::compiler::{
-        Frontend, QueryStats, logical::Query, passes::normalize, surface,
-    };
+pub(crate) fn test_stats(query: &str) -> query_engine::compiler::QueryStats {
+    use query_engine::compiler::{QueryStats, logical::Query, passes::normalize, surface};
     let model = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap();
     let catalog = model.model().logical().as_admin();
-    let statement = surface::parse(json, Frontend::JsonDsl, catalog)
-        .unwrap_or_else(|error| panic!("{json}: {error}"));
+    let statement =
+        surface::parse(query, catalog).unwrap_or_else(|error| panic!("{query}: {error}"));
     let plan = normalize::normalize(statement.plan, catalog.model(), &model).unwrap();
     QueryStats::new(Query::new(&plan, catalog.model()), &model)
 }

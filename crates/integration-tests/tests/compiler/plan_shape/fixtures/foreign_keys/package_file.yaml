@@ -1,11 +1,7 @@
 name: Package files use their FK edge relation
 
-missing_frontends:
-  json: The JSON query form is being deprecated.
-
-query:
-  gql: |
-    MATCH (p:Package {id: 8001})-[:HAS_PACKAGE_FILE]->(f:PackageFile) RETURN p.id, f.file_name
+query: |
+  MATCH (p:Package {id: 8001})-[:HAS_PACKAGE_FILE]->(f:PackageFile) RETURN p.id, f.file_name
 
 logical:
   expect: ["(Follow HAS_PACKAGE_FILE p->f AS e0 (Filter p.id = 8001 (Entities Package AS p)))"]

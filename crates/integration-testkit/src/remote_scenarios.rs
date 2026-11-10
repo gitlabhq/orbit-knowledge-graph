@@ -372,7 +372,6 @@ fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture() {
     );
     let relational = compiler::compile(
         CODE,
-        compiler::Frontend::Gql,
         &Arc::new(query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap()),
         &ctx,
     );

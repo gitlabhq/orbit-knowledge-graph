@@ -163,11 +163,8 @@ cases:
     description: Incoming IN_PROJECT returns every variant across every physical table, including the ones authorized through their merge request
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"project","entity":"Project","node_ids":[1000,3000]}],"neighbors":{"direction":"incoming","rel_types":["IN_PROJECT"]}}
-      gql: |
-        MATCH (project:Project)<-[:IN_PROJECT]-(neighbor) WHERE project.id IN [1000, 3000] RETURN project, neighbor
+    query: |
+      MATCH (project:Project)<-[:IN_PROJECT]-(neighbor) WHERE project.id IN [1000, 3000] RETURN project, neighbor
     expect:
       node_count: 16
       nodes:
@@ -212,11 +209,8 @@ cases:
     description: Exact traversal routes through gl_diff_edge and excludes the same variant in another organization
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"diff","entity":"MergeRequestDiff","node_ids":[20001,40001]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"diff","to":"project","filters":{"target_id":1000}}]}
-      gql: |
-        MATCH (diff:MergeRequestDiff)-[:IN_PROJECT {target_id: 1000}]->(project:Project) WHERE diff.id IN [20001, 40001] RETURN diff, project
+    query: |
+      MATCH (diff:MergeRequestDiff)-[:IN_PROJECT {target_id: 1000}]->(project:Project) WHERE diff.id IN [20001, 40001] RETURN diff, project
     expect:
       node_count: 2
       nodes:
@@ -234,11 +228,8 @@ cases:
     description: Exact traversal routes through gl_diff_edge and excludes the same variant in another organization
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"file","entity":"MergeRequestDiffFile","node_ids":[20002,40002]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"file","to":"project","filters":{"target_id":1000}}]}
-      gql: |
-        MATCH (file:MergeRequestDiffFile)-[:IN_PROJECT {target_id: 1000}]->(project:Project) WHERE file.id IN [20002, 40002] RETURN file, project
+    query: |
+      MATCH (file:MergeRequestDiffFile)-[:IN_PROJECT {target_id: 1000}]->(project:Project) WHERE file.id IN [20002, 40002] RETURN file, project
     expect:
       node_count: 2
       nodes:
@@ -253,11 +244,8 @@ cases:
 
   - name: Vulnerability neighbors return every security route
     description: Vulnerability neighbors read every newly specialized security relationship from gl_sec_edge
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"vulnerability","entity":"Vulnerability","node_ids":[1401]}],"neighbors":{"direction":"both","rel_types":["AUTHORED","CONFIRMED_BY","RESOLVED_BY","DISMISSED_BY","FIXES","HAS_VULNERABILITY"]}}
-      gql: |
-        MATCH (vulnerability:Vulnerability {id: 1401})-[:AUTHORED|CONFIRMED_BY|RESOLVED_BY|DISMISSED_BY|FIXES|HAS_VULNERABILITY]-(neighbor) RETURN vulnerability, neighbor
+    query: |
+      MATCH (vulnerability:Vulnerability {id: 1401})-[:AUTHORED|CONFIRMED_BY|RESOLVED_BY|DISMISSED_BY|FIXES|HAS_VULNERABILITY]-(neighbor) RETURN vulnerability, neighbor
     expect:
       node_count: 4
       nodes:
@@ -286,11 +274,8 @@ cases:
     description: Split AUTHORED and vulnerability lifecycle routes prune to the authorized target namespace
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"user","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["AUTHORED","CONFIRMED_BY","RESOLVED_BY","DISMISSED_BY"]}}
-      gql: |
-        MATCH (user:User {id: 1})-[:AUTHORED|CONFIRMED_BY|RESOLVED_BY|DISMISSED_BY]->(neighbor) RETURN user, neighbor
+    query: |
+      MATCH (user:User {id: 1})-[:AUTHORED|CONFIRMED_BY|RESOLVED_BY|DISMISSED_BY]->(neighbor) RETURN user, neighbor
     expect:
       node_count: 3
       nodes:
@@ -315,11 +300,8 @@ cases:
     description: The unscoped FIXES route retains only the merge request and vulnerability in the authorized namespace
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2501,4500]},{"id":"vulnerability","entity":"Vulnerability"}],"relationships":[{"type":"FIXES","from":"mr","to":"vulnerability"}]}
-      gql: |
-        MATCH (mr:MergeRequest)-[:FIXES]->(vulnerability:Vulnerability) WHERE mr.id IN [2501, 4500] RETURN mr, vulnerability
+    query: |
+      MATCH (mr:MergeRequest)-[:FIXES]->(vulnerability:Vulnerability) WHERE mr.id IN [2501, 4500] RETURN mr, vulnerability
     expect:
       node_count: 2
       nodes:
@@ -334,11 +316,8 @@ cases:
 
   - name: Pipeline neighbors return every CI route
     description: Pipeline neighbors read CHILD_OF and both BUILT_BY variants from gl_ci_edge
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1101,3101]}],"neighbors":{"direction":"both","rel_types":["CHILD_OF","BUILT_BY"]}}
-      gql: |
-        MATCH (pipeline:Pipeline)-[:CHILD_OF|BUILT_BY]-(neighbor) WHERE pipeline.id IN [1101, 3101] RETURN pipeline, neighbor
+    query: |
+      MATCH (pipeline:Pipeline)-[:CHILD_OF|BUILT_BY]-(neighbor) WHERE pipeline.id IN [1101, 3101] RETURN pipeline, neighbor
     expect:
       node_count: 4
       nodes:
@@ -358,11 +337,8 @@ cases:
 
   - name: Branch neighbors return bridge and root containment routes
     description: Branch neighbors read Project, Directory, and File CONTAINS variants from gl_code_edge
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"branch","entity":"Branch","node_ids":[2601,3601]}],"neighbors":{"direction":"both","rel_types":["CONTAINS"]}}
-      gql: |
-        MATCH (branch:Branch)-[:CONTAINS]-(neighbor) WHERE branch.id IN [2601, 3601] RETURN branch, neighbor
+    query: |
+      MATCH (branch:Branch)-[:CONTAINS]-(neighbor) WHERE branch.id IN [2601, 3601] RETURN branch, neighbor
     expect:
       node_count: 4
       nodes:
@@ -382,11 +358,8 @@ cases:
 
   - name: Directory neighbors return nested containment routes
     description: Directory neighbors read Branch, Directory, and File CONTAINS variants from gl_code_edge
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"directory","entity":"Directory","node_ids":[2701,4701]}],"neighbors":{"direction":"both","rel_types":["CONTAINS"]}}
-      gql: |
-        MATCH (directory:Directory)-[:CONTAINS]-(neighbor) WHERE directory.id IN [2701, 4701] RETURN directory, neighbor
+    query: |
+      MATCH (directory:Directory)-[:CONTAINS]-(neighbor) WHERE directory.id IN [2701, 4701] RETURN directory, neighbor
     expect:
       node_count: 4
       nodes:
@@ -407,11 +380,8 @@ cases:
     description: The same-namespace security route retains only the package and vulnerability in the authorized namespace
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"package","entity":"Package","node_ids":[2301,4301]}],"neighbors":{"direction":"outgoing","rel_types":["HAS_VULNERABILITY"]}}
-      gql: |
-        MATCH (package:Package)-[:HAS_VULNERABILITY]->(neighbor) WHERE package.id IN [2301, 4301] RETURN package, neighbor
+    query: |
+      MATCH (package:Package)-[:HAS_VULNERABILITY]->(neighbor) WHERE package.id IN [2301, 4301] RETURN package, neighbor
     expect:
       node_count: 2
       nodes:
@@ -426,11 +396,8 @@ cases:
 
   - name: Merge request pipeline branch chain joins FK hops to a code edge
     description: A four-hop chain resolves AUTHORED, HAS_HEAD_PIPELINE, and IN_PROJECT through FK columns and CONTAINS through gl_code_edge without losing joins
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"pipeline","entity":"Pipeline"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipeline"},{"type":"IN_PROJECT","from":"pipeline","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
-      gql: |
-        MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
+    query: |
+      MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
     expect:
       node_count: 5
       nodes:
@@ -454,11 +421,8 @@ cases:
 
   - name: Merge request diff branch chain joins FK hops to a code edge
     description: A four-hop chain resolves AUTHORED, HAS_DIFF, and IN_PROJECT through FK columns and CONTAINS through gl_code_edge without losing joins
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_DIFF","from":"mr","to":"diff"},{"type":"IN_PROJECT","from":"diff","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
-      gql: |
-        MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, diff, project, branch
+    query: |
+      MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, diff, project, branch
     expect:
       node_count: 5
       nodes:
@@ -482,11 +446,8 @@ cases:
 
   - name: Security scan directory chain joins an FK hop to code edges
     description: A three-hop chain resolves IN_PROJECT through gl_security_scan.project_id and both CONTAINS hops through gl_code_edge without losing joins
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"scan","entity":"SecurityScan","node_ids":[1701]},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"},{"id":"directory","entity":"Directory"}],"relationships":[{"type":"IN_PROJECT","from":"scan","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"},{"type":"CONTAINS","from":"branch","to":"directory"}]}
-      gql: |
-        MATCH (scan:SecurityScan {id: 1701})-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch)-[:CONTAINS]->(directory:Directory) RETURN scan, project, branch, directory
+    query: |
+      MATCH (scan:SecurityScan {id: 1701})-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch)-[:CONTAINS]->(directory:Directory) RETURN scan, project, branch, directory
     expect:
       node_count: 4
       nodes:
@@ -508,11 +469,8 @@ cases:
     description: Relationship alternatives return every authorized row across three physical tables and exclude another namespace
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2500,3500]}],"neighbors":{"direction":"outgoing","rel_types":["IN_PROJECT","HAS_HEAD_PIPELINE","HAS_DIFF"]}}
-      gql: |
-        MATCH (mr:MergeRequest)-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) WHERE mr.id IN [2500, 3500] RETURN mr, target
+    query: |
+      MATCH (mr:MergeRequest)-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) WHERE mr.id IN [2500, 3500] RETURN mr, target
     expect:
       node_count: 4
       nodes:
@@ -535,11 +493,8 @@ cases:
     description: Scope filtering excludes an otherwise valid FK-and-code-edge chain in another organization
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"pipeline","entity":"Pipeline"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipeline"},{"type":"IN_PROJECT","from":"pipeline","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
-      gql: |
-        MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
+    query: |
+      MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
     expect:
       node_count: 5
       nodes:
@@ -565,11 +520,8 @@ cases:
     description: The gl_security_scan FK hop and the gl_code_edge hop preserve namespace scope across their join
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"scan","entity":"SecurityScan","node_ids":[1701,3701]},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"IN_PROJECT","from":"scan","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
-      gql: |
-        MATCH (scan:SecurityScan)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) WHERE scan.id IN [1701, 3701] RETURN scan, project, branch
+    query: |
+      MATCH (scan:SecurityScan)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) WHERE scan.id IN [1701, 3701] RETURN scan, project, branch
     expect:
       node_count: 3
       nodes:
@@ -589,11 +541,8 @@ cases:
     description: A multi-table path frontier returns the authorized project and excludes the same path in another organization
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"path_finding","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1101,3101]},{"id":"branch","entity":"Branch","node_ids":[2601,3601]}],"path":{"type":"shortest","from":"pipeline","to":"branch","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS"]}}
-      gql: |
-        MATCH path = ANY SHORTEST (pipeline:Pipeline)-[:IN_PROJECT|CONTAINS*1..2]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] AND branch.id IN [2601, 3601] RETURN path
+    query: |
+      MATCH path = ANY SHORTEST (pipeline:Pipeline)-[:IN_PROJECT|CONTAINS*1..2]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] AND branch.id IN [2601, 3601] RETURN path
     expect:
       path_count: 1
       nodes:
@@ -611,11 +560,8 @@ cases:
     description: A two-hop variable traversal across CI and code tables returns only the authorized branch
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1101,3101]},{"id":"branch","entity":"Branch"}],"relationships":[{"type":["IN_PROJECT","CONTAINS"],"from":"pipeline","to":"branch","hops":[2,2]}]}
-      gql: |
-        MATCH (pipeline:Pipeline)-[:IN_PROJECT|CONTAINS*2]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] RETURN pipeline, branch
+    query: |
+      MATCH (pipeline:Pipeline)-[:IN_PROJECT|CONTAINS*2]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] RETURN pipeline, branch
     expect:
       node_count: 2
       nodes:
@@ -633,11 +579,8 @@ cases:
     description: Aggregation across CI and code tables counts only the branch in the authorized namespace
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1101,3101]},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"IN_PROJECT","from":"pipeline","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}],"aggregations":[{"count":"branch","as":"n"}],"limit":10}
-      gql: |
-        MATCH (pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] RETURN count(branch) AS n LIMIT 10
+    query: |
+      MATCH (pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] RETURN count(branch) AS n LIMIT 10
     expect:
       skip_requirements: [node_ids]
       row_count: 1

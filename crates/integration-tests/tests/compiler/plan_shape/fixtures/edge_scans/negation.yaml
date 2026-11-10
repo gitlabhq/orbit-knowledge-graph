@@ -1,11 +1,9 @@
 cases:
   - name: A NOT group across two nodes reads each leaf from the source its positive form reads
-    query:
-      gql: |
-        MATCH (mr:MergeRequest {project_id: 1000})-[:CLOSES]->(wi:WorkItem)
-        WHERE NOT (mr.state = 'merged' AND wi.state = 'closed')
-        RETURN count(mr) AS n
-    missing_frontends: { json: JSON filters cannot express grouped negation. }
+    query: |
+      MATCH (mr:MergeRequest {project_id: 1000})-[:CLOSES]->(wi:WorkItem)
+      WHERE NOT (mr.state = 'merged' AND wi.state = 'closed')
+      RETURN count(mr) AS n
     logical:
       expect:
         - "(Aggregate COUNT(mr) AS n (Filter NOT ((mr.state = 'merged') AND (wi.state = 'closed')) (Follow CLOSES mr->wi AS e0 (Filter mr.project_id = 1000 (Entities MergeRequest AS mr)))))"
@@ -17,17 +15,13 @@ cases:
           reject: ["(Scan Table(gl_work_item) ...)"]
 
   - name: NOT over a non-nullable denormalized property reads the node row and its edge tag together
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000],"not":{"definition_type":{"in":["function","method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
-      gql: |
-        MATCH (a:Definition)-[:CALLS]->(b:Definition)
-        WHERE a.id IN [12000] AND NOT a.definition_type IN ['function', 'method']
-        RETURN a, b
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.id IN [12000] AND NOT a.definition_type IN ['function', 'method']
+      RETURN a, b
     logical:
-      gql:
-        expect:
-          - "(Filter a.id IN [12000], NOT (a.definition_type IN ['function', 'method']) (Follow CALLS a->b AS e0 (Entities Definition AS a)))"
+      expect:
+        - "(Filter a.id IN [12000], NOT (a.definition_type IN ['function', 'method']) (Follow CALLS a->b AS e0 (Entities Definition AS a)))"
     physical:
       clickhouse:
         planned:
@@ -35,12 +29,10 @@ cases:
             - "(Filter NOT((a.definition_type IN ['function', 'method']) AND ArrayContainsAny(_orbit_edge_0.source_tags, Array('definition_type:function', 'definition_type:method'))) (_))"
 
   - name: A NOT group over edge columns and non-nullable denormalized properties reads no node table
-    query:
-      gql: |
-        MATCH (u:User)-[r:MEMBER_OF]->(g:Group {id: 100})
-        WHERE NOT (r.source_id < 50 AND u.state = 'active')
-        RETURN count(u) AS n
-    missing_frontends: { json: JSON filters cannot express grouped negation. }
+    query: |
+      MATCH (u:User)-[r:MEMBER_OF]->(g:Group {id: 100})
+      WHERE NOT (r.source_id < 50 AND u.state = 'active')
+      RETURN count(u) AS n
     logical:
       expect:
         - "(Aggregate COUNT(u) AS n (Filter g.id = 100, NOT ((e0.source_id < 50) AND (u.state = 'active')) (Follow MEMBER_OF u->g AS e0 (Entities User AS u))))"
@@ -52,12 +44,10 @@ cases:
           reject: ["(Scan Table(gl_user) ...)"]
 
   - name: A NOT group over a nullable denormalized property reads the node table instead of edge tags
-    query:
-      gql: |
-        MATCH (wi:WorkItem {id: 100})-[:HAS_NOTE]->(n:Note)
-        WHERE NOT (n.confidential = true AND n.internal = true)
-        RETURN count(n) AS c
-    missing_frontends: { json: JSON filters cannot express grouped negation. }
+    query: |
+      MATCH (wi:WorkItem {id: 100})-[:HAS_NOTE]->(n:Note)
+      WHERE NOT (n.confidential = true AND n.internal = true)
+      RETURN count(n) AS c
     logical:
       expect:
         - (Aggregate COUNT(n) AS c (Filter NOT ((n.confidential = true) AND (n.internal = true)) (Follow HAS_NOTE wi->n AS e0 (Filter wi.id = 100 (Entities WorkItem AS wi)))))
@@ -71,17 +61,13 @@ cases:
             - "(Filter ..., NOT(ArrayContains(_orbit_edge_0.target_tags, 'confidential:true') AND ArrayContains(_orbit_edge_0.target_tags, 'internal:true')) (_))"
 
   - name: A NOT leaf on a node that also has an untagged filter reads the node row and the edge tag
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":{"starts_with":"ali"}},"not":{"state":{"in":["blocked"]}}},{"id":"g","entity":"Group","node_ids":[100]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"},{"type":"CONTAINS","from":"g","to":"p"}]}
-      gql: |
-        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100})-[:CONTAINS]->(p:Project)
-        WHERE u.username STARTS WITH 'ali' AND NOT u.state IN ['blocked']
-        RETURN p.name
+    query: |
+      MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100})-[:CONTAINS]->(p:Project)
+      WHERE u.username STARTS WITH 'ali' AND NOT u.state IN ['blocked']
+      RETURN p.name
     logical:
-      gql:
-        expect:
-          - "(Filter starts_with(u.username, 'ali'), NOT (u.state IN ['blocked']) (Follow CONTAINS g->p AS e1 (Filter g.id = 100 (Follow MEMBER_OF u->g AS e0 (Entities User AS u)))))"
+      expect:
+        - "(Filter starts_with(u.username, 'ali'), NOT (u.state IN ['blocked']) (Follow CONTAINS g->p AS e1 (Filter g.id = 100 (Follow MEMBER_OF u->g AS e0 (Entities User AS u)))))"
     physical:
       clickhouse:
         planned:

@@ -15,9 +15,8 @@ config:
 cases:
   - name: not_equal
     description: NOT state closed keeps only the merge request whose latest version is open
-    query:
-      gql: |
-        MATCH (mr:MergeRequest) WHERE mr.id IN [9850, 9851] AND NOT mr.state = 'closed' RETURN mr.title, mr.state LIMIT 10
+    query: |
+      MATCH (mr:MergeRequest) WHERE mr.id IN [9850, 9851] AND NOT mr.state = 'closed' RETURN mr.title, mr.state LIMIT 10
     expect:
       skip_requirements: ["filter:state"]
       node_count: 1
@@ -29,9 +28,8 @@ cases:
 
   - name: negated_or
     description: The NOT form of state opened OR title zz keeps only the merge request whose latest version is open
-    query:
-      gql: |
-        MATCH (mr:MergeRequest) WHERE mr.id IN [9850, 9851] AND NOT (NOT mr.state = 'opened' AND NOT mr.title = 'zz') RETURN mr.title, mr.state LIMIT 10
+    query: |
+      MATCH (mr:MergeRequest) WHERE mr.id IN [9850, 9851] AND NOT (NOT mr.state = 'opened' AND NOT mr.title = 'zz') RETURN mr.title, mr.state LIMIT 10
     expect:
       node_count: 1
       nodes:

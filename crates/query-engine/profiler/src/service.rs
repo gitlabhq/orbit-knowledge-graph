@@ -31,7 +31,6 @@ impl ProfilerPipelineService {
         &self,
         security_ctx: SecurityContext,
         query_json: &str,
-        frontend: compiler::Frontend,
     ) -> Result<PipelineOutput, PipelineError> {
         let mut obs = NoOpObserver;
 
@@ -40,7 +39,6 @@ impl ProfilerPipelineService {
         server_extensions.insert(Arc::clone(&self.data_model));
 
         let mut ctx = QueryPipelineContext {
-            frontend,
             query_json: query_json.to_string(),
             compiled: None,
             security_context: Some(security_ctx),

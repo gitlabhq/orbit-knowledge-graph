@@ -1,8 +1,7 @@
 description: Four-hop traversal pages cover all 13 edges in 3 pages
 
-query:
-  gql: |
-    MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)-[:IN_GROUP]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, wi, g, p SKIP 0 LIMIT 3
+query: |
+  MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)-[:IN_GROUP]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, wi, g, p SKIP 0 LIMIT 3
 
 expect:
   all_pages:

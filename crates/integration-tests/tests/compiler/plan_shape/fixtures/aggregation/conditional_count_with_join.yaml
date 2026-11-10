@@ -1,15 +1,11 @@
 name: Conditional edge aggregation survives a grouped node join
 
-query:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"group_by":["b.name"],"aggregations":[{"count":"a","as":"n"}]}
-  gql: |
-    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN b.name, count(a) AS n
+query: |
+  MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN b.name, count(a) AS n
 
 logical:
-  gql:
-    expect:
-      - (Aggregate group b.name AS b_name, COUNT(a) AS n (Follow CALLS a->b AS e0 (Filter a.id = 1 (Entities Definition AS a))))
+  expect:
+    - (Aggregate group b.name AS b_name, COUNT(a) AS n (Follow CALLS a->b AS e0 (Filter a.id = 1 (Entities Definition AS a))))
 
 physical:
   clickhouse:

@@ -1,5 +1,5 @@
 use bolero::check;
-use compiler::{Frontend, SecurityContext, compile};
+use compiler::{SecurityContext, compile};
 use query_data_model::{Catalog, ClickHouse};
 use std::str::from_utf8;
 use std::sync::{Arc, OnceLock};
@@ -18,7 +18,7 @@ fn ctx() -> &'static SecurityContext {
 fn main() {
     check!().for_each(|input: &[u8]| {
         if let Ok(s) = from_utf8(input)
-            && let Err(error) = compile(s, Frontend::Gql, data_model(), ctx())
+            && let Err(error) = compile(s, data_model(), ctx())
         {
             assert!(error.is_client_safe(), "{s:?}\n{error}");
         }

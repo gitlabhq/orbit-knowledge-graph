@@ -41,9 +41,8 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = AppConfig::load(args.config.as_deref())?;
 
-    // Force-parse schema/format versions at boot so malformed version files
-    // fail fast instead of per-request.
-    let _ = orbit_server::tools::ToolService::build_query_dsl_version();
+    // Force-parse the format version at boot so a malformed version file
+    // fails fast instead of per-request.
     std::sync::LazyLock::force(&query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION);
 
     let invalid_keys = config.query.validate_keys(QueryType::VARIANTS);

@@ -3,9 +3,8 @@ description: Cross-namespace scoped traversal pages cover 3 in-scope edges
 config:
   security: { org_id: 1, paths: ["1/100/"] }
 
-query:
-  gql: |
-    MATCH (g:Group)-[:CONTAINS]->(p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN g, p SKIP 0 LIMIT 1
+query: |
+  MATCH (g:Group)-[:CONTAINS]->(p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN g, p SKIP 0 LIMIT 1
 
 expect:
   all_pages:

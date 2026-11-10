@@ -30,7 +30,6 @@ const (
 	OrbitService_InvokeAgentCommand_FullMethodName = "/orbit.v1.OrbitService/InvokeAgentCommand"
 	OrbitService_ExecuteQuery_FullMethodName       = "/orbit.v1.OrbitService/ExecuteQuery"
 	OrbitService_GetGraphSchema_FullMethodName     = "/orbit.v1.OrbitService/GetGraphSchema"
-	OrbitService_GetQueryDsl_FullMethodName        = "/orbit.v1.OrbitService/GetQueryDsl"
 	OrbitService_ListSkills_FullMethodName         = "/orbit.v1.OrbitService/ListSkills"
 	OrbitService_GetSkill_FullMethodName           = "/orbit.v1.OrbitService/GetSkill"
 	OrbitService_ListNamedQueries_FullMethodName   = "/orbit.v1.OrbitService/ListNamedQueries"
@@ -69,10 +68,6 @@ type OrbitServiceClient interface {
 	// No ClickHouse, no redaction. Supports selective node expansion.
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(ctx context.Context, in *GetGraphSchemaRequest, opts ...grpc.CallOption) (*GetGraphSchemaResponse, error)
-	// Returns the query DSL grammar (JSON Schema for query_graph input).
-	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
-	// command catalog and InvokeAgentCommand instead.
-	GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error)
 	// Lists the standalone Orbit Remote skills embedded in this deployment.
 	// Used by Rails to build GET /api/v4/orbit/skills.
 	ListSkills(ctx context.Context, in *ListSkillsRequest, opts ...grpc.CallOption) (*ListSkillsResponse, error)
@@ -82,7 +77,7 @@ type OrbitServiceClient interface {
 	// Used by GET /api/v4/orbit/templates.
 	ListNamedQueries(ctx context.Context, in *ListNamedQueriesRequest, opts ...grpc.CallOption) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
-	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
+	// output).
 	// Direct API helper for REST consumers. MCP agents should use the command
 	// catalog and InvokeAgentCommand instead.
 	GetResponseFormat(ctx context.Context, in *GetResponseFormatRequest, opts ...grpc.CallOption) (*GetResponseFormatResponse, error)
@@ -153,16 +148,6 @@ func (c *orbitServiceClient) GetGraphSchema(ctx context.Context, in *GetGraphSch
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetGraphSchemaResponse)
 	err := c.cc.Invoke(ctx, OrbitService_GetGraphSchema_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *orbitServiceClient) GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetQueryDslResponse)
-	err := c.cc.Invoke(ctx, OrbitService_GetQueryDsl_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -277,10 +262,6 @@ type OrbitServiceServer interface {
 	// No ClickHouse, no redaction. Supports selective node expansion.
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(context.Context, *GetGraphSchemaRequest) (*GetGraphSchemaResponse, error)
-	// Returns the query DSL grammar (JSON Schema for query_graph input).
-	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
-	// command catalog and InvokeAgentCommand instead.
-	GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error)
 	// Lists the standalone Orbit Remote skills embedded in this deployment.
 	// Used by Rails to build GET /api/v4/orbit/skills.
 	ListSkills(context.Context, *ListSkillsRequest) (*ListSkillsResponse, error)
@@ -290,7 +271,7 @@ type OrbitServiceServer interface {
 	// Used by GET /api/v4/orbit/templates.
 	ListNamedQueries(context.Context, *ListNamedQueriesRequest) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
-	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
+	// output).
 	// Direct API helper for REST consumers. MCP agents should use the command
 	// catalog and InvokeAgentCommand instead.
 	GetResponseFormat(context.Context, *GetResponseFormatRequest) (*GetResponseFormatResponse, error)
@@ -328,9 +309,6 @@ func (UnimplementedOrbitServiceServer) ExecuteQuery(grpc.BidiStreamingServer[Exe
 }
 func (UnimplementedOrbitServiceServer) GetGraphSchema(context.Context, *GetGraphSchemaRequest) (*GetGraphSchemaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetGraphSchema not implemented")
-}
-func (UnimplementedOrbitServiceServer) GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetQueryDsl not implemented")
 }
 func (UnimplementedOrbitServiceServer) ListSkills(context.Context, *ListSkillsRequest) (*ListSkillsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSkills not implemented")
@@ -452,24 +430,6 @@ func _OrbitService_GetGraphSchema_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(OrbitServiceServer).GetGraphSchema(ctx, req.(*GetGraphSchemaRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _OrbitService_GetQueryDsl_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetQueryDslRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(OrbitServiceServer).GetQueryDsl(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: OrbitService_GetQueryDsl_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(OrbitServiceServer).GetQueryDsl(ctx, req.(*GetQueryDslRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -640,10 +600,6 @@ var OrbitService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetGraphSchema",
 			Handler:    _OrbitService_GetGraphSchema_Handler,
-		},
-		{
-			MethodName: "GetQueryDsl",
-			Handler:    _OrbitService_GetQueryDsl_Handler,
 		},
 		{
 			MethodName: "ListSkills",

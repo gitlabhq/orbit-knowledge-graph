@@ -1,10 +1,7 @@
 cases:
   - name: Merge request pipeline branch chain composes default CI and code tables
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"pipeline","entity":"Pipeline"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipeline"},{"type":"IN_PROJECT","from":"pipeline","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
-      gql: |
-        MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
+    query: |
+      MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
     logical:
       expect:
         - (Follow CONTAINS project->branch AS e3 (Follow IN_PROJECT pipeline->project AS e2 (Follow HAS_HEAD_PIPELINE mr->pipeline AS e1 (Follow AUTHORED user->mr AS e0 (Filter ... (Entities User AS user))))))
@@ -17,11 +14,8 @@ cases:
             - (Scan Table(gl_code_edge) AS _orbit_edge_3)
 
   - name: Merge request diff branch chain composes default diff and code tables
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_DIFF","from":"mr","to":"diff"},{"type":"IN_PROJECT","from":"diff","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
-      gql: |
-        MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, diff, project, branch
+    query: |
+      MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, diff, project, branch
     logical:
       expect:
         - (Follow CONTAINS project->branch AS e3 (Follow IN_PROJECT diff->project AS e2 (Follow HAS_DIFF mr->diff AS e1 (Follow AUTHORED user->mr AS e0 (Filter ... (Entities User AS user))))))
@@ -34,11 +28,8 @@ cases:
             - (Scan Table(gl_code_edge) AS _orbit_edge_3)
 
   - name: Security scan project branch chain composes security and code tables
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"scan","entity":"SecurityScan","node_ids":[1]},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"},{"id":"directory","entity":"Directory"}],"relationships":[{"type":"IN_PROJECT","from":"scan","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"},{"type":"CONTAINS","from":"branch","to":"directory"}]}
-      gql: |
-        MATCH (scan:SecurityScan {id: 1})-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch)-[:CONTAINS]->(directory:Directory) RETURN scan, project, branch, directory
+    query: |
+      MATCH (scan:SecurityScan {id: 1})-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch)-[:CONTAINS]->(directory:Directory) RETURN scan, project, branch, directory
     logical:
       expect:
         - (Follow CONTAINS branch->directory AS e2 (Follow CONTAINS project->branch AS e1 (Follow IN_PROJECT scan->project AS e0 (Filter ... (Entities SecurityScan AS scan)))))
@@ -51,15 +42,11 @@ cases:
             - (Scan Table(gl_code_edge) AS _orbit_edge_2)
 
   - name: Untyped merge request alternatives union default CI and diff tables
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["IN_PROJECT","HAS_HEAD_PIPELINE","HAS_DIFF"]}}
-      gql: |
-        MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) RETURN mr, target
+    query: |
+      MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) RETURN mr, target
     logical:
-      gql:
-        expect:
-          - (Neighbors IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF mr->target (Filter mr.id = 1 (Entities MergeRequest AS mr)))
+      expect:
+        - (Neighbors IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF mr->target (Filter mr.id = 1 (Entities MergeRequest AS mr)))
     physical:
       clickhouse:
         planned:
@@ -82,15 +69,11 @@ cases:
             - (Scan Table(gl_diff_edge) AS _orbit_neighbor_edge_arm)
 
   - name: Split AUTHORED neighbors retain default and security routes
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"user","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["AUTHORED"]}}
-      gql: |
-        MATCH (user:User {id: 1})-[:AUTHORED]->(neighbor) RETURN user, neighbor
+    query: |
+      MATCH (user:User {id: 1})-[:AUTHORED]->(neighbor) RETURN user, neighbor
     logical:
-      gql:
-        expect:
-          - (Neighbors AUTHORED user->neighbor (Filter user.id = 1 (Entities User AS user)))
+      expect:
+        - (Neighbors AUTHORED user->neighbor (Filter user.id = 1 (Entities User AS user)))
     physical:
       clickhouse:
         planned:
@@ -104,15 +87,11 @@ cases:
             - (Scan Table(gl_sec_edge) AS _orbit_neighbor_edge_arm)
 
   - name: Cross-table shortest path keeps scoped CI and code frontiers
-    query:
-      json: |
-        {"query_type":"path_finding","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1]},{"id":"branch","entity":"Branch","node_ids":[2]}],"path":{"type":"shortest","from":"pipeline","to":"branch","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS"]}}
-      gql: |
-        MATCH path = ANY SHORTEST (pipeline:Pipeline {id: 1})-[:IN_PROJECT|CONTAINS*1..2]->(branch:Branch {id: 2}) RETURN path
+    query: |
+      MATCH path = ANY SHORTEST (pipeline:Pipeline {id: 1})-[:IN_PROJECT|CONTAINS*1..2]->(branch:Branch {id: 2}) RETURN path
     logical:
-      gql:
-        expect:
-          - (Shortest IN_PROJECT|CONTAINS pipeline->branch DEPTH 2 (Filter pipeline.id = 1 (Entities Pipeline AS pipeline)) (Filter branch.id = 2 (Entities Branch AS branch)))
+      expect:
+        - (Shortest IN_PROJECT|CONTAINS pipeline->branch DEPTH 2 (Filter pipeline.id = 1 (Entities Pipeline AS pipeline)) (Filter branch.id = 2 (Entities Branch AS branch)))
     physical:
       clickhouse:
         planned:

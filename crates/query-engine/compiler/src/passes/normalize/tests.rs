@@ -6,14 +6,14 @@ use query_data_model::plan::logical::{
 use query_data_model::{Catalog, ClickHouse};
 
 use crate::QueryError;
-use crate::surface::{self, Frontend};
+use crate::surface;
 
 static MODEL: LazyLock<Catalog<ClickHouse>> =
     LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
 
 fn normalized(gql: &str) -> Result<LogicalPlan, QueryError> {
     let model = MODEL.model();
-    let statement = surface::parse(gql, Frontend::Gql, model.logical().as_admin())?;
+    let statement = surface::parse(gql, model.logical().as_admin())?;
     super::normalize(statement.plan, model, &*MODEL)
 }
 

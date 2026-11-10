@@ -32,8 +32,6 @@ pub struct ExecuteQueryRequest {
     pub format: i32,
     #[prost(enumeration = "QueryType", tag = "3")]
     pub query_type: i32,
-    #[prost(enumeration = "QueryLanguage", tag = "4")]
-    pub language: i32,
     /// send the result text as ordered ResultChunk messages, then a result with metadata only
     #[prost(bool, tag = "6")]
     pub chunked_result: bool,
@@ -213,43 +211,9 @@ pub struct SchemaNodeStyle {
     #[prost(string, tag = "2")]
     pub color: ::prost::alloc::string::String,
 }
-/// Request for the query DSL grammar.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetQueryDslRequest {
-    /// RAW: full JSON Schema; LLM: condensed TOON
-    #[prost(enumeration = "ResponseFormat", tag = "1")]
-    pub format: i32,
-    #[prost(enumeration = "QueryLanguage", tag = "2")]
-    pub language: i32,
-}
-/// Response carrying the DSL grammar in the requested format.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetQueryDslResponse {
-    /// semver string for the query DSL grammar, e.g. "1.0.0"
-    #[prost(string, tag = "3")]
-    pub version: ::prost::alloc::string::String,
-    #[prost(oneof = "get_query_dsl_response::Content", tags = "1, 2")]
-    pub content: ::core::option::Option<get_query_dsl_response::Content>,
-}
-/// Nested message and enum types in `GetQueryDslResponse`.
-pub mod get_query_dsl_response {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
-    pub enum Content {
-        /// format = RAW: full JSON Schema as a JSON string
-        #[prost(string, tag = "1")]
-        RawJsonSchema(::prost::alloc::string::String),
-        /// format = LLM: condensed TOON
-        #[prost(string, tag = "2")]
-        FormattedText(::prost::alloc::string::String),
-    }
-}
 /// Request for the embedded skill catalog.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListSkillsRequest {
-    /// Query language of the caller; both modes serve the GQL skills
-    #[prost(enumeration = "QueryLanguage", tag = "1")]
-    pub language: i32,
-}
+pub struct ListSkillsRequest {}
 /// Response listing every skill embedded in the deployed server.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListSkillsResponse {
@@ -278,9 +242,6 @@ pub struct GetSkillRequest {
     /// true omits files for a cheap cache revalidation
     #[prost(bool, tag = "2")]
     pub metadata_only: bool,
-    /// Query language of the caller; both modes serve the GQL skill
-    #[prost(enumeration = "QueryLanguage", tag = "3")]
-    pub language: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetSkillResponse {
@@ -344,10 +305,7 @@ pub struct ResponseFormatSchema {
     pub version: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListNamedQueriesRequest {
-    #[prost(enumeration = "QueryLanguage", tag = "1")]
-    pub language: i32,
-}
+pub struct ListNamedQueriesRequest {}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNamedQueriesResponse {
     #[prost(message, repeated, tag = "1")]
@@ -422,10 +380,7 @@ pub struct ResourceAuthorization {
     pub authorized: ::std::collections::HashMap<i64, bool>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListToolsRequest {
-    #[prost(enumeration = "QueryLanguage", tag = "1")]
-    pub language: i32,
-}
+pub struct ListToolsRequest {}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListToolsResponse {
     #[prost(message, repeated, tag = "1")]
@@ -453,8 +408,6 @@ pub struct ListAgentCommandsRequest {
     /// RAW: command definitions; LLM: TOON command catalog
     #[prost(enumeration = "ResponseFormat", tag = "2")]
     pub format: i32,
-    #[prost(enumeration = "QueryLanguage", tag = "3")]
-    pub language: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListAgentCommandsResponse {
@@ -471,8 +424,6 @@ pub struct InvokeAgentCommandRequest {
     /// downstream command parameters object as JSON
     #[prost(string, tag = "2")]
     pub parameters_json: ::prost::alloc::string::String,
-    #[prost(enumeration = "QueryLanguage", tag = "3")]
-    pub language: i32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct InvokeAgentCommandResponse {
@@ -790,7 +741,8 @@ impl FormatName {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum QueryType {
-    Json = 0,
+    /// `query` is one GQL statement
+    Raw = 0,
     /// `query` is a named-query envelope: {"name": ..., "parameters": {...}}
     Named = 1,
 }
@@ -801,41 +753,15 @@ impl QueryType {
     /// (if the ProtoBuf definition does not change) and safe for programmatic use.
     pub fn as_str_name(&self) -> &'static str {
         match self {
-            Self::Json => "QUERY_TYPE_JSON",
+            Self::Raw => "QUERY_TYPE_RAW",
             Self::Named => "QUERY_TYPE_NAMED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
-            "QUERY_TYPE_JSON" => Some(Self::Json),
+            "QUERY_TYPE_RAW" => Some(Self::Raw),
             "QUERY_TYPE_NAMED" => Some(Self::Named),
-            _ => None,
-        }
-    }
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum QueryLanguage {
-    Json = 0,
-    Gql = 1,
-}
-impl QueryLanguage {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            Self::Json => "QUERY_LANGUAGE_JSON",
-            Self::Gql => "QUERY_LANGUAGE_GQL",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "QUERY_LANGUAGE_JSON" => Some(Self::Json),
-            "QUERY_LANGUAGE_GQL" => Some(Self::Gql),
             _ => None,
         }
     }
@@ -1208,33 +1134,6 @@ pub mod orbit_service_client {
                 .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetGraphSchema"));
             self.inner.unary(req, path, codec).await
         }
-        /// Returns the query DSL grammar (JSON Schema for query_graph input).
-        /// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
-        /// command catalog and InvokeAgentCommand instead.
-        pub async fn get_query_dsl(
-            &mut self,
-            request: impl tonic::IntoRequest<super::GetQueryDslRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetQueryDslResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/orbit.v1.OrbitService/GetQueryDsl",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetQueryDsl"));
-            self.inner.unary(req, path, codec).await
-        }
         /// Lists the standalone Orbit Remote skills embedded in this deployment.
         /// Used by Rails to build GET /api/v4/orbit/skills.
         pub async fn list_skills(
@@ -1313,7 +1212,7 @@ pub mod orbit_service_client {
             self.inner.unary(req, path, codec).await
         }
         /// Returns the JSON Schema describing the query response shape (the formatter
-        /// output). Pairs with GetQueryDsl: input grammar there, output shape here.
+        /// output).
         /// Direct API helper for REST consumers. MCP agents should use the command
         /// catalog and InvokeAgentCommand instead.
         pub async fn get_response_format(
@@ -1511,16 +1410,6 @@ pub mod orbit_service_server {
             tonic::Response<super::GetGraphSchemaResponse>,
             tonic::Status,
         >;
-        /// Returns the query DSL grammar (JSON Schema for query_graph input).
-        /// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
-        /// command catalog and InvokeAgentCommand instead.
-        async fn get_query_dsl(
-            &self,
-            request: tonic::Request<super::GetQueryDslRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetQueryDslResponse>,
-            tonic::Status,
-        >;
         /// Lists the standalone Orbit Remote skills embedded in this deployment.
         /// Used by Rails to build GET /api/v4/orbit/skills.
         async fn list_skills(
@@ -1548,7 +1437,7 @@ pub mod orbit_service_server {
             tonic::Status,
         >;
         /// Returns the JSON Schema describing the query response shape (the formatter
-        /// output). Pairs with GetQueryDsl: input grammar there, output shape here.
+        /// output).
         /// Direct API helper for REST consumers. MCP agents should use the command
         /// catalog and InvokeAgentCommand instead.
         async fn get_response_format(
@@ -1889,51 +1778,6 @@ pub mod orbit_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetGraphSchemaSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/orbit.v1.OrbitService/GetQueryDsl" => {
-                    #[allow(non_camel_case_types)]
-                    struct GetQueryDslSvc<T: OrbitService>(pub Arc<T>);
-                    impl<
-                        T: OrbitService,
-                    > tonic::server::UnaryService<super::GetQueryDslRequest>
-                    for GetQueryDslSvc<T> {
-                        type Response = super::GetQueryDslResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::GetQueryDslRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as OrbitService>::get_query_dsl(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = GetQueryDslSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

@@ -1,12 +1,9 @@
 cases:
   - name: A branch joins edge relations through the shared occurrence
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]},{"id":"pipe","entity":"Pipeline","columns":["status"]},{"id":"j","entity":"Job","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
-      gql: |
-        MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project),
-          (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
-        RETURN mr.title, p.name, pipe.status, j.name
+    query: |
+      MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project),
+        (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
+      RETURN mr.title, p.name, pipe.status, j.name
     logical:
       expect:
         - "(Follow HAS_JOB pipe->j AS e2 (Follow HAS_HEAD_PIPELINE mr->pipe AS e1 (Follow IN_PROJECT mr->p AS e0 (Filter ... (Entities MergeRequest AS mr)))))"
@@ -19,13 +16,10 @@ cases:
             - (Scan Table(gl_job) AS j)
 
   - name: Node-backed relations reuse their shared source row
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}]}
-      gql: |
-        MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project),
-          (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
-        RETURN mr.title, p.id, pipe.id
+    query: |
+      MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project),
+        (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
+      RETURN mr.title, p.id, pipe.id
     logical:
       expect:
         - "(Follow HAS_HEAD_PIPELINE mr->pipe AS e1 (Follow IN_PROJECT mr->p AS e0 (Filter ... (Entities MergeRequest AS mr))))"
@@ -39,13 +33,10 @@ cases:
               count: 1
 
   - name: A mixed table branch keeps one edge relation per relationship
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","columns":["name"]},{"id":"pipe","entity":"Pipeline","columns":["status"]}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}]}
-      gql: |
-        MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest),
-          (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
-        RETURN u.username, mr.title, p.name, pipe.status
+    query: |
+      MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest),
+        (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
+      RETURN u.username, mr.title, p.name, pipe.status
     logical:
       expect:
         - "(Follow HAS_HEAD_PIPELINE mr->pipe AS e2 (Follow IN_PROJECT mr->p AS e1 (Follow APPROVED u->mr AS e0 (Filter ... (Entities User AS u)))))"
@@ -57,32 +48,13 @@ cases:
             - (Scan Table(gl_edge) AS _orbit_edge_0)
             - (Scan Table(gl_merge_request) AS mr)
 
-  - name: Relationships declared out of order linearize along the pattern
-    missing_frontends:
-      gql: GQL MATCH order is already connected in the equivalent pattern.
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"},{"id":"d","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"c","to":"d"},{"type":"CALLS","from":"b","to":"c"}]}
+  - name: Convergent stored relations keep selective reads inline
+    query: |
+      MATCH (a:Definition {id: 1})-[:CALLS]->(c:Definition)<-[:CALLS]-(b:Definition {id: 2})
+      RETURN a.id, b.id, c.id
     logical:
       expect:
-        - "(Follow CALLS c->d AS e2 (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Filter a.id IN [1] (Entities Definition AS a)))))"
-    physical:
-      clickhouse:
-        planned:
-          expect:
-            - (Join ON _orbit_edge_1.target_id = _orbit_edge_2.source_id (Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_)) (_))
-
-  - name: Convergent stored relations keep selective reads inline
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","node_ids":[2]},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"c"},{"type":"CALLS","from":"b","to":"c"}]}
-      gql: |
-        MATCH (a:Definition {id: 1})-[:CALLS]->(c:Definition)<-[:CALLS]-(b:Definition {id: 2})
-        RETURN a.id, b.id, c.id
-    logical:
-      gql:
-        expect:
-          - "(Filter b.id = 2 (Follow CALLS c<-b AS e1 (Follow CALLS a->c AS e0 (Filter a.id = 1 (Entities Definition AS a)))))"
+        - "(Filter b.id = 2 (Follow CALLS c<-b AS e1 (Follow CALLS a->c AS e0 (Filter a.id = 1 (Entities Definition AS a)))))"
     physical:
       clickhouse:
         planned:
@@ -97,14 +69,11 @@ cases:
               count: 2
 
   - name: Incoming code-edge branches join on the stored endpoints of the shared node
-    missing_frontends:
-      gql: GQL normalizes incoming arrows into outgoing edges and reorders hops, so it plans a different join.
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"},{"id":"d","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","direction":"incoming"},{"type":"CALLS","from":"b","to":"c","direction":"incoming"},{"type":"CALLS","from":"a","to":"d","direction":"incoming"}]}
+    query: |
+      MATCH (a:Definition {id: 1})<-[:CALLS]-(b:Definition), (b)<-[:CALLS]-(c:Definition), (a)<-[:CALLS]-(d:Definition) RETURN a, b, c, d
     logical:
       expect:
-        - "(Follow CALLS a<-d AS e2 (Follow CALLS b<-c AS e1 (Follow CALLS a<-b AS e0 (Filter a.id IN [1] (Entities Definition AS a)))))"
+        - "(Follow CALLS a<-d AS e2 (Follow CALLS b<-c AS e1 (Follow CALLS a<-b AS e0 (Filter a.id = 1 (Entities Definition AS a)))))"
     physical:
       clickhouse:
         planned:

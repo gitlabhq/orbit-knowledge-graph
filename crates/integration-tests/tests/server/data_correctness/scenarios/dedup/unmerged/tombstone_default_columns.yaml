@@ -19,9 +19,8 @@ config:
 cases:
   - name: merge_request_defaults
     description: An immutable filter inside the latest-row pick does not resurrect a row whose tombstone carries the column
-    query:
-      gql: |
-        MATCH (mr:MergeRequest) WHERE mr.id >= 9800 AND mr.id <= 9801 AND mr.created_at >= '2023-01-01' RETURN mr.id
+    query: |
+      MATCH (mr:MergeRequest) WHERE mr.id >= 9800 AND mr.id <= 9801 AND mr.created_at >= '2023-01-01' RETURN mr.id
 
     expect:
       skip_requirements: ["filter:created_at"]
@@ -31,9 +30,8 @@ cases:
 
   - name: merge_request_count
     description: A count over an immutable filter excludes a row whose tombstone carries the column
-    query:
-      gql: |
-        MATCH (mr:MergeRequest) WHERE mr.id >= 9800 AND mr.id <= 9801 AND mr.created_at >= '2023-01-01' RETURN count(mr) AS n
+    query: |
+      MATCH (mr:MergeRequest) WHERE mr.id >= 9800 AND mr.id <= 9801 AND mr.created_at >= '2023-01-01' RETURN count(mr) AS n
 
     expect:
       skip_requirements: ["filter:created_at"]
@@ -42,9 +40,8 @@ cases:
 
   - name: job_deletion_time
     description: A job tombstone carries the job's created_at and stays excluded from the filter window
-    query:
-      gql: |
-        MATCH (j:Job) WHERE j.id >= 9900 AND j.id <= 9901 AND j.created_at <= '2024-03-01' RETURN j.id
+    query: |
+      MATCH (j:Job) WHERE j.id >= 9900 AND j.id <= 9901 AND j.created_at <= '2024-03-01' RETURN j.id
 
     expect:
       skip_requirements: ["filter:created_at"]

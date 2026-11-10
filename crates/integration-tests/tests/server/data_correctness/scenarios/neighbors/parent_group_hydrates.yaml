@@ -15,9 +15,8 @@ config:
     gl_edge:
       - { traversal_path: "1/701/7010/", source_id: 701, source_kind: Group, relationship_kind: CONTAINS, target_id: 7010, target_kind: Project }
 
-query:
-  gql: |
-    MATCH (p:Project {id: 7010})<-[:CONTAINS]-(n) RETURN p, properties(n)
+query: |
+  MATCH (p:Project {id: 7010})<-[:CONTAINS]-(n) RETURN p, properties(n)
 
 expect:
   node_count: 2

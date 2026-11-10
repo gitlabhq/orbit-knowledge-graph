@@ -1,8 +1,7 @@
 description: Two-hop MEMBER_OF traversal pages cover all 9 edges
 
-query:
-  gql: |
-    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g SKIP 0 LIMIT 4
+query: |
+  MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g SKIP 0 LIMIT 4
 
 expect:
   all_pages:

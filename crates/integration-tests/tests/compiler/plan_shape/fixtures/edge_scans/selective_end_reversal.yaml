@@ -1,15 +1,11 @@
 name: A pinned final endpoint anchors the chain at its last edge
 
-query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition","node_ids":[7]}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
-  gql: |
-    MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition {id: 7}) RETURN a, b, c
+query: |
+  MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition {id: 7}) RETURN a, b, c
 
 logical:
-  gql:
-    expect:
-      - (Filter c.id = 7 (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Entities Definition AS a))))
+  expect:
+    - (Filter c.id = 7 (Follow CALLS b->c AS e1 (Follow CALLS a->b AS e0 (Entities Definition AS a))))
 
 physical:
   clickhouse:

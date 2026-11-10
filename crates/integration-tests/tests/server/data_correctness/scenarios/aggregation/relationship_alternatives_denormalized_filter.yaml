@@ -13,10 +13,9 @@ config:
       - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: APPROVED, target_id: 99001, target_kind: MergeRequest, target_tags: ["state:opened"] }
       - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: AUTHORED, target_id: 99004, target_kind: MergeRequest, target_tags: ["state:merged"] }
 
-query:
-  gql: |
-    MATCH (u:User {id: 99002})-[:AUTHORED|APPROVED]->(mr:MergeRequest {state: 'opened'})
-    RETURN count(mr) AS n
+query: |
+  MATCH (u:User {id: 99002})-[:AUTHORED|APPROVED]->(mr:MergeRequest {state: 'opened'})
+  RETURN count(mr) AS n
 
 expect:
   skip_requirements: [node_ids, "filter:state"]

@@ -60,11 +60,6 @@ service OrbitService {
   // Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
   rpc GetGraphSchema(GetGraphSchemaRequest) returns (GetGraphSchemaResponse);
 
-  // Returns the query DSL grammar (JSON Schema for query_graph input).
-  // Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
-  // command catalog and InvokeAgentCommand instead.
-  rpc GetQueryDsl(GetQueryDslRequest) returns (GetQueryDslResponse);
-
   // Lists the standalone Orbit Remote skills embedded in this deployment.
   // Used by Rails to build GET /api/v4/orbit/skills.
   rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
@@ -77,7 +72,7 @@ service OrbitService {
   rpc ListNamedQueries(ListNamedQueriesRequest) returns (ListNamedQueriesResponse);
 
   // Returns the JSON Schema describing the query response shape (the formatter
-  // output). Pairs with GetQueryDsl: input grammar there, output shape here.
+  // output).
   // Direct API helper for REST consumers. MCP agents should use the command
   // catalog and InvokeAgentCommand instead.
   rpc GetResponseFormat(GetResponseFormatRequest) returns (GetResponseFormatResponse);
@@ -114,13 +109,8 @@ message ExecuteQueryMessage {
 }
 
 enum QueryType {
-  QUERY_TYPE_JSON = 0;
+  QUERY_TYPE_RAW = 0;    // `query` is one GQL statement
   QUERY_TYPE_NAMED = 1;  // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
-}
-
-enum QueryLanguage {
-  QUERY_LANGUAGE_JSON = 0;
-  QUERY_LANGUAGE_GQL = 1;
 }
 
 // Client-sent initial message to start a query.
@@ -128,7 +118,8 @@ message ExecuteQueryRequest {
   string query = 1;
   ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: TOON text; GQL: graph pattern table
   QueryType query_type = 3;
-  QueryLanguage language = 4;
+  reserved 4;
+  reserved "language";
   bool chunked_result = 6;     // send the result text as ordered ResultChunk messages, then a result with metadata only
 }
 
@@ -236,31 +227,13 @@ message SchemaNodeStyle {
 }
 
 // ---------------------------------------------------------------------------
-// GetQueryDsl — unary, returns the JSON Schema for query_graph input
-// ---------------------------------------------------------------------------
-
-// Request for the query DSL grammar.
-message GetQueryDslRequest {
-  ResponseFormat format = 1;  // RAW: full JSON Schema; LLM: condensed TOON
-  QueryLanguage language = 2;
-}
-
-// Response carrying the DSL grammar in the requested format.
-message GetQueryDslResponse {
-  string version = 3;  // semver string for the query DSL grammar, e.g. "1.0.0"
-  oneof content {
-    string raw_json_schema = 1;  // format = RAW: full JSON Schema as a JSON string
-    string formatted_text = 2;   // format = LLM: condensed TOON
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Skills — unary, returns embedded Orbit Remote skill artifacts
 // ---------------------------------------------------------------------------
 
 // Request for the embedded skill catalog.
 message ListSkillsRequest {
-  QueryLanguage language = 1;  // Query language of the caller; both modes serve the GQL skills
+  reserved 1;
+  reserved "language";
 }
 
 // Response listing every skill embedded in the deployed server.
@@ -282,7 +255,8 @@ message SkillSummary {
 message GetSkillRequest {
   string name = 1;
   bool metadata_only = 2;  // true omits files for a cheap cache revalidation
-  QueryLanguage language = 3;  // Query language of the caller; both modes serve the GQL skill
+  reserved 3;
+  reserved "language";
 }
 
 message GetSkillResponse {
@@ -332,7 +306,8 @@ message ResponseFormatSchema {
 // ---------------------------------------------------------------------------
 
 message ListNamedQueriesRequest {
-  QueryLanguage language = 1;
+  reserved 1;
+  reserved "language";
 }
 
 message ListNamedQueriesResponse {
@@ -389,7 +364,8 @@ message ResourceAuthorization {
 // ---------------------------------------------------------------------------
 
 message ListToolsRequest {
-  QueryLanguage language = 1;
+  reserved 1;
+  reserved "language";
 }
 
 message ListToolsResponse {
@@ -411,7 +387,8 @@ message ToolDefinition {
 message ListAgentCommandsRequest {
   repeated string command_names = 1; // empty means list every command
   ResponseFormat format = 2;         // RAW: command definitions; LLM: TOON command catalog
-  QueryLanguage language = 3;
+  reserved 3;
+  reserved "language";
 }
 
 message ListAgentCommandsResponse {
@@ -422,7 +399,8 @@ message ListAgentCommandsResponse {
 message InvokeAgentCommandRequest {
   string command_name = 1;
   string parameters_json = 2; // downstream command parameters object as JSON
-  QueryLanguage language = 3;
+  reserved 3;
+  reserved "language";
 }
 
 message InvokeAgentCommandResponse {

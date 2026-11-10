@@ -13,10 +13,9 @@ config:
     gl_edge:
       - { traversal_path: "1/200/1001/", source_id: 99001, source_kind: MergeRequest, relationship_kind: MENTIONS, target_id: 99000, target_kind: MergeRequest }
 
-query:
-  gql: |
-    MATCH (mr:MergeRequest {id: 99000})<-[:MENTIONS]-(neighbor)
-    RETURN neighbor
+query: |
+  MATCH (mr:MergeRequest {id: 99000})<-[:MENTIONS]-(neighbor)
+  RETURN neighbor
 
 expect:
   node_count: 2

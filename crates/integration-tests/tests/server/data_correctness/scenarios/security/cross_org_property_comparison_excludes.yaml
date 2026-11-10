@@ -7,11 +7,10 @@ description: >
 config:
   security: { org_id: 1, paths: ["1/"] }
 
-query:
-  gql: |
-    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
-    WHERE u.username <> mr.title
-    RETURN u, mr.title LIMIT 50
+query: |
+  MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+  WHERE u.username <> mr.title
+  RETURN u, mr.title LIMIT 50
 
 expect:
   node_count: 3

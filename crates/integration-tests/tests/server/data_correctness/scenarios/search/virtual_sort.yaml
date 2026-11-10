@@ -1,8 +1,7 @@
 description: Virtual properties cannot be ordered before hydration
 
-query:
-  gql: |
-    MATCH (f:File {id: 13004}) RETURN f.id ORDER BY f.content
+query: |
+  MATCH (f:File {id: 13004}) RETURN f.id ORDER BY f.content
 
 expect:
   compile_error: "virtual"

@@ -1,17 +1,17 @@
-use compiler::{Frontend, QueryError, compile};
+use compiler::{QueryError, compile};
 
 use super::setup::{embedded_model, test_ctx};
 
-fn assert_reserved(query: &str, frontend: Frontend, identifier: &str) {
+fn assert_reserved(query: &str, identifier: &str) {
     let expected = format!("identifier {identifier:?} conflicts with reserved prefix \"_orbit_\"");
-    match compile(query, frontend, &embedded_model(), &test_ctx()) {
+    match compile(query, &embedded_model(), &test_ctx()) {
         Err(QueryError::Validation(message)) => assert_eq!(message, expected, "{query}"),
         other => panic!("{query} must be rejected, got {other:?}"),
     }
 }
 
 #[test]
-fn gql_rejects_reserved_names_in_every_position() {
+fn reserved_names_are_rejected_in_every_position() {
     let cases = [
         (
             "MATCH (_orbit_p:Project {id: 1}) RETURN _orbit_p",
@@ -39,48 +39,6 @@ fn gql_rejects_reserved_names_in_every_position() {
         ),
     ];
     for (query, identifier) in cases {
-        assert_reserved(query, Frontend::Gql, identifier);
-    }
-}
-
-#[test]
-fn json_rejects_reserved_names_in_every_position() {
-    let cases = [
-        (
-            serde_json::json!({
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "project", "entity": "Project", "node_ids": [1]},
-                    {"id": "_orbit", "entity": "MergeRequest"}
-                ],
-                "relationships": [{"type": "IN_PROJECT", "from": "_orbit", "to": "project"}]
-            }),
-            "_orbit",
-        ),
-        (
-            serde_json::json!({
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "mr", "entity": "MergeRequest"},
-                    {"id": "p", "entity": "Project", "node_ids": [1]}
-                ],
-                "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-                "group_by": ["p"],
-                "aggregations": [{"max": "mr.iid", "as": "_orbit_p_id"}]
-            }),
-            "_orbit_p_id",
-        ),
-        (
-            serde_json::json!({
-                "query_type": "aggregation",
-                "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2]}],
-                "group_by": ["mr", {"key": "mr.iid", "as": "_orbit_mr_id"}],
-                "aggregations": [{"count": "mr", "as": "n"}]
-            }),
-            "_orbit_mr_id",
-        ),
-    ];
-    for (query, identifier) in cases {
-        assert_reserved(&query.to_string(), Frontend::JsonDsl, identifier);
+        assert_reserved(query, identifier);
     }
 }

@@ -15,10 +15,9 @@ config:
       - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: AUTHORED, target_id: 99000, target_kind: MergeRequest }
       - { traversal_path: "1/100/1000/", source_id: 99000, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
 
-query:
-  gql: |
-    MATCH (u:User {id: 99002})-[*2]->(p:Project {id: 1000})
-    RETURN u.id, p.id
+query: |
+  MATCH (u:User {id: 99002})-[*2]->(p:Project {id: 1000})
+  RETURN u.id, p.id
 
 expect:
   skip_requirements: ["node_ids", "relationship:*"]

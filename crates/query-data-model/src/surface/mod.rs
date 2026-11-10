@@ -1,5 +1,4 @@
 pub mod gql;
-pub mod json;
 
 use crate::plan::logical::{Literal, LogicalPlan, PlanError};
 

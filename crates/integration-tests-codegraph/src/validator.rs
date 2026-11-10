@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
-use compiler::{Frontend, compile_local};
+use compiler::compile_local;
 use duckdb_client::DuckDbClient;
 use orbit_arrow::ArrowUtils;
 use query_data_model::{Catalog, DuckDb, GraphCatalog};
@@ -130,7 +130,7 @@ fn execute_cypher(
         eprintln!("  ALIASES: {aliases:?}");
         eprintln!("  REWRITTEN: {clean_query}");
     }
-    let compiled = compile_local(&clean_query, Frontend::Gql, data_model)?;
+    let compiled = compile_local(&clean_query, data_model)?;
     let sql = compiled.base.render();
     eprintln!("  SQL: {sql}");
     let batches = client.query_arrow(&sql)?;

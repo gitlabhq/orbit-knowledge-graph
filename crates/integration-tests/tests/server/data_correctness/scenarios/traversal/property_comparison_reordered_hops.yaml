@@ -1,11 +1,10 @@
 description: Cross-node comparisons use the correct endpoints after a filtered target reverses the join order
 
-query:
-  gql: |
-    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
-    WHERE p.name IN ['Public Project', 'Internal Project'] AND u.id < g.id AND g.id < p.id
-      AND g.visibility_level = p.visibility_level
-    RETURN u, g, p.name LIMIT 20
+query: |
+  MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+  WHERE p.name IN ['Public Project', 'Internal Project'] AND u.id < g.id AND g.id < p.id
+    AND g.visibility_level = p.visibility_level
+  RETURN u, g, p.name LIMIT 20
 
 expect:
   node_count: 5

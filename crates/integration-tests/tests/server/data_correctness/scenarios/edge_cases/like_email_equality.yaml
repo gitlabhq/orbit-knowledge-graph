@@ -3,16 +3,8 @@ description: Exact equality on admin_only email field works (like_allowed false 
 config:
   security: admin
 
-query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "email"],
-                 "filters": {"email": "alice@example.com"}}],
-        "limit": 10
-    }
-  gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.email = 'alice@example.com' RETURN u.username, u.email LIMIT 10
+query: |
+  MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.email = 'alice@example.com' RETURN u.username, u.email LIMIT 10
 
 expect:
   node_count: 1

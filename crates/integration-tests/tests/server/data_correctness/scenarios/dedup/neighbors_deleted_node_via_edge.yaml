@@ -23,15 +23,8 @@ config:
       milestone: [6000, 6001]
       label: [7000, 7001, 7002]
 
-query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [9311]}],
-      "neighbors": {"direction": "both"}
-    }
-  gql: |
-    MATCH (mr:MergeRequest {id: 9311})--(n) RETURN mr, n
+query: |
+  MATCH (mr:MergeRequest {id: 9311})--(n) RETURN mr, n
 
 expect:
   skip_requirements: [node_count]

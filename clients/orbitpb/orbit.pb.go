@@ -137,18 +137,18 @@ func (FormatName) EnumDescriptor() ([]byte, []int) {
 type QueryType int32
 
 const (
-	QueryType_QUERY_TYPE_JSON  QueryType = 0
+	QueryType_QUERY_TYPE_RAW   QueryType = 0 // `query` is one GQL statement
 	QueryType_QUERY_TYPE_NAMED QueryType = 1 // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
 )
 
 // Enum value maps for QueryType.
 var (
 	QueryType_name = map[int32]string{
-		0: "QUERY_TYPE_JSON",
+		0: "QUERY_TYPE_RAW",
 		1: "QUERY_TYPE_NAMED",
 	}
 	QueryType_value = map[string]int32{
-		"QUERY_TYPE_JSON":  0,
+		"QUERY_TYPE_RAW":   0,
 		"QUERY_TYPE_NAMED": 1,
 	}
 )
@@ -178,52 +178,6 @@ func (x QueryType) Number() protoreflect.EnumNumber {
 // Deprecated: Use QueryType.Descriptor instead.
 func (QueryType) EnumDescriptor() ([]byte, []int) {
 	return file_orbit_proto_rawDescGZIP(), []int{2}
-}
-
-type QueryLanguage int32
-
-const (
-	QueryLanguage_QUERY_LANGUAGE_JSON QueryLanguage = 0
-	QueryLanguage_QUERY_LANGUAGE_GQL  QueryLanguage = 1
-)
-
-// Enum value maps for QueryLanguage.
-var (
-	QueryLanguage_name = map[int32]string{
-		0: "QUERY_LANGUAGE_JSON",
-		1: "QUERY_LANGUAGE_GQL",
-	}
-	QueryLanguage_value = map[string]int32{
-		"QUERY_LANGUAGE_JSON": 0,
-		"QUERY_LANGUAGE_GQL":  1,
-	}
-)
-
-func (x QueryLanguage) Enum() *QueryLanguage {
-	p := new(QueryLanguage)
-	*p = x
-	return p
-}
-
-func (x QueryLanguage) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (QueryLanguage) Descriptor() protoreflect.EnumDescriptor {
-	return file_orbit_proto_enumTypes[3].Descriptor()
-}
-
-func (QueryLanguage) Type() protoreflect.EnumType {
-	return &file_orbit_proto_enumTypes[3]
-}
-
-func (x QueryLanguage) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use QueryLanguage.Descriptor instead.
-func (QueryLanguage) EnumDescriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{3}
 }
 
 type ClusterStatus int32
@@ -265,11 +219,11 @@ func (x ClusterStatus) String() string {
 }
 
 func (ClusterStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_orbit_proto_enumTypes[4].Descriptor()
+	return file_orbit_proto_enumTypes[3].Descriptor()
 }
 
 func (ClusterStatus) Type() protoreflect.EnumType {
-	return &file_orbit_proto_enumTypes[4]
+	return &file_orbit_proto_enumTypes[3]
 }
 
 func (x ClusterStatus) Number() protoreflect.EnumNumber {
@@ -278,7 +232,7 @@ func (x ClusterStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ClusterStatus.Descriptor instead.
 func (ClusterStatus) EnumDescriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{4}
+	return file_orbit_proto_rawDescGZIP(), []int{3}
 }
 
 type SourceType int32
@@ -311,11 +265,11 @@ func (x SourceType) String() string {
 }
 
 func (SourceType) Descriptor() protoreflect.EnumDescriptor {
-	return file_orbit_proto_enumTypes[5].Descriptor()
+	return file_orbit_proto_enumTypes[4].Descriptor()
 }
 
 func (SourceType) Type() protoreflect.EnumType {
-	return &file_orbit_proto_enumTypes[5]
+	return &file_orbit_proto_enumTypes[4]
 }
 
 func (x SourceType) Number() protoreflect.EnumNumber {
@@ -324,7 +278,7 @@ func (x SourceType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SourceType.Descriptor instead.
 func (SourceType) EnumDescriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{5}
+	return file_orbit_proto_rawDescGZIP(), []int{4}
 }
 
 // Derived indexing lifecycle state.
@@ -370,11 +324,11 @@ func (x IndexingState) String() string {
 }
 
 func (IndexingState) Descriptor() protoreflect.EnumDescriptor {
-	return file_orbit_proto_enumTypes[6].Descriptor()
+	return file_orbit_proto_enumTypes[5].Descriptor()
 }
 
 func (IndexingState) Type() protoreflect.EnumType {
-	return &file_orbit_proto_enumTypes[6]
+	return &file_orbit_proto_enumTypes[5]
 }
 
 func (x IndexingState) Number() protoreflect.EnumNumber {
@@ -383,7 +337,7 @@ func (x IndexingState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use IndexingState.Descriptor instead.
 func (IndexingState) EnumDescriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{6}
+	return file_orbit_proto_rawDescGZIP(), []int{5}
 }
 
 type IndexingPhase int32
@@ -425,11 +379,11 @@ func (x IndexingPhase) String() string {
 }
 
 func (IndexingPhase) Descriptor() protoreflect.EnumDescriptor {
-	return file_orbit_proto_enumTypes[7].Descriptor()
+	return file_orbit_proto_enumTypes[6].Descriptor()
 }
 
 func (IndexingPhase) Type() protoreflect.EnumType {
-	return &file_orbit_proto_enumTypes[7]
+	return &file_orbit_proto_enumTypes[6]
 }
 
 func (x IndexingPhase) Number() protoreflect.EnumNumber {
@@ -438,7 +392,7 @@ func (x IndexingPhase) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use IndexingPhase.Descriptor instead.
 func (IndexingPhase) EnumDescriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{7}
+	return file_orbit_proto_rawDescGZIP(), []int{6}
 }
 
 // Envelope for the execute_query stream. Each message carries exactly one of:
@@ -579,7 +533,6 @@ type ExecuteQueryRequest struct {
 	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
 	Format        ResponseFormat         `protobuf:"varint,2,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"` // RAW: tabular JSON rows; LLM: TOON text; GQL: graph pattern table
 	QueryType     QueryType              `protobuf:"varint,3,opt,name=query_type,json=queryType,proto3,enum=orbit.v1.QueryType" json:"query_type,omitempty"`
-	Language      QueryLanguage          `protobuf:"varint,4,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
 	ChunkedResult bool                   `protobuf:"varint,6,opt,name=chunked_result,json=chunkedResult,proto3" json:"chunked_result,omitempty"` // send the result text as ordered ResultChunk messages, then a result with metadata only
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -633,14 +586,7 @@ func (x *ExecuteQueryRequest) GetQueryType() QueryType {
 	if x != nil {
 		return x.QueryType
 	}
-	return QueryType_QUERY_TYPE_JSON
-}
-
-func (x *ExecuteQueryRequest) GetLanguage() QueryLanguage {
-	if x != nil {
-		return x.Language
-	}
-	return QueryLanguage_QUERY_LANGUAGE_JSON
+	return QueryType_QUERY_TYPE_RAW
 }
 
 func (x *ExecuteQueryRequest) GetChunkedResult() bool {
@@ -1535,161 +1481,16 @@ func (x *SchemaNodeStyle) GetColor() string {
 	return ""
 }
 
-// Request for the query DSL grammar.
-type GetQueryDslRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Format        ResponseFormat         `protobuf:"varint,1,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"` // RAW: full JSON Schema; LLM: condensed TOON
-	Language      QueryLanguage          `protobuf:"varint,2,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetQueryDslRequest) Reset() {
-	*x = GetQueryDslRequest{}
-	mi := &file_orbit_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetQueryDslRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetQueryDslRequest) ProtoMessage() {}
-
-func (x *GetQueryDslRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetQueryDslRequest.ProtoReflect.Descriptor instead.
-func (*GetQueryDslRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *GetQueryDslRequest) GetFormat() ResponseFormat {
-	if x != nil {
-		return x.Format
-	}
-	return ResponseFormat_RESPONSE_FORMAT_RAW
-}
-
-func (x *GetQueryDslRequest) GetLanguage() QueryLanguage {
-	if x != nil {
-		return x.Language
-	}
-	return QueryLanguage_QUERY_LANGUAGE_JSON
-}
-
-// Response carrying the DSL grammar in the requested format.
-type GetQueryDslResponse struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Version string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // semver string for the query DSL grammar, e.g. "1.0.0"
-	// Types that are valid to be assigned to Content:
-	//
-	//	*GetQueryDslResponse_RawJsonSchema
-	//	*GetQueryDslResponse_FormattedText
-	Content       isGetQueryDslResponse_Content `protobuf_oneof:"content"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetQueryDslResponse) Reset() {
-	*x = GetQueryDslResponse{}
-	mi := &file_orbit_proto_msgTypes[16]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetQueryDslResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetQueryDslResponse) ProtoMessage() {}
-
-func (x *GetQueryDslResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[16]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetQueryDslResponse.ProtoReflect.Descriptor instead.
-func (*GetQueryDslResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{16}
-}
-
-func (x *GetQueryDslResponse) GetVersion() string {
-	if x != nil {
-		return x.Version
-	}
-	return ""
-}
-
-func (x *GetQueryDslResponse) GetContent() isGetQueryDslResponse_Content {
-	if x != nil {
-		return x.Content
-	}
-	return nil
-}
-
-func (x *GetQueryDslResponse) GetRawJsonSchema() string {
-	if x != nil {
-		if x, ok := x.Content.(*GetQueryDslResponse_RawJsonSchema); ok {
-			return x.RawJsonSchema
-		}
-	}
-	return ""
-}
-
-func (x *GetQueryDslResponse) GetFormattedText() string {
-	if x != nil {
-		if x, ok := x.Content.(*GetQueryDslResponse_FormattedText); ok {
-			return x.FormattedText
-		}
-	}
-	return ""
-}
-
-type isGetQueryDslResponse_Content interface {
-	isGetQueryDslResponse_Content()
-}
-
-type GetQueryDslResponse_RawJsonSchema struct {
-	RawJsonSchema string `protobuf:"bytes,1,opt,name=raw_json_schema,json=rawJsonSchema,proto3,oneof"` // format = RAW: full JSON Schema as a JSON string
-}
-
-type GetQueryDslResponse_FormattedText struct {
-	FormattedText string `protobuf:"bytes,2,opt,name=formatted_text,json=formattedText,proto3,oneof"` // format = LLM: condensed TOON
-}
-
-func (*GetQueryDslResponse_RawJsonSchema) isGetQueryDslResponse_Content() {}
-
-func (*GetQueryDslResponse_FormattedText) isGetQueryDslResponse_Content() {}
-
 // Request for the embedded skill catalog.
 type ListSkillsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Language      QueryLanguage          `protobuf:"varint,1,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"` // Query language of the caller; both modes serve the GQL skills
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListSkillsRequest) Reset() {
 	*x = ListSkillsRequest{}
-	mi := &file_orbit_proto_msgTypes[17]
+	mi := &file_orbit_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1701,7 +1502,7 @@ func (x *ListSkillsRequest) String() string {
 func (*ListSkillsRequest) ProtoMessage() {}
 
 func (x *ListSkillsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[17]
+	mi := &file_orbit_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1714,14 +1515,7 @@ func (x *ListSkillsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSkillsRequest.ProtoReflect.Descriptor instead.
 func (*ListSkillsRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{17}
-}
-
-func (x *ListSkillsRequest) GetLanguage() QueryLanguage {
-	if x != nil {
-		return x.Language
-	}
-	return QueryLanguage_QUERY_LANGUAGE_JSON
+	return file_orbit_proto_rawDescGZIP(), []int{15}
 }
 
 // Response listing every skill embedded in the deployed server.
@@ -1735,7 +1529,7 @@ type ListSkillsResponse struct {
 
 func (x *ListSkillsResponse) Reset() {
 	*x = ListSkillsResponse{}
-	mi := &file_orbit_proto_msgTypes[18]
+	mi := &file_orbit_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1747,7 +1541,7 @@ func (x *ListSkillsResponse) String() string {
 func (*ListSkillsResponse) ProtoMessage() {}
 
 func (x *ListSkillsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[18]
+	mi := &file_orbit_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1760,7 +1554,7 @@ func (x *ListSkillsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSkillsResponse.ProtoReflect.Descriptor instead.
 func (*ListSkillsResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{18}
+	return file_orbit_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListSkillsResponse) GetSkills() []*SkillSummary {
@@ -1789,7 +1583,7 @@ type SkillSummary struct {
 
 func (x *SkillSummary) Reset() {
 	*x = SkillSummary{}
-	mi := &file_orbit_proto_msgTypes[19]
+	mi := &file_orbit_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1801,7 +1595,7 @@ func (x *SkillSummary) String() string {
 func (*SkillSummary) ProtoMessage() {}
 
 func (x *SkillSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[19]
+	mi := &file_orbit_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1814,7 +1608,7 @@ func (x *SkillSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SkillSummary.ProtoReflect.Descriptor instead.
 func (*SkillSummary) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{19}
+	return file_orbit_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SkillSummary) GetName() string {
@@ -1850,14 +1644,13 @@ type GetSkillRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	MetadataOnly  bool                   `protobuf:"varint,2,opt,name=metadata_only,json=metadataOnly,proto3" json:"metadata_only,omitempty"` // true omits files for a cheap cache revalidation
-	Language      QueryLanguage          `protobuf:"varint,3,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"` // Query language of the caller; both modes serve the GQL skill
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetSkillRequest) Reset() {
 	*x = GetSkillRequest{}
-	mi := &file_orbit_proto_msgTypes[20]
+	mi := &file_orbit_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1869,7 +1662,7 @@ func (x *GetSkillRequest) String() string {
 func (*GetSkillRequest) ProtoMessage() {}
 
 func (x *GetSkillRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[20]
+	mi := &file_orbit_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1882,7 +1675,7 @@ func (x *GetSkillRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSkillRequest.ProtoReflect.Descriptor instead.
 func (*GetSkillRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{20}
+	return file_orbit_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GetSkillRequest) GetName() string {
@@ -1899,13 +1692,6 @@ func (x *GetSkillRequest) GetMetadataOnly() bool {
 	return false
 }
 
-func (x *GetSkillRequest) GetLanguage() QueryLanguage {
-	if x != nil {
-		return x.Language
-	}
-	return QueryLanguage_QUERY_LANGUAGE_JSON
-}
-
 type GetSkillResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -1919,7 +1705,7 @@ type GetSkillResponse struct {
 
 func (x *GetSkillResponse) Reset() {
 	*x = GetSkillResponse{}
-	mi := &file_orbit_proto_msgTypes[21]
+	mi := &file_orbit_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1931,7 +1717,7 @@ func (x *GetSkillResponse) String() string {
 func (*GetSkillResponse) ProtoMessage() {}
 
 func (x *GetSkillResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[21]
+	mi := &file_orbit_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1944,7 +1730,7 @@ func (x *GetSkillResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSkillResponse.ProtoReflect.Descriptor instead.
 func (*GetSkillResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{21}
+	return file_orbit_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GetSkillResponse) GetName() string {
@@ -1994,7 +1780,7 @@ type SkillFile struct {
 
 func (x *SkillFile) Reset() {
 	*x = SkillFile{}
-	mi := &file_orbit_proto_msgTypes[22]
+	mi := &file_orbit_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2006,7 +1792,7 @@ func (x *SkillFile) String() string {
 func (*SkillFile) ProtoMessage() {}
 
 func (x *SkillFile) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[22]
+	mi := &file_orbit_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2019,7 +1805,7 @@ func (x *SkillFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SkillFile.ProtoReflect.Descriptor instead.
 func (*SkillFile) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{22}
+	return file_orbit_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SkillFile) GetPath() string {
@@ -2053,7 +1839,7 @@ type GetResponseFormatRequest struct {
 
 func (x *GetResponseFormatRequest) Reset() {
 	*x = GetResponseFormatRequest{}
-	mi := &file_orbit_proto_msgTypes[23]
+	mi := &file_orbit_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2065,7 +1851,7 @@ func (x *GetResponseFormatRequest) String() string {
 func (*GetResponseFormatRequest) ProtoMessage() {}
 
 func (x *GetResponseFormatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[23]
+	mi := &file_orbit_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2078,7 +1864,7 @@ func (x *GetResponseFormatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetResponseFormatRequest.ProtoReflect.Descriptor instead.
 func (*GetResponseFormatRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{23}
+	return file_orbit_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetResponseFormatRequest) GetFormat() ResponseFormat {
@@ -2102,7 +1888,7 @@ type GetResponseFormatResponse struct {
 
 func (x *GetResponseFormatResponse) Reset() {
 	*x = GetResponseFormatResponse{}
-	mi := &file_orbit_proto_msgTypes[24]
+	mi := &file_orbit_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2114,7 +1900,7 @@ func (x *GetResponseFormatResponse) String() string {
 func (*GetResponseFormatResponse) ProtoMessage() {}
 
 func (x *GetResponseFormatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[24]
+	mi := &file_orbit_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2127,7 +1913,7 @@ func (x *GetResponseFormatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetResponseFormatResponse.ProtoReflect.Descriptor instead.
 func (*GetResponseFormatResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{24}
+	return file_orbit_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *GetResponseFormatResponse) GetContent() isGetResponseFormatResponse_Content {
@@ -2184,7 +1970,7 @@ type ResponseFormatSchema struct {
 
 func (x *ResponseFormatSchema) Reset() {
 	*x = ResponseFormatSchema{}
-	mi := &file_orbit_proto_msgTypes[25]
+	mi := &file_orbit_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2196,7 +1982,7 @@ func (x *ResponseFormatSchema) String() string {
 func (*ResponseFormatSchema) ProtoMessage() {}
 
 func (x *ResponseFormatSchema) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[25]
+	mi := &file_orbit_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2209,7 +1995,7 @@ func (x *ResponseFormatSchema) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResponseFormatSchema.ProtoReflect.Descriptor instead.
 func (*ResponseFormatSchema) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{25}
+	return file_orbit_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ResponseFormatSchema) GetSchema() string {
@@ -2228,14 +2014,13 @@ func (x *ResponseFormatSchema) GetVersion() string {
 
 type ListNamedQueriesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Language      QueryLanguage          `protobuf:"varint,1,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListNamedQueriesRequest) Reset() {
 	*x = ListNamedQueriesRequest{}
-	mi := &file_orbit_proto_msgTypes[26]
+	mi := &file_orbit_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2247,7 +2032,7 @@ func (x *ListNamedQueriesRequest) String() string {
 func (*ListNamedQueriesRequest) ProtoMessage() {}
 
 func (x *ListNamedQueriesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[26]
+	mi := &file_orbit_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2260,14 +2045,7 @@ func (x *ListNamedQueriesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNamedQueriesRequest.ProtoReflect.Descriptor instead.
 func (*ListNamedQueriesRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{26}
-}
-
-func (x *ListNamedQueriesRequest) GetLanguage() QueryLanguage {
-	if x != nil {
-		return x.Language
-	}
-	return QueryLanguage_QUERY_LANGUAGE_JSON
+	return file_orbit_proto_rawDescGZIP(), []int{24}
 }
 
 type ListNamedQueriesResponse struct {
@@ -2279,7 +2057,7 @@ type ListNamedQueriesResponse struct {
 
 func (x *ListNamedQueriesResponse) Reset() {
 	*x = ListNamedQueriesResponse{}
-	mi := &file_orbit_proto_msgTypes[27]
+	mi := &file_orbit_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2291,7 +2069,7 @@ func (x *ListNamedQueriesResponse) String() string {
 func (*ListNamedQueriesResponse) ProtoMessage() {}
 
 func (x *ListNamedQueriesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[27]
+	mi := &file_orbit_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2304,7 +2082,7 @@ func (x *ListNamedQueriesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNamedQueriesResponse.ProtoReflect.Descriptor instead.
 func (*ListNamedQueriesResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{27}
+	return file_orbit_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ListNamedQueriesResponse) GetQueries() []*NamedQueryDefinition {
@@ -2325,7 +2103,7 @@ type NamedQueryDefinition struct {
 
 func (x *NamedQueryDefinition) Reset() {
 	*x = NamedQueryDefinition{}
-	mi := &file_orbit_proto_msgTypes[28]
+	mi := &file_orbit_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2337,7 +2115,7 @@ func (x *NamedQueryDefinition) String() string {
 func (*NamedQueryDefinition) ProtoMessage() {}
 
 func (x *NamedQueryDefinition) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[28]
+	mi := &file_orbit_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2350,7 +2128,7 @@ func (x *NamedQueryDefinition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NamedQueryDefinition.ProtoReflect.Descriptor instead.
 func (*NamedQueryDefinition) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{28}
+	return file_orbit_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *NamedQueryDefinition) GetName() string {
@@ -2389,7 +2167,7 @@ type RedactionExchange struct {
 
 func (x *RedactionExchange) Reset() {
 	*x = RedactionExchange{}
-	mi := &file_orbit_proto_msgTypes[29]
+	mi := &file_orbit_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2401,7 +2179,7 @@ func (x *RedactionExchange) String() string {
 func (*RedactionExchange) ProtoMessage() {}
 
 func (x *RedactionExchange) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[29]
+	mi := &file_orbit_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2414,7 +2192,7 @@ func (x *RedactionExchange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedactionExchange.ProtoReflect.Descriptor instead.
 func (*RedactionExchange) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{29}
+	return file_orbit_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *RedactionExchange) GetContent() isRedactionExchange_Content {
@@ -2469,7 +2247,7 @@ type RedactionRequired struct {
 
 func (x *RedactionRequired) Reset() {
 	*x = RedactionRequired{}
-	mi := &file_orbit_proto_msgTypes[30]
+	mi := &file_orbit_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2481,7 +2259,7 @@ func (x *RedactionRequired) String() string {
 func (*RedactionRequired) ProtoMessage() {}
 
 func (x *RedactionRequired) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[30]
+	mi := &file_orbit_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2494,7 +2272,7 @@ func (x *RedactionRequired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedactionRequired.ProtoReflect.Descriptor instead.
 func (*RedactionRequired) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{30}
+	return file_orbit_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *RedactionRequired) GetResultId() string {
@@ -2523,7 +2301,7 @@ type ResourceToAuthorize struct {
 
 func (x *ResourceToAuthorize) Reset() {
 	*x = ResourceToAuthorize{}
-	mi := &file_orbit_proto_msgTypes[31]
+	mi := &file_orbit_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2535,7 +2313,7 @@ func (x *ResourceToAuthorize) String() string {
 func (*ResourceToAuthorize) ProtoMessage() {}
 
 func (x *ResourceToAuthorize) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[31]
+	mi := &file_orbit_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2548,7 +2326,7 @@ func (x *ResourceToAuthorize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceToAuthorize.ProtoReflect.Descriptor instead.
 func (*ResourceToAuthorize) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{31}
+	return file_orbit_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ResourceToAuthorize) GetResourceType() string {
@@ -2583,7 +2361,7 @@ type RedactionResponse struct {
 
 func (x *RedactionResponse) Reset() {
 	*x = RedactionResponse{}
-	mi := &file_orbit_proto_msgTypes[32]
+	mi := &file_orbit_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2595,7 +2373,7 @@ func (x *RedactionResponse) String() string {
 func (*RedactionResponse) ProtoMessage() {}
 
 func (x *RedactionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[32]
+	mi := &file_orbit_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2608,7 +2386,7 @@ func (x *RedactionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedactionResponse.ProtoReflect.Descriptor instead.
 func (*RedactionResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{32}
+	return file_orbit_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *RedactionResponse) GetResultId() string {
@@ -2637,7 +2415,7 @@ type ResourceAuthorization struct {
 
 func (x *ResourceAuthorization) Reset() {
 	*x = ResourceAuthorization{}
-	mi := &file_orbit_proto_msgTypes[33]
+	mi := &file_orbit_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2649,7 +2427,7 @@ func (x *ResourceAuthorization) String() string {
 func (*ResourceAuthorization) ProtoMessage() {}
 
 func (x *ResourceAuthorization) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[33]
+	mi := &file_orbit_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2662,7 +2440,7 @@ func (x *ResourceAuthorization) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceAuthorization.ProtoReflect.Descriptor instead.
 func (*ResourceAuthorization) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{33}
+	return file_orbit_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ResourceAuthorization) GetResourceType() string {
@@ -2681,14 +2459,13 @@ func (x *ResourceAuthorization) GetAuthorized() map[int64]bool {
 
 type ListToolsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Language      QueryLanguage          `protobuf:"varint,1,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListToolsRequest) Reset() {
 	*x = ListToolsRequest{}
-	mi := &file_orbit_proto_msgTypes[34]
+	mi := &file_orbit_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2700,7 +2477,7 @@ func (x *ListToolsRequest) String() string {
 func (*ListToolsRequest) ProtoMessage() {}
 
 func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[34]
+	mi := &file_orbit_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2713,14 +2490,7 @@ func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListToolsRequest.ProtoReflect.Descriptor instead.
 func (*ListToolsRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{34}
-}
-
-func (x *ListToolsRequest) GetLanguage() QueryLanguage {
-	if x != nil {
-		return x.Language
-	}
-	return QueryLanguage_QUERY_LANGUAGE_JSON
+	return file_orbit_proto_rawDescGZIP(), []int{32}
 }
 
 type ListToolsResponse struct {
@@ -2732,7 +2502,7 @@ type ListToolsResponse struct {
 
 func (x *ListToolsResponse) Reset() {
 	*x = ListToolsResponse{}
-	mi := &file_orbit_proto_msgTypes[35]
+	mi := &file_orbit_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2744,7 +2514,7 @@ func (x *ListToolsResponse) String() string {
 func (*ListToolsResponse) ProtoMessage() {}
 
 func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[35]
+	mi := &file_orbit_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2757,7 +2527,7 @@ func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListToolsResponse.ProtoReflect.Descriptor instead.
 func (*ListToolsResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{35}
+	return file_orbit_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ListToolsResponse) GetTools() []*ToolDefinition {
@@ -2780,7 +2550,7 @@ type ToolDefinition struct {
 
 func (x *ToolDefinition) Reset() {
 	*x = ToolDefinition{}
-	mi := &file_orbit_proto_msgTypes[36]
+	mi := &file_orbit_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2792,7 +2562,7 @@ func (x *ToolDefinition) String() string {
 func (*ToolDefinition) ProtoMessage() {}
 
 func (x *ToolDefinition) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[36]
+	mi := &file_orbit_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2805,7 +2575,7 @@ func (x *ToolDefinition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolDefinition.ProtoReflect.Descriptor instead.
 func (*ToolDefinition) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{36}
+	return file_orbit_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ToolDefinition) GetName() string {
@@ -2833,14 +2603,13 @@ type ListAgentCommandsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	CommandNames  []string               `protobuf:"bytes,1,rep,name=command_names,json=commandNames,proto3" json:"command_names,omitempty"` // empty means list every command
 	Format        ResponseFormat         `protobuf:"varint,2,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"`   // RAW: command definitions; LLM: TOON command catalog
-	Language      QueryLanguage          `protobuf:"varint,3,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListAgentCommandsRequest) Reset() {
 	*x = ListAgentCommandsRequest{}
-	mi := &file_orbit_proto_msgTypes[37]
+	mi := &file_orbit_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2852,7 +2621,7 @@ func (x *ListAgentCommandsRequest) String() string {
 func (*ListAgentCommandsRequest) ProtoMessage() {}
 
 func (x *ListAgentCommandsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[37]
+	mi := &file_orbit_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2865,7 +2634,7 @@ func (x *ListAgentCommandsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentCommandsRequest.ProtoReflect.Descriptor instead.
 func (*ListAgentCommandsRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{37}
+	return file_orbit_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ListAgentCommandsRequest) GetCommandNames() []string {
@@ -2882,13 +2651,6 @@ func (x *ListAgentCommandsRequest) GetFormat() ResponseFormat {
 	return ResponseFormat_RESPONSE_FORMAT_RAW
 }
 
-func (x *ListAgentCommandsRequest) GetLanguage() QueryLanguage {
-	if x != nil {
-		return x.Language
-	}
-	return QueryLanguage_QUERY_LANGUAGE_JSON
-}
-
 type ListAgentCommandsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Commands      []*ToolDefinition      `protobuf:"bytes,1,rep,name=commands,proto3" json:"commands,omitempty"`
@@ -2899,7 +2661,7 @@ type ListAgentCommandsResponse struct {
 
 func (x *ListAgentCommandsResponse) Reset() {
 	*x = ListAgentCommandsResponse{}
-	mi := &file_orbit_proto_msgTypes[38]
+	mi := &file_orbit_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2911,7 +2673,7 @@ func (x *ListAgentCommandsResponse) String() string {
 func (*ListAgentCommandsResponse) ProtoMessage() {}
 
 func (x *ListAgentCommandsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[38]
+	mi := &file_orbit_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2924,7 +2686,7 @@ func (x *ListAgentCommandsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentCommandsResponse.ProtoReflect.Descriptor instead.
 func (*ListAgentCommandsResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{38}
+	return file_orbit_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ListAgentCommandsResponse) GetCommands() []*ToolDefinition {
@@ -2945,14 +2707,13 @@ type InvokeAgentCommandRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	CommandName    string                 `protobuf:"bytes,1,opt,name=command_name,json=commandName,proto3" json:"command_name,omitempty"`
 	ParametersJson string                 `protobuf:"bytes,2,opt,name=parameters_json,json=parametersJson,proto3" json:"parameters_json,omitempty"` // downstream command parameters object as JSON
-	Language       QueryLanguage          `protobuf:"varint,3,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *InvokeAgentCommandRequest) Reset() {
 	*x = InvokeAgentCommandRequest{}
-	mi := &file_orbit_proto_msgTypes[39]
+	mi := &file_orbit_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2964,7 +2725,7 @@ func (x *InvokeAgentCommandRequest) String() string {
 func (*InvokeAgentCommandRequest) ProtoMessage() {}
 
 func (x *InvokeAgentCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[39]
+	mi := &file_orbit_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2977,7 +2738,7 @@ func (x *InvokeAgentCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeAgentCommandRequest.ProtoReflect.Descriptor instead.
 func (*InvokeAgentCommandRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{39}
+	return file_orbit_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *InvokeAgentCommandRequest) GetCommandName() string {
@@ -2994,13 +2755,6 @@ func (x *InvokeAgentCommandRequest) GetParametersJson() string {
 	return ""
 }
 
-func (x *InvokeAgentCommandRequest) GetLanguage() QueryLanguage {
-	if x != nil {
-		return x.Language
-	}
-	return QueryLanguage_QUERY_LANGUAGE_JSON
-}
-
 type InvokeAgentCommandResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Content:
@@ -3014,7 +2768,7 @@ type InvokeAgentCommandResponse struct {
 
 func (x *InvokeAgentCommandResponse) Reset() {
 	*x = InvokeAgentCommandResponse{}
-	mi := &file_orbit_proto_msgTypes[40]
+	mi := &file_orbit_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3026,7 +2780,7 @@ func (x *InvokeAgentCommandResponse) String() string {
 func (*InvokeAgentCommandResponse) ProtoMessage() {}
 
 func (x *InvokeAgentCommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[40]
+	mi := &file_orbit_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3039,7 +2793,7 @@ func (x *InvokeAgentCommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeAgentCommandResponse.ProtoReflect.Descriptor instead.
 func (*InvokeAgentCommandResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{40}
+	return file_orbit_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *InvokeAgentCommandResponse) GetContent() isInvokeAgentCommandResponse_Content {
@@ -3093,7 +2847,7 @@ type GetClusterHealthRequest struct {
 
 func (x *GetClusterHealthRequest) Reset() {
 	*x = GetClusterHealthRequest{}
-	mi := &file_orbit_proto_msgTypes[41]
+	mi := &file_orbit_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3105,7 +2859,7 @@ func (x *GetClusterHealthRequest) String() string {
 func (*GetClusterHealthRequest) ProtoMessage() {}
 
 func (x *GetClusterHealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[41]
+	mi := &file_orbit_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3118,7 +2872,7 @@ func (x *GetClusterHealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterHealthRequest.ProtoReflect.Descriptor instead.
 func (*GetClusterHealthRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{41}
+	return file_orbit_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *GetClusterHealthRequest) GetFormat() ResponseFormat {
@@ -3142,7 +2896,7 @@ type GetClusterHealthResponse struct {
 
 func (x *GetClusterHealthResponse) Reset() {
 	*x = GetClusterHealthResponse{}
-	mi := &file_orbit_proto_msgTypes[42]
+	mi := &file_orbit_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3154,7 +2908,7 @@ func (x *GetClusterHealthResponse) String() string {
 func (*GetClusterHealthResponse) ProtoMessage() {}
 
 func (x *GetClusterHealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[42]
+	mi := &file_orbit_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3167,7 +2921,7 @@ func (x *GetClusterHealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterHealthResponse.ProtoReflect.Descriptor instead.
 func (*GetClusterHealthResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{42}
+	return file_orbit_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *GetClusterHealthResponse) GetContent() isGetClusterHealthResponse_Content {
@@ -3224,7 +2978,7 @@ type StructuredClusterHealth struct {
 
 func (x *StructuredClusterHealth) Reset() {
 	*x = StructuredClusterHealth{}
-	mi := &file_orbit_proto_msgTypes[43]
+	mi := &file_orbit_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3236,7 +2990,7 @@ func (x *StructuredClusterHealth) String() string {
 func (*StructuredClusterHealth) ProtoMessage() {}
 
 func (x *StructuredClusterHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[43]
+	mi := &file_orbit_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3249,7 +3003,7 @@ func (x *StructuredClusterHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StructuredClusterHealth.ProtoReflect.Descriptor instead.
 func (*StructuredClusterHealth) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{43}
+	return file_orbit_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *StructuredClusterHealth) GetStatus() ClusterStatus {
@@ -3293,7 +3047,7 @@ type ComponentHealth struct {
 
 func (x *ComponentHealth) Reset() {
 	*x = ComponentHealth{}
-	mi := &file_orbit_proto_msgTypes[44]
+	mi := &file_orbit_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3305,7 +3059,7 @@ func (x *ComponentHealth) String() string {
 func (*ComponentHealth) ProtoMessage() {}
 
 func (x *ComponentHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[44]
+	mi := &file_orbit_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3318,7 +3072,7 @@ func (x *ComponentHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComponentHealth.ProtoReflect.Descriptor instead.
 func (*ComponentHealth) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{44}
+	return file_orbit_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ComponentHealth) GetName() string {
@@ -3359,7 +3113,7 @@ type ReplicaStatus struct {
 
 func (x *ReplicaStatus) Reset() {
 	*x = ReplicaStatus{}
-	mi := &file_orbit_proto_msgTypes[45]
+	mi := &file_orbit_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3371,7 +3125,7 @@ func (x *ReplicaStatus) String() string {
 func (*ReplicaStatus) ProtoMessage() {}
 
 func (x *ReplicaStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[45]
+	mi := &file_orbit_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3384,7 +3138,7 @@ func (x *ReplicaStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicaStatus.ProtoReflect.Descriptor instead.
 func (*ReplicaStatus) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{45}
+	return file_orbit_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ReplicaStatus) GetReady() int32 {
@@ -3413,7 +3167,7 @@ type GetGraphStatusRequest struct {
 
 func (x *GetGraphStatusRequest) Reset() {
 	*x = GetGraphStatusRequest{}
-	mi := &file_orbit_proto_msgTypes[46]
+	mi := &file_orbit_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3425,7 +3179,7 @@ func (x *GetGraphStatusRequest) String() string {
 func (*GetGraphStatusRequest) ProtoMessage() {}
 
 func (x *GetGraphStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[46]
+	mi := &file_orbit_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3438,7 +3192,7 @@ func (x *GetGraphStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetGraphStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetGraphStatusRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{46}
+	return file_orbit_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *GetGraphStatusRequest) GetTraversalPath() string {
@@ -3478,7 +3232,7 @@ type IndexingStatus struct {
 
 func (x *IndexingStatus) Reset() {
 	*x = IndexingStatus{}
-	mi := &file_orbit_proto_msgTypes[47]
+	mi := &file_orbit_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3490,7 +3244,7 @@ func (x *IndexingStatus) String() string {
 func (*IndexingStatus) ProtoMessage() {}
 
 func (x *IndexingStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[47]
+	mi := &file_orbit_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3503,7 +3257,7 @@ func (x *IndexingStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IndexingStatus.ProtoReflect.Descriptor instead.
 func (*IndexingStatus) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{47}
+	return file_orbit_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *IndexingStatus) GetState() IndexingState {
@@ -3569,7 +3323,7 @@ type GetGraphStatusResponse struct {
 
 func (x *GetGraphStatusResponse) Reset() {
 	*x = GetGraphStatusResponse{}
-	mi := &file_orbit_proto_msgTypes[48]
+	mi := &file_orbit_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3581,7 +3335,7 @@ func (x *GetGraphStatusResponse) String() string {
 func (*GetGraphStatusResponse) ProtoMessage() {}
 
 func (x *GetGraphStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[48]
+	mi := &file_orbit_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3594,7 +3348,7 @@ func (x *GetGraphStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetGraphStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetGraphStatusResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{48}
+	return file_orbit_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *GetGraphStatusResponse) GetContent() isGetGraphStatusResponse_Content {
@@ -3652,7 +3406,7 @@ type StructuredGraphStatus struct {
 
 func (x *StructuredGraphStatus) Reset() {
 	*x = StructuredGraphStatus{}
-	mi := &file_orbit_proto_msgTypes[49]
+	mi := &file_orbit_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3664,7 +3418,7 @@ func (x *StructuredGraphStatus) String() string {
 func (*StructuredGraphStatus) ProtoMessage() {}
 
 func (x *StructuredGraphStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[49]
+	mi := &file_orbit_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3677,7 +3431,7 @@ func (x *StructuredGraphStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StructuredGraphStatus.ProtoReflect.Descriptor instead.
 func (*StructuredGraphStatus) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{49}
+	return file_orbit_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *StructuredGraphStatus) GetProjects() *ProjectsStatus {
@@ -3727,7 +3481,7 @@ type ProjectsStatus struct {
 
 func (x *ProjectsStatus) Reset() {
 	*x = ProjectsStatus{}
-	mi := &file_orbit_proto_msgTypes[50]
+	mi := &file_orbit_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3739,7 +3493,7 @@ func (x *ProjectsStatus) String() string {
 func (*ProjectsStatus) ProtoMessage() {}
 
 func (x *ProjectsStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[50]
+	mi := &file_orbit_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3752,7 +3506,7 @@ func (x *ProjectsStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectsStatus.ProtoReflect.Descriptor instead.
 func (*ProjectsStatus) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{50}
+	return file_orbit_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ProjectsStatus) GetIndexed() int64 {
@@ -3787,7 +3541,7 @@ type GraphStatusDomain struct {
 
 func (x *GraphStatusDomain) Reset() {
 	*x = GraphStatusDomain{}
-	mi := &file_orbit_proto_msgTypes[51]
+	mi := &file_orbit_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3799,7 +3553,7 @@ func (x *GraphStatusDomain) String() string {
 func (*GraphStatusDomain) ProtoMessage() {}
 
 func (x *GraphStatusDomain) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[51]
+	mi := &file_orbit_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3812,7 +3566,7 @@ func (x *GraphStatusDomain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphStatusDomain.ProtoReflect.Descriptor instead.
 func (*GraphStatusDomain) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{51}
+	return file_orbit_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *GraphStatusDomain) GetName() string {
@@ -3841,7 +3595,7 @@ type GraphStatusItem struct {
 
 func (x *GraphStatusItem) Reset() {
 	*x = GraphStatusItem{}
-	mi := &file_orbit_proto_msgTypes[52]
+	mi := &file_orbit_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3853,7 +3607,7 @@ func (x *GraphStatusItem) String() string {
 func (*GraphStatusItem) ProtoMessage() {}
 
 func (x *GraphStatusItem) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[52]
+	mi := &file_orbit_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3866,7 +3620,7 @@ func (x *GraphStatusItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphStatusItem.ProtoReflect.Descriptor instead.
 func (*GraphStatusItem) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{52}
+	return file_orbit_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *GraphStatusItem) GetName() string {
@@ -3899,7 +3653,7 @@ type GetIndexingStatusRequest struct {
 
 func (x *GetIndexingStatusRequest) Reset() {
 	*x = GetIndexingStatusRequest{}
-	mi := &file_orbit_proto_msgTypes[53]
+	mi := &file_orbit_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3911,7 +3665,7 @@ func (x *GetIndexingStatusRequest) String() string {
 func (*GetIndexingStatusRequest) ProtoMessage() {}
 
 func (x *GetIndexingStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[53]
+	mi := &file_orbit_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3924,7 +3678,7 @@ func (x *GetIndexingStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetIndexingStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetIndexingStatusRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{53}
+	return file_orbit_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *GetIndexingStatusRequest) GetTraversalPaths() []string {
@@ -3943,7 +3697,7 @@ type GetIndexingStatusResponse struct {
 
 func (x *GetIndexingStatusResponse) Reset() {
 	*x = GetIndexingStatusResponse{}
-	mi := &file_orbit_proto_msgTypes[54]
+	mi := &file_orbit_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3955,7 +3709,7 @@ func (x *GetIndexingStatusResponse) String() string {
 func (*GetIndexingStatusResponse) ProtoMessage() {}
 
 func (x *GetIndexingStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[54]
+	mi := &file_orbit_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3968,7 +3722,7 @@ func (x *GetIndexingStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetIndexingStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetIndexingStatusResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{54}
+	return file_orbit_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *GetIndexingStatusResponse) GetStatuses() []*NamespaceIndexingStatus {
@@ -3990,7 +3744,7 @@ type NamespaceIndexingStatus struct {
 
 func (x *NamespaceIndexingStatus) Reset() {
 	*x = NamespaceIndexingStatus{}
-	mi := &file_orbit_proto_msgTypes[55]
+	mi := &file_orbit_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4002,7 +3756,7 @@ func (x *NamespaceIndexingStatus) String() string {
 func (*NamespaceIndexingStatus) ProtoMessage() {}
 
 func (x *NamespaceIndexingStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[55]
+	mi := &file_orbit_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4015,7 +3769,7 @@ func (x *NamespaceIndexingStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NamespaceIndexingStatus.ProtoReflect.Descriptor instead.
 func (*NamespaceIndexingStatus) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{55}
+	return file_orbit_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *NamespaceIndexingStatus) GetTraversalPath() string {
@@ -4057,7 +3811,7 @@ type DomainIndexingStatus struct {
 
 func (x *DomainIndexingStatus) Reset() {
 	*x = DomainIndexingStatus{}
-	mi := &file_orbit_proto_msgTypes[56]
+	mi := &file_orbit_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4069,7 +3823,7 @@ func (x *DomainIndexingStatus) String() string {
 func (*DomainIndexingStatus) ProtoMessage() {}
 
 func (x *DomainIndexingStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[56]
+	mi := &file_orbit_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4082,7 +3836,7 @@ func (x *DomainIndexingStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainIndexingStatus.ProtoReflect.Descriptor instead.
 func (*DomainIndexingStatus) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{56}
+	return file_orbit_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *DomainIndexingStatus) GetName() string {
@@ -4117,7 +3871,7 @@ type GetItemCountsRequest struct {
 
 func (x *GetItemCountsRequest) Reset() {
 	*x = GetItemCountsRequest{}
-	mi := &file_orbit_proto_msgTypes[57]
+	mi := &file_orbit_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4129,7 +3883,7 @@ func (x *GetItemCountsRequest) String() string {
 func (*GetItemCountsRequest) ProtoMessage() {}
 
 func (x *GetItemCountsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[57]
+	mi := &file_orbit_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4142,7 +3896,7 @@ func (x *GetItemCountsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetItemCountsRequest.ProtoReflect.Descriptor instead.
 func (*GetItemCountsRequest) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{57}
+	return file_orbit_proto_rawDescGZIP(), []int{55}
 }
 
 // Deprecated: Marked as deprecated in orbit.proto.
@@ -4170,7 +3924,7 @@ type GetItemCountsResponse struct {
 
 func (x *GetItemCountsResponse) Reset() {
 	*x = GetItemCountsResponse{}
-	mi := &file_orbit_proto_msgTypes[58]
+	mi := &file_orbit_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4182,7 +3936,7 @@ func (x *GetItemCountsResponse) String() string {
 func (*GetItemCountsResponse) ProtoMessage() {}
 
 func (x *GetItemCountsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[58]
+	mi := &file_orbit_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4195,7 +3949,7 @@ func (x *GetItemCountsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetItemCountsResponse.ProtoReflect.Descriptor instead.
 func (*GetItemCountsResponse) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{58}
+	return file_orbit_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *GetItemCountsResponse) GetDomains() []*DomainItemCount {
@@ -4222,7 +3976,7 @@ type NamespaceItemCounts struct {
 
 func (x *NamespaceItemCounts) Reset() {
 	*x = NamespaceItemCounts{}
-	mi := &file_orbit_proto_msgTypes[59]
+	mi := &file_orbit_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4234,7 +3988,7 @@ func (x *NamespaceItemCounts) String() string {
 func (*NamespaceItemCounts) ProtoMessage() {}
 
 func (x *NamespaceItemCounts) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[59]
+	mi := &file_orbit_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4247,7 +4001,7 @@ func (x *NamespaceItemCounts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NamespaceItemCounts.ProtoReflect.Descriptor instead.
 func (*NamespaceItemCounts) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{59}
+	return file_orbit_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *NamespaceItemCounts) GetTraversalPath() string {
@@ -4274,7 +4028,7 @@ type DomainItemCount struct {
 
 func (x *DomainItemCount) Reset() {
 	*x = DomainItemCount{}
-	mi := &file_orbit_proto_msgTypes[60]
+	mi := &file_orbit_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4286,7 +4040,7 @@ func (x *DomainItemCount) String() string {
 func (*DomainItemCount) ProtoMessage() {}
 
 func (x *DomainItemCount) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[60]
+	mi := &file_orbit_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4299,7 +4053,7 @@ func (x *DomainItemCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainItemCount.ProtoReflect.Descriptor instead.
 func (*DomainItemCount) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{60}
+	return file_orbit_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *DomainItemCount) GetName() string {
@@ -4326,7 +4080,7 @@ type EntityItemCount struct {
 
 func (x *EntityItemCount) Reset() {
 	*x = EntityItemCount{}
-	mi := &file_orbit_proto_msgTypes[61]
+	mi := &file_orbit_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4338,7 +4092,7 @@ func (x *EntityItemCount) String() string {
 func (*EntityItemCount) ProtoMessage() {}
 
 func (x *EntityItemCount) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[61]
+	mi := &file_orbit_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4351,7 +4105,7 @@ func (x *EntityItemCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntityItemCount.ProtoReflect.Descriptor instead.
 func (*EntityItemCount) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{61}
+	return file_orbit_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *EntityItemCount) GetName() string {
@@ -4379,14 +4133,13 @@ const file_orbit_proto_rawDesc = "" +
 	"\x06result\x18\x03 \x01(\v2\x1c.orbit.v1.ExecuteQueryResultH\x00R\x06result\x123\n" +
 	"\x05error\x18\x04 \x01(\v2\x1b.orbit.v1.ExecuteQueryErrorH\x00R\x05error\x12:\n" +
 	"\fresult_chunk\x18\x05 \x01(\v2\x15.orbit.v1.ResultChunkH\x00R\vresultChunkB\t\n" +
-	"\acontent\"\xed\x01\n" +
+	"\acontent\"\xc8\x01\n" +
 	"\x13ExecuteQueryRequest\x12\x14\n" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x120\n" +
 	"\x06format\x18\x02 \x01(\x0e2\x18.orbit.v1.ResponseFormatR\x06format\x122\n" +
 	"\n" +
-	"query_type\x18\x03 \x01(\x0e2\x13.orbit.v1.QueryTypeR\tqueryType\x123\n" +
-	"\blanguage\x18\x04 \x01(\x0e2\x17.orbit.v1.QueryLanguageR\blanguage\x12%\n" +
-	"\x0echunked_result\x18\x06 \x01(\bR\rchunkedResult\"\xa0\x01\n" +
+	"query_type\x18\x03 \x01(\x0e2\x13.orbit.v1.QueryTypeR\tqueryType\x12%\n" +
+	"\x0echunked_result\x18\x06 \x01(\bR\rchunkedResultJ\x04\b\x04\x10\x05R\blanguage\"\xa0\x01\n" +
 	"\x12ExecuteQueryResult\x12!\n" +
 	"\vresult_json\x18\x01 \x01(\tH\x00R\n" +
 	"resultJson\x12'\n" +
@@ -4459,17 +4212,8 @@ const file_orbit_proto_rawDesc = "" +
 	"targetType\";\n" +
 	"\x0fSchemaNodeStyle\x12\x12\n" +
 	"\x04size\x18\x01 \x01(\x05R\x04size\x12\x14\n" +
-	"\x05color\x18\x02 \x01(\tR\x05color\"{\n" +
-	"\x12GetQueryDslRequest\x120\n" +
-	"\x06format\x18\x01 \x01(\x0e2\x18.orbit.v1.ResponseFormatR\x06format\x123\n" +
-	"\blanguage\x18\x02 \x01(\x0e2\x17.orbit.v1.QueryLanguageR\blanguage\"\x8d\x01\n" +
-	"\x13GetQueryDslResponse\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\tR\aversion\x12(\n" +
-	"\x0fraw_json_schema\x18\x01 \x01(\tH\x00R\rrawJsonSchema\x12'\n" +
-	"\x0eformatted_text\x18\x02 \x01(\tH\x00R\rformattedTextB\t\n" +
-	"\acontent\"H\n" +
-	"\x11ListSkillsRequest\x123\n" +
-	"\blanguage\x18\x01 \x01(\x0e2\x17.orbit.v1.QueryLanguageR\blanguage\"k\n" +
+	"\x05color\x18\x02 \x01(\tR\x05color\"#\n" +
+	"\x11ListSkillsRequestJ\x04\b\x01\x10\x02R\blanguage\"k\n" +
 	"\x12ListSkillsResponse\x12.\n" +
 	"\x06skills\x18\x01 \x03(\v2\x16.orbit.v1.SkillSummaryR\x06skills\x12%\n" +
 	"\x0eserver_version\x18\x02 \x01(\tR\rserverVersion\"\x97\x01\n" +
@@ -4477,11 +4221,10 @@ const file_orbit_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12$\n" +
-	"\rcompatibility\x18\x05 \x01(\tR\rcompatibilityJ\x04\b\x03\x10\x04R\vtree_sha256\"\x7f\n" +
+	"\rcompatibility\x18\x05 \x01(\tR\rcompatibilityJ\x04\b\x03\x10\x04R\vtree_sha256\"Z\n" +
 	"\x0fGetSkillRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12#\n" +
-	"\rmetadata_only\x18\x02 \x01(\bR\fmetadataOnly\x123\n" +
-	"\blanguage\x18\x03 \x01(\x0e2\x17.orbit.v1.QueryLanguageR\blanguage\"\xcb\x01\n" +
+	"\rmetadata_only\x18\x02 \x01(\bR\fmetadataOnlyJ\x04\b\x03\x10\x04R\blanguage\"\xcb\x01\n" +
 	"\x10GetSkillResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12)\n" +
@@ -4502,9 +4245,8 @@ const file_orbit_proto_rawDesc = "" +
 	"\acontent\"H\n" +
 	"\x14ResponseFormatSchema\x12\x16\n" +
 	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\"N\n" +
-	"\x17ListNamedQueriesRequest\x123\n" +
-	"\blanguage\x18\x01 \x01(\x0e2\x17.orbit.v1.QueryLanguageR\blanguage\"T\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\")\n" +
+	"\x17ListNamedQueriesRequestJ\x04\b\x01\x10\x02R\blanguage\"T\n" +
 	"\x18ListNamedQueriesResponse\x128\n" +
 	"\aqueries\x18\x01 \x03(\v2\x1e.orbit.v1.NamedQueryDefinitionR\aqueries\"i\n" +
 	"\x14NamedQueryDefinition\x12\x12\n" +
@@ -4532,26 +4274,23 @@ const file_orbit_proto_rawDesc = "" +
 	"authorized\x1a=\n" +
 	"\x0fAuthorizedEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\x03R\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"G\n" +
-	"\x10ListToolsRequest\x123\n" +
-	"\blanguage\x18\x01 \x01(\x0e2\x17.orbit.v1.QueryLanguageR\blanguage\"C\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"\"\n" +
+	"\x10ListToolsRequestJ\x04\b\x01\x10\x02R\blanguage\"C\n" +
 	"\x11ListToolsResponse\x12.\n" +
 	"\x05tools\x18\x01 \x03(\v2\x18.orbit.v1.ToolDefinitionR\x05tools\"|\n" +
 	"\x0eToolDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x124\n" +
-	"\x16parameters_json_schema\x18\x03 \x01(\tR\x14parametersJsonSchema\"\xa6\x01\n" +
+	"\x16parameters_json_schema\x18\x03 \x01(\tR\x14parametersJsonSchema\"\x81\x01\n" +
 	"\x18ListAgentCommandsRequest\x12#\n" +
 	"\rcommand_names\x18\x01 \x03(\tR\fcommandNames\x120\n" +
-	"\x06format\x18\x02 \x01(\x0e2\x18.orbit.v1.ResponseFormatR\x06format\x123\n" +
-	"\blanguage\x18\x03 \x01(\x0e2\x17.orbit.v1.QueryLanguageR\blanguage\"x\n" +
+	"\x06format\x18\x02 \x01(\x0e2\x18.orbit.v1.ResponseFormatR\x06formatJ\x04\b\x03\x10\x04R\blanguage\"x\n" +
 	"\x19ListAgentCommandsResponse\x124\n" +
 	"\bcommands\x18\x01 \x03(\v2\x18.orbit.v1.ToolDefinitionR\bcommands\x12%\n" +
-	"\x0eformatted_text\x18\x02 \x01(\tR\rformattedText\"\x9c\x01\n" +
+	"\x0eformatted_text\x18\x02 \x01(\tR\rformattedText\"w\n" +
 	"\x19InvokeAgentCommandRequest\x12!\n" +
 	"\fcommand_name\x18\x01 \x01(\tR\vcommandName\x12'\n" +
-	"\x0fparameters_json\x18\x02 \x01(\tR\x0eparametersJson\x123\n" +
-	"\blanguage\x18\x03 \x01(\x0e2\x17.orbit.v1.QueryLanguageR\blanguage\"s\n" +
+	"\x0fparameters_json\x18\x02 \x01(\tR\x0eparametersJsonJ\x04\b\x03\x10\x04R\blanguage\"s\n" +
 	"\x1aInvokeAgentCommandResponse\x12!\n" +
 	"\vresult_json\x18\x01 \x01(\tH\x00R\n" +
 	"resultJson\x12'\n" +
@@ -4668,13 +4407,10 @@ const file_orbit_proto_rawDesc = "" +
 	"FormatName\x12\x13\n" +
 	"\x0fFORMAT_NAME_RAW\x10\x00\x12\x14\n" +
 	"\x10FORMAT_NAME_TOON\x10\x01\x12\x13\n" +
-	"\x0fFORMAT_NAME_GQL\x10\x02*6\n" +
-	"\tQueryType\x12\x13\n" +
-	"\x0fQUERY_TYPE_JSON\x10\x00\x12\x14\n" +
-	"\x10QUERY_TYPE_NAMED\x10\x01*@\n" +
-	"\rQueryLanguage\x12\x17\n" +
-	"\x13QUERY_LANGUAGE_JSON\x10\x00\x12\x16\n" +
-	"\x12QUERY_LANGUAGE_GQL\x10\x01*\xa4\x01\n" +
+	"\x0fFORMAT_NAME_GQL\x10\x02*5\n" +
+	"\tQueryType\x12\x12\n" +
+	"\x0eQUERY_TYPE_RAW\x10\x00\x12\x14\n" +
+	"\x10QUERY_TYPE_NAMED\x10\x01*\xa4\x01\n" +
 	"\rClusterStatus\x12\x1e\n" +
 	"\x1aCLUSTER_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16CLUSTER_STATUS_HEALTHY\x10\x01\x12\x1b\n" +
@@ -4697,14 +4433,13 @@ const file_orbit_proto_rawDesc = "" +
 	"\x1aINDEXING_PHASE_NOT_STARTED\x10\x01\x12\x1a\n" +
 	"\x16INDEXING_PHASE_SYNCING\x10\x02\x12\x18\n" +
 	"\x14INDEXING_PHASE_READY\x10\x03\x12\x18\n" +
-	"\x14INDEXING_PHASE_ERROR\x10\x042\xab\t\n" +
+	"\x14INDEXING_PHASE_ERROR\x10\x042\xdf\b\n" +
 	"\fOrbitService\x12D\n" +
 	"\tListTools\x12\x1a.orbit.v1.ListToolsRequest\x1a\x1b.orbit.v1.ListToolsResponse\x12\\\n" +
 	"\x11ListAgentCommands\x12\".orbit.v1.ListAgentCommandsRequest\x1a#.orbit.v1.ListAgentCommandsResponse\x12_\n" +
 	"\x12InvokeAgentCommand\x12#.orbit.v1.InvokeAgentCommandRequest\x1a$.orbit.v1.InvokeAgentCommandResponse\x12P\n" +
 	"\fExecuteQuery\x12\x1d.orbit.v1.ExecuteQueryMessage\x1a\x1d.orbit.v1.ExecuteQueryMessage(\x010\x01\x12S\n" +
-	"\x0eGetGraphSchema\x12\x1f.orbit.v1.GetGraphSchemaRequest\x1a .orbit.v1.GetGraphSchemaResponse\x12J\n" +
-	"\vGetQueryDsl\x12\x1c.orbit.v1.GetQueryDslRequest\x1a\x1d.orbit.v1.GetQueryDslResponse\x12G\n" +
+	"\x0eGetGraphSchema\x12\x1f.orbit.v1.GetGraphSchemaRequest\x1a .orbit.v1.GetGraphSchemaResponse\x12G\n" +
 	"\n" +
 	"ListSkills\x12\x1b.orbit.v1.ListSkillsRequest\x1a\x1c.orbit.v1.ListSkillsResponse\x12A\n" +
 	"\bGetSkill\x12\x19.orbit.v1.GetSkillRequest\x1a\x1a.orbit.v1.GetSkillResponse\x12Y\n" +
@@ -4727,182 +4462,168 @@ func file_orbit_proto_rawDescGZIP() []byte {
 	return file_orbit_proto_rawDescData
 }
 
-var file_orbit_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
-var file_orbit_proto_msgTypes = make([]protoimpl.MessageInfo, 64)
+var file_orbit_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
+var file_orbit_proto_msgTypes = make([]protoimpl.MessageInfo, 62)
 var file_orbit_proto_goTypes = []any{
 	(ResponseFormat)(0),                // 0: orbit.v1.ResponseFormat
 	(FormatName)(0),                    // 1: orbit.v1.FormatName
 	(QueryType)(0),                     // 2: orbit.v1.QueryType
-	(QueryLanguage)(0),                 // 3: orbit.v1.QueryLanguage
-	(ClusterStatus)(0),                 // 4: orbit.v1.ClusterStatus
-	(SourceType)(0),                    // 5: orbit.v1.SourceType
-	(IndexingState)(0),                 // 6: orbit.v1.IndexingState
-	(IndexingPhase)(0),                 // 7: orbit.v1.IndexingPhase
-	(*ExecuteQueryMessage)(nil),        // 8: orbit.v1.ExecuteQueryMessage
-	(*ExecuteQueryRequest)(nil),        // 9: orbit.v1.ExecuteQueryRequest
-	(*ExecuteQueryResult)(nil),         // 10: orbit.v1.ExecuteQueryResult
-	(*ResultChunk)(nil),                // 11: orbit.v1.ResultChunk
-	(*QueryMetadata)(nil),              // 12: orbit.v1.QueryMetadata
-	(*ExecuteQueryError)(nil),          // 13: orbit.v1.ExecuteQueryError
-	(*GetGraphSchemaRequest)(nil),      // 14: orbit.v1.GetGraphSchemaRequest
-	(*GetGraphSchemaResponse)(nil),     // 15: orbit.v1.GetGraphSchemaResponse
-	(*StructuredSchema)(nil),           // 16: orbit.v1.StructuredSchema
-	(*SchemaDomain)(nil),               // 17: orbit.v1.SchemaDomain
-	(*SchemaNode)(nil),                 // 18: orbit.v1.SchemaNode
-	(*SchemaProperty)(nil),             // 19: orbit.v1.SchemaProperty
-	(*SchemaEdge)(nil),                 // 20: orbit.v1.SchemaEdge
-	(*SchemaEdgeVariant)(nil),          // 21: orbit.v1.SchemaEdgeVariant
-	(*SchemaNodeStyle)(nil),            // 22: orbit.v1.SchemaNodeStyle
-	(*GetQueryDslRequest)(nil),         // 23: orbit.v1.GetQueryDslRequest
-	(*GetQueryDslResponse)(nil),        // 24: orbit.v1.GetQueryDslResponse
-	(*ListSkillsRequest)(nil),          // 25: orbit.v1.ListSkillsRequest
-	(*ListSkillsResponse)(nil),         // 26: orbit.v1.ListSkillsResponse
-	(*SkillSummary)(nil),               // 27: orbit.v1.SkillSummary
-	(*GetSkillRequest)(nil),            // 28: orbit.v1.GetSkillRequest
-	(*GetSkillResponse)(nil),           // 29: orbit.v1.GetSkillResponse
-	(*SkillFile)(nil),                  // 30: orbit.v1.SkillFile
-	(*GetResponseFormatRequest)(nil),   // 31: orbit.v1.GetResponseFormatRequest
-	(*GetResponseFormatResponse)(nil),  // 32: orbit.v1.GetResponseFormatResponse
-	(*ResponseFormatSchema)(nil),       // 33: orbit.v1.ResponseFormatSchema
-	(*ListNamedQueriesRequest)(nil),    // 34: orbit.v1.ListNamedQueriesRequest
-	(*ListNamedQueriesResponse)(nil),   // 35: orbit.v1.ListNamedQueriesResponse
-	(*NamedQueryDefinition)(nil),       // 36: orbit.v1.NamedQueryDefinition
-	(*RedactionExchange)(nil),          // 37: orbit.v1.RedactionExchange
-	(*RedactionRequired)(nil),          // 38: orbit.v1.RedactionRequired
-	(*ResourceToAuthorize)(nil),        // 39: orbit.v1.ResourceToAuthorize
-	(*RedactionResponse)(nil),          // 40: orbit.v1.RedactionResponse
-	(*ResourceAuthorization)(nil),      // 41: orbit.v1.ResourceAuthorization
-	(*ListToolsRequest)(nil),           // 42: orbit.v1.ListToolsRequest
-	(*ListToolsResponse)(nil),          // 43: orbit.v1.ListToolsResponse
-	(*ToolDefinition)(nil),             // 44: orbit.v1.ToolDefinition
-	(*ListAgentCommandsRequest)(nil),   // 45: orbit.v1.ListAgentCommandsRequest
-	(*ListAgentCommandsResponse)(nil),  // 46: orbit.v1.ListAgentCommandsResponse
-	(*InvokeAgentCommandRequest)(nil),  // 47: orbit.v1.InvokeAgentCommandRequest
-	(*InvokeAgentCommandResponse)(nil), // 48: orbit.v1.InvokeAgentCommandResponse
-	(*GetClusterHealthRequest)(nil),    // 49: orbit.v1.GetClusterHealthRequest
-	(*GetClusterHealthResponse)(nil),   // 50: orbit.v1.GetClusterHealthResponse
-	(*StructuredClusterHealth)(nil),    // 51: orbit.v1.StructuredClusterHealth
-	(*ComponentHealth)(nil),            // 52: orbit.v1.ComponentHealth
-	(*ReplicaStatus)(nil),              // 53: orbit.v1.ReplicaStatus
-	(*GetGraphStatusRequest)(nil),      // 54: orbit.v1.GetGraphStatusRequest
-	(*IndexingStatus)(nil),             // 55: orbit.v1.IndexingStatus
-	(*GetGraphStatusResponse)(nil),     // 56: orbit.v1.GetGraphStatusResponse
-	(*StructuredGraphStatus)(nil),      // 57: orbit.v1.StructuredGraphStatus
-	(*ProjectsStatus)(nil),             // 58: orbit.v1.ProjectsStatus
-	(*GraphStatusDomain)(nil),          // 59: orbit.v1.GraphStatusDomain
-	(*GraphStatusItem)(nil),            // 60: orbit.v1.GraphStatusItem
-	(*GetIndexingStatusRequest)(nil),   // 61: orbit.v1.GetIndexingStatusRequest
-	(*GetIndexingStatusResponse)(nil),  // 62: orbit.v1.GetIndexingStatusResponse
-	(*NamespaceIndexingStatus)(nil),    // 63: orbit.v1.NamespaceIndexingStatus
-	(*DomainIndexingStatus)(nil),       // 64: orbit.v1.DomainIndexingStatus
-	(*GetItemCountsRequest)(nil),       // 65: orbit.v1.GetItemCountsRequest
-	(*GetItemCountsResponse)(nil),      // 66: orbit.v1.GetItemCountsResponse
-	(*NamespaceItemCounts)(nil),        // 67: orbit.v1.NamespaceItemCounts
-	(*DomainItemCount)(nil),            // 68: orbit.v1.DomainItemCount
-	(*EntityItemCount)(nil),            // 69: orbit.v1.EntityItemCount
-	nil,                                // 70: orbit.v1.ResourceAuthorization.AuthorizedEntry
-	nil,                                // 71: orbit.v1.ComponentHealth.MetricsEntry
+	(ClusterStatus)(0),                 // 3: orbit.v1.ClusterStatus
+	(SourceType)(0),                    // 4: orbit.v1.SourceType
+	(IndexingState)(0),                 // 5: orbit.v1.IndexingState
+	(IndexingPhase)(0),                 // 6: orbit.v1.IndexingPhase
+	(*ExecuteQueryMessage)(nil),        // 7: orbit.v1.ExecuteQueryMessage
+	(*ExecuteQueryRequest)(nil),        // 8: orbit.v1.ExecuteQueryRequest
+	(*ExecuteQueryResult)(nil),         // 9: orbit.v1.ExecuteQueryResult
+	(*ResultChunk)(nil),                // 10: orbit.v1.ResultChunk
+	(*QueryMetadata)(nil),              // 11: orbit.v1.QueryMetadata
+	(*ExecuteQueryError)(nil),          // 12: orbit.v1.ExecuteQueryError
+	(*GetGraphSchemaRequest)(nil),      // 13: orbit.v1.GetGraphSchemaRequest
+	(*GetGraphSchemaResponse)(nil),     // 14: orbit.v1.GetGraphSchemaResponse
+	(*StructuredSchema)(nil),           // 15: orbit.v1.StructuredSchema
+	(*SchemaDomain)(nil),               // 16: orbit.v1.SchemaDomain
+	(*SchemaNode)(nil),                 // 17: orbit.v1.SchemaNode
+	(*SchemaProperty)(nil),             // 18: orbit.v1.SchemaProperty
+	(*SchemaEdge)(nil),                 // 19: orbit.v1.SchemaEdge
+	(*SchemaEdgeVariant)(nil),          // 20: orbit.v1.SchemaEdgeVariant
+	(*SchemaNodeStyle)(nil),            // 21: orbit.v1.SchemaNodeStyle
+	(*ListSkillsRequest)(nil),          // 22: orbit.v1.ListSkillsRequest
+	(*ListSkillsResponse)(nil),         // 23: orbit.v1.ListSkillsResponse
+	(*SkillSummary)(nil),               // 24: orbit.v1.SkillSummary
+	(*GetSkillRequest)(nil),            // 25: orbit.v1.GetSkillRequest
+	(*GetSkillResponse)(nil),           // 26: orbit.v1.GetSkillResponse
+	(*SkillFile)(nil),                  // 27: orbit.v1.SkillFile
+	(*GetResponseFormatRequest)(nil),   // 28: orbit.v1.GetResponseFormatRequest
+	(*GetResponseFormatResponse)(nil),  // 29: orbit.v1.GetResponseFormatResponse
+	(*ResponseFormatSchema)(nil),       // 30: orbit.v1.ResponseFormatSchema
+	(*ListNamedQueriesRequest)(nil),    // 31: orbit.v1.ListNamedQueriesRequest
+	(*ListNamedQueriesResponse)(nil),   // 32: orbit.v1.ListNamedQueriesResponse
+	(*NamedQueryDefinition)(nil),       // 33: orbit.v1.NamedQueryDefinition
+	(*RedactionExchange)(nil),          // 34: orbit.v1.RedactionExchange
+	(*RedactionRequired)(nil),          // 35: orbit.v1.RedactionRequired
+	(*ResourceToAuthorize)(nil),        // 36: orbit.v1.ResourceToAuthorize
+	(*RedactionResponse)(nil),          // 37: orbit.v1.RedactionResponse
+	(*ResourceAuthorization)(nil),      // 38: orbit.v1.ResourceAuthorization
+	(*ListToolsRequest)(nil),           // 39: orbit.v1.ListToolsRequest
+	(*ListToolsResponse)(nil),          // 40: orbit.v1.ListToolsResponse
+	(*ToolDefinition)(nil),             // 41: orbit.v1.ToolDefinition
+	(*ListAgentCommandsRequest)(nil),   // 42: orbit.v1.ListAgentCommandsRequest
+	(*ListAgentCommandsResponse)(nil),  // 43: orbit.v1.ListAgentCommandsResponse
+	(*InvokeAgentCommandRequest)(nil),  // 44: orbit.v1.InvokeAgentCommandRequest
+	(*InvokeAgentCommandResponse)(nil), // 45: orbit.v1.InvokeAgentCommandResponse
+	(*GetClusterHealthRequest)(nil),    // 46: orbit.v1.GetClusterHealthRequest
+	(*GetClusterHealthResponse)(nil),   // 47: orbit.v1.GetClusterHealthResponse
+	(*StructuredClusterHealth)(nil),    // 48: orbit.v1.StructuredClusterHealth
+	(*ComponentHealth)(nil),            // 49: orbit.v1.ComponentHealth
+	(*ReplicaStatus)(nil),              // 50: orbit.v1.ReplicaStatus
+	(*GetGraphStatusRequest)(nil),      // 51: orbit.v1.GetGraphStatusRequest
+	(*IndexingStatus)(nil),             // 52: orbit.v1.IndexingStatus
+	(*GetGraphStatusResponse)(nil),     // 53: orbit.v1.GetGraphStatusResponse
+	(*StructuredGraphStatus)(nil),      // 54: orbit.v1.StructuredGraphStatus
+	(*ProjectsStatus)(nil),             // 55: orbit.v1.ProjectsStatus
+	(*GraphStatusDomain)(nil),          // 56: orbit.v1.GraphStatusDomain
+	(*GraphStatusItem)(nil),            // 57: orbit.v1.GraphStatusItem
+	(*GetIndexingStatusRequest)(nil),   // 58: orbit.v1.GetIndexingStatusRequest
+	(*GetIndexingStatusResponse)(nil),  // 59: orbit.v1.GetIndexingStatusResponse
+	(*NamespaceIndexingStatus)(nil),    // 60: orbit.v1.NamespaceIndexingStatus
+	(*DomainIndexingStatus)(nil),       // 61: orbit.v1.DomainIndexingStatus
+	(*GetItemCountsRequest)(nil),       // 62: orbit.v1.GetItemCountsRequest
+	(*GetItemCountsResponse)(nil),      // 63: orbit.v1.GetItemCountsResponse
+	(*NamespaceItemCounts)(nil),        // 64: orbit.v1.NamespaceItemCounts
+	(*DomainItemCount)(nil),            // 65: orbit.v1.DomainItemCount
+	(*EntityItemCount)(nil),            // 66: orbit.v1.EntityItemCount
+	nil,                                // 67: orbit.v1.ResourceAuthorization.AuthorizedEntry
+	nil,                                // 68: orbit.v1.ComponentHealth.MetricsEntry
 }
 var file_orbit_proto_depIdxs = []int32{
-	9,  // 0: orbit.v1.ExecuteQueryMessage.request:type_name -> orbit.v1.ExecuteQueryRequest
-	37, // 1: orbit.v1.ExecuteQueryMessage.redaction:type_name -> orbit.v1.RedactionExchange
-	10, // 2: orbit.v1.ExecuteQueryMessage.result:type_name -> orbit.v1.ExecuteQueryResult
-	13, // 3: orbit.v1.ExecuteQueryMessage.error:type_name -> orbit.v1.ExecuteQueryError
-	11, // 4: orbit.v1.ExecuteQueryMessage.result_chunk:type_name -> orbit.v1.ResultChunk
+	8,  // 0: orbit.v1.ExecuteQueryMessage.request:type_name -> orbit.v1.ExecuteQueryRequest
+	34, // 1: orbit.v1.ExecuteQueryMessage.redaction:type_name -> orbit.v1.RedactionExchange
+	9,  // 2: orbit.v1.ExecuteQueryMessage.result:type_name -> orbit.v1.ExecuteQueryResult
+	12, // 3: orbit.v1.ExecuteQueryMessage.error:type_name -> orbit.v1.ExecuteQueryError
+	10, // 4: orbit.v1.ExecuteQueryMessage.result_chunk:type_name -> orbit.v1.ResultChunk
 	0,  // 5: orbit.v1.ExecuteQueryRequest.format:type_name -> orbit.v1.ResponseFormat
 	2,  // 6: orbit.v1.ExecuteQueryRequest.query_type:type_name -> orbit.v1.QueryType
-	3,  // 7: orbit.v1.ExecuteQueryRequest.language:type_name -> orbit.v1.QueryLanguage
-	12, // 8: orbit.v1.ExecuteQueryResult.metadata:type_name -> orbit.v1.QueryMetadata
-	1,  // 9: orbit.v1.QueryMetadata.format_name:type_name -> orbit.v1.FormatName
-	0,  // 10: orbit.v1.GetGraphSchemaRequest.format:type_name -> orbit.v1.ResponseFormat
-	16, // 11: orbit.v1.GetGraphSchemaResponse.structured:type_name -> orbit.v1.StructuredSchema
-	17, // 12: orbit.v1.StructuredSchema.domains:type_name -> orbit.v1.SchemaDomain
-	18, // 13: orbit.v1.StructuredSchema.nodes:type_name -> orbit.v1.SchemaNode
-	20, // 14: orbit.v1.StructuredSchema.edges:type_name -> orbit.v1.SchemaEdge
-	19, // 15: orbit.v1.SchemaNode.properties:type_name -> orbit.v1.SchemaProperty
-	22, // 16: orbit.v1.SchemaNode.style:type_name -> orbit.v1.SchemaNodeStyle
-	21, // 17: orbit.v1.SchemaEdge.variants:type_name -> orbit.v1.SchemaEdgeVariant
-	0,  // 18: orbit.v1.GetQueryDslRequest.format:type_name -> orbit.v1.ResponseFormat
-	3,  // 19: orbit.v1.GetQueryDslRequest.language:type_name -> orbit.v1.QueryLanguage
-	3,  // 20: orbit.v1.ListSkillsRequest.language:type_name -> orbit.v1.QueryLanguage
-	27, // 21: orbit.v1.ListSkillsResponse.skills:type_name -> orbit.v1.SkillSummary
-	3,  // 22: orbit.v1.GetSkillRequest.language:type_name -> orbit.v1.QueryLanguage
-	30, // 23: orbit.v1.GetSkillResponse.files:type_name -> orbit.v1.SkillFile
-	0,  // 24: orbit.v1.GetResponseFormatRequest.format:type_name -> orbit.v1.ResponseFormat
-	33, // 25: orbit.v1.GetResponseFormatResponse.structured:type_name -> orbit.v1.ResponseFormatSchema
-	3,  // 26: orbit.v1.ListNamedQueriesRequest.language:type_name -> orbit.v1.QueryLanguage
-	36, // 27: orbit.v1.ListNamedQueriesResponse.queries:type_name -> orbit.v1.NamedQueryDefinition
-	38, // 28: orbit.v1.RedactionExchange.required:type_name -> orbit.v1.RedactionRequired
-	40, // 29: orbit.v1.RedactionExchange.response:type_name -> orbit.v1.RedactionResponse
-	39, // 30: orbit.v1.RedactionRequired.resources:type_name -> orbit.v1.ResourceToAuthorize
-	41, // 31: orbit.v1.RedactionResponse.authorizations:type_name -> orbit.v1.ResourceAuthorization
-	70, // 32: orbit.v1.ResourceAuthorization.authorized:type_name -> orbit.v1.ResourceAuthorization.AuthorizedEntry
-	3,  // 33: orbit.v1.ListToolsRequest.language:type_name -> orbit.v1.QueryLanguage
-	44, // 34: orbit.v1.ListToolsResponse.tools:type_name -> orbit.v1.ToolDefinition
-	0,  // 35: orbit.v1.ListAgentCommandsRequest.format:type_name -> orbit.v1.ResponseFormat
-	3,  // 36: orbit.v1.ListAgentCommandsRequest.language:type_name -> orbit.v1.QueryLanguage
-	44, // 37: orbit.v1.ListAgentCommandsResponse.commands:type_name -> orbit.v1.ToolDefinition
-	3,  // 38: orbit.v1.InvokeAgentCommandRequest.language:type_name -> orbit.v1.QueryLanguage
-	0,  // 39: orbit.v1.GetClusterHealthRequest.format:type_name -> orbit.v1.ResponseFormat
-	51, // 40: orbit.v1.GetClusterHealthResponse.structured:type_name -> orbit.v1.StructuredClusterHealth
-	4,  // 41: orbit.v1.StructuredClusterHealth.status:type_name -> orbit.v1.ClusterStatus
-	52, // 42: orbit.v1.StructuredClusterHealth.components:type_name -> orbit.v1.ComponentHealth
-	4,  // 43: orbit.v1.ComponentHealth.status:type_name -> orbit.v1.ClusterStatus
-	53, // 44: orbit.v1.ComponentHealth.replicas:type_name -> orbit.v1.ReplicaStatus
-	71, // 45: orbit.v1.ComponentHealth.metrics:type_name -> orbit.v1.ComponentHealth.MetricsEntry
-	5,  // 46: orbit.v1.GetGraphStatusRequest.source_type:type_name -> orbit.v1.SourceType
-	0,  // 47: orbit.v1.GetGraphStatusRequest.format:type_name -> orbit.v1.ResponseFormat
-	6,  // 48: orbit.v1.IndexingStatus.state:type_name -> orbit.v1.IndexingState
-	57, // 49: orbit.v1.GetGraphStatusResponse.structured:type_name -> orbit.v1.StructuredGraphStatus
-	58, // 50: orbit.v1.StructuredGraphStatus.projects:type_name -> orbit.v1.ProjectsStatus
-	59, // 51: orbit.v1.StructuredGraphStatus.domains:type_name -> orbit.v1.GraphStatusDomain
-	55, // 52: orbit.v1.StructuredGraphStatus.indexing:type_name -> orbit.v1.IndexingStatus
-	55, // 53: orbit.v1.StructuredGraphStatus.sdlc_indexing:type_name -> orbit.v1.IndexingStatus
-	55, // 54: orbit.v1.StructuredGraphStatus.code_indexing:type_name -> orbit.v1.IndexingStatus
-	60, // 55: orbit.v1.GraphStatusDomain.items:type_name -> orbit.v1.GraphStatusItem
-	6,  // 56: orbit.v1.GraphStatusItem.state:type_name -> orbit.v1.IndexingState
-	63, // 57: orbit.v1.GetIndexingStatusResponse.statuses:type_name -> orbit.v1.NamespaceIndexingStatus
-	7,  // 58: orbit.v1.NamespaceIndexingStatus.phase:type_name -> orbit.v1.IndexingPhase
-	64, // 59: orbit.v1.NamespaceIndexingStatus.domains:type_name -> orbit.v1.DomainIndexingStatus
-	7,  // 60: orbit.v1.DomainIndexingStatus.phase:type_name -> orbit.v1.IndexingPhase
-	58, // 61: orbit.v1.DomainIndexingStatus.projects:type_name -> orbit.v1.ProjectsStatus
-	68, // 62: orbit.v1.GetItemCountsResponse.domains:type_name -> orbit.v1.DomainItemCount
-	67, // 63: orbit.v1.GetItemCountsResponse.namespaces:type_name -> orbit.v1.NamespaceItemCounts
-	68, // 64: orbit.v1.NamespaceItemCounts.domains:type_name -> orbit.v1.DomainItemCount
-	69, // 65: orbit.v1.DomainItemCount.entities:type_name -> orbit.v1.EntityItemCount
-	42, // 66: orbit.v1.OrbitService.ListTools:input_type -> orbit.v1.ListToolsRequest
-	45, // 67: orbit.v1.OrbitService.ListAgentCommands:input_type -> orbit.v1.ListAgentCommandsRequest
-	47, // 68: orbit.v1.OrbitService.InvokeAgentCommand:input_type -> orbit.v1.InvokeAgentCommandRequest
-	8,  // 69: orbit.v1.OrbitService.ExecuteQuery:input_type -> orbit.v1.ExecuteQueryMessage
-	14, // 70: orbit.v1.OrbitService.GetGraphSchema:input_type -> orbit.v1.GetGraphSchemaRequest
-	23, // 71: orbit.v1.OrbitService.GetQueryDsl:input_type -> orbit.v1.GetQueryDslRequest
-	25, // 72: orbit.v1.OrbitService.ListSkills:input_type -> orbit.v1.ListSkillsRequest
-	28, // 73: orbit.v1.OrbitService.GetSkill:input_type -> orbit.v1.GetSkillRequest
-	34, // 74: orbit.v1.OrbitService.ListNamedQueries:input_type -> orbit.v1.ListNamedQueriesRequest
-	31, // 75: orbit.v1.OrbitService.GetResponseFormat:input_type -> orbit.v1.GetResponseFormatRequest
-	49, // 76: orbit.v1.OrbitService.GetClusterHealth:input_type -> orbit.v1.GetClusterHealthRequest
-	54, // 77: orbit.v1.OrbitService.GetGraphStatus:input_type -> orbit.v1.GetGraphStatusRequest
-	61, // 78: orbit.v1.OrbitService.GetIndexingStatus:input_type -> orbit.v1.GetIndexingStatusRequest
-	65, // 79: orbit.v1.OrbitService.GetItemCounts:input_type -> orbit.v1.GetItemCountsRequest
-	43, // 80: orbit.v1.OrbitService.ListTools:output_type -> orbit.v1.ListToolsResponse
-	46, // 81: orbit.v1.OrbitService.ListAgentCommands:output_type -> orbit.v1.ListAgentCommandsResponse
-	48, // 82: orbit.v1.OrbitService.InvokeAgentCommand:output_type -> orbit.v1.InvokeAgentCommandResponse
-	8,  // 83: orbit.v1.OrbitService.ExecuteQuery:output_type -> orbit.v1.ExecuteQueryMessage
-	15, // 84: orbit.v1.OrbitService.GetGraphSchema:output_type -> orbit.v1.GetGraphSchemaResponse
-	24, // 85: orbit.v1.OrbitService.GetQueryDsl:output_type -> orbit.v1.GetQueryDslResponse
-	26, // 86: orbit.v1.OrbitService.ListSkills:output_type -> orbit.v1.ListSkillsResponse
-	29, // 87: orbit.v1.OrbitService.GetSkill:output_type -> orbit.v1.GetSkillResponse
-	35, // 88: orbit.v1.OrbitService.ListNamedQueries:output_type -> orbit.v1.ListNamedQueriesResponse
-	32, // 89: orbit.v1.OrbitService.GetResponseFormat:output_type -> orbit.v1.GetResponseFormatResponse
-	50, // 90: orbit.v1.OrbitService.GetClusterHealth:output_type -> orbit.v1.GetClusterHealthResponse
-	56, // 91: orbit.v1.OrbitService.GetGraphStatus:output_type -> orbit.v1.GetGraphStatusResponse
-	62, // 92: orbit.v1.OrbitService.GetIndexingStatus:output_type -> orbit.v1.GetIndexingStatusResponse
-	66, // 93: orbit.v1.OrbitService.GetItemCounts:output_type -> orbit.v1.GetItemCountsResponse
-	80, // [80:94] is the sub-list for method output_type
-	66, // [66:80] is the sub-list for method input_type
-	66, // [66:66] is the sub-list for extension type_name
-	66, // [66:66] is the sub-list for extension extendee
-	0,  // [0:66] is the sub-list for field type_name
+	11, // 7: orbit.v1.ExecuteQueryResult.metadata:type_name -> orbit.v1.QueryMetadata
+	1,  // 8: orbit.v1.QueryMetadata.format_name:type_name -> orbit.v1.FormatName
+	0,  // 9: orbit.v1.GetGraphSchemaRequest.format:type_name -> orbit.v1.ResponseFormat
+	15, // 10: orbit.v1.GetGraphSchemaResponse.structured:type_name -> orbit.v1.StructuredSchema
+	16, // 11: orbit.v1.StructuredSchema.domains:type_name -> orbit.v1.SchemaDomain
+	17, // 12: orbit.v1.StructuredSchema.nodes:type_name -> orbit.v1.SchemaNode
+	19, // 13: orbit.v1.StructuredSchema.edges:type_name -> orbit.v1.SchemaEdge
+	18, // 14: orbit.v1.SchemaNode.properties:type_name -> orbit.v1.SchemaProperty
+	21, // 15: orbit.v1.SchemaNode.style:type_name -> orbit.v1.SchemaNodeStyle
+	20, // 16: orbit.v1.SchemaEdge.variants:type_name -> orbit.v1.SchemaEdgeVariant
+	24, // 17: orbit.v1.ListSkillsResponse.skills:type_name -> orbit.v1.SkillSummary
+	27, // 18: orbit.v1.GetSkillResponse.files:type_name -> orbit.v1.SkillFile
+	0,  // 19: orbit.v1.GetResponseFormatRequest.format:type_name -> orbit.v1.ResponseFormat
+	30, // 20: orbit.v1.GetResponseFormatResponse.structured:type_name -> orbit.v1.ResponseFormatSchema
+	33, // 21: orbit.v1.ListNamedQueriesResponse.queries:type_name -> orbit.v1.NamedQueryDefinition
+	35, // 22: orbit.v1.RedactionExchange.required:type_name -> orbit.v1.RedactionRequired
+	37, // 23: orbit.v1.RedactionExchange.response:type_name -> orbit.v1.RedactionResponse
+	36, // 24: orbit.v1.RedactionRequired.resources:type_name -> orbit.v1.ResourceToAuthorize
+	38, // 25: orbit.v1.RedactionResponse.authorizations:type_name -> orbit.v1.ResourceAuthorization
+	67, // 26: orbit.v1.ResourceAuthorization.authorized:type_name -> orbit.v1.ResourceAuthorization.AuthorizedEntry
+	41, // 27: orbit.v1.ListToolsResponse.tools:type_name -> orbit.v1.ToolDefinition
+	0,  // 28: orbit.v1.ListAgentCommandsRequest.format:type_name -> orbit.v1.ResponseFormat
+	41, // 29: orbit.v1.ListAgentCommandsResponse.commands:type_name -> orbit.v1.ToolDefinition
+	0,  // 30: orbit.v1.GetClusterHealthRequest.format:type_name -> orbit.v1.ResponseFormat
+	48, // 31: orbit.v1.GetClusterHealthResponse.structured:type_name -> orbit.v1.StructuredClusterHealth
+	3,  // 32: orbit.v1.StructuredClusterHealth.status:type_name -> orbit.v1.ClusterStatus
+	49, // 33: orbit.v1.StructuredClusterHealth.components:type_name -> orbit.v1.ComponentHealth
+	3,  // 34: orbit.v1.ComponentHealth.status:type_name -> orbit.v1.ClusterStatus
+	50, // 35: orbit.v1.ComponentHealth.replicas:type_name -> orbit.v1.ReplicaStatus
+	68, // 36: orbit.v1.ComponentHealth.metrics:type_name -> orbit.v1.ComponentHealth.MetricsEntry
+	4,  // 37: orbit.v1.GetGraphStatusRequest.source_type:type_name -> orbit.v1.SourceType
+	0,  // 38: orbit.v1.GetGraphStatusRequest.format:type_name -> orbit.v1.ResponseFormat
+	5,  // 39: orbit.v1.IndexingStatus.state:type_name -> orbit.v1.IndexingState
+	54, // 40: orbit.v1.GetGraphStatusResponse.structured:type_name -> orbit.v1.StructuredGraphStatus
+	55, // 41: orbit.v1.StructuredGraphStatus.projects:type_name -> orbit.v1.ProjectsStatus
+	56, // 42: orbit.v1.StructuredGraphStatus.domains:type_name -> orbit.v1.GraphStatusDomain
+	52, // 43: orbit.v1.StructuredGraphStatus.indexing:type_name -> orbit.v1.IndexingStatus
+	52, // 44: orbit.v1.StructuredGraphStatus.sdlc_indexing:type_name -> orbit.v1.IndexingStatus
+	52, // 45: orbit.v1.StructuredGraphStatus.code_indexing:type_name -> orbit.v1.IndexingStatus
+	57, // 46: orbit.v1.GraphStatusDomain.items:type_name -> orbit.v1.GraphStatusItem
+	5,  // 47: orbit.v1.GraphStatusItem.state:type_name -> orbit.v1.IndexingState
+	60, // 48: orbit.v1.GetIndexingStatusResponse.statuses:type_name -> orbit.v1.NamespaceIndexingStatus
+	6,  // 49: orbit.v1.NamespaceIndexingStatus.phase:type_name -> orbit.v1.IndexingPhase
+	61, // 50: orbit.v1.NamespaceIndexingStatus.domains:type_name -> orbit.v1.DomainIndexingStatus
+	6,  // 51: orbit.v1.DomainIndexingStatus.phase:type_name -> orbit.v1.IndexingPhase
+	55, // 52: orbit.v1.DomainIndexingStatus.projects:type_name -> orbit.v1.ProjectsStatus
+	65, // 53: orbit.v1.GetItemCountsResponse.domains:type_name -> orbit.v1.DomainItemCount
+	64, // 54: orbit.v1.GetItemCountsResponse.namespaces:type_name -> orbit.v1.NamespaceItemCounts
+	65, // 55: orbit.v1.NamespaceItemCounts.domains:type_name -> orbit.v1.DomainItemCount
+	66, // 56: orbit.v1.DomainItemCount.entities:type_name -> orbit.v1.EntityItemCount
+	39, // 57: orbit.v1.OrbitService.ListTools:input_type -> orbit.v1.ListToolsRequest
+	42, // 58: orbit.v1.OrbitService.ListAgentCommands:input_type -> orbit.v1.ListAgentCommandsRequest
+	44, // 59: orbit.v1.OrbitService.InvokeAgentCommand:input_type -> orbit.v1.InvokeAgentCommandRequest
+	7,  // 60: orbit.v1.OrbitService.ExecuteQuery:input_type -> orbit.v1.ExecuteQueryMessage
+	13, // 61: orbit.v1.OrbitService.GetGraphSchema:input_type -> orbit.v1.GetGraphSchemaRequest
+	22, // 62: orbit.v1.OrbitService.ListSkills:input_type -> orbit.v1.ListSkillsRequest
+	25, // 63: orbit.v1.OrbitService.GetSkill:input_type -> orbit.v1.GetSkillRequest
+	31, // 64: orbit.v1.OrbitService.ListNamedQueries:input_type -> orbit.v1.ListNamedQueriesRequest
+	28, // 65: orbit.v1.OrbitService.GetResponseFormat:input_type -> orbit.v1.GetResponseFormatRequest
+	46, // 66: orbit.v1.OrbitService.GetClusterHealth:input_type -> orbit.v1.GetClusterHealthRequest
+	51, // 67: orbit.v1.OrbitService.GetGraphStatus:input_type -> orbit.v1.GetGraphStatusRequest
+	58, // 68: orbit.v1.OrbitService.GetIndexingStatus:input_type -> orbit.v1.GetIndexingStatusRequest
+	62, // 69: orbit.v1.OrbitService.GetItemCounts:input_type -> orbit.v1.GetItemCountsRequest
+	40, // 70: orbit.v1.OrbitService.ListTools:output_type -> orbit.v1.ListToolsResponse
+	43, // 71: orbit.v1.OrbitService.ListAgentCommands:output_type -> orbit.v1.ListAgentCommandsResponse
+	45, // 72: orbit.v1.OrbitService.InvokeAgentCommand:output_type -> orbit.v1.InvokeAgentCommandResponse
+	7,  // 73: orbit.v1.OrbitService.ExecuteQuery:output_type -> orbit.v1.ExecuteQueryMessage
+	14, // 74: orbit.v1.OrbitService.GetGraphSchema:output_type -> orbit.v1.GetGraphSchemaResponse
+	23, // 75: orbit.v1.OrbitService.ListSkills:output_type -> orbit.v1.ListSkillsResponse
+	26, // 76: orbit.v1.OrbitService.GetSkill:output_type -> orbit.v1.GetSkillResponse
+	32, // 77: orbit.v1.OrbitService.ListNamedQueries:output_type -> orbit.v1.ListNamedQueriesResponse
+	29, // 78: orbit.v1.OrbitService.GetResponseFormat:output_type -> orbit.v1.GetResponseFormatResponse
+	47, // 79: orbit.v1.OrbitService.GetClusterHealth:output_type -> orbit.v1.GetClusterHealthResponse
+	53, // 80: orbit.v1.OrbitService.GetGraphStatus:output_type -> orbit.v1.GetGraphStatusResponse
+	59, // 81: orbit.v1.OrbitService.GetIndexingStatus:output_type -> orbit.v1.GetIndexingStatusResponse
+	63, // 82: orbit.v1.OrbitService.GetItemCounts:output_type -> orbit.v1.GetItemCountsResponse
+	70, // [70:83] is the sub-list for method output_type
+	57, // [57:70] is the sub-list for method input_type
+	57, // [57:57] is the sub-list for extension type_name
+	57, // [57:57] is the sub-list for extension extendee
+	0,  // [0:57] is the sub-list for field type_name
 }
 
 func init() { file_orbit_proto_init() }
@@ -4925,41 +4646,37 @@ func file_orbit_proto_init() {
 		(*GetGraphSchemaResponse_Structured)(nil),
 		(*GetGraphSchemaResponse_FormattedText)(nil),
 	}
-	file_orbit_proto_msgTypes[16].OneofWrappers = []any{
-		(*GetQueryDslResponse_RawJsonSchema)(nil),
-		(*GetQueryDslResponse_FormattedText)(nil),
-	}
-	file_orbit_proto_msgTypes[24].OneofWrappers = []any{
+	file_orbit_proto_msgTypes[22].OneofWrappers = []any{
 		(*GetResponseFormatResponse_Structured)(nil),
 		(*GetResponseFormatResponse_FormattedText)(nil),
 	}
-	file_orbit_proto_msgTypes[29].OneofWrappers = []any{
+	file_orbit_proto_msgTypes[27].OneofWrappers = []any{
 		(*RedactionExchange_Required)(nil),
 		(*RedactionExchange_Response)(nil),
 	}
-	file_orbit_proto_msgTypes[40].OneofWrappers = []any{
+	file_orbit_proto_msgTypes[38].OneofWrappers = []any{
 		(*InvokeAgentCommandResponse_ResultJson)(nil),
 		(*InvokeAgentCommandResponse_FormattedText)(nil),
 	}
-	file_orbit_proto_msgTypes[42].OneofWrappers = []any{
+	file_orbit_proto_msgTypes[40].OneofWrappers = []any{
 		(*GetClusterHealthResponse_Structured)(nil),
 		(*GetClusterHealthResponse_FormattedText)(nil),
 	}
-	file_orbit_proto_msgTypes[47].OneofWrappers = []any{}
-	file_orbit_proto_msgTypes[48].OneofWrappers = []any{
+	file_orbit_proto_msgTypes[45].OneofWrappers = []any{}
+	file_orbit_proto_msgTypes[46].OneofWrappers = []any{
 		(*GetGraphStatusResponse_Structured)(nil),
 		(*GetGraphStatusResponse_FormattedText)(nil),
 	}
-	file_orbit_proto_msgTypes[52].OneofWrappers = []any{}
-	file_orbit_proto_msgTypes[55].OneofWrappers = []any{}
-	file_orbit_proto_msgTypes[56].OneofWrappers = []any{}
+	file_orbit_proto_msgTypes[50].OneofWrappers = []any{}
+	file_orbit_proto_msgTypes[53].OneofWrappers = []any{}
+	file_orbit_proto_msgTypes[54].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_orbit_proto_rawDesc), len(file_orbit_proto_rawDesc)),
-			NumEnums:      8,
-			NumMessages:   64,
+			NumEnums:      7,
+			NumMessages:   62,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

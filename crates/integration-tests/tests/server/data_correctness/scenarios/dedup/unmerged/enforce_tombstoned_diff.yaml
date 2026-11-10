@@ -11,9 +11,8 @@ config:
       - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 9730, target_kind: MergeRequestDiff, source_tags: ["state:opened"], target_tags: [] }
       - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 9731, target_kind: MergeRequestDiff, source_tags: ["state:opened"], target_tags: [] }
 
-query:
-  gql: |
-    MATCH (mr:MergeRequest {id: 2000})-[:HAS_DIFF]->(d:MergeRequestDiff) RETURN mr, d LIMIT 10
+query: |
+  MATCH (mr:MergeRequest {id: 2000})-[:HAS_DIFF]->(d:MergeRequestDiff) RETURN mr, d LIMIT 10
 
 expect:
   node_count: 4

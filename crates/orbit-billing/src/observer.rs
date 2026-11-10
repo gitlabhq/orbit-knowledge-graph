@@ -350,7 +350,7 @@ mod tests {
             ("search", "MATCH (p:Project {id: 1}) RETURN p LIMIT 1"),
         ];
         for (query_type, gql) in queries {
-            let compiled = compiler::compile(gql, compiler::Frontend::Gql, &model, &ctx).unwrap();
+            let compiled = compiler::compile(gql, &model, &ctx).unwrap();
             let mut obs = BillingObserver::new(None, test_inputs());
             obs.set_query_type(query_type);
             obs.set_compiled(&compiled);

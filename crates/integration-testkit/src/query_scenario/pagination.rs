@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use query_engine::compiler::Frontend;
 use query_engine::formatters::{GraphEdge, GraphResponse};
 
 use super::format::AllPagesExpect;
@@ -26,8 +25,7 @@ fn canonical_json(value: &impl serde::Serialize) -> String {
 
 /// Splits a paginated GQL statement ending in `SKIP 0 LIMIT n` into the
 /// statement prefix and the page size.
-fn window(frontend: Frontend, base_query: &str) -> (&str, u32) {
-    assert_eq!(frontend, Frontend::Gql, "pages require a GQL query");
+fn window(base_query: &str) -> (&str, u32) {
     let message = "paginated GQL must end with SKIP 0 LIMIT N";
     let mut tokens = base_query.trim_end().rsplitn(5, char::is_whitespace);
     let size = tokens
@@ -50,13 +48,13 @@ fn window(frontend: Frontend, base_query: &str) -> (&str, u32) {
     (tokens.next().expect(message).trim_end(), size)
 }
 
-pub(super) fn page_query(frontend: Frontend, base_query: &str, index: usize) -> String {
-    let (prefix, size) = window(frontend, base_query);
+pub(super) fn page_query(base_query: &str, index: usize) -> String {
+    let (prefix, size) = window(base_query);
     format!("{prefix} SKIP {} LIMIT {size}", index as u32 * size)
 }
 
-pub(super) fn unpaginated(frontend: Frontend, base_query: &str) -> String {
-    let (prefix, _) = window(frontend, base_query);
+pub(super) fn unpaginated(base_query: &str) -> String {
+    let (prefix, _) = window(base_query);
     format!("{prefix} LIMIT 1000")
 }
 

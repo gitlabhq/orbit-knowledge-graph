@@ -1,8 +1,7 @@
 description: Filtered DESC pagination returns exact matches per page
 
-query:
-  gql: |
-    MATCH (u:User)-[:AUTHORED]->(wi:WorkItem) WHERE u.id >= 1 AND u.id <= 10000 AND wi.work_item_type IN ['issue', 'task', 'epic'] AND wi.weight >= 3 RETURN u, wi.work_item_type, wi.weight ORDER BY wi.id DESC SKIP 0 LIMIT 1
+query: |
+  MATCH (u:User)-[:AUTHORED]->(wi:WorkItem) WHERE u.id >= 1 AND u.id <= 10000 AND wi.work_item_type IN ['issue', 'task', 'epic'] AND wi.weight >= 3 RETURN u, wi.work_item_type, wi.weight ORDER BY wi.id DESC SKIP 0 LIMIT 1
 
 expect:
   all_pages:

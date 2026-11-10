@@ -1,15 +1,11 @@
 name: Both-direction neighbor arms filter only the kinds that touch the center on their side
 
-query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["AUTHORED","HAS_HEAD_PIPELINE"]}}
-  gql: |
-    MATCH (mr:MergeRequest {id: 1})-[:AUTHORED|HAS_HEAD_PIPELINE]-(neighbor) RETURN mr, neighbor
+query: |
+  MATCH (mr:MergeRequest {id: 1})-[:AUTHORED|HAS_HEAD_PIPELINE]-(neighbor) RETURN mr, neighbor
 
 logical:
-  gql:
-    expect:
-      - (Limit 30 (Select mr, neighbor (Neighbors AUTHORED|HAS_HEAD_PIPELINE mr--neighbor (Filter mr.id = 1 (Entities MergeRequest AS mr)))))
+  expect:
+    - (Limit 30 (Select mr, neighbor (Neighbors AUTHORED|HAS_HEAD_PIPELINE mr--neighbor (Filter mr.id = 1 (Entities MergeRequest AS mr)))))
 
 physical:
   clickhouse:

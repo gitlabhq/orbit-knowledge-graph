@@ -1,10 +1,7 @@
 cases:
   - name: A selective filter on a changing column reads once with FINAL and checks after the merge
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"source_branch":"feature-x"},"columns":["id","title"]}],"limit":10}
-      gql: |
-        MATCH (mr:MergeRequest {source_branch: 'feature-x'}) RETURN mr.id, mr.title LIMIT 10
+    query: |
+      MATCH (mr:MergeRequest {source_branch: 'feature-x'}) RETURN mr.id, mr.title LIMIT 10
     logical:
       expect:
         - "(Filter mr.source_branch = 'feature-x' (Entities MergeRequest AS mr))"
@@ -20,11 +17,8 @@ cases:
             absent: true
 
   - name: High-selectivity filters on an unchanging column apply before the latest-row pick
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"name":"build"},"columns":["id","name"]}],"limit":10}
-      gql: |
-        MATCH (j:Job {name: 'build'}) RETURN j.id, j.name LIMIT 10
+    query: |
+      MATCH (j:Job {name: 'build'}) RETURN j.id, j.name LIMIT 10
     logical:
       expect:
         - "(Filter j.name = 'build' (Entities Job AS j))"
@@ -38,11 +32,8 @@ cases:
             - (Deduplicate Final (Scan Table(gl_job) AS j))
 
   - name: Low-selectivity node filters keep FINAL
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"status":"failed"},"columns":["id","status"]}],"limit":10}
-      gql: |
-        MATCH (j:Job {status: 'failed'}) RETURN j.id, j.status LIMIT 10
+    query: |
+      MATCH (j:Job {status: 'failed'}) RETURN j.id, j.status LIMIT 10
     logical:
       expect:
         - "(Filter j.status = 'failed' (Entities Job AS j))"
@@ -53,11 +44,8 @@ cases:
           reject: ["(Deduplicate LimitBy ... (_))"]
 
   - name: An unpinned range on a high fan out child reads once with FINAL
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"finished_at":{"gte":"2026-10-10"}},"columns":["id","finished_at"]}],"limit":10}
-      gql: |
-        MATCH (j:Job) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
+    query: |
+      MATCH (j:Job) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
     logical:
       expect:
         - "(Filter j.finished_at >= '2026-10-10' (Entities Job AS j))"
@@ -73,11 +61,8 @@ cases:
             absent: true
 
   - name: A changing-column filter on a high fan out child pinned by its parent keeps find then check
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"pipeline_id":7,"finished_at":{"gte":"2026-10-10"}},"columns":["id","finished_at"]}],"limit":10}
-      gql: |
-        MATCH (j:Job {pipeline_id: 7}) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
+    query: |
+      MATCH (j:Job {pipeline_id: 7}) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
     logical:
       expect:
         - "(Filter j.finished_at >= '2026-10-10', j.pipeline_id = 7 (Entities Job AS j))"
@@ -90,11 +75,8 @@ cases:
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
 
   - name: A changing-column filter on a high fan out child pinned by id keeps find then check
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","node_ids":[7,8],"filters":{"finished_at":{"gte":"2026-10-10"}},"columns":["id","finished_at"]}],"limit":10}
-      gql: |
-        MATCH (j:Job) WHERE j.id IN [7, 8] AND j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
+    query: |
+      MATCH (j:Job) WHERE j.id IN [7, 8] AND j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
     logical:
       expect:
         - "(Filter j.finished_at >= '2026-10-10', j.id IN [7, 8] (Entities Job AS j))"
@@ -107,11 +89,8 @@ cases:
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
 
   - name: A changing-column filter on a high fan out child reached through its parent keeps find then check
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"pl","entity":"Pipeline","node_ids":[1000]},{"id":"j","entity":"Job","filters":{"finished_at":{"gte":"2026-10-10"}},"columns":["id","finished_at"]}],"relationships":[{"type":"HAS_JOB","from":"pl","to":"j"}],"limit":10}
-      gql: |
-        MATCH (pl:Pipeline {id: 1000})-[:HAS_JOB]->(j:Job) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
+    query: |
+      MATCH (pl:Pipeline {id: 1000})-[:HAS_JOB]->(j:Job) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
     logical:
       expect:
         - "(Filter j.finished_at >= '2026-10-10' (Follow HAS_JOB pl->j AS e0 (Filter ... (Entities Pipeline AS pl))))"
@@ -124,11 +103,8 @@ cases:
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
 
   - name: A text match on a high fan out child pinned by its polymorphic parent keeps find then check
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":5,"note":{"contains":"abc"}},"columns":["id","note"]}],"limit":10}
-      gql: |
-        MATCH (n:Note) WHERE n.noteable_id = 5 AND n.note CONTAINS 'abc' RETURN n.id, n.note LIMIT 10
+    query: |
+      MATCH (n:Note) WHERE n.noteable_id = 5 AND n.note CONTAINS 'abc' RETURN n.id, n.note LIMIT 10
     logical:
       expect:
         - "(Filter contains(n.note, 'abc'), n.noteable_id = 5 (Entities Note AS n))"
@@ -141,11 +117,8 @@ cases:
           reject: ["(Deduplicate Final (Scan Table(gl_note) AS n))"]
 
   - name: A changing-column filter on a pinned read of an ordinary table reads once with FINAL
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000,2001],"filters":{"source_branch":"feature-x"},"columns":["id","title"]}],"limit":10}
-      gql: |
-        MATCH (mr:MergeRequest) WHERE mr.id IN [2000, 2001] AND mr.source_branch = 'feature-x' RETURN mr.id, mr.title LIMIT 10
+    query: |
+      MATCH (mr:MergeRequest) WHERE mr.id IN [2000, 2001] AND mr.source_branch = 'feature-x' RETURN mr.id, mr.title LIMIT 10
     logical:
       expect:
         - "(Filter mr.source_branch = 'feature-x', mr.id IN [2000, 2001] (Entities MergeRequest AS mr))"
@@ -162,11 +135,8 @@ cases:
             absent: true
 
   - name: High-selectivity ranges on an unchanging column apply before the latest-row pick
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"created_at":{"gte":"2026-10-10"}},"columns":["id","created_at"]}],"limit":10}
-      gql: |
-        MATCH (j:Job) WHERE j.created_at >= '2026-10-10' RETURN j.id, j.created_at LIMIT 10
+    query: |
+      MATCH (j:Job) WHERE j.created_at >= '2026-10-10' RETURN j.id, j.created_at LIMIT 10
     logical:
       expect:
         - "(Filter j.created_at >= '2026-10-10' (Entities Job AS j))"
@@ -180,11 +150,8 @@ cases:
             - (Deduplicate Final (Scan Table(gl_job) AS j))
 
   - name: Namespace anchors keep FINAL by themselves
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"j","entity":"Job","filters":{"project_id":1000}}],"aggregations":[{"count":"j","as":"n"}]}
-      gql: |
-        MATCH (j:Job {project_id: 1000}) RETURN count(j) AS n
+    query: |
+      MATCH (j:Job {project_id: 1000}) RETURN count(j) AS n
     logical:
       expect:
         - "(Aggregate COUNT(j) AS n (Filter j.project_id = 1000 (Entities Job AS j)))"
@@ -195,13 +162,10 @@ cases:
           reject: ["(Deduplicate LimitBy ... (_))"]
 
   - name: A text match on a changing column keeps FINAL instead of a keyed re-read
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"project_id":1000,"title":{"contains":"migration"}},"columns":["title"]}],"limit":10}
-      gql: |
-        MATCH (mr:MergeRequest {project_id: 1000})
-        WHERE mr.title CONTAINS 'migration'
-        RETURN mr.title LIMIT 10
+    query: |
+      MATCH (mr:MergeRequest {project_id: 1000})
+      WHERE mr.title CONTAINS 'migration'
+      RETURN mr.title LIMIT 10
     logical:
       expect:
         - "(Filter contains(mr.title, 'migration'), mr.project_id = 1000 (Entities MergeRequest AS mr))"
@@ -213,11 +177,8 @@ cases:
           reject: ["(Filter Tuple(mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))"]
 
   - name: A text match beside a key range still finds then checks
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"filters":{"username":{"starts_with":"ALI"}},"columns":["username"]}],"limit":10}
-      gql: |
-        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'ALI' RETURN u.username LIMIT 10
+    query: |
+      MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'ALI' RETURN u.username LIMIT 10
     logical:
       expect:
         - "(Filter u.id >= 1, u.id <= 10000, starts_with(u.username, 'ALI') (Entities User AS u))"
@@ -230,13 +191,10 @@ cases:
           reject: ["(Deduplicate Final (Scan Table(gl_user) AS u))"]
 
   - name: Text indexes on an unchanging column apply before the latest-row pick
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"MergeRequestDiffFile","filters":{"project_id":1000,"new_path":{"contains":"app/services"}},"columns":["new_path"]}],"limit":10}
-      gql: |
-        MATCH (f:MergeRequestDiffFile {project_id: 1000})
-        WHERE f.new_path CONTAINS 'app/services'
-        RETURN f.new_path LIMIT 10
+    query: |
+      MATCH (f:MergeRequestDiffFile {project_id: 1000})
+      WHERE f.new_path CONTAINS 'app/services'
+      RETURN f.new_path LIMIT 10
     logical:
       expect:
         - "(Filter contains(f.new_path, 'app/services'), f.project_id = 1000 (Entities MergeRequestDiffFile AS f))"
@@ -250,15 +208,11 @@ cases:
             - (Deduplicate Final (Scan Table(gl_merge_request_diff_file) AS f))
 
   - name: Negated high-selectivity node filters keep FINAL
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","not":{"name":"build"},"columns":["id","name"]}],"limit":10}
-      gql: |
-        MATCH (j:Job) WHERE NOT j.name = 'build' RETURN j.id, j.name LIMIT 10
+    query: |
+      MATCH (j:Job) WHERE NOT j.name = 'build' RETURN j.id, j.name LIMIT 10
     logical:
-      gql:
-        expect:
-          - "(Filter NOT (j.name = 'build') (Entities Job AS j))"
+      expect:
+        - "(Filter NOT (j.name = 'build') (Entities Job AS j))"
     physical:
       clickhouse:
         planned:
@@ -266,11 +220,8 @@ cases:
           reject: ["(Deduplicate LimitBy ... (_))"]
 
   - name: Wide ID ranges keep FINAL
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","id_range":{"start":1,"end":100002},"columns":["id"]}],"limit":10}
-      gql: |
-        MATCH (j:Job) WHERE j.id >= 1 AND j.id <= 100002 RETURN j.id LIMIT 10
+    query: |
+      MATCH (j:Job) WHERE j.id >= 1 AND j.id <= 100002 RETURN j.id LIMIT 10
     logical:
       expect:
         - "(Filter j.id >= 1, j.id <= 100002 (Entities Job AS j))"

@@ -46,7 +46,6 @@ impl TypeMap {
 
 pub struct QueryPipelineContext {
     pub query_json: String,
-    pub frontend: compiler::Frontend,
     pub compiled: Option<Arc<CompiledQueryContext>>,
     pub security_context: Option<SecurityContext>,
     /// Server-specific infrastructure (ClickHouse client, etc.)

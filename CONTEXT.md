@@ -37,7 +37,7 @@ A data model where typed **Nodes** carry properties and typed directed **Relatio
 _Avoid_: knowledge graph (too vague), graph database (refers to the storage layer)
 
 **Node**:
-A typed entity in the property graph representing a GitLab object (e.g., Project, MergeRequest, File, Definition). Each node type is defined in the **Data model** and stored in a dedicated table (ClickHouse in **GitLab Orbit**, DuckDB in the **Local graph**). Called `entity` in the **Query DSL**.
+A typed entity in the property graph representing a GitLab object (e.g., Project, MergeRequest, File, Definition). Each node type is defined in the **Data model** and stored in a dedicated table (ClickHouse in **GitLab Orbit**, DuckDB in the **Local graph**). Written as a node label, such as `(mr:MergeRequest)`, in **Orbit Query**.
 _Avoid_: vertex
 
 **Relationship**:
@@ -124,16 +124,12 @@ _Avoid_: data lake, raw data tables, lake
 
 ### Query system
 
-**Query DSL**:
-The JSON-based query language for the property graph. Supports four query types: traversal, aggregation, path_finding, and neighbors. Compiled to parameterized ClickHouse SQL. Versioned by `QUERY_DSL_VERSION`.
-_Avoid_: intermediate query language, intermediary LLM query language, JSON query language
-
-**Orbit Query Frontend**:
-A compiler-level interface for Orbit's read-only graph language. The `gql` frontend module converts Pest pairs into a typed syntax tree, then lowers it into compiler Input. Rails selects it per user with the default-off `orbit_gql_queries` feature flag and sets the protobuf `QueryLanguage` enum, independently of raw or named source kind. JSON **Query DSL** and GQL are mutually exclusive modes, not client-selected languages.
-_Avoid_: Describing Orbit Query as the default query language
+**Orbit Query**:
+The read-only, openCypher-based query language for the property graph and the only query language Orbit accepts. The `gql` surface parses the text with Pest and lowers it to a logical plan, which the compiler turns into parameterized SQL. A query is a traversal, an aggregation, a shortest path, or a neighbors query. The accepted shape is versioned by `query_dsl` in `config/versions.yaml`.
+_Avoid_: query DSL, JSON query language
 
 **Named Query**:
-A graph query defined in YAML under `config/named_queries/` and invoked by name. Each definition carries a JSON **Query DSL** spelling and a GQL spelling of the same shape; Rails sets `QUERY_TYPE_NAMED` and a separate `QueryLanguage` value. That language selects both the spelling and the matching compiler frontend. Trusted templates encode client values and bind caller identity separately. Both rendered examples compile against the data model in `orbit-server` unit tests so drift fails CI.
+A graph query defined in YAML under `config/named_queries/` and invoked by name. Each definition is an **Orbit Query** template; Rails sets `QUERY_TYPE_NAMED`. Trusted templates encode client values and bind caller identity separately. Every rendered example compiles against the data model in `orbit-server` unit tests so drift fails CI.
 _Avoid_: preset query, query template
 
 **Hop**:

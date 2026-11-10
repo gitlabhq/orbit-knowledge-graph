@@ -1,11 +1,10 @@
 cases:
   - name: is_null_on_date
     description: is_null on a Date column matches the rows whose stored epoch stands for null
-    query:
-      gql: |
-        MATCH (wi:WorkItem)
-        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.due_date IS NULL
-        RETURN wi.title, wi.due_date ORDER BY wi.id LIMIT 10
+    query: |
+      MATCH (wi:WorkItem)
+      WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.due_date IS NULL
+      RETURN wi.title, wi.due_date ORDER BY wi.id LIMIT 10
     expect:
       node_count: 5
       nodes:
@@ -27,11 +26,10 @@ cases:
       extra_seed:
         gl_work_item:
           - { id: 99030, iid: 90, title: Dated item, state: opened, work_item_type: issue, confidential: false, due_date: "2024-05-01", namespace_id: 100, project_id: 1000, traversal_path: "1/100/1000/" }
-    query:
-      gql: |
-        MATCH (wi:WorkItem)
-        WHERE wi.id IN [4000, 4001, 99030] AND wi.due_date IS NOT NULL
-        RETURN wi.title, wi.due_date LIMIT 10
+    query: |
+      MATCH (wi:WorkItem)
+      WHERE wi.id IN [4000, 4001, 99030] AND wi.due_date IS NOT NULL
+      RETURN wi.title, wi.due_date LIMIT 10
     expect:
       node_count: 1
       nodes:

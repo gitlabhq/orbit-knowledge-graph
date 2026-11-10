@@ -14,9 +14,8 @@ config:
       - { traversal_path: "1/100/9760/", source_id: 100, source_kind: Group, relationship_kind: CONTAINS, target_id: 9760, target_kind: Project, source_tags: [], target_tags: [] }
       - { traversal_path: "1/100/9761/", source_id: 100, source_kind: Group, relationship_kind: CONTAINS, target_id: 9761, target_kind: Project, source_tags: [], target_tags: [] }
 
-query:
-  gql: |
-    MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project {name: 'dup'}) RETURN p, count(g) AS n LIMIT 10
+query: |
+  MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project {name: 'dup'}) RETURN p, count(g) AS n LIMIT 10
 
 expect:
   skip_requirements: ["node_ids", "filter:name"]

@@ -4,9 +4,8 @@ config:
   security:
     paths: ["1/"]
 
-query:
-  gql: |
-    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(mr) AS mr_count, count(DISTINCT p) AS project_count LIMIT 10
+query: |
+  MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(mr) AS mr_count, count(DISTINCT p) AS project_count LIMIT 10
 
 expect:
   groups:

@@ -1,6 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
-use query_engine::compiler::{CompiledQueryContext, Frontend, QueryStats, QueryType};
+use query_engine::compiler::{CompiledQueryContext, QueryStats, QueryType};
 use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
 use query_engine::shared::PipelineOutput;
 use serde_json::Value;
@@ -69,15 +69,14 @@ pub(super) fn assert_repeated_response(
 pub(super) fn assert_compilation(
     compiled: Result<Arc<CompiledQueryContext>, impl std::fmt::Display>,
     expect: &QueryExpect,
-    frontend: &str,
     label: &str,
 ) -> Option<Arc<CompiledQueryContext>> {
-    let contains = expect.compile_error_contains.for_frontend(frontend);
-    let not_contains = expect.compile_error_not_contains.for_frontend(frontend);
+    let contains = &expect.compile_error_contains;
+    let not_contains = &expect.compile_error_not_contains;
     let substring = expect
         .compile_error
         .as_ref()
-        .and_then(|error| error.substring_for(frontend));
+        .and_then(CompileErrorExpect::substring);
     let expects_error = !matches!(
         expect.compile_error,
         None | Some(CompileErrorExpect::Flag(false))
@@ -159,16 +158,9 @@ pub(super) fn assert_compilation(
     Some(compiled)
 }
 
-pub(super) fn assert_output(
-    output: &PipelineOutput,
-    frontend: Frontend,
-    expect: &QueryExpect,
-    label: &str,
-) -> Value {
+pub(super) fn assert_output(output: &PipelineOutput, expect: &QueryExpect, label: &str) -> Value {
     assert_pagination(output, label);
-    if frontend == Frontend::Gql {
-        assert_gql_table(output, expect, label);
-    }
+    assert_gql_table(output, expect, label);
     let response = GraphFormatter.format(output);
     assert_response(&output.compiled.stats, response.clone(), expect, label);
     response

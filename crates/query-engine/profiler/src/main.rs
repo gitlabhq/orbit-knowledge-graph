@@ -28,13 +28,8 @@ use service::ProfilerPipelineService;
     about = "Profile GKG queries against ClickHouse"
 )]
 struct Cli {
-    /// Query string or @filepath. Named JSON objects map names to JSON queries,
-    /// or to GQL strings when used with --gql.
+    /// GQL statement or @filepath. A JSON object maps names to GQL statements.
     query: String,
-
-    /// Read the query as one GQL statement instead of Orbit query JSON
-    #[arg(long)]
-    gql: bool,
 
     /// ClickHouse HTTP URL
     #[arg(long, default_value = "http://127.0.0.1:8123", env = "CLICKHOUSE_URL")]
@@ -132,7 +127,6 @@ struct RunContext<'a> {
     org_id: i64,
     traversal_paths: &'a [String],
     emit_response: Option<ResponseFormat>,
-    frontend: compiler::Frontend,
 }
 
 async fn run_single(
@@ -144,7 +138,7 @@ async fn run_single(
     let span = labkit::context::span_with_id("profile", &correlation_id);
     let mut output = ctx
         .service
-        .run_query(ctx.security_ctx.clone(), query_json, ctx.frontend)
+        .run_query(ctx.security_ctx.clone(), query_json)
         .instrument(span)
         .await
         .map_err(|e| anyhow::anyhow!("pipeline failed: {e}"))?;
@@ -248,21 +242,12 @@ fn embedded_schema_version() -> u32 {
     orbit_versions::VERSIONS.schema
 }
 
-fn frontend(cli: &Cli) -> compiler::Frontend {
-    if cli.gql {
-        compiler::Frontend::Gql
-    } else {
-        compiler::Frontend::JsonDsl
-    }
-}
-
 fn compile_one(
-    query_json: &str,
-    frontend: compiler::Frontend,
+    query: &str,
     data_model: &Arc<Catalog<ClickHouse>>,
     security_ctx: &SecurityContext,
 ) -> Result<compiler::CompiledQueryContext> {
-    compiler::compile(query_json, frontend, data_model, security_ctx)
+    compiler::compile(query, data_model, security_ctx)
         .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
 }
 
@@ -300,7 +285,7 @@ fn run_compile_only(
     if entries.len() > 1 || cli.output.is_some() {
         let mut report = BTreeMap::new();
         for (name, query) in entries {
-            let value = match compile_one(&query, frontend(cli), data_model, security_ctx) {
+            let value = match compile_one(&query, data_model, security_ctx) {
                 Ok(compiled) => {
                     let mut value = serde_json::json!({ "query": query });
                     if matches!(show, CompileShow::Base | CompileShow::Both) {
@@ -320,7 +305,7 @@ fn run_compile_only(
     }
 
     for (name, query) in &entries {
-        let compiled = compile_one(query, frontend(cli), data_model, security_ctx)?;
+        let compiled = compile_one(query, data_model, security_ctx)?;
         if entries.len() > 1 {
             eprintln!("--- {} ---", name);
         }
@@ -347,35 +332,19 @@ fn run_compile_only(
 }
 
 fn query_entries(raw: &str, cli: &Cli) -> Result<Vec<(String, String)>> {
-    let parsed = serde_json::from_str::<serde_json::Value>(raw);
-    let single_json = parsed.as_ref().ok().is_some_and(|value| {
-        value
-            .get("query_type")
-            .is_some_and(serde_json::Value::is_string)
-    });
-    if (!cli.gql && single_json) || (cli.gql && parsed.is_err()) {
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) else {
         return Ok(vec![("query".to_string(), raw.to_string())]);
-    }
-
-    let parsed = parsed.context(if cli.gql {
-        "GQL query files must contain one statement or a JSON object of named statements"
-    } else {
-        "failed to parse query JSON"
-    })?;
-    let queries = parsed
-        .as_object()
-        .context("multi-query file must be a JSON object")?;
+    };
+    let queries = parsed.as_object().context(
+        "GQL query files must contain one statement or a JSON object of named statements",
+    )?;
     let mut entries = queries
         .iter()
         .map(|(name, query)| {
-            let query = if cli.gql {
-                query
-                    .as_str()
-                    .map(str::to_string)
-                    .with_context(|| format!("named GQL query '{name}' must be a string"))?
-            } else {
-                serde_json::to_string(query).context("failed to serialize query value")?
-            };
+            let query = query
+                .as_str()
+                .map(str::to_string)
+                .with_context(|| format!("named GQL query '{name}' must be a string"))?;
             Ok((name.clone(), query))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -514,7 +483,6 @@ async fn main() -> Result<()> {
         org_id,
         traversal_paths: &cli.traversal_paths,
         emit_response: cli.emit_response.clone(),
-        frontend: frontend(&cli),
     };
 
     if entries.len() == 1 && cli.output.is_none() {
