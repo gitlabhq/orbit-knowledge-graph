@@ -97,7 +97,7 @@ pub(super) fn bindings(
             .iter()
             .find(|binding| binding.node == alias)
             .ok_or_else(missing)?;
-        let binding = match (bound.get(&source.alias), node.node_ids.as_slice()) {
+        let binding = match (bound.get(&source.alias), node.node_ids.as_deref()) {
             (
                 Some(NodeBinding::Values {
                     table_alias: Some(table),
@@ -105,7 +105,7 @@ pub(super) fn bindings(
                 }),
                 _,
             ) => NodeBinding::source(table, &source.column, None, None),
-            (_, [id]) => NodeBinding::Values {
+            (_, Some([id])) => NodeBinding::Values {
                 identity: Term::Id(*id),
                 table_alias: None,
                 traversal_path: None,

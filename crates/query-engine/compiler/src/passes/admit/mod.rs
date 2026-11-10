@@ -72,7 +72,7 @@ fn filters(
             }
             let pinned = anchors
                 .iter()
-                .any(|anchor| anchor.binding.name == alias && !anchor.pinned.is_empty());
+                .any(|anchor| anchor.binding.name == alias && anchor.pinned.is_some());
             if !pinned {
                 return Err(QueryError::Validation(format!(
                     "filter on \"{property}\" for {entity}: virtual columns can only be \
@@ -115,7 +115,7 @@ fn buckets(query: Query<'_>, anchors: &[Anchor<'_>]) -> Result<()> {
         let filtered = anchor.filters.iter().any(|fact| {
             matches!(fact.left, Expr::Property { property: filtered, .. } if filtered == *property)
         });
-        if anchor.pinned.is_empty() && !filtered {
+        if anchor.pinned.is_none() && !filtered {
             let property = query.property_name(*property);
             let unit: &str = unit.into();
             return Err(QueryError::Validation(format!(

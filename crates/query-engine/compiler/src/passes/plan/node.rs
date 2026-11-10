@@ -20,7 +20,7 @@ pub(crate) struct Node<'p> {
     pub entity: &'p str,
     pub table: Option<&'p str>,
     pub redaction: &'p str,
-    pub pinned: Vec<i64>,
+    pub pinned: Option<Vec<i64>>,
     pub range: Option<(i64, i64)>,
     pub filters: Vec<(String, BoundFilter)>,
     pub has_traversal_path: bool,
@@ -50,7 +50,7 @@ impl<'p> Node<'p> {
     }
 
     pub fn is_id_pinned_only(&self) -> bool {
-        !self.pinned.is_empty() && self.filters.is_empty() && self.range.is_none()
+        self.pinned.is_some() && self.filters.is_empty() && self.range.is_none()
     }
 
     pub fn uses_default_pk(&self) -> bool {

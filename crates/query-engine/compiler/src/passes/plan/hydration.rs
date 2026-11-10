@@ -21,7 +21,7 @@ use crate::hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 use crate::logical::Query;
 use crate::logical::facts::{anchors, facts};
 use crate::passes::codegen::RelationalModel;
-use crate::passes::plan::build::expr::{in_list, live};
+use crate::passes::plan::build::expr::{id_list, live};
 use crate::passes::plan::build::predicates::Lowering;
 use crate::passes::plan::build::{
     Built, call, col, computed, disjoin, filtered, scan, stored, string, versioning,
@@ -35,7 +35,7 @@ pub(crate) struct Arm<'p> {
     alias: &'p str,
     entity: &'p str,
     table: &'p str,
-    ids: Vec<i64>,
+    ids: Option<Vec<i64>>,
     columns: Vec<(&'p str, Option<query_data_model::DataType>)>,
     path_filter: Option<PathFilter>,
     sort_key: &'p [String],
@@ -174,9 +174,9 @@ fn arm<B: RelationalBackend>(q: &mut RelationalBuilder<'_, B>, node: &Arm<'_>) -
             None => None,
         };
         predicates.extend(path_filter.map(Some));
-        let ids = node.ids.iter().map(|id| Value::from(*id)).collect();
-        let id = col(&scope, alias, pk)?;
-        predicates.extend(in_list::<B>(id, SqlType::Int64, ids).map(Some));
+        if let Some(ids) = &node.ids {
+            predicates.push(Some(id_list::<B>(col(&scope, alias, pk)?, ids)));
+        }
         let rows = filtered(q, rows, predicates)?;
         let mut names = vec![pk, DELETED_COLUMN];
         names.extend(

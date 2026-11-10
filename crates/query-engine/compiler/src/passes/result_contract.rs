@@ -356,7 +356,7 @@ pub fn apply<M: RelationalModel>(
     let anchors = anchors(query, &facts);
     if kind == Kind::Neighbors
         && let Some(center) = anchors.first()
-        && let [id] = center.pinned.as_slice()
+        && let Some([id]) = center.pinned.as_deref()
     {
         let entity = model.catalog().graph().entity(center.binding.entity);
         ctx.neighbors_center = Some((entity.name.clone(), *id));

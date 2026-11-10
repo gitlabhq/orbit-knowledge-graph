@@ -69,13 +69,13 @@ fn span(anchor: &Anchor<'_>) -> Option<i64> {
 }
 
 fn anchored(anchor: &Anchor<'_>) -> bool {
-    !anchor.pinned.is_empty()
+    anchor.pinned.is_some()
         || !anchor.filters.is_empty()
         || span(anchor).is_some_and(|span| span <= MAX_PATH_ANCHOR_RANGE)
 }
 
 fn selective(anchor: &Anchor<'_>) -> bool {
-    !anchor.pinned.is_empty()
+    anchor.pinned.is_some()
         || anchor.filters.iter().any(|fact| fact.right().is_none())
         || span(anchor).is_some_and(|span| span <= MAX_ID_RANGE_SPAN)
 }

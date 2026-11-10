@@ -159,7 +159,7 @@ impl QueryStats {
                     LogicalOperation::Shortest { max_depth, .. } => Some(*max_depth),
                     _ => None,
                 }),
-            pinned: anchors.iter().any(|anchor| !anchor.pinned.is_empty()),
+            pinned: anchors.iter().any(|anchor| anchor.pinned.is_some()),
             entity_types: query
                 .bindings()
                 .iter()

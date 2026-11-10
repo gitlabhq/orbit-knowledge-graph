@@ -5,6 +5,8 @@ use query_data_model::plan::tracking::Ref;
 
 use serde_json::Value;
 
+use query_data_model::constants::DEFAULT_PRIMARY_KEY;
+
 use super::{Binding, Query, binding};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr)]
@@ -167,7 +169,8 @@ fn fact(leaf: &Predicate, negated: bool, top: bool) -> Option<Fact<'_>> {
 
 pub struct Anchor<'p> {
     pub binding: Binding<'p>,
-    pub pinned: Vec<i64>,
+    /// The ids every top-level id equality and IN list admits; empty when they contradict.
+    pub pinned: Option<Vec<i64>>,
     pub range: Option<(i64, i64)>,
     pub filters: Vec<Fact<'p>>,
 }
@@ -181,68 +184,75 @@ pub fn anchors<'p>(query: Query<'p>, facts: &[Fact<'p>]) -> Vec<Anchor<'p>> {
 }
 
 fn anchor<'p>(query: Query<'p>, binding: Binding<'p>, facts: &[Fact<'p>]) -> Anchor<'p> {
-    let mut filters: Vec<Fact<'p>> = facts
+    let is_id = |fact: &Fact<'_>| matches!(fact.left, Expr::Property { property, .. } if query.property_name(property) == DEFAULT_PRIMARY_KEY);
+    let (mut pinned, mut lower, mut upper) = (None::<Vec<i64>>, None::<i64>, None::<i64>);
+    let mut filters = Vec::new();
+    for fact in facts
         .iter()
         .copied()
         .filter(|fact| fact.attached && fact.binding() == binding.output)
-        .collect();
-    let is_id = |fact: &Fact<'_>| matches!(fact.left, Expr::Property { property, .. } if query.property_name(property) == "id");
-    let pin = filters.iter().position(|fact| is_id(fact) && pins(*fact));
-    let pinned = pin.map_or_else(Vec::new, |index| pinned_ids(filters.remove(index)));
-    let ids: Vec<usize> = (0..filters.len()).filter(|i| is_id(&filters[*i])).collect();
-    let mut range = None;
-    if let [a, b] = ids[..] {
-        let bound = |fact: Fact<'_>, lower: bool| -> Option<i64> {
-            let Predicate::Compare {
-                right: Operand::Literal(Literal::Int(value)),
-                ..
-            } = fact.leaf
-            else {
-                return None;
-            };
-            match (fact.comparison?, lower) {
-                (Comparison::Ge, true) | (Comparison::Le, false) => Some(*value),
-                (Comparison::Gt, true) => value.checked_add(1),
-                (Comparison::Lt, false) => value.checked_sub(1),
-                _ => None,
+    {
+        match id_fact(fact).filter(|_| is_id(&fact)) {
+            Some(IdFact::Pin(ids)) => {
+                pinned = Some(match pinned {
+                    Some(mut kept) => {
+                        kept.retain(|id| ids.contains(id));
+                        kept
+                    }
+                    None => ids,
+                });
             }
-        };
-        let (first, second) = (filters[a], filters[b]);
-        let lower = bound(first, true).or_else(|| bound(second, true));
-        let upper = bound(first, false).or_else(|| bound(second, false));
-        if let (Some(start), Some(end)) = (lower, upper) {
-            range = Some((start, end));
-            filters.remove(b);
-            filters.remove(a);
+            Some(IdFact::Lower(bound)) => {
+                lower = Some(lower.map_or(bound, |kept| kept.max(bound)));
+                filters.push((fact, true));
+            }
+            Some(IdFact::Upper(bound)) => {
+                upper = Some(upper.map_or(bound, |kept| kept.min(bound)));
+                filters.push((fact, true));
+            }
+            None => filters.push((fact, false)),
         }
     }
+    let range = lower.zip(upper);
     Anchor {
         binding,
         pinned,
         range,
-        filters,
+        filters: filters
+            .into_iter()
+            .filter(|(_, bound)| range.is_none() || !bound)
+            .map(|(fact, _)| fact)
+            .collect(),
     }
 }
 
-fn pinned_ids(fact: Fact<'_>) -> Vec<i64> {
-    fact.literals()
-        .iter()
-        .filter_map(|literal| match literal {
-            Literal::Int(id) => Some(*id),
-            _ => None,
-        })
-        .collect()
+enum IdFact {
+    Pin(Vec<i64>),
+    Lower(i64),
+    Upper(i64),
 }
 
-fn pins(fact: Fact<'_>) -> bool {
+fn id_fact(fact: Fact<'_>) -> Option<IdFact> {
     match fact.leaf {
-        Predicate::In { values, .. } => {
-            !values.is_empty() && values.iter().all(|v| matches!(v, Literal::Int(_)))
-        }
+        Predicate::In { values, .. } => values
+            .iter()
+            .map(|value| match value {
+                Literal::Int(id) => Some(*id),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(IdFact::Pin),
         Predicate::Compare {
-            right: Operand::Literal(Literal::Int(_)),
+            right: Operand::Literal(Literal::Int(value)),
             ..
-        } => fact.comparison == Some(Comparison::Eq),
-        _ => false,
+        } => match fact.comparison? {
+            Comparison::Eq => Some(IdFact::Pin(vec![*value])),
+            Comparison::Ge => Some(IdFact::Lower(*value)),
+            Comparison::Gt => value.checked_add(1).map(IdFact::Lower),
+            Comparison::Le => Some(IdFact::Upper(*value)),
+            Comparison::Lt => value.checked_sub(1).map(IdFact::Upper),
+            Comparison::Ne => None,
+        },
+        _ => None,
     }
 }

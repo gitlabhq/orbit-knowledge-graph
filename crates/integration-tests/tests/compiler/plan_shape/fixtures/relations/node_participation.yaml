@@ -36,6 +36,23 @@ cases:
             - (Filter mr.project_id IN [1000, 1001], mr.project_id >= 1000, mr.project_id <= 1001, ... (_))
             - (Scan Table(gl_merge_request) AS mr)
 
+  - name: Every id equality and IN list intersects into the pins and every id bound joins the range
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+        WHERE p.id IN [1000, 1001, 1002] AND p.id IN [1001, 1002] AND p.id > 999 AND p.id <= 2000 AND p.id < 1500 AND p.id <> 1002
+        RETURN mr.title, p.name
+    missing_frontends:
+      json: JSON DSL deprecated
+    logical:
+      expect:
+        - "(Filter ... (Follow IN_PROJECT mr->p AS e0 (Entities MergeRequest AS mr)))"
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter mr.project_id IN [1001, 1002], mr.project_id >= 1000, mr.project_id <= 1499, ... (_))
+
   - name: Nullable aggregate properties retain current node rows and arguments
     query:
       json: |

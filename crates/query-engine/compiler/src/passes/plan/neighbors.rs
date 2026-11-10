@@ -265,7 +265,7 @@ impl<'p> Neighbors<'p> {
         tables.dedup();
         let fused_table = (direction == Direction::Both
             && !has_non_denorm
-            && center.pinned.len() != 1
+            && center.pinned.as_ref().is_none_or(|ids| ids.len() != 1)
             && center.uses_default_pk()
             && tables.len() == 1)
             .then(|| tables.remove(0));
@@ -381,7 +381,7 @@ fn arms<'p>(plan: &'p Neighbors<'_>) -> Vec<Arm<'p>> {
             kinds,
             bound,
         };
-        if center.is_empty() || !center_has_tp {
+        if center.is_none() || !center_has_tp {
             return vec![arm(all, None)];
         }
         if carrying.is_empty() {

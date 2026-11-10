@@ -411,9 +411,9 @@ fn hydration_request(
             let plan = catalog.build(|q| {
                 let rows = q.entities_as(catalog.entity(entity)?, binding.name)?;
                 let endpoint = rows.endpoint()?;
-                let rows = match anchor.pinned.as_slice() {
-                    [] => rows,
-                    pinned => q.pin(rows, endpoint.property("id")?, pinned)?,
+                let rows = match &anchor.pinned {
+                    None => rows,
+                    Some(pinned) => q.pin(rows, endpoint.property("id")?, pinned)?,
                 };
                 let projection = Projection::Graph {
                     binding: endpoint.output(),

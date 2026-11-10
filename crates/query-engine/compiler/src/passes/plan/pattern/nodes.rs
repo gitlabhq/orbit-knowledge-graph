@@ -75,7 +75,7 @@ impl NodePlan {
     }
 
     pub fn is_id_pinned_only(&self) -> bool {
-        !self.node_ids.is_empty() && self.filters.is_empty() && self.id_range.is_none()
+        self.node_ids.is_some() && self.filters.is_empty() && self.id_range.is_none()
     }
 
     pub fn uses_default_pk(&self) -> bool {
@@ -83,15 +83,15 @@ impl NodePlan {
     }
 
     pub(crate) fn is_pinned(&self) -> bool {
-        !self.node_ids.is_empty() || self.id_range.is_some()
+        self.node_ids.is_some() || self.id_range.is_some()
     }
 
     pub(crate) fn id_predicates(&self, column: Column) -> Vec<Predicate> {
         let mut predicates = Vec::new();
-        if !self.node_ids.is_empty() {
+        if let Some(ids) = &self.node_ids {
             predicates.push(Predicate::Ids {
                 column: column.clone(),
-                values: self.node_ids.clone(),
+                values: ids.clone(),
             });
         }
         if let Some((start, end)) = self.id_range {

@@ -174,14 +174,16 @@ pub(crate) fn in_list<B: RelationalBackend>(
     }
 }
 
+pub(crate) fn id_list<B: RelationalBackend>(value: Expr, ids: &[i64]) -> Expr {
+    let values = ids.iter().map(|id| Value::from(*id)).collect();
+    in_list::<B>(value, SqlType::Int64, values)
+        .unwrap_or_else(|| param::<B>(SqlType::Bool, false.into()))
+}
+
 pub(crate) fn ids<B: RelationalBackend>(value: Expr, ids: &[i64]) -> Expr {
     match ids {
         [id] => eq(value, super::int(*id)),
-        _ => {
-            let values = ids.iter().map(|id| Value::from(*id)).collect();
-            in_list::<B>(value, SqlType::Int64, values)
-                .unwrap_or_else(|| param::<B>(SqlType::Bool, false.into()))
-        }
+        _ => id_list::<B>(value, ids),
     }
 }
 

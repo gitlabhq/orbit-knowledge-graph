@@ -9,7 +9,6 @@ use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, Function, JoinKind, Order, Relation, RelationalBuilder, Subquery,
 };
 use query_data_model::plan::logical::LogicalOperation;
-use serde_json::Value;
 
 use super::node::Node;
 use crate::constants::*;
@@ -18,7 +17,7 @@ use crate::logical::Query;
 use crate::logical::facts::{anchors, facts};
 use crate::passes::codegen::RelationalModel;
 use crate::passes::plan::Term;
-use crate::passes::plan::build::expr::{id_range, ids, in_list, relationship_kinds};
+use crate::passes::plan::build::expr::{id_list, id_range, ids, relationship_kinds};
 use crate::passes::plan::build::sources::{Scope, columns, dedup, final_edge_scan, select};
 use crate::passes::plan::build::{
     Built, and, binary, call, col, computed, conjoin, eq, filtered, int, membership, stored, string,
@@ -134,11 +133,7 @@ fn anchor_filter<B: RelationalBackend>(
     value: Expr,
 ) -> Built<Expr> {
     match filter {
-        AnchorFilter::Ids(values) => {
-            let values = values.iter().map(|id| Value::from(*id)).collect();
-            Ok(in_list::<B>(value, SqlType::Int64, values)
-                .expect("pinned anchors carry at least one id"))
-        }
+        AnchorFilter::Ids(values) => Ok(id_list::<B>(value, values)),
         AnchorFilter::Shared(name) => bodies.member(q, value, name, DEFAULT_PRIMARY_KEY),
     }
 }
@@ -152,12 +147,12 @@ fn anchor<B: RelationalBackend>(
     let (alias, table) = (node.alias, node.table.unwrap_or_default());
     if !force_cte && node.is_id_pinned_only() {
         return Ok(Anchor {
-            filter: Some(AnchorFilter::Ids(node.pinned.clone())),
+            filter: Some(AnchorFilter::Ids(node.pinned.clone().unwrap_or_default())),
             shared: None,
             has_tp: false,
         });
     }
-    if node.pinned.is_empty() && node.filters.is_empty() && node.range.is_none() {
+    if node.pinned.is_none() && node.filters.is_empty() && node.range.is_none() {
         return Ok(Anchor {
             filter: None,
             shared: None,
@@ -178,9 +173,9 @@ fn anchor<B: RelationalBackend>(
             for (property, filter) in &node.filters {
                 parts.push(filter.lower::<B>(scope, &Column::new(alias, property))?);
             }
-            if !node.pinned.is_empty() {
+            if let Some(pinned) = &node.pinned {
                 let id = col(scope, alias, DEFAULT_PRIMARY_KEY)?;
-                parts.push(ids::<B>(id, &node.pinned));
+                parts.push(ids::<B>(id, pinned));
             }
             if let Some((start, end)) = node.range {
                 let id = col(scope, alias, DEFAULT_PRIMARY_KEY)?;
@@ -454,8 +449,8 @@ pub(crate) fn emit<B: RelationalBackend>(
         ];
         let reached = col(&scope, forward_cte(), end_node_column())?;
         if end.is_id_pinned_only() {
-            let values = end.pinned.iter().map(|id| Value::from(*id)).collect();
-            predicates.extend(in_list::<B>(reached, SqlType::Int64, values));
+            let ids = end.pinned.as_deref().unwrap_or_default();
+            predicates.push(id_list::<B>(reached, ids));
         } else if !end.filters.is_empty() || end.range.is_some() {
             let name = node_filter_cte(end.alias);
             predicates.push(bodies.member(q, reached, &name, DEFAULT_PRIMARY_KEY)?);
