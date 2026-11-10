@@ -173,16 +173,16 @@ pub async fn run(
 
     if config.engine.is_module_enabled(IndexerModule::Extensions) {
         info!("initializing extension handlers");
-        modules::sdlc::register_extensions(
-            &registry,
+        modules::sdlc::register_extensions(modules::sdlc::ExtensionSetup {
+            registry: &registry,
             config,
-            &clients,
-            &ontology,
-            writer.clone(),
-            analytics.clone(),
-            modules::sdlc::PARTITION_MIN_ROWS,
-            sql_transform.clone(),
-        )
+            clients: &clients,
+            ontology: &ontology,
+            writer: writer.clone(),
+            analytics: analytics.clone(),
+            partition_min_rows: modules::sdlc::PARTITION_MIN_ROWS,
+            sql_transform: sql_transform.clone(),
+        })
         .await?;
     } else {
         info!("Extension handlers disabled by engine.modules");

@@ -212,21 +212,37 @@ pub async fn register_handlers(
     Ok(())
 }
 
+/// The collaborators the extensions module needs to register its handlers. The
+/// same set `register_handlers` takes as positional arguments, bundled so the
+/// entry point stays within the argument-count limit.
+pub(crate) struct ExtensionSetup<'a> {
+    pub registry: &'a HandlerRegistry,
+    pub config: &'a IndexerConfig,
+    pub clients: &'a ClickHouseClients,
+    pub ontology: &'a ontology::Ontology,
+    pub writer: Arc<crate::clickhouse::ClickHouseWriter>,
+    pub analytics: IndexingAnalytics,
+    pub partition_min_rows: u64,
+    pub sql_transform: SqlTransformFactory,
+}
+
 /// The `extensions` indexer module (E5): registers an entity handler per
 /// extension-domain entity, reusing the SDLC entity pipeline, checkpoints, and
 /// transform. It knows nothing about any source; it only indexes the entities
 /// the merged ontology places in the `extensions` domain, per scope. The wiring
 /// mirrors [`register_handlers`]; only the plan selection differs.
-pub(crate) async fn register_extensions(
-    registry: &HandlerRegistry,
-    config: &IndexerConfig,
-    clients: &ClickHouseClients,
-    ontology: &ontology::Ontology,
-    writer: Arc<crate::clickhouse::ClickHouseWriter>,
-    analytics: IndexingAnalytics,
-    partition_min_rows: u64,
-    sql_transform: SqlTransformFactory,
-) -> Result<(), HandlerInitError> {
+pub(crate) async fn register_extensions(setup: ExtensionSetup<'_>) -> Result<(), HandlerInitError> {
+    let ExtensionSetup {
+        registry,
+        config,
+        clients,
+        ontology,
+        writer,
+        analytics,
+        partition_min_rows,
+        sql_transform,
+    } = setup;
+
     let extension_plans = extension_plan_names(ontology);
     if extension_plans.is_empty() {
         info!("extensions module enabled but the model has no extension entities");
