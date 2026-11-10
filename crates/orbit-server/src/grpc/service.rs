@@ -1354,7 +1354,24 @@ mod tests {
         let response = OrbitServiceImpl::build_structured_schema(&ontology, &["*".to_string()]);
 
         for node in &response.nodes {
-            for property in node.properties.iter().filter(|p| p.data_type != "Enum") {
+            for property in node
+                .properties
+                .iter()
+                .filter(|p| p.data_type.ends_with("[]"))
+            {
+                assert_eq!(
+                    property.text_searchable,
+                    Some(false),
+                    "{}.{}: CONTAINS on a list property is membership, not text search",
+                    node.name,
+                    property.name
+                );
+            }
+            for property in node
+                .properties
+                .iter()
+                .filter(|p| p.data_type != "Enum" && !p.data_type.ends_with("[]"))
+            {
                 let query = format!(
                     "MATCH (n:{}) WHERE n.{} CONTAINS 'abc' RETURN n.id LIMIT 1",
                     node.name, property.name

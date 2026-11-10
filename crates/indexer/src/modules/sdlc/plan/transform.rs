@@ -67,15 +67,29 @@ pub(super) struct DenormalizedColumnProjection {
 enum NodeColumn {
     Identity(String),
     Rename {
-        source: String,
+        source: ColumnSource,
         target: String,
     },
     IntEnum {
-        source: String,
+        source: ColumnSource,
         target: String,
         values: BTreeMap<i64, String>,
         nullable: bool,
     },
+}
+
+enum ColumnSource {
+    Column(String),
+    Expr(String),
+}
+
+impl ColumnSource {
+    fn sql(&self) -> String {
+        match self {
+            Self::Column(name) => quote_ident(name),
+            Self::Expr(expr) => expr.clone(),
+        }
+    }
 }
 
 enum EdgeId {
@@ -416,15 +430,18 @@ fn property_columns(fields: &[Field], mapping: &EdgeMapping) -> Vec<NodeColumn> 
 
 impl NodeColumn {
     fn inside_array(self, array: &str) -> Self {
-        let element = |field: String| {
-            edge_id_sql(&EdgeId::ArrayElement {
+        let element = |source: ColumnSource| {
+            let field = match source {
+                ColumnSource::Column(name) | ColumnSource::Expr(name) => name,
+            };
+            ColumnSource::Expr(edge_id_sql(&EdgeId::ArrayElement {
                 column: array.to_string(),
                 field,
-            })
+            }))
         };
         match self {
             Self::Identity(name) => Self::Rename {
-                source: element(name.clone()),
+                source: element(ColumnSource::Column(name.clone())),
                 target: name,
             },
             Self::Rename { source, target } => Self::Rename {
@@ -456,7 +473,7 @@ fn node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
                 && let Some(values) = &field.enum_values
             {
                 return Some(NodeColumn::IntEnum {
-                    source: col.to_string(),
+                    source: ColumnSource::Column(col.to_string()),
                     target: field.name.clone(),
                     values: values.clone(),
                     nullable: field.nullable,
@@ -466,7 +483,7 @@ fn node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
                 NodeColumn::Identity(field.name.clone())
             } else {
                 NodeColumn::Rename {
-                    source: col.to_string(),
+                    source: ColumnSource::Column(col.to_string()),
                     target: field.name.clone(),
                 }
             })
@@ -485,7 +502,7 @@ fn node_column_sql(column: &NodeColumn) -> String {
     match column {
         NodeColumn::Identity(name) => quote_ident(name),
         NodeColumn::Rename { source, target } => {
-            format!("{} AS {}", quote_ident(source), quote_ident(target))
+            format!("{} AS {}", source.sql(), quote_ident(target))
         }
         NodeColumn::IntEnum {
             source,
@@ -493,7 +510,7 @@ fn node_column_sql(column: &NodeColumn) -> String {
             values,
             nullable,
         } => {
-            let (source, target) = (quote_ident(source), quote_ident(target));
+            let (source, target) = (source.sql(), quote_ident(target));
             let cases: Vec<String> = values
                 .iter()
                 .map(|(key, value)| format!("WHEN {source} = {key} THEN '{value}'"))
@@ -743,11 +760,11 @@ mod tests {
         let columns = vec![
             NodeColumn::Identity("id".to_string()),
             NodeColumn::Rename {
-                source: "admin".to_string(),
+                source: ColumnSource::Column("admin".to_string()),
                 target: "is_admin".to_string(),
             },
             NodeColumn::IntEnum {
-                source: "state".to_string(),
+                source: ColumnSource::Column("state".to_string()),
                 target: "state".to_string(),
                 values,
                 nullable: false,
@@ -772,7 +789,7 @@ mod tests {
         values.insert(1, "script_failure".to_string());
 
         let columns = vec![NodeColumn::IntEnum {
-            source: "failure_reason".to_string(),
+            source: ColumnSource::Column("failure_reason".to_string()),
             target: "failure_reason".to_string(),
             values,
             nullable: true,
@@ -873,9 +890,15 @@ mod tests {
             panic!("datafusion transform")
         };
         let sql = &transforms[0].sql;
-        assert!(sql.contains("WHEN state = 1 THEN 'reviewed'"), "sql: {sql}");
-        assert!(sql.contains("ELSE 'unknown' END AS state"), "sql: {sql}");
-        assert!(sql.contains(", created_at,"), "sql: {sql}");
+        assert!(
+            sql.contains(r#"WHEN "state" = 1 THEN 'reviewed'"#),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains(r#"ELSE 'unknown' END AS "state""#),
+            "sql: {sql}"
+        );
+        assert!(sql.contains(r#", "created_at","#), "sql: {sql}");
         assert!(transforms[0].destination_table.ends_with("gl_prop_edge"));
 
         let mut array_mapping =
@@ -887,13 +910,12 @@ mod tests {
                 .map(node_column_sql)
                 .collect();
         assert!(
-            columns.iter().any(
-                |column| column.contains("WHEN unnest(reviewers)['state'] = 1 THEN 'reviewed'")
-            ),
+            columns.iter().any(|column| column
+                .contains(r#"WHEN unnest("reviewers")['state'] = 1 THEN 'reviewed'"#)),
             "{columns:?}"
         );
         assert!(
-            columns.contains(&"unnest(reviewers)['created_at'] AS created_at".to_string()),
+            columns.contains(&r#"unnest("reviewers")['created_at'] AS "created_at""#.to_string()),
             "{columns:?}"
         );
     }
