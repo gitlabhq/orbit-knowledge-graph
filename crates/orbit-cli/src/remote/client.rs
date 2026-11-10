@@ -67,7 +67,7 @@ impl OrbitClient {
         )
     }
 
-    /// Resolves credentials like `from_env_in`, but a missing credential is not an
+    /// Resolves credentials like `from_env`, but a missing credential is not an
     /// error: it returns `None` so callers can fall back to local Orbit. An
     /// invalid base URL is still an error so callers can say why they fall back.
     pub(crate) fn from_env_in_if_signed_in(dir: &Path) -> Result<Option<Self>, RemoteError> {

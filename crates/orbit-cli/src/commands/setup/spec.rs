@@ -167,8 +167,6 @@ pub(crate) fn reaches_gitlab() -> bool {
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
 
-/// `setup_reached_gitlab` stands in for a probe that has no credential, because some agents
-/// (GitLab Duo) strip GitLab tokens from the environment of the hooks they run.
 pub(crate) fn instructions_text(setup_reached_gitlab: bool) -> String {
     let remote = SESSION.reachable || (setup_reached_gitlab && !SESSION.signed_in);
     render_instructions(launcher(), remote, &SESSION.providers)
