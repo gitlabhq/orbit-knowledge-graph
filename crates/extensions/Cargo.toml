@@ -16,6 +16,7 @@ orbit-migrations = { path = "../orbit-migrations" }
 orbit-utils = { path = "../utils" }
 
 async-trait = { workspace = true }
+futures = { workspace = true }
 jsonschema = { workspace = true }
 jsonwebtoken = { workspace = true }
 prost = { workspace = true }
@@ -32,7 +33,9 @@ tracing = { workspace = true }
 tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
+compiler = { path = "../query-engine/compiler" }
 orbit-versions = { path = "../orbit-versions" }
+query-data-model = { path = "../query-data-model" }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }

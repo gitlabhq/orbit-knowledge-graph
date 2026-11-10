@@ -18,6 +18,11 @@ pub const KIND: &str = "Package";
 /// graph stores it as `Int64`.
 pub const ID_PROPERTY: &str = "id";
 
+/// Defaults for a live operation when the package omits them. A key set larger
+/// than `max_keys` fails the query; `timeout_ms` is the per-operation deadline.
+pub const DEFAULT_LIVE_MAX_KEYS: u32 = 200;
+pub const DEFAULT_LIVE_TIMEOUT_MS: u64 = 1500;
+
 const PACKAGE_SCHEMA_JSON: &str = include_str!("../schema/package.v1alpha1.json");
 
 static PACKAGE_SCHEMA: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
@@ -51,6 +56,10 @@ pub struct PackageDocument {
     pub authorization: Authorization,
     pub storage: Storage,
     pub sources: Sources,
+    /// Live properties, read per query rather than stored. Absent for packages
+    /// that only index data; then the package behaves exactly as before.
+    #[serde(default)]
+    pub live: Option<Live>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -157,6 +166,43 @@ pub struct Sources {
 pub struct SourceEntity {
     pub tables: Vec<String>,
     pub order_by: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Live {
+    pub entities: BTreeMap<String, LiveEntity>,
+}
+
+/// The live properties of one entity and the single operation that serves them.
+/// The entity may be declared by this package or by another loaded package.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LiveEntity {
+    pub properties: BTreeMap<String, Property>,
+    pub operation: LiveOperation,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LiveOperation {
+    /// Opaque to Orbit; sent to the provider as `LiveRequest.operation`.
+    pub name: String,
+    /// Stored properties of the entity. Their values, as strings in this order,
+    /// form each `LiveRequest.keys` tuple.
+    pub keys: Vec<String>,
+    #[serde(default = "default_live_max_keys")]
+    pub max_keys: u32,
+    #[serde(default = "default_live_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+fn default_live_max_keys() -> u32 {
+    DEFAULT_LIVE_MAX_KEYS
+}
+
+fn default_live_timeout_ms() -> u64 {
+    DEFAULT_LIVE_TIMEOUT_MS
 }
 
 impl Package {
@@ -411,6 +457,28 @@ mod tests {
             "got {:?}",
             err.errors
         );
+    }
+
+    #[test]
+    fn reads_the_live_block_and_applies_operation_defaults() {
+        let package = parse_widgets();
+        let live = package
+            .document
+            .live
+            .expect("fixture declares a live block");
+        let widget = &live.entities["Widget"];
+        assert!(widget.properties.contains_key("colour"));
+        assert_eq!(widget.operation.name, "widgets.get");
+        assert_eq!(widget.operation.keys, vec!["name", "status"]);
+
+        let defaults = WIDGETS
+            .replace("        max_keys: 50\n", "")
+            .replace("        timeout_ms: 1000\n", "");
+        let package =
+            Package::parse(&defaults, "d".into()).expect("parses without optional limits");
+        let gadget = &package.document.live.unwrap().entities["Gadget"];
+        assert_eq!(gadget.operation.max_keys, DEFAULT_LIVE_MAX_KEYS);
+        assert_eq!(gadget.operation.timeout_ms, DEFAULT_LIVE_TIMEOUT_MS);
     }
 
     #[test]

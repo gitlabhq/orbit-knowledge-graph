@@ -80,6 +80,19 @@
           "propertyNames": { "$ref": "#/$defs/entityName" }
         }
       }
+    },
+    "live": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entities"],
+      "properties": {
+        "entities": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/liveEntity" },
+          "propertyNames": { "$ref": "#/$defs/entityName" }
+        }
+      }
     }
   },
   "$defs": {
@@ -188,6 +201,39 @@
           "type": "array",
           "minItems": 1,
           "items": { "type": "string" }
+        }
+      }
+    },
+    "liveEntity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["properties", "operation"],
+      "properties": {
+        "properties": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": { "type": { "$ref": "#/$defs/propertyType" } }
+          },
+          "propertyNames": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        },
+        "operation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "keys"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "keys": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+            },
+            "max_keys": { "type": "integer", "minimum": 1 },
+            "timeout_ms": { "type": "integer", "minimum": 1 }
+          }
         }
       }
     }

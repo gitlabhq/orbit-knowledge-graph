@@ -11,12 +11,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde::Serialize;
+use tonic::Status;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 
+use crate::live::{LiveProvider, LiveStream};
 use crate::package::{Package, PackageError};
 use crate::proto::{
-    GetManifestRequest, GetPackageRequest, Manifest, provider_client::ProviderClient as RawClient,
+    GetManifestRequest, GetPackageRequest, LiveRequest, Manifest,
+    provider_client::ProviderClient as RawClient,
 };
 
 const JWT_ISSUER: &str = "orbit";
@@ -129,6 +132,19 @@ impl ProviderClient {
         Ok(Package::parse(&document.document_yaml, digest)?)
     }
 
+    fn authed_metadata<T>(
+        &self,
+        mut request: tonic::Request<T>,
+    ) -> Result<tonic::Request<T>, Status> {
+        let token = sign_provider_jwt(&self.name, &self.jwt_key)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let bearer: MetadataValue<_> = format!("Bearer {token}")
+            .parse()
+            .map_err(|_| Status::internal("provider jwt is not a valid header"))?;
+        request.metadata_mut().insert("authorization", bearer);
+        Ok(request)
+    }
+
     fn authed_request<T>(&self, message: T) -> Result<tonic::Request<T>, ProviderError> {
         let token = sign_provider_jwt(&self.name, &self.jwt_key)?;
         let bearer: MetadataValue<_> = format!("Bearer {token}").parse().map_err(|_| {
@@ -137,6 +153,18 @@ impl ProviderClient {
         let mut request = tonic::Request::new(message);
         request.metadata_mut().insert("authorization", bearer);
         Ok(request)
+    }
+}
+
+#[tonic::async_trait]
+impl LiveProvider for ProviderClient {
+    /// One Live call for one operation. Clones the cheap channel-backed client so
+    /// the trait can take `&self` while concurrent operations each hold their own.
+    async fn live(&self, request: LiveRequest) -> Result<LiveStream, Status> {
+        let mut raw = self.raw.clone();
+        let request = self.authed_metadata(tonic::Request::new(request))?;
+        let stream = raw.live(request).await?.into_inner();
+        Ok(Box::pin(stream))
     }
 }
 

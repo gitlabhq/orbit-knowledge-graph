@@ -2399,6 +2399,8 @@ name = "extensions"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "compiler",
+ "futures",
  "jsonschema",
  "jsonwebtoken",
  "ontology",
@@ -2407,6 +2409,7 @@ dependencies = [
  "orbit-utils",
  "orbit-versions",
  "prost",
+ "query-data-model",
  "serde",
  "serde_json",
  "sha2 0.11.0",

@@ -42,3 +42,22 @@ sources:
   entities:
     Widget: { tables: [ex_widgets], order_by: [traversal_path, id] }
     Gadget: { tables: [ex_gadgets], order_by: [traversal_path, id] }
+live:
+  entities:
+    Widget:
+      properties:
+        colour: { type: string }
+        weight: { type: float }
+      operation:
+        name: widgets.get
+        keys: [name, status]
+        max_keys: 200
+        timeout_ms: 1500
+    Gadget:
+      properties:
+        shininess: { type: float }
+      operation:
+        name: gadgets.get
+        keys: [title]
+        max_keys: 50
+        timeout_ms: 1000

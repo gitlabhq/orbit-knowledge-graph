@@ -21,9 +21,10 @@ server. The proto is the source of truth at
 |---|---|---|
 | `GetManifest` | — | `provider`, `scopes_table`, `packages[] {name, version, digest}` |
 | `GetPackage` | `name`, `version` | the package document (YAML) and its digest |
-| `Live` | operation, scope paths, user id, keys/filters, deadline | a stream of rows, then a status per key (later phase) |
+| `Live` | `package`, `operation`, `scope_paths`, `user_id`, `keys`, `deadline_unix_ms`, `max_rows` | a stream of `row` {key, properties}, then one `status` {key, status} per requested key |
 
-Phase 1 uses `GetManifest` and `GetPackage` only.
+`GetManifest` and `GetPackage` build the model; `Live` serves live properties at
+query time (see "The live block" below).
 
 **Auth.** Orbit signs an HS256 JWT per call: `iss` `orbit`, `aud`
 `orbit-provider`, `sub` `orbit`, 60-second expiry, key from the provider's
@@ -131,6 +132,54 @@ another loaded package, never an unknown one.
   declares.
 - A package that fails a rule is rejected with every error; the other packages
   still load.
+
+## The live block
+
+A package may declare a `live` block. Live properties are read per query from a
+provider operation, never stored and never put in SQL. With no `live` block a
+package behaves exactly as an index-only package.
+
+```yaml
+live:
+  entities:
+    Widget:                          # may be declared by this or another package
+      properties:
+        colour: { type: string }     # live-only: never in storage, never in SQL
+        weight: { type: float }
+      operation:
+        name: widgets.get            # opaque; sent as LiveRequest.operation
+        keys: [serial, batch]        # stored properties; their string values,
+                                     # in this order, form each LiveRequest.keys tuple
+        max_keys: 200                # default 200; a larger key set fails the query
+        timeout_ms: 1500             # default 1500; the per-operation deadline
+```
+
+**Load rules.**
+
+- A live property must not collide with a stored property of its entity, nor with
+  another package's live property on the same entity.
+- Every `operation.keys` entry is a stored property of the entity.
+- The target entity is declared by some loaded package; a live block may target an
+  entity another package owns.
+
+**In the model.** Each live property becomes a virtual field on the entity, so it
+appears in `GetGraphSchema` and the ontology tools, and an agent can `RETURN` it.
+The compiler drops it from the SQL but keeps selecting the operation's key columns.
+A `WHERE` or `ORDER BY` on a live property is a compile error.
+
+**At query time.** A query that returns a live property triggers one `Live` call
+per `(package, operation)` with the distinct key set of the returned rows. Every
+operation of a query runs at once; the query waits only for the slowest. Each call
+gets the smaller of its `timeout_ms` and the query's total live budget (config
+`query.live.total_budget_ms`, default 3000). A key whose status is not `OK`, or
+that misses the deadline, yields null for its live properties and a per-row
+`_live_status` annotation (`<operation>=<STATUS>`); one slow or failing operation
+never fails the query. A key set larger than `max_keys` fails the query with a
+clear error.
+
+**Security.** Orbit sends only the scope paths and user id from the caller's query
+JWT. The provider serves only data in those scopes and uses that user's own source
+token. It signs each `Live` call with the provider JWT, exactly as `GetManifest`.
 
 ## How Orbit loads a package
 

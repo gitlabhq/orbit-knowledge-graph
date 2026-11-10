@@ -9,6 +9,7 @@
 //! packages, signs a short-lived JWT per call, and refreshes on a digest change.
 
 pub mod bootstrap;
+pub mod live;
 pub mod loader;
 pub mod package;
 pub mod proto;

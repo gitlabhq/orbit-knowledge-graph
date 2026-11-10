@@ -14,6 +14,7 @@ use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 use serde_json::{Value, json};
 
+use crate::live::{LIVE_SERVICE, LiveCatalog, LiveField};
 use crate::package::{Package, PropertyType, RelationshipVariant};
 
 const EXTENSION_DOMAIN: &str = "extensions";
@@ -61,9 +62,11 @@ pub fn merge_packages_into(
 ) -> Result<(), LoaderError> {
     let known_entities = known_entity_names(sources, packages)?;
     check_cross_package_rules(packages, &known_entities)?;
+    check_live_rules(packages)?;
 
+    let live_fields = LiveCatalog::from_packages(packages).fields_by_entity();
     let mut schema = parse_schema(sources)?;
-    register_nodes(sources, &mut schema, packages);
+    register_nodes(sources, &mut schema, packages, &live_fields);
     register_relationships(sources, &mut schema, packages);
     sources.insert(
         SCHEMA_SOURCE.to_string(),
@@ -149,6 +152,70 @@ fn check_cross_package_rules(
     }
 }
 
+/// Live rules that need the whole package set: the target entity exists, the
+/// live properties do not collide with stored ones or with each other across
+/// packages, and every key is a stored property of the entity. A live block may
+/// target an entity another loaded package declares.
+fn check_live_rules(packages: &[Package]) -> Result<(), LoaderError> {
+    let mut stored: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for package in packages {
+        for (entity, def) in &package.document.graph.entities {
+            stored
+                .entry(entity)
+                .or_default()
+                .extend(def.properties.keys().map(String::as_str));
+        }
+    }
+
+    let mut errors = Vec::new();
+    let mut live_owner: BTreeMap<(&str, &str), &str> = BTreeMap::new();
+    for package in packages {
+        let Some(live) = &package.document.live else {
+            continue;
+        };
+        for (entity, live_entity) in &live.entities {
+            let Some(stored_props) = stored.get(entity.as_str()) else {
+                errors.push(format!(
+                    "{}: live block targets entity {entity}, which no loaded package declares",
+                    package.name()
+                ));
+                continue;
+            };
+            for property in live_entity.properties.keys() {
+                if stored_props.contains(property.as_str()) {
+                    errors.push(format!(
+                        "{}: live property {entity}.{property} collides with a stored property",
+                        package.name()
+                    ));
+                }
+                if let Some(previous) =
+                    live_owner.insert((entity.as_str(), property.as_str()), package.name())
+                {
+                    errors.push(format!(
+                        "live property {entity}.{property} is declared by both {previous} and {}",
+                        package.name()
+                    ));
+                }
+            }
+            for key in &live_entity.operation.keys {
+                if !stored_props.contains(key.as_str()) {
+                    errors.push(format!(
+                        "{}: live operation {} key `{key}` is not a stored property of {entity}",
+                        package.name(),
+                        live_entity.operation.name
+                    ));
+                }
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(LoaderError::Rules(errors))
+    }
+}
+
 /// Registers every package's entities as nodes under one `extensions` domain.
 /// Entity names are unique across packages (a cross-package rule), so their node
 /// files and domain entries never collide.
@@ -156,7 +223,9 @@ fn register_nodes(
     sources: &mut BTreeMap<String, String>,
     schema: &mut Value,
     packages: &[Package],
+    live_fields: &BTreeMap<String, Vec<LiveField>>,
 ) {
+    let no_fields = Vec::new();
     let mut nodes = serde_json::Map::new();
     for package in packages {
         for entity in package.document.graph.entities.keys() {
@@ -165,7 +234,8 @@ fn register_nodes(
                 package.name().replace('.', "_"),
                 to_snake_case(entity)
             );
-            sources.insert(path.clone(), node_source(package, entity));
+            let fields = live_fields.get(entity).unwrap_or(&no_fields);
+            sources.insert(path.clone(), node_source(package, entity, fields));
             nodes.insert(entity.clone(), Value::String(path));
         }
     }
@@ -199,7 +269,7 @@ fn register_relationships(
     }
 }
 
-fn node_source(package: &Package, entity: &str) -> String {
+fn node_source(package: &Package, entity: &str, live_fields: &[LiveField]) -> String {
     let document = &package.document;
     let entity_def = &document.graph.entities[entity];
     let storage = &document.storage.entities[entity];
@@ -219,6 +289,9 @@ fn node_source(package: &Package, entity: &str) -> String {
                 json!({ "kind": "id", "source_table": table, "key_column": "id" });
         }
         properties.insert(name.clone(), field);
+    }
+    for field in live_fields {
+        properties.insert(field.property.clone(), live_field_source(field));
     }
     properties.insert(
         TRAVERSAL_PATH_COLUMN.to_string(),
@@ -262,6 +335,24 @@ fn node_source(package: &Package, entity: &str) -> String {
     });
 
     orbit_utils::yaml::to_string(&node).expect("generated node yaml serializes")
+}
+
+/// A live property, as an ontology virtual field. `filterable: false` makes a
+/// `WHERE` on it a compile error, and the virtual source makes an `ORDER BY` on
+/// it one too; the enrich stage resolves it from the operation named by `lookup`.
+/// `depends_on` lists the key columns, so the compiler keeps selecting them even
+/// when the live property itself is dropped from the SQL.
+fn live_field_source(field: &LiveField) -> Value {
+    json!({
+        "type": field.property_type.ontology_type(),
+        "nullable": true,
+        "filterable": false,
+        "virtual": {
+            "service": LIVE_SERVICE,
+            "lookup": field.operation_id,
+            "depends_on": field.keys,
+        },
+    })
 }
 
 /// One ontology edge for a relationship name. Each fk variant becomes an
@@ -454,6 +545,141 @@ mod tests {
             node_names.contains("Sprocket"),
             "gadgets entity present: the two packages merge into one model"
         );
+    }
+
+    fn widget_model() -> query_data_model::ClickHouseDataModel {
+        let ontology = load_merged_ontology(schema_version(), &[widgets_package()])
+            .expect("merged model loads");
+        query_data_model::ClickHouseDataModel::derive(std::sync::Arc::new(ontology))
+            .expect("data model derives")
+    }
+
+    #[test]
+    fn live_properties_become_virtual_fields_keyed_by_their_operation() {
+        use query_data_model::OrbitQueryModel;
+        let model = widget_model();
+        let widget = model.entity("Widget").expect("Widget entity").id;
+
+        let source = model
+            .virtual_source_for_entity_id(widget, "colour")
+            .expect("colour is a live virtual field");
+        assert_eq!(source.service, LIVE_SERVICE);
+        assert_eq!(source.lookup, "example.widgets|widgets.get");
+        assert_eq!(source.depends_on, vec!["name", "status"]);
+        assert!(
+            model.property_is_virtual(widget, "weight"),
+            "weight is live too"
+        );
+    }
+
+    #[test]
+    fn a_live_property_is_not_filterable_so_a_where_is_a_compile_error() {
+        use query_data_model::OrbitQueryModel;
+        let model = widget_model();
+        assert!(
+            !model.property_is_filterable("Widget", "colour"),
+            "a WHERE on a live property must be rejected at compile time"
+        );
+        assert!(
+            model.property_is_filterable("Widget", "name"),
+            "a stored property stays filterable"
+        );
+    }
+
+    #[test]
+    fn live_catalog_lists_every_operation_with_its_limits() {
+        let catalog = crate::live::LiveCatalog::from_packages(&[widgets_package()]);
+        let widgets_get = catalog
+            .get("example.widgets|widgets.get")
+            .expect("widgets.get present");
+        assert_eq!(widgets_get.keys, vec!["name", "status"]);
+        assert_eq!(widgets_get.max_keys, 200);
+
+        let gadgets_get = catalog
+            .get("example.widgets|gadgets.get")
+            .expect("gadgets.get present");
+        assert_eq!(gadgets_get.entity, "Gadget");
+        assert_eq!(gadgets_get.max_keys, 50);
+        assert_eq!(gadgets_get.timeout_ms, 1000);
+    }
+
+    #[test]
+    fn rejects_a_live_property_that_collides_with_a_stored_one() {
+        let yaml = WIDGETS.replace(
+            "        colour: { type: string }",
+            "        name: { type: string }",
+        );
+        let package = Package::parse(&yaml, "d".into()).expect("parses");
+        let err = load_merged_ontology(schema_version(), &[package]).unwrap_err();
+        match err {
+            LoaderError::Rules(errors) => assert!(
+                errors
+                    .iter()
+                    .any(|e| e.contains("collides with a stored property")),
+                "got {errors:?}"
+            ),
+            other => panic!("expected rules error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_a_live_key_that_is_not_a_stored_property() {
+        let yaml = WIDGETS.replace(
+            "        keys: [name, status]",
+            "        keys: [name, missing]",
+        );
+        let package = Package::parse(&yaml, "d".into()).expect("parses");
+        let err = load_merged_ontology(schema_version(), &[package]).unwrap_err();
+        match err {
+            LoaderError::Rules(errors) => assert!(
+                errors.iter().any(|e| e.contains("key `missing`")),
+                "got {errors:?}"
+            ),
+            other => panic!("expected rules error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_a_live_block_for_an_unknown_entity() {
+        const PKG: &str = r#"apiVersion: orbit.gitlab.com/extensions/v1alpha1
+kind: Package
+metadata: { name: example.lonely, version: 0.1.0 }
+graph:
+  entities:
+    Lonely:
+      label: name
+      properties:
+        id: { type: int64 }
+        name: { type: string }
+authorization:
+  entities:
+    Lonely: { scope: namespace }
+storage:
+  store: graph
+  entities:
+    Lonely: { columns: { id: Int64, name: String }, sort_key: [traversal_path, id] }
+sources:
+  source: data_lake
+  entities:
+    Lonely: { tables: [ex_lonely], order_by: [traversal_path, id] }
+live:
+  entities:
+    Ghost:
+      properties:
+        aura: { type: string }
+      operation: { name: ghost.get, keys: [id] }
+"#;
+        let package = Package::parse(PKG, "d".into()).expect("parses");
+        let err = load_merged_ontology(schema_version(), &[package]).unwrap_err();
+        match err {
+            LoaderError::Rules(errors) => assert!(
+                errors
+                    .iter()
+                    .any(|e| e.contains("no loaded package declares")),
+                "got {errors:?}"
+            ),
+            other => panic!("expected rules error, got {other:?}"),
+        }
     }
 
     #[test]
