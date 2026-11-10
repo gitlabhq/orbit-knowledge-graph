@@ -39,6 +39,7 @@ impl ActiveSchema {
             graph,
             embedded,
             catalog,
+            providers: extension_provider_configs(config),
         };
         let retry_backoff = Duration::from_secs(config.schema.version_poll_interval_secs);
         tokio::spawn(active.clone().follow(loader, retry_backoff, shutdown));
@@ -207,6 +208,9 @@ struct SnapshotLoader {
     graph: Arc<ArrowClickHouseClient>,
     embedded: OntologyArchive,
     catalog: OntologyCatalog,
+    /// Configured extension providers. Empty means no overlay, so the loader
+    /// behaves exactly as it did before extensions existed.
+    providers: Vec<extensions::provider::ProviderConfig>,
 }
 
 impl SnapshotLoader {
@@ -221,7 +225,20 @@ impl SnapshotLoader {
 
     async fn load(&self, version: u32) -> anyhow::Result<Arc<SchemaSnapshot>> {
         let ontology = if version == self.embedded.schema_version() {
-            self.embedded.load_ontology()?
+            // Extensions are a per-process overlay (option B): the catalog stays
+            // core-only, and this process merges the configured providers'
+            // packages on top of the core model for the current version. With no
+            // providers this is exactly the previous `self.embedded` path. The
+            // merged tables flow into `expected_tables` below, so the schema stays
+            // unavailable (and this retries) until the extension tables exist.
+            if self.providers.is_empty() {
+                self.embedded.load_ontology()?
+            } else {
+                extensions::bootstrap::load_provider_model(&self.providers, version)
+                    .await
+                    .map_err(|error| anyhow!("extension overlay failed: {error}"))?
+                    .ontology
+            }
         } else {
             self.catalog.load(version).await?.load_ontology()?
         };
@@ -236,6 +253,20 @@ impl SnapshotLoader {
         }
         SchemaSnapshot::new(version, ontology).map(Arc::new)
     }
+}
+
+fn extension_provider_configs(config: &AppConfig) -> Vec<extensions::provider::ProviderConfig> {
+    config
+        .extensions
+        .providers
+        .iter()
+        .map(|provider| extensions::provider::ProviderConfig {
+            name: provider.name.clone(),
+            url: provider.url.clone(),
+            jwt_key_file: provider.jwt_key_file.clone(),
+            refresh_secs: provider.refresh_secs,
+        })
+        .collect()
 }
 
 fn fits_ontology(query: &NamedQuery, ontology: &Arc<Ontology>) -> Result<(), String> {
