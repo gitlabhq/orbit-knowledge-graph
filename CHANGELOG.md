@@ -1,3 +1,10 @@
+## [1.2.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.2.0...v1.2.1) (2026-11-10)
+
+### Fixes
+
+* **setup:** give the Duo session hook setup's remote decision ([11fb5b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/11fb5b921fa6594ea2462069997e7b6b1f5a94f8)) by Dmitry Gruzd
+* **setup:** give the generated Claude marketplace a description ([0cd066f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0cd066ff2a1744c7a6b3f1801b78a72ebb81effc)) by ANBUCHELVAN GANESAN CSE
+
 ## [1.2.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.1.0...v1.2.0) (2026-11-10)
 
 ### Features
