@@ -43,7 +43,7 @@ relationships:
     variants: {User -> MergeRequest: {cardinality: many_to_many}}
 ```
 
-The authorization fragment declares its scope, its role floor and its redaction check:
+The authorization fragment declares its scope and its role floor. `enforce` holds the policy for each backend that stores the entity. `checks` hold what runs outside every backend, on the returned rows:
 
 ```yaml
 # packages/gitlab.code_review/authorization.yaml
@@ -53,7 +53,24 @@ entities:
   MergeRequest:
     scope: namespace
     role: reporter
-    redaction: {resource: merge_request, ability: read_merge_request}
+    enforce:
+      clickhouse: {path: traversal_path}
+    checks:
+      - {by: rails, resource: merge_request, ability: read_merge_request}
+```
+
+The ClickHouse policy filters every `MergeRequest` read on the caller's paths at the role floor. The Rails check asks GitLab, in one batch, whether the caller can read each returned merge request, and it fails closed. Policies name graph properties and relationships, never columns.
+
+An entity without its own path reaches one through a relationship. A `Commit` takes its project's path:
+
+```yaml
+  Commit:
+    scope: namespace
+    role: reporter
+    enforce:
+      clickhouse: {path: {via: IN_PROJECT}}
+    checks:
+      - {by: rails, resource: project, ability: read_code, id: project_id}
 ```
 
 The storage fragment lays it out in a store, and nothing in it is inferred. It names the table and lists every stored property as a column, with its storage type and whether it is immutable. Shared fields work on every backend. A `backend` block holds what only that backend understands, and that backend validates it.
@@ -139,7 +156,7 @@ entities:
     query: generated
 ```
 
-Every row carries the `traversal_path` of the namespace that installed the integration, so the loader gives `JiraIssue` a path guard like any other entity.
+Every row carries the `traversal_path` of the namespace that installed the integration, so its authorization enforces a path filter like any other entity: `enforce: {clickhouse: {path: traversal_path}}`.
 
 ## Add a live third-party entity
 
@@ -165,7 +182,13 @@ entities:
 kind: authorization
 package: integration.slack
 entities:
-  SlackMessage: {scope: namespace, role: reporter, delegated: true}
+  SlackMessage:
+    scope: namespace
+    role: reporter
+    enforce:
+      live: {workspaces: installed_in_namespace}
+    checks:
+      - {by: provider, sign_in: caller}
 ```
 
 ```yaml
@@ -209,7 +232,7 @@ let plan = live.build(|q| {
 let request = live.render(&plan);
 ```
 
-The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. Each workspace maps to the namespace that installed it. The security phase sends the request only for workspaces in namespaces the caller can read. `delegated: true` records that Slack then applies its own visibility through the caller's sign-in.
+The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. Each workspace maps to the namespace that installed it. The `live` policy sends the request only for workspaces in namespaces the caller can read. The `provider` check records that Slack then applies its own visibility through the caller's sign-in.
 
 ## Add a backend
 
@@ -292,7 +315,7 @@ let plan = code.build(|q| {
 let request = code.render(&plan);
 ```
 
-The trigram prefilter is a planning decision: the planner takes the pattern's literal atoms and narrows the candidate files before the structural pass. The rendered request travels over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. The security phase turns the `File` guard into a repository restriction.
+The trigram prefilter is a planning decision: the planner takes the pattern's literal atoms and narrows the candidate files before the structural pass. The rendered request travels over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. `File` declares `orbit_code: {repositories: project_id}` next to its ClickHouse path policy, and the security phase turns it into a repository restriction.
 
 ## Add a tenant overlay
 
@@ -321,9 +344,15 @@ relationships:
 kind: authorization
 package: tenant.agent_memory
 entities:
-  Memory: {scope: namespace, role: reporter}
+  Memory:
+    scope: namespace
+    role: reporter
+    enforce:
+      clickhouse: {path: traversal_path}
 relationships:
-  ABOUT: same_namespace
+  ABOUT:
+    enforce:
+      clickhouse: same_namespace
 ```
 
 ```yaml
@@ -389,13 +418,16 @@ The loader collects every error, names its package, and fails once:
 - An entity or variant declared twice, or a second authorization entry.
 - An entity with no `id`, or no authorization entry.
 - A property that its home store neither stores nor excludes, a stored column without a storage type, or a binding without a table. Nothing is inferred.
-- A declaration above the package's trust tier. Only a platform package may declare a trusted store or global scope. A tenant overlay may not declare delegated access, and its entities must be namespace- or user-scoped.
+- A declaration above the package's trust tier. Only a platform package may declare a trusted store, global scope or a Rails check. Only an integration package may declare a provider check. A tenant overlay's entities must be namespace- or user-scoped.
+- A backend that stores an entity or a relationship but has no `enforce` entry for it.
+- A policy kind the backend cannot enforce, such as `repositories` on ClickHouse, or one that names a property or relationship the graph lacks.
+- A path through a relationship that does not reach a namespaced entity with one target per row.
+- An `enforce` entry of `none` with no `checks`.
 - A user-scoped entity whose owner relationship does not reach `User`, or allows more than one owner per row.
 - A relationship variant with no storage binding in the home store of its endpoints.
 - A foreign key binding on a many-to-many variant, on the wrong side of a one-to-many variant, or on a column its table does not hold.
 - An edge table copy that names no property of that endpoint, or a graph attribute with no edge column.
 - Two backends, or a trusted and an untrusted store, on one connection.
-- A namespaced entity that no guard rule covers.
 
 ### Composition rules
 
