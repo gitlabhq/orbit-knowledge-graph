@@ -411,6 +411,7 @@ mod tests {
             depth: None,
             path_id: None,
             step: None,
+            properties: Map::new(),
         }
     }
 
