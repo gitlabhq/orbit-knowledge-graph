@@ -40,6 +40,7 @@ impl ActiveSchema {
             embedded,
             catalog,
             providers: extension_provider_configs(config),
+            core_scope: core_scope(config),
         };
         let retry_backoff = Duration::from_secs(config.schema.version_poll_interval_secs);
         tokio::spawn(active.clone().follow(loader, retry_backoff, shutdown));
@@ -211,6 +212,9 @@ struct SnapshotLoader {
     /// Configured extension providers. Empty means no overlay, so the loader
     /// behaves exactly as it did before extensions existed.
     providers: Vec<extensions::provider::ProviderConfig>,
+    /// Whether this process serves the core GitLab model. A process that runs
+    /// neither the sdlc nor the code module serves only the extension entities.
+    core_scope: extensions::loader::CoreScope,
 }
 
 impl SnapshotLoader {
@@ -234,10 +238,14 @@ impl SnapshotLoader {
             if self.providers.is_empty() {
                 self.embedded.load_ontology()?
             } else {
-                extensions::bootstrap::load_provider_model(&self.providers, version)
-                    .await
-                    .map_err(|error| anyhow!("extension overlay failed: {error}"))?
-                    .ontology
+                extensions::bootstrap::load_provider_model(
+                    &self.providers,
+                    version,
+                    self.core_scope,
+                )
+                .await
+                .map_err(|error| anyhow!("extension overlay failed: {error}"))?
+                .ontology
             }
         } else {
             self.catalog.load(version).await?.load_ontology()?
@@ -252,6 +260,20 @@ impl SnapshotLoader {
             return Err(anyhow!("v{version} tables are incomplete"));
         }
         SchemaSnapshot::new(version, ontology).map(Arc::new)
+    }
+}
+
+/// Extensions-only unless this process runs a module that owns core GitLab
+/// entities (sdlc or code). A core-owning process keeps serving the full model.
+pub fn core_scope(config: &AppConfig) -> extensions::loader::CoreScope {
+    use orbit_server_config::IndexerModule;
+    let modules = &config.engine.modules;
+    let serves_core =
+        modules.contains(&IndexerModule::Sdlc) || modules.contains(&IndexerModule::Code);
+    if serves_core {
+        extensions::loader::CoreScope::Keep
+    } else {
+        extensions::loader::CoreScope::ExtensionsOnly
     }
 }
 
@@ -296,4 +318,40 @@ fn register_state_gauge(active: &Arc<ActiveSchema>) {
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orbit_server_config::IndexerModule;
+
+    fn config_with_modules(modules: Vec<IndexerModule>) -> AppConfig {
+        let mut config = AppConfig::embedded_defaults();
+        config.engine.modules = modules;
+        config
+    }
+
+    #[test]
+    fn serves_extensions_only_without_sdlc_or_code() {
+        let config = config_with_modules(vec![
+            IndexerModule::Extensions,
+            IndexerModule::NamespaceDeletion,
+        ]);
+        assert_eq!(
+            core_scope(&config),
+            extensions::loader::CoreScope::ExtensionsOnly
+        );
+    }
+
+    #[test]
+    fn keeps_core_when_sdlc_or_code_runs() {
+        for module in [IndexerModule::Sdlc, IndexerModule::Code] {
+            let config = config_with_modules(vec![module, IndexerModule::NamespaceDeletion]);
+            assert_eq!(
+                core_scope(&config),
+                extensions::loader::CoreScope::Keep,
+                "module {module:?} owns core entities"
+            );
+        }
+    }
 }

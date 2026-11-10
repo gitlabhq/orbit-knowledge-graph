@@ -14,7 +14,7 @@ use std::sync::Arc;
 use ontology::Ontology;
 
 use crate::live::LiveProvider;
-use crate::loader::{LoaderError, load_merged_ontology};
+use crate::loader::{CoreScope, LoaderError, load_scoped_ontology};
 use crate::package::Package;
 use crate::provider::{ProviderClient, ProviderConfig};
 
@@ -32,6 +32,7 @@ pub struct ProviderModel {
 pub async fn load_provider_model(
     providers: &[ProviderConfig],
     schema_version: u32,
+    scope: CoreScope,
 ) -> Result<ProviderModel, LoaderError> {
     let mut packages = Vec::new();
     let mut scopes_tables = Vec::new();
@@ -46,13 +47,13 @@ pub async fn load_provider_model(
                 orbit_log_fields::warn!(
                     safe(ERROR_TYPE) = "extension_provider_unavailable",
                     expanded(ERROR_MESSAGE) = %error,
-                    "extension provider unavailable at start; serving core and retrying on refresh"
+                    "extension provider unavailable at start; serving the base model and retrying on refresh"
                 );
             }
         }
     }
 
-    let ontology = load_merged_ontology(schema_version, &packages)?;
+    let ontology = load_scoped_ontology(schema_version, &packages, scope)?;
     Ok(ProviderModel {
         ontology,
         packages,
@@ -134,7 +135,7 @@ mod tests {
         let core_fingerprints =
             orbit_migrations::fingerprint::current_fingerprints(&core).expect("core fingerprints");
 
-        let model = load_provider_model(&[], schema_version)
+        let model = load_provider_model(&[], schema_version, CoreScope::Keep)
             .await
             .expect("core-only model");
         let model_fingerprints =

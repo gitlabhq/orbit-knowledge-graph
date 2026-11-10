@@ -21,6 +21,28 @@ const EXTENSION_DOMAIN: &str = "extensions";
 const SCHEMA_SOURCE: &str = "schema.yaml";
 const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
 
+/// The one edge table an extensions-only model keeps: the default edge table every
+/// relationship writes into. The code-domain edge table is dropped with its domain.
+const DEFAULT_EDGE_TABLE: &str = "gl_edge";
+
+/// Settings an extensions-only model keeps. Everything else in the core `settings`
+/// block (denormalization, statistics, `local_db`, auxiliary tables and
+/// dictionaries, materialized views) references core nodes and tables, so it is
+/// dropped with them. What stays is what the query compiler, redaction, and
+/// traversal-path security read: the edge-table shape (`default_edge_table`,
+/// `edge_tables`), the sort key and `table_prefix` used to resolve storage, the
+/// internal column prefix the compiler emits, and the ETL columns extension source
+/// tables carry.
+const EXTENSIONS_ONLY_SETTINGS: &[&str] = &[
+    "table_prefix",
+    "default_edge_table",
+    "default_entity_sort_key",
+    "edge_tables",
+    "internal_column_prefix",
+    "etl",
+    "gc_preserve_patterns",
+];
+
 #[derive(Debug, thiserror::Error)]
 pub enum LoaderError {
     #[error("extension load rules failed:\n  - {}", .0.join("\n  - "))]
@@ -33,22 +55,40 @@ pub enum LoaderError {
     Archive(#[from] ontology::archive::ArchiveError),
 }
 
-/// Translates and merges the packages into one ontology for the given core
-/// schema version. Cross-package load rules run first; a violation rejects the
-/// whole set with every error, because a partial model would be inconsistent.
-///
-/// The core entities always stay in the model. Dropping them (the optional E9
-/// `ontology.core: false`) is not supported here: the bundled core `settings`
-/// (denormalization, `local_db`, statistics, dictionaries, materialized views)
-/// reference core nodes and tables, so the loader rejects a model with the core
-/// entities removed. Exposing only extension entities belongs in the query and
-/// schema layer, not in the model load.
+/// Whether a loaded model carries the core entities alongside the extensions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreScope {
+    /// Serve the core model merged with the provider packages (today's behavior).
+    Keep,
+    /// Serve only the provider packages, for a process that runs neither the sdlc
+    /// nor the code module. The schema, the expected tables, and the created tables
+    /// then cover only extension entities, not the GitLab domains.
+    ExtensionsOnly,
+}
+
+/// Translates and merges the packages into one ontology for the given core schema
+/// version, keeping the core entities. Cross-package load rules run first; a
+/// violation rejects the whole set with every error.
 pub fn load_merged_ontology(
     schema_version: u32,
     packages: &[Package],
 ) -> Result<Ontology, LoaderError> {
+    load_scoped_ontology(schema_version, packages, CoreScope::Keep)
+}
+
+/// Like [`load_merged_ontology`], but [`CoreScope::ExtensionsOnly`] drops the core
+/// GitLab domains and the settings that reference them, leaving only the extension
+/// entities and the global settings the query path needs.
+pub fn load_scoped_ontology(
+    schema_version: u32,
+    packages: &[Package],
+    scope: CoreScope,
+) -> Result<Ontology, LoaderError> {
     let mut sources = ontology::migrations::embedded_sources();
     merge_packages_into(&mut sources, packages)?;
+    if scope == CoreScope::ExtensionsOnly {
+        strip_core_domains(&mut sources)?;
+    }
     let archive = OntologyArchive::from_sources(schema_version, &sources)?;
     Ok(archive.load_ontology()?)
 }
@@ -73,6 +113,48 @@ pub fn merge_packages_into(
         orbit_utils::yaml::to_string(&schema)
             .map_err(|e| LoaderError::CoreSchema(e.to_string()))?,
     );
+    Ok(())
+}
+
+/// Removes the core GitLab domains, their node and edge sources, and the settings
+/// that reference them, leaving only the extension domain and the global settings
+/// the query path needs. Run after [`merge_packages_into`], so the extension
+/// entities are already registered and survive.
+fn strip_core_domains(sources: &mut BTreeMap<String, String>) -> Result<(), LoaderError> {
+    let mut schema = parse_schema(sources)?;
+
+    if let Some(domains) = schema.get_mut("domains").and_then(Value::as_object_mut) {
+        domains.retain(|name, _| name == EXTENSION_DOMAIN);
+    }
+    if let Some(edges) = schema.get_mut("edges").and_then(Value::as_object_mut) {
+        let prefix = format!("edges/{EXTENSION_DOMAIN}/");
+        edges.retain(|_, path| path.as_str().is_some_and(|p| p.starts_with(&prefix)));
+    }
+    if let Some(settings) = schema.get_mut("settings").and_then(Value::as_object_mut) {
+        settings.retain(|key, _| EXTENSIONS_ONLY_SETTINGS.contains(&key.as_str()));
+        if let Some(edge_tables) = settings
+            .get_mut("edge_tables")
+            .and_then(Value::as_object_mut)
+        {
+            edge_tables.retain(|name, _| name == DEFAULT_EDGE_TABLE);
+        }
+    }
+
+    sources.insert(
+        SCHEMA_SOURCE.to_string(),
+        orbit_utils::yaml::to_string(&schema)
+            .map_err(|e| LoaderError::CoreSchema(e.to_string()))?,
+    );
+
+    let extension_nodes = format!("nodes/{EXTENSION_DOMAIN}/");
+    let extension_edges = format!("edges/{EXTENSION_DOMAIN}/");
+    sources.retain(|path, _| {
+        let is_graph_file = path.starts_with("nodes/")
+            || path.starts_with("edges/")
+            || path.starts_with("derived/");
+        let is_extension = path.starts_with(&extension_nodes) || path.starts_with(&extension_edges);
+        !is_graph_file || is_extension
+    });
     Ok(())
 }
 
@@ -520,6 +602,70 @@ mod tests {
         assert_eq!(
             widget.destination_table,
             extension_table_name("example.widgets", "Widget", &package.digest)
+        );
+    }
+
+    #[test]
+    fn extensions_only_scope_drops_core_nodes_but_keeps_extension_ones() {
+        let ontology = load_scoped_ontology(
+            schema_version(),
+            &[widgets_package()],
+            CoreScope::ExtensionsOnly,
+        )
+        .expect("extensions-only model loads");
+        let names: BTreeSet<&str> = ontology.nodes().map(|n| n.name.as_str()).collect();
+
+        assert!(
+            names.contains("Widget") && names.contains("Gadget"),
+            "extensions present"
+        );
+        assert!(
+            !names.contains("Project")
+                && !names.contains("User")
+                && !names.contains("MergeRequest")
+                && !names.contains("WorkItem"),
+            "no core GitLab node is served: {names:?}"
+        );
+    }
+
+    #[test]
+    fn extensions_only_tables_cover_only_extension_entities() {
+        let ontology = load_scoped_ontology(
+            schema_version(),
+            &[widgets_package()],
+            CoreScope::ExtensionsOnly,
+        )
+        .expect("extensions-only model loads");
+        let tables = orbit_migrations::schema::GraphSchema::from_ontology(&ontology)
+            .expect("schema derives")
+            .table_names()
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>();
+
+        assert!(
+            tables.iter().all(|t| !t.starts_with("gl_users")
+                && !t.starts_with("gl_projects")
+                && !t.starts_with("gl_merge_requests")),
+            "no core node table is expected: {tables:?}"
+        );
+        assert!(
+            tables
+                .iter()
+                .any(|t| t.starts_with(crate::storage::EXTENSION_TABLE_PREFIX)),
+            "extension tables are expected: {tables:?}"
+        );
+    }
+
+    #[test]
+    fn the_default_keep_scope_still_serves_core_and_extensions() {
+        let ontology = load_merged_ontology(schema_version(), &[widgets_package()])
+            .expect("merged model loads");
+        let names: BTreeSet<&str> = ontology.nodes().map(|n| n.name.as_str()).collect();
+        assert!(names.contains("Project"), "core stays when scope is Keep");
+        assert!(
+            names.contains("Widget"),
+            "extensions stay when scope is Keep"
         );
     }
 

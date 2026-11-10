@@ -174,6 +174,7 @@ async fn indexer_ontology(
     let model = extensions::bootstrap::load_provider_model(
         &extension_provider_configs(config),
         *SCHEMA_VERSION,
+        orbit_server::active_schema::core_scope(config),
     )
     .await?;
     Ok(Arc::new(model.ontology))
@@ -184,10 +185,14 @@ async fn indexer_ontology(
 /// live block, leave the server unchanged; live properties then resolve to null.
 async fn attach_live_runtime(server: GrpcServer, config: &AppConfig) -> GrpcServer {
     let provider_configs = extension_provider_configs(config);
-    let packages = extensions::bootstrap::load_provider_model(&provider_configs, *SCHEMA_VERSION)
-        .await
-        .map(|model| model.packages)
-        .unwrap_or_default();
+    let packages = extensions::bootstrap::load_provider_model(
+        &provider_configs,
+        *SCHEMA_VERSION,
+        extensions::loader::CoreScope::Keep,
+    )
+    .await
+    .map(|model| model.packages)
+    .unwrap_or_default();
     let catalog = extensions::live::LiveCatalog::from_packages(&packages);
     if catalog.is_empty() {
         return server;

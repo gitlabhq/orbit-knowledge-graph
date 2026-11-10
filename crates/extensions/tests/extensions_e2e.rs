@@ -198,6 +198,7 @@ async fn bootstrap_merges_a_live_provider_into_the_model() {
     let model = extensions::bootstrap::load_provider_model(
         std::slice::from_ref(&config),
         orbit_versions::VERSIONS.schema,
+        extensions::loader::CoreScope::Keep,
     )
     .await
     .expect("provider model loads");
@@ -222,6 +223,7 @@ async fn bootstrap_serves_core_when_a_provider_is_unreachable() {
     let model = extensions::bootstrap::load_provider_model(
         std::slice::from_ref(&config),
         orbit_versions::VERSIONS.schema,
+        extensions::loader::CoreScope::Keep,
     )
     .await
     .expect("an unreachable provider still yields the core model");
