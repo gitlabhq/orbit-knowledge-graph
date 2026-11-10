@@ -406,6 +406,20 @@ Security adds each read's policy as plan operations: a path filter on the `Merge
 
 ### 6. The same path for every backend
 
+```mermaid
+%%{init: {"flowchart": {"curve": "linear"}}}%%
+flowchart LR
+    accTitle: The same path for every backend
+    accDescr: The planning phase turns one logical plan into a relational plan for ClickHouse and DuckDB, a code plan for Orbit Next, or a live plan for Slack. Each physical plan renders into its backend's request.
+    LP["Logical plan"] --> P["Planning phase"]
+    P -->|ClickHouse, DuckDB| RP["Relational plan"]
+    P -->|Orbit Next| CP["Code plan"]
+    P -->|Slack| VP["Live plan"]
+    RP -->|render| SQL["SQL and parameters"]
+    CP -->|render| GRPC["gRPC structural<br/>search request"]
+    VP -->|render| CALL["Data Extraction<br/>Service call"]
+```
+
 The planning phase turns one logical plan into the physical plan of the connection that holds the data:
 
 | Backend | Plan language | A planning decision | Policy | Request |
