@@ -689,7 +689,9 @@ enum Commands {
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
 
-        /// Also point glab calls at Orbit's GitLab search and context; setup adds it when Orbit reaches GitLab.
+        /// Setup adds it when Orbit reaches GitLab. `search` also points glab calls at Orbit's
+        /// GitLab search and context; `instructions` describes remote Orbit when the hook has no
+        /// credential.
         #[arg(long, hide = true)]
         gitlab: bool,
     },

@@ -160,9 +160,6 @@ fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> S
 static SESSION: LazyLock<crate::remote::server_schema::Session> =
     LazyLock::new(|| crate::remote::server_schema::session_start(Path::new(".")));
 
-static RENDERED_INSTRUCTIONS: LazyLock<String> =
-    LazyLock::new(|| render_instructions(launcher(), SESSION.reachable, &SESSION.providers));
-
 pub(crate) fn reaches_gitlab() -> bool {
     SESSION.reachable
 }
@@ -170,8 +167,11 @@ pub(crate) fn reaches_gitlab() -> bool {
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
 
-pub(crate) fn instructions_text() -> &'static str {
-    &RENDERED_INSTRUCTIONS
+/// `setup_reached_gitlab` stands in for a probe that has no credential, because some agents
+/// (GitLab Duo) strip GitLab tokens from the environment of the hooks they run.
+pub(crate) fn instructions_text(setup_reached_gitlab: bool) -> String {
+    let remote = SESSION.reachable || (setup_reached_gitlab && !SESSION.signed_in);
+    render_instructions(launcher(), remote, &SESSION.providers)
 }
 
 pub(crate) fn search_nudge_text() -> &'static str {
@@ -1069,7 +1069,9 @@ mod tests {
             assert!(
                 session.entries[0]["hooks"][0]["command"]
                     .as_str()
-                    .is_some_and(|command| command.ends_with("hook-guard instructions")),
+                    .is_some_and(
+                        |command| command.ends_with("hook-guard instructions{{hook_gitlab}}")
+                    ),
                 "{name}"
             );
         }
