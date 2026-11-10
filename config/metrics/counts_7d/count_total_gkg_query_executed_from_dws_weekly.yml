@@ -8,7 +8,7 @@ performance_indicator_type: []
 value_type: number
 status: active
 milestone: '19.6'
-introduced_by_url: TBD
+introduced_by_url: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3353
 time_frame: 7d
 data_source: internal_events
 data_category: optional
