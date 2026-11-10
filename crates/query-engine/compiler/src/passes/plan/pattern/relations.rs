@@ -276,7 +276,6 @@ where
             Some((name, bound))
         })
         .collect();
-    filters.sort_by(|(left, _), (right, _)| left.cmp(right));
     unindex_if_key_narrowed(&mut filters);
     filters
 }

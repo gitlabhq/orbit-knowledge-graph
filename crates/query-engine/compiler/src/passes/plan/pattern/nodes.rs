@@ -35,7 +35,6 @@ impl NodePlan {
         };
         let mut filters = bind_facts(query, anchor, binding.name, model);
         filters.retain(|(property, _)| stored(property));
-        filters.sort_by(|(left, _), (right, _)| left.cmp(right));
         unindex_if_key_narrowed(&mut filters);
         let has_traversal_path = catalog.has_path_column(entity);
         Self {

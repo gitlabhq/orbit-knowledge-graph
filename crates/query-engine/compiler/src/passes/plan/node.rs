@@ -35,7 +35,6 @@ impl<'p> Node<'p> {
             .source(binding.entity)
             .map(|(_, source)| source);
         let mut filters = bind_facts(query, &anchor, binding.name, model);
-        filters.sort_by(|(left, _), (right, _)| left.cmp(right));
         unindex_if_key_narrowed(&mut filters);
         Self {
             alias: binding.name,
