@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import {
   DEFAULT_TIMEOUT_MS,
@@ -103,4 +105,22 @@ test("a listing that finds the graph locked adds nothing and does not try the ne
   const result = await lookupDefinition("parse_widget", stub.repo, { launchers: [[stub.launcher("locked")], [stub.launcher("orbit")]] });
   assert.deepEqual(result, { busy: true });
   assert.deepEqual(stub.calls(), []);
+});
+
+test("under Node the budget holds when a wrapper launcher leaves a grandchild holding its pipes", () => {
+  const stub = stubOrbit();
+  const wrapper = join(stub.bin, "wrapper");
+  writeFileSync(wrapper, "#!/bin/sh\nsleep 20 &\nwait\n", { mode: 0o755 });
+  const core = fileURLToPath(new URL("../search-guard/core.mjs", import.meta.url));
+  const script = `
+    import { lookupDefinition } from ${JSON.stringify(core)};
+    const started = Date.now();
+    const result = await lookupDefinition("parse_widget", ${JSON.stringify(stub.repo)}, { launchers: [[${JSON.stringify(wrapper)}]], timeoutMs: 400 });
+    console.log(JSON.stringify({ result, elapsed: Date.now() - started }));
+    process.exit(0);`;
+  const run = spawnSync("node", ["--input-type=module", "-e", script], { encoding: "utf8", timeout: 10_000 });
+  expect(run.status).toBe(0);
+  const { result, elapsed } = JSON.parse(run.stdout);
+  expect(result).toEqual({ failed: true });
+  expect(elapsed).toBeLessThan(2000);
 });
