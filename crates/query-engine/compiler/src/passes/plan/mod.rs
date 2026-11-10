@@ -6,7 +6,6 @@
 //! the shared condition vocabulary.
 
 pub mod aggregation;
-mod boolean;
 pub(crate) mod build;
 mod current;
 pub(crate) mod filters;

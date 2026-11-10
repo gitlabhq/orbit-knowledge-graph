@@ -7,7 +7,7 @@ use query_data_model::plan::tracking::Ref;
 use query_data_model::{Direction, RelationshipId};
 
 use crate::error::{QueryError, Result};
-use crate::logical::{Leaf, Literals, Query};
+use crate::logical::{Boolean, Leaf, Literals, Query, polarized};
 
 type Condition = (Vec<String>, bool);
 
@@ -121,11 +121,11 @@ fn apply(
 
 fn conditions(query: Query<'_>) -> Result<HashMap<Ref, Vec<Condition>>> {
     let mut found: HashMap<Ref, Vec<Condition>> = HashMap::new();
-    for leaf in query.conjuncts().into_iter().filter_map(type_leaf) {
+    for (leaf, kept_not) in query.filters().into_iter().filter_map(type_leaf) {
         let names = names(leaf).ok_or_else(|| {
             QueryError::PipelineInvariant("the builder admits only named type() conditions".into())
         })?;
-        let negated = leaf.negated != (leaf.comparison() == Some(Comparison::Ne));
+        let negated = kept_not != (leaf.comparison() == Some(Comparison::Ne));
         found
             .entry(leaf.binding())
             .or_default()
@@ -134,8 +134,16 @@ fn conditions(query: Query<'_>) -> Result<HashMap<Ref, Vec<Condition>>> {
     Ok(found)
 }
 
-fn type_leaf(conjunct: &Predicate) -> Option<Leaf<'_>> {
-    Leaf::of(conjunct).filter(|leaf| leaf.edge_kind())
+fn type_leaf(tree: Boolean<Leaf<'_>>) -> Option<(Leaf<'_>, bool)> {
+    let (leaf, kept_not) = match tree {
+        Boolean::Leaf(leaf) => (leaf, false),
+        Boolean::Not(inner) => match *inner {
+            Boolean::Leaf(leaf) => (leaf, true),
+            _ => return None,
+        },
+        Boolean::And(_) => return None,
+    };
+    leaf.edge_kind().then_some((leaf, kept_not))
 }
 
 fn names(leaf: Leaf<'_>) -> Option<Vec<String>> {
@@ -156,7 +164,7 @@ pub(super) fn without_types(predicate: &Predicate) -> Option<Predicate> {
     fn keep(predicate: &Predicate, into: &mut Vec<Predicate>) {
         match predicate {
             Predicate::And(all) => all.iter().for_each(|inner| keep(inner, into)),
-            conjunct if type_leaf(conjunct).is_some() => {}
+            conjunct if type_leaf(polarized(conjunct)).is_some() => {}
             conjunct => into.push(conjunct.clone()),
         }
     }

@@ -1,13 +1,11 @@
-use query_data_model::plan::logical::{
-    Comparison, Conjunct, Expr, Literal, LogicalOperation, Matching, Operand, Predicate,
-};
+use query_data_model::plan::logical::{Comparison, Expr, Literal, Matching, Operand, Predicate};
 use query_data_model::plan::tracking::Ref;
 
 use serde_json::Value;
 
 use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 
-use super::{Binding, Query, binding};
+use super::{Binding, Boolean, Leaf, Query, binding};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr)]
 #[strum(serialize_all = "snake_case")]
@@ -122,49 +120,26 @@ impl<'p> Fact<'p> {
 
 pub fn facts<'p>(query: Query<'p>) -> Vec<Fact<'p>> {
     let mut facts = Vec::new();
-    for (_, operation) in query.operations() {
-        let LogicalOperation::Filter(predicate) = operation else {
-            continue;
-        };
-        for conjunct in predicate.conjuncts() {
-            match conjunct {
-                Conjunct::Leaf { predicate, negated } => {
-                    facts.extend(fact(predicate, negated, true));
-                }
-                Conjunct::Negated(group) => facts.extend(
-                    group
-                        .leaf_predicates()
-                        .into_iter()
-                        .filter_map(|leaf| fact(leaf, true, false)),
-                ),
-            }
+    for tree in query.filters() {
+        match tree {
+            Boolean::Leaf(leaf) => facts.push(fact(leaf, false)),
+            negated => facts.extend(negated.leaves().map(|leaf| fact(*leaf, true))),
         }
     }
     facts
 }
 
-fn fact(leaf: &Predicate, negated: bool, top: bool) -> Option<Fact<'_>> {
-    let complemented = negated && leaf.complementable() && top;
-    let left = *leaf.exprs().first()?;
-    let comparison = match leaf {
-        Predicate::Compare { comparison, .. } if complemented => Some(match comparison {
-            Comparison::Eq => Comparison::Ne,
-            Comparison::Ne => Comparison::Eq,
-            other => *other,
-        }),
-        Predicate::Compare { comparison, .. } => Some(*comparison),
-        _ => None,
-    };
+fn fact(leaf: Leaf<'_>, negated: bool) -> Fact<'_> {
     let mut fact = Fact {
-        leaf,
-        left,
-        attached: top && (!negated || leaf.complementable()),
-        negated: negated && !complemented,
-        complemented,
-        comparison,
+        leaf: leaf.predicate,
+        left: leaf.left,
+        attached: !negated,
+        negated,
+        complemented: leaf.complemented,
+        comparison: leaf.comparison(),
     };
     fact.attached &= !fact.compares_bindings();
-    Some(fact)
+    fact
 }
 
 pub struct Anchor<'p> {

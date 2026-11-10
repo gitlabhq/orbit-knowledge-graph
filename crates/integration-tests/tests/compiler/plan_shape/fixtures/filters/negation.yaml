@@ -32,3 +32,19 @@ cases:
       clickhouse:
         planned:
           expect: ["(Filter b.name != 'skip', ... (_))"]
+
+  - name: A doubly negated leaf reads its column like an unnegated one
+    query:
+      gql: |
+        MATCH (j:Job)
+        WHERE j.project_id = 1 AND NOT (j.name = 'build' AND NOT j.finished_at >= '2026-10-10')
+        RETURN j.name
+    missing_frontends:
+      json: JSON DSL deprecated
+    logical:
+      expect: ["(Filter ... (Entities Job AS j))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - "(Filter j.project_id = 1, NOT((j.name = 'build') AND (Lower(j.name) = Lower('build')) AND NOT((j.finished_at >= '2026-10-10') AND (j.finished_at != '1970-01-01 00:00:00'))), ... (_))"

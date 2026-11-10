@@ -1,11 +1,13 @@
 //! Read access to a logical plan for the compiler phases: bindings, steps,
 //! conjuncts, and the result operations, all by declaration id.
 
+mod boolean;
 pub mod columns;
 mod conditions;
 pub mod facts;
 
-pub use conditions::{Leaf, Literals, binding};
+pub use boolean::Boolean;
+pub use conditions::{Leaf, Literals, binding, polarized};
 
 use query_data_model::plan::logical::{
     Columns, Expr, Hops, LogicalOperation, LogicalPlan, LogicalType, Measure, Order, Predicate,

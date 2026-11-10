@@ -7,7 +7,7 @@ use query_data_model::plan::logical::Comparison;
 
 use super::filters::{BoundFilter, NullAsEpoch, NullAsEpochColumns, Test};
 use super::rows::Rel;
-use crate::passes::plan::boolean::Boolean;
+use crate::logical::Boolean;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Column {

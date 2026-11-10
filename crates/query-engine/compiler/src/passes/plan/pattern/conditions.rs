@@ -3,13 +3,13 @@
 use crate::passes::codegen::RelationalModel;
 use std::collections::{HashMap, HashSet};
 
-use query_data_model::plan::logical::{EdgeField, Expr, LogicalOperation, Predicate as Logical};
+use query_data_model::plan::logical::{EdgeField, Expr};
 use query_data_model::plan::tracking::Ref;
 
 use super::Pattern;
 use crate::error::{QueryError, Result};
-use crate::logical::Query;
-use crate::passes::plan::boolean::Boolean;
+use crate::logical::Boolean;
+use crate::logical::{Leaf, Query};
 use crate::passes::plan::filters::{BoundFilter, FilterOwner, Test, bind_filter};
 use crate::passes::plan::predicates::{Column, Predicate, tag_filter};
 use crate::passes::plan::rows::BindingSource;
@@ -75,65 +75,19 @@ pub(super) fn conditions(query: Query<'_>) -> Result<Vec<Boolean<Condition>>> {
         .map(|(index, step)| (step.edge, index))
         .collect();
     let mut roots = Vec::new();
-    for (_, operation) in query.operations() {
-        let LogicalOperation::Filter(predicate) = operation else {
-            continue;
-        };
-        for conjunct in polarized(query, &edges, predicate, false)?.conjuncts() {
-            match conjunct {
-                Boolean::Leaf(condition)
-                    if !condition.compares_aliases() && !condition.is_kind() => {}
-                root => roots.push(root),
-            }
+    for tree in query.filters() {
+        match tree.try_map(&mut |leaf| condition(query, &edges, leaf))? {
+            Boolean::Leaf(condition) if !condition.compares_aliases() && !condition.is_kind() => {}
+            root => roots.push(root),
         }
     }
     Ok(roots)
 }
 
-fn polarized(
-    query: Query<'_>,
-    edges: &HashMap<Ref, usize>,
-    predicate: &Logical,
-    negated: bool,
-) -> Result<Boolean<Condition>> {
-    Ok(match predicate {
-        Logical::Not(inner) => polarized(query, edges, inner, !negated)?,
-        Logical::And(all) if all.len() == 1 => polarized(query, edges, &all[0], negated)?,
-        Logical::And(all) => {
-            let mut children = Vec::new();
-            for child in all {
-                children.extend(polarized(query, edges, child, false)?.conjuncts());
-            }
-            let conjunction = Boolean::And(children);
-            match negated {
-                true => Boolean::Not(Box::new(conjunction)),
-                false => conjunction,
-            }
-        }
-        leaf => {
-            let complemented = negated && leaf.complementable();
-            let condition = Boolean::Leaf(condition(query, edges, leaf, complemented)?);
-            match negated && !complemented {
-                true => Boolean::Not(Box::new(condition)),
-                false => condition,
-            }
-        }
-    })
-}
-
-fn condition(
-    query: Query<'_>,
-    edges: &HashMap<Ref, usize>,
-    leaf: &Logical,
-    complemented: bool,
-) -> Result<Condition> {
+fn condition(query: Query<'_>, edges: &HashMap<Ref, usize>, leaf: Leaf<'_>) -> Result<Condition> {
     let graph = query.model.graph();
     let unbound = || QueryError::PipelineInvariant("unbound relationship".into());
-    let left = *leaf
-        .exprs()
-        .first()
-        .ok_or_else(|| QueryError::PipelineInvariant("a condition without a column".into()))?;
-    let (target, property) = match left {
+    let (target, property) = match leaf.left {
         Expr::Property { binding, property } => (
             Target::Node(query.name(binding).to_string()),
             graph.property(property).name.clone(),
@@ -162,7 +116,7 @@ fn condition(
             )));
         }
     };
-    let test = Test::of(leaf, complemented, |right| match right {
+    let test = Test::of(leaf.predicate, leaf.complemented, |right| match right {
         Expr::Property { binding, property } => Some(Column::new(
             query.name(binding),
             &graph.property(property).name,

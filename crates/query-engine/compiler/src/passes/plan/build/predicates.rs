@@ -5,7 +5,7 @@ use query_data_model::implementations::relational::plan::{
 
 use super::expr::{self, Filter};
 use super::{Built, call, column, eq, int, string};
-use crate::passes::plan::boolean::Boolean;
+use crate::logical::Boolean;
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
 
 pub(crate) struct Lowering<'s> {
@@ -38,7 +38,7 @@ impl Lowering<'_> {
             }
             Boolean::Not(child) => Expr::Unary {
                 op: UnaryOp::Not,
-                value: Box::new(self.boolean(q, child, true)?),
+                value: Box::new(self.boolean(q, child, !negated)?),
             },
         })
     }

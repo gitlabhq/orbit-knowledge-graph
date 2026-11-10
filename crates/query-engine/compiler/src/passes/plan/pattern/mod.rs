@@ -22,10 +22,10 @@ use super::predicates::{Column, Predicate, kind_column};
 use super::rows::{ReadScope, Reads, Rel};
 use super::{DenormalizedKey, DenormalizedProperty, sort_key};
 use crate::error::{QueryError, Result};
+use crate::logical::Boolean;
 use crate::logical::Kind;
 use crate::logical::Query;
 use crate::logical::facts::{anchors, facts};
-use crate::passes::plan::boolean::Boolean;
 use query_data_model::Direction;
 use query_data_model::plan::logical::Expr;
 

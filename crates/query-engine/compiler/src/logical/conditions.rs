@@ -1,16 +1,18 @@
 use query_data_model::PropertyId;
 use query_data_model::plan::logical::{
-    Comparison, EdgeField, Expr, Literal, Matching, Operand, Predicate,
+    Comparison, EdgeField, Expr, Literal, LogicalOperation, Matching, Operand, Predicate,
 };
 use query_data_model::plan::tracking::Ref;
 
-use super::Query;
+use super::{Boolean, Query};
 
+/// A filter leaf after the planner's NOT rule. NOT folds into `=`, `<>` and null checks, whose
+/// complements are exact under SQL's three-valued logic, and stays above every other operand.
 #[derive(Debug, Clone, Copy)]
 pub struct Leaf<'p> {
     pub predicate: &'p Predicate,
     pub left: Expr,
-    pub negated: bool,
+    pub complemented: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -20,26 +22,43 @@ pub enum Literals<'p> {
     None,
 }
 
-impl<'p> Leaf<'p> {
-    pub fn of(predicate: &'p Predicate) -> Option<Self> {
-        let (mut inner, mut negated) = (predicate, false);
-        while let Predicate::Not(nested) = inner {
-            (inner, negated) = (nested.as_ref(), !negated);
-        }
-        let left = match inner {
+/// The filter tree with NOT pushed down by the planner's rule: negation flips at every NOT, a
+/// negated conjunction keeps its NOT, and a negated leaf folds in when it has an exact complement.
+pub fn polarized(predicate: &Predicate) -> Boolean<Leaf<'_>> {
+    fn walk(predicate: &Predicate, negated: bool) -> Boolean<Leaf<'_>> {
+        let tree = match predicate {
+            Predicate::Not(inner) => return walk(inner, !negated),
+            Predicate::And(all) if all.len() == 1 => return walk(&all[0], negated),
+            Predicate::And(all) => Boolean::And(
+                all.iter()
+                    .flat_map(|child| walk(child, false).conjuncts())
+                    .collect(),
+            ),
             Predicate::Compare { left, .. }
             | Predicate::In { left, .. }
             | Predicate::Text { left, .. }
-            | Predicate::Null { left, .. } => *left,
-            Predicate::And(_) | Predicate::Not(_) => return None,
+            | Predicate::Null { left, .. } => {
+                let complemented = negated && predicate.complementable();
+                let leaf = Boolean::Leaf(Leaf {
+                    predicate,
+                    left: *left,
+                    complemented,
+                });
+                if complemented {
+                    return leaf;
+                }
+                leaf
+            }
         };
-        Some(Self {
-            predicate: inner,
-            left,
-            negated,
-        })
+        match negated {
+            true => Boolean::Not(Box::new(tree)),
+            false => tree,
+        }
     }
+    walk(predicate, false)
+}
 
+impl<'p> Leaf<'p> {
     pub fn binding(self) -> Ref {
         binding(self.left)
     }
@@ -71,9 +90,14 @@ impl<'p> Leaf<'p> {
         }
     }
 
+    /// The comparison with a folded NOT applied.
     pub fn comparison(self) -> Option<Comparison> {
         match self.predicate {
-            Predicate::Compare { comparison, .. } => Some(*comparison),
+            Predicate::Compare { comparison, .. } => Some(match (comparison, self.complemented) {
+                (Comparison::Eq, true) => Comparison::Ne,
+                (Comparison::Ne, true) => Comparison::Eq,
+                (comparison, _) => *comparison,
+            }),
             _ => None,
         }
     }
@@ -113,38 +137,34 @@ impl<'p> Query<'p> {
         &self.model.graph().property(property).name
     }
 
-    pub fn leaves(self) -> Vec<Leaf<'p>> {
-        fn walk<'a>(predicate: &'a Predicate, into: &mut Vec<Leaf<'a>>) {
-            match predicate {
-                Predicate::And(all) => all.iter().for_each(|inner| walk(inner, into)),
-                Predicate::Not(inner) if matches!(inner.as_ref(), Predicate::And(_)) => {
-                    walk(inner, into)
-                }
-                Predicate::Not(inner) => match Leaf::of(predicate) {
-                    Some(leaf) => into.push(leaf),
-                    None => walk(inner, into),
-                },
-                leaf => into.extend(Leaf::of(leaf)),
-            }
-        }
-        let mut leaves = Vec::new();
-        for conjunct in self.conjuncts() {
-            walk(conjunct, &mut leaves);
-        }
-        leaves
-    }
-
-    pub fn attached(self) -> Vec<Leaf<'p>> {
-        self.conjuncts()
+    /// The top-level conjuncts of every filter, polarized.
+    pub fn filters(self) -> Vec<Boolean<Leaf<'p>>> {
+        self.operations()
             .into_iter()
-            .filter_map(Leaf::of)
-            .filter(|leaf| !leaf.negated && leaf.compared().is_none() && !leaf.edge_kind())
+            .filter_map(|(_, operation)| match operation {
+                LogicalOperation::Filter(predicate) => Some(polarized(predicate).conjuncts()),
+                _ => None,
+            })
+            .flatten()
             .collect()
     }
 
-    pub fn has_negation(self) -> bool {
-        self.conjuncts()
+    pub fn leaves(self) -> Vec<Leaf<'p>> {
+        self.filters()
             .iter()
-            .any(|conjunct| matches!(conjunct, Predicate::Not(_)))
+            .flat_map(|tree| tree.leaves().copied())
+            .collect()
+    }
+
+    /// The top-level leaves no NOT stays above, other than comparisons across bindings and edge kinds.
+    pub fn attached(self) -> Vec<Leaf<'p>> {
+        self.filters()
+            .into_iter()
+            .filter_map(|tree| match tree {
+                Boolean::Leaf(leaf) => Some(leaf),
+                _ => None,
+            })
+            .filter(|leaf| leaf.compared().is_none() && !leaf.edge_kind())
+            .collect()
     }
 }
