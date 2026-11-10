@@ -19,24 +19,29 @@ Each extension writes only a package, a surface or a backend:
 
 An entity has one fragment of each kind it needs. These are the fragments for `MergeRequest` in `gitlab.code_review`.
 
-The graph fragment declares its properties:
+The graph fragment declares every property, with its type and its default value:
 
 ```yaml
+# packages/gitlab.code_review/graph.yaml
 kind: graph
 package: gitlab.code_review
 entities:
   MergeRequest:
     label: title
-    defaults: [id, iid, title, state, source_branch, target_branch]
+    default_columns: [id, iid, title, state]
     properties:
-      id: {type: int64, immutable: true}
-      title: {type: string}
-      state: {type: enum, values: {1: opened, 2: closed, 3: merged, 4: locked}}
+      id: {type: int64}
+      iid: {type: int64}
+      title: {type: string, default: ""}
+      state: {type: enum, values: {1: opened, 2: closed, 3: merged, 4: locked}, default: opened}
+      author_id: {type: int64?, references: [User]}
+      traversal_path: {type: string}
 ```
 
 The authorization fragment declares its scope, its role floor and its redaction check:
 
 ```yaml
+# packages/gitlab.code_review/authorization.yaml
 kind: authorization
 package: gitlab.code_review
 entities:
@@ -46,23 +51,33 @@ entities:
     redaction: {resource: merge_request, ability: read_merge_request}
 ```
 
-The storage fragment lays it out in a store. Shared fields work on every backend. The `backend` block holds what only that backend understands, and that backend validates it.
+The storage fragment lays it out in a store, and nothing in it is inferred. It names the table and lists every stored property as a column, with its storage type and whether it is immutable. Shared fields work on every backend. A `backend` block holds what only that backend understands, and that backend validates it.
 
 ```yaml
+# packages/gitlab.code_review/storage/clickhouse.yaml
 kind: storage
 package: gitlab.code_review
 store: graph
 entities:
   MergeRequest:
+    table: gl_merge_request
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      iid: {immutable: true, backend: {type: Int64, codec: [Delta(8), LZ4]}}
+      title: {backend: {type: String, codec: [ZSTD(1)]}}
+      state: {backend: {type: LowCardinality(String)}}
+      author_id: {backend: {type: Nullable(Int64)}}
+      traversal_path: {backend: {type: String}}
     backend:
       primary_key: [traversal_path, id]
-      columns:
-        title: {default: "''", codec: [ZSTD(1)]}
 ```
+
+The entity's home store must list every property of the graph, or exclude it by name with `exclude: [...]`. Another store lists exactly the properties it holds. The loader rejects a property that its home store neither stores nor excludes. It also rejects a column without a storage type and a binding without a table. A forgotten column fails at load, not at query time.
 
 The source fragment says where the indexer reads it from:
 
 ```yaml
+# packages/gitlab.code_review/sources/siphon.yaml
 kind: source
 package: gitlab.code_review
 source: siphon
@@ -92,6 +107,7 @@ Publish the new package version to the registry. The registry diffs its storage 
 An integration that lands rows in the data lake ships a package with graph, authorization, storage and source fragments. Jira issues use the graph store, like GitLab entities:
 
 ```yaml
+# packages/integration.jira/sources/data_lake.yaml
 kind: source
 package: integration.jira
 source: data_lake
@@ -109,13 +125,14 @@ Every row carries the `traversal_path` of the namespace that installed the integ
 An entity can be fetched at query time instead of indexed. Its storage is a `live` store that holds no rows.
 
 ```yaml
+# packages/integration.slack/graph.yaml
 kind: graph
 package: integration.slack
 entities:
   SlackMessage:
     label: text
     properties:
-      id: {type: string, immutable: true}
+      id: {type: string}
       channel: {type: string}
       author: {type: string}
       text: {type: string}
@@ -123,6 +140,7 @@ entities:
 ```
 
 ```yaml
+# packages/integration.slack/authorization.yaml
 kind: authorization
 package: integration.slack
 entities:
@@ -130,6 +148,7 @@ entities:
 ```
 
 ```yaml
+# packages/integration.slack/storage/live.yaml
 kind: storage
 package: integration.slack
 store: slack
@@ -139,6 +158,12 @@ engine:
   path_column: traversal_path
 entities:
   SlackMessage:
+    columns:
+      id: {immutable: true}
+      channel: {}
+      author: {}
+      text: {}
+      sent_at: {}
     backend:
       operation: search.messages
       filters: [channel, author, sent_at]
@@ -212,6 +237,7 @@ The builder plugs into shared tracking, which proves the structural facts of eve
 Orbit Next is a backend whose catalog speaks in repositories and structural matches. Its storage fragment binds `File` to a store on the code indexing connection:
 
 ```yaml
+# packages/gitlab.source_code/storage/orbit_code.yaml
 kind: storage
 package: gitlab.source_code
 store: code
@@ -252,17 +278,45 @@ The trigram prefilter is a planning decision: the planner takes the pattern's li
 A tenant overlay is a package that loads only into one tenant's model. Agent memory adds a `Memory` entity linked to the merge requests and projects it is about:
 
 ```yaml
+# packages/tenant.agent_memory/graph.yaml
 kind: graph
 package: tenant.agent_memory
 entities:
   Memory:
     label: summary
     properties:
-      id: {type: string, immutable: true}
-      summary: {type: string}
+      id: {type: string}
+      summary: {type: string, default: ""}
+      traversal_path: {type: string}
 relationships:
   ABOUT:
     variants: [Memory -> MergeRequest, Memory -> Project]
+```
+
+```yaml
+# packages/tenant.agent_memory/authorization.yaml
+kind: authorization
+package: tenant.agent_memory
+entities:
+  Memory: {scope: namespace, role: reporter}
+relationships:
+  ABOUT: same_namespace
+```
+
+```yaml
+# packages/tenant.agent_memory/storage/clickhouse.yaml
+kind: storage
+package: tenant.agent_memory
+store: graph
+entities:
+  Memory:
+    table: gl_memory
+    columns:
+      id: {immutable: true, backend: {type: String}}
+      summary: {backend: {type: String, codec: [ZSTD(3)]}}
+      traversal_path: {backend: {type: String}}
+    backend:
+      primary_key: [traversal_path, id]
 ```
 
 Its entities appear only in that tenant's catalogs, and that tenant's plans and caches carry their own model ID.
@@ -307,6 +361,7 @@ The loader collects every error, names its package, and fails once:
 - An unknown entity, property, relationship, variant, role, scope, field or template.
 - An entity or variant declared twice, or a second authorization entry.
 - An entity with no `id`, or no authorization entry.
+- A property that its home store neither stores nor excludes, a stored column without a storage type, or a binding without a table. Nothing is inferred.
 - A foreign key on neither endpoint, or one the graph does not mark as a reference.
 - Two backends, or a trusted and an untrusted store, on one connection.
 - A namespaced entity that no guard rule covers.
