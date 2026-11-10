@@ -51,23 +51,27 @@ pub(super) fn narrowed(query: Query<'_>) -> Result<HashMap<Ref, Narrowed>> {
         }
     }
     for (node, operation) in query.operations() {
-        let LogicalOperation::Neighbors {
-            from,
-            relationships,
-            direction,
-        } = operation
-        else {
-            continue;
+        let (relationships, inferred) = match operation {
+            LogicalOperation::Neighbors {
+                from,
+                relationships,
+                direction,
+            } => match (relationships.is_empty(), query.entity_name(*from)) {
+                (true, Some(center)) => (
+                    relationships,
+                    Some(infer(query, *direction, Some(center), None)),
+                ),
+                _ => (relationships, None),
+            },
+            LogicalOperation::Shortest { relationships, .. } => (relationships, None),
+            _ => continue,
         };
         let outputs: Vec<Ref> = query.plan.outputs(node).collect();
         let [.., edge, _] = outputs[..] else {
             continue;
         };
         let current = names(relationships);
-        let inferred = match (relationships.is_empty(), query.entity_name(*from)) {
-            (true, Some(center)) => infer(query, *direction, Some(center), None),
-            _ => current.clone(),
-        };
+        let inferred = inferred.unwrap_or_else(|| current.clone());
         let types = apply(query, inferred, conditions.get(&edge))?;
         if types != current {
             narrowed.insert(edge, Narrowed::new(query, types)?);

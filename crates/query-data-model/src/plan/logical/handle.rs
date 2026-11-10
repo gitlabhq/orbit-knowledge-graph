@@ -1,5 +1,6 @@
 use super::{
-    EdgeField, Expr, Logical, LogicalCatalog, LogicalOperation, LogicalType, PlanError, TimeUnit,
+    EdgeField, Expr, Hops, Logical, LogicalCatalog, LogicalOperation, LogicalType, PlanError,
+    TimeUnit,
 };
 use crate::plan::tracking::{self, Construction, Ref};
 use crate::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
@@ -9,6 +10,7 @@ pub struct Binding<'m> {
     catalog: LogicalCatalog<'m>,
     kind: LogicalType,
     output: Ref,
+    hops: Hops,
 }
 
 impl<'m> Binding<'m> {
@@ -25,6 +27,10 @@ impl<'m> Binding<'m> {
 
     pub fn output(self) -> Ref {
         self.output
+    }
+
+    pub fn hops(self) -> Hops {
+        self.hops
     }
 
     pub fn catalog(self) -> LogicalCatalog<'m> {
@@ -56,16 +62,22 @@ impl<'m> Binding<'m> {
                 binding: self.output,
                 field,
             }),
-            found => Err(PlanError::Type {
-                expr: format!("{field:?}"),
-                expected: "a relationship".to_string(),
-                found: format!("{found:?}"),
-            }),
+            _ => Err(PlanError::shape(
+                "type() and relationship fields take a relationship variable, such as r in -[r]->",
+            )),
         }
     }
 
     fn resolve(self, name: &str) -> Result<PropertyId, PlanError> {
-        let entity = self.entity().ok_or(PlanError::NoEntity)?;
+        let entity = match self.kind {
+            LogicalType::Entity(entity) => entity,
+            LogicalType::Node => {
+                return Err(PlanError::shape(format!(
+                    "the unlabeled endpoint of a neighbors query has no property {name}; give it a label to filter or return its properties"
+                )));
+            }
+            _ => return Err(PlanError::NoEntity),
+        };
         let model = self.catalog.model();
         let property = model.property(entity, name)?;
         let access = model.access().property(property.id);
@@ -109,10 +121,19 @@ impl<'m> Rows<'m> {
                 (_, LogicalType::Scalar(_)) => {}
                 (name, LogicalType::Edge) => {
                     let model = catalog.model();
-                    if matches!(
-                        construction.producer(output)?,
-                        LogicalOperation::Follow { .. } | LogicalOperation::Neighbors { .. }
-                    ) {
+                    let (hops, step) = match construction.producer(output)? {
+                        LogicalOperation::Follow { range, .. } => (*range, true),
+                        LogicalOperation::Neighbors { .. } => (Hops::ONE, true),
+                        LogicalOperation::Shortest { max_depth, .. } => (
+                            Hops {
+                                min: 1,
+                                max: *max_depth,
+                            },
+                            false,
+                        ),
+                        _ => (Hops::ONE, false),
+                    };
+                    if step {
                         edges.push((
                             output,
                             super::check::edge_relationships(model, construction, output)?,
@@ -125,6 +146,7 @@ impl<'m> Rows<'m> {
                             catalog,
                             kind: LogicalType::Edge,
                             output,
+                            hops,
                         },
                     ));
                 }
@@ -134,6 +156,7 @@ impl<'m> Rows<'m> {
                         catalog,
                         kind: *kind,
                         output,
+                        hops: Hops::ONE,
                     },
                 )),
             }
@@ -172,18 +195,23 @@ impl<'m> Rows<'m> {
     }
 
     pub fn binding(&self, name: &str) -> Result<Binding<'m>, PlanError> {
-        self.bindings
+        let binding = self
+            .bindings
             .iter()
             .find(|(bound, _)| bound.as_deref() == Some(name))
             .map(|(_, binding)| *binding)
             .ok_or_else(|| PlanError::UnknownBinding {
                 name: name.to_string(),
-                available: self
-                    .bindings
-                    .iter()
-                    .filter_map(|(name, _)| name.clone())
-                    .collect(),
-            })
+                available: self.names().map(str::to_string).collect(),
+            })?;
+        match self
+            .edges
+            .iter()
+            .any(|(output, ..)| *output == binding.output)
+        {
+            true => single(name, binding),
+            false => Ok(binding),
+        }
     }
 
     pub fn property(&self, name: &str) -> Result<Expr, PlanError> {
@@ -191,6 +219,11 @@ impl<'m> Rows<'m> {
     }
 
     pub fn edge_column(&self, edge: Binding<'m>, name: &str) -> Result<Expr, PlanError> {
+        if edge.hops.max > 1 {
+            return Err(PlanError::shape(
+                "a variable-length relationship binds a list, so its properties cannot be filtered",
+            ));
+        }
         if let Ok(field) = name.parse() {
             return edge.field(field);
         }
@@ -199,7 +232,9 @@ impl<'m> Rows<'m> {
             .iter()
             .find(|(output, ..)| *output == edge.output)
         else {
-            return Err(super::check::mismatch(name, "a relationship", edge.kind));
+            return Err(PlanError::shape(
+                "path finding filters its relationships only with type()",
+            ));
         };
         let attribute = super::check::edge_attribute(edge.catalog.model(), relationships, name)?;
         if attribute.access.hidden {
@@ -226,10 +261,14 @@ impl<'m> Rows<'m> {
     }
 
     pub(super) fn fresh(&self, name: &str) -> Result<(), PlanError> {
-        match self.binding(name) {
-            Ok(_) => Err(PlanError::Duplicate(name.to_string())),
-            Err(_) => Ok(()),
+        match self.names().any(|bound| bound == name) {
+            true => Err(PlanError::Duplicate(name.to_string())),
+            false => Ok(()),
         }
+    }
+
+    pub(super) fn bound(&self) -> impl Iterator<Item = Binding<'m>> + '_ {
+        self.bindings.iter().map(|(_, binding)| *binding)
     }
 
     pub fn column(&self, name: &str) -> Result<Expr, PlanError> {
@@ -241,5 +280,14 @@ impl<'m> Rows<'m> {
                 name: name.to_string(),
                 available: self.columns.iter().map(|(name, _)| name.clone()).collect(),
             })
+    }
+}
+
+fn single<'m>(name: &str, binding: Binding<'m>) -> Result<Binding<'m>, PlanError> {
+    match binding.hops.max > 1 {
+        true => Err(PlanError::shape(format!(
+            "{name} has a variable length and binds a list; only a one-hop relationship can be filtered, returned, or sorted, so list the types in the pattern instead, such as -[{name}:CLOSES|MENTIONS*1..3]->"
+        ))),
+        false => Ok(binding),
     }
 }

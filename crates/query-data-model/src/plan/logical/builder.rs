@@ -180,6 +180,11 @@ impl<'m> LogicalBuilder<'m> {
             if inputs.iter().any(|rows| rows.column(MATCH_LINE).is_ok()) {
                 return Err(PlanError::Duplicate("a structural match".into()));
             }
+            if inputs.iter().any(|rows| rows.bound().count() != 1) {
+                return Err(PlanError::shape(
+                    "MATCHES ast(...) must be a top-level condition of a single-node match",
+                ));
+            }
             let property = match target {
                 Expr::Property { property, .. } => catalog.model().graph().property(property),
                 other => {

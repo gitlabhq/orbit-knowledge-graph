@@ -1,8 +1,7 @@
 use pest::Span;
-use serde_json::Value;
 
 pub(super) use crate::Direction;
-pub(super) use crate::plan::logical::TimeUnit as TruncateUnit;
+pub(super) use crate::plan::logical::{Literal, Operator, TimeUnit as TruncateUnit};
 
 pub(super) enum BooleanExpression<T> {
     Leaf(T),
@@ -18,25 +17,6 @@ impl<T> BooleanExpression<T> {
             Self::Not(child) => child.depth() + 1,
         }
     }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum FilterOp {
-    Eq,
-    Ne,
-    Gt,
-    Lt,
-    Gte,
-    Lte,
-    In,
-    Contains,
-    StartsWith,
-    EndsWith,
-    IsNull,
-    IsNotNull,
-    TokenMatch,
-    AllTokens,
-    AnyTokens,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -91,15 +71,15 @@ pub(super) struct NodePattern<'i> {
     pub properties: Vec<MapEntry<'i>>,
 }
 
-pub(super) struct MapLiteral<'i> {
-    pub span: Span<'i>,
-    pub entries: Vec<MapEntry<'i>>,
-}
-
 pub(super) struct MapEntry<'i> {
     pub key: Name<'i>,
     pub value: Value,
-    pub from_temporal_literal: bool,
+}
+
+/// A literal, or a list of literals.
+pub(super) enum Value {
+    Scalar(Literal),
+    List(Vec<Literal>),
 }
 
 pub(super) struct Relationship<'i> {
@@ -107,7 +87,7 @@ pub(super) struct Relationship<'i> {
     pub variable: Option<Name<'i>>,
     pub types: Vec<Name<'i>>,
     pub range: Option<Range<'i>>,
-    pub properties: Option<MapLiteral<'i>>,
+    pub properties: Vec<MapEntry<'i>>,
 }
 
 pub(super) struct Range<'i> {
@@ -117,37 +97,34 @@ pub(super) struct Range<'i> {
     pub end: Option<u32>,
 }
 
+pub(super) enum Subject<'i> {
+    Property(Property<'i>),
+    Type(Name<'i>),
+}
+
+pub(super) enum Operand<'i> {
+    Value(Value),
+    Property(Property<'i>),
+}
+
 pub(super) enum Predicate<'i> {
-    Comparison(Box<Comparison<'i>>),
+    Comparison {
+        span: Span<'i>,
+        subject: Subject<'i>,
+        op: Operator,
+        operand: Option<Operand<'i>>,
+    },
     Structural {
         span: Span<'i>,
         property: Property<'i>,
         pattern: String,
         language: String,
     },
-    RelationshipType {
-        span: Span<'i>,
-        variable: Name<'i>,
-        op: FilterOp,
-        value: Option<Value>,
-    },
-}
-
-pub(super) struct Comparison<'i> {
-    pub span: Span<'i>,
-    pub property: Property<'i>,
-    pub op: FilterOp,
-    pub value: Option<Value>,
-    pub from_temporal_literal: bool,
-    pub rhs_property: Option<Property<'i>>,
 }
 
 pub(super) enum Projections<'i> {
     Star(Span<'i>),
-    Items {
-        span: Span<'i>,
-        items: Vec<ProjectionItem<'i>>,
-    },
+    Items(Vec<ProjectionItem<'i>>),
 }
 
 pub(super) struct ProjectionItem<'i> {
@@ -166,10 +143,7 @@ pub(super) enum Expression<'i> {
         unit: TruncateUnit,
         property: Property<'i>,
     },
-    AllProperties {
-        span: Span<'i>,
-        variable: Name<'i>,
-    },
+    AllProperties(Name<'i>),
     RelationshipType {
         span: Span<'i>,
         variable: Name<'i>,

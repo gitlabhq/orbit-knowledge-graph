@@ -222,16 +222,30 @@ pub(super) fn mismatch(expr: impl Into<String>, expected: &str, found: LogicalTy
     }
 }
 
+const COMPUTED: &str = "structural matches cannot be aggregated";
+
 pub(super) fn group(
     model: &Model,
     construction: &Construction<Logical>,
     expr: Expr,
 ) -> Result<LogicalType, PlanError> {
-    if let Expr::Node(binding) = expr {
-        return match construction.value(binding)? {
-            (_, kind @ LogicalType::Entity(_)) => Ok(*kind),
-            (name, found) => Err(mismatch(name.unwrap_or("node"), "an entity", *found)),
-        };
+    match expr {
+        Expr::Node(binding) => {
+            return match construction.value(binding)? {
+                (_, kind @ LogicalType::Entity(_)) => Ok(*kind),
+                (_, LogicalType::Edge) => Err(PlanError::shape(
+                    "grouping by a relationship is not supported yet",
+                )),
+                (name, found) => Err(mismatch(name.unwrap_or("node"), "an entity", *found)),
+            };
+        }
+        Expr::Edge { .. } | Expr::Attribute { .. } => {
+            return Err(PlanError::shape(
+                "grouping by a relationship is not supported yet",
+            ));
+        }
+        Expr::Output(_) => return Err(PlanError::shape(COMPUTED)),
+        Expr::Property { .. } | Expr::Truncate { .. } => {}
     }
     let typed = super::filter::filterable(model, construction, expr)?;
     Ok(LogicalType::Scalar(typed.data_type))
@@ -246,6 +260,9 @@ pub(super) fn measure(
     let Some(input) = measure.input().copied() else {
         return Ok(DataType::Int);
     };
+    if let Expr::Output(_) = input {
+        return Err(PlanError::shape(COMPUTED));
+    }
     if counts {
         if let Expr::Node(binding) = input {
             group(model, construction, Expr::Node(binding))?;
@@ -253,6 +270,11 @@ pub(super) fn measure(
             scalar(model, construction, input)?;
         }
         return Ok(DataType::Int);
+    }
+    if let Expr::Node(_) = input {
+        return Err(PlanError::shape(
+            "sum, avg, min, and max take a node property, such as sum(mr.added_lines)",
+        ));
     }
     let typed = scalar(model, construction, input)?;
     match (measure, typed.data_type) {

@@ -1,11 +1,15 @@
 use super::limits::RESERVED_PREFIX;
-use super::{Expr, LogicalOperation, LogicalPlan, LogicalType, Operand, PlanError, Predicate};
+use super::{
+    Comparison, Conjunct, EdgeField, Expr, LogicalOperation, LogicalPlan, LogicalType, Operand,
+    PlanError, Predicate,
+};
 use crate::plan::tracking::Ref;
 
 pub(super) fn plan(plan: &LogicalPlan, internal: &[String]) -> Result<(), PlanError> {
     reserved(plan, internal)?;
     overlapping(plan)?;
-    conditions(plan)
+    conditions(plan)?;
+    named(plan)
 }
 
 fn reserved(plan: &LogicalPlan, internal: &[String]) -> Result<(), PlanError> {
@@ -83,8 +87,66 @@ fn conditions(plan: &LogicalPlan) -> Result<(), PlanError> {
                 "{shape} support NOT only on =, <>, IS NULL, and IS NOT NULL conditions; use a traversal for other negated conditions"
             )));
         }
+        let spanning = predicate.conjuncts().into_iter().any(|conjunct| {
+            let bound: Vec<Ref> = conjunct_exprs(conjunct).into_iter().map(binding).collect();
+            bound.iter().any(|other| *other != bound[0])
+        });
+        if let (Some(shape), true) = (shape, spanning) {
+            return Err(PlanError::shape(format!(
+                "each condition of {shape} must reference one node"
+            )));
+        }
     }
     Ok(())
+}
+
+fn conjunct_exprs(conjunct: Conjunct<'_>) -> Vec<Expr> {
+    match conjunct {
+        Conjunct::Leaf { predicate, .. } | Conjunct::Negated(predicate) => predicate.exprs(),
+    }
+}
+
+/// A shortest path over every relationship type expands too far; a type() condition must name them.
+fn named(plan: &LogicalPlan) -> Result<(), PlanError> {
+    for node in plan.nodes() {
+        let LogicalOperation::Shortest { relationships, .. } = plan.operation(node) else {
+            continue;
+        };
+        let outputs: Vec<Ref> = plan.outputs(node).collect();
+        let [.., edge, _] = outputs[..] else {
+            continue;
+        };
+        if relationships.is_empty() && !narrowed(plan, edge) {
+            return Err(PlanError::shape(
+                "shortest paths require named relationship types, such as -[:CONTAINS*1..3]->; a wildcard expands over every edge type",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn narrowed(plan: &LogicalPlan, edge: Ref) -> bool {
+    let kind = Expr::Edge {
+        binding: edge,
+        field: EdgeField::Kind,
+    };
+    plan.nodes()
+        .filter_map(|node| match plan.operation(node) {
+            LogicalOperation::Filter(predicate) => Some(predicate),
+            _ => None,
+        })
+        .flat_map(Predicate::conjuncts)
+        .any(|conjunct| match conjunct {
+            Conjunct::Leaf { predicate, negated } if predicate.exprs() == [kind] => match predicate
+            {
+                Predicate::Compare {
+                    comparison: Comparison::Ne,
+                    ..
+                } => negated,
+                _ => !negated,
+            },
+            _ => false,
+        })
 }
 
 fn compares_bindings(leaf: &Predicate) -> bool {

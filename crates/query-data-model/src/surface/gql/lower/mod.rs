@@ -1,22 +1,20 @@
-mod aggregate;
-mod classify;
 mod conditions;
 mod returns;
-mod scope;
 
-use super::ast::{BooleanExpression, Predicate as Leaf, Query};
-use super::errors;
+use super::ast::{
+    BooleanExpression, Direction, MapEntry, NodePattern, Pattern, PatternElement,
+    Predicate as Leaf, Query, Range, Relationship,
+};
+use super::errors::invalid;
 use crate::RelationshipId;
-use crate::plan::logical::{LogicalBuilder, LogicalCatalog, PlanError, Predicate, Rows, Step};
+use crate::plan::logical::{
+    Hops, LogicalBuilder, LogicalCatalog, PlanError, Predicate, Rows, Step,
+};
 use crate::plan::tracking::Declared;
 use crate::surface::{Statement, SurfaceError};
-use scope::{Node, Scope, Shape};
 
 type Built<'m> = Result<Rows<'m>, SurfaceError>;
 type Conditions<'i> = Vec<BooleanExpression<Leaf<'i>>>;
-type Pattern<'i> = (pest::Span<'i>, super::ast::Property<'i>, String, String);
-
-const DEFAULT_LIMIT: u32 = 30;
 
 pub(super) fn lower(
     query: Query<'_>,
@@ -31,25 +29,230 @@ pub(super) fn lower(
         limit,
         debug,
     } = query;
-    let mut scope = Scope::collect(pattern)?;
-    scope.classify(&conditions::referenced(&predicates))?;
+    let (graph, path) = Graph::collect(pattern)?;
     let plan = catalog.build(|q| -> Built<'_> {
-        let rows = match &scope.shape {
-            Shape::Match => matched(q, &scope, predicates)?,
-            Shape::Path(name) => path(q, &scope, predicates, name)?,
-            Shape::Neighbors(name) => neighbors(q, &scope, predicates, name)?,
+        let rows = match &path {
+            Some(name) => graph.shortest(q, name)?,
+            None => graph.walk(q)?,
         };
-        let declared = scope.nodes.iter().map(|node| rows.binding(&node.alias));
-        q.declare_order(declared.collect::<Result<Vec<_>, _>>()?)?;
-        let rows = returns::project(q, rows, &scope, projections, order)?;
-        let limit = limit.unwrap_or(DEFAULT_LIMIT);
-        Ok(q.slice(rows, limit.into(), skip.map(u64::from))?)
+        let rows = conditions::filter(q, rows, predicates)?;
+        let nodes = graph.nodes.iter().map(|node| rows.binding(&node.alias));
+        q.declare_order(nodes.collect::<Result<Vec<_>, _>>()?)?;
+        let dynamic = path.or_else(|| graph.unlabeled().map(str::to_string));
+        let nodes: Vec<&str> = graph.nodes.iter().map(|node| node.alias.as_str()).collect();
+        let rows = returns::project(q, rows, &nodes, dynamic.as_deref(), projections, order)?;
+        Ok(q.slice(rows, limit.map(u64::from), skip.map(u64::from))?)
     })?;
     Ok(Statement { plan, debug })
 }
 
+/// The pattern as written: nodes once each, and relationships between node positions.
+struct Graph<'i> {
+    nodes: Vec<Node<'i>>,
+    edges: Vec<Edge<'i>>,
+}
+
+struct Node<'i> {
+    alias: String,
+    label: Option<String>,
+    properties: Vec<MapEntry<'i>>,
+}
+
+struct Edge<'i> {
+    variable: Option<String>,
+    types: Vec<String>,
+    from: usize,
+    to: usize,
+    direction: Direction,
+    hops: Hops,
+    properties: Vec<MapEntry<'i>>,
+}
+
+/// A relationship by position, with its near node, far node, and direction from the near node.
+type Walked = (usize, usize, usize, Direction);
+
+const DISCONNECTED: &str = "each relationship must connect one new node to the preceding pattern; disconnected hops and cycles are unsupported";
+
+impl<'i> Graph<'i> {
+    fn collect(pattern: Pattern<'i>) -> Result<(Self, Option<String>), SurfaceError> {
+        let (elements, path) = match pattern {
+            Pattern::Elements(elements) => (elements, None),
+            Pattern::Shortest { variable, element } => (vec![*element], Some(variable.value)),
+        };
+        let mut graph = Self {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        };
+        for PatternElement { head, chain } in elements {
+            let mut from = graph.declare(head)?;
+            for (relationship, node) in chain {
+                let to = graph.declare(node)?;
+                graph.link(relationship, from, to)?;
+                from = to;
+            }
+        }
+        if path.is_none() {
+            graph.steps()?;
+        }
+        Ok((graph, path))
+    }
+
+    /// The first labeled node, then each relationship from the end the pattern already reached.
+    fn steps(&self) -> Result<(usize, Vec<Walked>), SurfaceError> {
+        let anchor = self
+            .nodes
+            .iter()
+            .position(|node| node.label.is_some())
+            .unwrap_or_default();
+        let mut bound = vec![anchor];
+        let mut steps = Vec::new();
+        for (index, edge) in self.edges.iter().enumerate() {
+            let step = match (bound.contains(&edge.from), bound.contains(&edge.to)) {
+                (true, false) => (index, edge.from, edge.to, edge.direction),
+                (false, true) => (index, edge.to, edge.from, reverse(edge.direction)),
+                _ => return Err(SurfaceError::schema(DISCONNECTED)),
+            };
+            bound.push(step.2);
+            steps.push(step);
+        }
+        if bound.len() != self.nodes.len() {
+            return Err(SurfaceError::schema(
+                "all declared nodes must belong to one connected pattern",
+            ));
+        }
+        Ok((anchor, steps))
+    }
+
+    fn unlabeled(&self) -> Option<&str> {
+        self.nodes
+            .iter()
+            .find(|node| node.label.is_none())
+            .map(|node| node.alias.as_str())
+    }
+
+    fn declare(&mut self, pattern: NodePattern<'i>) -> Result<usize, SurfaceError> {
+        let alias = pattern.variable.value;
+        let Some(index) = self.nodes.iter().position(|node| node.alias == alias) else {
+            self.nodes.push(Node {
+                alias,
+                label: pattern.label.map(|label| label.value),
+                properties: pattern.properties,
+            });
+            return Ok(self.nodes.len() - 1);
+        };
+        if pattern
+            .label
+            .is_some_and(|label| self.nodes[index].label.as_deref() != Some(&label.value))
+        {
+            return Err(invalid(
+                pattern.span,
+                "a repeated node must keep its original label",
+            ));
+        }
+        if !pattern.properties.is_empty() {
+            return Err(invalid(
+                pattern.span,
+                "declare a node's properties once or use WHERE predicates",
+            ));
+        }
+        Ok(index)
+    }
+
+    fn link(
+        &mut self,
+        relationship: Relationship<'i>,
+        from: usize,
+        to: usize,
+    ) -> Result<(), SurfaceError> {
+        if relationship.types.is_empty()
+            && let Some(alias) = &relationship.variable
+            && type_shaped(&alias.value)
+        {
+            return Err(invalid(
+                alias.span,
+                &format!(
+                    "[{0}] declares a variable, not a relationship type; write [:{0}] for the type, or use a lowercase variable",
+                    alias.value
+                ),
+            ));
+        }
+        let hops = match relationship.range {
+            Some(range) => hops(range)?,
+            None => Hops::ONE,
+        };
+        self.edges.push(Edge {
+            variable: relationship.variable.map(|alias| alias.value),
+            types: relationship
+                .types
+                .into_iter()
+                .map(|name| name.value)
+                .collect(),
+            from,
+            to,
+            direction: relationship.direction,
+            hops,
+            properties: relationship.properties,
+        });
+        Ok(())
+    }
+
+    fn walk<'m>(&self, q: &mut LogicalBuilder<'m>) -> Built<'m> {
+        let (anchor, steps) = self.steps()?;
+        let mut rows = bind(q, &self.nodes[anchor])?;
+        for (index, near, far, direction) in steps {
+            let (edge, target) = (&self.edges[index], &self.nodes[far]);
+            let from = rows.binding(&self.nodes[near].alias)?;
+            let step = edge.step(q, direction)?.named(&target.alias);
+            rows = match &target.label {
+                Some(label) => q.traverse(rows, from, step.to(q.catalog().entity(label)?))?,
+                None => q.neighbors(rows, from, step)?,
+            };
+            rows = edge.inline(q, rows)?;
+            rows = inline(q, rows, target)?;
+        }
+        Ok(rows)
+    }
+
+    fn shortest<'m>(&self, q: &mut LogicalBuilder<'m>, name: &str) -> Built<'m> {
+        let [edge] = self.edges.as_slice() else {
+            return Err(SurfaceError::schema(
+                "a shortest path requires one bounded relationship between two labeled nodes",
+            ));
+        };
+        let start = bind(q, &self.nodes[edge.from])?;
+        let end = bind(q, &self.nodes[edge.to])?;
+        let step = edge.step(q, edge.direction)?;
+        let rows = q.shortest(start, end, step, name)?;
+        edge.inline(q, rows)
+    }
+}
+
+impl Edge<'_> {
+    fn step(&self, q: &LogicalBuilder<'_>, direction: Direction) -> Result<Step, SurfaceError> {
+        let step = Step::new(direction)
+            .via(relationships(q, &self.types)?)
+            .hops(self.hops);
+        Ok(match &self.variable {
+            Some(variable) => step.edge(variable),
+            None => step,
+        })
+    }
+
+    fn inline<'m>(&self, q: &mut LogicalBuilder<'m>, rows: Rows<'m>) -> Built<'m> {
+        let link = rows.edge().ok_or(PlanError::NoEntity)?;
+        let predicates =
+            conditions::entries(&self.properties, |name| Ok(rows.edge_column(link, name)?))?;
+        conjoin(q, rows, predicates)
+    }
+}
+
 fn bind<'m>(q: &mut LogicalBuilder<'m>, node: &Node<'_>) -> Built<'m> {
-    let label = node.label.as_deref().unwrap_or_default();
+    let label = node.label.as_deref().ok_or_else(|| {
+        SurfaceError::schema(format!(
+            "({0}) needs a label, such as ({0}:Project); only the far endpoint of a neighbors query may omit it",
+            node.alias
+        ))
+    })?;
     let rows = q.entities_as(q.catalog().entity(label)?, &node.alias)?;
     inline(q, rows, node)
 }
@@ -82,181 +285,31 @@ fn relationships(
         .collect::<Result<_, _>>()?)
 }
 
-fn filtered<'m>(
-    q: &mut LogicalBuilder<'m>,
-    rows: Rows<'m>,
-    scope: &Scope<'_>,
-    predicates: Conditions<'_>,
-) -> Built<'m> {
-    if predicates.is_empty() {
-        return Ok(rows);
+fn reverse(direction: Direction) -> Direction {
+    match direction {
+        Direction::Outgoing => Direction::Incoming,
+        Direction::Incoming => Direction::Outgoing,
+        Direction::Both => Direction::Both,
     }
-    let predicate = conditions::tree(BooleanExpression::And(predicates), &rows, scope)?;
-    Ok(q.filter(rows, predicate)?)
 }
 
-fn matched<'m>(
-    q: &mut LogicalBuilder<'m>,
-    scope: &Scope<'_>,
-    predicates: Conditions<'_>,
-) -> Built<'m> {
-    let (patterns, predicates) = structural(predicates);
-    let first = &scope.nodes[0];
-    let mut rows = bind(q, first)?;
-    let mut bound = vec![first.alias.as_str()];
-    for edge in &scope.edges {
-        let forward = bound.contains(&edge.from.as_str());
-        let (near, far) = if forward {
-            (&edge.from, &edge.to)
-        } else {
-            (&edge.to, &edge.from)
-        };
-        let direction = match forward {
-            true => edge.direction,
-            false => classify::reverse(edge.direction),
-        };
-        let target = scope
-            .node(far)
-            .ok_or_else(|| PlanError::shape("unbound endpoint"))?;
-        let label = target.label.as_deref().unwrap_or_default();
-        let mut step = Step::new(direction)
-            .via(relationships(q, &edge.types)?)
-            .to(q.catalog().entity(label)?)
-            .hops(edge.hops)
-            .named(far);
-        if let Some(variable) = &edge.variable {
-            step = step.edge(variable);
-        }
-        let from = rows.binding(near)?;
-        rows = q.traverse(rows, from, step)?;
-        let link = rows.edge().ok_or(PlanError::NoEntity)?;
-        let predicates =
-            conditions::entries(&edge.properties, |name| Ok(rows.edge_column(link, name)?))?;
-        rows = conjoin(q, rows, predicates)?;
-        rows = inline(q, rows, target)?;
-        bound.push(far);
-    }
-    let mut rows = filtered(q, rows, scope, predicates)?;
-    for (span, property, pattern, language) in patterns {
-        if !scope.edges.is_empty() {
-            return Err(errors::invalid(
-                span,
-                "MATCHES ast(...) must be a top-level condition of a single-node match",
-            ));
-        }
-        let target = rows
-            .binding(&property.node.value)?
-            .property(&property.property.value)?;
-        rows = q.structural(rows, target, &pattern, &language)?;
-    }
-    Ok(rows)
+fn hops(range: Range<'_>) -> Result<Hops, SurfaceError> {
+    let max = if range.dots { range.end } else { range.start }.ok_or_else(|| {
+        invalid(
+            range.span,
+            "unbounded paths are unsupported; use *1..3 or an exact *2",
+        )
+    })?;
+    Ok(Hops {
+        min: range.start.unwrap_or(1),
+        max,
+    })
 }
 
-/// Splits top-level structural matches from the other conditions; without one, the conditions
-/// stay as written.
-fn structural(predicates: Conditions<'_>) -> (Vec<Pattern<'_>>, Conditions<'_>) {
-    fn top_level(tree: &BooleanExpression<Leaf<'_>>) -> bool {
-        match tree {
-            BooleanExpression::Leaf(Leaf::Structural { .. }) => true,
-            BooleanExpression::And(all) => all.iter().any(top_level),
-            _ => false,
-        }
-    }
-    if !predicates.iter().any(top_level) {
-        return (Vec::new(), predicates);
-    }
-    let mut patterns = Vec::new();
-    let mut rest = Vec::new();
-    for conjunct in flatten(predicates) {
-        match conjunct {
-            BooleanExpression::Leaf(Leaf::Structural {
-                span,
-                property,
-                pattern,
-                language,
-            }) => patterns.push((span, property, pattern, language)),
-            other => rest.push(other),
-        }
-    }
-    (patterns, rest)
-}
-
-fn flatten(predicates: Conditions<'_>) -> Conditions<'_> {
-    predicates
-        .into_iter()
-        .flat_map(|tree| match tree {
-            BooleanExpression::And(all) => flatten(all),
-            tree => vec![tree],
-        })
-        .collect()
-}
-
-fn local<'i>(
-    predicates: Conditions<'i>,
-    aliases: &[&str],
-) -> Result<(Vec<Conditions<'i>>, Conditions<'i>), SurfaceError> {
-    let mut split: Vec<Conditions<'i>> = aliases.iter().map(|_| Vec::new()).collect();
-    let mut typed = Vec::new();
-    for conjunct in flatten(predicates) {
-        if conditions::typed(&conjunct) {
-            typed.push(conjunct);
-            continue;
-        }
-        let referenced = conditions::referenced(std::slice::from_ref(&conjunct));
-        let owner = aliases
-            .iter()
-            .position(|alias| referenced.iter().all(|name| name == alias))
-            .ok_or_else(|| {
-                PlanError::shape(
-                    "each condition of a path or neighbors query must reference one endpoint",
-                )
-            })?;
-        split[owner].push(conjunct);
-    }
-    Ok((split, typed))
-}
-
-fn path<'m>(
-    q: &mut LogicalBuilder<'m>,
-    scope: &Scope<'_>,
-    predicates: Conditions<'_>,
-    name: &str,
-) -> Built<'m> {
-    let edge = &scope.edges[0];
-    let (split, typed) = local(predicates, &[&edge.from, &edge.to])?;
-    let types = conditions::narrow(edge.types.clone(), typed, edge.variable.as_deref())?;
-    if types.is_empty() {
-        return Err(SurfaceError::schema(
-            "shortest paths require named relationship types, such as -[:CONTAINS*1..3]->; a wildcard expands over every edge type",
-        ));
-    }
-    let mut split = split.into_iter();
-    let mut endpoint = |q: &mut LogicalBuilder<'m>, alias: &str| {
-        let node = scope
-            .node(alias)
-            .ok_or_else(|| PlanError::shape("unbound endpoint"))?;
-        let rows = bind(q, node)?;
-        filtered(q, rows, scope, split.next().unwrap_or_default())
-    };
-    let start = endpoint(q, &edge.from)?;
-    let end = endpoint(q, &edge.to)?;
-    let via = relationships(q, &types)?;
-    Ok(q.shortest(start, end, &via, edge.hops.max, name)?)
-}
-
-fn neighbors<'m>(
-    q: &mut LogicalBuilder<'m>,
-    scope: &Scope<'_>,
-    predicates: Conditions<'_>,
-    name: &str,
-) -> Built<'m> {
-    let (center, edge) = (&scope.nodes[0], &scope.edges[0]);
-    let rows = bind(q, center)?;
-    let (mut split, typed) = local(predicates, &[&center.alias])?;
-    let rows = filtered(q, rows, scope, split.remove(0))?;
-    let from = rows.binding(&center.alias)?;
-    let via = relationships(q, &edge.types)?;
-    let variable = edge.variable.as_deref();
-    let rows = q.neighbors(rows, from, &via, edge.direction, name, variable)?;
-    filtered(q, rows, scope, typed)
+fn type_shaped(name: &str) -> bool {
+    name.len() > 1
+        && name.starts_with(|c: char| c.is_ascii_uppercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }

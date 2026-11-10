@@ -50,9 +50,9 @@ pub use constants::{
 };
 pub use error::{QueryError, RejectionReason, Result};
 pub use logical::DynamicColumnMode;
-pub use logical::facts::FilterOp;
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use query_data_model::Direction;
+pub use query_data_model::plan::logical::Operator;
 use query_data_model::{Catalog, ClickHouse, DuckDb};
 pub use types::QueryType;
 

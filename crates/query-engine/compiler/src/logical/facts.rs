@@ -1,4 +1,4 @@
-use query_data_model::plan::logical::{Comparison, Expr, Literal, Matching, Operand, Predicate};
+use query_data_model::plan::logical::{Comparison, Expr, Literal, Operand, Operator, Predicate};
 use query_data_model::plan::tracking::Ref;
 
 use serde_json::Value;
@@ -6,26 +6,6 @@ use serde_json::Value;
 use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 
 use super::{Binding, Boolean, Leaf, Query, binding};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr)]
-#[strum(serialize_all = "snake_case")]
-pub enum FilterOp {
-    Eq,
-    Ne,
-    Gt,
-    Lt,
-    Gte,
-    Lte,
-    In,
-    Contains,
-    StartsWith,
-    EndsWith,
-    IsNull,
-    IsNotNull,
-    TokenMatch,
-    AllTokens,
-    AnyTokens,
-}
 
 #[derive(Clone, Copy)]
 pub struct Fact<'p> {
@@ -60,30 +40,14 @@ impl<'p> Fact<'p> {
     }
 
     /// The operator the leaf applies once its negation is folded in.
-    pub fn op(self) -> Option<FilterOp> {
+    pub fn op(self) -> Option<Operator> {
         Some(match self.leaf {
             Predicate::Null { null, .. } => match *null != self.complemented {
-                true => FilterOp::IsNull,
-                false => FilterOp::IsNotNull,
+                true => Operator::IsNull,
+                false => Operator::IsNotNull,
             },
-            Predicate::In { .. } => FilterOp::In,
-            Predicate::Text { matching, .. } => match matching {
-                Matching::Contains => FilterOp::Contains,
-                Matching::StartsWith => FilterOp::StartsWith,
-                Matching::EndsWith => FilterOp::EndsWith,
-                Matching::Token => FilterOp::TokenMatch,
-                Matching::AllTokens => FilterOp::AllTokens,
-                Matching::AnyTokens => FilterOp::AnyTokens,
-            },
-            Predicate::Compare { .. } => match self.comparison? {
-                Comparison::Eq => FilterOp::Eq,
-                Comparison::Ne => FilterOp::Ne,
-                Comparison::Lt => FilterOp::Lt,
-                Comparison::Le => FilterOp::Lte,
-                Comparison::Gt => FilterOp::Gt,
-                Comparison::Ge => FilterOp::Gte,
-            },
-            Predicate::And(_) | Predicate::Not(_) => return None,
+            Predicate::Compare { .. } => self.comparison?.into(),
+            leaf => leaf.operator()?,
         })
     }
 

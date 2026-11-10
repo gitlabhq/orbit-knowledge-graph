@@ -89,7 +89,11 @@ fn looked_up(model: &Model, leaf: &Predicate) -> Result<(), PlanError> {
             lookup.service
         )));
     }
-    if !lookup.operators.iter().any(|allowed| allowed == operator) {
+    if !lookup
+        .operators
+        .iter()
+        .any(|allowed| allowed == operator.as_ref())
+    {
         return Err(PlanError::shape(format!(
             "{operator} is not supported on the looked-up property {name}; allowed: {}",
             lookup.operators.join(", ")
