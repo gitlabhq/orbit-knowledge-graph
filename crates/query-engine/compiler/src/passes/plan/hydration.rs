@@ -20,7 +20,6 @@ use super::node::Node;
 use crate::error::{QueryError, Result};
 use crate::hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 use crate::logical::Query;
-use crate::logical::facts::{anchors, facts};
 use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::build::expr::{id_list, live};
 use crate::passes::plan::build::predicates::Lowering;
@@ -70,8 +69,8 @@ impl<'p> Arm<'p> {
         model: &'p Catalog<B>,
     ) -> Result<Self> {
         let query = Query::new(&arm.plan, model.model());
-        let facts = facts(query);
-        let anchor = anchors(query, &facts)
+        let anchor = query
+            .anchors(&query.leaves())
             .into_iter()
             .next()
             .ok_or_else(|| QueryError::Lowering("hydration node has no entity".into()))?;

@@ -13,8 +13,9 @@ use query_data_model::plan::logical::{Expr, LogicalOperation, Predicate, TimeUni
 
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
+use crate::logical::Leaf;
 use crate::logical::Query;
-use crate::logical::facts::{self, Anchor, Fact};
+use crate::logical::anchors::Anchor;
 
 pub fn admit(query: Query<'_>, model: &Catalog<impl SqlBackend>, selectivity: bool) -> Result<()> {
     if query
@@ -25,8 +26,8 @@ pub fn admit(query: Query<'_>, model: &Catalog<impl SqlBackend>, selectivity: bo
             "structural matches run on the code connection, not in SQL".into(),
         ));
     }
-    let facts = facts::facts(query);
-    let anchors = facts::anchors(query, &facts);
+    let facts = query.leaves();
+    let anchors = query.anchors(&facts);
     limits::predicates(&facts)?;
     limits::filters(query, &facts, &anchors)?;
     rules::negated(query, &facts, model)?;
@@ -59,16 +60,16 @@ fn node_property<'p>(query: Query<'p>, expr: Expr) -> Option<(&'p str, &'p str, 
 
 fn filters(
     query: Query<'_>,
-    facts: &[Fact<'_>],
+    facts: &[Leaf<'_>],
     anchors: &[Anchor<'_>],
     model: &Catalog<impl SqlBackend>,
 ) -> Result<()> {
     let kind = query.kind();
     for fact in facts {
-        let Some((alias, entity, property)) = node_property(query, fact.left) else {
+        let Some((alias, entity, property)) = node_property(query, fact.left()) else {
             continue;
         };
-        if served(model, fact.left) {
+        if served(model, fact.left()) {
             if matches!(
                 kind,
                 Kind::Aggregation | Kind::Neighbors | Kind::PathFinding
@@ -90,9 +91,10 @@ fn filters(
                 )));
             }
         }
-        let tokens = matches!(fact.leaf, Predicate::Text { matching, .. } if matching.tokens());
+        let tokens =
+            matches!(&*fact.predicate, Predicate::Text { matching, .. } if matching.tokens());
         let indexed =
-            matches!(fact.left, Expr::Property { property, .. } if model.text_index(property));
+            matches!(fact.left(), Expr::Property { property, .. } if model.text_index(property));
         if tokens && !indexed {
             return Err(QueryError::Validation(format!(
                 "filter on \"{property}\" for {entity}: \
@@ -123,7 +125,7 @@ fn buckets(query: Query<'_>, anchors: &[Anchor<'_>]) -> Result<()> {
             continue;
         };
         let filtered = anchor.filters.iter().any(|fact| {
-            matches!(fact.left, Expr::Property { property: filtered, .. } if filtered == *property)
+            matches!(fact.left(), Expr::Property { property: filtered, .. } if filtered == *property)
         });
         if anchor.pinned.is_none() && !filtered {
             let property = query.property_name(*property);

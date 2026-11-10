@@ -15,7 +15,7 @@ use serde_json::Value as Json;
 use super::predicates::{Column, Predicate};
 use super::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 use crate::logical::Query;
-use crate::logical::facts::Anchor;
+use crate::logical::anchors::Anchor;
 
 pub type NullAsEpochColumns = HashMap<String, query_data_model::DataType>;
 
@@ -37,30 +37,20 @@ pub enum Test {
 }
 
 impl Test {
-    /// The test of a logical leaf; `complemented` folds a negation into `=`, `<>`, and null checks.
-    pub fn of(
-        leaf: &Leaf,
-        complemented: bool,
-        rhs: impl FnOnce(Logical) -> Option<Column>,
-    ) -> Option<Self> {
-        let flip = |comparison: Comparison| match (comparison, complemented) {
-            (Comparison::Eq, true) => Comparison::Ne,
-            (Comparison::Ne, true) => Comparison::Eq,
-            (comparison, _) => comparison,
-        };
+    pub fn of(leaf: &Leaf, rhs: impl FnOnce(Logical) -> Option<Column>) -> Option<Self> {
         Some(match leaf {
             Leaf::Compare {
                 comparison,
                 right: Operand::Literal(literal),
                 ..
-            } => Self::Compare(flip(*comparison), literal.clone()),
+            } => Self::Compare(*comparison, literal.clone()),
             Leaf::Compare {
                 comparison,
                 right: Operand::Expr(right),
                 ..
-            } => Self::Column(flip(*comparison), rhs(*right)?),
+            } => Self::Column(*comparison, rhs(*right)?),
             Leaf::In { values, .. } => Self::In(values.clone()),
-            Leaf::Null { null, .. } => Self::Null(*null != complemented),
+            Leaf::Null { null, .. } => Self::Null(*null),
             Leaf::Text {
                 matching, needle, ..
             } => Self::Text(*matching, needle.clone()),
@@ -276,7 +266,7 @@ pub fn denormalized_facts(
     query
         .leaves()
         .into_iter()
-        .filter_map(|leaf| match leaf.left {
+        .filter_map(|leaf| match leaf.left() {
             Logical::Property { property, .. } => Some(property),
             _ => None,
         })
@@ -307,12 +297,12 @@ pub fn bind_facts<B: SqlBackend>(
         .filters
         .iter()
         .filter_map(|fact| {
-            let Logical::Property { property, .. } = fact.left else {
+            let Logical::Property { property, .. } = fact.left() else {
                 return None;
             };
             let name = &graph.property(property).name;
             let mut rhs = None;
-            let test = Test::of(fact.leaf, fact.complemented, |right| {
+            let test = Test::of(&fact.predicate, |right| {
                 let Logical::Property { property, .. } = right else {
                     return None;
                 };

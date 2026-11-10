@@ -15,7 +15,6 @@ use super::node::Node;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
-use crate::logical::facts::{anchors, facts};
 use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::Term;
 use crate::passes::plan::build::expr::{id_list, id_range, ids, relationship_kinds};
@@ -49,8 +48,8 @@ impl<'p> PathFinding<'p> {
                 _ => None,
             })
             .ok_or_else(|| QueryError::Lowering("path config missing".into()))?;
-        let facts = facts(query);
-        let mut anchors = anchors(query, &facts);
+        let facts = query.leaves();
+        let mut anchors = query.anchors(&facts);
         let mut node = |output| {
             let index = anchors
                 .iter()

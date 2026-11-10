@@ -16,8 +16,8 @@ use query_data_model::{Direction, EntityId, RelationshipId};
 use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::{EDGE_PATH_NODES_SUFFIX, edge_column_prefix, edge_relation_alias};
 use crate::error::{QueryError, Result};
+use crate::logical::Leaf;
 use crate::logical::Query;
-use crate::logical::facts::Fact;
 use crate::passes::plan::filters::{
     BoundFilter, FilterOwner, Test, bind_filter, unindex_if_key_narrowed,
 };
@@ -136,7 +136,7 @@ impl EdgeRelation {
 
 pub(super) fn build_relations<B>(
     query: Query<'_>,
-    facts: &[Fact<'_>],
+    facts: &[Leaf<'_>],
     model: &Catalog<B>,
     nodes: &HashMap<String, NodePlan>,
 ) -> Vec<EdgeRelation>
@@ -242,7 +242,7 @@ where
 
 /// The filters attached to an edge, bound to the columns its tables store.
 fn edge_filters<B>(
-    facts: &[Fact<'_>],
+    facts: &[Leaf<'_>],
     edge: Ref,
     tables: &[String],
     model: &Catalog<B>,
@@ -253,9 +253,9 @@ where
     let owner = FilterOwner::Tables(tables);
     let mut filters: Vec<(String, BoundFilter)> = facts
         .iter()
-        .filter(|fact| fact.attached && fact.binding() == edge)
+        .filter(|fact| fact.attached() && fact.binding() == edge)
         .filter_map(|fact| {
-            let name = match fact.left {
+            let name = match fact.left() {
                 Logical::Edge { field, .. } => match field {
                     EdgeField::Kind => return None,
                     EdgeField::Source => SOURCE_ID_COLUMN,
@@ -269,7 +269,7 @@ where
                 }
                 _ => return None,
             };
-            let test = Test::of(fact.leaf, fact.complemented, |_| None)?;
+            let test = Test::of(&fact.predicate, |_| None)?;
             let bound = bind_filter(&name, test, &owner, model);
             Some((name, bound))
         })

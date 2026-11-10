@@ -9,8 +9,8 @@ use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::plan::logical::{Columns, Expr, Measure};
 
 use super::{NodePlan, Pattern};
+use crate::logical::anchors::Anchor;
 use crate::logical::columns::{free_text, redaction_column, returned, selections};
-use crate::logical::facts::Anchor;
 use crate::logical::{Query, binding};
 use crate::passes::plan::filters::{bind_facts, unindex_if_key_narrowed};
 use crate::passes::plan::predicates::{

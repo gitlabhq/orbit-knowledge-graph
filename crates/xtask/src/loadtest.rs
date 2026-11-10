@@ -880,13 +880,13 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
 
 /// `(entity, id)` for every pinned node id in a query, deduplicated.
 fn node_refs(query: &str) -> Result<Vec<(String, i64)>> {
-    use query_engine::compiler::logical::{Query, facts};
+    use query_engine::compiler::logical::Query;
     let model = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()?;
     let catalog = model.model().logical().as_admin();
     let statement = query_engine::compiler::surface::parse(query, catalog)?;
     let query = Query::new(&statement.plan, model.model());
-    let facts = facts::facts(query);
-    let mut refs: Vec<(String, i64)> = facts::anchors(query, &facts)
+    let mut refs: Vec<(String, i64)> = query
+        .anchors(&query.leaves())
         .into_iter()
         .flat_map(|anchor| {
             let entity = query.entity_name(anchor.binding.output).unwrap_or_default();

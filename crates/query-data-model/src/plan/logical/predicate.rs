@@ -247,13 +247,32 @@ impl Predicate {
     }
 
     pub fn complementable(&self) -> bool {
-        matches!(
-            self,
+        self.complement().is_some()
+    }
+
+    /// The leaf a NOT folds into: `=` and `<>` swap and null checks flip, which three-valued logic keeps exact.
+    pub fn complement(&self) -> Option<Self> {
+        let swapped = |comparison| match comparison {
+            Comparison::Eq => Some(Comparison::Ne),
+            Comparison::Ne => Some(Comparison::Eq),
+            _ => None,
+        };
+        Some(match self {
             Self::Compare {
-                comparison: Comparison::Eq | Comparison::Ne,
-                ..
-            } | Self::Null { .. }
-        )
+                left,
+                comparison,
+                right,
+            } => Self::Compare {
+                left: *left,
+                comparison: swapped(*comparison)?,
+                right: right.clone(),
+            },
+            Self::Null { left, null } => Self::Null {
+                left: *left,
+                null: !null,
+            },
+            _ => return None,
+        })
     }
 
     pub fn leaf_predicates(&self) -> Vec<&Predicate> {

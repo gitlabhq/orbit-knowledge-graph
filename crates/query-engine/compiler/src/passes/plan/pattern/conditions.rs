@@ -87,7 +87,7 @@ pub(super) fn conditions(query: Query<'_>) -> Result<Vec<Boolean<Condition>>> {
 fn condition(query: Query<'_>, edges: &HashMap<Ref, usize>, leaf: Leaf<'_>) -> Result<Condition> {
     let graph = query.model.graph();
     let unbound = || QueryError::PipelineInvariant("unbound relationship".into());
-    let (target, property) = match leaf.left {
+    let (target, property) = match leaf.left() {
         Expr::Property { binding, property } => (
             Target::Node(query.name(binding).to_string()),
             graph.property(property).name.clone(),
@@ -116,7 +116,7 @@ fn condition(query: Query<'_>, edges: &HashMap<Ref, usize>, leaf: Leaf<'_>) -> R
             )));
         }
     };
-    let test = Test::of(leaf.predicate, leaf.complemented, |right| match right {
+    let test = Test::of(&leaf.predicate, |right| match right {
         Expr::Property { binding, property } => Some(Column::new(
             query.name(binding),
             &graph.property(property).name,

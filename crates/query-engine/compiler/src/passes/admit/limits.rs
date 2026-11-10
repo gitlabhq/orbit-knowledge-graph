@@ -3,15 +3,16 @@ use std::collections::HashMap;
 use query_data_model::plan::logical::Expr;
 
 use crate::error::{QueryError, Result};
+use crate::logical::Leaf;
 use crate::logical::Query;
-use crate::logical::facts::{Anchor, Fact};
+use crate::logical::anchors::Anchor;
 
 pub(super) const MAX_PREDICATES: usize = 16;
 pub(super) const MAX_FILTERS_PER_NODE: usize = 10;
 pub(super) const MAX_FILTERS_PER_REL: usize = 5;
 const MAX_FILTER_ENTRIES_PER_PROPERTY: usize = 10;
 
-pub(super) fn predicates(facts: &[Fact<'_>]) -> Result<()> {
+pub(super) fn predicates(facts: &[Leaf<'_>]) -> Result<()> {
     let count = facts.len();
     if count > MAX_PREDICATES {
         return Err(QueryError::Validation(format!(
@@ -21,7 +22,7 @@ pub(super) fn predicates(facts: &[Fact<'_>]) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn filters(query: Query<'_>, facts: &[Fact<'_>], anchors: &[Anchor<'_>]) -> Result<()> {
+pub(super) fn filters(query: Query<'_>, facts: &[Leaf<'_>], anchors: &[Anchor<'_>]) -> Result<()> {
     let nodes = anchors.iter().map(|anchor| {
         let owner = format!("node \"{}\"", anchor.binding.name);
         (
@@ -34,8 +35,8 @@ pub(super) fn filters(query: Query<'_>, facts: &[Fact<'_>], anchors: &[Anchor<'_
     let edges = query.steps().into_iter().enumerate().map(|(index, step)| {
         let attached = facts
             .iter()
-            .copied()
-            .filter(|fact| fact.attached && fact.binding() == step.edge)
+            .filter(|fact| fact.attached() && fact.binding() == step.edge)
+            .cloned()
             .collect();
         (
             step.edge,
@@ -45,12 +46,12 @@ pub(super) fn filters(query: Query<'_>, facts: &[Fact<'_>], anchors: &[Anchor<'_
         )
     });
     for (target, owner, attached, maximum) in nodes.chain(edges) {
-        let conditions = facts
-            .iter()
-            .filter(|fact| !fact.attached && !fact.compares_bindings() && fact.binding() == target);
+        let conditions = facts.iter().filter(|fact| {
+            !fact.attached() && !fact.compares_bindings() && fact.binding() == target
+        });
         let mut counts: HashMap<String, usize> = HashMap::new();
         for fact in attached.iter().chain(conditions) {
-            *counts.entry(name(query, fact.left)).or_default() += 1;
+            *counts.entry(name(query, fact.left())).or_default() += 1;
         }
         if counts.len() > maximum {
             return Err(QueryError::Validation(format!(

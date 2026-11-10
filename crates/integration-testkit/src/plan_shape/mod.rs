@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use compiler::logical::facts;
 use compiler::passes::codegen::{self, SqlBackend};
 use compiler::passes::{normalize, page, plan, response_policy};
 use compiler::{HydrationArm, HydrationCompileOptions, HydrationRequest};
@@ -313,8 +312,7 @@ fn hydration_request(
     setup: &HydrationSetup,
 ) -> compiler::Result<HydrationRequest> {
     let query = compiler::logical::Query::new(plan, catalog.model());
-    let facts = facts::facts(query);
-    let anchors = facts::anchors(query, &facts);
+    let anchors = query.anchors(&query.leaves());
     if let Some(alias) = setup
         .paths
         .keys()

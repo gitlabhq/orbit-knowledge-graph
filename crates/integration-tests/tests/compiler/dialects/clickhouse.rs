@@ -619,11 +619,10 @@ fn orbit_query_id_list_and_range_promote_independently() {
                 let statement = gql_statement(&query).unwrap();
                 let embedded = embedded_model();
                 let logical = compiler::logical::Query::new(&statement.plan, embedded.model());
-                let facts = compiler::logical::facts::facts(logical);
-                let anchor = &compiler::logical::facts::anchors(logical, &facts)[0];
+                let anchor = &logical.anchors(&logical.leaves())[0];
                 assert_eq!(anchor.pinned, Some(vec![1, 2, 3, 5]), "{query}");
                 assert_eq!(anchor.range, Some((1, 3)), "{query}");
-                let id = |fact: &compiler::logical::facts::Fact<'_>| matches!(fact.left, query_data_model::plan::logical::Expr::Property { property, .. } if logical.property_name(property) == "id");
+                let id = |leaf: &compiler::logical::Leaf<'_>| matches!(leaf.left(), query_data_model::plan::logical::Expr::Property { property, .. } if logical.property_name(property) == "id");
                 assert!(!anchor.filters.iter().any(id), "{query}");
                 compile(&query, &embedded_model(), &context).unwrap();
             }

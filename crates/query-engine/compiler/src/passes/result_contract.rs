@@ -18,7 +18,6 @@ use crate::constants::{
 };
 use crate::error::{QueryError, Result};
 use crate::logical::columns::free_text;
-use crate::logical::facts::{anchors, facts};
 use crate::logical::{Binding, Kind, Query};
 use crate::passes::codegen::{SqlBackend, rejected};
 use crate::passes::plan::Term;
@@ -353,8 +352,8 @@ pub fn apply<B: SqlBackend>(
     let kind = query.kind();
     let mut ctx = ResultContext::new().with_query_type(kind.into());
     ctx.entity_auth = entity_auth(model);
-    let facts = facts(query);
-    let anchors = anchors(query, &facts);
+    let facts = query.leaves();
+    let anchors = query.anchors(&facts);
     if kind == Kind::Neighbors
         && let Some(center) = anchors.first()
         && let Some([id]) = center.pinned.as_deref()
