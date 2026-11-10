@@ -43,7 +43,7 @@ relationships:
     variants: {User -> MergeRequest: {cardinality: many_to_many}}
 ```
 
-The authorization fragment declares its scope and its role floor. `enforce` holds the policy for each backend that stores the entity. `checks` hold what runs outside every backend, on the returned rows:
+The authorization fragment declares the entity's scope and the permission a read needs. `enforce` holds the policy for each backend that stores the entity. `checks` name a provider that checks the returned rows:
 
 ```yaml
 # packages/gitlab.code_review/authorization.yaml
@@ -52,25 +52,39 @@ package: gitlab.code_review
 entities:
   MergeRequest:
     scope: namespace
-    role: reporter
+    permission: read
     enforce:
-      clickhouse: {path: traversal_path}
+      clickhouse: {scope_key: traversal_path}
     checks:
-      - {by: rails, resource: merge_request, ability: read_merge_request}
+      - {provider: rails, permission: read_merge_request}
 ```
 
-The ClickHouse policy filters every `MergeRequest` read on the caller's paths at the role floor. The Rails check asks GitLab, in one batch, whether the caller can read each returned merge request, and it fails closed. Policies name graph properties and relationships, never columns.
+The ClickHouse policy filters every `MergeRequest` read on the paths where the caller holds `read`. The `rails` check asks GitLab, in one batch, whether the caller can read each returned merge request, and it fails closed. Policies name graph properties and relationships, never columns.
 
-An entity without its own path reaches one through a relationship. A `Commit` takes its project's path:
+The platform package declares the permissions and scope kinds that every package uses:
+
+```yaml
+# packages/gitlab/authorization.yaml
+kind: authorization
+package: gitlab
+permissions: [read, read_code, read_merge_request, read_vulnerability]
+scopes:
+  namespace: {kind: hierarchy}
+  user: {kind: owner, entity: User}
+entities:
+  User: {scope: global, permission: read}
+```
+
+An entity without its own scope key reaches one through a relationship. A `Commit` takes its project's path:
 
 ```yaml
   Commit:
     scope: namespace
-    role: reporter
+    permission: read
     enforce:
-      clickhouse: {path: {via: IN_PROJECT}}
+      clickhouse: {scope_key: {via: IN_PROJECT}}
     checks:
-      - {by: rails, resource: project, ability: read_code, id: project_id}
+      - {provider: rails, permission: read_code, object: Project, id: project_id}
 ```
 
 The storage fragment lays it out in a store, and nothing in it is inferred. It names the table and lists every stored property as a column, with its storage type and whether it is immutable. Shared fields work on every backend. A `backend` block holds what only that backend understands, and that backend validates it.
@@ -156,7 +170,7 @@ entities:
     query: generated
 ```
 
-Every row carries the `traversal_path` of the namespace that installed the integration, so its authorization enforces a path filter like any other entity: `enforce: {clickhouse: {path: traversal_path}}`.
+Every row carries the `traversal_path` of the namespace that installed the integration, so its authorization enforces a scope filter like any other entity: `enforce: {clickhouse: {scope_key: traversal_path}}`.
 
 ## Add a live third-party entity
 
@@ -184,11 +198,11 @@ package: integration.slack
 entities:
   SlackMessage:
     scope: namespace
-    role: reporter
+    permission: read
     enforce:
-      live: {workspaces: installed_in_namespace}
+      live: {scope_key: {via: [IN_WORKSPACE, INSTALLED_IN]}}
     checks:
-      - {by: provider, sign_in: caller}
+      - {provider: slack, kind: delegated}
 ```
 
 ```yaml
@@ -232,7 +246,7 @@ let plan = live.build(|q| {
 let request = live.render(&plan);
 ```
 
-The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. Each workspace maps to the namespace that installed it. The `live` policy sends the request only for workspaces in namespaces the caller can read. The `provider` check records that Slack then applies its own visibility through the caller's sign-in.
+The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. Each workspace maps to the namespace that installed it. The `live` policy follows each message to the namespace that installed its workspace. The live backend then sends the request only for workspaces in namespaces where the caller holds `read`. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through the caller's sign-in.
 
 ## Add a backend
 
@@ -315,7 +329,7 @@ let plan = code.build(|q| {
 let request = code.render(&plan);
 ```
 
-The trigram prefilter is a planning decision: the planner takes the pattern's literal atoms and narrows the candidate files before the structural pass. The rendered request travels over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. `File` declares `orbit_code: {repositories: project_id}` next to its ClickHouse path policy, and the security phase turns it into a repository restriction.
+The trigram prefilter is a planning decision: the planner takes the pattern's literal atoms and narrows the candidate files before the structural pass. The rendered request travels over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. `File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction.
 
 ## Add a tenant overlay
 
@@ -346,13 +360,13 @@ package: tenant.agent_memory
 entities:
   Memory:
     scope: namespace
-    role: reporter
+    permission: read
     enforce:
-      clickhouse: {path: traversal_path}
+      clickhouse: {scope_key: traversal_path}
 relationships:
   ABOUT:
     enforce:
-      clickhouse: same_namespace
+      clickhouse: {scope_key: traversal_path}
 ```
 
 ```yaml
@@ -375,7 +389,87 @@ relationships:
     Memory -> Project: {edge_table: gl_edge}
 ```
 
+A user-scoped entity names its owner relationship instead of a scope key:
+
+```yaml
+# packages/tenant.todos/authorization.yaml
+kind: authorization
+package: tenant.todos
+entities:
+  Todo:
+    scope: user
+    permission: read
+    enforce:
+      clickhouse: {owner: OWNS}
+relationships:
+  OWNS:
+    enforce:
+      clickhouse: {scope_key: traversal_path}
+```
+
+The graph must give `OWNS` one owner per todo. Storage decides whether the owner check reads a column or an edge.
+
 Its entities appear only in that tenant's catalogs, and that tenant's plans and caches carry their own model ID.
+
+## Add an authorization provider
+
+A provider is a Rust module that answers one or more authorization queries. Each query type has its own response:
+
+| Query | Asks | Response |
+|---|---|---|
+| `Identify` | who sent this request | `Caller` |
+| `Scopes` | which scope keys the caller holds a permission in | `ScopeSet`: `All`, `Keys` or `Subtrees` |
+| `Check` | which of these rows the caller may use with a permission | the allowed rows |
+| `Credentials` | the caller's sign-in for a delegated service | `Credential` |
+
+```rust
+pub trait Provider<Q: Query>: Send + Sync {
+    async fn call(&self, query: Q) -> Result<Q::Response, AuthError>;
+}
+
+pub trait Module: Sized {
+    const KIND: &'static str;
+    type Options: DeserializeOwned;
+    fn build(options: Self::Options) -> Result<Self, AuthError>;
+}
+```
+
+The GitLab modules wrap what runs today:
+
+```rust
+impl Provider<Identify<'_>> for GitLabSession { /* verify the session token Rails issues */ }
+impl Provider<Scopes<'_>> for GitLabSession { /* paths at the role the permission maps to, as Subtrees */ }
+impl Provider<Check<'_>> for RailsAbilities { /* the redaction call to Rails, in batches */ }
+```
+
+The deployment config binds each provider name that packages use to a module, and names the one `Identify` provider:
+
+```yaml
+authorization:
+  identify: gitlab_session
+  providers:
+    gitlab_session:
+      module: gitlab.session
+      connection: rails
+      permissions: {read: reporter, read_code: reporter, read_merge_request: reporter, read_vulnerability: developer}
+    rails: {module: gitlab.abilities, connection: rails, batch: 1000}
+    slack: {module: slack.sign_in, connection: data_extraction}
+```
+
+GitLab's access levels appear only in the `gitlab.session` options. Another deployment binds other modules to the same contract:
+
+```yaml
+authorization:
+  identify: oidc
+  providers:
+    oidc: {module: oidc, issuer: "https://login.example.com", subject: sub}
+    spicedb: {module: spicedb, endpoint: "spicedb:50051"}
+    cedar: {module: cedar, policies: "s3://example-authz/policies.cedar"}
+```
+
+`spicedb` answers `Scopes` with `LookupResources` and `Check` with `CheckBulkPermissions`. `cedar` answers `Check` with `is_authorized` per row, over the columns the check lists in `attributes`. A row comes back only if every check on its entity allows it. Every provider fails closed.
+
+Tests use seeded fakes for each query, like the existing redaction mock.
 
 ## Add a query language
 
@@ -414,15 +508,16 @@ physical:
 
 The loader collects every error, names its package, and fails once:
 
-- An unknown entity, property, relationship, variant, role, scope, field or template.
+- An unknown entity, property, relationship, variant, permission, scope, provider, field or template.
 - An entity or variant declared twice, or a second authorization entry.
 - An entity with no `id`, or no authorization entry.
 - A property that its home store neither stores nor excludes, a stored column without a storage type, or a binding without a table. Nothing is inferred.
-- A declaration above the package's trust tier. Only a platform package may declare a trusted store, global scope or a Rails check. Only an integration package may declare a provider check. A tenant overlay's entities must be namespace- or user-scoped.
-- A backend that stores an entity or a relationship but has no `enforce` entry for it.
-- A policy kind the backend cannot enforce, such as `repositories` on ClickHouse, or one that names a property or relationship the graph lacks.
-- A path through a relationship that does not reach a namespaced entity with one target per row.
-- An `enforce` entry of `none` with no `checks`.
+- A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none`, or checks by any provider. An integration package may declare only `Credentials` checks. A tenant overlay declares no checks, and its entities must be namespace- or user-scoped.
+- A backend that stores a non-global entity or a relationship but has no `enforce` entry for it.
+- A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.
+- A `via` chain that does not reach an entity holding the scope key, with one target per step.
+- An `enforce` entry of `none` with no `checks`, or an entity whose scope answer is not exact and that has no check.
+- A provider name the deployment does not bind, or one bound to a module that does not answer the query the check needs.
 - A user-scoped entity whose owner relationship does not reach `User`, or allows more than one owner per row.
 - A relationship variant with no storage binding in the home store of its endpoints.
 - A foreign key binding on a many-to-many variant, on the wrong side of a one-to-many variant, or on a column its table does not hold.

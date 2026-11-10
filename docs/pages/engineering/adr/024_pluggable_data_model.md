@@ -45,7 +45,7 @@ Agent memory needs custom node types for one tenant.
 5. **A backend implements one trait.** A catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. Shared code reads capabilities and never checks a backend name.
 6. **Every plan is built through a checked catalog builder.** There is one logical plan language and one physical plan language per kind of backend. Shared tracking checks every connection as it is made, and rewrites use the same builder, so no phase can leave an invalid plan.
 7. **Surfaces parse, and the compiler plans.** A surface turns text into a logical plan, and construction errors replace the validation pass. The planning phase reads the logical plan and builds the physical plan in one step, with no intermediate plan description.
-8. **Authorization is declared per backend, and security enforces it in its own phase.** Each backend that stores an entity has its own policy, and checks such as Rails redaction run on the returned rows. A final check proves that every read carries its policy.
+8. **Authorization runs through providers, and security enforces it in its own phase.** Packages declare each entity's scope, permission, one policy per backend and its checks. A deployment binds provider names to modules that identify the caller, list the caller's scopes and check rows; GitLab is one such module. A final check proves that every read carries its policy.
 9. **The catalog renders its own plans.** The catalog that builds a plan renders it, into SQL with parameters or into the backend's native request.
 10. **A query that spans connections runs as an execution DAG.** The planner splits it into stages, one per connection, connected by key sets and rows. The query engine runs the DAG and applies the final order, limit and pagination.
 11. **Plans are tested in three stages.** Plan tests assert the logical plan, the physical plan right after planning, and the physical plan after every phase.
@@ -180,12 +180,12 @@ rectangle "<b>Tenant model</b>  (one ModelId)\nthe active version of every packa
   rectangle "<b>Tenant overlays</b>\nnamespace- or user-scoped only" as T3 #F8FAFC {
     rectangle "tenant.agent_memory" as O #F1F5F9
   }
-  rectangle "<b>Integration packages</b>\nprovider checks, no trusted stores" as T2 #F8FAFC {
+  rectangle "<b>Integration packages</b>\nCredentials checks, no trusted stores" as T2 #F8FAFC {
     rectangle "integration.slack\nintegration.jira" as I #F1F5F9
   }
   rectangle "<b>Platform packages</b>\nmay declare anything" as T1 #F8FAFC {
-    rectangle "<b>package gitlab.code_review</b>\npackage.yaml: requires gitlab, gitlab.core" as P #F1F5F9 {
-      rectangle "<b>Layer 2: authorization, source</b>\nenforce per backend: clickhouse path filter\nchecks: Rails read_merge_request\nsource: siphon tables, query, column map" as L2 #E2E8F0 {
+    rectangle "<b>package gitlab.code_review</b>\npackage.yaml: requires gitlab" as P #F1F5F9 {
+      rectangle "<b>Layer 2: authorization, source</b>\npermission: read, enforce: clickhouse scope_key\nchecks: rails read_merge_request\nsource: siphon tables, query, column map" as L2 #E2E8F0 {
         rectangle "<b>Layer 1: storage, service</b>\ntable gl_merge_request, every column and type\nAUTHORED: foreign key author_id\naccess hints, immutable columns" as L1 #CBD5E1 {
           rectangle "<b>Layer 0: graph</b>\nMergeRequest: properties, types, defaults\nAUTHORED: User -> MergeRequest, one to many" as L0 #FFFFFF
         }
@@ -203,7 +203,7 @@ Each layer names only the layers inside it, and the loader checks them from the 
 | 0 | graph | nothing | entities, properties, types, defaults; relationship variants, their cardinality and edge-owned attributes |
 | 1 | storage | the graph | tables, columns, storage types, immutable columns, access hints; a foreign key or an edge table for every variant |
 | 1 | service | the graph | lookups for virtual properties |
-| 2 | authorization | the graph, backend kinds | scope, role floor, one policy per backend that stores the entity, checks on returned rows |
+| 2 | authorization | the graph, backends, provider names | scope, permission, one policy per backend that stores the entity, checks by provider |
 | 2 | source | the graph | source tables, query templates, column map; rows land in the tables storage binds |
 | package | `package.yaml` | other packages | name, `requires` |
 
@@ -215,9 +215,9 @@ The registry records each package's tier from its publisher, and the loader enfo
 
 | Tier | May declare | May not declare |
 |---|---|---|
-| Platform | anything | |
-| Integration | provider checks | trusted stores, Rails checks, global scope |
-| Tenant overlay | namespace- and user-scoped entities | trusted stores, Rails or provider checks, global scope |
+| Platform | permissions, scope kinds, checks by any provider, `none` | |
+| Integration | entities in a platform scope, `Credentials` checks | permissions, scope kinds, other checks, `none`, global scope, trusted stores |
+| Tenant overlay | namespace- and user-scoped entities | permissions, scope kinds, any check, `none`, trusted stores |
 
 Packages compose under five rules:
 
@@ -244,7 +244,7 @@ note right
      that stores the entity
   2. a policy kind that backend enforces
   3. names that exist in the graph
-  4. checks outside the backend,
+  4. providers the deployment binds,
      within the package's trust tier
 end note
 if (Any errors?) then (yes)
@@ -260,24 +260,25 @@ endif
 
 Later stages read facts by ID, and every plan carries the `ModelId` it was built against.
 
-An access policy names graph properties and relationships, never columns. `enforce` holds one policy per backend kind:
+The platform package declares the vocabulary that every package uses: the permissions and the scope kinds. A scope kind is a rule every backend can render:
 
-| Backend kind | Policy | Example |
+| Scope kind | Meaning | Example |
 |---|---|---|
-| Relational | path filter, directly or through a relationship | `MergeRequest`: `{path: traversal_path}`; `Commit`: `{path: {via: IN_PROJECT}}` |
-| Relational | owner check for a user-scoped entity | todo: `{owner: OWNS}`; storage decides whether it reads a column or an edge |
-| Code | repository restriction | `File`: `{repositories: project_id}` |
-| Live | workspace precondition | `SlackMessage`: `{workspaces: installed_in_namespace}` |
-| Any | `none`, allowed only with a check | a redaction-only entity |
+| `hierarchy` | a grant on a scope covers its descendants | GitLab namespaces |
+| `flat` | a grant covers one scope only | a team, an organization |
+| `owner` | one entity owns the row, and the caller must be it | a todo owned by its `User` |
+| `global` | no scope, only the permission | `User` |
 
-`checks` run outside every backend, on the returned rows:
+An entity names its scope, the permission a read needs, and one `enforce` policy per backend that stores it. A policy names graph properties and relationships, never columns:
 
-| Check | What it does | On failure |
-|---|---|---|
-| `by: rails` | one batch ability check against GitLab | drops the rows, and fails closed if GitLab does not answer |
-| `by: provider` | the provider filters again through the caller's own sign-in | the provider returns nothing |
+| Policy | Example |
+|---|---|
+| `scope_key`, on the entity | `MergeRequest`: `{clickhouse: {scope_key: traversal_path}}` |
+| `scope_key`, through relationships | `File`: `{orbit_code: {scope_key: {via: IN_PROJECT}}}`; `SlackMessage`: `{live: {scope_key: {via: [IN_WORKSPACE, INSTALLED_IN]}}}` |
+| `owner`, through a relationship to the owner | todo: `{clickhouse: {owner: OWNS}}` |
+| `none`, only with a check | a check-only entity |
 
-`User` is global, so its policy is a role floor alone.
+`checks` name a provider and a permission, and run on the returned rows. A row comes back only if every check allows it.
 
 ### 3. A new version goes live after its backfill
 
@@ -402,9 +403,68 @@ CH --> Caller : rows
 The surface records what the caller asked for and makes no planning decisions.
 The planning phase decides and builds in one step, and every later phase rewrites through the same builder.
 The rewrite contract is fixed: inputs before consumers, each shared body once, no revisiting inserted operations, and explicit reconnection when outputs change. So no phase can produce a plan the builder would reject.
-Security adds each read's policy as plan operations: a path filter on the `MergeRequest` read and a role floor on the `User` read. The Rails checks run on the rows that come back.
+Security adds each read's policy as plan operations: a path filter on the `MergeRequest` read, and on the `User` read a filter that admits rows only if the caller holds `read`. The Rails checks run on the rows that come back.
 
-### 6. The same path for every backend
+### 6. Authorization runs through providers
+
+```plantuml
+@startuml
+set separator none
+skinparam shadowing false
+participant "Query engine" as Q
+participant "Identify provider" as ID
+participant "Scopes provider" as SC
+participant "Catalog" as C
+database "Backend" as B
+participant "Check provider" as CK
+
+Q -> ID : Identify(request)
+ID --> Q : Caller
+Q -> SC : Scopes(caller, namespace, read)
+SC --> Q : ScopeSet
+Q -> C : security: render each read's policy\nwith its ScopeSet
+Q -> B : execute
+B --> Q : rows
+Q -> CK : Check(caller, read_merge_request, ids)
+CK --> Q : allowed rows
+@enduml
+```
+
+The contract is one trait with one query type per job:
+
+```rust
+pub trait Query { type Response; }
+
+pub trait Provider<Q: Query>: Send + Sync {
+    async fn call(&self, query: Q) -> Result<Q::Response, AuthError>;
+}
+
+pub struct Identify<'a> { pub request: &'a RequestContext }
+pub struct Scopes<'a> { pub caller: &'a Caller, pub scope: ScopeId, pub permission: PermissionId }
+pub struct Check<'a> { pub caller: &'a Caller, pub permission: PermissionId, pub object: EntityId, pub ids: &'a [RowId] }
+pub struct Credentials<'a> { pub caller: &'a Caller, pub service: ServiceId }
+
+pub enum ScopeSet { All, Keys(Vec<ScopeKey>), Subtrees(Vec<ScopeKey>) }
+```
+
+`Identify` returns a `Caller`, `Scopes` a `ScopeSet`, `Check` the allowed rows, and `Credentials` the caller's sign-in for a delegated service.
+A module implements the queries it answers, and a `Module` trait builds it from its options.
+The deployment config binds each provider name that packages use to a module, the way it binds store connections. It also names the one `Identify` provider.
+Each backend renders a `ScopeSet` its own way: `Subtrees` as a prefix filter, `Keys` as an `IN` list, `All` as no filter. A set over the key-set cap fails the query.
+Every provider fails closed.
+
+The same contract fits other authorization systems:
+
+| Deployment | `Identify` | `Scopes` | `Check` |
+|---|---|---|---|
+| GitLab | the session token Rails issues | the caller's paths at the role each permission maps to | Rails abilities, in batches |
+| SpiceDB or OpenFGA | an OIDC token | `LookupResources` | `CheckBulkPermissions` |
+| Cedar, as a check | the deployment's `Identify` | the deployment's `Scopes` | `is_authorized` per row, over the declared attributes |
+| OIDC groups | an OIDC token | the `groups` claim | none |
+
+GitLab's access levels live only in the GitLab module's options, which map each permission to a role. A `Scopes` answer is exact when the provider owns the grants, as GitLab paths, SpiceDB lookups and group claims do. An entity whose scope answer is not exact must declare a check.
+
+### 7. The same path for every backend
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear"}}}%%
@@ -428,7 +488,7 @@ The planning phase turns one logical plan into the physical plan of the connecti
 | Orbit Next | code | a trigram prefilter before the ast-grep pass | repository restriction | gRPC structural search |
 | Slack | live | a push-down filter | workspace precondition, then the provider check | Data Extraction Service call |
 
-### 7. A query that spans connections runs as a DAG of stages
+### 8. A query that spans connections runs as a DAG of stages
 
 Some queries need data from more than one connection. This one joins open merge requests, which live in ClickHouse, with code that Orbit Next keeps on S3 in its trigram index, commit manifests and code graph:
 
@@ -471,7 +531,8 @@ Every stage gets its own policy, and plan tests assert the logical plan, the pla
 
 - A package that fails its load checks is rejected, and the previous model keeps serving. Publishing must run the same checks, so authors see the errors first.
 - The loader is strict. A fragment cannot carry unknown fields for later use.
-- Every namespaced entity declares a policy for each backend that stores it. A new backend for an existing entity needs an authorization change as well as a storage change.
+- Every scoped entity declares a policy for each backend that stores it. A new backend for an existing entity needs an authorization change as well as a storage change.
+- The query engine has no built-in authorization system. A deployment without Rails supplies its own `Identify` and `Scopes` modules, and a `Check` module where its scope answer is not exact.
 - A change to storage goes live only after its backfill. A change that only adds query metadata takes effect on the next load.
 - The derived scope covers what the packages describe: storage layout and source fragments. A change in indexer code that alters the rows it writes is outside every package, so the ledger keeps a hand-written widening for it.
 - The server holds each model snapshot until the compiles that use it finish, and caches keyed by the model hash evict old snapshots.
