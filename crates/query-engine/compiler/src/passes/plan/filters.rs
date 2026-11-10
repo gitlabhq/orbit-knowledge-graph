@@ -239,8 +239,8 @@ pub fn bind_filter(
 
 fn in_sort_key<B: RelationalBackend>(catalog: &Catalog<B>, table: &str, column: &str) -> bool {
     catalog
-        .table_facts(table)
-        .is_some_and(|facts| facts.sort_key.iter().any(|key| key == column))
+        .physical_table(table)
+        .is_some_and(|table| table.sort_key.iter().any(|key| key == column))
 }
 
 fn column_type<B: RelationalBackend>(
@@ -248,11 +248,7 @@ fn column_type<B: RelationalBackend>(
     table: &str,
     column: &str,
 ) -> Option<query_data_model::DataType> {
-    catalog
-        .table_facts(table)?
-        .column_types
-        .get(column)
-        .copied()
+    catalog.physical_table(table)?.column(column)?.data_type
 }
 
 pub fn lowerable_denorm<'a>(

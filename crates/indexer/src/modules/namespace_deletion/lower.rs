@@ -61,7 +61,7 @@ fn deletion_tables(catalog: &Catalog<ClickHouse>) -> Vec<DeletionTable<'_>> {
     let Ok(schema) = catalog.schema() else {
         return Vec::new();
     };
-    let sort_key = |table: &str| schema.table(table).map_or(&[][..], |table| &table.order_by);
+    let sort_key = |table: &str| schema.table(table).map_or(&[][..], |table| &table.sort_key);
     let mut entities: Vec<_> = graph
         .entities()
         .filter(|entity| catalog.has_path_column(entity.id))
@@ -99,7 +99,7 @@ fn deletion_tables(catalog: &Catalog<ClickHouse>) -> Vec<DeletionTable<'_>> {
         if let Some(table) = schema.table(&table) {
             tables.push(DeletionTable {
                 table: &table.name,
-                sort_key: &table.order_by,
+                sort_key: &table.sort_key,
                 carried: Vec::new(),
             });
         }
@@ -320,7 +320,7 @@ mod tests {
             let table = schema.table(&edge_table).expect("edge table must exist");
 
             let statement = find_statement(&statements, &edge_table);
-            for column in &table.order_by {
+            for column in &table.sort_key {
                 assert!(
                     statement.sql.contains(column.as_str()),
                     "{edge_table} deletion should include sort key column {column}: {}",

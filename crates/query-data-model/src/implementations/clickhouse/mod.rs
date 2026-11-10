@@ -48,6 +48,6 @@ impl Catalog<ClickHouse> {
         &self,
     ) -> impl Iterator<Item = (RelationshipId, DenormalizedKey, &DenormalizedProperty)> {
         self.stores()
-            .flat_map(|(_, store)| store.denormalized.declared())
+            .flat_map(|(_, store)| store.relational.denormalized.declared())
     }
 }

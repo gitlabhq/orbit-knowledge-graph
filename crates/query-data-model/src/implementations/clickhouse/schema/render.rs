@@ -24,7 +24,9 @@ impl Table {
             "CREATE TABLE IF NOT EXISTS {prefix}{} (\n{}\n) ENGINE = {}",
             self.name,
             body.join(",\n"),
-            self.engine.to_sql(),
+            self.engine
+                .as_ref()
+                .map_or_else(String::new, Engine::to_sql),
         )];
         clauses.extend(self.order_by_clauses());
         if let Some(ttl) = &self.ttl {
@@ -42,16 +44,20 @@ impl Table {
     }
 
     fn order_by_clauses(&self) -> Vec<String> {
-        if self.order_by.is_empty() {
-            return if self.engine.name.contains("MergeTree") {
+        if self.sort_key.is_empty() {
+            let merge_tree = self
+                .engine
+                .as_ref()
+                .is_some_and(|engine| engine.name.contains("MergeTree"));
+            return if merge_tree {
                 vec!["ORDER BY tuple()".into()]
             } else {
                 Vec::new()
             };
         }
-        let order_by = format!("ORDER BY ({})", self.order_by.join(", "));
+        let order_by = format!("ORDER BY ({})", self.sort_key.join(", "));
         match &self.primary_key {
-            Some(primary_key) if primary_key == &self.order_by => {
+            Some(primary_key) if primary_key == &self.sort_key => {
                 vec![format!(
                     "{order_by} PRIMARY KEY ({})",
                     primary_key.join(", ")

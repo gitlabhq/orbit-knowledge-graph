@@ -1,5 +1,8 @@
+mod edges;
 mod engine;
+mod entities;
 mod joins;
+mod layout;
 mod render;
 mod resolve;
 mod types;
@@ -10,10 +13,14 @@ use std::sync::Arc;
 use super::ClickHouse;
 use crate::{Catalog, DataModelError, Model};
 
+pub use crate::implementations::relational::{
+    Column, Engine, Index, PathColumn, Projection, Table,
+};
+pub(super) use layout::check_indexes;
+pub use layout::default_index_name;
 pub use render::DictionaryCredentials;
-pub use resolve::default_index_name;
-pub(super) use resolve::{check_indexes, resolve};
-pub use types::{data_type, storage_type};
+pub(super) use resolve::resolve;
+pub use types::{data_type, nullable, storage_type};
 
 impl Catalog<ClickHouse> {
     pub fn schema(&self) -> Result<&Schema, DataModelError> {
@@ -25,7 +32,7 @@ impl Catalog<ClickHouse> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Schema {
     tables: Vec<Table>,
     auxiliary: Vec<AuxiliaryTable>,
@@ -36,59 +43,6 @@ pub struct Schema {
     joins: Vec<String>,
     dependencies: BTreeMap<String, BTreeSet<String>>,
     writers: BTreeMap<String, BTreeSet<String>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Table {
-    pub name: String,
-    pub columns: Vec<Column>,
-    pub indexes: Vec<Index>,
-    pub projections: Vec<Projection>,
-    pub engine: Engine,
-    pub order_by: Vec<String>,
-    pub primary_key: Option<Vec<String>>,
-    pub settings: Vec<(String, String)>,
-    pub ttl: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Column {
-    pub name: String,
-    pub storage_type: String,
-    pub default: Option<String>,
-    pub codecs: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Index {
-    pub name: String,
-    pub column: String,
-    pub lowercase: bool,
-    pub kind: String,
-    pub granularity: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Projection {
-    Reorder {
-        name: String,
-        order_by: Vec<String>,
-    },
-    Lightweight {
-        name: String,
-        order_by: Vec<String>,
-    },
-    Aggregate {
-        name: String,
-        select: Vec<String>,
-        group_by: Vec<String>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Engine {
-    pub name: String,
-    pub arguments: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

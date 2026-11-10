@@ -4,6 +4,7 @@ use crate::passes::codegen::SqlBackend;
 use std::collections::HashSet;
 
 use query_data_model::constants::*;
+use query_data_model::implementations::relational::Table;
 use query_data_model::{DenormalizedDirection, DenormalizedProperty};
 
 use super::{EdgeRelation, NodePlan, Pattern};
@@ -81,8 +82,8 @@ impl<B: SqlBackend> Pattern<'_, B> {
             && relation.max_hops == 1
             && relation.endpoint_column(node).is_some()
             && self
-                .edge_columns(relation)
-                .is_some_and(|columns| columns.contains(property))
+                .edge_table(relation)
+                .is_some_and(|table| table.has_column(property))
     }
 
     pub fn has_uncovered_filter(&self, node: &NodePlan) -> bool {
@@ -114,9 +115,8 @@ impl<B: SqlBackend> Pattern<'_, B> {
             .any(|relation| relation.fk.as_ref().is_some_and(|key| key.node == node))
     }
 
-    fn edge_columns(&self, relation: &EdgeRelation) -> Option<&HashSet<String>> {
-        let table = relation.single_edge_table()?;
-        Some(&self.model.table_facts(table)?.columns)
+    fn edge_table(&self, relation: &EdgeRelation) -> Option<&Table> {
+        self.model.physical_table(relation.single_edge_table()?)
     }
 
     /// Endpoint filters on properties the edge table stores as columns, each property once.
@@ -144,12 +144,11 @@ impl<B: SqlBackend> Pattern<'_, B> {
             .entity
             .as_deref()
             .and_then(|entity| self.model.graph().entity_id(entity));
-        let columns = node
+        let table = node
             .table
             .as_deref()
-            .and_then(|table| self.model.table_facts(table))
-            .map(|facts| &facts.columns);
-        let (Some(entity), Some(columns)) = (entity, columns) else {
+            .and_then(|table| self.model.physical_table(table));
+        let (Some(entity), Some(table)) = (entity, table) else {
             return vec![];
         };
         let mut seen: HashSet<&str> = node
@@ -166,7 +165,7 @@ impl<B: SqlBackend> Pattern<'_, B> {
             })
             .filter(|(relation, property, filter)| {
                 self.edge_stores(relation, &node.alias, property, filter)
-                    && columns.contains(*property)
+                    && table.has_column(property)
                     && seen.insert(*property)
             })
             .filter_map(|(_, property, filter)| {

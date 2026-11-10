@@ -31,7 +31,7 @@ impl CodeTableNames {
             let Some(table) = catalog.table_of(entity.id) else {
                 continue;
             };
-            let sort_key = schema.table(table).map_or(&[][..], |table| &table.order_by);
+            let sort_key = schema.table(table).map_or(&[][..], |table| &table.sort_key);
             let carried = entity
                 .properties
                 .iter()

@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{EdgeVariantScope, TraversalPathKind};
 
-use super::{RelationalFacts, TableFacts};
+use super::{Column, RelationalFacts, Table};
 use crate::catalog::{Catalog, Lookup, Redaction, StorageBackend};
+use crate::implementations::clickhouse::backend::IndexKind;
 use crate::{
     DenormalizedKey, DenormalizedProperty, EntityId, ForeignKey, MaterializedJoin, PropertyId,
     RelationshipId, RelationshipVariant, RelationshipVariantId, TraversalPathLookup,
@@ -188,46 +189,65 @@ where
 
     pub fn default_edge_table(&self) -> Option<&str> {
         self.stores()
-            .find_map(|(_, facts)| facts.relational().default_edge_table())
-            .map(|table| table.name.as_str())
+            .find_map(|(_, facts)| facts.relational().default_edge_table.as_deref())
     }
 
-    /// The facts of a table on any store of the connection.
-    pub fn table_facts(&self, name: &str) -> Option<&TableFacts> {
-        self.stores().find_map(|(_, facts)| facts.table(name))
+    /// A table any store of the connection holds.
+    pub fn physical_table(&self, name: &str) -> Option<&Table> {
+        self.stores()
+            .find_map(|(_, facts)| facts.relational().table(name))
     }
 
     /// The copies of a table that store the same rows in another sort order.
     pub fn copies_of(&self, table: &str) -> Vec<&str> {
         self.stores()
-            .flat_map(|(_, facts)| facts.copies_of(table))
+            .flat_map(|(_, facts)| &facts.relational().copies)
+            .filter(|(_, source)| source == table)
+            .map(|(copy, _)| copy.as_str())
             .collect()
     }
 
     pub fn joins(&self) -> &[MaterializedJoin] {
         self.stores()
-            .map(|(_, facts)| facts.joins())
+            .map(|(_, facts)| facts.relational().joins.as_slice())
             .find(|joins| !joins.is_empty())
             .unwrap_or_default()
     }
 
     pub fn denormalized(&self, key: DenormalizedKey) -> Option<&DenormalizedProperty> {
-        self.stores().next()?.1.denormalized(key)
+        self.stores()
+            .next()?
+            .1
+            .relational()
+            .denormalized
+            .property(key)
+    }
+
+    /// The home table of a property's entity and the column there that stores it.
+    fn stored_column(&self, property: PropertyId) -> Option<(&Table, &Column)> {
+        let entity = self.graph().property(property).entity;
+        let (store, facts) = self.home(entity)?;
+        let table = facts.relational().table(&store.source(entity)?.table)?;
+        Some((table, table.column(store.column(property)?)?))
     }
 
     pub fn text_index(&self, property: PropertyId) -> bool {
-        self.home(self.graph().property(property).entity)
-            .is_some_and(|(_, facts)| facts.text_index(property))
+        self.stored_column(property).is_some_and(|(table, column)| {
+            table.indexes.iter().any(|index| {
+                index.column == column.name
+                    && IndexKind::parse(&index.kind) == Some(IndexKind::Text)
+            })
+        })
     }
 
     pub fn null_as_epoch(&self, property: PropertyId) -> bool {
-        self.home(self.graph().property(property).entity)
-            .is_some_and(|(_, facts)| facts.null_as_epoch(property))
+        self.stored_column(property)
+            .is_some_and(|(_, column)| column.null_as_epoch)
     }
 
     pub fn high_fan_out(&self, entity: EntityId) -> bool {
         self.home(entity)
-            .is_some_and(|(_, facts)| facts.high_fan_out(entity))
+            .is_some_and(|(_, facts)| facts.relational().high_fan_out.contains(&entity))
     }
 
     pub fn path_lookup(
@@ -235,6 +255,10 @@ where
         entity: EntityId,
         kind: TraversalPathKind,
     ) -> Option<&TraversalPathLookup> {
-        self.home(entity)?.1.path_lookup(entity, kind)
+        self.home(entity)?
+            .1
+            .relational()
+            .path_lookups
+            .get(&(entity, kind))
     }
 }

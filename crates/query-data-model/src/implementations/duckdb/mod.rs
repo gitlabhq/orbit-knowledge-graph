@@ -1,12 +1,11 @@
 pub mod backend;
+mod ddl;
 mod functions;
 pub mod render;
 
 use std::sync::Arc;
 
-use backend::DuckDbTable;
-
-use super::relational::{Capabilities, CurrentRows, RelationalBackend};
+use super::relational::{Capabilities, CurrentRows, RelationalBackend, Table};
 use crate::{Catalog, DataModelError, Model, Packages};
 
 #[derive(Debug, Clone)]
@@ -35,8 +34,8 @@ impl Catalog<DuckDb> {
     }
 
     /// The tables the connection creates, entity tables before edge tables.
-    pub fn tables(&self) -> impl Iterator<Item = &DuckDbTable> {
-        let layouts = || self.stores().flat_map(|(_, facts)| &facts.layouts);
+    pub fn tables(&self) -> impl Iterator<Item = &Table> {
+        let layouts = || self.stores().flat_map(|(_, store)| &store.tables);
         layouts()
             .filter(|table| table.entity.is_some())
             .chain(layouts().filter(|table| table.entity.is_none()))

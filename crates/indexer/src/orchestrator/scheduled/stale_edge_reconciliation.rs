@@ -230,7 +230,7 @@ fn group_mutable_edges_by_emitting_node(catalog: &Catalog<ClickHouse>) -> Vec<Re
                 kinds.dedup();
                 let edge_sort_key = schema
                     .and_then(|schema| schema.table(&edge_table))
-                    .map(|table| table.order_by.join(", "))
+                    .map(|table| table.sort_key.join(", "))
                     .unwrap_or_default();
                 ReconciliationGroup {
                     emitting_node_table: tables_by_emitting_node[&emitting_node].clone(),

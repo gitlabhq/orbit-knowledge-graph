@@ -36,7 +36,7 @@ impl GraphSchema {
         };
         let table = |table: &Table| {
             let mut table = table.clone();
-            table.engine = engine(table.engine);
+            table.engine = table.engine.map(engine);
             table
         };
         let view = |view: &MaterializedView| {
@@ -111,7 +111,7 @@ mod tests {
         schema
             .tables
             .iter()
-            .map(|table| table.engine.name.clone())
+            .filter_map(|table| table.engine.as_ref().map(|engine| engine.name.clone()))
             .chain(
                 schema
                     .views

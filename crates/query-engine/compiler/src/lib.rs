@@ -26,7 +26,6 @@
 //! ```
 
 pub mod analytics;
-pub mod ast;
 pub mod constants;
 pub mod error;
 pub mod hydration;
@@ -42,7 +41,6 @@ pub mod passes;
 pub mod remote;
 pub mod surface;
 
-pub use ast::ddl;
 pub use constants::{
     EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_SRC_KIND_SUFFIX, EDGE_SRC_SUFFIX,
     edge_kinds_column, hydration_node_alias, internal_column_prefix, neighbor_id_column,
@@ -60,9 +58,7 @@ pub use analytics::ExecMetrics;
 pub use analytics::QueryStats;
 pub use hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 pub use passes::codegen::{
-    CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
-    ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::duckdb::generate_local_ddl,
-    ddl::generate_local_tables,
+    CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect, ddl::generate_local_ddl,
 };
 pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,

@@ -2,7 +2,6 @@ use std::path::Path;
 
 use query_data_model::catalog::RowFilter;
 use query_data_model::implementations::clickhouse::ClickHouse;
-use query_data_model::implementations::clickhouse::backend::IndexKind;
 use query_data_model::implementations::duckdb::DuckDb;
 use query_data_model::{DataModelError, Direction, Endpoint, Model};
 
@@ -91,7 +90,7 @@ fn a_clickhouse_catalog_resolves_tables_columns_and_routes() {
     let diff = model.property(request, "diff").unwrap().id;
 
     assert_eq!(store.source(request).unwrap().table, "gl_merge_request");
-    assert_eq!(facts.column(title).unwrap().indexes, [IndexKind::Text]);
+    assert!(catalog.text_index(title));
     assert_eq!(
         facts.relational.versioning.as_ref().unwrap().version,
         "_version"

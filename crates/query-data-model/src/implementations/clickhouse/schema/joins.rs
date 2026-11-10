@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
-use super::resolve::{Layout, merge};
-use super::{Column, Index, MaterializedView, Table};
+use super::layout::merge;
+use super::resolve::Layout;
+use super::{Column, Index, MaterializedView, PathColumn, Table};
 use crate::catalog::Diagnostics;
 use crate::implementations::clickhouse::spec::{JoinSourceSpec, JoinSpec, Settings};
 
@@ -56,20 +57,27 @@ pub(super) fn resolve(
         let column = columns.remove(position);
         columns.insert(0, column);
     }
-    columns.extend(layout.columns.iter().cloned());
+    let path_columns = spec
+        .sources
+        .iter()
+        .zip(&sources)
+        .filter_map(|(source, table)| {
+            Some(PathColumn {
+                name: source.path_column.clone()?,
+                entity: table.entity,
+            })
+        })
+        .collect();
     let table = Table {
-        name: name.to_string(),
         indexes,
-        projections: Vec::new(),
         engine: layout.engine.clone(),
-        order_by: spec.sort_key.clone(),
-        primary_key: None,
+        sort_key: spec.sort_key.clone(),
         settings: merge(
             &layout.settings,
             &inherited.into_iter().collect::<Settings>(),
         ),
-        ttl: None,
-        columns,
+        path_columns,
+        ..Table::new(name, columns)
     };
     let views = feeding_views(name, spec, &table, &version, &deleted);
     Some((table, views))

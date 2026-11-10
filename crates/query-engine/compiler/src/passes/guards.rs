@@ -26,7 +26,7 @@ pub fn scan<B: RelationalBackend>(catalog: &Catalog<B>, table: Table) -> Option<
             RowFilter::None | RowFilter::PathThrough { .. } => Vec::new(),
         });
     }
-    let columns = &facts.table(name)?.path_columns;
+    let columns = &facts.relational().table(name)?.path_columns;
     Some(
         columns
             .iter()

@@ -288,7 +288,7 @@ fn edge_transformations(
                     namespaced,
                     &denormalized,
                     &filters,
-                    schema.map_or(&[], |table| table.order_by.as_slice()),
+                    schema.map_or(&[], |table| table.sort_key.as_slice()),
                 ),
                 destination_table: prefixed_table_name(table, *SCHEMA_VERSION),
                 dict_encode_columns: low_cardinality_columns(schema),

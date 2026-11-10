@@ -1,16 +1,13 @@
-use std::collections::HashMap;
-
-use crate::DataType;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use super::DuckDb;
-use crate::EntityId;
+use crate::DataType;
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
 use crate::implementations::relational::{
-    PathColumn, RelationalFacts, RelationalOptions, RelationalRoute, RelationalStore, TableFacts,
-    TableSchema,
+    Column, RelationalOptions, RelationalRoute, RelationalStore, Table,
 };
+use crate::spec::parse_word;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -28,157 +25,29 @@ pub struct DuckDbColumnSpec {
     pub default: Option<String>,
 }
 
-/// A table the store creates, with its columns in declaration order.
-#[derive(Debug, Clone)]
-pub struct DuckDbTable {
-    pub name: String,
-    pub entity: Option<EntityId>,
-    pub columns: Vec<DuckDbColumn>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DuckDbColumn {
-    pub name: String,
-    pub data_type: DataType,
-    pub nullable: bool,
-    pub default: Option<String>,
-}
-
-#[derive(Debug)]
-pub struct DuckDbStore {
-    pub relational: RelationalStore,
-    pub layouts: Vec<DuckDbTable>,
-    tables: HashMap<String, TableFacts>,
-}
-
-impl RelationalFacts for DuckDbStore {
-    fn relational(&self) -> &RelationalStore {
-        &self.relational
-    }
-
-    fn table(&self, name: &str) -> Option<&TableFacts> {
-        self.tables.get(name)
-    }
-}
-
 impl StorageBackend for DuckDb {
     const KIND: &'static str = "duckdb";
     type Options = RelationalOptions;
     type SourceOptions = DuckDbSource;
     type RouteOptions = RelationalRoute;
-    type Store = DuckDbStore;
+    type Store = RelationalStore;
 
-    fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> DuckDbStore {
-        let relational = RelationalStore::resolve(
-            &input,
-            &input.options,
-            input
-                .sources
-                .iter()
-                .map(|source| (source.entity, source.options.sort_key.clone())),
-            diagnostics,
-        );
-        let mut relational = relational;
-        relational.tables = entity_schemas(&input).collect();
-        let mut layouts = entity_layouts(&input, diagnostics);
-        let mut tables = HashMap::new();
-        for source in input.store.sources() {
-            let properties = input.graph.entity(source.entity).properties.iter();
-            let column_types: HashMap<String, DataType> = properties
-                .filter_map(|property| {
-                    let column = input.store.column(*property)?;
-                    Some((
-                        column.to_string(),
-                        input.graph.property(*property).data_type,
-                    ))
-                })
-                .collect();
-            tables.insert(
-                source.table.clone(),
-                TableFacts {
-                    entity: Some(source.entity),
-                    columns: column_types.keys().cloned().collect(),
-                    column_types,
-                    sort_key: relational
-                        .sort_key(source.entity)
-                        .unwrap_or_default()
-                        .to_vec(),
-                    path_columns: path_columns(&input, Some(source.entity)),
-                },
-            );
-        }
-        for (name, spec) in &input.options.edge_tables {
-            let column_types = spec.column_types(&input.store.package, name, diagnostics);
-            layouts.push(DuckDbTable {
-                name: name.clone(),
-                entity: None,
-                columns: spec
-                    .columns
-                    .keys()
-                    .filter_map(|column| {
-                        Some(DuckDbColumn {
-                            name: column.clone(),
-                            data_type: *column_types.get(column)?,
-                            nullable: false,
-                            default: None,
-                        })
-                    })
-                    .collect(),
-            });
-            relational.tables.push(TableSchema::new(
-                name,
-                spec.columns
-                    .keys()
-                    .map(|column| (column.clone(), column_types.get(column).copied())),
-            ));
-            tables.insert(
-                name.clone(),
-                TableFacts {
-                    entity: None,
-                    columns: column_types.keys().cloned().collect(),
-                    column_types,
-                    sort_key: spec.sort_key.clone(),
-                    path_columns: path_columns(&input, None),
-                },
-            );
-        }
-        let store = DuckDbStore {
-            relational,
-            layouts,
-            tables,
-        };
-        store.check_attribute_columns(input.store, input.graph, diagnostics);
-        store
+    fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> RelationalStore {
+        let mut relational = RelationalStore::resolve(&input, &input.options, diagnostics);
+        relational.tables = entity_tables(&input, diagnostics);
+        relational.tables.extend(edge_tables(&input, diagnostics));
+        relational.check_attribute_columns(input.store, input.graph, diagnostics);
+        relational
     }
 }
 
-fn path_columns(input: &StoreInput<'_, DuckDb>, entity: Option<EntityId>) -> Vec<PathColumn> {
-    let column = match entity {
-        Some(entity) => input
-            .store
-            .source(entity)
-            .and_then(|source| source.path_column.as_ref()),
-        None => input.store.path_column.as_ref(),
-    };
-    column
-        .map(|name| PathColumn {
-            name: name.clone(),
-            entity,
-        })
-        .into_iter()
-        .collect()
-}
-
-fn entity_layouts(
-    input: &StoreInput<'_, DuckDb>,
-    diagnostics: &mut Diagnostics,
-) -> Vec<DuckDbTable> {
+fn entity_tables(input: &StoreInput<'_, DuckDb>, diagnostics: &mut Diagnostics) -> Vec<Table> {
     let (graph, store) = (input.graph, input.store);
     input
         .sources
         .iter()
         .filter_map(|source| {
-            let table = &store.source(source.entity)?.table;
+            let bound = store.source(source.entity)?;
             let entity = graph.entity(source.entity);
             let declared = &source.options.columns;
             for property in declared.keys() {
@@ -197,39 +66,56 @@ fn entity_layouts(
                 .iter()
                 .filter_map(|id| {
                     let property = graph.property(*id);
-                    Some(DuckDbColumn {
-                        name: store.column(*id)?.to_string(),
-                        data_type: property.data_type,
+                    Some(Column {
+                        property: Some(*id),
+                        storage_type: sql_type(property.data_type).to_string(),
                         nullable: property.nullable,
                         default: declared
                             .get(&property.name)
                             .and_then(|column| column.default.clone()),
+                        ..Column::new(store.column(*id)?, Some(property.data_type))
                     })
                 })
                 .collect();
-            Some(DuckDbTable {
-                name: table.clone(),
-                entity: Some(source.entity),
-                columns,
-            })
+            let sort_key = input.options.sort_key_of(&source.options.sort_key);
+            Some(Table::of_source(bound, sort_key, columns))
         })
         .collect()
 }
 
-fn entity_schemas<'a>(input: &'a StoreInput<'_, DuckDb>) -> impl Iterator<Item = TableSchema> + 'a {
-    let graph = input.graph;
-    input.store.sources().map(move |source| {
-        let columns = graph
-            .entity(source.entity)
-            .properties
-            .iter()
-            .filter_map(|property| {
-                let column = input.store.column(*property)?;
-                Some((
-                    column.to_string(),
-                    Some(graph.property(*property).data_type),
-                ))
-            });
-        TableSchema::new(&source.table, columns)
-    })
+fn edge_tables(input: &StoreInput<'_, DuckDb>, diagnostics: &mut Diagnostics) -> Vec<Table> {
+    let package = &input.store.package;
+    input
+        .options
+        .edge_tables
+        .iter()
+        .map(|(name, spec)| {
+            let columns = spec
+                .columns
+                .iter()
+                .filter_map(|(column, word)| {
+                    let data_type =
+                        diagnostics.require(parse_word::<DataType>(word), package, || {
+                            format!("edge table {name} column {column} has unknown type `{word}`")
+                        })?;
+                    Some(Column {
+                        storage_type: sql_type(data_type).to_string(),
+                        ..Column::new(column, Some(data_type))
+                    })
+                })
+                .collect();
+            Table::edge(name, input.store, spec.sort_key.clone(), columns)
+        })
+        .collect()
+}
+
+fn sql_type(data_type: DataType) -> &'static str {
+    match data_type {
+        DataType::String | DataType::Enum | DataType::Uuid => "VARCHAR",
+        DataType::Int => "BIGINT",
+        DataType::Float => "DOUBLE",
+        DataType::Bool => "BOOLEAN",
+        DataType::Date => "DATE",
+        DataType::DateTime => "TIMESTAMP",
+    }
 }

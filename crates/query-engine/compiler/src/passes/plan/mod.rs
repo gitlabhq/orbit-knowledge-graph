@@ -52,8 +52,8 @@ pub(crate) fn sort_key<'m>(
     table: &str,
 ) -> Result<&'m [String]> {
     model
-        .table_facts(table)
-        .map(|facts| facts.sort_key.as_slice())
+        .physical_table(table)
+        .map(|table| table.sort_key.as_slice())
         .filter(|key| !key.is_empty())
         .ok_or_else(|| {
             QueryError::Lowering(format!(

@@ -43,6 +43,10 @@ pub fn data_type(storage_type: &str) -> Option<DataType> {
     }
 }
 
+pub fn nullable(storage_type: &str) -> bool {
+    unwrap("LowCardinality", storage_type).starts_with("Nullable(")
+}
+
 fn unwrap<'a>(wrapper: &str, storage_type: &'a str) -> &'a str {
     storage_type
         .strip_prefix(wrapper)

@@ -291,7 +291,7 @@ pub(super) fn select_edge_layouts(
         let selected = std::iter::once(table.as_str())
             .chain(model.copies_of(table))
             .min_by_key(|layout| {
-                let key = model.table_facts(layout).map(|facts| &facts.sort_key);
+                let key = model.physical_table(layout).map(|table| &table.sort_key);
                 key.map_or(usize::MAX, |key| {
                     endpoints
                         .iter()

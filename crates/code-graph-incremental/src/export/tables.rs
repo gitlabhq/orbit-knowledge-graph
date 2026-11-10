@@ -1,6 +1,5 @@
 //! The local tables an export writes, read from the model's local store.
 
-use query_data_model::implementations::relational::RelationalFacts;
 use query_data_model::{Catalog, DataType, DuckDb};
 
 use crate::error::LoadError;
@@ -49,8 +48,7 @@ impl ExportTables {
             .default_edge_table()
             .ok_or_else(|| LoadError::new("the local store has no default edge table"))?;
         let edge_columns = catalog
-            .stores()
-            .find_map(|(_, facts)| facts.relational().table_schema(edge_table))
+            .physical_table(edge_table)
             .ok_or_else(|| LoadError::new(format!("the local store has no table {edge_table}")))?
             .columns
             .iter()

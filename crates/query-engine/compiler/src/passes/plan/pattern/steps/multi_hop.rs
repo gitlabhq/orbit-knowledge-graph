@@ -69,8 +69,8 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
         let tagged = relation.edge_tables.iter().all(|table| {
             pattern
                 .model
-                .table_facts(table)
-                .is_none_or(|facts| facts.columns.contains(SOURCE_TAGS_COLUMN))
+                .physical_table(table)
+                .is_none_or(|table| table.has_column(SOURCE_TAGS_COLUMN))
         });
         let shape = Depth {
             required: &required,

@@ -18,8 +18,8 @@ fn reordered_tables_retain_source_columns_and_dependencies() {
         catalog.copies_of("gl_code_edge"),
         ["gl_code_edge_by_target"]
     );
-    let source = &catalog.table_facts("gl_code_edge").unwrap().columns;
-    let copy = catalog.table_facts("gl_code_edge_by_target").unwrap();
+    let source = &catalog.physical_table("gl_code_edge").unwrap().columns;
+    let copy = catalog.physical_table("gl_code_edge_by_target").unwrap();
     assert_eq!(&copy.columns, source);
     assert_eq!(copy.sort_key[1], "target_id");
     let storage = Schema::from_model(&overlay).unwrap();
@@ -106,8 +106,8 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
     );
 
     for binding in model.joins() {
-        let columns = &model.table_facts(&binding.table).unwrap().columns;
-        let has_column = |name: &str| columns.contains(name);
+        let table = model.physical_table(&binding.table).unwrap();
+        let has_column = |name: &str| table.has_column(name);
         for node in &binding.nodes {
             assert!(has_column(&node.identity_column));
             for (property, column) in &node.properties {
@@ -199,9 +199,9 @@ fn keeps_extraction_sources_separate_from_query_columns() {
         .unwrap();
     assert_eq!(source.column, "target_project_id");
     assert_eq!(model.column(property), Some("project_id"));
-    let types = &model.table_facts(table).unwrap().column_types;
-    assert!(types.contains_key("project_id"));
-    assert!(!types.contains_key("target_project_id"));
+    let table = model.physical_table(table).unwrap();
+    assert!(table.has_column("project_id"));
+    assert!(!table.has_column("target_project_id"));
 }
 
 #[test]
@@ -212,9 +212,9 @@ fn exposes_storage_columns_as_query_identifiers() {
     let table = model.table_of(entity).unwrap();
 
     assert_eq!(model.column(property), Some("when"));
-    let columns = &model.table_facts(table).unwrap().columns;
-    assert!(columns.contains("when"));
-    assert!(!columns.contains("`when`"));
+    let table = model.physical_table(table).unwrap();
+    assert!(table.has_column("when"));
+    assert!(!table.has_column("`when`"));
 }
 
 #[test]
