@@ -58,97 +58,53 @@ RETURN u.username, mr.title LIMIT 10
 
 ### The system
 
-```plantuml
-@startuml
-set separator none
-skinparam shadowing false
-skinparam componentStyle rectangle
-skinparam nodesep 60
-skinparam ranksep 70
-skinparam component {
-  BackgroundColor<<qdm>> #E3F2FD
-  BorderColor<<qdm>> #1565C0
-  BackgroundColor<<engine>> #FFF3E0
-  BorderColor<<engine>> #E65100
-}
-skinparam rectangle {
-  BackgroundColor<<label>> #EEEEEE
-  BorderColor<<label>> #EEEEEE
-  FontSize<<label>> 11
-}
-hide stereotype
+```mermaid
+flowchart TB
+    accTitle: The data model in one picture
+    accDescr: The package registry feeds the loader, which checks packages once into the model. The model exposes a logical catalog and one physical catalog per connection, both built on shared tracking. The query engine parses through the surfaces and builds and rewrites physical plans through the catalogs, which send SQL, gRPC or live calls to the backends. The indexing engine reads sources and storage from the model and writes rows to ClickHouse.
+    subgraph REG["Package registry"]
+        direction LR
+        P1["gitlab.*"]
+        P2["integration.jira"]
+        P3["integration.slack"]
+        P4["tenant.agent_memory"]
+    end
+    L["Loader"]
+    M["Model<br/>(graph, access, sources,<br/>stores, guards, ModelId)"]
+    S["Surfaces (GQL)"]
+    LC["Logical catalog"]
+    PC["Physical catalogs<br/>(one per connection)"]
+    T["Shared tracking"]
+    E["Query engine<br/>(compiler phases)"]
+    IX["Indexing engine<br/>(ADR 023)"]
+    CH[("ClickHouse<br/>graph store")]
+    DD[("DuckDB<br/>local store")]
+    ON["Orbit Next<br/>code service"]
+    DES["Data Extraction<br/>Service"]
 
-package "Package registry" as REG {
-  [gitlab.*] as P1
-  [integration.jira] as P2
-  [integration.slack] as P3
-  [tenant.agent_memory] as P4
-}
+    REG -->|package versions| L
+    L -->|checked once| M
+    M --> LC
+    M --> PC
+    E -->|parse| S
+    S -->|logical plans| LC
+    E -->|builds and rewrites<br/>physical plans| PC
+    IX -->|reads sources<br/>and storage| M
+    LC -.-> T
+    PC -.-> T
+    PC -->|SQL| CH
+    PC -->|SQL| DD
+    PC -->|gRPC| ON
+    PC -->|live call| DES
+    IX -->|writes rows| CH
 
-[Loader] <<qdm>> as L
-[Model\n(graph, access, sources,\nstores, guards, ModelId)] <<qdm>> as M
-[Surfaces\n(GQL)] <<qdm>> as S
-[Logical catalog] <<qdm>> as LC
-[Physical catalogs\n(one per connection)] <<qdm>> as PC
-[Shared tracking] <<qdm>> as T
-
-[Query engine\n(compiler phases)] <<engine>> as E
-[Indexing engine\n(ADR 023)] <<engine>> as IX
-
-database "ClickHouse\ngraph store" as CH
-database "DuckDB\nlocal store" as DD
-node "Orbit Next\ncode service" as ON
-node "Data Extraction\nService" as DES
-
-P1 -[hidden]right- P2
-P2 -[hidden]right- P3
-P3 -[hidden]right- P4
-
-rectangle "package versions" <<label>> as LBL1
-REG -- LBL1
-LBL1 --> L
-rectangle "checked once" <<label>> as LBL2
-L -- LBL2
-LBL2 --> M
-M --> LC
-M --> PC
-rectangle "parse" <<label>> as LBL3
-E -- LBL3
-LBL3 --> S
-rectangle "logical plans" <<label>> as LBL4
-S -- LBL4
-LBL4 --> LC
-rectangle "builds and rewrites\nphysical plans" <<label>> as LBL5
-E -- LBL5
-LBL5 --> PC
-rectangle "reads sources\nand storage" <<label>> as LBL6
-IX -- LBL6
-LBL6 --> M
-LC ..> T
-PC ..> T
-rectangle "SQL" <<label>> as LBL7
-PC -- LBL7
-LBL7 --> CH
-rectangle "SQL" <<label>> as LBL8
-PC -- LBL8
-LBL8 --> DD
-rectangle "gRPC" <<label>> as LBL9
-PC -- LBL9
-LBL9 --> ON
-rectangle "live call" <<label>> as LBL10
-PC -- LBL10
-LBL10 --> DES
-rectangle "writes rows" <<label>> as LBL11
-IX -- LBL11
-LBL11 --> CH
-
-legend right
-  |<#E3F2FD> query-data-model |
-  |<#FFF3E0> engines |
-endlegend
-@enduml
+    classDef qdm fill:#E3F2FD,stroke:#1565C0
+    classDef engine fill:#FFF3E0,stroke:#E65100
+    class L,M,S,LC,PC,T qdm
+    class E,IX engine
 ```
 
+Blue boxes belong to `query-data-model`, and orange boxes are the two engines.
 The model is the only description of the graph.
 The query engine and the indexing engine read the same model, so they always agree on what exists and where it lives.
 The data model is infrastructure and makes no planning decisions: the compiler phases decide, and express every decision through a catalog.
@@ -157,13 +113,6 @@ The data model is infrastructure and makes no planning decisions: the compiler p
 
 ```plantuml
 @startuml
-allowmixing
-skinparam rectangle {
-  BackgroundColor<<label>> #EEEEEE
-  BorderColor<<label>> #EEEEEE
-  FontSize<<label>> 11
-}
-hide <<label>> stereotype
 set separator none
 skinparam shadowing false
 skinparam nodesep 60
@@ -194,20 +143,12 @@ package "gitlab.code_review" {
     lookups for virtual
     properties
   }
-  rectangle "refers to" <<label>> as LB1
-  rectangle "binds" <<label>> as LB2
-  rectangle "feeds" <<label>> as LB3
-  rectangle "provides" <<label>> as LB4
 }
 
-A -- LB1
-LB1 --> G
-ST -- LB2
-LB2 --> G
-SO -- LB3
-LB3 --> G
-SV -- LB4
-LB4 --> G
+A --> G : refers to
+ST --> G : binds
+SO --> G : feeds
+SV --> G : provides
 @enduml
 ```
 
@@ -381,46 +322,17 @@ A final check proves every read carries its guard before anything leaves the que
 
 ### 6. The same path for every backend
 
-```plantuml
-@startuml
-skinparam rectangle {
-  BackgroundColor<<label>> #EEEEEE
-  BorderColor<<label>> #EEEEEE
-  FontSize<<label>> 11
-}
-hide <<label>> stereotype
-set separator none
-skinparam shadowing false
-left to right direction
-rectangle "Logical plan" as LP
-rectangle "Planning phase" as P
-rectangle "Relational plan" as RP
-rectangle "Code plan" as CP
-rectangle "Live plan" as VP
-rectangle "SQL + parameters" as SQL
-rectangle "gRPC structural\nsearch request" as GRPC
-rectangle "Data Extraction\nService call" as CALL
-
-LP --> P
-rectangle "ClickHouse, DuckDB" <<label>> as LR1
-P -- LR1
-LR1 --> RP
-rectangle "Orbit Next" <<label>> as LR2
-P -- LR2
-LR2 --> CP
-rectangle "Slack" <<label>> as LR3
-P -- LR3
-LR3 --> VP
-rectangle "render" <<label>> as LR4
-RP -- LR4
-LR4 --> SQL
-rectangle "render" <<label>> as LR5
-CP -- LR5
-LR5 --> GRPC
-rectangle "render" <<label>> as LR6
-VP -- LR6
-LR6 --> CALL
-@enduml
+```mermaid
+flowchart LR
+    accTitle: The same path for every backend
+    accDescr: The planning phase turns one logical plan into a relational plan for ClickHouse and DuckDB, a code plan for Orbit Next, or a live plan for Slack. Each physical plan renders into its backend's request.
+    LP["Logical plan"] --> P["Planning phase"]
+    P -->|ClickHouse, DuckDB| RP["Relational plan"]
+    P -->|Orbit Next| CP["Code plan"]
+    P -->|Slack| VP["Live plan"]
+    RP -->|render| SQL["SQL and parameters"]
+    CP -->|render| GRPC["gRPC structural<br/>search request"]
+    VP -->|render| CALL["Data Extraction<br/>Service call"]
 ```
 
 The planner chooses the target connection from where the requested data lives.
