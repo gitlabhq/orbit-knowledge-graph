@@ -1057,7 +1057,10 @@ mod tests {
         let opencode = read_embedded_text("opencode_plugin.js", false);
         assert!(opencode.contains("experimental.chat.system.transform"));
         assert!(opencode.contains(r#""hook-guard", "instructions""#));
-        for name in ["codex", "duo"] {
+        for (name, suffix) in [
+            ("codex", "hook-guard instructions"),
+            ("duo", "hook-guard instructions{{hook_gitlab}}"),
+        ] {
             let agent = agent_named(name).unwrap();
             let session = agent
                 .json_merges
@@ -1067,9 +1070,7 @@ mod tests {
             assert!(
                 session.entries[0]["hooks"][0]["command"]
                     .as_str()
-                    .is_some_and(
-                        |command| command.ends_with("hook-guard instructions{{hook_gitlab}}")
-                    ),
+                    .is_some_and(|command| command.ends_with(suffix)),
                 "{name}"
             );
         }

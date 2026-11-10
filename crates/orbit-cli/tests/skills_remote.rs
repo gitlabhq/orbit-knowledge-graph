@@ -769,11 +769,20 @@ fn setup_skill(
     project: &tempfile::TempDir,
     skill_args: &[&str],
 ) -> (Output, std::path::PathBuf) {
+    setup_agent("codex", base_url, project, skill_args)
+}
+
+fn setup_agent(
+    agent: &str,
+    base_url: Option<&str>,
+    project: &tempfile::TempDir,
+    skill_args: &[&str],
+) -> (Output, std::path::PathBuf) {
     let cache = tempfile::tempdir().unwrap();
     let dir = project.path().to_str().unwrap();
     let mut args = vec![
         "setup",
-        "codex",
+        agent,
         "--yes",
         "--skip",
         "instructions",
@@ -995,8 +1004,8 @@ fn the_gitlab_flag_does_not_override_a_hook_that_has_a_credential() {
     assert_local_only(&output, &instructions);
 }
 
-fn session_start_hook(project: &std::path::Path) -> String {
-    let hooks = std::fs::read_to_string(project.join(".codex/hooks.json")).unwrap();
+fn session_start_hook(hooks_file: &std::path::Path) -> String {
+    let hooks = std::fs::read_to_string(hooks_file).unwrap();
     let hooks: serde_json::Value = serde_json::from_str(&hooks).unwrap();
     let entries = hooks["hooks"]["SessionStart"].as_array().unwrap();
     assert_eq!(entries.len(), 1, "{hooks}");
@@ -1007,23 +1016,41 @@ fn session_start_hook(project: &std::path::Path) -> String {
 }
 
 #[test]
-fn a_signed_in_setup_gives_the_tokenless_session_hook_the_remote_text() {
+fn a_signed_in_duo_setup_gives_the_tokenless_session_hook_the_remote_text() {
     let project = tempfile::tempdir().unwrap();
-    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS)]);
-    let (output, _) = setup_skill(Some(&url), &project, &[]);
+    let hooks_file = project.path().join(".gitlab/duo/hooks.json");
+    let (url, server) = mock_server(vec![
+        tree_reply("1.0.0", "Remote v1"),
+        ok_reply(SERVICE_STATUS),
+    ]);
+    let (output, skills) = setup_agent("duo", Some(&url), &project, &[]);
     assert!(output.status.success(), "{}", stderr(&output));
-    server.join().unwrap();
+    assert_eq!(server.join().unwrap().len(), 2);
+    assert!(skills.join("orbit/references/remote.md").is_file());
 
-    let command = session_start_hook(project.path());
+    let command = session_start_hook(&hooks_file);
     assert_eq!(command, "orbit hook-guard instructions --gitlab");
     let args: Vec<&str> = command.split(' ').skip(1).collect();
     let (output, instructions) = hook_instructions(None, &args);
     assert_remote_without_schema(&output, &instructions);
 
-    let (output, _) = setup_skill(None, &project, &[]);
+    let (output, _) = setup_agent("duo", None, &project, &[]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
-        session_start_hook(project.path()),
+        session_start_hook(&hooks_file),
+        "orbit hook-guard instructions"
+    );
+}
+
+#[test]
+fn a_signed_in_codex_setup_keeps_the_session_hook_command() {
+    let project = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS)]);
+    let (output, _) = setup_skill(Some(&url), &project, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    server.join().unwrap();
+    assert_eq!(
+        session_start_hook(&project.path().join(".codex/hooks.json")),
         "orbit hook-guard instructions"
     );
 }
