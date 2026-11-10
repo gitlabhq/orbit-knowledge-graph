@@ -2,16 +2,13 @@
 instructions: |
   ## Orbit
 
-  MANDATORY: use these instead of grep, rg, or reading files{{remote_tools}}.
-
-  - `{{orbit}} grep` searches code. Ignores case, `_`, `-`; `a|b` OR; narrow with paths, `def:words`, or `file:x`.{{remote_grep}}
-  - `{{orbit}} context` reads code. Batch all reads and searches you can name, code with tests: `{{orbit}} context a.rs:10-40 a_test.rs:5-60 Name; {{orbit}} grep 'x'`. Names show connections. Edit straight from its output; no separate read is needed.{{remote_gitlab}}{{remote_query}}{{server_entities}}
+  - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR; narrow with paths, `def:words`, or `file:x`.{{remote_grep}}
+  - MANDATORY: `{{orbit}} context` must be used for reading code instead of reading files. Batch all reads and searches you can name, code with tests: `{{orbit}} context a.rs:10-40 a_test.rs:5-60 Name; {{orbit}} grep 'x'`. Names show connections. Edit straight from its output; no separate read is needed.{{remote_gitlab}}{{remote_query}}{{server_entities}}
 
 remote:
-  remote_tools: ", and instead of glab and glab api for reading GitLab; glab is only for writes"
   remote_grep: " Prefix a GitLab kind to search GitLab: {{gitlab_kinds}}."
-  remote_gitlab: "\n- `{{orbit}} context mr:42 job:9` reads GitLab; bare `{{orbit}} context` reads the branch's MR and CI failures, and `repo:group/project symbol:Name` a sibling project."
-  remote_query: "\n- `{{orbit}} query` for counts, rankings, and relationships across GitLab. {{query_syntax}}"
+  remote_gitlab: "\n- MANDATORY: `{{orbit}} context mr:42 job:9` must be used for reading GitLab instead of glab and glab api; writes stay with glab. Bare `{{orbit}} context` reads the branch's MR and CI failures, and `repo:group/project symbol:Name` a sibling project."
+  remote_query: "\n- MANDATORY: `{{orbit}} query` must be used for counts, rankings, and relationships across GitLab. {{query_syntax}}"
 server_entities: "\n\nConnected providers and their entities, for `{{orbit}} query`:\n{{entities}}"
 
 nudge_gitlab: |
