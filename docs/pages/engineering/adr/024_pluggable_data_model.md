@@ -110,42 +110,53 @@ A package is a directory of fragments, and the registry holds one version line p
 
 ```plaintext
 packages/
-├── gitlab/                       platform package shared by every domain
-│   ├── graph.yaml                graph: User, Note, cross-domain relationships
-│   ├── authorization.yaml        authorization
-│   ├── graph_store.yaml          storage: the ClickHouse graph store
-│   ├── local_store.yaml          storage: the DuckDB local store
-│   ├── gitaly_service.yaml       service: lookups served by Gitaly
-│   ├── source.yaml               source
-│   └── system_note.sql.j2        template named by source.yaml
+├── gitlab/
+│   ├── graph.yaml
+│   ├── authorization.yaml
+│   ├── storage/
+│   │   ├── graph.yaml            ClickHouse
+│   │   └── local.yaml            DuckDB
+│   ├── services/
+│   │   └── gitaly.yaml
+│   └── sources/
+│       ├── siphon.yaml
+│       └── system_note.sql.j2
 ├── gitlab.code_review/
-│   ├── graph.yaml                graph: MergeRequest, MergeRequestDiff, ...
-│   ├── authorization.yaml        authorization
-│   ├── graph_store.yaml          storage: binds to the graph store
-│   ├── source.yaml               source
-│   └── merge_request.sql.j2      template named by source.yaml
+│   ├── graph.yaml
+│   ├── authorization.yaml
+│   ├── storage/
+│   │   └── graph.yaml
+│   └── sources/
+│       ├── siphon.yaml
+│       └── merge_request.sql.j2
 ├── gitlab.source_code/
-│   ├── graph.yaml                graph: File, Definition, Commit, ...
-│   ├── authorization.yaml        authorization
-│   ├── graph_store.yaml          storage: binds to the graph store
-│   ├── code_store.yaml           storage: the Orbit Next code store
-│   └── source.yaml               source
-├── integration.jira/             indexed third-party source
-│   ├── graph.yaml                graph: JiraIssue
-│   ├── authorization.yaml        authorization
-│   ├── graph_store.yaml          storage: binds to the graph store
-│   └── source.yaml               source: rows from the data lake
-├── integration.slack/            fetched at query time
-│   ├── graph.yaml                graph: SlackMessage
-│   ├── authorization.yaml        authorization
-│   └── live_store.yaml           storage: Data Extraction Service, no rows
-└── tenant.agent_memory/          loads into one tenant's model only
-    ├── graph.yaml                graph: Memory, ABOUT
-    ├── authorization.yaml        authorization
-    └── graph_store.yaml          storage: binds to the graph store
+│   ├── graph.yaml
+│   ├── authorization.yaml
+│   ├── storage/
+│   │   ├── graph.yaml
+│   │   └── code.yaml             Orbit Next
+│   └── sources/
+│       └── siphon.yaml
+├── integration.jira/
+│   ├── graph.yaml
+│   ├── authorization.yaml
+│   ├── storage/
+│   │   └── graph.yaml
+│   └── sources/
+│       └── data_lake.yaml
+├── integration.slack/
+│   ├── graph.yaml
+│   ├── authorization.yaml
+│   └── storage/
+│       └── live.yaml             Data Extraction Service
+└── tenant.agent_memory/
+    ├── graph.yaml
+    ├── authorization.yaml
+    └── storage/
+        └── graph.yaml
 ```
 
-A package has at most one graph and one authorization fragment, one storage fragment for each store it declares or binds to, one service fragment for each service, and one source fragment for each source. Templates are supporting files that a source fragment names, not fragments.
+Each package has one `graph.yaml` and one `authorization.yaml`. The `storage/`, `services/` and `sources/` directories hold one fragment per store, service or source, named after it. A source fragment can name query templates, which sit next to it.
 
 ```plantuml
 @startuml
