@@ -471,6 +471,7 @@ The ontology would stay the source of truth, with the same mixed concerns and th
 ## References
 
 - [Extending the data model](../development/extending-the-data-model.md)
+- [Data model spike MR !3346](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3346)
 - [MR !1967: ontology graph and reachability](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1967)
 - [ADR 000: ClickHouse graph storage](000_clickhouse_graph_storage.md)
 - [ADR 017: Clone-based non-blocking schema migrations](017_clone_based_non_blocking_migrations.md)
