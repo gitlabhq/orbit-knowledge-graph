@@ -686,7 +686,7 @@ mod tests {
                 );
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
                 assert_eq!(rendered.contains("`branch:`"), remote, "{launcher}");
-                let budget = if remote { 290 } else { 90 };
+                let budget = if remote { 255 } else { 80 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
