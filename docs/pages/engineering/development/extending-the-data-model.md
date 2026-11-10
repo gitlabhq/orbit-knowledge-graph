@@ -234,7 +234,7 @@ pub trait Render: Catalog {
 
 The builder plugs into shared tracking, which proves the structural facts of every call. The backend's own rules check the rest, such as which match modes an index supports.
 
-Orbit Next is a backend whose catalog speaks in repositories and structural matches. Its storage fragment binds `File` to a store on the code indexing connection:
+Orbit Next is a backend whose catalog speaks in repositories and structural matches. Its data lives on S3: the trigram index, the commit manifests and the code graph. The code indexing web servers read those objects and answer structural queries. Its storage fragment binds `File` to a store on the code indexing connection:
 
 ```yaml
 # packages/gitlab.source_code/storage/orbit_code.yaml
@@ -271,7 +271,7 @@ let plan = code.build(|q| {
 let request = code.render(&plan);
 ```
 
-The trigram prefilter is a planning decision: the planner takes the pattern's literal atoms and narrows the candidate files before the structural pass. The rendered request travels over gRPC to the code indexing web servers, which run the pattern and stream back paths, lines and captures. The security phase turns the `File` guard into a repository restriction.
+The trigram prefilter is a planning decision: the planner takes the pattern's literal atoms and narrows the candidate files before the structural pass. The rendered request travels over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. The security phase turns the `File` guard into a repository restriction.
 
 ## Add a tenant overlay
 
