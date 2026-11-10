@@ -1,7 +1,7 @@
 //! The path columns a scan must filter and the role each one needs, read from
 //! the loader's guards and the store's table facts.
 
-use ontology::RequiredRole;
+use query_data_model::RequiredRole;
 use query_data_model::catalog::RowFilter;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::RelationalFacts;

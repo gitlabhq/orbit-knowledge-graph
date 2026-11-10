@@ -374,7 +374,7 @@ fn graph_source(
                 .find(|field| field.name == name)
                 .map(|field| {
                     storage_type(
-                        field.data_type,
+                        data_type(field.data_type),
                         field.nullable && !epoch_nulls.contains(&name),
                     )
                 });
@@ -525,6 +525,19 @@ fn join_spec(ontology: &Ontology, join: &DenormalizedJoin) -> JoinSpec {
         sources,
         nodes,
         relationships,
+    }
+}
+
+fn data_type(data_type: DataType) -> crate::DataType {
+    match data_type {
+        DataType::String => crate::DataType::String,
+        DataType::Int => crate::DataType::Int,
+        DataType::Float => crate::DataType::Float,
+        DataType::Bool => crate::DataType::Bool,
+        DataType::Date => crate::DataType::Date,
+        DataType::DateTime => crate::DataType::DateTime,
+        DataType::Enum => crate::DataType::Enum,
+        DataType::Uuid => crate::DataType::Uuid,
     }
 }
 

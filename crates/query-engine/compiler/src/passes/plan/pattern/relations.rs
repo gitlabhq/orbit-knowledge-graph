@@ -5,7 +5,7 @@ use crate::passes::codegen::RelationalModel;
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use ontology::constants::{
+use query_data_model::constants::{
     SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
 };
 use query_data_model::plan::logical::{EdgeField, Expr as Logical};

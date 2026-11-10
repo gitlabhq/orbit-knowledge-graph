@@ -9,7 +9,7 @@ use crate::passes::codegen::RelationalModel;
 use crate::passes::plan::build::stored;
 use std::collections::{HashMap, HashSet};
 
-use ontology::constants::*;
+use query_data_model::constants::*;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Relation;
 

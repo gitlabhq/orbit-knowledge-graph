@@ -488,8 +488,8 @@ fn relationships_declare_typed_attributes() {
     assert_eq!(
         names,
         [
-            ("position", ontology::DataType::Int, true),
-            ("thread", ontology::DataType::String, false),
+            ("position", query_data_model::DataType::Int, true),
+            ("thread", query_data_model::DataType::String, false),
         ]
     );
     let thread = graph.attribute_id(has_note, "thread").unwrap();
@@ -634,7 +634,7 @@ fn string_enums_keep_their_declared_values() {
     let model = load(&["gitlab", "linear"]).unwrap();
     let issue = model.entity("LinearIssue").unwrap();
     let state = model.property(issue, "state").unwrap();
-    assert_eq!(state.enum_type, ontology::EnumType::String);
+    assert_eq!(state.enum_type, query_data_model::EnumType::String);
     assert_eq!(state.enum_values.as_ref().unwrap()[&3], "done");
 }
 

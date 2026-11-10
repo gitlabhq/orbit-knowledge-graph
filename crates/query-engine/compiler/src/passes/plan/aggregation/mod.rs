@@ -4,7 +4,7 @@ pub(super) mod emit;
 
 use std::collections::HashMap;
 
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::implementations::relational::plan::AggregateFunction;
 use query_data_model::plan::logical::{
     Expr, LogicalOperation, Measure as Logical, Order, TimeUnit,

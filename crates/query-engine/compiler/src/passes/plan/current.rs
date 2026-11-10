@@ -1,7 +1,7 @@
 //! Current-row reads: one FINAL read when a predicate bounds it, else a latest-row pick narrowed by
 //! the keys of matching rows. A repeated read returns the same share.
 
-use ontology::constants::VERSION_COLUMN;
+use query_data_model::constants::VERSION_COLUMN;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{Order, Relation, RelationalBuilder};
 

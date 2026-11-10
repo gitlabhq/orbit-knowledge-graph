@@ -30,7 +30,7 @@ fn variant_scope(
     kind: &str,
     source: Option<EntityId>,
     target: Option<EntityId>,
-) -> Option<ontology::EdgeVariantScope> {
+) -> Option<query_data_model::EdgeVariantScope> {
     let catalog = model.catalog();
     let graph = catalog.graph();
     let variant: RelationshipVariantId =
@@ -58,7 +58,7 @@ impl TpBounds {
     }
 }
 
-use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
+use query_data_model::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
 use crate::constants::scope_lookup_alias;
 use crate::passes::plan::build::{self, Built};

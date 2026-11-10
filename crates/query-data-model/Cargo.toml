@@ -9,7 +9,7 @@ chrono = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 jsonschema = { workspace = true }
 minijinja = { workspace = true }
-ontology = { path = "../ontology" }
+ontology = { path = "../ontology", optional = true }
 orbit-utils = { path = "../utils" }
 pest = { workspace = true }
 pest_consume = { workspace = true }
@@ -23,7 +23,7 @@ strum = { workspace = true }
 thiserror = { workspace = true }
 
 [features]
-from-ontology = ["dep:serde-saphyr"]
+from-ontology = ["dep:ontology", "dep:serde-saphyr"]
 
 [dev-dependencies]
 query-data-model = { path = ".", features = ["from-ontology"] }

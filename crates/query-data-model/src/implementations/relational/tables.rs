@@ -1,4 +1,4 @@
-use ontology::DataType;
+use crate::DataType;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnSchema {

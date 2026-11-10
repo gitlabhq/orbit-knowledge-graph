@@ -5,9 +5,9 @@
 //! When the base query provided traversal paths, each arm adds a `startsWith(traversal_path, tp)`
 //! predicate so ClickHouse can prune granules via the primary key.
 
-use ontology::constants::*;
 use orbit_utils::query_types::SqlType;
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
+use query_data_model::constants::*;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     Expr, Function, Order, Relation, RelationalBuilder,
@@ -36,7 +36,7 @@ pub(crate) struct Arm<'p> {
     entity: &'p str,
     table: &'p str,
     ids: Vec<i64>,
-    columns: Vec<(&'p str, Option<ontology::DataType>)>,
+    columns: Vec<(&'p str, Option<query_data_model::DataType>)>,
     path_filter: Option<PathFilter>,
     sort_key: &'p [String],
 }

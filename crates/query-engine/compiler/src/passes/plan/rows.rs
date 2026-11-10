@@ -1,8 +1,8 @@
 //! The planner's relations: every relation a later step may read again is a share, so the planner
 //! states what is reused and `Catalog::materialize` decides how.
 
-use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use query_data_model::Catalog;
+use query_data_model::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     JoinKind, Relation, RelationalBuilder, RelationalError, RelationalPlan, Subquery,

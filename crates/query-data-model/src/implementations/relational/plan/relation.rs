@@ -1,4 +1,4 @@
-use ontology::DataType;
+use crate::DataType;
 
 use super::stage::Stage;
 use super::{Expr, RelationalError};

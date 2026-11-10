@@ -2,7 +2,7 @@
 //! depths, carrying the path so far.
 
 use crate::passes::codegen::RelationalModel;
-use ontology::constants::*;
+use query_data_model::constants::*;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Relation;
 

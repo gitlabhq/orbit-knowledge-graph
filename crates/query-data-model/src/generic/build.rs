@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use crate::constants::{DEFAULT_PRIMARY_KEY as KEY, EDGE_RESERVED_COLUMNS};
+use crate::{DataType, EnumType};
 use indexmap::IndexMap;
-use ontology::constants::{DEFAULT_PRIMARY_KEY as KEY, EDGE_RESERVED_COLUMNS};
-use ontology::{DataType, EnumType};
 
 use super::catalog::{
     Attribute, Domain, Entity, GraphCatalog, Property, Relationship, RelationshipVariant, Style,
@@ -347,7 +347,7 @@ fn declare_property(
         EnumType::Int
     };
     let selectivity = match detail.selectivity.as_deref() {
-        None => ontology::FieldSelectivity::from_data_type(data_type),
+        None => crate::FieldSelectivity::from_data_type(data_type),
         Some(word) => diagnostics
             .require(parse_word(word), package, || {
                 format!("property {name} has unknown selectivity `{word}`")

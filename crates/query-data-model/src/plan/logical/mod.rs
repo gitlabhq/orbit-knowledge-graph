@@ -16,7 +16,7 @@ mod shape;
 mod step;
 mod time;
 
-use ontology::DataType;
+use crate::DataType;
 
 pub use builder::{InternalName, LogicalBuilder};
 pub use catalog::LogicalCatalog;

@@ -3,7 +3,7 @@
 use crate::passes::codegen::RelationalModel;
 use std::collections::HashSet;
 
-use ontology::constants::*;
+use query_data_model::constants::*;
 use query_data_model::{DenormalizedDirection, DenormalizedProperty};
 
 use super::{EdgeRelation, NodePlan, Pattern};

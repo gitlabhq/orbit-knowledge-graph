@@ -1,4 +1,4 @@
-use ontology::EnumType;
+use query_data_model::EnumType;
 use query_data_model::Model;
 use query_data_model::plan::logical::{Expr, Literal, Operand, Predicate};
 

@@ -203,7 +203,7 @@ where
                     condition
                         .node_properties()
                         .filter(|(_, property)| {
-                            *property != ontology::constants::DEFAULT_PRIMARY_KEY
+                            *property != query_data_model::constants::DEFAULT_PRIMARY_KEY
                         })
                         .map(|(alias, _)| alias.to_string()),
                 );

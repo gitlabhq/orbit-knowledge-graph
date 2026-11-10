@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::Direction;
+use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     Column, Expr, Operation, Relation, RelationalBuilder, RelationalError, Selection,

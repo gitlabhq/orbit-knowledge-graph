@@ -4,7 +4,7 @@
 use crate::passes::codegen::RelationalModel;
 use std::collections::{HashMap, HashSet};
 
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::plan::logical::{Columns, Expr, Measure};
 

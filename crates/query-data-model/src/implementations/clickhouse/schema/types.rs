@@ -1,4 +1,4 @@
-use ontology::DataType;
+use crate::DataType;
 
 pub fn storage_type(data_type: DataType, nullable: bool) -> String {
     let base = match data_type {

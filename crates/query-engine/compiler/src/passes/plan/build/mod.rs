@@ -158,7 +158,8 @@ pub(crate) fn present(mut parts: Vec<Option<Expr>>) -> Option<Expr> {
 }
 
 pub(crate) fn versioning(column: &str) -> bool {
-    column == ontology::constants::VERSION_COLUMN || column == ontology::constants::DELETED_COLUMN
+    column == query_data_model::constants::VERSION_COLUMN
+        || column == query_data_model::constants::DELETED_COLUMN
 }
 
 pub(crate) fn filtered<B: RelationalBackend>(

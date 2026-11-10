@@ -3,7 +3,7 @@
 //! denormalized edge tags where every relationship carries them. Arms emit their own redaction
 //! columns since the center edge column differs per direction.
 
-use ontology::constants::*;
+use query_data_model::constants::*;
 use query_data_model::plan::logical::{Expr as Logical, LogicalOperation, Order as Sort};
 use query_data_model::{
     DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Direction, RelationshipId,

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use crate::DataType;
 use indexmap::IndexMap;
-use ontology::DataType;
 use serde::{Deserialize, Serialize};
 
 use super::DuckDb;

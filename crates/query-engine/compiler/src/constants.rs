@@ -1,6 +1,3 @@
-// Re-export so existing `crate::constants::` paths keep working.
-pub use ontology::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
-
 // Per-node columns embed a user alias and end in one of these suffixes. No other
 // internal name may, or an alias could reproduce it; the const asserts enforce that.
 const PER_NODE_SUFFIXES: [&str; 4] = ["pk", "id", "type", "tp"];

@@ -1,5 +1,5 @@
-use ontology::TraversalPathKind;
 use query_data_model::EntityId;
+use query_data_model::TraversalPathKind;
 use query_data_model::plan::logical::{Comparison, Expr, Literal};
 use query_data_model::plan::tracking::Ref;
 

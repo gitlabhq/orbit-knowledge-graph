@@ -2,8 +2,8 @@
 //! direct depth-1 paths plus the paths where the two frontiers meet. Anchor CTEs bound and dedup
 //! the filtered endpoints.
 
-use ontology::constants::*;
 use orbit_utils::query_types::SqlType;
+use query_data_model::constants::*;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, Function, JoinKind, Order, Relation, RelationalBuilder, Subquery,

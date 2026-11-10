@@ -9,7 +9,7 @@ mod stage;
 use std::collections::HashSet;
 use std::marker::PhantomData;
 
-use ontology::DataType;
+use crate::DataType;
 
 pub use block::Block;
 pub use builder::{Aggregated, Detached, RelationalBuilder, SharePolicy, Subquery};

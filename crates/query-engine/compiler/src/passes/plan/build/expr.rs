@@ -1,5 +1,5 @@
-use ontology::constants::{DELETED_COLUMN, RELATIONSHIP_KIND_COLUMN};
 use orbit_utils::query_types::{SqlType, TimeZone};
+use query_data_model::constants::{DELETED_COLUMN, RELATIONSHIP_KIND_COLUMN};
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, Function, Relation, TextMatch, UnaryOp,
@@ -15,23 +15,25 @@ use crate::passes::plan::predicates::Column;
 pub(crate) struct Filter<'a> {
     pub column: &'a Column,
     pub test: &'a Test,
-    pub data_type: Option<&'a ontology::DataType>,
+    pub data_type: Option<&'a query_data_model::DataType>,
     pub in_sort_key: bool,
     pub text_indexed: bool,
     pub null_as_epoch: NullAsEpoch,
     pub negated: bool,
 }
 
-pub(crate) fn parameter_type(data_type: Option<&ontology::DataType>) -> SqlType {
+pub(crate) fn parameter_type(data_type: Option<&query_data_model::DataType>) -> SqlType {
     match data_type {
-        Some(ontology::DataType::String | ontology::DataType::Enum | ontology::DataType::Uuid) => {
-            SqlType::String
-        }
-        Some(ontology::DataType::Int) => SqlType::Int64,
-        Some(ontology::DataType::Float) => SqlType::Float64,
-        Some(ontology::DataType::Bool) => SqlType::Bool,
-        Some(ontology::DataType::Date) => SqlType::Date,
-        Some(ontology::DataType::DateTime) => SqlType::Timestamp {
+        Some(
+            query_data_model::DataType::String
+            | query_data_model::DataType::Enum
+            | query_data_model::DataType::Uuid,
+        ) => SqlType::String,
+        Some(query_data_model::DataType::Int) => SqlType::Int64,
+        Some(query_data_model::DataType::Float) => SqlType::Float64,
+        Some(query_data_model::DataType::Bool) => SqlType::Bool,
+        Some(query_data_model::DataType::Date) => SqlType::Date,
+        Some(query_data_model::DataType::DateTime) => SqlType::Timestamp {
             precision: 6,
             timezone: Some(TimeZone::Utc),
         },
@@ -39,9 +41,9 @@ pub(crate) fn parameter_type(data_type: Option<&ontology::DataType>) -> SqlType 
     }
 }
 
-pub(crate) fn epoch<B: RelationalBackend>(data_type: ontology::DataType) -> Expr {
+pub(crate) fn epoch<B: RelationalBackend>(data_type: query_data_model::DataType) -> Expr {
     let value = match data_type {
-        ontology::DataType::Date => "1970-01-01",
+        query_data_model::DataType::Date => "1970-01-01",
         _ => "1970-01-01 00:00:00",
     };
     param::<B>(parameter_type(Some(&data_type)), value.into())
@@ -49,12 +51,15 @@ pub(crate) fn epoch<B: RelationalBackend>(data_type: ontology::DataType) -> Expr
 
 pub(crate) fn null_if_epoch<B: RelationalBackend>(
     value: Expr,
-    data_type: ontology::DataType,
+    data_type: query_data_model::DataType,
 ) -> Expr {
     call(Function::NullIf, vec![value, epoch::<B>(data_type)])
 }
 
-fn read<B: RelationalBackend>(column: Expr, null_as_epoch: Option<ontology::DataType>) -> Expr {
+fn read<B: RelationalBackend>(
+    column: Expr,
+    null_as_epoch: Option<query_data_model::DataType>,
+) -> Expr {
     match null_as_epoch {
         Some(data_type) => null_if_epoch::<B>(column, data_type),
         None => column,

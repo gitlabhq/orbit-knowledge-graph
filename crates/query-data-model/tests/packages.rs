@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ontology::TraversalPathKind;
+use query_data_model::TraversalPathKind;
 use query_data_model::catalog::sources::{self, PathResolution};
 use query_data_model::catalog::{RowFilter, Scope};
 use query_data_model::from_ontology::{self, from_ontology, packages};
@@ -366,13 +366,25 @@ fn graph_matches_ontology_fields() {
             assert_eq!(property.name, "id", "{name}");
             continue;
         };
-        assert_eq!(property.data_type, field.data_type, "{name}");
+        assert_eq!(
+            format!("{:?}", property.data_type),
+            format!("{:?}", field.data_type),
+            "{name}"
+        );
         assert_eq!(property.nullable, field.nullable, "{name}");
         assert_eq!(property.mutable, field.mutable, "{name}");
         assert_eq!(property.unique, field.unique, "{name}");
-        assert_eq!(property.selectivity, field.selectivity, "{name}");
+        assert_eq!(
+            format!("{:?}", property.selectivity),
+            format!("{:?}", field.selectivity),
+            "{name}"
+        );
         assert_eq!(property.enum_values, field.enum_values, "{name}");
-        assert_eq!(property.enum_type, field.enum_type, "{name}");
+        assert_eq!(
+            format!("{:?}", property.enum_type),
+            format!("{:?}", field.enum_type),
+            "{name}"
+        );
     }
 }
 

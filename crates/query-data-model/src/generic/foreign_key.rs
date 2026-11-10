@@ -27,8 +27,7 @@ impl ForeignKey {
         Some(Self {
             holder,
             property,
-            referenced_key: graph
-                .property_id(referenced, ontology::constants::DEFAULT_PRIMARY_KEY)?,
+            referenced_key: graph.property_id(referenced, crate::constants::DEFAULT_PRIMARY_KEY)?,
         })
     }
 

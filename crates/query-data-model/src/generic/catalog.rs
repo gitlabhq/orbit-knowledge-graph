@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use ontology::{DataType, EnumType};
+use crate::{DataType, EnumType};
 
 use super::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
@@ -18,7 +18,7 @@ pub struct Property {
     pub enum_type: EnumType,
     pub terminal_values: Vec<String>,
     pub references: Vec<EntityId>,
-    pub selectivity: ontology::FieldSelectivity,
+    pub selectivity: crate::FieldSelectivity,
 }
 
 #[derive(Debug)]

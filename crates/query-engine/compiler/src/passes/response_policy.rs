@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use ontology::DataType;
 use orbit_utils::query_types::SqlType;
+use query_data_model::DataType;
 use query_data_model::implementations::relational::plan::{BinaryOp, Expr, Function, Operation};
 
 use crate::error::Result;

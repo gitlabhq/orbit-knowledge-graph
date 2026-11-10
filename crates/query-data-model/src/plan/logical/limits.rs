@@ -1,4 +1,4 @@
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use crate::constants::DEFAULT_PRIMARY_KEY;
 
 use super::{Expr, PlanError, Predicate};
 use crate::Model;

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use ontology::{EdgeVariantScope, RequiredRole, TraversalPathKind};
+use crate::{EdgeVariantScope, RequiredRole, TraversalPathKind};
 
 use super::{RelationalFacts, TableFacts};
 use crate::catalog::{Catalog, Lookup, Redaction, StorageBackend};

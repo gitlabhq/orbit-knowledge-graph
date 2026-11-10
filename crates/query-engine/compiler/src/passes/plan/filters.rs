@@ -17,13 +17,13 @@ use super::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 use crate::logical::Query;
 use crate::logical::facts::Anchor;
 
-pub type NullAsEpochColumns = HashMap<String, ontology::DataType>;
+pub type NullAsEpochColumns = HashMap<String, query_data_model::DataType>;
 
 /// The type of each compared column that stores null as the epoch, so the epoch literal matches it.
 #[derive(Clone, Copy, PartialEq)]
 pub struct NullAsEpoch {
-    pub column: Option<ontology::DataType>,
-    pub rhs: Option<ontology::DataType>,
+    pub column: Option<query_data_model::DataType>,
+    pub rhs: Option<query_data_model::DataType>,
 }
 
 /// What a filter tests on its column, with any complement already folded into the operator.
@@ -120,8 +120,8 @@ pub fn json(literal: &Literal) -> Json {
 pub struct BoundFilter {
     pub test: Test,
     pub property: Option<query_data_model::PropertyId>,
-    pub data_type: Option<ontology::DataType>,
-    pub selectivity: ontology::FieldSelectivity,
+    pub data_type: Option<query_data_model::DataType>,
+    pub selectivity: query_data_model::FieldSelectivity,
     pub namespace_anchor: bool,
     pub foreign_key: bool,
     pub in_sort_key: bool,
@@ -136,7 +136,7 @@ impl BoundFilter {
         if self.namespace_anchor {
             return false;
         }
-        let high = self.selectivity == ontology::FieldSelectivity::High;
+        let high = self.selectivity == query_data_model::FieldSelectivity::High;
         match self.test {
             Test::Column(..) | Test::Compare(Comparison::Ne, _) | Test::Null(false) => false,
             Test::Text(..) => self.text_indexed,
@@ -223,7 +223,7 @@ pub fn bind_filter(
         data_type,
         selectivity: property_id
             .map(|property| graph.property(property).selectivity)
-            .or_else(|| data_type.map(ontology::FieldSelectivity::from_data_type))
+            .or_else(|| data_type.map(query_data_model::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
         namespace_anchor: anchor_keys(model).iter().any(|(name, _)| name == column),
         foreign_key: property_id
@@ -250,7 +250,7 @@ fn column_type<B: RelationalBackend>(
     catalog: &Catalog<B>,
     table: &str,
     column: &str,
-) -> Option<ontology::DataType> {
+) -> Option<query_data_model::DataType> {
     catalog
         .table_facts(table)?
         .column_types

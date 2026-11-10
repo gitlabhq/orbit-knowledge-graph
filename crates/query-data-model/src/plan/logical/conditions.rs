@@ -165,9 +165,12 @@ fn endpoint(
         .into_iter()
         .find(|kind| !allowed.iter().any(|allowed| allowed == kind))
     {
+        Some(kind) if allowed.is_empty() => Err(PlanError::shape(format!(
+            "filter on \"{name}\": {kind:?} cannot match this pattern"
+        ))),
         Some(kind) => Err(PlanError::shape(format!(
-            "filter on \"{name}\": {kind:?} cannot match this pattern{}",
-            ontology::errors::format_candidate_list("values", &allowed)
+            "filter on \"{name}\": {kind:?} cannot match this pattern. Valid values: {}",
+            allowed.join(", ")
         ))),
         None => Ok(()),
     }

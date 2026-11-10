@@ -3,7 +3,7 @@
 
 use crate::passes::codegen::RelationalModel;
 use crate::passes::plan::build::stored;
-use ontology::constants::*;
+use query_data_model::constants::*;
 use query_data_model::implementations::relational::RelationalBackend;
 
 use super::super::relations::{edge_columns, select_edge_layouts};

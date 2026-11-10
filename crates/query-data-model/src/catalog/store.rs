@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
+use crate::constants::DEFAULT_PRIMARY_KEY;
 use indexmap::IndexMap;
-use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use super::Diagnostics;
 use super::access::Guard;

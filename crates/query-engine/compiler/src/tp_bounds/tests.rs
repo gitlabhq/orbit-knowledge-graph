@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use ontology::TraversalPathKind;
+use query_data_model::TraversalPathKind;
 use query_data_model::plan::logical::LogicalPlan;
 use query_data_model::{Catalog, ClickHouse};
 

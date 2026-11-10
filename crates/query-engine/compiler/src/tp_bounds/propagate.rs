@@ -74,10 +74,9 @@ fn scoped(query: Query<'_>, edge: &Edge, model: &impl RelationalModel) -> Scoped
     Scoped {
         from: edge.from,
         to: edge.to,
-        preserving: edge
-            .types
-            .iter()
-            .all(|kind| scope(kind).is_some_and(ontology::EdgeVariantScope::is_scope_preserving)),
+        preserving: edge.types.iter().all(|kind| {
+            scope(kind).is_some_and(query_data_model::EdgeVariantScope::is_scope_preserving)
+        }),
         to_source: edge
             .types
             .iter()

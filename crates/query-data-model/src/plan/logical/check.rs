@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use ontology::DataType;
+use crate::DataType;
 
 use super::{EdgeField, Expr, Logical, LogicalOperation, LogicalType, Measure, PlanError};
 use crate::catalog::PropertyAccess;

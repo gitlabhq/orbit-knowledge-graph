@@ -1,4 +1,4 @@
-use ontology::DataType;
+use crate::DataType;
 
 use super::check::{Typed, scalar};
 use super::{Comparison, Expr, Literal, Logical, Matching, Operand, PlanError, Predicate};
@@ -262,7 +262,7 @@ fn enum_value(typed: &Typed<'_>, literal: &Literal) -> Result<(), PlanError> {
     let declared = match literal {
         Literal::String(text) => labels.clone().any(|(_, label)| label == text),
         Literal::Int(key) => {
-            property.enum_type == ontology::EnumType::Int
+            property.enum_type == crate::EnumType::Int
                 && labels.clone().any(|(known, _)| known == key)
         }
         _ => false,
@@ -287,7 +287,7 @@ fn allowed(typed: &Typed<'_>) -> Vec<String> {
         .iter()
         .flatten()
         .map(|(key, label)| match property.enum_type {
-            ontology::EnumType::Int => format!("{key} ({label})"),
+            crate::EnumType::Int => format!("{key} ({label})"),
             _ => label.clone(),
         })
         .collect()

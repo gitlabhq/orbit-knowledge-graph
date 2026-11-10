@@ -9,7 +9,7 @@ mod tail;
 
 use std::collections::HashMap;
 
-use ontology::DataType;
+use crate::DataType;
 
 pub use bodies::Subquery;
 pub use clauses::Aggregated;

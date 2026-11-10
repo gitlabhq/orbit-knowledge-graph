@@ -2,7 +2,7 @@
 //! by the other endpoint, and expose the pair as edge columns.
 
 use crate::passes::codegen::RelationalModel;
-use ontology::constants::*;
+use query_data_model::constants::*;
 use query_data_model::implementations::relational::RelationalBackend;
 
 use super::super::{EdgeRelation, Fk};

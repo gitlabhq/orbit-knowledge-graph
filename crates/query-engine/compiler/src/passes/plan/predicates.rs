@@ -1,7 +1,7 @@
 //! Predicates and projections the planner attaches to relations, and the facts about a predicate the
 //! planner asks for: selective, a point lookup, or filtering the sort key.
 
-use ontology::constants::*;
+use query_data_model::constants::*;
 
 use query_data_model::plan::logical::Comparison;
 
@@ -30,7 +30,7 @@ pub enum Predicate {
     Property {
         column: Column,
         test: Test,
-        data_type: Option<ontology::DataType>,
+        data_type: Option<query_data_model::DataType>,
         selective: bool,
         in_sort_key: bool,
         text_indexed: bool,
@@ -166,7 +166,7 @@ impl Predicate {
 #[derive(Clone, PartialEq)]
 pub enum OutputValue {
     Column(Column),
-    EpochAsNull(Column, ontology::DataType),
+    EpochAsNull(Column, query_data_model::DataType),
     Text(String),
     Depth(u32),
     Path(Vec<(Column, Column)>),

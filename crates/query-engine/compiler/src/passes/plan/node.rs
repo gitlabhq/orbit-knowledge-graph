@@ -1,7 +1,7 @@
 //! A binding as the planner reads it: its source table, pinned ids, id range, and the filters
 //! attached to it, each bound to the storage facts that decide how it lowers.
 
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::Expr;
 

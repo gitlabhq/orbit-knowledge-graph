@@ -1,4 +1,4 @@
-use ontology::constants::{DELETED_COLUMN, EDGE_RESERVED_COLUMNS};
+use query_data_model::constants::{DELETED_COLUMN, EDGE_RESERVED_COLUMNS};
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{Expr, Relation, RelationalBuilder};
 

@@ -3,9 +3,9 @@
 use crate::passes::codegen::RelationalModel;
 use std::collections::HashMap;
 
-use ontology::{DataType, FieldSelectivity};
 use query_data_model::plan::logical::{Columns, Expr, LogicalOperation, Projection};
 use query_data_model::plan::tracking::Ref;
+use query_data_model::{DataType, FieldSelectivity};
 use query_data_model::{Entity, EntityId, GraphCatalog, PropertyId};
 
 use super::Query;

@@ -1,6 +1,6 @@
 mod builder;
 
-use ontology::DataType;
+use crate::DataType;
 
 pub use builder::{Field, Matches, SearchBuilder};
 

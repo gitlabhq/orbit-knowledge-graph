@@ -1,4 +1,4 @@
-use ontology::constants::*;
+use query_data_model::constants::*;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Column as Output, Expr, Function, JoinKind, Order, Relation, RelationalBuilder,

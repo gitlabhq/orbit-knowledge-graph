@@ -137,9 +137,7 @@ mod tests {
     };
     use query_data_model::plan::tracking::Declare;
     use query_data_model::spec::{Fragment, decode_options, encode_options};
-    use query_data_model::{Catalog, Model, Packages};
-
-    use crate::constants::TRAVERSAL_PATH_COLUMN;
+    use query_data_model::{Catalog, Model, Packages, TRAVERSAL_PATH_COLUMN};
 
     type Built<T> = std::result::Result<T, RelationalError>;
     type Predicate = fn(&Relation) -> Expr;

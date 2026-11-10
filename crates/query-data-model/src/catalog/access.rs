@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use ontology::constants::DEFAULT_PRIMARY_KEY;
-use ontology::{EdgeVariantScope, RequiredRole};
+use crate::constants::DEFAULT_PRIMARY_KEY;
+use crate::{EdgeVariantScope, RequiredRole};
 
 use super::Diagnostics;
 use super::store::Store;

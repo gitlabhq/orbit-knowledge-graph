@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use ontology::{DataType, FieldSelectivity, TraversalPathKind};
+use crate::{DataType, FieldSelectivity, TraversalPathKind};
 
 use super::ClickHouse;
 use super::schema::{self, Schema};

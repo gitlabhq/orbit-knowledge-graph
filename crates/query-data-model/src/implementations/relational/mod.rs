@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::DataType;
 use indexmap::IndexMap;
-use ontology::DataType;
 use serde::{Deserialize, Serialize};
 
+use crate::TraversalPathKind;
 use crate::catalog::{Catalog, Diagnostics, StorageBackend, Store, StoreInput};
 use crate::spec::parse_word;
-use ontology::TraversalPathKind;
 
 use crate::{
     DenormalizedKey, DenormalizedProperty, EntityId, ForeignKey, GraphCatalog, MaterializedJoin,
