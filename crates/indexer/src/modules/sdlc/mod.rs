@@ -41,15 +41,37 @@ const SDLC_CONCURRENCY_GROUP: &str = IndexerModule::Sdlc.concurrency_group();
 /// entity. SDLC skips these plans (E7); the extensions module owns them (E5).
 const EXTENSION_DOMAIN: &str = "extensions";
 
-/// The pipeline (plan) names of every extension entity, so SDLC can skip them
-/// and the extensions module can select them. A plan carries no domain, so the
-/// mapping goes through the owning node.
+/// The pipeline (plan) names of every extension entity and of every extension
+/// edge table, so SDLC can skip them and the extensions module can select them.
+/// A plan carries no domain, so the mapping goes through the owning node, or,
+/// for an edge pipeline (a relationship read from its own table, such as CITES),
+/// through the nodes its edges join.
 fn extension_plan_names(ontology: &ontology::Ontology) -> std::collections::HashSet<String> {
-    ontology
+    let extension_nodes: std::collections::HashSet<&str> = ontology
         .nodes()
         .filter(|node| node.domain == EXTENSION_DOMAIN)
-        .flat_map(|node| node.pipelines.iter().map(|pipeline| pipeline.name.clone()))
-        .collect()
+        .map(|node| node.name.as_str())
+        .collect();
+    let joins_an_extension_node = |reference: &ontology::etl::NodeRef| match &reference.kind {
+        ontology::etl::NodeRefKind::Literal(kind) => extension_nodes.contains(kind.as_str()),
+        ontology::etl::NodeRefKind::Derived { mapping, .. } => mapping
+            .values()
+            .any(|kind| extension_nodes.contains(kind.as_str())),
+    };
+
+    let node_plans = ontology
+        .nodes()
+        .filter(|node| node.domain == EXTENSION_DOMAIN)
+        .flat_map(|node| node.pipelines.iter().map(|pipeline| pipeline.name.clone()));
+    let edge_plans = ontology
+        .edge_etl_configs()
+        .filter(|(_, pipeline)| {
+            pipeline.transform.edges().iter().any(|mapping| {
+                joins_an_extension_node(&mapping.source) || joins_an_extension_node(&mapping.target)
+            })
+        })
+        .map(|(_, pipeline)| pipeline.name.clone());
+    node_plans.chain(edge_plans).collect()
 }
 
 #[cfg(any(test, feature = "testkit"))]
@@ -337,6 +359,30 @@ mod tests {
             },
         )
         .expect("plans should build")
+    }
+
+    #[test]
+    fn extension_plans_include_the_edge_table_pipelines() {
+        const WIDGETS: &str =
+            include_str!("../../../../extensions/tests/fixtures/example.widgets.yaml");
+        let package =
+            extensions::package::Package::parse(WIDGETS, "d1".to_string()).expect("fixture parses");
+        let ontology = extensions::loader::load_merged_ontology(
+            *orbit_migrations::version::SCHEMA_VERSION,
+            &[package],
+        )
+        .expect("merged model loads");
+
+        let names = extension_plan_names(&ontology);
+
+        assert!(
+            names.contains("Widget") && names.contains("Gadget"),
+            "node plans: {names:?}"
+        );
+        assert!(
+            names.iter().any(|name| name.starts_with("LINKS_")),
+            "the LINKS edge table pipeline is an extension plan, or its edges are never indexed: {names:?}"
+        );
     }
 
     #[test]
