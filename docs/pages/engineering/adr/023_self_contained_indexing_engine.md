@@ -56,6 +56,7 @@ They also need new ontology versions at runtime, with no deploy.
 - A planner must handle sweeps and manual requests. Without them, recovery and replans cannot reach its work.
 - KEDA scales on message count, not cost. The planner must split work into lanes by size.
 - A failed migration costs a full reindex and the ledger history, at most once for each release. Graph queries keep working.
+- The active version pointer is never rebuilt. A failed step on it stops indexing until an admin acts.
 - A system table change that rewrites data is a new table and a campaign.
 - Live work writes to two versions during a campaign. Code jobs run two times while it lasts.
 - The ledger shares the graph cluster for now. If it loads the cluster too much, it moves to its own backend.

@@ -115,10 +115,13 @@ It never starts work itself. It asks a planner to plan some work again, or to st
 
 Orbit has two kinds of schema, with opposite rules.
 
-The binary owns the system tables: the checkpoints, the group status and the ledger.
+The binary owns the system tables, such as the group status and the ledger.
 The engine migrates them at startup, with steps that only change metadata, such as a new column.
 If a step fails, the engine creates the tables fresh and swaps them in. It keeps the old ones as a backup.
 A recovery campaign then fills them again. Indexing lags, but queries keep working.
+The campaign replaces all the rows of each project. Deletion jobs remove the entities that were deleted since.
+The engine never rebuilds the pointer to the active version, because queries read it.
+A failed step on it stops indexing and needs an admin.
 
 The ontology registry owns the graph tables, and a new version can come at any time.
 A campaign fills the new version in the background lanes. Live work writes to both versions.
@@ -133,6 +136,7 @@ A newer version cancels an older campaign. A failed version is marked failed, an
 - **A repository is slower than its size suggests.** The lane timeout stops the run and moves the task to the big lane.
 - **An event is lost.** A reconciler or the next sweep finds the stale work and plans it again.
 - **A system table step fails.** The engine rebuilds the system tables and starts a recovery campaign, at most once for each release. A second failure stops indexing and alerts the admin. Queries keep working.
+- **A step on the active version pointer fails.** The engine never rebuilds this table. Indexing stops and alerts the admin. Queries keep using the last active version.
 - **ClickHouse is too old for the schema.** The engine checks the version at startup. Indexing stops with a clear error, and queries keep working.
 - **A new ontology version fails.** The version is marked failed. The active version keeps serving queries.
 - **A planner pod stops.** Its leases expire, and the other replica takes over its triggers and reconcilers.

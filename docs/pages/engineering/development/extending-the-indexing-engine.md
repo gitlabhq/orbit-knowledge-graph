@@ -315,10 +315,10 @@ The system tables are in one store, `engine`, with one folder for each dialect.
 stores/engine/
   clickhouse/
     000_baseline.sql
-    022_expand_parseable_files.sql
+    022_expand_task_attempts.sql
   sqlite/
     000_baseline.sql
-    022_expand_parseable_files.sql
+    022_expand_task_attempts.sql
 ```
 
 | Step | What it may do | When it runs |
@@ -327,7 +327,7 @@ stores/engine/
 | `expand` | Add a table, a column with a default, a TTL or a comment | At startup, before indexing serves |
 | `contract` | Drop a column or a table | One release after the first binary that sees it |
 
-A step may only change metadata, and `build.rs` rejects a step that rewrites data. A change that rewrites data is a new table, filled by a campaign. CI runs every step on each supported ClickHouse version. If a step fails at startup, the engine rebuilds the store and reindexes, at most once for each release. So every table must be rebuildable from the source, or safe to start empty.
+A step may only change metadata, and `build.rs` rejects a step that rewrites data. A change that rewrites data is a new table, filled by a campaign. CI runs every step on each supported ClickHouse version. If a step fails at startup, the engine rebuilds the store and reindexes, at most once for each release. So every table must be rebuildable from the source, or safe to start empty. The active version pointer is neither. It lives outside the `engine` store, and the engine never rebuilds it. A failed step on it stops indexing and alerts the admin.
 
 ## Step 9: Wire it into the host
 
