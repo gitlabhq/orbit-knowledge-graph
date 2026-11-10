@@ -6,7 +6,7 @@ use query_data_model::plan::logical::{
     Expr, LogicalBuilder, LogicalCatalog, LogicalOperation, LogicalPlan, Order, PlanError, Rows,
     count,
 };
-use query_data_model::plan::tracking::{Declared, NodeId, Ref, Rejected};
+use query_data_model::plan::tracking::{Declared, NodeId, Rejected};
 use query_data_model::{DataModelError, Direction, EntityId, Model};
 
 fn package_sources(packages: &[&str]) -> Vec<(String, String)> {
@@ -259,7 +259,7 @@ fn handles_from_another_plan_or_snapshot_are_rejected() {
         PlanError::Rejected(Rejected::ForeignPlan)
     );
 
-    let rewritten = other.logical().rewrite(first, |_, rows| Ok(rows));
+    let rewritten = other.logical().rebuild(first, |q, step| step.keep(q));
     assert_eq!(
         rewritten.unwrap_err(),
         PlanError::Rejected(Rejected::ForeignSnapshot)
@@ -409,9 +409,10 @@ fn guard_every_scan(
     plan: LogicalPlan,
 ) -> Result<(LogicalPlan, usize), PlanError> {
     let mut visits = 0;
-    let plan = catalog.rewrite(plan, |q, rows| {
+    let plan = catalog.rebuild(plan, |q, step| {
         visits += 1;
-        if !matches!(q.operation(&rows)?, LogicalOperation::Entities(_)) {
+        let rows = step.keep(q)?;
+        if !matches!(step.operation, LogicalOperation::Entities(_)) {
             return Ok(rows);
         }
         let state = rows.property("state")?;
@@ -432,7 +433,7 @@ fn consumers_of_scans(plan: &LogicalPlan) -> Vec<&LogicalOperation> {
 }
 
 #[test]
-fn a_rewrite_guards_every_scan_and_preserves_outputs() {
+fn a_rebuild_guards_every_scan_and_preserves_outputs() {
     let model = load(&["gitlab"]);
     let catalog = model.logical();
     let requests = catalog.entity("MergeRequest").unwrap();
@@ -452,10 +453,13 @@ fn a_rewrite_guards_every_scan_and_preserves_outputs() {
             q.union(vec![first, second])
         })
         .unwrap();
-    let before: Vec<Ref> = plan.outputs(plan.root()).collect();
+    let before: Vec<String> = names(&plan, plan.root())
+        .into_iter()
+        .map(str::to_string)
+        .collect();
     let (plan, visits) = guard_every_scan(catalog, plan).unwrap();
     assert_eq!(visits, 5);
-    assert_eq!(plan.outputs(plan.root()).collect::<Vec<_>>(), before);
+    assert_eq!(names(&plan, plan.root()), before);
     let consumers = consumers_of_scans(&plan);
     assert_eq!(consumers.len(), 2);
     assert!(
@@ -492,19 +496,18 @@ fn changed_outputs_need_explicit_reconnection() {
         })
     };
     let rename = |reconnect: bool| {
-        catalog.rewrite(build().unwrap(), move |q, rows| {
-            if !matches!(q.operation(&rows)?, LogicalOperation::Select(_)) {
+        catalog.rebuild(build().unwrap(), move |q, step| {
+            let rows = step.keep(q)?;
+            if !matches!(step.operation, LogicalOperation::Select(_)) {
                 return Ok(rows);
             }
-            let Expr::Output(title) = rows.column("title")? else {
-                unreachable!("select outputs are columns");
-            };
-            let renamed = q.select(rows, [Expr::Output(title).named("name")])?;
+            let title = rows.column("title")?;
+            let renamed = q.select(rows, [title.named("name")])?;
             let Expr::Output(name) = renamed.column("name")? else {
                 unreachable!("select outputs are columns");
             };
             if reconnect {
-                q.reconnect(title, name)?;
+                step.reconnect(step.outputs()[0], name)?;
             }
             Ok(renamed)
         })
@@ -518,8 +521,9 @@ fn changed_outputs_need_explicit_reconnection() {
     assert_eq!(names(&plan, plan.root()), ["name"]);
 
     let plan = catalog
-        .rewrite(build().unwrap(), |q, rows| {
-            if !matches!(q.operation(&rows)?, LogicalOperation::Order(_)) {
+        .rebuild(build().unwrap(), |q, step| {
+            let rows = step.keep(q)?;
+            if !matches!(step.operation, LogicalOperation::Order(_)) {
                 return Ok(rows);
             }
             let title = rows.column("title")?;

@@ -18,10 +18,6 @@ pub enum Rejected {
     Failed,
     #[error("the replacement changes outputs {0} without reconnecting their consumers")]
     ChangedOutputs(String),
-    #[error("reconnection needs a rewrite and an output of the replaced operation")]
+    #[error("only an output of the operation a rebuild is visiting can be reconnected")]
     BadReconnection,
-    #[error(
-        "only the operation a rewrite is visiting can be detached, before anything consumes it"
-    )]
-    NotDetachable,
 }

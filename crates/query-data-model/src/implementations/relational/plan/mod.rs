@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 use crate::DataType;
 
 pub use block::Block;
-pub use builder::{Aggregated, Detached, RelationalBuilder, SharePolicy, Subquery};
+pub use builder::{Aggregated, RelationalBuilder, SharePolicy, Subquery};
 pub use error::RelationalError;
 pub use expr::{BinaryOp, Expr, Function, TextMatch, TimeUnit, UnaryOp};
 pub use operation::{
@@ -149,13 +149,5 @@ impl<B: RelationalBackend> Catalog<B> {
             }
             tracking::rebuild(q, plan, hook)
         })
-    }
-
-    pub fn rewrite<'c>(
-        &'c self,
-        plan: RelationalPlan<B>,
-        visit: impl FnMut(&mut RelationalBuilder<'c, B>, Relation) -> Result<Relation, RelationalError>,
-    ) -> Result<RelationalPlan<B>, RelationalError> {
-        RelationalBuilder::rewriting(self, plan)?.rewrite(visit)
     }
 }

@@ -37,8 +37,9 @@ pub fn secure(
                 })
                 .ok_or_else(|| QueryError::Security("the code plan reads no index".into()))?;
             let readable = readable(code.guard(index), ctx)?;
-            let plan = code.rewrite(plan, |q, files| {
-                let CodeOperation::Repositories { projects, .. } = q.operation(&files)? else {
+            let plan = code.rebuild(plan, |q, step| {
+                let files = step.keep(q)?;
+                let CodeOperation::Repositories { projects, .. } = &step.operation else {
                     return Ok(files);
                 };
                 let allowed: Vec<i64> = projects
@@ -70,9 +71,12 @@ pub fn secure(
                 .filter(|(_, path)| path.is_within_scope(&readable))
                 .map(|(workspace, _)| workspace.clone())
                 .collect();
-            let plan = live.rewrite(plan, |q, calls| match q.operation(&calls)? {
-                LiveOperation::Call(_) => q.workspaces(calls, workspaces.clone()),
-                _ => Ok(calls),
+            let plan = live.rebuild(plan, |q, step| {
+                let calls = step.keep(q)?;
+                match step.operation {
+                    LiveOperation::Call(_) => q.workspaces(calls, workspaces.clone()),
+                    _ => Ok(calls),
+                }
             })?;
             Ok(RemotePlan::Live(plan))
         }

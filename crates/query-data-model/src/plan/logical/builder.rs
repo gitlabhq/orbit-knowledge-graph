@@ -259,7 +259,9 @@ impl<'m> LogicalBuilder<'m> {
     }
 
     pub fn read(&mut self, body: Body) -> Result<Rows<'m>, PlanError> {
-        let connected = self.construction.read(body, LogicalOperation::Read(body))?;
+        let connected = self
+            .construction
+            .read(body, LogicalOperation::Read(body.id()))?;
         self.view(connected.rows)
     }
 
@@ -269,10 +271,6 @@ impl<'m> LogicalBuilder<'m> {
     ) -> Result<(), PlanError> {
         let outputs: Vec<Ref> = bindings.into_iter().map(Binding::output).collect();
         Ok(self.construction.declare_order(&outputs)?)
-    }
-
-    pub fn reconnect(&mut self, from: Ref, to: Ref) -> Result<(), PlanError> {
-        Ok(self.construction.reconnect(from, to)?)
     }
 
     pub(super) fn bound(binding: Binding<'m>) -> Result<EntityId, PlanError> {

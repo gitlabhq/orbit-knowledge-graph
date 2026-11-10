@@ -79,14 +79,4 @@ impl Spec {
                 .collect(),
         }
     }
-
-    pub(super) fn remap(&mut self, map: impl Fn(OutputId) -> OutputId) {
-        if let Self::Replace(items) = self {
-            for item in items {
-                if let Item::Keep(id) = item {
-                    *id = map(*id);
-                }
-            }
-        }
-    }
 }

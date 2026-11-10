@@ -5,7 +5,7 @@ pub use builder::{Calls, Conditions, Field, LiveBuilder};
 use crate::catalog::{Catalog, Guard};
 use crate::implementations::live::{Endpoint, Live};
 use crate::plan::logical::Literal;
-use crate::plan::tracking::{self, Construction, Declared, Plan, Ref, Rejected};
+use crate::plan::tracking::{self, Declared, Each, Plan, Ref, Rejected, Step};
 use crate::{DataType, EntityId, PropertyId};
 
 #[derive(Debug)]
@@ -154,22 +154,21 @@ impl Catalog<Live> {
         &'c self,
         construct: impl FnOnce(&mut LiveBuilder<'c>) -> Result<Calls, LiveError>,
     ) -> Result<LivePlan, LiveError> {
-        let mut builder = LiveBuilder::new(self, Construction::new(self.model().id()));
+        let mut builder = LiveBuilder::new(self);
         let root = construct(&mut builder);
-        builder.finish(root.map(Calls::into_inner))
+        builder.finish(root)
     }
 
-    pub fn rewrite<'c>(
+    pub fn rebuild<'c>(
         &'c self,
         plan: LivePlan,
-        mut visit: impl FnMut(&mut LiveBuilder<'c>, Calls) -> Result<Calls, LiveError>,
+        visit: impl FnMut(
+            &mut LiveBuilder<'c>,
+            &mut Step<'_, '_, LiveBuilder<'c>>,
+        ) -> Result<Calls, LiveError>,
     ) -> Result<LivePlan, LiveError> {
-        let construction = Construction::rewrite(plan, self.model().id())?;
-        let mut builder = LiveBuilder::new(self, construction);
-        let root = tracking::rewrite(&mut builder, LiveBuilder::construction, |q, rows| {
-            let calls = q.view(rows)?;
-            visit(q, calls).map(Calls::into_inner)
-        });
+        let mut builder = LiveBuilder::new(self);
+        let root = tracking::rebuild(&mut builder, &plan, &mut Each(visit));
         builder.finish(root)
     }
 }

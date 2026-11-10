@@ -201,20 +201,21 @@ fn handles(catalog: &Catalog<ClickHouse>) -> RelationalPlan<ClickHouse> {
 }
 
 #[test]
-fn a_relational_rewrite_keeps_unchanged_plans_and_guards_every_scan() {
+fn a_relational_rebuild_keeps_unchanged_plans_and_guards_every_scan() {
     let model = clickhouse();
     let catalog = &model;
     let original = catalog.render(&handles(catalog)).sql;
     let same = catalog
-        .rewrite(handles(catalog), |_, rows| Ok(rows))
+        .rebuild(handles(catalog), |q, step| step.keep(q))
         .unwrap();
     assert_eq!(catalog.render(&same).sql, original);
 
     let mut visits = 0;
     let guarded = catalog
-        .rewrite(handles(catalog), |q, rows| {
+        .rebuild(handles(catalog), |q, step| {
             visits += 1;
-            if !matches!(q.operation(&rows)?, Operation::Scan { .. }) {
+            let rows = step.keep(q)?;
+            if !matches!(step.operation, Operation::Scan { .. }) {
                 return Ok(rows);
             }
             let deleted = rows.column("_deleted")?;
@@ -234,16 +235,18 @@ fn a_relational_rewrite_keeps_unchanged_plans_and_guards_every_scan() {
 }
 
 #[test]
-fn relational_rewrites_reconnect_changed_outputs() {
+fn relational_rebuilds_reconnect_changed_outputs() {
     let model = clickhouse();
     let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
     let build = || {
-        catalog
+        let mut username = None;
+        let plan = catalog
             .build(|q| {
                 let rows = q.scan(users, ReadMode::Current, "u")?;
                 let id = rows.qualified("u", "id")?;
                 let name = rows.qualified("u", "username")?;
+                username = Some(name.output());
                 let rows = q.filter(rows, eq(name.expr(), text("root")))?;
                 let order = Order {
                     value: name.expr(),
@@ -252,17 +255,20 @@ fn relational_rewrites_reconnect_changed_outputs() {
                 let rows = q.order(rows, vec![order])?;
                 q.select(rows, vec![id, name])
             })
-            .unwrap()
+            .unwrap();
+        (plan, username.unwrap())
     };
     let alias = |reconnect: bool| {
-        catalog.rewrite(build(), move |q, rows| {
-            if !matches!(q.operation(&rows)?, Operation::Filter(_)) {
+        let (plan, username) = build();
+        catalog.rebuild(plan, move |q, step| {
+            let rows = step.keep(q)?;
+            if !matches!(step.operation, Operation::Filter(_)) {
                 return Ok(rows);
             }
             let name = rows.qualified("u", "username")?;
             let (rows, computed) = q.compute(rows, vec![Declare::named("handle", name.expr())])?;
             if reconnect {
-                q.reconnect(name.output(), computed[0].output())?;
+                step.reconnect(username, computed[0].output())?;
             }
             Ok(rows)
         })
@@ -280,7 +286,7 @@ fn relational_rewrites_reconnect_changed_outputs() {
 }
 
 #[test]
-fn relational_rewrites_expose_outputs_their_result_selects() {
+fn relational_rebuilds_expose_outputs_their_result_selects() {
     let model = clickhouse();
     let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
@@ -296,28 +302,24 @@ fn relational_rewrites_expose_outputs_their_result_selects() {
     };
     let label = |expose: bool| {
         let mut added = None;
-        catalog.rewrite(build(), move |q, rows| match q.operation(&rows)? {
-            Operation::Limit { .. } => {
-                let mut detached = q.detach(rows)?;
-                let source = detached.inputs.remove(0);
-                let (source, computed) =
-                    q.compute(source, vec![Declare::named("label", text("user"))])?;
-                detached.inputs.insert(0, source);
-                let rows = q.reattach(detached)?;
-                if expose {
-                    q.expose(computed[0])?;
+        catalog.rebuild(build(), move |q, step| {
+            match &mut step.operation {
+                Operation::Limit { .. } => {
+                    let source = step.inputs.remove(0);
+                    let (source, computed) =
+                        q.compute(source, vec![Declare::named("label", text("user"))])?;
+                    step.inputs.insert(0, source);
+                    if expose {
+                        step.expose(computed[0].output());
+                    }
+                    added = Some(computed[0]);
                 }
-                added = Some(computed[0]);
-                Ok(rows)
-            }
-            Operation::Select(_) => {
-                let mut detached = q.detach(rows)?;
-                if let Operation::Select(Selection::Columns(columns)) = &mut detached.operation {
+                Operation::Select(Selection::Columns(columns)) => {
                     columns.extend(added.map(|column| column.output()));
                 }
-                q.reattach(detached)
+                _ => {}
             }
-            _ => Ok(rows),
+            step.keep(q)
         })
     };
 
@@ -332,54 +334,36 @@ fn relational_rewrites_expose_outputs_their_result_selects() {
 }
 
 #[test]
-fn a_detached_operation_reattaches_onto_rewritten_inputs() {
+fn a_rebuilt_operation_replays_onto_rewritten_inputs() {
     let model = clickhouse();
     let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
-    let build = || {
-        catalog
-            .build(|q| {
-                let rows = q.scan(users, ReadMode::Current, "u")?;
-                let id = rows.qualified("u", "id")?;
-                let name = rows.qualified("u", "username")?;
-                let (rows, computed) =
-                    q.compute(rows, vec![Declare::named("handle", name.expr())])?;
-                q.select(rows, vec![id, computed[0]])
-            })
-            .unwrap()
-    };
+    let plan = catalog
+        .build(|q| {
+            let rows = q.scan(users, ReadMode::Current, "u")?;
+            let id = rows.qualified("u", "id")?;
+            let name = rows.qualified("u", "username")?;
+            let (rows, computed) = q.compute(rows, vec![Declare::named("handle", name.expr())])?;
+            q.select(rows, vec![id, computed[0]])
+        })
+        .unwrap();
     let guarded = catalog
-        .rewrite(build(), |q, rows| {
-            if !matches!(q.operation(&rows)?, Operation::Compute(_)) {
-                return Ok(rows);
+        .rebuild(plan, |q, step| {
+            if matches!(step.operation, Operation::Compute(_)) {
+                let input = step.inputs.remove(0);
+                let deleted = input.qualified("u", "_deleted")?;
+                let live = Expr::Unary {
+                    op: UnaryOp::Not,
+                    value: Box::new(deleted.expr()),
+                };
+                step.inputs.push(q.filter(input, live)?);
             }
-            let mut detached = q.detach(rows)?;
-            let input = detached.inputs.remove(0);
-            let deleted = input.qualified("u", "_deleted")?;
-            let live = Expr::Unary {
-                op: UnaryOp::Not,
-                value: Box::new(deleted.expr()),
-            };
-            detached.inputs.push(q.filter(input, live)?);
-            q.reattach(detached)
+            step.keep(q)
         })
         .unwrap();
     assert_eq!(
         catalog.render(&guarded).sql,
         "SELECT u.id, u.username AS handle FROM gl_user AS u FINAL WHERE (NOT u._deleted)"
-    );
-
-    let stray = catalog.rewrite(build(), |q, rows| {
-        if !matches!(q.operation(&rows)?, Operation::Select(_)) {
-            return Ok(rows);
-        }
-        let other = q.scan(users, ReadMode::Current, "v")?;
-        q.detach(other)?;
-        Ok(rows)
-    });
-    assert_eq!(
-        stray.unwrap_err(),
-        RelationalError::Rejected(Rejected::NotDetachable)
     );
 }
 

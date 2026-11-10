@@ -34,10 +34,11 @@ impl<Q: Rebuilder> Step<'_, '_, Q> {
 
     /// Points the consumers of an old output of this operation at `new`.
     pub fn reconnect(&mut self, old: Ref, new: Ref) -> Result<(), Rejected> {
-        match self.outputs().contains(&old) {
-            true => Ok(self.rebuild.reconnect(old, new)),
-            false => Err(Rejected::BadReconnection),
+        if !self.outputs().contains(&old) {
+            return Err(Rejected::BadReconnection);
         }
+        self.rebuild.reconnect(old, new);
+        Ok(())
     }
 
     /// Lets consumers see `new`, an output the old operation did not have.

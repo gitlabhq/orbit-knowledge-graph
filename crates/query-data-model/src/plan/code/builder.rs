@@ -3,7 +3,9 @@ use super::{
 };
 use crate::catalog::Catalog;
 use crate::implementations::orbit_code::{OrbitCode, SearchMode};
-use crate::plan::tracking::{self, Construction, Declare, Declared, Output, Outputs, Ref};
+use crate::plan::tracking::{
+    self, Construction, Declare, Declared, Output, Outputs, Rebuilder, Ref,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
@@ -78,33 +80,19 @@ pub struct CodeBuilder<'c> {
 }
 
 impl<'c> CodeBuilder<'c> {
-    pub(super) fn new(
-        catalog: &'c Catalog<OrbitCode>,
-        construction: Construction<CodeLanguage>,
-    ) -> Self {
+    pub(super) fn new(catalog: &'c Catalog<OrbitCode>) -> Self {
         Self {
             catalog,
-            construction,
+            construction: Construction::new(catalog.model().id()),
             index: None,
         }
     }
 
-    pub(super) fn construction(&mut self) -> &mut Construction<CodeLanguage> {
-        &mut self.construction
-    }
-
     pub(super) fn finish(self, root: Result<Matches, CodeError>) -> Result<CodePlan, CodeError> {
-        self.finish_rows(root.map(Matches::into_inner))
+        Ok(self.construction.finish(root?.rows)?)
     }
 
-    pub(super) fn finish_rows(
-        self,
-        root: Result<tracking::Rows, CodeError>,
-    ) -> Result<CodePlan, CodeError> {
-        Ok(self.construction.finish(root?)?)
-    }
-
-    pub(super) fn view(&mut self, rows: tracking::Rows) -> Result<Matches, CodeError> {
+    fn view(&mut self, rows: tracking::Rows) -> Result<Matches, CodeError> {
         if let CodeOperation::Repositories { index, .. } = self.construction.operation(&rows)? {
             self.index = Some(*index);
         }
@@ -286,5 +274,58 @@ impl<'c> CodeBuilder<'c> {
         self.connect(CodeOperation::Select(refs), vec![matches], |_| {
             Ok(Outputs::replace(outputs))
         })
+    }
+}
+
+impl Rebuilder for CodeBuilder<'_> {
+    type Language = CodeLanguage;
+    type Old = CodePlan;
+    type Rows = Matches;
+    type Error = CodeError;
+
+    fn plan(old: &CodePlan) -> &CodePlan {
+        old
+    }
+
+    fn construction(&mut self) -> &mut Construction<CodeLanguage> {
+        &mut self.construction
+    }
+
+    fn rows(rows: &Matches) -> &tracking::Rows {
+        &rows.rows
+    }
+
+    fn replay(
+        &mut self,
+        operation: CodeOperation,
+        mut inputs: Vec<Matches>,
+        _outputs: Outputs<CodeValue>,
+    ) -> Result<Matches, CodeError> {
+        let mut input = || match inputs.is_empty() {
+            true => Err(CodeError::Incomplete("one input")),
+            false => Ok(inputs.remove(0)),
+        };
+        match operation {
+            CodeOperation::Repositories { index, projects } => {
+                let index = Declared::new(self.catalog.model().id(), index);
+                self.repositories(index, projects)
+            }
+            CodeOperation::Restrict(readable) => self.restrict(input()?, readable),
+            CodeOperation::Languages(languages) => self.languages(input()?, languages),
+            CodeOperation::Prefilter(atoms) => self.prefilter(input()?, Trigrams(atoms)),
+            CodeOperation::Structural(pattern) => self.structural(input()?, pattern),
+            CodeOperation::Top(count) => self.top(input()?, count),
+            CodeOperation::Select(refs) => {
+                let matches = input()?;
+                let fields = refs.iter().map(|output| {
+                    let field = matches.fields.iter().find(|field| field.output == *output);
+                    field
+                        .cloned()
+                        .ok_or(CodeError::Incomplete("a selected field"))
+                });
+                let fields = fields.collect::<Result<Vec<_>, _>>()?;
+                self.select(matches, fields)
+            }
+        }
     }
 }

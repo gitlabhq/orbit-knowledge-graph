@@ -147,9 +147,12 @@ fn a_rewrite_restricts_repositories_through_the_builder() {
         })
         .unwrap();
     let restricted = code
-        .rewrite(plan, |q, files| match q.operation(&files)? {
-            CodeOperation::Repositories { .. } => q.restrict(files, [42]),
-            _ => Ok(files),
+        .rebuild(plan, |q, step| {
+            let files = step.keep(q)?;
+            match step.operation {
+                CodeOperation::Repositories { .. } => q.restrict(files, [42]),
+                _ => Ok(files),
+            }
         })
         .unwrap();
     let request = code.render(&restricted).unwrap();

@@ -3,7 +3,9 @@ use crate::DataType;
 use crate::catalog::Catalog;
 use crate::implementations::live::Live;
 use crate::plan::logical::Literal;
-use crate::plan::tracking::{self, Construction, Declare, Declared, Output, Outputs, Ref};
+use crate::plan::tracking::{
+    self, Construction, Declare, Declared, Output, Outputs, Rebuilder, Ref,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
@@ -74,28 +76,18 @@ pub struct LiveBuilder<'c> {
 }
 
 impl<'c> LiveBuilder<'c> {
-    pub(super) fn new(
-        catalog: &'c Catalog<Live>,
-        construction: Construction<LiveLanguage>,
-    ) -> Self {
+    pub(super) fn new(catalog: &'c Catalog<Live>) -> Self {
         Self {
             catalog,
-            construction,
+            construction: Construction::new(catalog.model().id()),
         }
     }
 
-    pub(super) fn construction(&mut self) -> &mut Construction<LiveLanguage> {
-        &mut self.construction
+    pub(super) fn finish(self, root: Result<Calls, LiveError>) -> Result<LivePlan, LiveError> {
+        Ok(self.construction.finish(root?.rows)?)
     }
 
-    pub(super) fn finish(
-        self,
-        root: Result<tracking::Rows, LiveError>,
-    ) -> Result<LivePlan, LiveError> {
-        Ok(self.construction.finish(root?)?)
-    }
-
-    pub(super) fn view(&self, rows: tracking::Rows) -> Result<Calls, LiveError> {
+    fn view(&self, rows: tracking::Rows) -> Result<Calls, LiveError> {
         let mut fields = Vec::new();
         for output in self.construction.outputs(&rows)? {
             if let (Some(name), value) = self.construction.value(output)? {
@@ -295,5 +287,70 @@ impl<'c> LiveBuilder<'c> {
         self.connect(LiveOperation::Select(refs), vec![calls], || {
             Ok(Outputs::replace(outputs))
         })
+    }
+}
+
+impl Rebuilder for LiveBuilder<'_> {
+    type Language = LiveLanguage;
+    type Old = LivePlan;
+    type Rows = Calls;
+    type Error = LiveError;
+
+    fn plan(old: &LivePlan) -> &LivePlan {
+        old
+    }
+
+    fn construction(&mut self) -> &mut Construction<LiveLanguage> {
+        &mut self.construction
+    }
+
+    fn rows(rows: &Calls) -> &tracking::Rows {
+        &rows.rows
+    }
+
+    fn replay(
+        &mut self,
+        operation: LiveOperation,
+        mut inputs: Vec<Calls>,
+        _outputs: Outputs<LiveValue>,
+    ) -> Result<Calls, LiveError> {
+        let mut input = || match inputs.is_empty() {
+            true => Err(LiveError::Incomplete("one input")),
+            false => Ok(inputs.remove(0)),
+        };
+        let field = |calls: &Calls, output: Ref| {
+            let field = calls.fields.iter().find(|field| field.output == output);
+            field.cloned().ok_or(LiveError::Incomplete("a known field"))
+        };
+        match operation {
+            LiveOperation::Call(operation) => {
+                self.call(Declared::new(self.catalog.model().id(), operation))
+            }
+            LiveOperation::Filter(conditions) => {
+                let calls = input()?;
+                let conditions = conditions
+                    .into_iter()
+                    .map(|mut condition| Ok((field(&calls, *condition.field())?, condition)))
+                    .collect::<Result<_, LiveError>>()?;
+                self.filter(calls, Conditions(conditions))
+            }
+            LiveOperation::Window {
+                field: output,
+                from,
+                to,
+            } => {
+                let calls = input()?;
+                let field = field(&calls, output)?;
+                self.window(calls, &field, from, to)
+            }
+            LiveOperation::Workspaces(workspaces) => self.workspaces(input()?, workspaces),
+            LiveOperation::Limit(rows) => self.limit(input()?, rows),
+            LiveOperation::Select(refs) => {
+                let calls = input()?;
+                let fields = refs.into_iter().map(|output| field(&calls, output));
+                let fields = fields.collect::<Result<Vec<_>, _>>()?;
+                self.select(calls, fields)
+            }
+        }
     }
 }

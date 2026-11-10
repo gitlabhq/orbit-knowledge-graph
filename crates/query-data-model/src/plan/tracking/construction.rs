@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use super::contract::{Item, Output, Outputs, Spec};
 use super::plan::{Arena, Node, OutputInfo};
-use super::rewrite::Pending;
 use super::{
     Body, BodyId, Declared, Language, NodeId, OutputId, Plan, PlanId, Ref, Rejected, Rows, ScopeId,
 };
@@ -12,7 +11,6 @@ pub struct Construction<L: Language> {
     pub(super) arena: Arena<L>,
     pub(super) scope: ScopeId,
     pub(super) failed: bool,
-    pub(super) pending: Option<Pending<L>>,
 }
 
 #[derive(Debug)]
@@ -35,7 +33,6 @@ impl<L: Language> Construction<L> {
             },
             scope: ScopeId(0),
             failed: false,
-            pending: None,
         }
     }
 
@@ -275,9 +272,6 @@ impl<L: Language> Construction<L> {
 
     pub fn finish(mut self, root: Rows) -> Result<Plan<L>, Rejected> {
         let root = self.attempt(|this| {
-            if this.pending.as_ref().is_some_and(|pending| !pending.done()) {
-                return Err(Rejected::Failed);
-            }
             let root = this.node(&root)?;
             this.arena.nodes[root.0].consumed = true;
             let unused = this

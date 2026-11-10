@@ -6,7 +6,6 @@ mod error;
 mod ids;
 mod plan;
 mod rebuild;
-mod rewrite;
 mod step;
 
 use std::fmt::Debug;
@@ -18,7 +17,6 @@ pub use error::Rejected;
 pub use ids::{Body, BodyId, Declared, NodeId, OutputId, PlanId, Ref, Rows, ScopeId};
 pub use plan::Plan;
 pub use rebuild::{Hook, Rebuild, Rebuilder, rebuild};
-pub use rewrite::rewrite;
 pub use step::{Each, Step};
 
 pub trait Language: Sized {
