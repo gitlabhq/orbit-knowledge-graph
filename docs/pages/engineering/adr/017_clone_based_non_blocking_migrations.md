@@ -9,6 +9,8 @@ toc_hide: true
 
 Accepted
 
+Amended by [ADR 024](024_pluggable_data_model.md): the scope is derived from the package diff, and a shared edge table is cloned intact and swept per writer instead of widening to full.
+
 ## Date
 
 2026-07-13

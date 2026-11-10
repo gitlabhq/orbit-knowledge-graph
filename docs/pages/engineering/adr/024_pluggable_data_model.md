@@ -10,6 +10,9 @@ toc_hide: true
 Proposed. This ADR replaces the ontology as the source of truth for the query engine, the schema migrations and the indexer.
 [ADR 000](000_clickhouse_graph_storage.md) is unchanged: ClickHouse remains the graph store.
 It works with [ADR 023](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3333), whose indexing engine backfills a new package version before it goes live.
+This ADR amends [ADR 017](017_clone_based_non_blocking_migrations.md) on two points.
+The migration scope is derived from the package diff, as a floor that a ledger entry can widen but never narrow.
+A shared edge table no longer widens the scope to full: it is cloned intact, and only in-scope writers are re-run and swept.
 
 ## Date
 
@@ -274,7 +277,8 @@ end
 ```
 
 The registry keeps one version line per package, and a tenant's model is the active version of every package that applies to it.
-The migration scope is the diff of the physical catalogs and the source fragments, so nobody declares it by hand.
+The migration scope is the diff of the physical catalogs and the source fragments. It is a floor: a ledger entry can widen it but never narrow it.
+A shared edge table is cloned intact. Only its in-scope writers re-emit their rows, and after each namespace finishes, a sweep tombstones that writer's older rows in the namespace.
 The query engine never sees a model whose tables are not built yet, and the indexer and the query engine always agree on one package version.
 
 ### 4. Catalogs give each connection a typed view
