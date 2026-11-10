@@ -159,3 +159,5 @@ cases:
             visibility_level: public
         Project:
           ids: [1000]
+      edges:
+        CONTAINS: [[100, 1000]]

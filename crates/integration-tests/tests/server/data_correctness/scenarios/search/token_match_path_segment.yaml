@@ -27,3 +27,4 @@ expect:
       order: [12002, 12102]
       rows:
         - { id: 12002, file_path: "crates/orbit/src/main.rs" }
+        - { id: 12102, file_path: "crates/orbit/src/main.rs" }

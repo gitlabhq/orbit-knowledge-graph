@@ -133,12 +133,23 @@ typed helpers for looking up nodes, edges, and paths.
 
 ### Creating a view
 
-Use `from_response` with the formatted `GraphResponse`:
+Use `for_query` with the compiled `Input` and the formatted `GraphResponse`:
 
 ```rust
 use integration_testkit::visitor::{ResponseView, NodeExt};
-let resp = ResponseView::from_response(response);
+let resp = ResponseView::for_query(&compiled.input, response);
 ```
+
+`for_query` derives requirements from the query: an order check for `order_by`, a
+filter check per filtered field, edge checks per relationship type, and path,
+aggregation, sort, and `SKIP` checks. It keeps only the requirements the response
+can show: a filter check needs a returned node with a non-null value for the field,
+an order check needs two nodes, and an empty response needs nothing. The view
+panics on drop when a kept requirement has no matching assertion.
+
+In query scenarios, `nodes.<Entity>.filters` checks a filter. `rows` also checks
+every field they list when they cover every returned node of the entity.
+`row_values` checks the sort when it lists every row.
 
 ### Example: single-entity traversal with filter and ordering
 

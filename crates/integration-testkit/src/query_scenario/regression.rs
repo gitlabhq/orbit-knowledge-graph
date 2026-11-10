@@ -85,15 +85,7 @@ fn filtered_returned_nodes_require_a_filter_check() {
         query.clone(),
         "nodes: {Definition: {filters: {name: {starts_with: alp}}}}",
     );
-    run_suite(
-        query.clone(),
-        "nodes: {Definition: {rows: [{id: 1, name: alpha}]}}",
-    );
-    rejects(
-        query,
-        "node_count: 1",
-        "Definition nodes return the filtered field name",
-    );
+    rejects(query, "node_count: 1", "Filter on 'name'");
     run_suite(
         json!({"gql": "MATCH (d:Definition) WHERE d.name = 'none' RETURN d.name"}),
         "node_count: 0",
@@ -375,7 +367,7 @@ fn numeric_metric_assertions_reject_numeric_strings() {
         let check = |metric: Value| {
             let mut response = sample_aggregation_response();
             response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
-            assertion(&ResponseView::from_response(response));
+            assertion(&ResponseView::new(response));
         };
         check(json!(2));
         assert_panics(|| check(json!("2")), "column 'c' is not an integer");
@@ -384,7 +376,7 @@ fn numeric_metric_assertions_reject_numeric_strings() {
     let check_group = |metric: Value| {
         let mut response = sample_grouped_aggregation_response();
         response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
-        ResponseView::from_response(response).assert_group_row_value_i64("u", "User", 1, "c", 2);
+        ResponseView::new(response).assert_group_row_value_i64("u", "User", 1, "c", 2);
     };
     check_group(json!(2));
     assert_panics(|| check_group(json!("2")), "column 'c' is not an integer");
@@ -392,7 +384,7 @@ fn numeric_metric_assertions_reject_numeric_strings() {
     let check_average = |metric: Value| {
         let mut response = sample_grouped_aggregation_response();
         response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
-        ResponseView::from_response(response).assert_group_row_value_f64("u", "User", 1, "c", 2.5);
+        ResponseView::new(response).assert_group_row_value_f64("u", "User", 1, "c", 2.5);
     };
     check_average(json!(2.5));
     assert_panics(|| check_average(json!("2.5")), "column 'c' is not a number");
