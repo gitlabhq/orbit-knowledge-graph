@@ -346,14 +346,24 @@ pub async fn run_dispatcher(
         config.schedule.tasks.code_backfill.publish_window,
     ));
 
-    let tasks: Vec<Box<dyn ScheduledTask>> = vec![
-        Box::new(GlobalDispatcher::new(
+    let sdlc_enabled = config.engine.is_module_enabled(IndexerModule::Sdlc);
+    let code_enabled = config.engine.is_module_enabled(IndexerModule::Code);
+    let namespace_deletion_enabled = config
+        .engine
+        .is_module_enabled(IndexerModule::NamespaceDeletion);
+
+    // TableCleanup, StaleEdgeReconciliation and MigrationCompletionChecker read no
+    // Siphon source table, so they run under every module selection.
+    let mut tasks: Vec<Box<dyn ScheduledTask>> = Vec::new();
+
+    if sdlc_enabled {
+        tasks.push(Box::new(GlobalDispatcher::new(
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.global.clone(),
             campaign.clone(),
-        )),
-        Box::new(NamespaceDispatcher::new(
+        )));
+        tasks.push(Box::new(NamespaceDispatcher::new(
             services.nats.clone(),
             datalake,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
@@ -363,8 +373,11 @@ pub async fn run_dispatcher(
             config.schedule.tasks.namespace.clone(),
             campaign.clone(),
             &ontology,
-        )),
-        Box::new(CodeBackfillSweep::new(
+        )));
+    }
+
+    if code_enabled {
+        tasks.push(Box::new(CodeBackfillSweep::new(
             backfill.clone(),
             CodeStaleSweep::new(
                 clients.graph.clone(),
@@ -373,76 +386,90 @@ pub async fn run_dispatcher(
                 config.schedule.tasks.code_backfill.stale_sweeps_per_tick,
             ),
             config.schedule.tasks.code_backfill.clone(),
-        )),
-        Box::new(TableCleanup::new(
-            graph,
-            &ontology,
-            metrics.clone(),
-            config.schedule.tasks.table_cleanup.clone(),
-        )?),
-        Box::new(NamespaceDeletionScheduler::new(
+        )));
+    }
+
+    tasks.push(Box::new(TableCleanup::new(
+        graph,
+        &ontology,
+        metrics.clone(),
+        config.schedule.tasks.table_cleanup.clone(),
+    )?));
+
+    if namespace_deletion_enabled {
+        tasks.push(Box::new(NamespaceDeletionScheduler::new(
             deletion_store,
             checkpoint_store,
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.namespace_deletion.clone(),
-        )),
-        Box::new(StaleEdgeReconciliation::new(
+        )));
+    }
+
+    tasks.push(Box::new(StaleEdgeReconciliation::new(
+        clients.graph.clone(),
+        &ontology,
+        Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
             clients.graph.clone(),
-            &ontology,
-            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                clients.graph.clone(),
-            ))),
-            metrics.clone(),
-            config.schedule.tasks.stale_edge_reconciliation.clone(),
-        )),
-        Box::new(NamespaceFreshness::new(
+        ))),
+        metrics.clone(),
+        config.schedule.tasks.stale_edge_reconciliation.clone(),
+    )));
+
+    if sdlc_enabled {
+        tasks.push(Box::new(NamespaceFreshness::new(
             clients.graph.clone(),
             clients.datalake.clone(),
             catalog.clone(),
             config.schedule.tasks.namespace_freshness.clone(),
             config.schedule.tasks.namespace.sweep_interval_secs,
-        )),
-        Box::new(MigrationCompletionChecker::new(
-            clients.graph.clone(),
-            clients.datalake.clone(),
-            lock_service.clone(),
-            Arc::new(ontology),
-            config.schema.clone(),
-            config.schedule.tasks.migration_completion.clone(),
-            metrics.clone(),
-            campaign.clone(),
-            services.nats_connection.clone(),
-            catalog,
-        )),
-    ];
+        )));
+    }
 
-    let routes: Vec<Arc<dyn Route>> = vec![
-        Arc::new(CodeIndexingTaskRoute::new(
+    tasks.push(Box::new(MigrationCompletionChecker::new(
+        clients.graph.clone(),
+        clients.datalake.clone(),
+        lock_service.clone(),
+        Arc::new(ontology),
+        config.schema.clone(),
+        config.schedule.tasks.migration_completion.clone(),
+        metrics.clone(),
+        campaign.clone(),
+        services.nats_connection.clone(),
+        catalog,
+    )));
+
+    // The Siphon trigger consumes CDC for the enabled source modules only. With
+    // neither sdlc nor code, no route exists and the trigger is not started, so
+    // the dispatcher opens no Siphon consumer.
+    let mut routes: Vec<Arc<dyn Route>> = Vec::new();
+    if code_enabled {
+        routes.push(Arc::new(CodeIndexingTaskRoute::new(
             services.nats.clone(),
             metrics.clone(),
-        )),
-        Arc::new(EnabledNamespacesRoute::new(
+        )));
+    }
+    if sdlc_enabled {
+        routes.push(Arc::new(EnabledNamespacesRoute::new(
             NamespaceIndexingDispatch::new(services.nats.clone()),
             backfill.clone(),
             clients.datalake.clone(),
-        )),
-    ];
+        )));
+    }
 
     let scheduled = Scheduled::new(tasks, lock_service);
-    let siphon = Siphon::new(
-        services.nats.clone(),
-        metrics,
-        config.schedule.tasks.siphon.clone(),
-        campaign.clone(),
-        routes,
-    );
     let max_deliveries_reconciler = MaxDeliveriesReconciler::new(services.nats_connection.clone());
-    let triggers: Vec<Box<dyn Trigger>> = vec![
-        Box::new(scheduled),
-        Box::new(siphon),
-        Box::new(max_deliveries_reconciler),
-    ];
+    let mut triggers: Vec<Box<dyn Trigger>> = vec![Box::new(scheduled)];
+    if !routes.is_empty() {
+        triggers.push(Box::new(Siphon::new(
+            services.nats.clone(),
+            metrics,
+            config.schedule.tasks.siphon.clone(),
+            campaign.clone(),
+            routes,
+        )));
+    }
+    triggers.push(Box::new(max_deliveries_reconciler));
 
     orchestrator::launch(triggers, shutdown)
         .await

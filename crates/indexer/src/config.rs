@@ -73,6 +73,7 @@ pub struct DispatcherConfig {
     pub nats: NatsConfiguration,
     pub graph: ClickHouseConfiguration,
     pub datalake: ClickHouseConfiguration,
+    pub engine: EngineConfiguration,
     pub schedule: ScheduleConfig,
     pub schema: SchemaConfig,
 }
@@ -83,6 +84,7 @@ impl From<&AppConfig> for DispatcherConfig {
             nats: config.nats.clone(),
             graph: config.graph.clone(),
             datalake: config.datalake.clone(),
+            engine: config.engine.clone(),
             schedule: config.schedule.clone(),
             schema: config.schema.clone(),
         }

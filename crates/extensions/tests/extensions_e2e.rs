@@ -144,7 +144,8 @@ async fn orbit_loads_a_provider_package_over_grpc() {
     let names: Vec<&str> = ontology.nodes().map(|n| n.name.as_str()).collect();
     assert!(names.contains(&"Widget") && names.contains(&"Gadget"));
 
-    let statements = extension_create_statements(&ontology, "").expect("extension ddl");
+    let statements = extension_create_statements(&ontology, orbit_versions::VERSIONS.schema)
+        .expect("extension ddl");
     assert_eq!(statements.len(), 2, "one graph table per extension entity");
     assert!(
         statements

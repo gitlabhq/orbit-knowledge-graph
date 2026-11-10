@@ -81,8 +81,12 @@ graph:
         name:   { type: string }
         status: { type: string }
   relationships:
-    PART_OF: { variants: [Gadget -> Widget], fk: { entity: Gadget, column: widget_id } }
-    LINKS:   { variants: [Widget -> Gadget], table: ex_widget_links }
+    PART_OF:
+      variants:
+        - { from: Gadget, to: Widget, fk: { column: widget_id } }
+    LINKS:
+      variants:
+        - { from: Widget, to: Gadget, table: ex_widget_links }
 authorization:
   entities:
     Widget: { scope: namespace }
@@ -101,17 +105,20 @@ sources:
 **Property types.** `int64`, `string`, `bool`, `float`, `timestamp`, `date`.
 Entity ids are `int64`. Storage columns are raw ClickHouse type strings.
 
-**Relationships** come in two kinds, so Orbit never joins on natural keys (the
-provider resolves natural keys to ids itself):
+**Relationships** are a name with a list of **variants**. Each variant carries
+its own `from` and `to` entity and exactly one of `fk` or `table`, so Orbit never
+joins on natural keys (the provider resolves natural keys to ids itself):
 
-- `fk`: `{ variants: [A -> B], fk: { entity: A, column: b_id } }` — a column on
-  `A`'s source table holds `B`'s id.
-- `table`: `{ variants: [A -> B], table: <datalake table> }` — an edge table with
-  `traversal_path String, source_id Int64, target_id Int64` plus ETL columns,
+- `fk`: `{ from: A, to: B, fk: { column: b_id } }` — the column on `A`'s source
+  table holds `B`'s id.
+- `table`: `{ from: A, to: B, table: <datalake table> }` — an edge table with
+  `traversal_path String, source_id Int64, target_id Int64` plus the ETL columns,
   `ORDER BY (traversal_path, source_id, target_id)`.
 
-A relationship may refer to an entity from another loaded package
-(cross-package), never to an unknown one.
+Several packages may add variants to the same relationship name (ADR 024: a
+package can add variants to a platform relationship). A `(name, from, to)` triple
+is declared once across all loaded packages; `from` and `to` may name entities of
+another loaded package, never an unknown one.
 
 **Load rules.**
 

@@ -14,7 +14,7 @@ use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 use serde_json::{Value, json};
 
-use crate::package::{Package, PropertyType, Relationship};
+use crate::package::{Package, PropertyType, RelationshipVariant};
 
 const EXTENSION_DOMAIN: &str = "extensions";
 const SCHEMA_SOURCE: &str = "schema.yaml";
@@ -63,9 +63,8 @@ pub fn merge_packages_into(
     check_cross_package_rules(packages, &known_entities)?;
 
     let mut schema = parse_schema(sources)?;
-    for package in packages {
-        register_package(sources, &mut schema, package);
-    }
+    register_nodes(sources, &mut schema, packages);
+    register_relationships(sources, &mut schema, packages);
     sources.insert(
         SCHEMA_SOURCE.to_string(),
         orbit_utils::yaml::to_string(&schema)
@@ -118,16 +117,26 @@ fn check_cross_package_rules(
         }
     }
 
+    let mut triples: BTreeMap<(&str, &str, &str), &str> = BTreeMap::new();
     for package in packages {
         for (name, relationship) in &package.document.graph.relationships {
-            for variant in relationship.parsed_variants() {
-                for endpoint in [&variant.source, &variant.target] {
+            for variant in &relationship.variants {
+                for endpoint in [&variant.from, &variant.to] {
                     if !known_entities.contains(endpoint) {
                         errors.push(format!(
                             "{}: relationship {name} points at unknown entity {endpoint}",
                             package.name()
                         ));
                     }
+                }
+                let triple = (name.as_str(), variant.from.as_str(), variant.to.as_str());
+                if let Some(previous) = triples.insert(triple, package.name()) {
+                    errors.push(format!(
+                        "relationship {name} variant {} -> {} is declared by both {previous} and {}",
+                        variant.from,
+                        variant.to,
+                        package.name()
+                    ));
                 }
             }
         }
@@ -140,28 +149,52 @@ fn check_cross_package_rules(
     }
 }
 
-fn register_package(sources: &mut BTreeMap<String, String>, schema: &mut Value, package: &Package) {
-    let pkg = package.name();
+/// Registers every package's entities as nodes under one `extensions` domain.
+/// Entity names are unique across packages (a cross-package rule), so their node
+/// files and domain entries never collide.
+fn register_nodes(
+    sources: &mut BTreeMap<String, String>,
+    schema: &mut Value,
+    packages: &[Package],
+) {
     let mut nodes = serde_json::Map::new();
-
-    for entity in package.document.graph.entities.keys() {
-        let path = format!(
-            "nodes/{EXTENSION_DOMAIN}/{}/{}.yaml",
-            pkg.replace('.', "_"),
-            to_snake_case(entity)
-        );
-        sources.insert(path.clone(), node_source(package, entity));
-        nodes.insert(entity.clone(), Value::String(path));
+    for package in packages {
+        for entity in package.document.graph.entities.keys() {
+            let path = format!(
+                "nodes/{EXTENSION_DOMAIN}/{}/{}.yaml",
+                package.name().replace('.', "_"),
+                to_snake_case(entity)
+            );
+            sources.insert(path.clone(), node_source(package, entity));
+            nodes.insert(entity.clone(), Value::String(path));
+        }
     }
-
     schema["domains"][EXTENSION_DOMAIN] = json!({
-        "description": format!("Extension entities served by provider package {pkg}."),
+        "description": "Extension entities served by provider packages.",
         "nodes": nodes,
     });
+}
 
-    for (name, relationship) in &package.document.graph.relationships {
+/// Registers one edge per relationship name, merging the variants every package
+/// contributes to that name into a single edge definition.
+fn register_relationships(
+    sources: &mut BTreeMap<String, String>,
+    schema: &mut Value,
+    packages: &[Package],
+) {
+    let mut by_name: BTreeMap<&str, Vec<&RelationshipVariant>> = BTreeMap::new();
+    for package in packages {
+        for (name, relationship) in &package.document.graph.relationships {
+            by_name
+                .entry(name)
+                .or_default()
+                .extend(&relationship.variants);
+        }
+    }
+
+    for (name, variants) in by_name {
         let path = format!("edges/{EXTENSION_DOMAIN}/{}.yaml", name.to_lowercase());
-        sources.insert(path.clone(), edge_source(package, name, relationship));
+        sources.insert(path.clone(), edge_source(name, &variants));
         schema["edges"][name] = Value::String(path);
     }
 }
@@ -231,54 +264,68 @@ fn node_source(package: &Package, entity: &str) -> String {
     orbit_utils::yaml::to_string(&node).expect("generated node yaml serializes")
 }
 
-fn edge_source(package: &Package, name: &str, relationship: &Relationship) -> String {
-    let variants: Vec<Value> = relationship
-        .parsed_variants()
-        .into_iter()
-        .map(|variant| match &relationship.fk {
-            Some(fk) => json!({
-                "from_node": { "type": variant.source, "id": "id" },
-                "to_node": { "type": variant.target, "id": "id" },
-                "fk_column": fk.column,
+/// One ontology edge for a relationship name. Each fk variant becomes an
+/// FK-derived edge variant on the source table's column; each table variant
+/// becomes a variant plus a datalake pipeline reading its edge table. A name may
+/// mix both kinds and span several packages' entities.
+fn edge_source(name: &str, variants: &[&RelationshipVariant]) -> String {
+    let variant_defs: Vec<Value> = variants
+        .iter()
+        .map(|variant| {
+            let mut def = json!({
+                "from_node": { "type": variant.from, "id": "id" },
+                "to_node": { "type": variant.to, "id": "id" },
                 "scope": "prune_to_source",
-            }),
-            None => json!({
-                "from_node": { "type": variant.source, "id": "id" },
-                "to_node": { "type": variant.target, "id": "id" },
-                "scope": "prune_to_source",
-            }),
+            });
+            if let Some(fk) = &variant.fk {
+                def["fk_column"] = json!(fk.column);
+            }
+            def
         })
         .collect();
 
-    let edge = match &relationship.table {
-        Some(table) => json!({
-            "description": format!("Extension relationship {name} from package {}.", package.name()),
-            "variants": variants,
-            "indexer": { "reindex": [table] },
-            "pipelines": [{
-                "name": format!("{name}_{table}"),
-                "extract": {
-                    "type": "clickhouse",
-                    "tables": [table],
-                    "fields": ["source_id", "target_id"],
-                    "order_by": ["traversal_path", "source_id", "target_id"],
-                    "query": "generated",
-                },
-                "transform": {
-                    "type": "datafusion",
-                    "edges": relationship.parsed_variants().into_iter().map(|variant| json!({
-                        "from": { "field": "source_id", "kind": variant.source },
-                        "to": { "field": "target_id", "kind": variant.target },
-                        "label": name,
-                    })).collect::<Vec<_>>(),
-                },
-            }],
-        }),
-        None => json!({
-            "description": format!("Extension relationship {name} from package {}.", package.name()),
-            "variants": variants,
-        }),
-    };
+    let table_variants: Vec<&&RelationshipVariant> = variants
+        .iter()
+        .filter(|variant| variant.table.is_some())
+        .collect();
+
+    let mut edge = json!({
+        "description": format!("Extension relationship {name}."),
+        "variants": variant_defs,
+    });
+
+    if !table_variants.is_empty() {
+        let tables: Vec<&String> = table_variants
+            .iter()
+            .filter_map(|variant| variant.table.as_ref())
+            .collect();
+        let pipelines: Vec<Value> = table_variants
+            .iter()
+            .map(|variant| {
+                let table = variant.table.as_ref().expect("table variant has a table");
+                json!({
+                    "name": format!("{name}_{table}"),
+                    "extract": {
+                        "type": "clickhouse",
+                        "tables": [table],
+                        "fields": ["source_id", "target_id"],
+                        "order_by": ["traversal_path", "source_id", "target_id"],
+                        "query": "generated",
+                    },
+                    "transform": {
+                        "type": "datafusion",
+                        "edges": [{
+                            "from": { "field": "source_id", "kind": variant.from },
+                            "to": { "field": "target_id", "kind": variant.to },
+                            "label": name,
+                        }],
+                    },
+                })
+            })
+            .collect();
+        edge["indexer"] = json!({ "reindex": tables });
+        edge["pipelines"] = json!(pipelines);
+    }
 
     orbit_utils::yaml::to_string(&edge).expect("generated edge yaml serializes")
 }
@@ -339,9 +386,14 @@ mod tests {
     use crate::package::short_digest;
 
     const WIDGETS: &str = include_str!("../tests/fixtures/example.widgets.yaml");
+    const GADGETS: &str = include_str!("../tests/fixtures/example.gadgets.yaml");
 
     fn widgets_package() -> Package {
         Package::parse(WIDGETS, short_digest(WIDGETS)).expect("fixture parses")
+    }
+
+    fn gadgets_package() -> Package {
+        Package::parse(GADGETS, short_digest(GADGETS)).expect("fixture parses")
     }
 
     fn schema_version() -> u32 {
@@ -389,5 +441,60 @@ mod tests {
         .expect("second package parses");
         let err = load_merged_ontology(schema_version(), &[widgets_package(), other]).unwrap_err();
         assert!(matches!(err, LoaderError::Rules(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn two_packages_add_variants_to_one_relationship() {
+        let ontology =
+            load_merged_ontology(schema_version(), &[widgets_package(), gadgets_package()])
+                .expect("both packages merge and load");
+        let node_names: BTreeSet<&str> = ontology.nodes().map(|n| n.name.as_str()).collect();
+        assert!(node_names.contains("Widget"), "widgets entity present");
+        assert!(
+            node_names.contains("Sprocket"),
+            "gadgets entity present: the two packages merge into one model"
+        );
+    }
+
+    #[test]
+    fn rejects_the_same_relationship_variant_triple_twice() {
+        // example.extra adds its own entity but repeats widgets' LINKS Widget -> Gadget triple.
+        const EXTRA: &str = r#"apiVersion: orbit.gitlab.com/extensions/v1alpha1
+kind: Package
+metadata: { name: example.extra, version: 0.1.0 }
+graph:
+  entities:
+    Extra:
+      label: code
+      properties:
+        id: { type: int64 }
+        code: { type: string }
+  relationships:
+    LINKS:
+      variants:
+        - { from: Widget, to: Gadget, table: ex_extra_links }
+authorization:
+  entities:
+    Extra: { scope: namespace }
+storage:
+  store: graph
+  entities:
+    Extra: { columns: { id: Int64, code: String }, sort_key: [traversal_path, id] }
+sources:
+  source: data_lake
+  entities:
+    Extra: { tables: [ex_extras], order_by: [traversal_path, id] }
+"#;
+        let extra = Package::parse(EXTRA, "beef".into()).expect("parses");
+        let err = load_merged_ontology(schema_version(), &[widgets_package(), extra]).unwrap_err();
+        match err {
+            LoaderError::Rules(errors) => {
+                assert!(
+                    errors.iter().any(|e| e.contains("Widget -> Gadget")),
+                    "got {errors:?}"
+                );
+            }
+            other => panic!("expected a rules error, got {other:?}"),
+        }
     }
 }

@@ -1,0 +1,29 @@
+apiVersion: orbit.gitlab.com/extensions/v1alpha1
+kind: Package
+metadata:
+  name: example.gadgets
+  version: 0.1.0
+graph:
+  entities:
+    Sprocket:
+      label: code
+      properties:
+        id: { type: int64 }
+        code: { type: string }
+  relationships:
+    LINKS:
+      variants:
+        - { from: Sprocket, to: Widget, table: ex_sprocket_links }
+authorization:
+  entities:
+    Sprocket: { scope: namespace }
+storage:
+  store: graph
+  entities:
+    Sprocket:
+      columns: { id: Int64, code: String }
+      sort_key: [traversal_path, id]
+sources:
+  source: data_lake
+  entities:
+    Sprocket: { tables: [ex_sprockets], order_by: [traversal_path, id] }

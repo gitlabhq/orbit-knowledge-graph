@@ -5,17 +5,22 @@
 //! table has the same shape a core node table would: a `ReplacingMergeTree` over
 //! the declared storage columns plus the internal version and deleted columns.
 //!
-//! They are created outside the core schema version and the migration ledger.
-//! The core migration machinery fingerprints only the bundled ontology and the
-//! tables it derives, so these never enter the fingerprint or the ledger. Their
-//! name carries the package digest, so a new package version is a new table and
-//! the extensions engine reindexes into it.
+//! They carry the same `v<N>_` version prefix as core graph tables, because the
+//! indexer and the query compiler read and write them through the same
+//! `prefixed_table_name` path. The POC has no migrations: a schema-version bump
+//! simply recreates the extension tables and reindexes them from the silver
+//! tables. They stay out of the migration fingerprint and clone-based migrations
+//! (the core machinery fingerprints only the bundled ontology and the tables it
+//! derives). Their name also carries the package digest, so a new package version
+//! is a new table and the extensions engine reindexes into it.
 
 use ontology::Ontology;
 use orbit_migrations::schema::GraphSchema;
+use orbit_migrations::version::table_prefix;
 
-/// The prefix that marks an extension graph table. It combines the ontology's
-/// required `gl_` table prefix with `ext_`.
+/// The prefix that marks an extension graph table, within the version prefix. It
+/// combines the ontology's required `gl_` table prefix with `ext_`, so the full
+/// physical name is `v<N>_gl_ext_<package>_<entity>_<digest8>`.
 pub const EXTENSION_TABLE_PREFIX: &str = "gl_ext_";
 
 #[derive(Debug, thiserror::Error)]
@@ -23,12 +28,13 @@ pub const EXTENSION_TABLE_PREFIX: &str = "gl_ext_";
 pub struct StorageError(String);
 
 /// The `CREATE TABLE` statement for every extension table in the merged model,
-/// paired with its table name. `version_prefix` is empty for the unversioned
-/// extension tables; pass a `v<N>_` prefix only to match a versioned read path.
+/// paired with its physical (version-prefixed) name, for the given schema
+/// version. This matches what the indexer writes and the compiler reads.
 pub fn extension_create_statements(
     ontology: &Ontology,
-    version_prefix: &str,
+    schema_version: u32,
 ) -> Result<Vec<(String, String)>, StorageError> {
+    let prefix = table_prefix(schema_version);
     let schema = GraphSchema::from_ontology(ontology).map_err(|e| StorageError(e.to_string()))?;
     Ok(schema
         .tables
@@ -36,8 +42,8 @@ pub fn extension_create_statements(
         .filter(|table| table.name.starts_with(EXTENSION_TABLE_PREFIX))
         .map(|table| {
             (
-                format!("{version_prefix}{}", table.name),
-                table.to_create_sql(version_prefix),
+                format!("{prefix}{}", table.name),
+                table.to_create_sql(&prefix),
             )
         })
         .collect())
@@ -56,24 +62,33 @@ mod tests {
         load_merged_ontology(orbit_versions::VERSIONS.schema, &[package]).expect("model loads")
     }
 
-    #[test]
-    fn generates_a_replacing_merge_tree_per_entity() {
-        let statements = extension_create_statements(&merged(), "").expect("ddl generated");
-        let names: Vec<&str> = statements.iter().map(|(name, _)| name.as_str()).collect();
+    fn schema_version() -> u32 {
+        orbit_versions::VERSIONS.schema
+    }
 
-        assert_eq!(names.len(), 2, "one table per extension entity: {names:?}");
+    #[test]
+    fn generates_a_version_prefixed_replacing_merge_tree_per_entity() {
+        let statements =
+            extension_create_statements(&merged(), schema_version()).expect("ddl generated");
+        let expected_prefix = format!("v{}_{EXTENSION_TABLE_PREFIX}", schema_version());
+
+        assert_eq!(statements.len(), 2, "one table per extension entity");
         for (name, ddl) in &statements {
-            assert!(name.starts_with(EXTENSION_TABLE_PREFIX), "{name}");
+            assert!(
+                name.starts_with(&expected_prefix),
+                "{name} lacks {expected_prefix}"
+            );
             assert!(ddl.contains("CREATE TABLE IF NOT EXISTS"), "{ddl}");
             assert!(ddl.contains("ReplacingMergeTree"), "{ddl}");
-            assert!(ddl.contains(name.as_str()), "ddl names the table");
+            assert!(ddl.contains(name.as_str()), "ddl names the physical table");
         }
     }
 
     #[test]
     fn table_names_carry_the_digest() {
         let digest8: String = short_digest(WIDGETS).chars().take(8).collect();
-        let statements = extension_create_statements(&merged(), "").expect("ddl generated");
+        let statements =
+            extension_create_statements(&merged(), schema_version()).expect("ddl generated");
         assert!(
             statements.iter().all(|(name, _)| name.ends_with(&digest8)),
             "every table ends with the digest {digest8}: {:?}",

@@ -126,25 +126,30 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["variants"],
+      "properties": {
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/relationshipVariant" }
+        }
+      }
+    },
+    "relationshipVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
       "oneOf": [
         { "required": ["fk"], "not": { "required": ["table"] } },
         { "required": ["table"], "not": { "required": ["fk"] } }
       ],
       "properties": {
-        "variants": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "string",
-            "pattern": "^[A-Z][A-Za-z0-9]* -> [A-Z][A-Za-z0-9]*$"
-          }
-        },
+        "from": { "$ref": "#/$defs/entityName" },
+        "to": { "$ref": "#/$defs/entityName" },
         "fk": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["entity", "column"],
+          "required": ["column"],
           "properties": {
-            "entity": { "$ref": "#/$defs/entityName" },
             "column": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
           }
         },

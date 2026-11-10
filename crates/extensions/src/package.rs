@@ -96,7 +96,17 @@ pub enum PropertyType {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Relationship {
-    pub variants: Vec<String>,
+    pub variants: Vec<RelationshipVariant>,
+}
+
+/// One edge kind `from -> to`. Several packages may add variants to the same
+/// relationship name; a `(name, from, to)` triple is declared once across all of
+/// them. A variant carries exactly one of `fk` or `table`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelationshipVariant {
+    pub from: String,
+    pub to: String,
     #[serde(default)]
     pub fk: Option<ForeignKey>,
     #[serde(default)]
@@ -106,7 +116,6 @@ pub struct Relationship {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ForeignKey {
-    pub entity: String,
     pub column: String,
 }
 
@@ -148,12 +157,6 @@ pub struct Sources {
 pub struct SourceEntity {
     pub tables: Vec<String>,
     pub order_by: Vec<String>,
-}
-
-/// One edge between a source entity and a target entity.
-pub struct Variant {
-    pub source: String,
-    pub target: String,
 }
 
 impl Package {
@@ -206,21 +209,6 @@ impl Package {
 
     pub fn name(&self) -> &str {
         &self.document.metadata.name
-    }
-}
-
-impl Relationship {
-    /// The parsed `A -> B` endpoints of each variant. Malformed strings are
-    /// rejected by the schema, so this skips any that do not split.
-    pub fn parsed_variants(&self) -> Vec<Variant> {
-        self.variants
-            .iter()
-            .filter_map(|variant| variant.split_once(" -> "))
-            .map(|(source, target)| Variant {
-                source: source.to_string(),
-                target: target.to_string(),
-            })
-            .collect()
     }
 }
 
@@ -318,15 +306,11 @@ impl PackageDocument {
         relationship: &Relationship,
         errors: &mut Vec<String>,
     ) {
-        if let Some(fk) = &relationship.fk {
-            let is_a_source = relationship
-                .parsed_variants()
-                .iter()
-                .any(|variant| variant.source == fk.entity);
-            if !is_a_source {
+        for variant in &relationship.variants {
+            if variant.fk.is_some() == variant.table.is_some() {
                 errors.push(format!(
-                    "relationship {name}: fk.entity `{}` is not the source of any variant",
-                    fk.entity
+                    "relationship {name} variant {} -> {}: exactly one of fk or table is required",
+                    variant.from, variant.to
                 ));
             }
         }
@@ -363,16 +347,34 @@ mod tests {
     }
 
     #[test]
-    fn reads_both_relationship_kinds() {
+    fn reads_both_relationship_variant_kinds() {
         let package = parse_widgets();
         let relationships = &package.document.graph.relationships;
-        assert!(
-            relationships["PART_OF"].fk.is_some(),
-            "PART_OF is a fk relationship"
+        let part_of = &relationships["PART_OF"].variants[0];
+        assert_eq!(
+            (part_of.from.as_str(), part_of.to.as_str()),
+            ("Gadget", "Widget")
         );
+        assert!(part_of.fk.is_some(), "PART_OF variant is a fk variant");
         assert!(
-            relationships["LINKS"].table.is_some(),
-            "LINKS is an edge-table relationship"
+            relationships["LINKS"].variants[0].table.is_some(),
+            "LINKS variant is a table variant"
+        );
+    }
+
+    #[test]
+    fn rejects_a_variant_with_both_fk_and_table() {
+        let yaml = WIDGETS.replace(
+            "        - { from: Widget, to: Gadget, table: ex_widget_links }",
+            "        - { from: Widget, to: Gadget, table: ex_widget_links, fk: { column: gadget_id } }",
+        );
+        let err = Package::parse(&yaml, "d".into()).unwrap_err();
+        assert!(
+            err.errors
+                .iter()
+                .any(|e| e.contains("exactly one of fk or table") || e.contains("oneOf")),
+            "got {:?}",
+            err.errors
         );
     }
 
