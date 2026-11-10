@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use orbit_search::{RecallFilter, query_alternatives};
 
-use crate::remote::grep::{Outcome, searched_kind};
+use crate::remote::grep::{Outcome, graph_kind, searched_kind};
 use local::LocalBackend;
 
 /// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
@@ -74,6 +74,7 @@ pub(crate) async fn run(
         false => query.map(|query| or_word(&query)),
     };
     let sections = qualifier::apply(query, &mut options, &mut paths);
+    let budget = crate::remote::grep::Budget::default();
     let mut found = false;
     for section in sections {
         if found {
@@ -93,6 +94,7 @@ pub(crate) async fn run(
             paths.clone(),
             filter,
             options,
+            &budget,
         )
         .await
         {
@@ -114,6 +116,7 @@ async fn search(
     paths: Vec<String>,
     mut filter: RecallFilter,
     options: Options,
+    budget: &crate::remote::grep::Budget,
 ) -> Result<()> {
     let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new("."))).ok();
     let exists = |path: &str| {
@@ -130,6 +133,7 @@ async fn search(
             exists: &exists,
             indexed: &indexed,
         },
+        budget,
     )?;
     for reason in &route.skipped {
         eprintln!("orbit: {reason}");
@@ -141,7 +145,9 @@ async fn search(
         .map(|request| tokio::spawn(crate::remote::grep::search(request, label.clone())))
         .collect();
     if !pending.is_empty() {
-        filter.kinds.retain(|kind| searched_kind(kind).is_none());
+        filter
+            .kinds
+            .retain(|kind| searched_kind(kind).is_none() && graph_kind(kind).is_none());
         if route.local.is_empty() && !filter.kinds.is_empty() {
             eprintln!(
                 "orbit: skipping hosted {}; use `{} query`",
@@ -570,16 +576,27 @@ fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::K
             "pipeline" | "job" | "stage"
         )
     });
+    let graph = kinds
+        .hosted
+        .iter()
+        .find(|kind| searched_kind(kind).is_none())
+        .map(|kind| {
+            format!(
+                ", or `{launcher} grep gitlab:{}:words`",
+                kind.to_ascii_lowercase()
+            )
+        })
+        .unwrap_or_default();
     anyhow::ensure!(
         !ci || kinds.hosted.len() < requested.len(),
-        "{hosted} isn't searchable; read CI with `{launcher} context` (the current branch's MR and \
-         CI), `{launcher} context branch:name`, `pipeline:ID`, or `job:ID`"
+        "{hosted} isn't searchable here; read CI with `{launcher} context` (the current branch's MR \
+         and CI), `{launcher} context branch:name`, `pipeline:ID`, or `job:ID`{graph}"
     );
     anyhow::ensure!(
         kinds.hosted.is_empty() || kinds.hosted.len() < requested.len(),
         "{hosted} lives in the hosted graph; `{launcher} grep` searches GitLab for work items, \
          merge requests, commits, notes, milestones, users, projects, and groups only without \
-         paths or file filters. Otherwise use `{launcher} query`"
+         paths or file filters{graph}. Otherwise use `{launcher} query`"
     );
     if !kinds.hosted.is_empty() {
         eprintln!("orbit: skipping hosted {hosted}; use `{launcher} query`");

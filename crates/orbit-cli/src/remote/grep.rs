@@ -1,10 +1,16 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use cynic::QueryBuilder;
+use orbit_cli_graphql::queries::grep_schema::GrepSchema;
+use orbit_cli_graphql::queries::namespace_kind::{NamespaceKind, NamespaceKindVariables};
 use serde::Deserialize;
 
 use super::client::OrbitClient;
-use super::error::{EXIT_FORBIDDEN, EXIT_UNAVAILABLE, RemoteError};
+use super::error::{EXIT_FORBIDDEN, EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError};
+use super::server_schema::{Anchor, Entities, Entity};
 
 /// Node kinds that GitLab grep searches. The API maps a kind to its scope, so requests send kinds as-is.
 const SEARCHED_KINDS: &[&str] = &[
@@ -19,10 +25,19 @@ const SEARCHED_KINDS: &[&str] = &[
     "Branch",
 ];
 const BRANCH: &str = "Branch";
-const DEFAULT_SCOPES: &[&str] = &["work_items", "merge_requests", "notes"];
 const MAX_SEARCHES: usize = 5;
 /// GitLab rejects a search with no term this long as an abusive tiny search.
 const MIN_SEARCH_CHARS: usize = 2;
+
+pub(crate) fn provider(name: &str) -> Option<&'static str> {
+    let provider = super::server_schema::PROVIDER;
+    provider.eq_ignore_ascii_case(name).then_some(provider)
+}
+
+pub(crate) fn graph_kind(kind: &str) -> Option<&str> {
+    let (name, entity) = kind.split_once(':')?;
+    provider(name).map(|_| entity)
+}
 
 pub(crate) fn searched_kinds() -> &'static [&'static str] {
     SEARCHED_KINDS
@@ -61,11 +76,39 @@ impl Target {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Budget(Arc<AtomicUsize>);
+
+impl Budget {
+    const QUERIES: usize = 4;
+
+    fn take(&self, wanted: usize) -> usize {
+        let mut granted = 0;
+        let _ = self
+            .0
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |sent| {
+                granted = wanted.min(Self::QUERIES.saturating_sub(sent));
+                Some(sent + granted)
+            });
+        granted
+    }
+}
+
+impl PartialEq for Budget {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Budget {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Request {
     pub(crate) target: Target,
     pub(crate) keywords: Vec<String>,
     pub(crate) kinds: Vec<&'static str>,
+    pub(crate) graph: Option<String>,
+    pub(crate) budget: Budget,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -134,59 +177,80 @@ struct Match {
     text: String,
 }
 
-fn api_scopes(kinds: &[&str]) -> Vec<String> {
-    match kinds.is_empty() {
-        true => DEFAULT_SCOPES
-            .iter()
-            .map(|scope| scope.to_string())
-            .collect(),
-        false => kinds.iter().map(|kind| kind.to_string()).collect(),
+struct Resolved {
+    client: OrbitClient,
+    api_host: String,
+    home_project: Option<String>,
+    path: Option<String>,
+}
+
+impl Resolved {
+    fn new(target: &Target) -> Result<Self, Outcome> {
+        let origin = match target {
+            Target::Origin(dir) => match super::origin::project(dir) {
+                Some(origin) => Some(origin),
+                None => return Err(Outcome::Skipped("no GitLab `origin` remote".into())),
+            },
+            _ => None,
+        };
+        let dir = match target {
+            Target::Origin(dir) => dir.clone(),
+            _ => PathBuf::from("."),
+        };
+        let client = OrbitClient::from_env_in(&dir)
+            .map_err(|error| Outcome::Skipped(first_line(&error.message)))?;
+        let api_host = client
+            .get_host()
+            .map_err(|error| Outcome::Failed(first_line(&error.message)))?;
+        let (home_project, path) = match (target, origin) {
+            (Target::Origin(_), Some((host, _))) if host != api_host => {
+                return Err(Outcome::Skipped(format!(
+                    "`origin` is on {host}, but Orbit uses {api_host}"
+                )));
+            }
+            (Target::Origin(_), origin) => (origin.map(|(_, path)| path), None),
+            (Target::Project(path), _) => (None, Some(path.clone())),
+            (Target::Namespace(path), _) => match super::token::url_host(path) {
+                Some(host) if host != api_host => {
+                    return Err(Outcome::Skipped(format!(
+                        "{path} is on {host}, but Orbit uses {api_host}"
+                    )));
+                }
+                _ => (None, Some(super::token::namespace(path, &api_host))),
+            },
+            _ => (None, None),
+        };
+        Ok(Self {
+            client,
+            api_host,
+            home_project,
+            path,
+        })
     }
 }
 
 pub(crate) async fn search(request: Request, query: String) -> Outcome {
-    let origin = match &request.target {
-        Target::Origin(dir) => match super::origin::project(dir) {
-            Some(origin) => Some(origin),
-            None => return Outcome::Skipped("no GitLab `origin` remote".into()),
-        },
-        _ => None,
+    let resolved = match Resolved::new(&request.target) {
+        Ok(resolved) => resolved,
+        Err(outcome) => return outcome,
     };
-    let dir = match &request.target {
-        Target::Origin(dir) => dir.clone(),
-        _ => PathBuf::from("."),
+    if let Some(kind) = request.graph.clone() {
+        return graph_search(&request, resolved, &kind, &query).await;
+    }
+    let Resolved {
+        client,
+        api_host,
+        home_project,
+        path,
+    } = resolved;
+    let scope = match (&request.target, &home_project, path) {
+        (Target::Origin(_), Some(home), _) => ("full_path", top_level_group(home).to_string()),
+        (_, _, Some(path)) => ("full_path", path),
+        (Target::ProjectId(id), _, _) => ("project_id", id.to_string()),
+        (Target::GroupId(id), _, _) => ("namespace_id", id.to_string()),
+        _ => return Outcome::Skipped("no GitLab `origin` remote".into()),
     };
-    let client = match OrbitClient::from_env_in(&dir) {
-        Ok(client) => client,
-        Err(error) => return Outcome::Skipped(first_line(&error.message)),
-    };
-    let api_host = match client.get_host() {
-        Ok(host) => host,
-        Err(error) => return Outcome::Failed(first_line(&error.message)),
-    };
-    let home_project = match (&request.target, &origin) {
-        (Target::Origin(_), Some((_, path))) => Some(path.clone()),
-        _ => None,
-    };
-    let scope = match (&request.target, origin) {
-        (Target::Origin(_), Some((host, path))) if host == api_host => {
-            ("full_path", top_level_group(&path).to_string())
-        }
-        (Target::Origin(_), Some((host, _))) => {
-            return Outcome::Skipped(format!("`origin` is on {host}, but Orbit uses {api_host}"));
-        }
-        (Target::Origin(_), None) => return Outcome::Skipped("no GitLab `origin` remote".into()),
-        (Target::Project(path), _) => ("full_path", path.clone()),
-        (Target::Namespace(path), _) => match super::token::url_host(path) {
-            Some(host) if host != api_host => {
-                return Outcome::Skipped(format!("{path} is on {host}, but Orbit uses {api_host}"));
-            }
-            _ => ("full_path", super::token::namespace(path, &api_host)),
-        },
-        (Target::ProjectId(id), _) => ("project_id", id.to_string()),
-        (Target::GroupId(id), _) => ("namespace_id", id.to_string()),
-    };
-    let api_scopes = api_scopes(&request.kinds);
+    let api_scopes: Vec<String> = request.kinds.iter().map(|kind| kind.to_string()).collect();
     // Branches belong to a project, so for the `origin` they are searched in its project, not its group.
     let branch_project = home_project
         .as_ref()
@@ -213,7 +277,9 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
             .flat_map(|keywords| {
                 searches.iter().map(move |(target, scopes)| {
                     let mut params = vec![("search", keywords.clone()), target.clone()];
-                    params.push(("scopes", scopes.join(",")));
+                    if !scopes.is_empty() {
+                        params.push(("scopes", scopes.join(",")));
+                    }
                     params
                 })
             })
@@ -757,6 +823,441 @@ fn label(entry: &Entry, home: Option<&str>) -> (String, Option<String>) {
     }
 }
 
+enum GraphScope {
+    Project(String),
+    ProjectId(i64),
+    ProjectColumn(i64),
+    Group(String),
+    GroupId(i64),
+}
+
+impl GraphScope {
+    fn pattern(&self, entity: &str) -> String {
+        let group = "(p:Project)<-[:CONTAINS*1..3]-(g:Group";
+        let anchor = match self {
+            GraphScope::Project(path) => format!("(p:Project {{full_path: {}}})", gql(path)),
+            GraphScope::ProjectId(id) => format!("(p:Project {{id: {id}}})"),
+            GraphScope::Group(path) => format!("{group} {{full_path: {}}})", gql(path)),
+            GraphScope::GroupId(id) => format!("{group} {{id: {id}}})"),
+            GraphScope::ProjectColumn(id) => return format!("(n:{entity} {{project_id: {id}}})"),
+        };
+        format!("(n:{entity})-[:IN_PROJECT]->{anchor}")
+    }
+
+    fn shown(&self) -> String {
+        let depth = " (projects up to 3 levels down)";
+        match self {
+            GraphScope::Project(path) => path.clone(),
+            GraphScope::ProjectId(id) | GraphScope::ProjectColumn(id) => format!("Project[{id}]"),
+            GraphScope::Group(path) => format!("{path}{depth}"),
+            GraphScope::GroupId(id) => format!("Group[{id}]{depth}"),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct GraphResponse {
+    result: GraphResult,
+}
+
+#[derive(Deserialize)]
+struct GraphResult {
+    #[serde(default)]
+    nodes: Vec<GraphNode>,
+    #[serde(default)]
+    pagination: GraphPagination,
+}
+
+#[derive(Default, Deserialize)]
+struct GraphPagination {
+    #[serde(default)]
+    has_more: bool,
+}
+
+#[derive(Deserialize)]
+struct GraphNode {
+    #[serde(rename = "type")]
+    kind: String,
+    id: String,
+    #[serde(flatten)]
+    properties: serde_json::Map<String, serde_json::Value>,
+}
+
+struct GraphHits {
+    rows: Vec<String>,
+    failed: Vec<String>,
+    error: Option<RemoteError>,
+    truncated: bool,
+}
+
+async fn graph_search(request: &Request, resolved: Resolved, kind: &str, query: &str) -> Outcome {
+    let launcher = crate::commands::setup::spec::launcher();
+    let entities = match graph_entities(&resolved.client).await {
+        Ok(entities) => entities,
+        Err(outcome) => return outcome,
+    };
+    let wanted = graph_kind(kind).unwrap_or(kind);
+    let Some((name, entity)) = find_entity(&entities, wanted) else {
+        let known: Vec<&str> = entities.keys().map(String::as_str).collect();
+        return Outcome::NoMatches(format!(
+            "this GitLab lists no entity named {wanted}; entities: {}. `{launcher} grep -F` searches the text literally",
+            known.join(", ")
+        ));
+    };
+    let fields = match entity.searchable.as_deref() {
+        None => {
+            return Outcome::NoMatches(format!(
+                "this GitLab doesn't say which {name} fields grep can search (it needs GitLab 19.6 or later); use `{launcher} query`"
+            ));
+        }
+        Some([]) => {
+            return Outcome::NoMatches(format!(
+                "{name} has no text field to search; use `{launcher} query`"
+            ));
+        }
+        Some(fields) => fields,
+    };
+    let scope = match graph_scope(request, &resolved, name, entity).await {
+        Ok(scope) => scope,
+        Err(outcome) => return outcome,
+    };
+    let terms: Vec<&str> = request
+        .keywords
+        .iter()
+        .map(|keyword| keyword.trim())
+        .collect();
+    let planned: Vec<(&str, &str)> = fields
+        .iter()
+        .flat_map(|field| terms.iter().map(move |term| (field.as_str(), *term)))
+        .collect();
+    let (sent, skipped) = planned.split_at(request.budget.take(planned.len()));
+    if sent.is_empty() {
+        return Outcome::NoMatches(format!(
+            "{name} not searched: this grep already sent {} graph queries",
+            Budget::QUERIES
+        ));
+    }
+    let hits = match graph_hits(&resolved.client, name, entity, &scope, sent).await {
+        Ok(hits) => hits,
+        Err(outcome) => return outcome,
+    };
+    let shown = format!("{}/{}", resolved.api_host, scope.shown());
+    let mut notes = Vec::new();
+    if !hits.failed.is_empty() {
+        notes.push(format!("unavailable: {}", hits.failed.join(", ")));
+    }
+    if !skipped.is_empty() {
+        notes.push(format!(
+            "not searched (a grep sends at most {} graph queries): {}; `{launcher} query` searches them",
+            Budget::QUERIES,
+            listed(skipped)
+        ));
+    }
+    match (hits.rows.is_empty(), hits.error) {
+        (true, Some(error)) if hits.failed.len() == sent.len() => {
+            outcome_for(&request.target, &error)
+        }
+        (true, _) => {
+            notes.insert(0, format!("no {name} matched {} in {shown}", listed(sent)));
+            Outcome::NoMatches(notes.join("\n"))
+        }
+        (false, _) => {
+            let truncated = if hits.truncated { ", truncated" } else { "" };
+            let mut out = format!("GitLab {name} {query:?} in {shown}{truncated}:\n");
+            for line in hits.rows.iter().chain(&notes) {
+                let _ = writeln!(out, "{line}");
+            }
+            Outcome::Found(out)
+        }
+    }
+}
+
+async fn graph_hits(
+    client: &OrbitClient,
+    name: &str,
+    entity: &Entity,
+    scope: &GraphScope,
+    searches: &[(&str, &str)],
+) -> Result<GraphHits, Outcome> {
+    let tasks: Vec<_> = searches
+        .iter()
+        .map(|(field, term)| {
+            let text = graph_query(name, scope, &entity.columns, field, term);
+            let client = client.clone();
+            tokio::spawn(async move { graph_nodes(&client, &text).await })
+        })
+        .collect();
+    let mut hits = GraphHits {
+        rows: Vec::new(),
+        failed: Vec::new(),
+        error: None,
+        truncated: false,
+    };
+    let mut seen = std::collections::HashSet::new();
+    for (&(field, term), task) in searches.iter().zip(tasks) {
+        match task
+            .await
+            .map_err(|error| Outcome::Failed(error.to_string()))?
+        {
+            Ok(result) => {
+                hits.truncated |= result.pagination.has_more;
+                for node in result.nodes.iter().filter(|node| node.kind == name) {
+                    if seen.insert(node.id.clone()) {
+                        hits.rows
+                            .push(graph_row(name, node, &entity.columns, field));
+                    }
+                }
+            }
+            Err(error) => {
+                let reason = first_line(&error.message);
+                hits.failed.push(format!("{field} {term:?} ({reason})"));
+                hits.error.get_or_insert(error);
+            }
+        }
+    }
+    Ok(hits)
+}
+
+fn listed(searches: &[(&str, &str)]) -> String {
+    let listed: Vec<String> = searches
+        .iter()
+        .map(|(field, term)| format!("{field} {term:?}"))
+        .collect();
+    listed.join(", ")
+}
+
+async fn graph_entities(client: &OrbitClient) -> Result<Entities, Outcome> {
+    if let Some(entities) = super::server_schema::cached_entities(client) {
+        return Ok(entities);
+    }
+    let launcher = crate::commands::setup::spec::launcher();
+    let unlisted = || {
+        Outcome::Skipped(format!(
+            "this GitLab doesn't list Orbit entities over GraphQL; use `{launcher} query`"
+        ))
+    };
+    let schema = client
+        .graphql(&GrepSchema::build(()))
+        .await
+        .map_err(|error| Outcome::Failed(first_line(&error.message)))?
+        .and_then(|response| response.data)
+        .and_then(|data| data.orbit)
+        .and_then(|orbit| orbit.schema)
+        .ok_or_else(unlisted)?;
+    let in_project: Vec<String> = schema
+        .edges
+        .nodes
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|edge| edge.name == "IN_PROJECT")
+        .flat_map(|edge| edge.endpoints.nodes.into_iter().flatten().flatten())
+        .filter(|endpoint| endpoint.target.name == "Project")
+        .map(|endpoint| endpoint.source.name)
+        .collect();
+    let entities: Entities = schema
+        .nodes
+        .nodes
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|node| super::server_schema::is_name(&node.name))
+        .map(|node| {
+            let properties: Vec<_> = node
+                .properties
+                .nodes
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|property| is_property(&property.name))
+                .collect();
+            let known = properties
+                .iter()
+                .any(|property| property.text_searchable.is_some());
+            let mut searchable: Vec<(bool, String)> = properties
+                .iter()
+                .filter(|property| property.text_searchable == Some(true))
+                .map(|property| (property.default_column != Some(true), property.name.clone()))
+                .collect();
+            searchable.sort_by_key(|(secondary, _)| *secondary);
+            let anchor = match (
+                in_project.contains(&node.name),
+                properties
+                    .iter()
+                    .any(|property| property.name == "project_id"),
+            ) {
+                (true, _) => Anchor::Edge,
+                (false, true) => Anchor::Column,
+                (false, false) => Anchor::None,
+            };
+            let entity = Entity {
+                searchable: known.then(|| searchable.into_iter().map(|(_, name)| name).collect()),
+                columns: properties
+                    .iter()
+                    .filter(|property| property.default_column == Some(true))
+                    .map(|property| property.name.clone())
+                    .collect(),
+                anchor,
+            };
+            (node.name, entity)
+        })
+        .collect();
+    if entities.is_empty() {
+        return Err(unlisted());
+    }
+    super::server_schema::remember_entities(client, &entities);
+    Ok(entities)
+}
+
+fn is_property(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+fn find_entity<'a>(entities: &'a Entities, kind: &str) -> Option<(&'a str, &'a Entity)> {
+    let flat = kind.replace('_', "").to_ascii_lowercase();
+    [
+        Some(flat.as_str()),
+        flat.strip_suffix("es"),
+        flat.strip_suffix('s'),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|name| {
+        entities
+            .iter()
+            .find(|(entity, _)| entity.eq_ignore_ascii_case(name))
+    })
+    .map(|(name, entity)| (name.as_str(), entity))
+}
+
+async fn graph_scope(
+    request: &Request,
+    resolved: &Resolved,
+    name: &str,
+    entity: &Entity,
+) -> Result<GraphScope, Outcome> {
+    let launcher = crate::commands::setup::spec::launcher();
+    let path = match (&request.target, &resolved.home_project) {
+        (Target::Origin(_), home) => home.clone(),
+        _ => resolved.path.clone(),
+    };
+    let known_project = matches!(request.target, Target::Origin(_) | Target::Project(_));
+    let lookup = |path: String| async move {
+        namespace_kind(&resolved.client, &path)
+            .await?
+            .map(|named| (path, named))
+            .ok_or_else(|| Outcome::NoMatches(missing_target(&request.target)))
+    };
+    match (entity.anchor, &request.target, path) {
+        (Anchor::None, _, _) => Err(Outcome::NoMatches(format!(
+            "{name} isn't in a project or group, so grep can't bound the search; use `{launcher} query`"
+        ))),
+        (Anchor::Edge, Target::ProjectId(id), _) => Ok(GraphScope::ProjectId(*id)),
+        (Anchor::Edge, Target::GroupId(id), _) => Ok(GraphScope::GroupId(*id)),
+        (Anchor::Edge, _, Some(path)) if known_project => Ok(GraphScope::Project(path)),
+        (Anchor::Edge, _, Some(path)) => match lookup(path).await? {
+            (path, Named::Project(_)) => Ok(GraphScope::Project(path)),
+            (path, Named::Group) => Ok(GraphScope::Group(path)),
+        },
+        (Anchor::Column, Target::ProjectId(id), _) => Ok(GraphScope::ProjectColumn(*id)),
+        (Anchor::Column, _, Some(path)) => match lookup(path).await? {
+            (_, Named::Project(id)) => Ok(GraphScope::ProjectColumn(id)),
+            (_, Named::Group) => Err(Outcome::NoMatches(format!(
+                "{name} is searched one project at a time; name a project, not a group"
+            ))),
+        },
+        (Anchor::Column, Target::GroupId(_), _) => Err(Outcome::NoMatches(format!(
+            "{name} is searched one project at a time; name a project, not a group"
+        ))),
+        _ => Err(Outcome::Skipped("no GitLab `origin` remote".into())),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Named {
+    Project(i64),
+    Group,
+}
+
+async fn namespace_kind(client: &OrbitClient, path: &str) -> Result<Option<Named>, Outcome> {
+    let full_path = cynic::Id::new(path);
+    let data = client
+        .graphql(&NamespaceKind::build(NamespaceKindVariables {
+            full_path: &full_path,
+        }))
+        .await
+        .map_err(|error| Outcome::Failed(first_line(&error.message)))?
+        .and_then(|response| response.data);
+    let id = |gid: &cynic::Id| gid.inner().rsplit('/').next()?.parse().ok();
+    Ok(data.and_then(|data| match (data.project, data.group) {
+        (Some(project), _) => id(&project.id).map(Named::Project),
+        (None, Some(_)) => Some(Named::Group),
+        _ => None,
+    }))
+}
+
+fn graph_query(
+    entity: &str,
+    scope: &GraphScope,
+    columns: &[String],
+    field: &str,
+    term: &str,
+) -> String {
+    let matched = scope.pattern(entity);
+    let mut returned: Vec<String> = columns.iter().map(|column| format!(".{column}")).collect();
+    if !columns.iter().any(|column| column == field) {
+        returned.push(format!(".{field}"));
+    }
+    format!(
+        "MATCH {matched} WHERE n.{field} CONTAINS {} RETURN n{{{}}}",
+        gql(term),
+        returned.join(", ")
+    )
+}
+
+async fn graph_nodes(client: &OrbitClient, query: &str) -> Result<GraphResult, RemoteError> {
+    let request = serde_json::json!({"query": query, "response_format": "raw"}).to_string();
+    let body = client.grep_query(request.into_bytes()).await?;
+    serde_json::from_slice::<GraphResponse>(&body)
+        .map(|response| response.result)
+        .map_err(|error| {
+            RemoteError::new(EXIT_GENERIC, format!("unreadable graph response: {error}"))
+        })
+}
+
+fn graph_row(entity: &str, node: &GraphNode, columns: &[String], field: &str) -> String {
+    let mut row = format!("{entity}[{}]", node.id);
+    let extra = (!columns.iter().any(|column| column == field)).then_some(field);
+    for column in columns
+        .iter()
+        .map(String::as_str)
+        .filter(|c| *c != "id")
+        .chain(extra)
+    {
+        let text = match node.properties.get(column) {
+            None | Some(serde_json::Value::Null) => continue,
+            Some(serde_json::Value::String(text)) => text.clone(),
+            Some(value) => value.to_string(),
+        };
+        let text = text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .replace(char::is_control, "");
+        let _ = write!(row, " {column}={text}");
+    }
+    row
+}
+
+fn gql(value: &str) -> String {
+    super::code::gql_string(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -767,6 +1268,8 @@ mod tests {
             target: Target::Project("g/p".into()),
             keywords: vec![words.into()],
             kinds: vec!["MergeRequest"],
+            graph: None,
+            budget: Budget::default(),
         };
         let scopes = ["MergeRequest".to_string()];
         assert_eq!(
@@ -824,6 +1327,35 @@ mod tests {
                 "unavailable: notes (timeout)"
             ]
         );
+    }
+
+    #[test]
+    fn a_graph_search_is_scoped_capped_and_returns_the_default_columns() {
+        let columns = ["id".to_string(), "ref".to_string()];
+        assert_eq!(
+            graph_query(
+                "Pipeline",
+                &GraphScope::Group("g".into()),
+                &columns,
+                "sha",
+                "it's"
+            ),
+            "MATCH (n:Pipeline)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS*1..3]-(g:Group {full_path: 'g'}) \
+             WHERE n.sha CONTAINS 'it\\'s' RETURN n{.id, .ref, .sha}"
+        );
+        assert_eq!(
+            GraphScope::ProjectColumn(7).pattern("Definition"),
+            "(n:Definition {project_id: 7})"
+        );
+        let budget = Budget::default();
+        assert_eq!([budget.take(3), budget.take(3), budget.take(1)], [3, 1, 0]);
+        let node: GraphNode =
+            serde_json::from_str(r#"{"type":"Job","id":"1","name":"a\u001b[31m\nb"}"#).unwrap();
+        assert_eq!(
+            graph_row("Job", &node, &columns, "name"),
+            "Job[1] name=a[31m b"
+        );
+        assert!(!is_property("name} RETURN n LIMIT 1 //"));
     }
 
     #[test]

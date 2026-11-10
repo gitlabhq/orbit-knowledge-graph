@@ -9,7 +9,7 @@ remote:
   remote_grep: " Prefix a GitLab kind to search GitLab: {{gitlab_kinds}}."
   remote_gitlab: "\n- MANDATORY: `{{orbit}}` must be used for reading GitLab instead of glab and glab api; writes stay with glab. `{{orbit}} context mr:42 job:9` reads GitLab; bare `{{orbit}} context` reads the branch's MR and CI failures, and `repo:group/project symbol:Name` a sibling project."
   remote_query: "\n- MANDATORY: `{{orbit}} query` must be used for counts, rankings, and relationships across GitLab. {{query_syntax}}"
-server_entities: "\n\nConnected providers and their entities, for `{{orbit}} query`:\n{{entities}}"
+server_entities: "\n\nConnected providers and their entities, for `{{orbit}} query` and `{{orbit}} grep gitlab:type:words`:\n{{entities}}"
 
 nudge_gitlab: |
   MANDATORY: `{{orbit}}` must be used for reading GitLab instead of glab; writes stay with glab. `{{orbit}} grep` is local-only; GitLab entities: {{gitlab_kinds}}. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI; `{{orbit}} context repo:group/project symbol:Name file:path` reads a sibling project's code.

@@ -707,7 +707,9 @@ mod tests {
         let providers = Providers::from([("gitlab".into(), vec!["Widget".into()])]);
         let rendered = render_instructions(GLAB_LAUNCHER, true, &providers);
         assert!(
-            rendered.ends_with("for `glab orbit query`:\n- gitlab: Widget"),
+            rendered.ends_with(
+                "for `glab orbit query` and `glab orbit grep gitlab:type:words`:\n- gitlab: Widget"
+            ),
             "{rendered}"
         );
         assert!(!render_instructions(GLAB_LAUNCHER, false, &providers).contains("Widget"));
