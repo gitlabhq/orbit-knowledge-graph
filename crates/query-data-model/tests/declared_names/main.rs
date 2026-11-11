@@ -271,9 +271,9 @@ fn scanner_reads_only_non_test_literals() {
     .unwrap();
     let literals = modules::literals(&root);
     std::fs::remove_dir_all(&root).unwrap();
-    let found: Vec<(String, usize)> = literals
-        .into_iter()
-        .map(|literal| (literal.text, literal.line))
+    let found: Vec<(&str, usize)> = literals
+        .iter()
+        .map(|literal| (literal.text.as_str(), literal.line))
         .collect();
     let expected = [
         ("kept", 1),
@@ -282,9 +282,5 @@ fn scanner_reads_only_non_test_literals() {
         ("not test", 13),
         ("line \\\ncontinued", 18),
     ];
-    let expected: Vec<(String, usize)> = expected
-        .into_iter()
-        .map(|(text, line)| (text.to_string(), line))
-        .collect();
     assert_eq!(found, expected);
 }

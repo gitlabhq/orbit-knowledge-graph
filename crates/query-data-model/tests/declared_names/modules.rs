@@ -70,17 +70,6 @@ fn walk(file: &Path, modules: &Path, out: &mut Vec<Literal>) {
                     at = skip_item(&tokens, end);
                     continue;
                 }
-                for token in &tokens[at..end] {
-                    if let Token::Str(text, line) = token {
-                        out.push(Literal {
-                            file: file.to_path_buf(),
-                            line: *line,
-                            text: text.clone(),
-                        });
-                    }
-                }
-                at = end.max(at + 1);
-                continue;
             }
             Token::Str(text, line) => out.push(Literal {
                 file: file.to_path_buf(),
