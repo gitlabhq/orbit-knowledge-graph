@@ -858,3 +858,151 @@ fn every_untrusted_guard_carries_the_declared_role() {
         }
     }
 }
+
+fn gitlab_errors(find: &'static str, replace: &'static str) -> Vec<String> {
+    spec_errors(load_with(
+        &["gitlab"],
+        edit_one("gitlab/storage/clickhouse.yaml", find, replace),
+    ))
+}
+
+#[test]
+fn storage_must_hold_or_exclude_every_property() {
+    let errors = gitlab_errors(
+        "      full_path: { backend: { type: String } }\n      traversal_path: { backend: { type: String } }\n    access: { order: [id] }\n  User:",
+        "      traversal_path: { backend: { type: String } }\n    access: { order: [id] }\n  User:",
+    );
+    assert_eq!(
+        errors,
+        ["gitlab: Project.full_path is neither stored nor excluded by any store"]
+    );
+}
+
+#[test]
+fn relational_columns_and_bindings_are_explicit() {
+    let errors = gitlab_errors(
+        "      body: { backend: { type: String } }",
+        "      body: {}",
+    );
+    assert_eq!(
+        errors,
+        ["gitlab: store graph column Note.body declares no storage type"]
+    );
+    let errors = gitlab_errors("    table: gl_note\n", "");
+    assert_eq!(errors, ["gitlab: store graph binds Note without a table"]);
+}
+
+#[test]
+fn every_variant_is_bound_where_its_endpoints_live() {
+    let errors = gitlab_errors("    Group -> Group: { edge_table: gl_edge }\n", "");
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph holds both endpoints of CONTAINS(Group -> Group) but does not bind it",
+            "gitlab: CONTAINS(Group -> Group) is bound in no store",
+        ]
+    );
+    let errors = gitlab_errors(
+        "    MergeRequest -> Note: { edge_table: gl_edge }",
+        "    MergeRequest -> Note: {}",
+    );
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) names neither a foreign key nor an edge table"
+        ]
+    );
+}
+
+#[test]
+fn foreign_keys_follow_the_variant_cardinality() {
+    let errors = gitlab_errors(
+        "User -> Note: { fk: { on: target, column: author_id }",
+        "User -> Note: { fk: { on: source, column: author_id }",
+    );
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph AUTHORED(User -> Note) is OneToMany and cannot hold a foreign key on its Source"
+        ]
+    );
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| match name {
+        "gitlab/graph.yaml" => yaml.replace(
+            "MergeRequest -> Note: { cardinality: one_to_many }",
+            "MergeRequest -> Note: { cardinality: many_to_many }",
+        ),
+        "gitlab/storage/clickhouse.yaml" => yaml.replace(
+            "MergeRequest -> Note: { edge_table: gl_edge }",
+            "MergeRequest -> Note: { fk: { on: target, column: project_id }, edge_table: gl_edge }",
+        ),
+        _ => yaml,
+    }));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) is ManyToMany and cannot hold a foreign key on its Target"
+        ]
+    );
+}
+
+#[test]
+fn an_edge_copy_names_an_endpoint_property() {
+    let errors = gitlab_errors(
+        "  HAS_NOTE:\n    MergeRequest -> Note: { edge_table: gl_edge }",
+        "  HAS_NOTE:\n    MergeRequest -> Note: { edge_table: gl_edge, copies: { project_id: target.nope } }",
+    );
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) copy project_id names no property of an endpoint"
+        ]
+    );
+}
+
+#[test]
+fn graph_defaults_match_the_property_type() {
+    let errors = spec_errors(load_with(
+        &["gitlab"],
+        edit_one(
+            "gitlab/graph.yaml",
+            "title: { type: string, default: \"\" }",
+            "title: { type: string, default: 3 }",
+        ),
+    ));
+    assert_eq!(
+        errors,
+        ["gitlab: property title default Int(3) is not a String"]
+    );
+}
+
+#[test]
+fn stores_that_hold_no_rows_name_no_table() {
+    let packages = query_data_model::testkit::patched([(
+        "gitlab.source_code/storage/orbit_code.yaml",
+        "  File:\n    columns:",
+        "  File:\n    table: gl_file\n    columns:",
+    )]);
+    let errors = spec_errors(packages.load());
+    assert_eq!(
+        errors,
+        [
+            "gitlab.source_code: store code is orbit_code and holds no table, but binds File to gl_file"
+        ]
+    );
+}
+
+#[test]
+fn variants_that_share_a_key_column_name_distinct_types() {
+    let packages = query_data_model::testkit::patched([(
+        "gitlab/storage/clickhouse.yaml",
+        "type_value: [Epic, Issue]",
+        "type_value: [Epic, MergeRequest]",
+    )]);
+    let errors = spec_errors(packages.load());
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph keys HAS_NOTE(MergeRequest -> Note) and HAS_NOTE(WorkItem -> Note) on noteable_id without distinct type values"
+        ]
+    );
+}
