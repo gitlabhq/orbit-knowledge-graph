@@ -276,9 +276,14 @@ async fn run_webserver(
     let mut analytics_tracker = None;
     let collector_url_missing = config.analytics.collector_url.trim().is_empty();
     if config.analytics.enabled == Some(true) && collector_url_missing {
-        return Err(anyhow::anyhow!(
-            "analytics.enabled=true but analytics.collector_url is empty"
-        ));
+        if config.analytics.local_collector().is_none() {
+            return Err(anyhow::anyhow!(
+                "analytics.enabled=true but analytics.collector_url is empty"
+            ));
+        }
+        warn!(
+            "analytics.enabled=true but analytics.collector_url is empty; analytics go to analytics.local_collector_url only"
+        );
     }
     if config.analytics.may_send_events() && !collector_url_missing {
         info!(
