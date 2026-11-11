@@ -25,6 +25,9 @@
 //!
 pub mod analytics;
 pub use orbit_migrations::campaign;
+/// The datalake source the SDLC pipelines and system notes replicate from.
+pub const SIPHON_SOURCE: &str = "siphon";
+
 pub mod checkpoint;
 pub mod clickhouse;
 pub mod config;
@@ -243,11 +246,9 @@ pub async fn run_dispatcher(
     let siphon = candidate
         .model()
         .sources()
-        .source_named(orbit_migrations::completion::SIPHON_SOURCE)
+        .source_named(SIPHON_SOURCE)
         .cloned()
-        .ok_or(DispatcherError::MissingSource(
-            orbit_migrations::completion::SIPHON_SOURCE,
-        ))?;
+        .ok_or(DispatcherError::MissingSource(SIPHON_SOURCE))?;
     let clients = ClickHouseClients::new(&config.graph, &config.datalake);
 
     let services = orchestrator::scheduled::connect(&config.nats).await?;

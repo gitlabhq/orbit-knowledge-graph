@@ -48,7 +48,7 @@ pub fn siphon_source() -> query_data_model::catalog::sources::DataSource {
         .load()
         .expect("embedded model")
         .sources()
-        .source_named(orbit_migrations::completion::SIPHON_SOURCE)
+        .source_named(crate::SIPHON_SOURCE)
         .expect("embedded siphon source")
         .clone()
 }

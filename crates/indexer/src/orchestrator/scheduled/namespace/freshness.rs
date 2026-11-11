@@ -8,7 +8,6 @@ use clickhouse_client::FromArrowColumn;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Histogram, ObservableGauge};
 use orbit_migrations::catalog::ModelCatalog;
-use orbit_migrations::completion::SIPHON_SOURCE;
 use orbit_migrations::version::read_active_version;
 use orbit_observability::indexer::sdlc;
 use orbit_server_config::{NamespaceFreshnessConfig, ScheduleConfiguration};
@@ -200,9 +199,10 @@ impl NamespaceFreshness {
             .packages()
             .load()
             .map_err(TaskError::new)?;
-        let siphon = model.sources().source_named(SIPHON_SOURCE).ok_or_else(|| {
-            TaskError::new(format!("the model declares no {SIPHON_SOURCE} source"))
-        })?;
+        let (siphon, _) = model
+            .sources()
+            .enabled_namespaces()
+            .ok_or_else(|| TaskError::new("no source lists the enabled namespaces"))?;
         let checkpoint_store =
             ClickHouseCheckpointStore::for_version(Arc::new(self.graph.clone()), version);
         let global_prefix = format!("{GLOBAL_SCOPE_KEY}.");

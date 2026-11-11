@@ -49,6 +49,7 @@ pub struct Schema {
 pub struct AuxiliaryTable {
     pub table: Table,
     pub versioned: bool,
+    pub role: Option<super::spec::TableRole>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +108,14 @@ impl Schema {
 
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
         &self.auxiliary
+    }
+
+    /// The name of the auxiliary table that holds the role.
+    pub fn role_table(&self, role: super::spec::TableRole) -> Option<&str> {
+        self.auxiliary
+            .iter()
+            .find(|table| table.role == Some(role))
+            .map(|table| table.table.name.as_str())
     }
 
     pub fn versioned_tables(&self) -> impl Iterator<Item = &Table> {

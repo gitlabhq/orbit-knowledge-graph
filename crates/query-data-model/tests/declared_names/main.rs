@@ -210,7 +210,7 @@ fn query_engine_names_no_declared_name() {
 }
 
 #[test]
-#[ignore = "157 hits in the indexer and the source catalog, owned by the indexing side"]
+#[ignore = "158 hits in the indexer and the source catalog, owned by the indexing side"]
 fn indexer_names_no_declared_name() {
     assert_no_declared_name(&["crates/indexer", "crates/query-data-model"], |file| {
         file.starts_with("crates/indexer/") || SOURCE_CATALOG.contains(&file)
@@ -218,13 +218,12 @@ fn indexer_names_no_declared_name() {
 }
 
 #[test]
-#[ignore = "4 hits wait on declarations: the checkpoint tables, the code indexing tables, the siphon source"]
+#[ignore = "1 hit: the code indexing edge table, which the code_indexer source must declare"]
 fn migrations_name_no_declared_name() {
     assert_no_declared_name(&["crates/orbit-migrations"], |_| true);
 }
 
 #[test]
-#[ignore = "2 hits wait on code indexing declarations: its project entity and its checkpoint table"]
 fn server_names_no_declared_name() {
     assert_no_declared_name(&["crates/orbit-server/"], |_| true);
 }

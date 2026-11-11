@@ -17,7 +17,7 @@ use orbit_migrations::version::{
     promote_version, read_active_version, table_prefix, version_tables_complete,
 };
 
-pub use orbit_migrations::execute::CHECKPOINT_TABLE;
+pub use crate::checkpoint::CHECKPOINT_TABLE;
 
 const MIGRATION_LOCK_KEY: &str = "schema_migration";
 const MIGRATION_LOCK_TTL: Duration = Duration::from_secs(120);

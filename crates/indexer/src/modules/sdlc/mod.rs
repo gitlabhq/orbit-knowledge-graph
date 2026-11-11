@@ -24,6 +24,7 @@ use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseClients;
 
+use crate::SIPHON_SOURCE;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{
     GLOBAL_HANDLER_TOPIC, GlobalIndexingRequest, NAMESPACE_HANDLER_TOPIC, NamespaceIndexingRequest,
@@ -33,7 +34,6 @@ use datalake::{Datalake, DatalakeQuery};
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
 use orbit_log_fields::info;
-use orbit_migrations::completion::SIPHON_SOURCE;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use pipeline::Pipeline;
 

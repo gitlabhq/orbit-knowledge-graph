@@ -10,7 +10,7 @@ use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const CHECKPOINT_TABLE: &str = "checkpoint";
+pub const CHECKPOINT_TABLE: &str = "checkpoint";
 
 /// The checkpoint key prefix for a given namespace, e.g. `ns.100`.
 ///

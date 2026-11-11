@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS;
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::{Catalog, ClickHouse};
+use query_data_model::catalog::Rule;
+use query_data_model::implementations::clickhouse::spec::TableRole;
+use query_data_model::implementations::orbit_code::OrbitCode;
+use query_data_model::{Catalog, ClickHouse, EntityId, Model, StorageBackend};
 use tonic::Status;
 
 use super::phase::Phase;
@@ -11,9 +14,6 @@ use crate::status_query::{
     bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
     map_column_extraction_error, uncached_query_config,
 };
-
-pub(super) const PROJECT_NODE: &str = "Project";
-const CODE_CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
 
 const PROJECT_COVERAGE_SQL: &str = r#"
 WITH projects AS (
@@ -107,23 +107,48 @@ pub async fn read_project_coverage(
         .collect())
 }
 
+/// The entity the code store scopes every read through: the repositories code is indexed for.
+pub(super) fn repository_entity(model: &Model) -> Result<EntityId, Status> {
+    let mut ends = model
+        .stores()
+        .iter()
+        .filter(|store| store.kind == OrbitCode::KIND)
+        .flat_map(|store| {
+            store
+                .sources()
+                .filter_map(move |source| match &store.guard(source.entity)?.rule {
+                    Rule::Via(hops) => hops.last().map(|hop| hop.to),
+                    _ => None,
+                })
+        });
+    let first = ends.next().ok_or_else(|| {
+        Status::internal(format!(
+            "no {} store scopes its reads through an entity",
+            OrbitCode::KIND
+        ))
+    })?;
+    match ends.all(|end| end == first) {
+        true => Ok(first),
+        false => Err(Status::internal(format!(
+            "{} stores scope their reads through different entities",
+            OrbitCode::KIND
+        ))),
+    }
+}
+
 fn find_coverage_tables(catalog: &Catalog<ClickHouse>) -> Result<(&str, &str), Status> {
-    let project_table = catalog
-        .graph()
-        .entity_id(PROJECT_NODE)
-        .and_then(|entity| catalog.table_of(entity))
-        .ok_or_else(|| Status::internal(format!("model missing required node: {PROJECT_NODE}")))?;
+    let repository = repository_entity(catalog.model())?;
+    let project_table = catalog.table_of(repository).ok_or_else(|| {
+        Status::internal(format!(
+            "{} has no table on connection {}",
+            catalog.graph().entity(repository).name,
+            catalog.connection()
+        ))
+    })?;
     let code_checkpoint_table = catalog
         .schema()
         .map_err(|error| Status::internal(error.to_string()))?
-        .auxiliary_tables()
-        .iter()
-        .map(|table| table.table.name.as_str())
-        .find(|name| name.ends_with(CODE_CHECKPOINT_TABLE_SUFFIX))
-        .ok_or_else(|| {
-            Status::internal(format!(
-                "model missing auxiliary table ending with: {CODE_CHECKPOINT_TABLE_SUFFIX}"
-            ))
-        })?;
+        .role_table(TableRole::CodeProgress)
+        .ok_or_else(|| Status::internal("the model holds repository progress in no table"))?;
     Ok((project_table, code_checkpoint_table))
 }

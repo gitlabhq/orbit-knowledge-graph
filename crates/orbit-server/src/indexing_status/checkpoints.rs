@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use chrono::{DateTime, TimeDelta, Utc};
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use indexer::checkpoint::NAMESPACE_KEY_PREFIX;
-use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_migrations::version::prefixed_table_name;
 use query_data_model::catalog::sources::PipelineDescriptor;
+use query_data_model::implementations::clickhouse::spec::TableRole;
 use tonic::Status;
 
 use super::phase::Phase;
@@ -91,7 +91,13 @@ pub async fn read_plan_checkpoints(
         return Ok(HashMap::new());
     }
 
-    let table = prefixed_table_name(CHECKPOINT_TABLE, schema.migration_version);
+    let checkpoint = schema
+        .data_model
+        .schema()
+        .map_err(|error| Status::internal(error.to_string()))?
+        .role_table(TableRole::PlanProgress)
+        .ok_or_else(|| Status::internal("the model holds plan progress in no table"))?;
+    let table = prefixed_table_name(checkpoint, schema.migration_version);
     let config = uncached_query_config();
     let batches = fetch_status_query_batches(
         client,

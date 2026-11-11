@@ -1253,3 +1253,19 @@ fn edge_tables_hold_ids_of_their_endpoint_identity_types() {
         ]
     );
 }
+
+#[test]
+fn an_engine_table_role_is_held_by_one_table() {
+    let packages = query_data_model::testkit::patched([(
+        "gitlab/storage/clickhouse.yaml",
+        "role: code_progress",
+        "role: plan_progress",
+    )]);
+    let errors = spec_errors(packages.load());
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.ends_with("both hold the PlanProgress role")),
+        "{errors:?}"
+    );
+}

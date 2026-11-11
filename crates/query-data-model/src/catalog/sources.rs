@@ -29,6 +29,7 @@ pub struct DataSource {
     pub version: String,
     pub watermark: String,
     pub deleted: String,
+    pub enabled_namespaces: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,6 +105,13 @@ impl Sources {
 
     pub fn source_named(&self, name: &str) -> Option<&DataSource> {
         self.sources.iter().find(|source| source.name == name)
+    }
+
+    /// The one source that lists the namespaces enabled for indexing, with that table.
+    pub fn enabled_namespaces(&self) -> Option<(&DataSource, &str)> {
+        self.sources
+            .iter()
+            .find_map(|source| Some((source, source.enabled_namespaces.as_deref()?)))
     }
 
     pub fn pipelines(&self) -> &[Pipeline] {
@@ -237,6 +245,17 @@ impl<'a> Resolver<'a> {
             let Some(declaration) = &fragment.declare else {
                 continue;
             };
+            if declaration.enabled_namespaces.is_some()
+                && let Some((other, _)) = self.sources.enabled_namespaces()
+            {
+                self.diagnostics.error(
+                    &fragment.package,
+                    format!(
+                        "sources {} and {} both list the enabled namespaces",
+                        other.name, fragment.source
+                    ),
+                );
+            }
             if self.sources.source_named(&fragment.source).is_some() {
                 self.diagnostics.error(
                     &fragment.package,
@@ -250,6 +269,7 @@ impl<'a> Resolver<'a> {
                 version: declaration.version.clone(),
                 watermark: declaration.watermark.clone(),
                 deleted: declaration.deleted.clone(),
+                enabled_namespaces: declaration.enabled_namespaces.clone(),
             });
         }
     }

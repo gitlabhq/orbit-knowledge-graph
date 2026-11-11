@@ -11,8 +11,7 @@ use crate::scope::{
     find_invalidated_pipelines, widen_scope_for_shared_table_writers,
 };
 use crate::version::{self, list_version_entities, table_prefix};
-
-pub const CHECKPOINT_TABLE: &str = "checkpoint";
+use query_data_model::implementations::clickhouse::spec::TableRole;
 
 const DISPATCH_CURSOR_PREFIX: &str = "dispatch.";
 const CODE_STALE_SWEEP_GATE_PREFIX: &str = "maintenance.code_stale_sweep";
@@ -103,7 +102,7 @@ pub async fn create_tables_with_selective_cloning(
         let active_name = format!("{active_prefix}{}", table.name);
         let target_name = format!("{target_prefix}{}", table.name);
 
-        if table.name == CHECKPOINT_TABLE
+        if schema.physical.role_table(TableRole::PlanProgress) == Some(table.name.as_str())
             && let Some(seed) = &seed
             && active_entities.contains(&active_name)
         {

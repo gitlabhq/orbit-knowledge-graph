@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{TimeDelta, Utc};
+use indexer::checkpoint::CHECKPOINT_TABLE;
 use indexer::checkpoint::{
     Checkpoint, CheckpointStore, ClickHouseCheckpointStore, GLOBAL_SCOPE_KEY,
     namespace_position_key,
@@ -13,7 +14,6 @@ use indexer::schema::version::{
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 use orbit_migrations::catalog::ModelCatalog;
-use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_server_config::{AppConfig, NatsConfiguration};
 use query_data_model::catalog::sources::EtlScope;
 

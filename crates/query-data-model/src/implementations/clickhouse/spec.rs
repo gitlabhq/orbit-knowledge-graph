@@ -147,6 +147,8 @@ pub struct EdgeTable {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TableSpec {
+    /// What the engines keep in the table; each role names at most one table.
+    pub role: Option<TableRole>,
     #[serde(default = "yes")]
     pub versioned: bool,
     pub engine: String,
@@ -161,6 +163,16 @@ pub struct TableSpec {
     #[serde(default)]
     pub settings: Settings,
     pub ttl: Option<String>,
+}
+
+/// An engine-owned table the indexing and query engines read and write by its role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TableRole {
+    /// Each indexing plan's watermark and completion, keyed by plan.
+    PlanProgress,
+    /// Each repository branch's code indexing progress.
+    CodeProgress,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

@@ -7,22 +7,20 @@ use orbit_arrow::ArrowUtils;
 use orbit_utils::traversal_path::TopLevelSplit;
 use query_data_model::catalog::sources::DataSource;
 
-use crate::execute::{CHECKPOINT_TABLE, MigrationError};
+use crate::execute::MigrationError;
 use crate::ledger::MigrationLedger;
 use crate::scope::{
     MigrationScope, find_invalidated_pipelines, widen_scope_for_shared_table_writers,
 };
 use crate::version::{read_active_version, table_prefix};
+use query_data_model::implementations::clickhouse::spec::TableRole;
 
-/// The datalake source whose replication columns the hand-written siphon queries read.
-pub const SIPHON_SOURCE: &str = "siphon";
-
-fn fetch_enabled_namespaces_sql(source: &DataSource) -> String {
+fn fetch_enabled_namespaces_sql(source: &DataSource, table: &str) -> String {
     let (version, deleted) = (&source.version, &source.deleted);
     format!(
         "SELECT DISTINCT root_namespace_id, traversal_path \
          FROM (SELECT root_namespace_id, argMax(traversal_path, {version}) AS traversal_path \
-               FROM siphon_knowledge_graph_enabled_namespaces \
+               FROM {table} \
                GROUP BY root_namespace_id, id \
                HAVING argMax({deleted}, {version}) = false)"
     )
@@ -94,22 +92,29 @@ pub async fn fetch_enabled_top_level_namespaces(
     datalake: &ArrowClickHouseClient,
     source: &DataSource,
 ) -> Result<TopLevelSplit, MigrationError> {
+    let table = source
+        .enabled_namespaces
+        .as_deref()
+        .ok_or_else(|| MigrationError::Ddl {
+            entity_name: source.name.clone(),
+            reason: "the source lists no enabled namespaces".into(),
+        })?;
     let batches = datalake
-        .query(&fetch_enabled_namespaces_sql(source))
+        .query(&fetch_enabled_namespaces_sql(source, table))
         .fetch_arrow()
         .await
         .map_err(|error| MigrationError::Ddl {
-            entity_name: "siphon_knowledge_graph_enabled_namespaces".into(),
+            entity_name: table.into(),
             reason: error.to_string(),
         })?;
 
     let ids = i64::extract_column(&batches, 0).map_err(|error| MigrationError::Ddl {
-        entity_name: "siphon_knowledge_graph_enabled_namespaces".into(),
+        entity_name: table.into(),
         reason: error.to_string(),
     })?;
 
     let paths = String::extract_column(&batches, 1).map_err(|error| MigrationError::Ddl {
-        entity_name: "siphon_knowledge_graph_enabled_namespaces".into(),
+        entity_name: table.into(),
         reason: error.to_string(),
     })?;
 
@@ -145,7 +150,18 @@ pub async fn check_sdlc_reindex_progress(
     enabled_namespace_ids: &[i64],
 ) -> Result<SdlcReindexProgress, MigrationError> {
     let prefix = table_prefix(version);
-    let checkpoint_table = format!("{prefix}{CHECKPOINT_TABLE}");
+    let progress = catalog
+        .schema()
+        .map_err(|error| MigrationError::Ddl {
+            entity_name: "schema".into(),
+            reason: error.to_string(),
+        })?
+        .role_table(TableRole::PlanProgress)
+        .ok_or_else(|| MigrationError::Ddl {
+            entity_name: "schema".into(),
+            reason: "no table holds plan progress".into(),
+        })?;
+    let checkpoint_table = format!("{prefix}{progress}");
     let pipelines = find_invalidated_pipelines(catalog, scope);
 
     let completed_namespace_ids =

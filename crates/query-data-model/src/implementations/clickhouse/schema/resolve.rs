@@ -126,9 +126,18 @@ impl Resolver<'_, '_> {
             else {
                 continue;
             };
+            if let Some(role) = spec.role
+                && let Some(other) = self.schema.role_table(role)
+            {
+                self.diagnostics.error(
+                    &package,
+                    format!("{context} and table {other} both hold the {role:?} role"),
+                );
+            }
             self.schema.auxiliary.push(AuxiliaryTable {
                 table,
                 versioned: spec.versioned,
+                role: spec.role,
             });
         }
     }

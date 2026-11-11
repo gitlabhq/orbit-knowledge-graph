@@ -14,7 +14,6 @@ use crate::clickhouse::ClickHouseClients;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{NAMESPACE_DELETION_TOPIC, NamespaceDeletionRequest};
 use crate::types::Event;
-use orbit_migrations::completion::SIPHON_SOURCE;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use query_data_model::{Catalog, ClickHouse};
 
@@ -43,11 +42,12 @@ pub fn register_handlers(
     let siphon = catalog
         .model()
         .sources()
-        .source_named(SIPHON_SOURCE)
+        .enabled_namespaces()
+        .map(|(source, _)| source)
         .ok_or_else(|| {
-            HandlerInitError::new(std::io::Error::other(format!(
-                "the model declares no {SIPHON_SOURCE} source"
-            )))
+            HandlerInitError::new(std::io::Error::other(
+                "no source lists the enabled namespaces",
+            ))
         })?;
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
         datalake_client,

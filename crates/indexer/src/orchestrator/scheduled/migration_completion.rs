@@ -5,15 +5,15 @@ use async_trait::async_trait;
 use orbit_arrow::ArrowUtils;
 use orbit_log_fields::{info, warn};
 use orbit_migrations::catalog::ModelCatalog;
-use orbit_migrations::completion::SIPHON_SOURCE;
 use orbit_migrations::schema::Schema;
-use orbit_migrations::scope::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
+use orbit_migrations::scope::MigrationScope;
 use orbit_migrations::version::{
     SCHEMA_VERSION, promote_version, read_migrating_version, table_prefix,
 };
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
 use query_data_model::catalog::sources::DataSource;
+use query_data_model::implementations::clickhouse::spec::TableRole;
 use query_data_model::{Catalog, ClickHouse};
 
 use crate::campaign::CampaignState;
@@ -270,7 +270,14 @@ impl MigrationCompletionChecker {
             .map_err(|e| format!("fetch enabled namespaces: {e}"))?;
         let enabled_count = enabled_namespaces.ids.len() as u64;
 
-        let code_table = format!("{prefix}{CODE_INDEXING_CHECKPOINT_TABLE}");
+        let code_checkpoint = self
+            .data_model
+            .schema()
+            .map_err(|error| error.to_string())?
+            .role_table(TableRole::CodeProgress)
+            .ok_or("no table holds repository progress")?
+            .to_string();
+        let code_table = format!("{prefix}{code_checkpoint}");
         let code_coverage = match self
             .compute_code_coverage(&code_table, &enabled_namespaces.paths)
             .await
@@ -386,8 +393,9 @@ impl MigrationCompletionChecker {
         self.data_model
             .model()
             .sources()
-            .source_named(SIPHON_SOURCE)
-            .ok_or_else(|| format!("the model declares no {SIPHON_SOURCE} source"))
+            .enabled_namespaces()
+            .map(|(source, _)| source)
+            .ok_or_else(|| "no source lists the enabled namespaces".to_string())
     }
 
     async fn fetch_enabled_top_level_namespaces(&self) -> Result<TopLevelSplit, String> {
