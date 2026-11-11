@@ -1,0 +1,71 @@
+name: "C: a file with several includes resolves names through each of them"
+
+# tcpdump's print.c includes netdissect.h, addrtoname.h, print.h, and more; the printers its
+# table names and the functions it calls are declared in the first of them, as
+# `extern void ether_if_print IF_PRINTER_ARGS;` with the parameter list in a macro. A name the
+# file uses resolves through whichever include declares it, not only the last one.
+
+fixtures:
+  - path: netdissect.h
+    content: |
+      #define IF_PRINTER_ARGS (int)
+      extern void ether_if_print IF_PRINTER_ARGS;
+      void nd_print_trunc(void);
+
+  - path: addrtoname.h
+    content: |
+      const char *etheraddr_string(const unsigned char *a);
+
+  - path: print.h
+    content: |
+      void init_print(void);
+
+  - path: print-ether.c
+    content: |
+      #include "netdissect.h"
+      void ether_if_print(int n) { }
+      void nd_print_trunc(void) { }
+
+  - path: addrtoname.c
+    content: |
+      #include "addrtoname.h"
+      const char *etheraddr_string(const unsigned char *a) { return 0; }
+
+  - path: print.c
+    content: |
+      #include "netdissect.h"
+      #include "addrtoname.h"
+      #include "print.h"
+
+      static void (*printers[])(int) = { ether_if_print };
+
+      void init_print(void) { }
+
+      void pretty_print_packet(const unsigned char *a)
+      {
+      	nd_print_trunc();
+      	etheraddr_string(a);
+      	init_print();
+      }
+
+tests:
+  - name: "a call resolves through the first include"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.name = 'pretty_print_packet'
+      RETURN b.name AS callee, b.file_path AS file
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: etheraddr_string, file: addrtoname.c } }
+      - { row: { callee: init_print, file: print.c } }
+      - { row: { callee: nd_print_trunc, file: print-ether.c } }
+
+  - name: "a table entry resolves through the first include"
+    query: |
+      MATCH (t:Definition)-[:USES_VALUE]->(f:Definition)
+      WHERE t.name = 'printers'
+      RETURN f.name AS function, f.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { function: ether_if_print, file: print-ether.c } }
