@@ -771,7 +771,7 @@ pub type CustomParseFn = fn(
 /// parse with tree-sitter and walk the CST through the rule tables; `Custom`
 /// replaces that wholesale with `(source, file_path) -> (definitions,
 /// imports)`. Per-phase CPU budgets cannot interrupt a custom parser, so it
-/// must be robust to pathological input on its own. Used by Markdown (comrak).
+/// must be robust to pathological input on its own.
 #[derive(Clone, Copy, Default)]
 pub enum LanguageParser {
     #[default]

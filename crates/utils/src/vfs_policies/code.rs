@@ -12,7 +12,7 @@ const EXCLUDED_SUFFIXES: &[&str] = &[".min.js", ".min.mjs", ".min.cjs"];
 /// Directory names whose whole subtree is machine-generated content: recorded
 /// as bare nodes, never loaded or parsed. Matched case-insensitively on any
 /// path segment. `doc-locale`/`docs-locale` are GitLab's machine-translated
-/// documentation directories (see docs.gitlab.com documentation testing).
+/// documentation directories.
 pub const EXCLUDED_INDEXING_DIRS: &[&str] = &["doc-locale", "docs-locale"];
 const BINARY_SNIFF_BYTES: usize = 8000;
 const MAX_LINE_LENGTH: usize = 64 * 1024;

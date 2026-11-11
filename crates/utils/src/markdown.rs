@@ -141,8 +141,8 @@ fn inline_text<'a>(node: &'a AstNode<'a>) -> String {
     text.trim().to_string()
 }
 
-/// Line starts of a source, for converting between byte offsets and
-/// zero-based (line, byte column) positions.
+/// Zero-based (line, byte column) positions. A lone `\r` ends a line, as in
+/// CommonMark, so line numbers agree with comrak's.
 pub struct LineIndex {
     starts: Vec<usize>,
     len: usize,
@@ -185,7 +185,7 @@ impl LineIndex {
     /// The position just past the last character of `source[..end]`, before
     /// its trailing line ending, so a range ends on its own last line.
     pub fn end_position(&self, source: &str, end: usize) -> (usize, usize) {
-        let content = &source[..end];
+        let content = source.get(..end).unwrap_or(source);
         let content = content
             .strip_suffix("\r\n")
             .or_else(|| content.strip_suffix(['\n', '\r']))

@@ -206,7 +206,7 @@ fn is_lfs_pointer(content: &[u8]) -> bool {
 /// parsed: globs matched case-insensitively on the basename, grouped by line.
 /// Source (including tests), manifests, lockfiles, and dotfiles are absent so
 /// resolver inputs survive — file-name exclusions go here, directory-subtree
-/// exclusions in [`EXCLUDED_INDEXING_DIRS`].
+/// exclusions in [`orbit_utils::vfs_policies::EXCLUDED_INDEXING_DIRS`].
 pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     // Raster + vector images.
     "*.{png,jpg,jpeg,gif,bmp,ico,webp,avif,tiff,tif,svg}",
@@ -234,7 +234,7 @@ static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
     builder.build().expect("static excluded-indexing globset")
 });
 
-pub use orbit_utils::vfs_policies::EXCLUDED_INDEXING_DIRS;
+use orbit_utils::vfs_policies::EXCLUDED_INDEXING_DIRS;
 
 fn in_excluded_directory(rel_path: &Path) -> bool {
     let mut components = rel_path.components().peekable();
