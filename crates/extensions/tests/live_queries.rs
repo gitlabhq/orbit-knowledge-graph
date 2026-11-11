@@ -130,6 +130,7 @@ fn row_response(operation: &str, key: &Key) -> LiveResponse {
         kind: Some(live_response::Kind::Row(Row {
             key: Some(key.clone()),
             properties,
+            ..Default::default()
         })),
     }
 }

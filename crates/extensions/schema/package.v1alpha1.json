@@ -122,6 +122,7 @@
       "required": ["label", "properties"],
       "properties": {
         "label": { "type": "string" },
+        "cited_by": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
         "properties": {
           "type": "object",
           "minProperties": 1,
@@ -234,7 +235,38 @@
             "max_keys": { "type": "integer", "minimum": 1 },
             "timeout_ms": { "type": "integer", "minimum": 1 }
           }
-        }
+        },
+        "search": { "$ref": "#/$defs/search" }
+      }
+    },
+    "searchMatch": {
+      "type": "string",
+      "enum": ["contains", "equals", "range"]
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "fields"],
+      "properties": {
+        "operation": { "type": "string", "minLength": 1 },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/searchMatch" },
+          "propertyNames": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        },
+        "inbound": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": { "const": "$cited_by" },
+            "propertyNames": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+          },
+          "propertyNames": { "$ref": "#/$defs/relationshipName" }
+        },
+        "max_rows": { "type": "integer", "minimum": 1 },
+        "timeout_ms": { "type": "integer", "minimum": 1 }
       }
     }
   }

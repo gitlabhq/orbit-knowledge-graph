@@ -181,6 +181,88 @@ clear error.
 JWT. The provider serves only data in those scopes and uses that user's own source
 token. It signs each `Live` call with the provider JWT, exactly as `GetManifest`.
 
+## Searchable live entities
+
+A live entity may add a `search` block. Its searchable text lives at the provider,
+not in ClickHouse, so a query starts from the rows a live search returns and then
+traverses into the indexed graph. The block is additive: a `v1alpha1` package
+without it behaves exactly as before.
+
+An entity names only its own properties. To be found by an inbound search, a graph
+entity declares its citation key — the stored property whose value appears in the
+searcher's text — on its own entity:
+
+```yaml
+graph:
+  entities:
+    Incident:
+      label: reference
+      cited_by: reference        # a stored property of Incident
+      properties: { id: { type: int64 }, reference: { type: string } }
+```
+
+```yaml
+live:
+  entities:
+    SlackMessage:
+      properties: { text: { type: string } }       # live properties, as above
+      operation: { name: messages.get, keys: [channel_id, ts] }
+      search:
+        operation: messages.search                  # opaque; sent as LiveRequest.operation
+        fields:                                      # property -> how a predicate pushes down
+          text: contains
+          author_name: equals
+          channel_name: equals
+          sent_at: range                            # range only on an int or datetime property
+        inbound:                                     # relationship -> (search field -> placeholder)
+          CITES:
+            text: $cited_by                          # search `text` for the target's cited_by value
+        max_rows: 20                                 # default 20; the row cap of one search
+        timeout_ms: 5000                             # default 5000; the per-search deadline
+```
+
+**Load rules.**
+
+- A `cited_by` names a stored property of its own entity.
+- Every `fields` key is a stored or live property of the entity.
+- A `range` match is valid only on an int or datetime property.
+- For each `inbound` entry, the entity starts at least one variant of the
+  relationship, the mapped search field is one of `fields`, and the value is the
+  `$cited_by` placeholder (the only placeholder in v0).
+
+**Filter encoding (`LiveRequest.filters`).** A pushed-down predicate encodes as a
+string entry: `<property>` carries a `contains` or `equals` value; `<property>_from`
+and `<property>_to` carry the bounds of a `range` (ISO-8601 for a datetime, the
+decimal string for an int). `LiveRequest.max_rows` carries the row cap. A search
+answer is a stream of `Row`s (the key may be empty), each with the entity's graph
+`id`, its `properties`, and its outgoing `edges` (`relationship`, `target_entity`,
+`target_id`).
+
+**Planner.** When a searched node starts the pattern — `(m:E)-[:R]->(x:T)...` — and
+the `WHERE` has at least one predicate on `m`'s search fields with the declared
+match (`CONTAINS` for `contains`, `=` for `equals`, `>`/`>=`/`<`/`<=` for `range`),
+Orbit removes those predicates from the SQL, runs one `Live` search before the
+stored query, and constrains the first hop with `x.id IN [the target ids of m's R
+edges to T]`; the rest runs in ClickHouse. A query that only returns `m` returns
+the seed rows. Zero search predicates leave the query byte-for-byte unchanged.
+
+For an inbound shape — `(x:T)<-[:R]-(m:E)...` where `E` declares `inbound[R]` and
+`x` is constrained by indexed predicates — Orbit runs the indexed part for `x`
+first (at most `max_rows` anchors; more is a clear error), reads each anchor's
+`cited_by` value, then runs one `Live` search per anchor with that value filling
+the `$cited_by` field ANDed with any `WHERE` predicates on `m`, all in parallel
+under the live budget. It keeps only rows that carry an edge `(R, T, x.id)`; `m`'s
+nodes come from those rows, and the rest of the pattern follows the rows' other
+edges into ClickHouse. If `T` declares no `cited_by`, it is a clear compile error.
+
+**Status.** Unlike a live property, a search never degrades silently: a timeout,
+a transport error, or a non-`OK` provider status fails the query with a clear
+error. An unsupported shape (for example a searched node in the pattern middle)
+is a clear compile error.
+
+**In the schema.** A searchable property is marked `[search: <match>]` in
+`GetGraphSchema`, so an agent learns which predicate each field accepts.
+
 ## How Orbit loads a package
 
 Orbit translates each entity into an ontology node and each relationship into an

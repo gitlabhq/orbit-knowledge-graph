@@ -91,6 +91,25 @@ pub struct Row {
     pub key: ::core::option::Option<Key>,
     #[prost(map = "string, message", tag = "2")]
     pub properties: ::std::collections::HashMap<::prost::alloc::string::String, Value>,
+    /// The entity's graph id. A search answer carries it so Orbit can join the row
+    /// into the indexed graph; a key-based answer may leave it 0.
+    #[prost(int64, tag = "3")]
+    pub id: i64,
+    /// The row's outgoing edges in the graph. A search answer carries them so Orbit
+    /// can traverse from a searched (non-indexed) row into indexed entities.
+    #[prost(message, repeated, tag = "4")]
+    pub edges: ::prost::alloc::vec::Vec<Edge>,
+}
+/// One outgoing edge of a search row: its relationship, the target entity, and
+/// the target's graph id. Orbit uses these to constrain the next hop.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Edge {
+    #[prost(string, tag = "1")]
+    pub relationship: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub target_entity: ::prost::alloc::string::String,
+    #[prost(int64, tag = "3")]
+    pub target_id: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Value {

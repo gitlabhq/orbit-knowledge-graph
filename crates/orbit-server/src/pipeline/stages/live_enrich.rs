@@ -354,6 +354,7 @@ mod tests {
                     kind: Some(live_response::Kind::Row(Row {
                         key: Some(key.clone()),
                         properties,
+                        ..Default::default()
                     })),
                 }));
                 messages.push(Ok(LiveResponse {

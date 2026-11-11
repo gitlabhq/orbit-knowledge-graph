@@ -135,12 +135,13 @@ fn build_overview_domains(ontology: &Ontology, scope: IntrospectionScope) -> Vec
 }
 
 fn format_listed_property(field: &Field) -> String {
+    let marker = search_marker(field);
     match &field.enum_values {
         Some(values) => {
             let values: Vec<&str> = values.values().map(String::as_str).collect();
-            format!("{} ({})", field.name, values.join("|"))
+            format!("{} ({}){marker}", field.name, values.join("|"))
         }
-        None => field.name.clone(),
+        None => format!("{}{marker}", field.name),
     }
 }
 
@@ -336,25 +337,39 @@ fn format_compact_property(field: &Field) -> String {
         let values: Vec<&str> = values.values().map(String::as_str).collect();
         text.push_str(&format!(" ({})", values.join("|")));
     }
+    text.push_str(&search_marker(field));
     text
 }
 
 fn format_property(field: &Field) -> String {
     let nullable = if field.nullable { "?" } else { "" };
+    let marker = search_marker(field);
     match &field.description {
         Some(desc) => format!(
-            "{}:{}{} — {}",
+            "{}:{}{}{} — {}",
             field.name,
             field.data_type.to_string().to_lowercase(),
             nullable,
+            marker,
             desc
         ),
         None => format!(
-            "{}:{}{}",
+            "{}:{}{}{}",
             field.name,
             field.data_type.to_string().to_lowercase(),
-            nullable
+            nullable,
+            marker
         ),
+    }
+}
+
+/// The ` [search: <match>]` suffix for a field an extension package marked
+/// searchable, or empty for an ordinary field. It tells an agent which live
+/// search predicate the field accepts.
+fn search_marker(field: &Field) -> String {
+    match &field.search_match {
+        Some(search_match) => format!(" [search: {search_match}]"),
+        None => String::new(),
     }
 }
 

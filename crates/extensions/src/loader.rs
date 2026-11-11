@@ -15,7 +15,10 @@ use ontology::archive::OntologyArchive;
 use serde_json::{Value, json};
 
 use crate::live::{LIVE_SERVICE, LiveCatalog, LiveField};
-use crate::package::{Package, PropertyType, RelationshipVariant};
+use crate::package::{
+    CITED_BY_PLACEHOLDER, Package, PropertyType, RelationshipVariant, SearchMatch,
+};
+use crate::search::SearchCatalog;
 
 const EXTENSION_DOMAIN: &str = "extensions";
 const SCHEMA_SOURCE: &str = "schema.yaml";
@@ -105,8 +108,15 @@ pub fn merge_packages_into(
     check_live_rules(packages)?;
 
     let live_fields = LiveCatalog::from_packages(packages).fields_by_entity();
+    let search_matches = SearchCatalog::from_packages(packages).matches_by_entity();
     let mut schema = parse_schema(sources)?;
-    register_nodes(sources, &mut schema, packages, &live_fields);
+    register_nodes(
+        sources,
+        &mut schema,
+        packages,
+        &live_fields,
+        &search_matches,
+    );
     register_relationships(sources, &mut schema, packages);
     sources.insert(
         SCHEMA_SOURCE.to_string(),
@@ -239,15 +249,9 @@ fn check_cross_package_rules(
 /// packages, and every key is a stored property of the entity. A live block may
 /// target an entity another loaded package declares.
 fn check_live_rules(packages: &[Package]) -> Result<(), LoaderError> {
-    let mut stored: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-    for package in packages {
-        for (entity, def) in &package.document.graph.entities {
-            stored
-                .entry(entity)
-                .or_default()
-                .extend(def.properties.keys().map(String::as_str));
-        }
-    }
+    let stored = stored_properties(packages);
+    let property_types = property_types(packages);
+    let relationship_triples = relationship_triples(packages);
 
     let mut errors = Vec::new();
     let mut live_owner: BTreeMap<(&str, &str), &str> = BTreeMap::new();
@@ -288,6 +292,16 @@ fn check_live_rules(packages: &[Package]) -> Result<(), LoaderError> {
                     ));
                 }
             }
+            if let Some(search) = &live_entity.search {
+                check_search_rules(
+                    package.name(),
+                    entity,
+                    search,
+                    &property_types,
+                    &relationship_triples,
+                    &mut errors,
+                );
+            }
         }
     }
 
@@ -298,6 +312,107 @@ fn check_live_rules(packages: &[Package]) -> Result<(), LoaderError> {
     }
 }
 
+/// Search rules that need the whole package set: every search field is a stored or
+/// live property of the entity, `range` only on an int or datetime property, and
+/// every `inbound` entry names a relationship this entity starts, a declared search
+/// field, and the `$cited_by` placeholder.
+fn check_search_rules(
+    package: &str,
+    entity: &str,
+    search: &crate::package::Search,
+    property_types: &BTreeMap<&str, BTreeMap<&str, PropertyType>>,
+    relationship_triples: &BTreeSet<(&str, &str, &str)>,
+    errors: &mut Vec<String>,
+) {
+    let entity_types = property_types.get(entity);
+    for (field, search_match) in &search.fields {
+        let field_type = entity_types.and_then(|types| types.get(field.as_str()).copied());
+        match field_type {
+            None => errors.push(format!(
+                "{package}: search field {entity}.{field} is not a stored or live property"
+            )),
+            Some(ty) if *search_match == SearchMatch::Range && !ty.supports_range() => {
+                errors.push(format!(
+                    "{package}: search field {entity}.{field} uses `range`, which needs an int or datetime property"
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+
+    for (relationship, mapping) in &search.inbound {
+        let starts_relationship = relationship_triples
+            .iter()
+            .any(|(name, from, _)| *name == relationship && *from == entity);
+        if !starts_relationship {
+            errors.push(format!(
+                "{package}: inbound {relationship} on {entity} has no relationship variant from {entity}"
+            ));
+        }
+        for (field, placeholder) in mapping {
+            if !search.fields.contains_key(field) {
+                errors.push(format!(
+                    "{package}: inbound {relationship} maps unknown search field `{field}` of {entity}"
+                ));
+            }
+            if placeholder != CITED_BY_PLACEHOLDER {
+                errors.push(format!(
+                    "{package}: inbound {relationship} field `{field}` must map to {CITED_BY_PLACEHOLDER}, got `{placeholder}`"
+                ));
+            }
+        }
+    }
+}
+
+fn stored_properties(packages: &[Package]) -> BTreeMap<&str, BTreeSet<&str>> {
+    let mut stored: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for package in packages {
+        for (entity, def) in &package.document.graph.entities {
+            stored
+                .entry(entity)
+                .or_default()
+                .extend(def.properties.keys().map(String::as_str));
+        }
+    }
+    stored
+}
+
+/// Every property's type, keyed by entity then property name, over both stored and
+/// live properties. Search field rules read it to validate `range` match types.
+fn property_types(packages: &[Package]) -> BTreeMap<&str, BTreeMap<&str, PropertyType>> {
+    let mut types: BTreeMap<&str, BTreeMap<&str, PropertyType>> = BTreeMap::new();
+    for package in packages {
+        for (entity, def) in &package.document.graph.entities {
+            let entry = types.entry(entity).or_default();
+            for (name, property) in &def.properties {
+                entry.insert(name, property.property_type);
+            }
+        }
+        let Some(live) = &package.document.live else {
+            continue;
+        };
+        for (entity, live_entity) in &live.entities {
+            let entry = types.entry(entity).or_default();
+            for (name, property) in &live_entity.properties {
+                entry.insert(name, property.property_type);
+            }
+        }
+    }
+    types
+}
+
+fn relationship_triples(packages: &[Package]) -> BTreeSet<(&str, &str, &str)> {
+    let mut triples = BTreeSet::new();
+    for package in packages {
+        for (name, relationship) in &package.document.graph.relationships {
+            for variant in &relationship.variants {
+                triples.insert((name.as_str(), variant.from.as_str(), variant.to.as_str()));
+            }
+        }
+    }
+    triples
+}
+
 /// Registers every package's entities as nodes under one `extensions` domain.
 /// Entity names are unique across packages (a cross-package rule), so their node
 /// files and domain entries never collide.
@@ -306,8 +421,10 @@ fn register_nodes(
     schema: &mut Value,
     packages: &[Package],
     live_fields: &BTreeMap<String, Vec<LiveField>>,
+    search_matches: &BTreeMap<String, BTreeMap<String, SearchMatch>>,
 ) {
     let no_fields = Vec::new();
+    let no_matches = BTreeMap::new();
     let mut nodes = serde_json::Map::new();
     for package in packages {
         for entity in package.document.graph.entities.keys() {
@@ -317,7 +434,8 @@ fn register_nodes(
                 to_snake_case(entity)
             );
             let fields = live_fields.get(entity).unwrap_or(&no_fields);
-            sources.insert(path.clone(), node_source(package, entity, fields));
+            let matches = search_matches.get(entity).unwrap_or(&no_matches);
+            sources.insert(path.clone(), node_source(package, entity, fields, matches));
             nodes.insert(entity.clone(), Value::String(path));
         }
     }
@@ -351,7 +469,12 @@ fn register_relationships(
     }
 }
 
-fn node_source(package: &Package, entity: &str, live_fields: &[LiveField]) -> String {
+fn node_source(
+    package: &Package,
+    entity: &str,
+    live_fields: &[LiveField],
+    search_matches: &BTreeMap<String, SearchMatch>,
+) -> String {
     let document = &package.document;
     let entity_def = &document.graph.entities[entity];
     let storage = &document.storage.entities[entity];
@@ -370,10 +493,17 @@ fn node_source(package: &Package, entity: &str, live_fields: &[LiveField]) -> St
             field["traversal_path_lookup"] =
                 json!({ "kind": "id", "source_table": table, "key_column": "id" });
         }
+        if let Some(search_match) = search_matches.get(name) {
+            field["search_match"] = json!(search_match.as_str());
+        }
         properties.insert(name.clone(), field);
     }
     for field in live_fields {
-        properties.insert(field.property.clone(), live_field_source(field));
+        let search_match = search_matches.get(&field.property).copied();
+        properties.insert(
+            field.property.clone(),
+            live_field_source(field, search_match),
+        );
     }
     properties.insert(
         TRAVERSAL_PATH_COLUMN.to_string(),
@@ -424,8 +554,8 @@ fn node_source(package: &Package, entity: &str, live_fields: &[LiveField]) -> St
 /// it one too; the enrich stage resolves it from the operation named by `lookup`.
 /// `depends_on` lists the key columns, so the compiler keeps selecting them even
 /// when the live property itself is dropped from the SQL.
-fn live_field_source(field: &LiveField) -> Value {
-    json!({
+fn live_field_source(field: &LiveField, search_match: Option<SearchMatch>) -> Value {
+    let mut source = json!({
         "type": field.property_type.ontology_type(),
         "nullable": true,
         "filterable": false,
@@ -434,7 +564,11 @@ fn live_field_source(field: &LiveField) -> Value {
             "lookup": field.operation_id,
             "depends_on": field.keys,
         },
-    })
+    });
+    if let Some(search_match) = search_match {
+        source["search_match"] = json!(search_match.as_str());
+    }
+    source
 }
 
 /// One ontology edge for a relationship name. Each fk variant becomes an
@@ -560,6 +694,19 @@ mod tests {
 
     const WIDGETS: &str = include_str!("../tests/fixtures/example.widgets.yaml");
     const GADGETS: &str = include_str!("../tests/fixtures/example.gadgets.yaml");
+    const MESSAGES: &str = include_str!("../tests/fixtures/example.messages.yaml");
+
+    fn messages_package() -> Package {
+        Package::parse(MESSAGES, short_digest(MESSAGES)).expect("fixture parses")
+    }
+
+    fn search_rules_error(yaml: &str) -> Vec<String> {
+        let package = Package::parse(yaml, "d".into()).expect("parses");
+        match load_merged_ontology(schema_version(), &[package]) {
+            Err(LoaderError::Rules(errors)) => errors,
+            other => panic!("expected a rules error, got {other:?}"),
+        }
+    }
 
     fn widgets_package() -> Package {
         Package::parse(WIDGETS, short_digest(WIDGETS)).expect("fixture parses")
@@ -826,6 +973,120 @@ live:
             ),
             other => panic!("expected rules error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_package_with_a_valid_search_and_inbound_block_loads() {
+        let ontology = load_merged_ontology(schema_version(), &[messages_package()])
+            .expect("a valid search block loads");
+        let names: BTreeSet<&str> = ontology.nodes().map(|n| n.name.as_str()).collect();
+        assert!(names.contains("SlackMessage") && names.contains("Incident"));
+    }
+
+    #[test]
+    fn searchable_fields_carry_their_match_in_the_schema() {
+        let ontology = load_merged_ontology(schema_version(), &[messages_package()])
+            .expect("a valid search block loads");
+        let slack = ontology
+            .nodes()
+            .find(|n| n.name == "SlackMessage")
+            .expect("SlackMessage node");
+        let search_match = |property: &str| {
+            slack
+                .fields
+                .iter()
+                .find(|f| f.name == property)
+                .unwrap_or_else(|| panic!("field {property}"))
+                .search_match
+                .clone()
+        };
+        assert_eq!(search_match("text"), Some("contains".to_string()));
+        assert_eq!(search_match("sent_at"), Some("range".to_string()));
+        assert_eq!(
+            search_match("id"),
+            None,
+            "a non-search field stays unmarked"
+        );
+    }
+
+    #[test]
+    fn rejects_a_search_field_that_is_not_a_property() {
+        let yaml = MESSAGES.replace("          text: contains", "          missing: contains");
+        let errors = search_rules_error(&yaml);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("search field SlackMessage.missing is not a stored or live")),
+            "got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_range_match_on_a_non_ordered_property() {
+        let yaml = MESSAGES.replace("          text: contains", "          text: range");
+        let errors = search_rules_error(&yaml);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("search field SlackMessage.text uses `range`")),
+            "got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_inbound_relationship_the_entity_does_not_start() {
+        let yaml = MESSAGES.replace("          CITES:\n", "          MENTIONS:\n");
+        let errors = search_rules_error(&yaml);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("inbound MENTIONS on SlackMessage has no relationship variant")),
+            "got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_inbound_field_not_in_the_search_fields() {
+        let yaml = MESSAGES.replace(
+            "            text: \"$cited_by\"",
+            "            subject: \"$cited_by\"",
+        );
+        let errors = search_rules_error(&yaml);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("maps unknown search field `subject`")),
+            "got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_non_placeholder_inbound_value() {
+        let yaml = MESSAGES.replace(
+            "            text: \"$cited_by\"",
+            "            text: reference",
+        );
+        let err = Package::parse(&yaml, "d".into())
+            .expect_err("a non-$cited_by inbound value is a schema violation");
+        assert!(
+            err.errors.iter().any(|e| e.contains("$cited_by")),
+            "got {:?}",
+            err.errors
+        );
+    }
+
+    #[test]
+    fn rejects_a_cited_by_that_is_not_a_stored_property() {
+        let yaml = MESSAGES.replace("      cited_by: reference", "      cited_by: missing");
+        let err =
+            Package::parse(&yaml, "d".into()).expect_err("cited_by must name a stored property");
+        assert!(
+            err.errors
+                .iter()
+                .any(|e| e.contains("cited_by `missing` is not a stored property")),
+            "got {:?}",
+            err.errors
+        );
     }
 
     #[test]

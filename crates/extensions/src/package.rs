@@ -23,6 +23,15 @@ pub const ID_PROPERTY: &str = "id";
 pub const DEFAULT_LIVE_MAX_KEYS: u32 = 200;
 pub const DEFAULT_LIVE_TIMEOUT_MS: u64 = 1500;
 
+/// Defaults for a live search operation when the package omits them. `max_rows`
+/// caps the rows one search returns; `timeout_ms` is its per-operation deadline.
+pub const DEFAULT_SEARCH_MAX_ROWS: u32 = 20;
+pub const DEFAULT_SEARCH_TIMEOUT_MS: u64 = 5000;
+
+/// The only inbound placeholder in v0. An inbound search filter of this value is
+/// filled with the target node's `cited_by` property value at query time.
+pub const CITED_BY_PLACEHOLDER: &str = "$cited_by";
+
 const PACKAGE_SCHEMA_JSON: &str = include_str!("../schema/package.v1alpha1.json");
 
 static PACKAGE_SCHEMA: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
@@ -82,6 +91,11 @@ pub struct Graph {
 pub struct Entity {
     pub label: String,
     pub properties: BTreeMap<String, Property>,
+    /// The stored property whose value identifies this entity in another entity's
+    /// text (its citation key). An inbound search substitutes it for the
+    /// `$cited_by` placeholder, so a package names only its own properties.
+    #[serde(default)]
+    pub cited_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -181,6 +195,42 @@ pub struct Live {
 pub struct LiveEntity {
     pub properties: BTreeMap<String, Property>,
     pub operation: LiveOperation,
+    /// How Orbit searches for rows of this entity live, then traverses from them
+    /// into the indexed graph. Absent for a live entity that is only read by key.
+    #[serde(default)]
+    pub search: Option<Search>,
+}
+
+/// A live search: the operation that returns rows, which predicates push down
+/// into it (`fields`), and how to find rows that point at an indexed node
+/// (`inbound`). The entity may be declared by this or another loaded package.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Search {
+    /// Opaque to Orbit; sent to the provider as `LiveRequest.operation`.
+    pub operation: String,
+    /// Each searchable property mapped to how a predicate on it pushes down. The
+    /// property is a stored or live property of the entity.
+    pub fields: BTreeMap<String, SearchMatch>,
+    /// For finding the rows of this entity that point at an indexed node:
+    /// relationship -> (search field -> placeholder). The only placeholder in v0 is
+    /// `$cited_by`, filled with the target node's `cited_by` value at query time.
+    #[serde(default)]
+    pub inbound: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default = "default_search_max_rows")]
+    pub max_rows: u32,
+    #[serde(default = "default_search_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+/// How a predicate on a searchable field pushes down into the search operation.
+/// `range` is valid only on an int or datetime property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchMatch {
+    Contains,
+    Equals,
+    Range,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -203,6 +253,14 @@ fn default_live_max_keys() -> u32 {
 
 fn default_live_timeout_ms() -> u64 {
     DEFAULT_LIVE_TIMEOUT_MS
+}
+
+fn default_search_max_rows() -> u32 {
+    DEFAULT_SEARCH_MAX_ROWS
+}
+
+fn default_search_timeout_ms() -> u64 {
+    DEFAULT_SEARCH_TIMEOUT_MS
 }
 
 impl Package {
@@ -272,6 +330,22 @@ impl PropertyType {
             Self::Date => "Date",
         }
     }
+
+    /// Whether a `range` search match is valid on a property of this type. A range
+    /// orders its bounds, so only ints and datetimes qualify.
+    pub fn supports_range(self) -> bool {
+        matches!(self, Self::Int64 | Self::Timestamp | Self::Date)
+    }
+}
+
+impl SearchMatch {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Contains => "contains",
+            Self::Equals => "equals",
+            Self::Range => "range",
+        }
+    }
 }
 
 /// The first 8 hex characters of the sha256 of a package document. Orbit puts
@@ -307,6 +381,13 @@ impl PackageDocument {
                 None => errors.push(format!(
                     "entity {name}: a required `id` property is missing"
                 )),
+            }
+            if let Some(cited_by) = &entity.cited_by
+                && !entity.properties.contains_key(cited_by)
+            {
+                errors.push(format!(
+                    "entity {name}: cited_by `{cited_by}` is not a stored property"
+                ));
             }
             self.check_entity_coverage(name, entity, &mut errors);
         }

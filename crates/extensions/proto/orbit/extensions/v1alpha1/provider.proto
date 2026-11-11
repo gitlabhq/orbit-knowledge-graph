@@ -81,6 +81,20 @@ message LiveResponse {
 message Row {
   Key key = 1;
   map<string, Value> properties = 2;
+  // The entity's graph id. A search answer carries it so Orbit can join the row
+  // into the indexed graph; a key-based answer may leave it 0.
+  int64 id = 3;
+  // The row's outgoing edges in the graph. A search answer carries them so Orbit
+  // can traverse from a searched (non-indexed) row into indexed entities.
+  repeated Edge edges = 4;
+}
+
+// One outgoing edge of a search row: its relationship, the target entity, and
+// the target's graph id. Orbit uses these to constrain the next hop.
+message Edge {
+  string relationship = 1;
+  string target_entity = 2;
+  int64 target_id = 3;
 }
 
 message Value {

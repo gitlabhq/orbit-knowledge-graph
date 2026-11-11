@@ -74,6 +74,21 @@ pub enum LiveValue {
     TimestampUnixMs(i64),
 }
 
+impl LiveValue {
+    /// Maps a provider value by its own wire kind, without a declared type. Search
+    /// rows carry an entity's full property set, so the column resolves to whatever
+    /// kind the provider sent rather than one expected type.
+    pub fn from_proto(value: crate::proto::Value) -> Option<Self> {
+        Some(match value.kind? {
+            ValueKind::StringValue(v) => Self::String(v),
+            ValueKind::IntValue(v) => Self::Int(v),
+            ValueKind::FloatValue(v) => Self::Float(v),
+            ValueKind::BoolValue(v) => Self::Bool(v),
+            ValueKind::TimestampUnixMs(v) => Self::TimestampUnixMs(v),
+        })
+    }
+}
+
 /// The fate of one requested key. A key that is not `Ok` yields null values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyStatus {
@@ -369,7 +384,7 @@ fn map_value(value: crate::proto::Value, property_type: PropertyType) -> Option<
     })
 }
 
-fn key_status(status: i32) -> KeyStatus {
+pub(crate) fn key_status(status: i32) -> KeyStatus {
     match ProtoStatus::try_from(status).unwrap_or(ProtoStatus::Unspecified) {
         ProtoStatus::Ok => KeyStatus::Ok,
         ProtoStatus::NotFound => KeyStatus::NotFound,

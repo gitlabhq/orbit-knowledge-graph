@@ -1,0 +1,78 @@
+apiVersion: orbit.gitlab.com/extensions/v1alpha1
+kind: Package
+metadata:
+  name: example.messages
+  version: 0.1.0
+graph:
+  entities:
+    SlackMessage:
+      label: text
+      properties:
+        id: { type: int64 }
+        channel_id: { type: int64 }
+        ts: { type: string }
+    Incident:
+      label: reference
+      cited_by: reference
+      properties:
+        id: { type: int64 }
+        reference: { type: string }
+        title: { type: string }
+    GitLabRef:
+      label: url
+      cited_by: url
+      properties:
+        id: { type: int64 }
+        url: { type: string }
+  relationships:
+    CITES:
+      variants:
+        - { from: SlackMessage, to: Incident, table: ex_message_cites_incident }
+        - { from: SlackMessage, to: GitLabRef, table: ex_message_cites_gitlab_ref }
+        - { from: Incident, to: GitLabRef, table: ex_incident_cites_gitlab_ref }
+authorization:
+  entities:
+    SlackMessage: { scope: namespace }
+    Incident: { scope: namespace }
+    GitLabRef: { scope: namespace }
+storage:
+  store: graph
+  entities:
+    SlackMessage:
+      columns: { id: Int64, channel_id: Int64, ts: String }
+      sort_key: [traversal_path, id]
+    Incident:
+      columns: { id: Int64, reference: String, title: String }
+      sort_key: [traversal_path, id]
+    GitLabRef:
+      columns: { id: Int64, url: String }
+      sort_key: [traversal_path, id]
+sources:
+  source: data_lake
+  entities:
+    SlackMessage: { tables: [ex_slack_messages], order_by: [traversal_path, id] }
+    Incident: { tables: [ex_incidents], order_by: [traversal_path, id] }
+    GitLabRef: { tables: [ex_gitlab_refs], order_by: [traversal_path, id] }
+live:
+  entities:
+    SlackMessage:
+      properties:
+        text: { type: string }
+        author_name: { type: string }
+        channel_name: { type: string }
+        sent_at: { type: timestamp }
+      operation:
+        name: messages.get
+        keys: [channel_id, ts]
+      search:
+        operation: messages.search
+        fields:
+          text: contains
+          author_name: equals
+          channel_name: equals
+          sent_at: range
+        inbound:
+          CITES:
+            text: "$cited_by"
+        max_rows: 20
+        timeout_ms: 5000

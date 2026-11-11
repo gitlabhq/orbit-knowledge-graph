@@ -613,6 +613,10 @@ pub struct Field {
     /// Source column is a Postgres `bytea` that may hold non-UTF8 bytes. Extraction
     /// hex-encodes invalid values so a single binary row cannot poison the Arrow batch.
     pub binary: bool,
+    /// How a predicate on this field pushes down into a live search (`contains`,
+    /// `equals`, `range`), when an extension package marks it searchable. Surfaced
+    /// in the graph schema so an agent can learn which fields a live search accepts.
+    pub search_match: Option<String>,
 }
 
 impl Default for Field {
@@ -636,6 +640,7 @@ impl Default for Field {
             mutable: true,
             terminal_values: None,
             binary: false,
+            search_match: None,
         }
     }
 }

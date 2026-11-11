@@ -14,4 +14,5 @@ pub mod loader;
 pub mod package;
 pub mod proto;
 pub mod provider;
+pub mod search;
 pub mod storage;
