@@ -19,7 +19,7 @@ cases:
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
     expect:
-      compile_error_contains: ["requires access level 25"]
+      compile_error_contains: ["requires permission read_security"]
 
   - name: developer_counts_the_finding
     description: The same aggregation counts the vulnerability once the caller meets the role floor
