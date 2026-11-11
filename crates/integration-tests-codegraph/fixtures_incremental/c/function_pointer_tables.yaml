@@ -44,6 +44,20 @@ fixtures:
       	local(1);
       }
 
+  - path: print.h
+    content: |
+      void llc_if_print(int n);
+
+  - path: print-llc.c
+    content: |
+      #include "print.h"
+      void llc_if_print(int n) { }
+
+  - path: link.c
+    content: |
+      #include "print.h"
+      static void (*link_printers[])(int) = { llc_if_print };
+
 tests:
   - name: "a table of function pointers is a definition"
     query: |
@@ -84,3 +98,12 @@ tests:
     assert:
       - { row: { function: ether_if_print } }
       - { row: { function: ppp_if_print } }
+
+  - name: "a table refers to functions defined in an included file"
+    query: |
+      MATCH (t:Definition)-[:USES_VALUE]->(f:Definition)
+      WHERE t.name = 'link_printers'
+      RETURN f.name AS function, f.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { function: llc_if_print, file: print-llc.c } }

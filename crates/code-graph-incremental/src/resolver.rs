@@ -1581,6 +1581,20 @@ fn wildcard_uses<'a>(
         for target in headers.filter_map(|h| chain(ctx, h, &root)) {
             import(target, &mut edges);
         }
+        for reference in from
+            .descendants()
+            .filter(|node| node.is(C::Ref))
+            .filter(|node| node.enclosing(|n| n.is(C::Def)).is_some_and(|def| def.index() == from.index()))
+        {
+            let Some(target) = qualified(ctx, reference.sym(), &provided) else {
+                continue;
+            };
+            import(target, &mut edges);
+            edges.push(Edge {
+                call_resolution: CallResolution::Reference,
+                ..call_edge(from, target, Some(reference.index())).resolved(Resolution::WildcardImport)
+            });
+        }
     }
     edges
 }

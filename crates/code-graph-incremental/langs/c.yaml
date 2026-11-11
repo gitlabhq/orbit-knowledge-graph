@@ -68,7 +68,7 @@ stages:
   - name: top-level-variables
     rules: &c_globals
       - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: (function_declarator declarator: (parenthesized_declarator $P:pointer_declarator)) value: $V:identifier)) $$$B)'
-        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$P|regex_replace("^[\s*]+", "")) (__variable) (__ref @$V))) $$$B)'
+        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$P|regex_replace("^[\s*]+", "")|regex_replace("\s*\[.*$", "")) (__variable) (__ref @$V))) $$$B)'
       - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:identifier)) $$$B)'
         replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$N) (__variable) (__ref @$V))) $$$B)'
       - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: $N:identifier value: $V:identifier)) $$$B)'
@@ -80,7 +80,7 @@ stages:
       - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V)) $$$B)'
         replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$N) (__variable) $V)) $$$B)'
       - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: (function_declarator declarator: (parenthesized_declarator $P:pointer_declarator)) value: $V)) $$$B)'
-        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$P|regex_replace("^[\s*]+", "")) (__variable) $V)) $$$B)'
+        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$P|regex_replace("^[\s*]+", "")|regex_replace("\s*\[.*$", "")) (__variable) $V)) $$$B)'
   - name: top-level-variables-2
     rules: *c_globals
   - name: top-level-variables-3

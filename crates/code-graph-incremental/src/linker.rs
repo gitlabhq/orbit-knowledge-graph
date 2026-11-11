@@ -746,12 +746,24 @@ impl<'t> Fold<'t> {
         }
     }
 
+    /// A name read as a value resolves like a call to it: in scope first, then, for a
+    /// name defined in another file, through the file's wildcard imports (C `#include`).
     fn link_value_reference(&mut self, reference: Cursor<'t>) {
         let from = self.enclosing();
         if from == 0 {
             return;
         }
-        for value in self.lookup(reference.sym()) {
+        let found = self.lookup(reference.sym());
+        if found.is_empty() {
+            let first = self.edges.len();
+            self.resolve_name(reference.sym(), from, reference, Wildcards::All);
+            for edge in &mut self.edges[first..] {
+                edge.site = Some(reference.index());
+                edge.call_resolution = crate::tree::CallResolution::Reference;
+            }
+            return;
+        }
+        for value in found {
             if let Value::LocalDef(target) | Value::ImportRef(target) = value
                 && target != from
             {
