@@ -1582,6 +1582,20 @@
           ],
           "format": "uint32",
           "minimum": 0
+        },
+        "query_cache_nondeterministic_function_handling": {
+          "description": "ClickHouse `query_cache_nondeterministic_function_handling`, sent only with the query cache on.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "query_cache_system_table_handling": {
+          "description": "ClickHouse `query_cache_system_table_handling`, sent only with the query cache on.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false

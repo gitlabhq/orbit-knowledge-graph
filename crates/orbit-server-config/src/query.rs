@@ -20,11 +20,6 @@ fn escape_setting_str(s: &str) -> String {
     format!("'{escaped}'")
 }
 
-const QUERY_CACHE_UNCACHEABLE_HANDLING: [(&str, &str); 2] = [
-    ("query_cache_nondeterministic_function_handling", "ignore"),
-    ("query_cache_system_table_handling", "ignore"),
-];
-
 /// Query execution settings. All fields map to ClickHouse query-level
 /// settings. The closed set of fields prevents arbitrary user input from
 /// reaching the SETTINGS clause (CWE-89).
@@ -82,6 +77,14 @@ pub struct QueryConfig {
     /// ClickHouse `query_cache_ttl` in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_cache_ttl: Option<u32>,
+
+    /// ClickHouse `query_cache_nondeterministic_function_handling`, sent only with the query cache on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_cache_nondeterministic_function_handling: Option<String>,
+
+    /// ClickHouse `query_cache_system_table_handling`, sent only with the query cache on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_cache_system_table_handling: Option<String>,
 
     /// Compiler-derived ClickHouse settings. Set by the compiler's settings
     /// pass based on AST inspection (e.g. materialized CTEs). Invisible to
@@ -160,6 +163,14 @@ impl QueryConfig {
             max_ast_depth: overrides.max_ast_depth.or(self.max_ast_depth),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
+            query_cache_nondeterministic_function_handling: overrides
+                .query_cache_nondeterministic_function_handling
+                .clone()
+                .or_else(|| self.query_cache_nondeterministic_function_handling.clone()),
+            query_cache_system_table_handling: overrides
+                .query_cache_system_table_handling
+                .clone()
+                .or_else(|| self.query_cache_system_table_handling.clone()),
             // compiler_derived is never merged from YAML overrides — it's
             // set by the compiler after merge() runs.
             compiler_derived: self.compiler_derived.clone(),
@@ -181,10 +192,14 @@ impl QueryConfig {
         &self,
         render_str: fn(&str) -> String,
     ) -> Result<Vec<(String, String)>, String> {
-        let map = match serde_json::to_value(self) {
+        let mut map = match serde_json::to_value(self) {
             Ok(Value::Object(m)) => m,
             _ => return Ok(Vec::new()),
         };
+        let cache_handling: Vec<(String, Value)> = CACHE_HANDLING
+            .iter()
+            .filter_map(|key| Some((key.to_string(), map.remove(*key)?)))
+            .collect();
         let mut settings = map
             .into_iter()
             .filter(|(_, v)| !v.is_null())
@@ -203,9 +218,12 @@ impl QueryConfig {
             })
             .collect::<Result<Vec<_>, String>>()?;
         if self.use_query_cache == Some(true) {
-            settings.extend(
-                QUERY_CACHE_UNCACHEABLE_HANDLING.map(|(k, v)| (k.to_string(), render_str(v))),
-            );
+            for (key, value) in cache_handling {
+                let value = value
+                    .as_str()
+                    .ok_or_else(|| format!("setting `{key}` has unsupported type: {value}"))?;
+                settings.push((key, render_str(value)));
+            }
         }
         Ok(settings)
     }
@@ -261,7 +279,16 @@ impl QuerySettings {
     }
 }
 
+/// How the query cache treats results it must not cache; ClickHouse reads them only with the
+/// cache on, so they follow the other settings.
+const CACHE_HANDLING: [&str; 2] = [
+    "query_cache_nondeterministic_function_handling",
+    "query_cache_system_table_handling",
+];
+
 static QUERY_SETTINGS: OnceLock<QuerySettings> = OnceLock::new();
+const UNINITIALIZED: &str =
+    "orbit_server_config::query::init must run before query settings are read";
 
 /// Initialize the global query settings. Called once at startup by the
 /// server after loading `AppConfig`.
@@ -271,24 +298,24 @@ pub fn init(settings: QuerySettings) {
         .expect("orbit_server_config::query::init called twice");
 }
 
-/// Resolve the effective [`QueryConfig`] for a given query type from
-/// the global settings. Before [`init`] has run (unit tests that never load
-/// config) every field is `None`, so no SETTINGS are emitted.
+/// Installs the settings of the embedded `config/default.yaml` once, for processes that compile
+/// with the shipped config instead of a loaded one: tests, the profiler, tools.
+pub fn init_embedded_defaults() {
+    QUERY_SETTINGS.get_or_init(|| crate::AppConfig::embedded_defaults().query);
+}
+
+/// Resolve the effective [`QueryConfig`] for a given query type from the global settings.
 pub fn for_query_type(query_type: &str) -> QueryConfig {
-    match QUERY_SETTINGS.get() {
-        Some(settings) => settings.resolve(query_type),
-        None => QueryConfig::default(),
-    }
+    QUERY_SETTINGS
+        .get()
+        .expect(UNINITIALIZED)
+        .resolve(query_type)
 }
 
 /// The `query.default` section, for callers outside the compiler pipeline
-/// that issue their own ClickHouse queries. Same pre-[`init`] behavior as
-/// [`for_query_type`].
+/// that issue their own ClickHouse queries.
 pub fn default_config() -> QueryConfig {
-    QUERY_SETTINGS
-        .get()
-        .map(|settings| settings.default.clone())
-        .unwrap_or_default()
+    QUERY_SETTINGS.get().expect(UNINITIALIZED).default.clone()
 }
 
 #[cfg(test)]

@@ -205,6 +205,7 @@ pub(crate) mod testkit {
 
     pub fn limits() -> &'static orbit_server_config::QueryLimits {
         static LIMITS: LazyLock<orbit_server_config::QueryLimits> = LazyLock::new(|| {
+            orbit_server_config::query::init_embedded_defaults();
             orbit_server_config::AppConfig::embedded_defaults()
                 .query
                 .limits

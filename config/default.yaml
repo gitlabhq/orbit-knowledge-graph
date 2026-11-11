@@ -238,6 +238,8 @@ query:
     max_ast_depth: 10000
     use_query_cache: true
     query_cache_ttl: 10
+    query_cache_nondeterministic_function_handling: ignore
+    query_cache_system_table_handling: ignore
 
 metrics:
   # log_level: "info"
