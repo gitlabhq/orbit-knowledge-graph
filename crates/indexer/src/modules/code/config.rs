@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use query_data_model::catalog::sources::Role;
 use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, DataModelError};
 
@@ -9,6 +10,47 @@ use crate::lifetime::{Lifetime, Tombstone};
 
 const PROJECT_COLUMN: &str = "project_id";
 const BRANCH_COLUMN: &str = "branch";
+
+/// The entity and relationship names the code indexer writes by role, from its source's roles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeKinds {
+    pub branch: String,
+    pub directory: String,
+    pub file: String,
+    pub definition: String,
+    pub imported_symbol: String,
+    pub project: String,
+    pub in_project: String,
+    pub contains: String,
+    pub on_branch: String,
+}
+
+impl CodeKinds {
+    pub fn from_catalog(catalog: &Catalog<ClickHouse>) -> Result<Self, DataModelError> {
+        let graph = catalog.graph();
+        let sources = catalog.model().sources();
+        let name = |role: &str| match sources.role(CODE_INDEXER_SOURCE, role) {
+            Some(Role::Entity(entity)) => Ok(graph.entity(*entity).name.clone()),
+            Some(Role::Relationship(relationship)) => {
+                Ok(graph.relationship(*relationship).name.clone())
+            }
+            _ => Err(DataModelError::Invalid(format!(
+                "{CODE_INDEXER_SOURCE} declares no {role} role"
+            ))),
+        };
+        Ok(Self {
+            branch: name("branch")?,
+            directory: name("directory")?,
+            file: name("file")?,
+            definition: name("definition")?,
+            imported_symbol: name("imported_symbol")?,
+            project: name("project")?,
+            in_project: name("in_project")?,
+            contains: name("contains")?,
+            on_branch: name("on_branch")?,
+        })
+    }
+}
 
 pub struct CodeTableNames {
     pub branch: String,
@@ -92,6 +134,7 @@ impl CodeTableNames {
             ));
         }
 
+        let kinds = CodeKinds::from_catalog(catalog)?;
         let table = |name: &str| -> Result<String, DataModelError> {
             graph
                 .entity_id(name)
@@ -100,11 +143,11 @@ impl CodeTableNames {
                 .ok_or_else(|| DataModelError::Invalid(format!("{name} has no graph table")))
         };
         Ok(Self {
-            branch: table("Branch")?,
-            directory: table("Directory")?,
-            file: table("File")?,
-            definition: table("Definition")?,
-            imported_symbol: table("ImportedSymbol")?,
+            branch: table(&kinds.branch)?,
+            directory: table(&kinds.directory)?,
+            file: table(&kinds.file)?,
+            definition: table(&kinds.definition)?,
+            imported_symbol: table(&kinds.imported_symbol)?,
             edge_tables,
             shared_edge_table: catalog
                 .shared_edge_table()

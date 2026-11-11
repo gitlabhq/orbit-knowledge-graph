@@ -6,6 +6,14 @@ declare:
   version: _siphon_replicated_at
   watermark: _siphon_watermark
   deleted: _siphon_deleted
+roles:
+  entities: {merge_request: MergeRequest, work_item: WorkItem, commit: Commit, project: Project, note: Note}
+  tables:
+    routes: siphon_routes
+    namespace_paths: namespace_traversal_paths
+    project_paths: project_namespace_traversal_paths
+    merge_request_rows: merge_requests
+    work_item_rows: work_items
 relationships:
   APPROVED:
     reindex: [siphon_approvals]

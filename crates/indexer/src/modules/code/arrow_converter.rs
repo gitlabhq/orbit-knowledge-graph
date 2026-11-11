@@ -3,11 +3,14 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use code_graph::v2::SinkError;
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
+use code_graph::v2::types::EdgeKind;
 use code_graph_incremental::export::ExportTables;
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::implementations::clickhouse::schema::{Table, data_type};
 use query_data_model::spec::CODE_INDEXER_SOURCE;
+
+use super::config::CodeKinds;
 use query_data_model::{Catalog, ClickHouse, DataModelError, DataType, DuckDb};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -392,10 +395,11 @@ fn convert_repository_edges(
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
     let branch_id = compute_branch_id(env.project_id, &env.branch);
+    let kinds = &specs.kinds;
     let tag_cache = graph.build_node_tags(&specs.tag_properties);
     let branch_tags: Vec<String> = specs
         .tag_properties
-        .get("Branch")
+        .get(&kinds.branch)
         .map(|props| {
             props
                 .iter()
@@ -409,9 +413,9 @@ fn convert_repository_edges(
         env,
         source_id: branch_id,
         target_id: env.project_id,
-        edge_kind: "IN_PROJECT",
-        source_node_kind: "Branch",
-        target_node_kind: "Project",
+        edge_kind: &kinds.in_project,
+        source_node_kind: &kinds.branch,
+        target_node_kind: &kinds.project,
         source_tags: &branch_tags,
         target_tags: &[],
     });
@@ -420,9 +424,9 @@ fn convert_repository_edges(
         env,
         source_id: env.project_id,
         target_id: branch_id,
-        edge_kind: "CONTAINS",
-        source_node_kind: "Project",
-        target_node_kind: "Branch",
+        edge_kind: &kinds.contains,
+        source_node_kind: &kinds.project,
+        target_node_kind: &kinds.branch,
         source_tags: &[],
         target_tags: &branch_tags,
     });
@@ -431,6 +435,7 @@ fn convert_repository_edges(
         graph,
         ids,
         env,
+        kinds,
         branch_id,
         &branch_tags,
     ));
@@ -438,6 +443,7 @@ fn convert_repository_edges(
         graph,
         ids,
         env,
+        kinds,
         branch_id,
         &branch_tags,
         &tag_cache,
@@ -446,6 +452,7 @@ fn convert_repository_edges(
         graph,
         ids,
         env,
+        kinds,
         branch_id,
         &branch_tags,
         &tag_cache,
@@ -470,7 +477,7 @@ fn convert_semantic_edges(
 ) -> Result<RecordBatch, ArrowError> {
     let mut builder = BatchBuilder::new(&specs.edge, graph.graph.edge_count())?;
     for ei in graph.graph.edge_indices() {
-        if graph.graph[ei].relationship.edge_kind.as_ref() == "CONTAINS" {
+        if graph.graph[ei].relationship.edge_kind == EdgeKind::Contains {
             continue;
         }
         graph_edge_row(graph, ids, env, tag_cache, ei).write_row(&mut builder, &())?;
@@ -515,6 +522,7 @@ fn branch_contains_directory_rows<'a>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
+    kinds: &'a CodeKinds,
     branch_id: i64,
     branch_tags: &'a [String],
 ) -> Vec<IndexerEdgeRow<'a>> {
@@ -525,9 +533,9 @@ fn branch_contains_directory_rows<'a>(
             env,
             source_id: branch_id,
             target_id: ids[idx.index()],
-            edge_kind: "CONTAINS",
-            source_node_kind: "Branch",
-            target_node_kind: "Directory",
+            edge_kind: &kinds.contains,
+            source_node_kind: &kinds.branch,
+            target_node_kind: &kinds.directory,
             source_tags: branch_tags,
             target_tags: &[],
         })
@@ -538,6 +546,7 @@ fn branch_contains_file_rows<'a>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
+    kinds: &'a CodeKinds,
     branch_id: i64,
     branch_tags: &'a [String],
     tag_cache: &'a code_graph::v2::linker::graph::NodeTags,
@@ -549,9 +558,9 @@ fn branch_contains_file_rows<'a>(
             env,
             source_id: branch_id,
             target_id: ids[idx.index()],
-            edge_kind: "CONTAINS",
-            source_node_kind: "Branch",
-            target_node_kind: "File",
+            edge_kind: &kinds.contains,
+            source_node_kind: &kinds.branch,
+            target_node_kind: &kinds.file,
             source_tags: branch_tags,
             target_tags: tag_cache.get(idx),
         })
@@ -562,6 +571,7 @@ fn repository_on_branch_rows<'a>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
+    kinds: &'a CodeKinds,
     branch_id: i64,
     branch_tags: &'a [String],
     tag_cache: &'a code_graph::v2::linker::graph::NodeTags,
@@ -572,9 +582,9 @@ fn repository_on_branch_rows<'a>(
         env,
         source_id: ids[idx.index()],
         target_id: branch_id,
-        edge_kind: "ON_BRANCH",
-        source_node_kind: "Directory",
-        target_node_kind: "Branch",
+        edge_kind: &kinds.on_branch,
+        source_node_kind: &kinds.directory,
+        target_node_kind: &kinds.branch,
         source_tags: &[],
         target_tags: branch_tags,
     }));
@@ -582,9 +592,9 @@ fn repository_on_branch_rows<'a>(
         env,
         source_id: ids[idx.index()],
         target_id: branch_id,
-        edge_kind: "ON_BRANCH",
-        source_node_kind: "File",
-        target_node_kind: "Branch",
+        edge_kind: &kinds.on_branch,
+        source_node_kind: &kinds.file,
+        target_node_kind: &kinds.branch,
         source_tags: tag_cache.get(idx),
         target_tags: branch_tags,
     }));
@@ -658,6 +668,7 @@ pub struct ConverterSpecs {
     pub(super) edge: Vec<ColumnSpec>,
     pub(super) tag_properties: TagProperties,
     pub(super) export: ExportTables,
+    pub(super) kinds: CodeKinds,
 }
 
 impl ConverterSpecs {
@@ -665,28 +676,33 @@ impl ConverterSpecs {
         catalog: &Catalog<ClickHouse>,
         local: &Catalog<DuckDb>,
     ) -> Result<Self, DataModelError> {
+        let kinds = CodeKinds::from_catalog(catalog)?;
         Ok(Self {
-            branch: entity_specs(catalog, "Branch")?,
-            directory: entity_specs(catalog, "Directory")?,
-            file: entity_specs(catalog, "File")?,
-            definition: entity_specs(catalog, "Definition")?,
-            imported_symbol: entity_specs(catalog, "ImportedSymbol")?,
+            branch: entity_specs(catalog, &kinds.branch)?,
+            directory: entity_specs(catalog, &kinds.directory)?,
+            file: entity_specs(catalog, &kinds.file)?,
+            definition: entity_specs(catalog, &kinds.definition)?,
+            imported_symbol: entity_specs(catalog, &kinds.imported_symbol)?,
             edge: edge_specs(catalog)?,
             tag_properties: build_tag_properties(catalog),
             export: ExportTables::from_catalog(local)
                 .map_err(|error| DataModelError::Invalid(error.to_string()))?,
+            kinds,
         })
     }
 
     pub(super) fn node(&self, kind: &str) -> Option<&[ColumnSpec]> {
-        match kind {
-            "Branch" => Some(&self.branch),
-            "Directory" => Some(&self.directory),
-            "File" => Some(&self.file),
-            "Definition" => Some(&self.definition),
-            "ImportedSymbol" => Some(&self.imported_symbol),
-            _ => None,
-        }
+        let kinds = &self.kinds;
+        [
+            (&kinds.branch, &self.branch),
+            (&kinds.directory, &self.directory),
+            (&kinds.file, &self.file),
+            (&kinds.definition, &self.definition),
+            (&kinds.imported_symbol, &self.imported_symbol),
+        ]
+        .into_iter()
+        .find(|(name, _)| name.as_str() == kind)
+        .map(|(_, specs)| specs.as_slice())
     }
 }
 

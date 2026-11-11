@@ -15,9 +15,12 @@
 //! Both queries are parameterized with named placeholders (`{name:Type}`) so
 //! they can be bound via [`ArrowQuery::param`] without string interpolation.
 
+use super::TRANSFORM_NAME;
+use super::emit::NoteKinds;
 use super::parse::{RefKind, Reference};
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::catalog::sources::DataSource;
+use query_data_model::catalog::sources::{DataSource, EndpointKind, Role, Transform};
+use query_data_model::{Catalog, ClickHouse, DataModelError};
 use std::collections::{HashMap, HashSet};
 
 /// The clickhouse crate serializes params into the URL query string, so these
@@ -32,17 +35,67 @@ pub struct ResolveSql {
     pub project_paths: String,
     pub merge_requests: String,
     pub work_items: String,
+    pub kinds: NoteKinds,
 }
 
 impl ResolveSql {
-    pub fn new(source: &DataSource) -> Self {
+    /// The lookups and edge names, all from the siphon source's roles and the `SystemNote`
+    /// pipeline's emitted relationship.
+    pub fn from_catalog(
+        catalog: &Catalog<ClickHouse>,
+        source: &DataSource,
+    ) -> Result<Self, DataModelError> {
+        let (graph, sources) = (catalog.graph(), catalog.model().sources());
+        let invalid = |what: String| DataModelError::Invalid(what);
+        let entity = |role: &str| match sources.role(&source.name, role) {
+            Some(Role::Entity(entity)) => Ok(*entity),
+            _ => Err(invalid(format!(
+                "source {} declares no {role} role",
+                source.name
+            ))),
+        };
+        let name = |role: &str| entity(role).map(|entity| graph.entity(entity).name.clone());
+        let table = |role: &str| source.table(role);
+        let aliases = sources
+            .entity_pipelines(entity("note")?)
+            .flat_map(|pipeline| pipeline.transform.edges())
+            .find_map(|edge| match &edge.source.kind {
+                EndpointKind::Column { mapping, .. } => Some(
+                    mapping
+                        .iter()
+                        .map(|(raw, entity)| (raw.clone(), graph.entity(*entity).name.clone()))
+                        .collect(),
+                ),
+                EndpointKind::Entity(_) => None,
+            })
+            .unwrap_or_default();
+        let emitted: Vec<_> = sources
+            .pipelines()
+            .iter()
+            .filter(|pipeline| matches!(&pipeline.transform, Transform::Rust(name) if name == TRANSFORM_NAME))
+            .flat_map(|pipeline| sources.emitted_relationships(pipeline))
+            .collect();
+        let [mentions] = emitted[..] else {
+            return Err(invalid(format!(
+                "the {TRANSFORM_NAME} pipeline emits {} relationships, not one",
+                emitted.len()
+            )));
+        };
         let (version, del) = (source.version.as_str(), source.deleted.as_str());
-        Self {
-            routes: routes_sql(version, del),
-            project_paths: project_paths_sql(version, del),
-            merge_requests: merge_requests_sql(version, del),
-            work_items: work_items_sql(version, del),
-        }
+        let (routes, project) = (table("routes")?, name("project")?);
+        Ok(Self {
+            routes: routes_sql(routes, &project, version, del),
+            project_paths: project_paths_sql(routes, &project, version, del),
+            merge_requests: merge_requests_sql(table("merge_request_rows")?, version, del),
+            work_items: work_items_sql(table("work_item_rows")?, version, del),
+            kinds: NoteKinds {
+                mentions: graph.relationship(mentions).name.clone(),
+                merge_request: name("merge_request")?,
+                work_item: name("work_item")?,
+                commit: name("commit")?,
+                aliases,
+            },
+        })
     }
 }
 
@@ -54,16 +107,16 @@ impl ResolveSql {
 /// top-level namespace (the leading sort-key column) so it's a range scan, not
 /// a full datalake scan. v1 therefore resolves only same-top-level references;
 /// cross-top-level is deferred to the dictionary lever (ADR 013).
-fn routes_sql(version: &str, del: &str) -> String {
+fn routes_sql(routes: &str, project: &str, version: &str, del: &str) -> String {
     format!(
         "SELECT source_id, path, traversal_path \
          FROM (SELECT id, source_id, path, \
          argMax(traversal_path, {version}) AS traversal_path, \
          argMax({del}, {version}) AS {del} \
-         FROM siphon_routes \
-         WHERE startsWith(siphon_routes.traversal_path, {{root_prefix:String}}) \
+         FROM {routes} \
+         WHERE startsWith({routes}.traversal_path, {{root_prefix:String}}) \
          AND path IN {{paths:Array(String)}} \
-         AND source_type = 'Project' \
+         AND source_type = '{project}' \
          GROUP BY id, source_id, path) \
          WHERE {del} = false"
     )
@@ -74,14 +127,14 @@ fn routes_sql(version: &str, del: &str) -> String {
 /// complements [`ResolveSql::routes`]; same `argMax` dedup and `root_prefix` bounding.
 /// Params: `{root_prefix:String}`, `{source_ids:Array(Int64)}`. Returns
 /// `(source_id, path)`.
-fn project_paths_sql(version: &str, del: &str) -> String {
+fn project_paths_sql(routes: &str, project: &str, version: &str, del: &str) -> String {
     format!(
         "SELECT source_id, path \
          FROM (SELECT id, source_id, path, \
          argMax({del}, {version}) AS {del} \
-         FROM siphon_routes \
+         FROM {routes} \
          WHERE startsWith(traversal_path, {{root_prefix:String}}) \
-         AND source_type = 'Project' \
+         AND source_type = '{project}' \
          AND source_id IN {{source_ids:Array(Int64)}} \
          GROUP BY id, source_id, path) \
          WHERE {del} = false"
@@ -95,12 +148,12 @@ fn project_paths_sql(version: &str, del: &str) -> String {
 /// index-aligned flat arrays and `arrayZip`-ed server-side, because the JSON
 /// param channel serializes a tuple as `[200,5]`, which ClickHouse rejects for
 /// `Array(Tuple(Int64, Int64))`. Returns `(id, target_project_id, iid)`.
-fn merge_requests_sql(version: &str, del: &str) -> String {
+fn merge_requests_sql(table: &str, version: &str, del: &str) -> String {
     format!(
         "SELECT id, target_project_id, iid \
          FROM (SELECT id, target_project_id, iid, \
          argMax({del}, {version}) AS {del} \
-         FROM merge_requests \
+         FROM {table} \
          WHERE startsWith(traversal_path, {{root_prefix:String}}) \
          AND (target_project_id, iid) IN arrayZip({{project_ids:Array(Int64)}}, {{iids:Array(Int64)}}) \
          GROUP BY id, target_project_id, iid) \
@@ -110,12 +163,12 @@ fn merge_requests_sql(version: &str, del: &str) -> String {
 
 /// Like [`ResolveSql::merge_requests`] but keyed on `project_id`. Returns
 /// `(id, project_id, iid)`.
-fn work_items_sql(version: &str, del: &str) -> String {
+fn work_items_sql(table: &str, version: &str, del: &str) -> String {
     format!(
         "SELECT id, project_id, iid \
          FROM (SELECT id, project_id, iid, \
          argMax({del}, {version}) AS {del} \
-         FROM work_items \
+         FROM {table} \
          WHERE startsWith(traversal_path, {{root_prefix:String}}) \
          AND (project_id, iid) IN arrayZip({{project_ids:Array(Int64)}}, {{iids:Array(Int64)}}) \
          GROUP BY id, project_id, iid) \
@@ -274,8 +327,7 @@ mod tests {
     use super::*;
     use std::sync::LazyLock;
 
-    static SQL: LazyLock<ResolveSql> =
-        LazyLock::new(|| ResolveSql::new(&crate::testkit::siphon_source()));
+    static SQL: LazyLock<ResolveSql> = LazyLock::new(super::super::test_resolve_sql);
     use crate::modules::sdlc::transform::system_notes::parse::{Action, extract};
 
     const TEST_RESOLVE_LOOKUP_BATCH_SIZE: usize = 1_000;

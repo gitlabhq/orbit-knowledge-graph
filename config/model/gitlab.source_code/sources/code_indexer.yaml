@@ -10,3 +10,6 @@ relationships:
   IMPORTS: [File -> ImportedSymbol, ImportedSymbol -> Definition]
   IN_PROJECT: [Branch -> Project]
   ON_BRANCH: [Directory -> Branch, File -> Branch]
+roles:
+  entities: {branch: Branch, directory: Directory, file: File, definition: Definition, imported_symbol: ImportedSymbol, project: Project}
+  relationships: {in_project: IN_PROJECT, contains: CONTAINS, on_branch: ON_BRANCH}

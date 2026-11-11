@@ -25,7 +25,21 @@ pub struct SourceFragment {
     pub derived: Pipelines,
     /// What the source writes itself, listed by name instead of by pipeline.
     pub writes: Writes,
+    pub roles: Roles,
     pub templates: BTreeMap<String, String>,
+}
+
+/// The names the source's own code reads by role, so it names no entity, relationship or
+/// table itself.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Roles {
+    #[serde(default)]
+    pub entities: IndexMap<String, String>,
+    #[serde(default)]
+    pub relationships: IndexMap<String, String>,
+    #[serde(default)]
+    pub tables: IndexMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -48,6 +62,8 @@ struct WrittenFragment {
     relationships: IndexMap<String, Listed<RelationshipSourceSpec>>,
     #[serde(default, deserialize_with = "derived")]
     derived: Pipelines,
+    #[serde(default)]
+    roles: Roles,
 }
 
 impl TryFrom<WrittenFragment> for SourceFragment {
@@ -87,6 +103,7 @@ impl TryFrom<WrittenFragment> for SourceFragment {
             relationships,
             derived: written.derived,
             writes,
+            roles: written.roles,
             templates: BTreeMap::new(),
         })
     }

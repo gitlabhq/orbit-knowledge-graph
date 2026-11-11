@@ -89,6 +89,7 @@ pub async fn register_handlers(
     transform::system_notes::register(
         &mut transform_registry,
         Arc::clone(&datalake),
+        catalog,
         catalog
             .model()
             .sources()
@@ -100,7 +101,8 @@ pub async fn register_handlers(
             })?,
         transform::system_notes::edge_table(catalog).map_err(HandlerInitError::new)?,
         entity_handler_config.system_notes_resolve_lookup_batch_size,
-    );
+    )
+    .map_err(HandlerInitError::new)?;
     let transform_registry = Arc::new(transform_registry);
 
     let pipeline = Arc::new(Pipeline::new(

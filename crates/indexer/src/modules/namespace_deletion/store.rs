@@ -20,13 +20,17 @@ use super::lower::{self, DeletionStatement, ReconcileStatement};
 use crate::checkpoint::namespace_position_key;
 use crate::lifetime::Lifetime;
 
-const CURRENT_ROUTES_UNDER_ROOT: &str = r#"
-SELECT DISTINCT traversal_path FROM project_namespace_traversal_paths FINAL
-WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
+fn current_routes_under_root(project_paths: &str, namespace_paths: &str) -> String {
+    format!(
+        r#"
+SELECT DISTINCT traversal_path FROM {project_paths} FINAL
+WHERE deleted = false AND startsWith(traversal_path, {{traversal_path:String}})
 UNION DISTINCT
-SELECT DISTINCT traversal_path FROM namespace_traversal_paths FINAL
-WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
-"#;
+SELECT DISTINCT traversal_path FROM {namespace_paths} FINAL
+WHERE deleted = false AND startsWith(traversal_path, {{traversal_path:String}})
+"#
+    )
+}
 
 struct SiphonQueries {
     still_deleted: String,
@@ -253,6 +257,7 @@ pub struct ClickHouseNamespaceDeletionStore {
     deletion_statements: Vec<DeletionStatement>,
     reconcile_statements: Vec<ReconcileStatement>,
     lifetime_statements: Vec<DeletionStatement>,
+    current_routes: String,
     siphon: SiphonQueries,
 }
 
@@ -269,6 +274,10 @@ impl ClickHouseNamespaceDeletionStore {
             deletion_statements: lower::build_deletion_statements(catalog)?,
             reconcile_statements: lower::build_reconcile_statements(catalog)?,
             lifetime_statements: Lifetime::from_catalog(catalog)?.reconcile_under_path(),
+            current_routes: current_routes_under_root(
+                siphon.table("project_paths")?,
+                siphon.table("namespace_paths")?,
+            ),
             siphon: SiphonQueries::new(siphon),
         })
     }
@@ -427,22 +436,17 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
             );
         }
 
-        let current_paths = match fetch_paths(
-            &self.datalake,
-            CURRENT_ROUTES_UNDER_ROOT,
-            root_traversal_path,
-        )
-        .await
-        {
-            Ok(paths) => HashSet::<String>::from_iter(paths),
-            Err(error) => {
-                return vec![TableDeletionOutcome {
-                    table: "current_routes".to_string(),
-                    duration_seconds: 0.0,
-                    error: Some(error.to_string()),
-                }];
-            }
-        };
+        let current_paths =
+            match fetch_paths(&self.datalake, &self.current_routes, root_traversal_path).await {
+                Ok(paths) => HashSet::<String>::from_iter(paths),
+                Err(error) => {
+                    return vec![TableDeletionOutcome {
+                        table: "current_routes".to_string(),
+                        duration_seconds: 0.0,
+                        error: Some(error.to_string()),
+                    }];
+                }
+            };
 
         let mut outcomes = Vec::with_capacity(self.reconcile_statements.len());
         for (statement, live_paths) in self.reconcile_statements.iter().zip(live_paths) {

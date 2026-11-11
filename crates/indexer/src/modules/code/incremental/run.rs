@@ -29,7 +29,7 @@ pub(in crate::modules::code) fn run(
         orbit_log_fields::warn!(
             safe(SKIPPED_COUNT) = dropped,
             safe(REASON) = "file_limit",
-            "listed-only files past the repository file limit have no File row"
+            "listed-only files past the repository file limit have no file row"
         );
     }
     let stats = PipelineStats {

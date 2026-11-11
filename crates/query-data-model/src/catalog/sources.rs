@@ -9,7 +9,9 @@ use crate::spec::{
     GENERATED_QUERY, PipelineSpec, Raw, Short, SourceFragment, TEMPLATE_EXTENSION, Writes,
     parse_variant, snake_case,
 };
-use crate::{EntityId, GraphCatalog, PropertyId, RelationshipId, RelationshipVariantId};
+use crate::{
+    DataModelError, EntityId, GraphCatalog, PropertyId, RelationshipId, RelationshipVariantId,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EtlScope {
@@ -31,6 +33,16 @@ pub struct DataSource {
     pub version: String,
     pub watermark: String,
     pub deleted: String,
+    /// The lake tables the source's own code reads, by role.
+    pub tables: BTreeMap<String, String>,
+}
+
+impl DataSource {
+    pub fn table(&self, role: &str) -> Result<&str, DataModelError> {
+        self.tables.get(role).map(String::as_str).ok_or_else(|| {
+            DataModelError::Invalid(format!("source {} declares no {role} table", self.name))
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +103,13 @@ pub struct PipelineDescriptor {
     pub reindex_targets: BTreeSet<String>,
 }
 
+/// A name a source's own code reads by role.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Role {
+    Entity(EntityId),
+    Relationship(RelationshipId),
+}
+
 /// Who writes a stored entity's rows or an edge-table variant's rows: a pipeline, or a
 /// source that writes its own rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -106,6 +125,7 @@ pub struct Sources {
     derived: Vec<Derived>,
     reindex: BTreeSet<ReindexTrigger>,
     direct: Vec<DirectSource>,
+    roles: BTreeMap<(String, String), Role>,
     pub(super) writers: Writers,
 }
 
@@ -162,6 +182,11 @@ impl Sources {
 
     pub fn variant_writer(&self, variant: RelationshipVariantId) -> Option<RowWriter> {
         self.writers.variants.get(&variant).copied()
+    }
+
+    /// What the source named `source` declares for `role`.
+    pub fn role(&self, source: &str, role: &str) -> Option<&Role> {
+        self.roles.get(&(source.to_string(), role.to_string()))
     }
 
     pub fn direct_sources(&self) -> &[DirectSource] {
@@ -311,6 +336,7 @@ impl<'a> Resolver<'a> {
                 version: declaration.version.clone(),
                 watermark: declaration.watermark.clone(),
                 deleted: declaration.deleted.clone(),
+                tables: BTreeMap::new(),
             });
         }
     }
@@ -318,6 +344,7 @@ impl<'a> Resolver<'a> {
     fn resolve(&mut self, fragments: &[&'a SourceFragment]) -> Vec<String> {
         let mut pending = Vec::new();
         for fragment in fragments {
+            self.roles(fragment);
             if fragment.writes != Writes::default() {
                 self.direct(fragment);
                 continue;
@@ -424,6 +451,48 @@ impl<'a> Resolver<'a> {
         }
         self.sources.pipelines = pipelines;
         packages
+    }
+
+    fn roles(&mut self, fragment: &SourceFragment) {
+        let (package, source) = (fragment.package.as_str(), fragment.source.as_str());
+        let roles = &fragment.roles;
+        let mut resolved = Vec::new();
+        for (role, name) in &roles.entities {
+            let found = self.graph.entity_id(name).map(Role::Entity);
+            resolved.push((role, name, found));
+        }
+        for (role, name) in &roles.relationships {
+            let found = self.graph.relationship_id(name).map(Role::Relationship);
+            resolved.push((role, name, found));
+        }
+        if !roles.tables.is_empty() {
+            match self
+                .sources
+                .sources
+                .iter_mut()
+                .find(|declared| declared.name == source)
+            {
+                Some(declared) => declared.tables.extend(roles.tables.clone()),
+                None => self.diagnostics.error(
+                    package,
+                    format!("source {source} declares table roles but no connection"),
+                ),
+            }
+        }
+        for (role, name, found) in resolved {
+            let Some(found) = self.diagnostics.require(found, package, || {
+                format!("source {source} role {role} names unknown {name}")
+            }) else {
+                continue;
+            };
+            let key = (source.to_string(), role.clone());
+            if self.sources.roles.insert(key, found).is_some() {
+                self.diagnostics.error(
+                    package,
+                    format!("source {source} declares role {role} twice"),
+                );
+            }
+        }
     }
 
     /// A source that lists the rows it writes, one fragment per package.

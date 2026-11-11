@@ -53,9 +53,10 @@ impl<'a> Output<'a> {
                 .ok_or_else(|| SinkError(format!("missing {table}")))
         };
         let properties = &self.specs.tag_properties;
+        let kinds = &self.specs.kinds;
         let branch_id = compute_branch_id(self.envelope.project_id, &self.envelope.branch);
         let branch_tags: Vec<_> = properties
-            .get("Branch")
+            .get(&kinds.branch)
             .into_iter()
             .flatten()
             .map(|(key, _)| format!("{key}:true"))
@@ -63,7 +64,13 @@ impl<'a> Output<'a> {
         let mut tags: HashMap<i64, Vec<String>> = HashMap::new();
         let mut structure = Vec::new();
         let mut entities = Vec::new();
-        for kind in ["Directory", "File", "Definition", "ImportedSymbol"] {
+        let entity_kinds = [
+            &kinds.directory,
+            &kinds.file,
+            &kinds.definition,
+            &kinds.imported_symbol,
+        ];
+        for kind in entity_kinds.map(String::as_str) {
             let table = self
                 .specs
                 .export
@@ -82,7 +89,7 @@ impl<'a> Output<'a> {
                         })
                         .collect::<Result<Vec<_>, _>>()?;
                     tags.insert(id, row_tags);
-                    if matches!(kind, "Directory" | "File") {
+                    if kind == kinds.directory || kind == kinds.file {
                         structure.push((id, kind, text(batch, "path", row)?));
                     }
                 }
@@ -94,12 +101,12 @@ impl<'a> Output<'a> {
         let empty_tags = Vec::new();
         let mut edge =
             |source_id, target_id, edge_kind: &str, source_kind: &str, target_kind: &str| {
-                let source_tags = if source_kind == "Branch" {
+                let source_tags = if source_kind == kinds.branch {
                     &branch_tags
                 } else {
                     tags.get(&source_id).unwrap_or(&empty_tags)
                 };
-                let target_tags = if target_kind == "Branch" {
+                let target_tags = if target_kind == kinds.branch {
                     &branch_tags
                 } else {
                     tags.get(&target_id).unwrap_or(&empty_tags)
@@ -124,23 +131,23 @@ impl<'a> Output<'a> {
             edge(
                 branch_id,
                 self.envelope.project_id,
-                "IN_PROJECT",
-                "Branch",
-                "Project",
+                &kinds.in_project,
+                &kinds.branch,
+                &kinds.project,
             )?;
             edge(
                 self.envelope.project_id,
                 branch_id,
-                "CONTAINS",
-                "Project",
-                "Branch",
+                &kinds.contains,
+                &kinds.project,
+                &kinds.branch,
             )?;
             convert_branch_row(self.envelope, &self.specs.branch)?
         };
         for (id, kind, path) in structure {
-            edge(id, branch_id, "ON_BRANCH", kind, "Branch")?;
+            edge(id, branch_id, &kinds.on_branch, kind, &kinds.branch)?;
             if path != "." && !path.contains('/') {
-                edge(branch_id, id, "CONTAINS", "Branch", kind)?;
+                edge(branch_id, id, &kinds.contains, &kinds.branch, kind)?;
             }
         }
         for batch in take(&self.specs.export.edge_table)? {

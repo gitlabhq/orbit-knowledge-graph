@@ -3,6 +3,8 @@
 //! `BatchWriter` plumbing carries these rows through to ClickHouse without
 //! a new code path.
 
+use std::collections::BTreeMap;
+
 use super::parse::{Action, RefKind, Reference};
 use super::resolve::ResolvedTarget;
 
@@ -16,21 +18,33 @@ pub enum NoteableKind {
     Commit,
 }
 
+/// The names a system note's edges carry, read from the model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteKinds {
+    pub mentions: String,
+    pub merge_request: String,
+    pub work_item: String,
+    pub commit: String,
+    /// The Rails noteable types that name another entity, from the note's own mapping.
+    pub aliases: BTreeMap<String, String>,
+}
+
 impl NoteableKind {
-    pub fn from_siphon(noteable_type: &str) -> Option<Self> {
-        Some(match noteable_type {
-            "MergeRequest" => Self::MergeRequest,
-            "Issue" | "WorkItem" | "Epic" | "Task" => Self::WorkItem,
-            "Commit" => Self::Commit,
-            _ => return None,
-        })
+    pub fn from_siphon(noteable_type: &str, kinds: &NoteKinds) -> Option<Self> {
+        let name = kinds
+            .aliases
+            .get(noteable_type)
+            .map_or(noteable_type, String::as_str);
+        [Self::MergeRequest, Self::WorkItem, Self::Commit]
+            .into_iter()
+            .find(|kind| kind.name(kinds) == name)
     }
 
-    pub fn as_str(self) -> &'static str {
+    pub fn name(self, kinds: &NoteKinds) -> &str {
         match self {
-            Self::MergeRequest => "MergeRequest",
-            Self::WorkItem => "WorkItem",
-            Self::Commit => "Commit",
+            Self::MergeRequest => &kinds.merge_request,
+            Self::WorkItem => &kinds.work_item,
+            Self::Commit => &kinds.commit,
         }
     }
 }
@@ -45,19 +59,14 @@ impl From<RefKind> for NoteableKind {
     }
 }
 
-/// Values must mirror relationship names in the model's `graph` fragments.
-pub mod edge_kinds {
-    pub const MENTIONS: &str = "MENTIONS";
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmittedEdge<'a> {
     pub traversal_path: &'a str,
-    pub relationship_kind: &'static str,
+    pub relationship_kind: &'a str,
     pub source_id: i64,
-    pub source_kind: &'static str,
+    pub source_kind: &'a str,
     pub target_id: i64,
-    pub target_kind: &'static str,
+    pub target_kind: &'a str,
 }
 
 /// Two lifetimes because the default-project lookup is dropped before the emitted
@@ -79,7 +88,11 @@ pub struct NoteRow<'a, 'p> {
 
 /// The resolver returns `None` for any unresolvable `(project_path, iid)` or
 /// commit SHA — those references are silently dropped.
-pub fn build_edges<'a, R>(rows: &[NoteRow<'a, '_>], mut resolve: R) -> Vec<EmittedEdge<'a>>
+pub fn build_edges<'a, R>(
+    rows: &[NoteRow<'a, '_>],
+    kinds: &'a NoteKinds,
+    mut resolve: R,
+) -> Vec<EmittedEdge<'a>>
 where
     R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
 {
@@ -116,11 +129,11 @@ where
                     }
                     edges.push(EmittedEdge {
                         traversal_path: row.traversal_path,
-                        relationship_kind: edge_kinds::MENTIONS,
+                        relationship_kind: &kinds.mentions,
                         source_id: resolved.id,
-                        source_kind: ref_kind.as_str(),
+                        source_kind: ref_kind.name(kinds),
                         target_id: row.noteable_id,
-                        target_kind: row.noteable_kind.as_str(),
+                        target_kind: row.noteable_kind.name(kinds),
                     });
                 }
             }
@@ -132,6 +145,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modules::sdlc::transform::system_notes::test_resolve_sql;
+
+    static KINDS: std::sync::LazyLock<NoteKinds> =
+        std::sync::LazyLock::new(|| test_resolve_sql().kinds);
     use crate::modules::sdlc::transform::system_notes::parse;
     use crate::modules::sdlc::transform::system_notes::resolve::ResolvedTarget;
 
@@ -172,7 +189,7 @@ mod tests {
             NoteableKind::MergeRequest,
             100,
         );
-        let edges = build_edges(&[row], always_resolve(456, "3/4/"));
+        let edges = build_edges(&[row], &KINDS, always_resolve(456, "3/4/"));
         assert_eq!(edges.len(), 1);
         let e = &edges[0];
         assert_eq!(e.relationship_kind, "MENTIONS");
@@ -194,7 +211,7 @@ mod tests {
             NoteableKind::MergeRequest,
             100,
         );
-        let edges = build_edges(&[row], always_resolve(99, "3/4/"));
+        let edges = build_edges(&[row], &KINDS, always_resolve(99, "3/4/"));
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].source_id, 99);
         assert_eq!(edges[0].source_kind, "WorkItem");
@@ -210,7 +227,7 @@ mod tests {
             NoteableKind::MergeRequest,
             100,
         );
-        let edges = build_edges(&[row], |_r: &Reference, _d: &str| None);
+        let edges = build_edges(&[row], &KINDS, |_r: &Reference, _d: &str| None);
         assert!(edges.is_empty());
     }
 
@@ -222,7 +239,7 @@ mod tests {
             NoteableKind::MergeRequest,
             100,
         );
-        let edges = build_edges(&[row], always_resolve(100, "1/2/"));
+        let edges = build_edges(&[row], &KINDS, always_resolve(100, "1/2/"));
         assert!(
             edges.is_empty(),
             "self-loop MR !100 → MR !100 should be filtered"

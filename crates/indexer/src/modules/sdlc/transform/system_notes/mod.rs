@@ -41,13 +41,13 @@ use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::catalog::sources::{DataSource, Transform};
-use query_data_model::{Catalog, ClickHouse};
+use query_data_model::{Catalog, ClickHouse, DataModelError};
 
 /// Registry key for this transform; also the `SystemNote` `transform` value in
 /// `config/model/gitlab/sources/siphon.yaml`.
 pub(in crate::modules::sdlc) const TRANSFORM_NAME: &str = "system_notes";
 
-use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};
+use emit::{EmittedEdge, NoteKinds, NoteRow, NoteableKind, build_edges};
 use parse::{Action, Reference, extract as parse_body};
 use resolve::{
     EntityRow, ResolutionPlan, ResolveSql, ResolvedIndex, ResolvedTarget, RouteRow, lookup_chunks,
@@ -160,16 +160,17 @@ pub(in crate::modules::sdlc) fn edge_table(
 pub(in crate::modules::sdlc) fn register(
     registry: &mut TransformRegistry,
     datalake: Arc<dyn DatalakeQuery>,
+    catalog: &Catalog<ClickHouse>,
     source: &DataSource,
     edge_table: &str,
     resolve_lookup_batch_size: usize,
-) {
+) -> Result<(), DataModelError> {
     // Every write path targets the current schema version's table-set, so the
     // hand-written transform must prefix its destination exactly like the
     // lowered DataFusion plans do (`lower.rs`); a bare `gl_edge` writes to the
     // wrong (unprefixed) table.
     let edge_table = prefixed_table_name(edge_table, *SCHEMA_VERSION);
-    let sql = Arc::new(ResolveSql::new(source));
+    let sql = Arc::new(ResolveSql::from_catalog(catalog, source)?);
     let factory: TransformFactory = Box::new(move |_plan| {
         Arc::new(SystemNotesTransform::new(
             Arc::clone(&datalake),
@@ -179,6 +180,13 @@ pub(in crate::modules::sdlc) fn register(
         ))
     });
     registry.register(TRANSFORM_NAME, factory);
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn test_resolve_sql() -> ResolveSql {
+    let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+    ResolveSql::from_catalog(&catalog, &crate::testkit::siphon_source()).expect("resolve sql")
 }
 
 fn col<'a, A: 'static>(block: &'a RecordBatch, name: &str) -> Result<&'a A, HandlerError> {
@@ -219,7 +227,7 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote<'_>>, Handler
 
 async fn resolve_and_emit<'a>(
     datalake: &dyn DatalakeQuery,
-    sql: &ResolveSql,
+    sql: &'a ResolveSql,
     notes: &[ExtractedNote<'a>],
     root_prefix: &TraversalPath,
     resolve_lookup_batch_size: usize,
@@ -227,18 +235,22 @@ async fn resolve_and_emit<'a>(
     let default_projects =
         resolve_default_projects(datalake, sql, notes, root_prefix, resolve_lookup_batch_size)
             .await?;
-    let plan = plan_for_batch(notes, &default_projects);
+    let plan = plan_for_batch(notes, &sql.kinds, &default_projects);
     let index = resolve_plan(datalake, sql, &plan, root_prefix, resolve_lookup_batch_size).await?;
 
-    let edges = process_batch(notes, &default_projects, |r, default_project| {
-        index.resolve(r, default_project)
-    });
+    let edges = process_batch(
+        notes,
+        &sql.kinds,
+        &default_projects,
+        |r, default_project| index.resolve(r, default_project),
+    );
 
     Ok(edges)
 }
 
 fn process_batch<'a, R>(
     notes: &[ExtractedNote<'a>],
+    kinds: &'a NoteKinds,
     default_projects: &DefaultProjectLookup,
     mut resolve: R,
 ) -> Vec<EmittedEdge<'a>>
@@ -253,7 +265,7 @@ where
             dropped_actions.insert(n.action);
             continue;
         };
-        let Some(noteable_kind) = NoteableKind::from_siphon(n.noteable_type) else {
+        let Some(noteable_kind) = NoteableKind::from_siphon(n.noteable_type, kinds) else {
             dropped_noteables.insert(n.noteable_type);
             continue;
         };
@@ -285,11 +297,14 @@ where
         );
     }
 
-    build_edges(&rows, |r, default_project| resolve(r, default_project))
+    build_edges(&rows, kinds, |r, default_project| {
+        resolve(r, default_project)
+    })
 }
 
 fn plan_for_batch(
     notes: &[ExtractedNote<'_>],
+    kinds: &NoteKinds,
     default_projects: &DefaultProjectLookup,
 ) -> ResolutionPlan {
     let mut plan = ResolutionPlan::default();
@@ -297,7 +312,7 @@ fn plan_for_batch(
         let Some(action) = Action::parse(n.action) else {
             continue;
         };
-        if NoteableKind::from_siphon(n.noteable_type).is_none() {
+        if NoteableKind::from_siphon(n.noteable_type, kinds).is_none() {
             continue;
         }
         let default_project = default_projects
@@ -535,7 +550,7 @@ fn edges_to_record_batch(edges: &[EmittedEdge<'_>]) -> Result<RecordBatch, Handl
             Arc::new(arrow::array::BooleanArray::from(deleted)),
         ],
     )
-    .map_err(|e| HandlerError::Processing(format!("failed to build gl_edge batch: {e}")))
+    .map_err(|e| HandlerError::Processing(format!("failed to build the edge batch: {e}")))
 }
 
 #[cfg(test)]
@@ -553,8 +568,7 @@ mod tests {
     const TEST_RESOLVE_LOOKUP_BATCH_SIZE: usize = 1_000;
     const TEST_ENTITY_ID_PROJECT_FACTOR: i64 = 1_000_000;
 
-    static SQL: std::sync::LazyLock<ResolveSql> =
-        std::sync::LazyLock::new(|| ResolveSql::new(&crate::testkit::siphon_source()));
+    static SQL: std::sync::LazyLock<ResolveSql> = std::sync::LazyLock::new(test_resolve_sql);
 
     fn make_note<'a>(
         action: &'a str,
@@ -713,12 +727,17 @@ mod tests {
             "MergeRequest",
             100,
         )];
-        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_r, _default| {
-            Some(ResolvedTarget {
-                id: 456,
-                traversal_path: TraversalPath::new_unchecked("1/100/"),
-            })
-        });
+        let edges = process_batch(
+            &notes,
+            &SQL.kinds,
+            &DefaultProjectLookup::new(),
+            |_r, _default| {
+                Some(ResolvedTarget {
+                    id: 456,
+                    traversal_path: TraversalPath::new_unchecked("1/100/"),
+                })
+            },
+        );
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].relationship_kind, "MENTIONS");
     }
@@ -735,7 +754,7 @@ mod tests {
         defaults.insert(100, "my/proj".to_string());
 
         let mut seen_default = None;
-        let _edges = process_batch(&notes, &defaults, |_r, default| {
+        let _edges = process_batch(&notes, &SQL.kinds, &defaults, |_r, default| {
             seen_default = Some(default.to_string());
             Some(ResolvedTarget {
                 id: 456,
@@ -748,7 +767,9 @@ mod tests {
     #[test]
     fn process_batch_drops_unknown_action_silently() {
         let notes = vec![make_note("designs_added", "", "MergeRequest", 1)];
-        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
+        let edges = process_batch(&notes, &SQL.kinds, &DefaultProjectLookup::new(), |_, _| {
+            None
+        });
         assert!(edges.is_empty());
     }
 
@@ -760,7 +781,9 @@ mod tests {
             "Snippet",
             1,
         )];
-        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
+        let edges = process_batch(&notes, &SQL.kinds, &DefaultProjectLookup::new(), |_, _| {
+            None
+        });
         assert!(edges.is_empty());
     }
 
@@ -787,7 +810,7 @@ mod tests {
             ),
         ];
         let defaults = DefaultProjectLookup::new();
-        let plan = plan_for_batch(&notes, &defaults);
+        let plan = plan_for_batch(&notes, &SQL.kinds, &defaults);
         assert_eq!(plan.mr_pairs.len(), 1, "MR pair !42 deduped");
         assert_eq!(plan.issue_pairs.len(), 1, "issue pair #9");
         assert_eq!(plan.paths.len(), 1, "project path gitlab-org/gitlab");

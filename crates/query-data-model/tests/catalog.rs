@@ -78,6 +78,22 @@ fn a_foreign_key_variant_is_written_by_the_writer_of_its_node() {
 }
 
 #[test]
+fn a_source_role_names_a_declared_entity_relationship_or_lake_table() {
+    let errors = spec_errors(with_writers(
+        &[],
+        "source: indexer\nroles:\n  entities: {person: Persn}\n  relationships: {wrote: AUTHORED}\n  tables: {rows: users}\n",
+    ));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: source indexer declares table roles but no connection",
+            "gitlab: source indexer role person names unknown Persn",
+            "gitlab: source indexer is never declared",
+        ]
+    );
+}
+
+#[test]
 fn a_source_that_lists_its_rows_declares_no_pipelines() {
     let errors = spec_errors(with_writers(
         &[],
