@@ -104,9 +104,6 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         if !center_uses_default_pk {
             select.push(SelectExpr::col(&center_id, &center_redaction_col));
         }
-        if let Some(ob) = input.order_by.as_ref().filter(|ob| ob.node == center_id) {
-            select.push(SelectExpr::col(&center_id, &ob.property));
-        }
         dedup_subquery(&center_id, &center_table, select, scan_where)
     });
 
