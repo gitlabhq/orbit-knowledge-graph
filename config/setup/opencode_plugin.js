@@ -28,6 +28,19 @@ async function loadInstructions() {
   return texts.find(Boolean) ?? "";
 }
 
+function instructionLoader() {
+  let instructions = loadInstructions();
+  let loadedAt = Date.now();
+  return async () => {
+    const text = await instructions;
+    if (!text && Date.now() - loadedAt > RETRY_AFTER_MS) {
+      instructions = loadInstructions();
+      loadedAt = Date.now();
+    }
+    return text;
+  };
+}
+
 function withReminder(result) {
   const suffix = "\n\n" + REMINDER;
   if (Array.isArray(result.content)) return { ...result, content: [...result.content, { type: "text", text: REMINDER }] };
@@ -41,6 +54,11 @@ export default {
   id: "orbit",
   async setup(ctx) {
     let reminded = false;
+    const instructions = instructionLoader();
+    await ctx.session.hook("context", async (event) => {
+      const text = await instructions();
+      if (text && !event.system.some((part) => part.text === text)) event.system.push({ type: "text", text });
+    });
     await ctx.tool.hook("execute.after", (event) => {
       if (reminded || event.status !== "completed") return;
       if (!SHELL_TOOLS.includes(event.tool) || !hasGraph()) return;
@@ -50,15 +68,10 @@ export default {
   },
   async server() {
     let reminded = false;
-    let instructions = loadInstructions();
-    let loadedAt = Date.now();
+    const instructions = instructionLoader();
     return {
       "experimental.chat.system.transform": async (_input, output) => {
-        const text = await instructions;
-        if (!text && Date.now() - loadedAt > RETRY_AFTER_MS) {
-          instructions = loadInstructions();
-          loadedAt = Date.now();
-        }
+        const text = await instructions();
         if (text && !output.system.includes(text)) output.system.push(text);
       },
       "tool.execute.after": async (input, output) => {
