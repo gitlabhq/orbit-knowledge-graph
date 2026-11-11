@@ -4,16 +4,16 @@ The [data model spike MR](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/
 This guide shows its packages and APIs, and it changes with the code.
 [ADR 024](../adr/024_pluggable_data_model.md) records the design and explains how it works.
 
-Each extension writes only a package, a surface or a backend:
+Each extension writes only a package, a frontend or a backend:
 
 | To add | Write | Leave untouched |
 |---|---|---|
 | A GitLab entity | Fragments in a `gitlab.*` package | The compiler |
 | An indexed third-party source | A package with a `source` fragment | The compiler and the indexing engine |
-| A live third-party entity | A package with a `live` store | The surfaces and the compiler phases |
-| A backend | A `StorageBackend`, its plan language and its renderer | The surfaces and the shared phases |
-| A tenant overlay | A package that loads for one tenant | Everything else |
-| A query language | A surface that builds logical plans | The planner |
+| A live third-party entity | A package with a `live` store | The frontends and the compiler phases |
+| A backend | A `StorageBackend`, its plan language and its renderer | The frontends and the shared phases |
+| A namespace overlay | A package that loads for one top-level namespace | Everything else |
+| A query language | A frontend that builds logical plans | The planner |
 
 ## Add a GitLab entity
 
@@ -474,14 +474,14 @@ let request = code.render(&plan);
 
 The trigram prefilter is a planning decision: the planner takes the pattern's literal atoms and narrows the candidate files before the structural pass. The rendered request travels over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. `File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction.
 
-## Add a tenant overlay
+## Add a namespace overlay
 
-A tenant overlay is a package that loads only into one tenant's model. Agent memory adds a `Memory` entity linked to the merge requests and projects it is about:
+A namespace overlay is a package that loads only into one top-level namespace's model. Agent memory adds a `Memory` entity linked to the merge requests and projects it is about:
 
 ```yaml
-# packages/tenant.agent_memory/graph.yaml
+# packages/overlay.agent_memory/graph.yaml
 kind: graph
-package: tenant.agent_memory
+package: overlay.agent_memory
 entities:
   Memory:
     identity: id
@@ -499,9 +499,9 @@ relationships:
 ```
 
 ```yaml
-# packages/tenant.agent_memory/authorization.yaml
+# packages/overlay.agent_memory/authorization.yaml
 kind: authorization
-package: tenant.agent_memory
+package: overlay.agent_memory
 entities:
   Memory:
     scope: namespace
@@ -520,9 +520,9 @@ relationships:
 ```
 
 ```yaml
-# packages/tenant.agent_memory/storage/clickhouse.yaml
+# packages/overlay.agent_memory/storage/clickhouse.yaml
 kind: storage
-package: tenant.agent_memory
+package: overlay.agent_memory
 store: graph
 engine:
   edge_tables:
@@ -551,9 +551,9 @@ relationships:
 `Memory` has string IDs and points at entities with integer IDs. So its edges live in their own table, with a `String` source column and an `Int64` target column. The agent memory API writes both:
 
 ```yaml
-# packages/tenant.agent_memory/sources/agent_api.yaml
+# packages/overlay.agent_memory/sources/agent_api.yaml
 kind: source
-package: tenant.agent_memory
+package: overlay.agent_memory
 source: agent_api
 entities: [Memory]
 relationships: [ABOUT]
@@ -562,9 +562,9 @@ relationships: [ABOUT]
 A user-scoped entity names its owner relationship instead of a scope key:
 
 ```yaml
-# packages/tenant.todos/authorization.yaml
+# packages/overlay.todos/authorization.yaml
 kind: authorization
-package: tenant.todos
+package: overlay.todos
 entities:
   Todo:
     scope: user
@@ -583,7 +583,7 @@ relationships:
 
 The graph must give `OWNS` one owner per todo. Storage decides whether the owner check reads a column or an edge. `OWNS` itself takes `of: target`: a caller sees the edge only when they may see the todo.
 
-Its entities appear only in that tenant's catalogs, and that tenant's plans and caches carry their own model ID.
+Its entities appear only in that namespace's catalogs, and that namespace's plans and caches carry their own model ID.
 
 ## Add an authorization provider
 
@@ -647,13 +647,13 @@ Tests use seeded fakes for each query, like the existing redaction mock.
 
 ## Add a query language
 
-A surface parses text and builds a logical plan with the logical builder:
+A frontend parses text and builds a logical plan with the logical builder:
 
 ```rust
-let statement = surface::gql::parse(text, model.logical())?;
+let statement = frontend::gql::parse(text, model.logical())?;
 ```
 
-Name, type and connectivity errors are construction errors, so a surface has no validation pass. It records intent, such as hop bounds or a skip, as data, and makes no planning decisions.
+Name, type and connectivity errors are construction errors, so a frontend has no validation pass. It records intent, such as hop bounds or a skip, as data, and makes no planning decisions.
 
 ## Test it
 
@@ -661,7 +661,7 @@ Plan tests assert three stages of the same query:
 
 | Stage | Inspects |
 |---|---|
-| `logical` | The logical plan that the surface built |
+| `logical` | The logical plan that the frontend built |
 | `planned` | The physical plan right after the planning phase |
 | `emitted` | The physical plan after every phase, just before render |
 
@@ -689,7 +689,7 @@ The loader collects every error, names its package, and fails once. A missing de
 - An entity without `default_columns`.
 - A property or relationship attribute with no access class, or with two.
 - A relationship without a scope, a permission, or an `of:` on each variant's policy.
-- A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none`, or checks by any provider. An integration package may declare only `Credentials` checks. A tenant overlay declares no checks, and its entities must be namespace- or user-scoped.
+- A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none`, or checks by any provider. An integration package may declare only `Credentials` checks. A namespace overlay declares no checks, and its entities must be namespace- or user-scoped.
 - A backend that stores a non-global entity or a relationship but has no `enforce` entry for it.
 - A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.
 - A `via` chain that does not reach an entity holding the scope key, with one target per step.

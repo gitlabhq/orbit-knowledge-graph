@@ -32,7 +32,7 @@ This shape causes three problems:
 The next projects make these problems larger.
 [Orbit Next](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/16) needs a code backend that is not SQL.
 [Third-party data](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/20) needs new entities without compiler changes, some indexed and some fetched at query time.
-Agent memory needs custom node types for one tenant.
+Agent memory needs custom node types for one top-level namespace.
 
 ## Decision
 
@@ -45,7 +45,7 @@ Agent memory needs custom node types for one tenant.
 5. **A version goes live after its backfill.** The migration scope is the diff between the new version's storage and source fragments and the active one's. The indexing engine of ADR 023 backfills the tables in scope, then the registry promotes the version and the query engine swaps models atomically.
 6. **A backend implements one trait.** A catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. Shared code reads capabilities and never checks a backend name.
 7. **Every plan is built through a checked catalog builder.** There is one logical plan language and one physical plan language per kind of backend. Shared tracking checks every connection as it is made, and rewrites use the same builder, so no phase can leave an invalid plan.
-8. **Surfaces parse, and the compiler plans.** A surface turns text into a logical plan, and construction errors replace the validation pass. The planning phase reads the logical plan and builds the physical plan in one step, with no intermediate plan description.
+8. **Frontends parse, and the compiler plans.** A frontend turns text into a logical plan, and construction errors replace the validation pass. The planning phase reads the logical plan and builds the physical plan in one step, with no intermediate plan description.
 9. **Authorization runs through providers, and security enforces it in its own phase.** Packages declare each entity's scope, permission, one policy per backend and its checks. A deployment binds provider names to modules that identify the caller, list the caller's scopes and check rows; GitLab is one such module. A final check proves that every read carries its policy.
 10. **The catalog renders its own plans.** The catalog that builds a plan renders it, into SQL with parameters or into the backend's native request.
 11. **A query that spans connections runs as an execution DAG.** The planner splits it into stages, one per connection, connected by key sets and rows. The query engine runs the DAG and applies the final order, limit and pagination.
@@ -67,12 +67,12 @@ RETURN u.username, mr.title LIMIT 10
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 45, "rankSpacing": 55}}}%%
 flowchart TB
     accTitle: The data model in one picture
-    accDescr: The package registry feeds the loader, which checks packages once into the model. The model exposes a logical catalog and one physical catalog per connection, both built on shared tracking. The query engine parses through the surfaces and builds and rewrites physical plans through the catalogs, which send SQL, gRPC or live calls to the backends. The indexing engine reads sources and storage from the model and writes rows to ClickHouse.
-    REG[("Package registry<br/>gitlab.*, integration.jira,<br/>integration.slack, tenant.agent_memory")]
+    accDescr: The package registry feeds the loader, which checks packages once into the model. The model exposes a logical catalog and one physical catalog per connection, both built on shared tracking. The query engine parses through the frontends and builds and rewrites physical plans through the catalogs, which send SQL, gRPC or live calls to the backends. The indexing engine reads sources and storage from the model and writes rows to ClickHouse.
+    REG[("Package registry<br/>gitlab.*, integration.jira,<br/>integration.slack, overlay.agent_memory")]
     E["Query engine<br/>(compiler phases)"]
     L["Loader"]
     IX["Indexing engine<br/>(ADR 023)"]
-    S["Surfaces (GQL)"]
+    S["Frontends (GQL)"]
     M["Model<br/>(graph, stores, policies,<br/>sources, ModelId)"]
     LC["Logical catalog"]
     PC["Physical catalogs<br/>(one per connection)"]
@@ -163,7 +163,7 @@ packages/
 │   │   └── live.yaml
 │   └── sources/
 │       └── data_lake.yaml
-└── tenant.agent_memory/
+└── overlay.agent_memory/
     ├── package.yaml
     ├── graph.yaml
     ├── authorization.yaml
@@ -183,9 +183,9 @@ skinparam rectangleBorderColor #8A94A6
 skinparam rectangleFontColor #1F2937
 skinparam rectangleFontStyle plain
 
-rectangle "<b>Tenant model</b>  (one ModelId)\nthe active version of every package that applies to the tenant" as M #FFFFFF {
-  rectangle "<b>Tenant overlays</b>\nnamespace- or user-scoped only" as T3 #F8FAFC {
-    rectangle "tenant.agent_memory" as O #F1F5F9
+rectangle "<b>Namespace model</b>  (one ModelId)\nthe active version of every package that applies to a top-level namespace" as M #FFFFFF {
+  rectangle "<b>Namespace overlays</b>\nnamespace- or user-scoped only" as T3 #F8FAFC {
+    rectangle "overlay.agent_memory" as O #F1F5F9
   }
   rectangle "<b>Integration packages</b>\nCredentials checks, no trusted stores" as T2 #F8FAFC {
     rectangle "integration.slack\nintegration.jira" as I #F1F5F9
@@ -245,7 +245,7 @@ The registry records each package's tier from its publisher, and the loader enfo
 |---|---|---|
 | Platform | permissions, scope kinds, checks by any provider, `none` | |
 | Integration | entities in a platform scope, `Credentials` checks | permissions, scope kinds, other checks, `none`, global scope, trusted stores |
-| Tenant overlay | namespace- and user-scoped entities | permissions, scope kinds, any check, `none`, trusted stores |
+| Namespace overlay | namespace- and user-scoped entities | permissions, scope kinds, any check, `none`, trusted stores |
 
 Packages compose under five rules:
 
@@ -370,7 +370,7 @@ end
 @enduml
 ```
 
-A tenant's model is the active version of every package that applies to it.
+A top-level namespace's model is the active version of every package that applies to it.
 The migration scope is the diff of the physical catalogs and the source fragments. It is a floor: a ledger entry can widen it but never narrow it.
 A shared edge table is cloned intact. Each edge-table variant has exactly one writer, so the in-scope variants' writers re-emit their rows, and after each namespace finishes, a sweep tombstones that variant's older rows in the namespace.
 The query engine never sees a model whose tables are not built yet, and the indexer and the query engine always agree on one package version.
@@ -427,7 +427,7 @@ A stage targets one connection, and it can read every store on that connection.
 set separator none
 skinparam shadowing false
 participant Caller
-participant "GQL surface" as S
+participant "GQL frontend" as S
 participant "Logical catalog" as LC
 participant "Compiler phases" as E
 participant "ClickHouse catalog" as C
@@ -455,7 +455,7 @@ CH --> Caller : rows
 @enduml
 ```
 
-The surface records what the caller asked for and makes no planning decisions.
+The frontend records what the caller asked for and makes no planning decisions.
 The planning phase decides and builds in one step, and every later phase rewrites through the same builder.
 The rewrite contract is fixed: inputs before consumers, each shared body once, no revisiting inserted operations, and explicit reconnection when outputs change. So no phase can produce a plan the builder would reject.
 Security adds each read's policy as plan operations: a path filter on the `MergeRequest` read, and on the `User` read a filter that admits rows only if the caller holds `read`. The Rails checks run on the rows that come back.
@@ -593,7 +593,7 @@ Every stage gets its own policy, and plan tests assert the logical plan, the pla
 - A change to storage goes live only after its backfill. A change that only adds query metadata takes effect on the next load.
 - The derived scope covers what the packages describe: storage layout and source fragments. A change in indexer code that alters the rows it writes is outside every package, so the ledger keeps a hand-written widening for it.
 - The server holds each model snapshot until the compiles that use it finish, and caches keyed by the model hash evict old snapshots.
-- A new backend brings its own plan language and renderer, but it reuses the surfaces, the shared tracking and the phases.
+- A new backend brings its own plan language and renderer, but it reuses the frontends, the shared tracking and the phases.
 - A key set between stages has a size cap. A stage whose keys exceed it fails the query instead of reading without a bound.
 
 These items are out of scope:
