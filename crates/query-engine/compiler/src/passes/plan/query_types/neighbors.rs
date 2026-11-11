@@ -1,5 +1,5 @@
 //! Neighbors: the center node, the edge tables and relationship kinds per direction, and whether the
-//! center's filters are answered by denormalized edge columns.
+//! arms join the center's latest rows.
 
 use ontology::constants::*;
 use query_data_model::{DenormalizedDirection, OrbitQueryModel, RelationshipId};
@@ -15,7 +15,7 @@ pub struct Neighbors {
     pub center: String,
     pub direction: Direction,
     pub edge: EdgeTableConfig,
-    pub has_non_denorm: bool,
+    pub joins_center: bool,
     pub fused_table: Option<String>,
     pub outgoing_kinds: Vec<String>,
     pub incoming_kinds: Vec<String>,
@@ -252,7 +252,7 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         center: center.alias.clone(),
         direction,
         edge,
-        has_non_denorm,
+        joins_center: has_non_denorm || !center.uses_default_pk(),
         fused_table,
         outgoing_kinds: arm_kinds(true),
         incoming_kinds: arm_kinds(false),

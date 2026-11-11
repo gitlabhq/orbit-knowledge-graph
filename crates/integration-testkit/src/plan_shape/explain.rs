@@ -297,14 +297,14 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             Tree::node(
                 Operator::Neighbors,
                 format!(
-                    "center={} direction={} {access} center_filter={} relationships=[{}] incoming_scoped=[{}] incoming_cross_scope=[{}]",
+                    "center={} direction={} {access} center_join={} relationships=[{}] incoming_scoped=[{}] incoming_cross_scope=[{}]",
                     operation.center,
                     match operation.direction {
                         compiler::input::Direction::Both => "both",
                         compiler::input::Direction::Incoming => "incoming",
                         compiler::input::Direction::Outgoing => "outgoing",
                     },
-                    operation.has_non_denorm,
+                    operation.joins_center,
                     operation
                         .edge
                         .rel_type_filter

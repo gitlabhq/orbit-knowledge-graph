@@ -1,0 +1,102 @@
+logical:
+  expect: ["(Input neighbors (...))"]
+
+cases:
+  - name: A pinned center without a traversal path checks outgoing edges against its latest live row
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["MEMBER_OF"]}}
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(n) RETURN u, n
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (SemiJoin _orbit_neighbor_edge.source_id IN subquery (_) (Project _orbit_center_rows.id AS id (Scan Table(_orbit_center_rows) AS _orbit_center_rows)))
+            - (Filter _orbit_center_rows._deleted = false (_))
+
+  - name: Pinned centers check scope-carrying and cross-scope arms against their latest live rows
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","node_ids":[1,2]}],"neighbors":{"direction":"outgoing","rel_types":["RELATED_TO","CONTAINS"]}}
+      gql: |
+        MATCH (w:WorkItem)-[:RELATED_TO|`CONTAINS`]->(n) WHERE w.id IN [1, 2] RETURN w, n
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (SemiJoin _orbit_neighbor_edge.source_id IN subquery (SemiJoin _orbit_neighbor_edge.traversal_path IN subquery (_) (_)) (_))
+            - (SemiJoin _orbit_neighbor_edge.source_id IN subquery (Filter ..., _orbit_neighbor_edge.relationship_kind = 'CONTAINS' (_)) (_))
+
+  - name: A pinned center that joins its latest rows bounds the join by id and skips the center rows lookup
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"d","entity":"MergeRequestDiff","node_ids":[1]}],"neighbors":{"direction":"incoming","rel_types":["HAS_DIFF"]}}
+      gql: |
+        MATCH (d:MergeRequestDiff {id: 1})<-[:HAS_DIFF]-(n) RETURN d, n
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter d.id = 1 (Deduplicate Final (Scan Table(gl_merge_request_diff) AS d)))
+          reject: ["(SemiJoin _orbit_neighbor_edge.target_id IN subquery (_) (_))"]
+
+  - name: A pinned center with a non-denormalized filter checks liveness through its join only
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[1],"filters":{"name":"x"}}],"neighbors":{"direction":"both","rel_types":["MEMBER_OF"]}}
+      gql: |
+        MATCH (g:Group {id: 1})-[:MEMBER_OF]-(n) WHERE g.name = 'x' RETURN g, n
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Join ON _orbit_neighbor_edge.target_id = g.id (Scan Table(gl_edge) AS _orbit_neighbor_edge) (_))
+          ctes:
+            absent: true
+
+  - name: A pinned center with a non-denormalized filter keeps the path bound on its scope-carrying arm
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","node_ids":[1,2],"filters":{"title":"x"}}],"neighbors":{"direction":"outgoing","rel_types":["RELATED_TO","CONTAINS"]}}
+      gql: |
+        MATCH (w:WorkItem)-[:RELATED_TO|`CONTAINS`]->(n) WHERE w.id IN [1, 2] AND w.title = 'x' RETURN w, n
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (SemiJoin _orbit_neighbor_edge.traversal_path IN subquery (_) (Project _orbit_center_rows.traversal_path AS traversal_path (_)))
+          occurrences:
+            - pattern: (Join ON _orbit_neighbor_edge.source_id = w.id (_) (_))
+              count: 2
+          reject: ["(SemiJoin _orbit_neighbor_edge.source_id IN subquery (_) (_))"]
+
+  - name: A pinned center checks every edge table its relationship routes to
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1000]}],"neighbors":{"direction":"incoming","rel_types":["IN_PROJECT"]}}
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(neighbor) RETURN p, neighbor
+    physical:
+      clickhouse:
+        emitted:
+          occurrences:
+            - pattern: (SemiJoin _orbit_neighbor_edge_arm.target_id IN subquery (_) (Project _orbit_center_rows.id AS id (_)))
+              count: 5
+
+  - name: An unpinned center with covered filters reads only the edge table
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"neighbors":{"direction":"outgoing","rel_types":["IN_PROJECT"]}}
+      gql: |
+        MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(neighbor) RETURN mr, neighbor
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=mr direction=outgoing directional outgoing=[gl_edge] incoming=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] center_join=false ... (_))"]
+        emitted:
+          expect:
+            - (Scan Table(gl_edge) AS _orbit_neighbor_edge)
+          reject: ["(Scan Table(gl_merge_request) ...)"]
+          ctes:
+            absent: true

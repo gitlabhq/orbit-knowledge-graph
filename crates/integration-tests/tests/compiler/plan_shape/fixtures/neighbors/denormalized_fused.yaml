@@ -1,22 +1,42 @@
-name: Covered center filters retain fused neighbor scans and filter both tag directions
-
-query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT","AUTHORED"]}}
-  gql: |
-    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT|AUTHORED]-(neighbor) RETURN mr, neighbor
-
 logical:
   expect: ["(Input neighbors (...))"]
 
-physical:
-  clickhouse:
-    planned:
-      expect: ["(Neighbors center=mr direction=both fused table=gl_edge center_filter=false ... (_))"]
-    emitted:
-      expect:
-        - (Filter ((_orbit_neighbor_edge.source_kind = 'MergeRequest') AND ArrayContains(_orbit_neighbor_edge.source_tags, 'state:merged')) OR ((_orbit_neighbor_edge.target_kind = 'MergeRequest') AND ArrayContains(_orbit_neighbor_edge.target_tags, 'state:merged')), ... (_))
-      occurrences:
-        - pattern: (Scan Table(gl_edge) AS _orbit_neighbor_edge)
-          count: 1
-      reject: ["(Scan Table(gl_merge_request) ...)", "(Union ... (...))"]
+cases:
+  - name: Covered center filters on pinned centers retain fused neighbor scans and filter both tag directions
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1,2],"filters":{"state":"merged"}}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT","AUTHORED"]}}
+      gql: |
+        MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT|AUTHORED]-(neighbor) WHERE mr.id IN [1, 2] RETURN mr, neighbor
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=mr direction=both fused table=gl_edge center_join=false ... (_))"]
+        emitted:
+          expect:
+            - (Filter ((_orbit_neighbor_edge.source_kind = 'MergeRequest') AND (_orbit_neighbor_edge.source_id IN [1, 2]) AND _orbit_neighbor_edge.source_id IN subquery AND ArrayContains(_orbit_neighbor_edge.source_tags, 'state:merged')) OR ((_orbit_neighbor_edge.target_kind = 'MergeRequest') AND (_orbit_neighbor_edge.target_id IN [1, 2]) AND _orbit_neighbor_edge.target_id IN subquery AND ArrayContains(_orbit_neighbor_edge.target_tags, 'state:merged')), ... (_))
+            - (Filter _orbit_center_rows._deleted = false (_))
+          occurrences:
+            - pattern: (Scan Table(gl_edge) AS _orbit_neighbor_edge)
+              count: 1
+          reject: ["(Union ... (...))"]
+          ctes:
+            exact_order: [_orbit_center_rows]
+
+  - name: Covered center filters retain fused neighbor scans and filter both tag directions
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT","AUTHORED"]}}
+      gql: |
+        MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT|AUTHORED]-(neighbor) RETURN mr, neighbor
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=mr direction=both fused table=gl_edge center_join=false ... (_))"]
+        emitted:
+          expect:
+            - (Filter ((_orbit_neighbor_edge.source_kind = 'MergeRequest') AND ArrayContains(_orbit_neighbor_edge.source_tags, 'state:merged')) OR ((_orbit_neighbor_edge.target_kind = 'MergeRequest') AND ArrayContains(_orbit_neighbor_edge.target_tags, 'state:merged')), ... (_))
+          occurrences:
+            - pattern: (Scan Table(gl_edge) AS _orbit_neighbor_edge)
+              count: 1
+          reject: ["(Scan Table(gl_merge_request) ...)", "(Union ... (...))"]

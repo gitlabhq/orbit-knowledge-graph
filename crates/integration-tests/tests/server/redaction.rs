@@ -3015,22 +3015,32 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
 }
 
 async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-
     let json = r#"{
         "query_type": "neighbors",
         "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
         "neighbors": {"direction": "outgoing"}
     }"#;
+    assert_denied_center_redacts_every_row(ctx, json, query_engine::compiler::Frontend::JsonDsl)
+        .await;
+}
 
-    let query = compile(
-        json,
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
+async fn neighbors_query_center_node_denied_filters_all_when_only_neighbors_return(
+    ctx: &TestContext,
+) {
+    assert_denied_center_redacts_every_row(
+        ctx,
+        "MATCH (u:User {id: 1})-->(n) RETURN n",
+        query_engine::compiler::Frontend::Gql,
     )
-    .unwrap();
+    .await;
+}
+
+async fn assert_denied_center_redacts_every_row(
+    ctx: &TestContext,
+    query: &str,
+    frontend: query_engine::compiler::Frontend,
+) {
+    let query = compile(query, frontend, &load_ontology(), &test_security_context()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -4298,6 +4308,7 @@ async fn redaction_integration() {
         column_selection_fail_closed_no_authorization,
         neighbors_query_comprehensive,
         neighbors_query_center_node_denied_filters_all,
+        neighbors_query_center_node_denied_filters_all_when_only_neighbors_return,
         neighbors_query_multiple_center_nodes_mixed_authorization,
         neighbors_query_incoming_with_redaction,
         traversal_edge_columns_preserved_through_redaction,

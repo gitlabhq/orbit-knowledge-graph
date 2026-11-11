@@ -18,7 +18,7 @@ config:
 
 cases:
   - name: outgoing
-    description: Outgoing neighbors return one edge per versioned edge and keep a tombstoned neighbor as a bare node through its live edge, which the indexer tombstones with the node
+    description: Outgoing neighbors return one edge per versioned edge and keep a tombstoned neighbor as a bare node through its live edge
     query:
       json: |
         {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[99320]}],"neighbors":{"direction":"outgoing","rel_types":["MEMBER_OF"]}}

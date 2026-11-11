@@ -1,6 +1,7 @@
 description: >
-  Deleted neighbor visible via edge; neighbor queries don't join non-center
-  node tables (indexer soft-deletes edges alongside parent)
+  Deleted neighbor visible via a live edge; neighbor queries do not read
+  neighbor node rows, and an edge can outlive its endpoint because edge
+  tombstones come from the edge's own source row
 
 config:
   unmerged_seed: true

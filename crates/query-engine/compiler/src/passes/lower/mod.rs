@@ -31,9 +31,7 @@ pub enum NodeBinding {
         table_alias: Option<String>,
         traversal_path: Option<Expr>,
     },
-    Projected {
-        role_identity: Option<Expr>,
-    },
+    Projected,
 }
 
 impl NodeBinding {
