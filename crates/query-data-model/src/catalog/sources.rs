@@ -4,8 +4,8 @@ use indexmap::IndexMap;
 
 use super::Diagnostics;
 use crate::spec::{
-    EndpointKindSpec, EndpointSpec, ExtractLookupSpec, GENERATED_QUERY, PathSpec, ReindexSpec,
-    SourceFragment, TEMPLATE_EXTENSION, snake_case,
+    EdgeSpec, EndpointKindSpec, EndpointSpec, ExtractLookupSpec, GENERATED_QUERY, PathSpec,
+    PipelineSpec, ReindexSpec, SourceFragment, TEMPLATE_EXTENSION, snake_case,
 };
 use crate::{EntityId, GraphCatalog, PropertyId, RelationshipId, RelationshipVariantId};
 
@@ -142,17 +142,8 @@ pub struct Derived {
 pub struct ReindexTrigger {
     pub table: String,
     pub target: String,
-    pub traversal_path: PathResolution,
+    pub traversal_path: PathSpec,
     pub watermark: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PathResolution {
-    Column(String),
-    Dictionary {
-        dictionary: String,
-        key_column: String,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -282,9 +273,26 @@ struct EntityColumns {
     namespaced: bool,
 }
 
+#[derive(Clone, Copy)]
 struct Pending<'a> {
     fragment: &'a SourceFragment,
     source: usize,
+}
+
+fn sorted<'a, T>(
+    pending: &[Pending<'a>],
+    section: impl Fn(&'a SourceFragment) -> &'a IndexMap<String, T>,
+) -> Vec<(&'a str, &'a T, Pending<'a>)> {
+    let mut items: Vec<_> = pending
+        .iter()
+        .flat_map(|item| {
+            section(item.fragment)
+                .iter()
+                .map(|(name, spec)| (name.as_str(), spec, *item))
+        })
+        .collect();
+    items.sort_by_key(|(name, ..)| *name);
+    items
 }
 
 impl<'a> Resolver<'a> {
@@ -325,161 +333,51 @@ impl<'a> Resolver<'a> {
             };
             pending.push(Pending { fragment, source });
         }
-        let mut entities = Vec::new();
-        for item in &pending {
-            for (name, spec) in &item.fragment.entities {
-                let package = item.fragment.package.as_str();
-                let Some(entity) =
-                    self.diagnostics
-                        .require(self.graph.entity_id(name), package, || {
-                            format!(
-                                "source {} names unknown entity {name}",
-                                item.fragment.source
-                            )
-                        })
-                else {
-                    continue;
-                };
-                if self.entity_columns.contains_key(&entity) {
-                    self.diagnostics
-                        .error(package, format!("entity {name} has two sources"));
-                    continue;
-                }
-                let columns = self.entity_columns(package, entity, spec);
-                self.entity_columns.insert(entity, columns);
-                entities.push((name.as_str(), entity, spec, item));
-            }
-        }
-        let mut pipelines = Vec::new();
-        entities.sort_by_key(|(name, ..)| *name);
-        for (name, entity, spec, item) in entities {
+        let mut work = Vec::new();
+        for (name, spec, item) in sorted(&pending, |fragment| &fragment.entities) {
             let package = item.fragment.package.as_str();
-            let extract = Extract {
-                name,
-                tables: &spec.tables,
-                fields: &[],
-                order_by: &spec.order_by,
-                query: &spec.query,
-                filter: spec.filter.as_ref(),
-                lookups: &[],
+            let Some(entity) =
+                self.diagnostics
+                    .require(self.graph.entity_id(name), package, || {
+                        format!(
+                            "source {} names unknown entity {name}",
+                            item.fragment.source
+                        )
+                    })
+            else {
+                continue;
             };
-            let query = self.query(item.fragment, &extract);
-            let edges = spec
-                .edges
-                .iter()
-                .filter_map(|edge| {
-                    self.edge(package, name, &edge.label, &edge.from, &edge.to)
-                        .map(|(relationship, source, target, variants)| EdgeMapping {
-                            relationship,
-                            source,
-                            target,
-                            array_field: edge.array_field.clone(),
-                            mutable: edge.mutable,
-                            variants,
-                        })
-                })
-                .collect::<Vec<_>>();
-            let edges = self.enrich(package, name, edges, &spec.edges);
-            let columns = self.extracted_columns(entity, spec);
-            self.reindex(package, name, &spec.reindex, item.source);
-            pipelines.push(Pipeline {
-                name: name.to_string(),
-                source: item.source,
-                writer: Writer::Entity(entity),
-                scope: if spec.global {
-                    EtlScope::Global
-                } else {
-                    EtlScope::Namespaced
-                },
-                tables: spec.tables.clone(),
-                columns,
-                fields: Vec::new(),
-                order_by: spec.order_by.clone(),
-                query,
-                lookups: Vec::new(),
-                partition_count: spec.partition_count,
-                transform: Transform::DataFusion(edges),
-            });
-        }
-        let mut relationships: Vec<_> = pending
-            .iter()
-            .flat_map(|item| {
-                item.fragment
-                    .relationships
-                    .iter()
-                    .map(move |(name, spec)| (name.as_str(), spec, item))
-            })
-            .collect();
-        relationships.sort_by_key(|(name, ..)| *name);
-        for (name, spec, item) in relationships {
-            let package = item.fragment.package.as_str();
-            if self
-                .diagnostics
-                .require(self.graph.relationship_id(name), package, || {
-                    format!(
-                        "source {} names unknown relationship {name}",
-                        item.fragment.source
-                    )
-                })
-                .is_none()
-            {
+            if self.entity_columns.contains_key(&entity) {
+                self.diagnostics
+                    .error(package, format!("entity {name} has two sources"));
                 continue;
             }
-            self.reindex(package, name, &spec.reindex, item.source);
-            for (pipeline, edge) in &spec.pipelines {
-                let extract = Extract {
-                    name: pipeline,
-                    tables: &edge.tables,
-                    fields: &edge.fields,
-                    order_by: &edge.order_by,
-                    query: &edge.query,
-                    filter: edge.filter.as_ref(),
-                    lookups: &edge.lookups,
-                };
-                let query = self.query(item.fragment, &extract);
-                let lookups = self.lookups(package, pipeline, &edge.lookups);
-                let Some((relationship, source, target, variants)) =
-                    self.edge(package, pipeline, name, &edge.from, &edge.to)
-                else {
-                    continue;
-                };
-                let mapping = EdgeMapping {
-                    relationship,
-                    source,
-                    target,
-                    array_field: edge.array_field.clone(),
-                    mutable: edge.mutable,
-                    variants,
-                };
-                let mut specs = [(edge.from.clone(), edge.to.clone())];
-                let edges = self.enrich_endpoints(package, pipeline, vec![mapping], &mut specs);
-                pipelines.push(Pipeline {
-                    name: pipeline.clone(),
-                    source: item.source,
-                    writer: Writer::Relationship(relationship),
-                    scope: EtlScope::Namespaced,
-                    tables: edge.tables.clone(),
-                    columns: Vec::new(),
-                    fields: edge.fields.clone(),
-                    order_by: edge.order_by.clone(),
-                    query,
-                    lookups,
-                    partition_count: None,
-                    transform: Transform::DataFusion(edges),
-                });
-            }
+            let columns = self.entity_columns(package, entity, spec);
+            self.entity_columns.insert(entity, columns);
+            work.push((Writer::Entity(entity), name, spec, item));
         }
-        let mut derived: Vec<_> = pending
-            .iter()
-            .flat_map(|item| {
-                item.fragment
-                    .derived
+        for (name, spec, item) in sorted(&pending, |fragment| &fragment.relationships) {
+            let package = item.fragment.package.as_str();
+            let Some(relationship) =
+                self.diagnostics
+                    .require(self.graph.relationship_id(name), package, || {
+                        format!(
+                            "source {} names unknown relationship {name}",
+                            item.fragment.source
+                        )
+                    })
+            else {
+                continue;
+            };
+            self.reindex(package, name, &spec.reindex, item.source);
+            let writer = Writer::Relationship(relationship);
+            work.extend(
+                spec.pipelines
                     .iter()
-                    .map(move |(name, spec)| (name.as_str(), spec, item))
-            })
-            .collect();
-        derived.sort_by_key(|(name, ..)| *name);
-        for (name, spec, item) in derived {
+                    .map(|(pipeline, spec)| (writer, pipeline.as_str(), spec, item)),
+            );
+        }
+        for (name, spec, item) in sorted(&pending, |fragment| &fragment.derived) {
             let package = item.fragment.package.as_str();
             if self.graph.entity_id(name).is_some() {
                 self.diagnostics.error(
@@ -491,6 +389,7 @@ impl<'a> Resolver<'a> {
             let emits = spec
                 .emits
                 .iter()
+                .flatten()
                 .filter_map(|emitted| {
                     self.diagnostics
                         .require(self.graph.relationship_id(emitted), package, || {
@@ -498,43 +397,17 @@ impl<'a> Resolver<'a> {
                         })
                 })
                 .collect();
-            let extract = Extract {
-                name,
-                tables: &spec.tables,
-                fields: &[],
-                order_by: &spec.order_by,
-                query: &spec.query,
-                filter: None,
-                lookups: &[],
-            };
-            let query = self.query(item.fragment, &extract);
-            if matches!(query, ExtractQuery::Generated { .. }) {
-                self.diagnostics.error(
-                    package,
-                    format!("derived source {name} needs a template, not a generated query"),
-                );
-            }
-            self.reindex(package, name, &spec.reindex, item.source);
             let index = self.sources.derived.len();
             self.sources.derived.push(Derived {
                 name: name.to_string(),
                 emits,
             });
-            pipelines.push(Pipeline {
-                name: name.to_string(),
-                source: item.source,
-                writer: Writer::Derived(index),
-                scope: EtlScope::Namespaced,
-                tables: spec.tables.clone(),
-                columns: Vec::new(),
-                fields: Vec::new(),
-                order_by: spec.order_by.clone(),
-                query,
-                lookups: Vec::new(),
-                partition_count: None,
-                transform: Transform::Rust(spec.transform.clone()),
-            });
+            work.push((Writer::Derived(index), name, spec, item));
         }
+        let pipelines: Vec<_> = work
+            .into_iter()
+            .map(|(writer, name, spec, item)| self.pipeline(writer, name, spec, item))
+            .collect();
         let mut names = HashSet::new();
         for pipeline in &pipelines {
             if !names.insert(pipeline.name.as_str()) {
@@ -547,25 +420,95 @@ impl<'a> Resolver<'a> {
         self.sources.pipelines = pipelines;
     }
 
+    fn pipeline(
+        &mut self,
+        writer: Writer,
+        name: &str,
+        spec: &PipelineSpec,
+        item: Pending<'_>,
+    ) -> Pipeline {
+        let package = item.fragment.package.as_str();
+        let query = self.query(item.fragment, name, spec);
+        let lookups = self.lookups(package, name, spec.lookups.as_deref().unwrap_or_default());
+        let reindex = spec.reindex.as_deref().unwrap_or_default();
+        self.reindex(package, name, reindex, item.source);
+        let columns = match writer {
+            Writer::Entity(entity) => self.extracted_columns(entity, spec),
+            Writer::Relationship(_) | Writer::Derived(_) => Vec::new(),
+        };
+        let transform = match &spec.transform {
+            Some(transform) => {
+                if matches!(query, ExtractQuery::Generated { .. }) {
+                    self.diagnostics.error(
+                        package,
+                        format!("derived source {name} needs a template, not a generated query"),
+                    );
+                }
+                Transform::Rust(transform.clone())
+            }
+            None => {
+                let specs = self.edge_specs(writer, spec);
+                Transform::DataFusion(self.edges(package, name, &specs))
+            }
+        };
+        Pipeline {
+            name: name.to_string(),
+            source: item.source,
+            writer,
+            scope: match spec.global {
+                Some(true) => EtlScope::Global,
+                Some(false) | None => EtlScope::Namespaced,
+            },
+            tables: spec.tables.clone(),
+            columns,
+            fields: spec.fields.clone().unwrap_or_default(),
+            order_by: spec.order_by.clone(),
+            query,
+            lookups,
+            partition_count: spec.partition_count,
+            transform,
+        }
+    }
+
+    fn edge_specs(&self, writer: Writer, spec: &PipelineSpec) -> Vec<EdgeSpec> {
+        let Writer::Relationship(relationship) = writer else {
+            return spec.edges.clone().unwrap_or_default();
+        };
+        let label = &self.graph.relationship(relationship).name;
+        spec.from
+            .clone()
+            .zip(spec.to.clone())
+            .map(|(from, to)| EdgeSpec {
+                label: label.clone(),
+                from,
+                to,
+                array_field: spec.array_field.clone(),
+                mutable: spec.mutable.unwrap_or_default(),
+            })
+            .into_iter()
+            .collect()
+    }
+
     fn entity_columns(
         &mut self,
         package: &str,
         entity: EntityId,
-        spec: &crate::spec::EntitySourceSpec,
+        spec: &PipelineSpec,
     ) -> EntityColumns {
         let name = self.graph.entity(entity).name.clone();
         let mut columns = HashMap::new();
-        for (property, column) in &spec.columns {
+        for (property, column) in spec.columns.iter().flatten() {
             if let Some(property) = self.stored_property(package, entity, property) {
                 columns.insert(property, column.clone());
             }
         }
-        for property in &spec.binary {
+        for property in spec.binary.iter().flatten() {
             self.stored_property(package, entity, property);
         }
         let enrich = spec
             .enrich
             .iter()
+            .flatten()
             .filter_map(|property| {
                 let id = self.stored_property(package, entity, property)?;
                 let column = columns
@@ -582,7 +525,7 @@ impl<'a> Resolver<'a> {
             columns,
             enrich,
             table: table.cloned().unwrap_or_default(),
-            namespaced: !spec.global,
+            namespaced: spec.global != Some(true),
         }
     }
 
@@ -608,12 +551,9 @@ impl<'a> Resolver<'a> {
         Some(id)
     }
 
-    fn extracted_columns(
-        &self,
-        entity: EntityId,
-        spec: &crate::spec::EntitySourceSpec,
-    ) -> Vec<SourceColumn> {
+    fn extracted_columns(&self, entity: EntityId, spec: &PipelineSpec) -> Vec<SourceColumn> {
         let columns = &self.entity_columns[&entity].columns;
+        let binary = spec.binary.as_deref().unwrap_or_default();
         self.graph
             .entity(entity)
             .properties
@@ -627,38 +567,42 @@ impl<'a> Resolver<'a> {
                         .get(property)
                         .cloned()
                         .unwrap_or_else(|| name.clone()),
-                    binary: spec.binary.contains(name),
+                    binary: binary.contains(name),
                 }
             })
             .collect()
     }
 
-    fn query(&mut self, fragment: &SourceFragment, extract: &Extract<'_>) -> ExtractQuery {
+    fn query(
+        &mut self,
+        fragment: &SourceFragment,
+        name: &str,
+        spec: &PipelineSpec,
+    ) -> ExtractQuery {
         let package = fragment.package.as_str();
-        let name = extract.name;
-        if extract.tables.is_empty() {
+        if spec.tables.is_empty() {
             self.diagnostics
                 .error(package, format!("pipeline {name} lists no tables"));
         }
-        if extract.order_by.is_empty() {
+        if spec.order_by.is_empty() {
             self.diagnostics
                 .error(package, format!("pipeline {name} has an empty order_by"));
         }
-        if extract.query == GENERATED_QUERY {
-            if extract.tables.len() > 1 {
+        if spec.query == GENERATED_QUERY {
+            if spec.tables.len() > 1 {
                 self.diagnostics.error(
                     package,
                     format!("pipeline {name} generates its query from more than one table"),
                 );
             }
             return ExtractQuery::Generated {
-                filter: extract.filter.cloned(),
+                filter: spec.filter.clone(),
             };
         }
         for (set, key) in [
-            (extract.filter.is_some(), "filter"),
-            (!extract.fields.is_empty(), "fields"),
-            (!extract.lookups.is_empty(), "lookups"),
+            (spec.filter.is_some(), "filter"),
+            (spec.fields.is_some(), "fields"),
+            (spec.lookups.is_some(), "lookups"),
         ] {
             if set {
                 self.diagnostics.error(
@@ -667,43 +611,42 @@ impl<'a> Resolver<'a> {
                 );
             }
         }
-        let template = extract
+        let template = spec
             .query
             .ends_with(TEMPLATE_EXTENSION)
-            .then(|| fragment.templates.get(extract.query))
+            .then(|| fragment.templates.get(&spec.query))
             .flatten();
         match self.diagnostics.require(template, package, || {
-            format!("pipeline {name} names unknown template {}", extract.query)
+            format!("pipeline {name} names unknown template {}", spec.query)
         }) {
             Some(template) => ExtractQuery::Template(template.clone()),
             None => ExtractQuery::Generated { filter: None },
         }
     }
 
-    fn edge(
-        &mut self,
-        package: &str,
-        pipeline: &str,
-        label: &str,
-        from: &EndpointSpec,
-        to: &EndpointSpec,
-    ) -> Option<(
-        RelationshipId,
-        Endpoint,
-        Endpoint,
-        Vec<RelationshipVariantId>,
-    )> {
+    fn edge(&mut self, package: &str, pipeline: &str, spec: &EdgeSpec) -> Option<EdgeMapping> {
+        let label = &spec.label;
         let relationship =
             self.diagnostics
                 .require(self.graph.relationship_id(label), package, || {
                     format!("pipeline {pipeline} emits unknown relationship {label}")
                 })?;
-        let source = self.endpoint(package, pipeline, from)?;
-        let target = self.endpoint(package, pipeline, to)?;
-        let declared = &self.graph.relationship(relationship).variants;
+        let source = self.endpoint(package, pipeline, &spec.from)?;
+        let target = self.endpoint(package, pipeline, &spec.to)?;
+        let variants: Vec<_> = self
+            .graph
+            .relationship(relationship)
+            .variants
+            .iter()
+            .copied()
+            .filter(|variant| {
+                let variant = self.graph.variant(*variant);
+                source.kind.matches(variant.source) && target.kind.matches(variant.target)
+            })
+            .collect();
         for from in source.kind.entities() {
             for to in target.kind.entities() {
-                let exists = declared.iter().any(|variant| {
+                let exists = variants.iter().any(|variant| {
                     let variant = self.graph.variant(*variant);
                     variant.source == from && variant.target == to
                 });
@@ -719,14 +662,6 @@ impl<'a> Resolver<'a> {
                 }
             }
         }
-        let variants: Vec<_> = declared
-            .iter()
-            .copied()
-            .filter(|variant| {
-                let variant = self.graph.variant(*variant);
-                source.kind.matches(variant.source) && target.kind.matches(variant.target)
-            })
-            .collect();
         if variants.is_empty() {
             self.diagnostics.error(
                 package,
@@ -734,7 +669,14 @@ impl<'a> Resolver<'a> {
             );
             return None;
         }
-        Some((relationship, source, target, variants))
+        Some(EdgeMapping {
+            relationship,
+            source,
+            target,
+            array_field: spec.array_field.clone(),
+            mutable: spec.mutable,
+            variants,
+        })
     }
 
     fn endpoint(&mut self, package: &str, pipeline: &str, spec: &EndpointSpec) -> Option<Endpoint> {
@@ -795,82 +737,60 @@ impl<'a> Resolver<'a> {
         })
     }
 
+    fn edges(&mut self, package: &str, pipeline: &str, specs: &[EdgeSpec]) -> Vec<EdgeMapping> {
+        let mut edges: Vec<_> = specs
+            .iter()
+            .filter_map(|spec| Some((self.edge(package, pipeline, spec)?, spec)))
+            .collect();
+        let mut counts = HashMap::<EntityId, usize>::new();
+        for (edge, spec) in &edges {
+            for (endpoint, endpoint_spec) in [(&edge.source, &spec.from), (&edge.target, &spec.to)]
+            {
+                if let Some(entity) = endpoint.kind.entity().filter(|_| endpoint_spec.enrich) {
+                    *counts.entry(entity).or_default() += 1;
+                }
+            }
+        }
+        for (edge, spec) in &mut edges {
+            let endpoints = [(&mut edge.source, &spec.from), (&mut edge.target, &spec.to)];
+            for (endpoint, endpoint_spec) in endpoints {
+                if let Some(entity) = endpoint.kind.entity().filter(|_| endpoint_spec.enrich) {
+                    self.enrich(package, pipeline, endpoint, entity, counts[&entity]);
+                }
+            }
+        }
+        edges.into_iter().map(|(edge, _)| edge).collect()
+    }
+
     fn enrich(
         &mut self,
         package: &str,
         pipeline: &str,
-        edges: Vec<EdgeMapping>,
-        specs: &[crate::spec::EdgeSpec],
-    ) -> Vec<EdgeMapping> {
-        let mut specs: Vec<_> = specs
-            .iter()
-            .map(|edge| (edge.from.clone(), edge.to.clone()))
-            .collect();
-        self.enrich_endpoints(package, pipeline, edges, &mut specs)
-    }
-
-    fn enrich_endpoints(
-        &mut self,
-        package: &str,
-        pipeline: &str,
-        mut edges: Vec<EdgeMapping>,
-        specs: &mut [(EndpointSpec, EndpointSpec)],
-    ) -> Vec<EdgeMapping> {
-        let mut counts = HashMap::<EntityId, usize>::new();
-        let enriched: Vec<(usize, bool, EntityId)> = edges
-            .iter()
-            .zip(specs.iter())
-            .enumerate()
-            .flat_map(|(index, (edge, (from, to)))| {
-                [(true, &edge.source, from), (false, &edge.target, to)]
-                    .into_iter()
-                    .filter(|(_, _, spec)| spec.enrich)
-                    .filter_map(move |(source, endpoint, _)| {
-                        endpoint.kind.entity().map(|entity| (index, source, entity))
-                    })
-            })
-            .collect();
-        for (_, _, entity) in &enriched {
-            *counts.entry(*entity).or_default() += 1;
-        }
-        for (index, source, entity) in enriched {
-            let Some(columns) = self.entity_columns.get(&entity) else {
-                self.diagnostics.error(
-                    package,
-                    format!(
-                        "pipeline {pipeline} enriches from {}, which has no source",
-                        self.graph.entity(entity).name
-                    ),
-                );
-                continue;
-            };
-            if columns.enrich.is_empty() {
-                self.diagnostics.error(
-                    package,
-                    format!(
-                        "pipeline {pipeline}: {} declares no enrich properties",
-                        self.graph.entity(entity).name
-                    ),
-                );
-                continue;
-            }
-            let endpoint = if source {
-                &mut edges[index].source
-            } else {
-                &mut edges[index].target
-            };
-            let prefix = enrichment_prefix(
-                &self.graph.entity(entity).name,
-                &endpoint.field,
-                counts[&entity],
+        endpoint: &mut Endpoint,
+        entity: EntityId,
+        references: usize,
+    ) {
+        let name = &self.graph.entity(entity).name;
+        let Some(columns) = self.entity_columns.get(&entity) else {
+            self.diagnostics.error(
+                package,
+                format!("pipeline {pipeline} enriches from {name}, which has no source"),
             );
-            for (property, column) in &columns.enrich {
-                endpoint
-                    .properties
-                    .insert(*property, format!("{prefix}{column}"));
-            }
+            return;
+        };
+        if columns.enrich.is_empty() {
+            self.diagnostics.error(
+                package,
+                format!("pipeline {pipeline}: {name} declares no enrich properties"),
+            );
+            return;
         }
-        edges
+        let prefix = enrichment_prefix(name, &endpoint.field, references);
+        for (property, column) in &columns.enrich {
+            endpoint
+                .properties
+                .insert(*property, format!("{prefix}{column}"));
+        }
     }
 
     fn lookups(
@@ -945,25 +865,11 @@ impl<'a> Resolver<'a> {
         let watermark = self.sources.sources[source].watermark.clone();
         for spec in specs {
             let (table, traversal_path) = match spec {
-                ReindexSpec::Table(table) => (table, PathResolution::Column(PATH_COLUMN.into())),
+                ReindexSpec::Table(table) => (table, PathSpec::Column(PATH_COLUMN.into())),
                 ReindexSpec::Detail {
                     table,
-                    traversal_path: PathSpec::Column { column },
-                } => (table, PathResolution::Column(column.clone())),
-                ReindexSpec::Detail {
-                    table,
-                    traversal_path:
-                        PathSpec::Dictionary {
-                            dictionary,
-                            key_column,
-                        },
-                } => (
-                    table,
-                    PathResolution::Dictionary {
-                        dictionary: dictionary.clone(),
-                        key_column: key_column.clone(),
-                    },
-                ),
+                    traversal_path,
+                } => (table, traversal_path.clone()),
             };
             let trigger = ReindexTrigger {
                 table: table.clone(),
@@ -977,16 +883,6 @@ impl<'a> Resolver<'a> {
             }
         }
     }
-}
-
-struct Extract<'a> {
-    name: &'a str,
-    tables: &'a [String],
-    fields: &'a [String],
-    order_by: &'a [String],
-    query: &'a str,
-    filter: Option<&'a String>,
-    lookups: &'a [ExtractLookupSpec],
 }
 
 fn enrichment_prefix(entity: &str, field: &str, references: usize) -> String {
