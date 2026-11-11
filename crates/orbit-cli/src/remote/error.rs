@@ -124,10 +124,13 @@ fn parse_missing_resource(body: &str) -> Option<String> {
 }
 
 fn body_suffix(body: &str) -> String {
-    if body.is_empty() {
-        String::new()
-    } else {
-        format!(": {body}")
+    let message = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("message")?.as_str().map(str::to_string));
+    match (message, body.is_empty()) {
+        (Some(message), _) => format!(": {message}"),
+        (None, true) => String::new(),
+        (None, false) => format!(": {body}"),
     }
 }
 
