@@ -40,6 +40,8 @@ pub struct NodePlan {
     pub id_range: Option<(i64, i64)>,
     pub has_traversal_path: bool,
     pub read_scope: ReadScope,
+    /// The column holding the node's identity.
+    pub id_column: String,
     pub redaction_id_column: String,
     pub columns: Vec<String>,
     pub emit_select: bool,
@@ -119,7 +121,7 @@ impl<B: SqlBackend> Pattern<'_, B> {
 impl<'a, B: SqlBackend> Pattern<'a, B> {
     pub(crate) fn new(query: Query<'a>, model: &'a Catalog<B>) -> Result<Self> {
         let facts = query.leaves();
-        let nodes = nodes::build_nodes(query, &query.anchors(&facts), model);
+        let nodes = nodes::build_nodes(query, &query.anchors(&facts), model)?;
         let relations = relations::build_relations(query, &facts, model, &nodes);
         let mut pattern = Self {
             query,

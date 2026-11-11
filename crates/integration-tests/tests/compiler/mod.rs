@@ -1,5 +1,6 @@
 mod authorization_variants;
 mod dialects;
+mod identity_variants;
 mod ontology;
 mod plan_shape;
 mod predicate_limits;

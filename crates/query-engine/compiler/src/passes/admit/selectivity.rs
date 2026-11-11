@@ -56,12 +56,18 @@ pub(super) fn selectivity(
                 true => " (NOT conditions do not count)",
                 false => "",
             };
-            let example = anchors.first().map_or(String::new(), |anchor| {
-                format!(
-                    ", such as WHERE {}.id = 42",
-                    query.name(anchor.binding.output)
-                )
-            });
+            let graph = query.model.graph();
+            let example = anchors
+                .first()
+                .and_then(|anchor| {
+                    let identity = graph.entity(anchor.binding.entity).identity.first()?;
+                    Some(format!(
+                        ", such as WHERE {}.{} = 42",
+                        query.name(anchor.binding.output),
+                        graph.property(*identity).name
+                    ))
+                })
+                .unwrap_or_default();
             return Err(QueryError::Validation(format!(
                 "add filters or node_ids to at least one node{example}{hint}{negation}"
             )));

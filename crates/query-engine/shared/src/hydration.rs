@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use arrow::record_batch::RecordBatch;
 use compiler::constants::{
-    hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
-    traversal_path_column,
+    hydration_id_column, hydration_node_alias, neighbor_traversal_path_column, primary_key_column,
+    redaction_id_column, traversal_path_column,
 };
 use compiler::orbit_authorization::{Grants, Key, ScopeSet};
 use compiler::{
@@ -175,7 +175,7 @@ pub fn parse_hydration_batches(
     let alias = hydration_node_alias();
     let entity_type_col = format!("{alias}_entity_type");
     let props_col = format!("{alias}_props");
-    let id_col = format!("{alias}_id");
+    let id_col = hydration_id_column();
 
     let mut result = HashMap::new();
     let mut field_types_cache: HashMap<String, HashMap<String, DataType>> = HashMap::new();

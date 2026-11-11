@@ -1,0 +1,46 @@
+kind: storage
+package: acme.threads
+store: threads
+engine:
+  kind: clickhouse
+  connection: main
+  path_column: traversal_path
+  backend:
+    version_column: _version
+    deleted_column: _deleted
+    columns:
+      _version: {type: "DateTime64(6, 'UTC')", default: now64(6)}
+      _deleted: {type: Bool, default: "false"}
+    engine: ReplacingMergeTree(_version, _deleted)
+    edge_tables:
+      acme_thread_edge:
+        shared: true
+        sort_key: [traversal_path, relationship_kind, source_id, target_id]
+        columns:
+          traversal_path: {type: String}
+          source_id: {type: String}
+          source_kind: {type: LowCardinality(String)}
+          relationship_kind: {type: LowCardinality(String)}
+          target_id: {type: String}
+          target_kind: {type: LowCardinality(String)}
+entities:
+  Thread:
+    complete: true
+    table: acme_thread
+    columns:
+      key: {immutable: true, backend: {type: String}}
+      title: {backend: {type: String}}
+      traversal_path: {backend: {type: String}}
+    access: {order: [key]}
+
+  Post:
+    complete: true
+    table: acme_post
+    columns:
+      slug: {immutable: true, backend: {type: String}}
+      body: {backend: {type: String}}
+      traversal_path: {backend: {type: String}}
+    access: {order: [slug]}
+relationships:
+  REPLIES_TO:
+    Post -> Thread: {edge_table: acme_thread_edge}

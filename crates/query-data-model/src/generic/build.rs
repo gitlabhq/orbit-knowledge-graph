@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::DataType;
-use crate::constants::{DEFAULT_PRIMARY_KEY as KEY, EDGE_RESERVED_COLUMNS};
+use crate::constants::EDGE_RESERVED_COLUMNS;
 use indexmap::IndexMap;
 
 use super::catalog::{Domain, GraphCatalog};
@@ -92,9 +92,6 @@ impl GraphCatalog {
                 format!("entity {name} is already declared by {owner}"),
             );
             return;
-        }
-        if !spec.properties.contains_key(KEY) {
-            diagnostics.error(package, format!("entity {name} has no `{KEY}` property"));
         }
         self.entity_ids.insert(name.clone(), id);
         let mut names = HashMap::with_capacity(spec.properties.len());

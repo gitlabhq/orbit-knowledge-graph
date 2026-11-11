@@ -76,7 +76,7 @@ fn center_rows<B: RelationalBackend>(
     q.cte(alias, !stored::<B>(), |q| {
         let latest = q.subquery(alias, |q| {
             let rows = scan(q, table, alias, false)?;
-            let id = col(&[&rows], alias, DEFAULT_PRIMARY_KEY)?;
+            let id = col(&[&rows], alias, center.id)?;
             let rows = q.filter(
                 rows,
                 ids::<B>(id, center.pinned.as_deref().unwrap_or_default())?,
@@ -104,7 +104,7 @@ fn center_rows<B: RelationalBackend>(
         let rows = q.read(&latest, Some(alias))?;
         let live = deleted::<B>(&[&rows], alias)?;
         let rows = filtered(q, rows, vec![live])?;
-        let names = [DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN];
+        let names = [center.id, TRAVERSAL_PATH_COLUMN];
         let items = columns(&[&rows], alias, names, false)?;
         select(q, rows, items)
     })
@@ -184,7 +184,7 @@ impl Context<'_> {
                 }
                 Some(CenterBound::Id) => {
                     let value = col(scope, alias, center_edge)?;
-                    parts.push(Some(self.lookup(q, value, DEFAULT_PRIMARY_KEY)?));
+                    parts.push(Some(self.lookup(q, value, center.id)?));
                 }
                 None => {}
             }
@@ -199,7 +199,7 @@ impl Context<'_> {
         let mut tail = outer;
         let needs_center_table = !center.uses_default_pk();
         if plan.has_non_denorm {
-            let mut names = vec![DEFAULT_PRIMARY_KEY, DELETED_COLUMN];
+            let mut names = vec![center.id, DELETED_COLUMN];
             if needs_center_table {
                 names.push(center.redaction);
             }
@@ -210,18 +210,18 @@ impl Context<'_> {
                     parts.push(expr::filter::<B>(scope, &column, &filter.filter, false)?);
                 }
                 if let Some(pinned) = &center.pinned {
-                    let id = col(scope, center_alias, DEFAULT_PRIMARY_KEY)?;
+                    let id = col(scope, center_alias, center.id)?;
                     parts.push(ids::<B>(id, pinned)?);
                 }
                 if let Some((start, end)) = center.range {
-                    let id = col(scope, center_alias, DEFAULT_PRIMARY_KEY)?;
+                    let id = col(scope, center_alias, center.id)?;
                     parts.push(id_range(id, start, end));
                 }
                 Ok(parts)
             })?;
             let on = eq(
                 col(&[&rows, &joined], edge, center_edge)?,
-                col(&[&rows, &joined], center_alias, DEFAULT_PRIMARY_KEY)?,
+                col(&[&rows, &joined], center_alias, center.id)?,
             );
             rows = q.join(rows, joined, JoinKind::Inner(on))?;
             tail.push(live);
@@ -230,7 +230,7 @@ impl Context<'_> {
             let joined = scan(q, table, center_alias, true)?;
             let on = eq(
                 col(&[&rows, &joined], edge, center_edge)?,
-                col(&[&rows, &joined], center_alias, DEFAULT_PRIMARY_KEY)?,
+                col(&[&rows, &joined], center_alias, center.id)?,
             );
             rows = q.join(rows, joined, JoinKind::Inner(on))?;
             tail.push(deleted::<B>(&[&rows], center_alias)?);
@@ -273,7 +273,7 @@ impl Context<'_> {
         } else {
             let redaction = col(&scope, center_alias, center.redaction)?;
             items.push((redaction_id_column(center_alias), redaction));
-            let pk = col(&scope, center_alias, DEFAULT_PRIMARY_KEY)?;
+            let pk = col(&scope, center_alias, center.id)?;
             items.push((primary_key_column(center_alias), pk));
         }
         items.push((redaction_type_column(center_alias), string(entity)));

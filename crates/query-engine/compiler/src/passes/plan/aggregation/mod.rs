@@ -4,7 +4,6 @@ pub(super) mod emit;
 
 use std::collections::HashMap;
 
-use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::implementations::relational::plan::AggregateFunction;
 use query_data_model::plan::logical::{
     Expr, LogicalOperation, Measure as Logical, Order, TimeUnit,
@@ -99,8 +98,8 @@ pub(crate) fn aggregation_plan(
                     .iter()
                     .find(|binding| binding.node == node)
                     .and_then(|binding| binding.property_source.as_ref())
-                    .map(|source| Column::new(source, DEFAULT_PRIMARY_KEY))
-                    .unwrap_or_else(|| execution.property(node, DEFAULT_PRIMARY_KEY));
+                    .map(|source| Column::new(source, &metadata.id_column))
+                    .unwrap_or_else(|| execution.property(node, &metadata.id_column));
                 add_group(
                     &mut plan.groups,
                     Group {
@@ -137,9 +136,9 @@ pub(crate) fn aggregation_plan(
                 _ => None,
             };
             match (function, distinct) {
-                (AggregateFunction::Count, true) => {
-                    Some(value(node, property.unwrap_or(DEFAULT_PRIMARY_KEY)))
-                }
+                (AggregateFunction::Count, true) => property
+                    .or_else(|| nodes.get(node).map(|node| node.id_column.as_str()))
+                    .map(|property| value(node, property)),
                 (AggregateFunction::Count, false) => property
                     .filter(|_| nodes.get(node).is_some_and(|node| node.joined))
                     .map(|property| value(node, property)),

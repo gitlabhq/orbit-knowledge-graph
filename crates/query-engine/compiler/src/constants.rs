@@ -59,6 +59,11 @@ internal_name!(pub neighbor_is_outgoing_column, "neighbor_is_outgoing");
 internal_name!(pub neighbor_traversal_path_column, "neighbor_traversal_path");
 internal_name!(pub hydration_node_alias, "hydrate");
 
+/// The one column of a relation of reached identity keys.
+pub(crate) fn id_set_column() -> &'static str {
+    "id"
+}
+
 internal_name!(pub(crate) depth_column, "depth");
 internal_name!(pub(crate) path_nodes_column, "path_nodes");
 internal_name!(pub(crate) frontier_edge_kinds_column, "frontier_edge_kinds");
@@ -77,6 +82,11 @@ internal_name!(pub(crate) neighbor_edge_alias, "neighbor_edge");
 internal_name!(pub(crate) center_rows_cte, "center_rows");
 internal_name!(pub(crate) scope_lookup_alias, "scope");
 internal_name!(pub(crate) id_source_alias, "id_source");
+
+/// The column a hydration read returns each row's identity in, whatever the identity is named.
+pub fn hydration_id_column() -> String {
+    format!("{}_id", hydration_node_alias())
+}
 
 // _orbit_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {

@@ -2,7 +2,7 @@
 //! states what is reused and `Catalog::materialize` decides how.
 
 use query_data_model::Catalog;
-use query_data_model::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use query_data_model::constants::TRAVERSAL_PATH_COLUMN;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     JoinKind, Relation, RelationalBuilder, RelationalError, RelationalPlan, Subquery,
@@ -37,6 +37,8 @@ pub struct BindingSource {
     pub node: String,
     pub alias: String,
     pub column: String,
+    /// The node's identity column, which the binding's column carries.
+    pub identity: String,
     pub property_source: Option<String>,
     pub traversal_path: Option<Column>,
 }
@@ -46,7 +48,7 @@ impl BindingSource {
         if property == TRAVERSAL_PATH_COLUMN {
             return self.traversal_path.clone();
         }
-        if property == DEFAULT_PRIMARY_KEY {
+        if property == self.identity {
             Some(Column::new(&self.alias, &self.column))
         } else {
             self.property_source
@@ -55,11 +57,12 @@ impl BindingSource {
         }
     }
 
-    pub(super) fn table(alias: &str) -> Self {
+    pub(super) fn table(alias: &str, identity: &str) -> Self {
         Self {
             node: alias.into(),
             alias: alias.into(),
-            column: DEFAULT_PRIMARY_KEY.into(),
+            column: identity.into(),
+            identity: identity.into(),
             property_source: Some(alias.into()),
             traversal_path: Some(Column::new(alias, TRAVERSAL_PATH_COLUMN)),
         }

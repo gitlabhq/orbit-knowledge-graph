@@ -131,7 +131,7 @@ where
         let read = self.pattern.node_read(&mut self.reads, node)?;
         self.root = Some(self.reads.read(&read, None)?);
         self.outputs = node.outputs();
-        Ok(vec![BindingSource::table(&node.alias)])
+        Ok(vec![BindingSource::table(&node.alias, &node.id_column)])
     }
 
     fn binding(&self, node: &str) -> Option<&BindingSource> {
@@ -171,6 +171,7 @@ where
             node: node.to_string(),
             alias: alias.to_string(),
             column: column.to_string(),
+            identity: self.pattern.nodes[node].id_column.clone(),
             property_source: property_source.map(str::to_string),
             traversal_path,
         });
@@ -183,7 +184,7 @@ where
         self.set_binding(
             &node.alias,
             &node.alias,
-            DEFAULT_PRIMARY_KEY,
+            &node.id_column,
             Some(&node.alias),
             traversal_path,
         );
@@ -212,8 +213,9 @@ where
         let mut node = self.pattern.uncovered_node(alias);
         if let Some(ids) = self.reached_ids(alias) {
             node.predicates
-                .push(membership(Column::new(alias, DEFAULT_PRIMARY_KEY), ids));
+                .push(membership(Column::new(alias, &node.id_column), ids));
         }
+        let id_column = node.id_column.clone();
         self.attach_table(&node, |builder| {
             let binding = builder.binding(alias).ok_or_else(|| {
                 QueryError::Lowering(format!(
@@ -221,7 +223,7 @@ where
                 ))
             })?;
             Ok((
-                Column::new(alias, DEFAULT_PRIMARY_KEY),
+                Column::new(alias, &id_column),
                 Column::new(&binding.alias, &binding.column),
             ))
         })
@@ -290,12 +292,12 @@ where
         }
         let source = self.node_read(node)?;
         let id = Projection::new(
-            OutputValue::Column(Column::new(&node.alias, DEFAULT_PRIMARY_KEY)),
-            DEFAULT_PRIMARY_KEY,
+            OutputValue::Column(Column::new(&node.alias, &node.id_column)),
+            &node.id_column,
         );
         let ids = (
             self.reads.project(&source, None, &[id])?,
-            DEFAULT_PRIMARY_KEY.to_string(),
+            node.id_column.clone(),
         );
         self.set_ids(&node.alias, ids.clone());
         Ok(ids)
@@ -337,7 +339,8 @@ where
         if let Some(ids) = self.ids(node) {
             return Ok(Some(ids.clone()));
         }
-        let Some(ids) = self.ids_through_holder(node, DEFAULT_PRIMARY_KEY)? else {
+        let id_column = self.pattern.nodes[node].id_column.clone();
+        let Some(ids) = self.ids_through_holder(node, &id_column)? else {
             return Ok(None);
         };
         self.set_ids(node, ids.clone());
@@ -361,9 +364,9 @@ where
     fn ids_reached_by(&mut self, source: &Rel, column: &str) -> Result<IdSet> {
         let id = Projection::new(
             OutputValue::Column(Column::new(id_source_alias(), column)),
-            DEFAULT_PRIMARY_KEY,
+            id_set_column(),
         );
         let ids = self.reads.project(source, Some(id_source_alias()), &[id])?;
-        Ok((ids, DEFAULT_PRIMARY_KEY.to_string()))
+        Ok((ids, id_set_column().to_string()))
     }
 }

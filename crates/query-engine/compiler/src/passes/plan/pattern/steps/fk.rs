@@ -2,7 +2,6 @@
 //! by the other endpoint, and expose the pair as edge columns.
 
 use crate::passes::codegen::SqlBackend;
-use query_data_model::constants::*;
 
 use super::super::{EdgeRelation, Fk};
 use super::RelationBuilder;
@@ -53,7 +52,7 @@ where
                     node.columns = Vec::new();
                     if let Some(reached) = reached {
                         node.predicates.push(membership(
-                            Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
+                            Column::new(&node.alias, &node.id_column),
                             reached,
                         ));
                     }
@@ -103,16 +102,14 @@ where
             node.predicates.push(membership(key_column.clone(), ids));
         }
         if let Some(ids) = self.reached_ids(&key.node) {
-            node.predicates.push(membership(
-                Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
-                ids,
-            ));
+            node.predicates
+                .push(membership(Column::new(&node.alias, &node.id_column), ids));
         }
         let holder_binding = self.binding(&key.node).cloned();
         let joined_through_endpoint = self.root.is_some() && holder_binding.is_none();
         self.attach_table(&node, |builder| match &holder_binding {
             Some(binding) => Ok((
-                Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
+                Column::new(&node.alias, &node.id_column),
                 Column::new(&binding.alias, &binding.column),
             )),
             None => {
@@ -129,9 +126,15 @@ where
         let pattern = self.pattern;
         let (source, target) = relation.stored_endpoints();
         let (source_id, target_id) = if key.node == source {
-            (DEFAULT_PRIMARY_KEY, key.column.as_str())
+            (
+                pattern.nodes[source].id_column.as_str(),
+                key.column.as_str(),
+            )
         } else {
-            (key.column.as_str(), DEFAULT_PRIMARY_KEY)
+            (
+                key.column.as_str(),
+                pattern.nodes[target].id_column.as_str(),
+            )
         };
         let entity =
             |node: &str| OutputValue::Text(pattern.nodes[node].entity.clone().unwrap_or_default());

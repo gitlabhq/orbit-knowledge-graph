@@ -4,7 +4,6 @@ use query_data_model::{Catalog, DataType};
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::Direction;
-use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     Column, Expr, Operation, Relation, RelationalBuilder, RelationalError, Selection,
@@ -528,8 +527,9 @@ fn return_columns(
         else {
             continue;
         };
-        let redaction_column = redaction_column(model, entity_id).unwrap_or(DEFAULT_PRIMARY_KEY);
-        let needs_separate_pk = redaction_column != DEFAULT_PRIMARY_KEY;
+        let id_column = crate::logical::columns::identity_column(model, entity_id)?;
+        let redaction_column = redaction_column(model, entity_id).unwrap_or(id_column);
+        let needs_separate_pk = redaction_column != id_column;
         let authorization_id = if needs_separate_pk {
             let table_alias = table_alias.as_deref().ok_or_else(|| {
                 QueryError::PipelineInvariant(format!(

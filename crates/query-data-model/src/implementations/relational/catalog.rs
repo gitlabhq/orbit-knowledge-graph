@@ -43,6 +43,11 @@ impl<B: StorageBackend> Catalog<B>
 where
     B::Store: RelationalFacts,
 {
+    /// The column that holds the entity's identity in its home store on this connection.
+    pub fn identity_column(&self, entity: EntityId) -> Option<&str> {
+        Some(self.source(entity)?.1.key.as_str())
+    }
+
     pub fn table_of(&self, entity: EntityId) -> Option<&str> {
         self.source(entity)?.1.table.as_deref()
     }

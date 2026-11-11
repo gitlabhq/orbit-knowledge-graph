@@ -83,6 +83,21 @@ pub fn redaction_column(model: &Catalog<impl SqlBackend>, entity: EntityId) -> O
     })
 }
 
+/// The column holding the entity's identity on the catalog's connection; an entity this
+/// connection does not store has none, and no SQL plan reads it.
+pub fn identity_column(
+    model: &Catalog<impl SqlBackend>,
+    entity: EntityId,
+) -> crate::error::Result<&str> {
+    model.identity_column(entity).ok_or_else(|| {
+        crate::error::QueryError::Lowering(format!(
+            "{} has no identity column on connection {}",
+            model.graph().entity(entity).name,
+            model.connection()
+        ))
+    })
+}
+
 /// Free text: a uuid, or a string its store does not declare low selectivity.
 pub fn free_text(model: &Catalog<impl SqlBackend>, property: PropertyId) -> bool {
     match model.graph().property(property).data_type {
