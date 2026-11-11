@@ -23,7 +23,6 @@ impl Default for Style {
 pub struct Domain {
     pub name: String,
     pub description: Option<String>,
-    pub overview: bool,
 }
 
 #[derive(Debug, Default)]

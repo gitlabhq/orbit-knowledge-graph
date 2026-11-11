@@ -58,9 +58,7 @@ impl GraphCatalog {
             .or_insert_with(|| Domain {
                 name: name.to_string(),
                 description: None,
-                overview: false,
             });
-        domain.overview |= fragment.domain_overview;
         let Some(description) = fragment.domain_description.clone() else {
             return;
         };
