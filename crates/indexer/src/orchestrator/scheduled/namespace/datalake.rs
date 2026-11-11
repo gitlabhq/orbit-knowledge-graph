@@ -10,7 +10,8 @@ use orbit_log_fields::{error, warn};
 use orbit_utils::traversal_path::{TOP_LEVEL_PREFIX_REGEX, TraversalPath};
 use query_data_model::catalog::Sources;
 use query_data_model::catalog::sources::DataSource;
-use query_data_model::catalog::sources::{PathResolution, ReindexTrigger};
+use query_data_model::catalog::sources::ReindexTrigger;
+use query_data_model::spec::PathSpec;
 
 use crate::clickhouse::{ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT};
 use crate::orchestrator::dispatch::NamespaceDispatchRequest;
@@ -284,10 +285,10 @@ fn render_change_branch(source_table: &ReindexTrigger) -> String {
         .replace("{{root_namespace_path_pattern}}", TOP_LEVEL_PREFIX_REGEX)
 }
 
-fn path_expression(resolution: &PathResolution) -> String {
-    match resolution {
-        PathResolution::Column(column) => column.clone(),
-        PathResolution::Dictionary {
+fn path_expression(path: &PathSpec) -> String {
+    match path {
+        PathSpec::Column(column) => column.clone(),
+        PathSpec::Dictionary {
             dictionary,
             key_column,
         } => format!(
@@ -363,7 +364,7 @@ mod tests {
         ReindexTrigger {
             table: table.to_string(),
             target: "WorkItem".to_string(),
-            traversal_path: PathResolution::Column("traversal_path".to_string()),
+            traversal_path: PathSpec::Column("traversal_path".to_string()),
             watermark: "_siphon_watermark".to_string(),
         }
     }
@@ -596,7 +597,7 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#,
             [ReindexTrigger {
                 table: "siphon_projects".to_string(),
                 target: "Project".to_string(),
-                traversal_path: PathResolution::Dictionary {
+                traversal_path: PathSpec::Dictionary {
                     dictionary: "project_traversal_paths_dict".to_string(),
                     key_column: "id".to_string(),
                 },

@@ -93,3 +93,25 @@ fn source_fragments_reject_unknown_names() {
                    from: {field: a, kind: Note}\n        to: {field: b, kind: Note}\n";
     assert!(load_error(variant).contains("unknown variant Note -[AUTHORED]-> Note"));
 }
+
+#[test]
+fn source_fragments_reject_fields_outside_their_section() {
+    let entity =
+        "entities:\n  File: {tables: [t], order_by: [id], query: generated, lookups: []}\n";
+    assert!(
+        load_error(entity)
+            .contains("pipeline File sets lookups, which the entities section does not allow")
+    );
+    let relationship = "relationships:\n  AUTHORED:\n    pipelines:\n      AUTHORED_t: \
+                        {tables: [t], order_by: [id], query: generated, from: {field: a, kind: User}}\n";
+    assert!(
+        load_error(relationship)
+            .contains("pipeline AUTHORED_t omits to, which the relationships section requires")
+    );
+    let derived = "derived:\n  D: {emits: [AUTHORED], tables: [t], order_by: [id], \
+                   query: d.sql.j2, transform: d, global: true}\n";
+    assert!(
+        load_error(derived)
+            .contains("pipeline D sets global, which the derived section does not allow")
+    );
+}
