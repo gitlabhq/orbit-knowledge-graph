@@ -187,7 +187,7 @@ fn search_with_wildcard_columns() {
 #[test]
 fn traversal_with_columns() {
     let query =
-        "MATCH (u:User {id: 1})-[:CONTAINS]->(p:Project) RETURN u{.username}, p{.name} LIMIT 10";
+        "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) RETURN u{.username}, p{.name} LIMIT 10";
 
     let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
@@ -227,7 +227,7 @@ fn path_finding_uses_orbit_path_not_node_columns() {
 #[test]
 fn result_context_populated() {
     let query =
-        "MATCH (u:User {id: 1})-[:CONTAINS]->(p:Project) RETURN u{.username}, p{.name} LIMIT 10";
+        "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) RETURN u{.username}, p{.name} LIMIT 10";
 
     let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
     let rendered = result.base.render();
