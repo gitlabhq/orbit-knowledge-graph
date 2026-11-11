@@ -7,18 +7,19 @@ query:
   gql: |
     MATCH (p:Package {id: 8001})-[:HAS_PACKAGE_FILE]->(f:PackageFile) RETURN p.id, f.file_name
 
-logical:
-  expect: ["(EdgeScan HAS_PACKAGE_FILE p->f AS e0)"]
-
 physical:
   clickhouse:
-    planned:
-      expect:
-        - (Filter f.package_id = 8001, ... (_))
-        - (Project p.id AS id (Filter p._deleted = false (Deduplicate LimitBy ... (Filter p.id = 8001 (_)))))
-        - (Project f.package_id AS _orbit_e0_src, ... (_))
-        - (Filter f.package_id = 8001, ... (Deduplicate Final (Scan Table(gl_package_file) AS f)))
-      reject:
-        - (Deduplicate LimitBy ... (Scan Table(gl_package_file) AS f))
-        - (Scan Table(gl_edge) ...)
-        - (Project f.id AS _orbit_e0_src, f.package_id AS _orbit_e0_dst, ... (_))
+    normalize:
+      input:
+        expect: ["(EdgeScan HAS_PACKAGE_FILE p->f AS e0)"]
+    plan_clickhouse:
+      query_plan:
+        expect:
+          - (Filter f.package_id = 8001, ... (_))
+          - (Project p.id AS id (Filter p._deleted = false (Deduplicate LimitBy ... (Filter p.id = 8001 (_)))))
+          - (Project f.package_id AS _orbit_e0_src, ... (_))
+          - (Filter f.package_id = 8001, ... (Deduplicate Final (Scan Table(gl_package_file) AS f)))
+        reject:
+          - (Deduplicate LimitBy ... (Scan Table(gl_package_file) AS f))
+          - (Scan Table(gl_edge) ...)
+          - (Project f.id AS _orbit_e0_src, f.package_id AS _orbit_e0_dst, ... (_))

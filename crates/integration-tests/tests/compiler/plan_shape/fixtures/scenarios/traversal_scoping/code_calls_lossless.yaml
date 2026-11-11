@@ -1,4 +1,3 @@
----
 cases:
   - name: Code-intel CALLS traversal returns caller-callee pair without loss under scoping
     query:
@@ -19,7 +18,9 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - gl_definition AS _orbit_scope WHERE
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - gl_definition AS _orbit_scope WHERE
+              not_contains: []

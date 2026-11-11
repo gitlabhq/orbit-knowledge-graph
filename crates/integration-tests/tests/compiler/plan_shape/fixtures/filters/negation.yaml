@@ -7,13 +7,15 @@ cases:
         MATCH (d:Definition)
         WHERE d.id >= 1 AND d.id <= 10 AND NOT d.id IN [3, 4]
         RETURN d.name
-    logical:
-      expect: ["(Filter NOT (d.id IN [3, 4]) (_))"]
     physical:
       clickhouse:
-        planned:
-          expect:
-            - (Filter NOT (d.id IN [3, 4]), d._deleted = false (Deduplicate LimitBy ... (Filter d.id >= 1, d.id <= 10 (_))))
+        normalize:
+          input:
+            expect: ["(Filter NOT (d.id IN [3, 4]) (_))"]
+        plan_clickhouse:
+          query_plan:
+            expect:
+              - (Filter NOT (d.id IN [3, 4]), d._deleted = false (Deduplicate LimitBy ... (Filter d.id >= 1, d.id <= 10 (_))))
 
   - name: A complemented NOT becomes an ordinary node filter
     query:
@@ -23,11 +25,13 @@ cases:
         MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition)
         WHERE NOT b.name = 'skip'
         RETURN b.name
-    logical:
-      expect:
-        - "(Filter b.name != 'skip' (NodeScan Definition AS b))"
-      reject: ["(Filter NOT (b.name = 'skip') (_))"]
     physical:
       clickhouse:
-        planned:
-          expect: ["(Filter b.name != 'skip', ... (_))"]
+        normalize:
+          input:
+            expect:
+              - "(Filter b.name != 'skip' (NodeScan Definition AS b))"
+            reject: ["(Filter NOT (b.name = 'skip') (_))"]
+        plan_clickhouse:
+          query_plan:
+            expect: ["(Filter b.name != 'skip', ... (_))"]

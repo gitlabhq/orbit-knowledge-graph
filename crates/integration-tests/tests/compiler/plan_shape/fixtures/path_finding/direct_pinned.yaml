@@ -6,15 +6,17 @@ query:
   gql: |
     MATCH p = ANY SHORTEST (a:User {id: 1})-[:MEMBER_OF*1..1]->(b:Group {id: 2}) RETURN p
 
-logical:
-  expect: ["(Input path_finding (...))"]
-
 physical:
   clickhouse:
-    planned:
-      expect: ["(PathFinding a->b depth=1 forward=1 backward=0 scoped=false ... (_) (_))"]
-    emitted:
-      ctes:
-        exact_order: [_orbit_forward]
-      expect: ["(Filter _orbit_e1.source_id = 1, ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_e1)))"]
-      reject: ["(Scan Table(gl_user) ...)", "(CTE _orbit_backward (_))"]
+    normalize:
+      input:
+        expect: ["(Input path_finding (...))"]
+    plan_clickhouse:
+      query_plan:
+        expect: ["(PathFinding a->b depth=1 forward=1 backward=0 scoped=false ... (_) (_))"]
+    response_policy:
+      node:
+        ctes:
+          exact_order: [_orbit_forward]
+        expect: ["(Filter _orbit_e1.source_id = 1, ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_e1)))"]
+        reject: ["(Scan Table(gl_user) ...)", "(CTE _orbit_backward (_))"]

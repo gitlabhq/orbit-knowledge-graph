@@ -1,13 +1,51 @@
 # Planner optimization coverage
 
 Run `mise test:plan-shape`. The runner discovers YAML files recursively under
-`fixtures/`. Each fixture checks normalized input, the selected plan, the lowered
-SQL AST, and/or the final secured AST. Most fixtures run through both JSON and GQL.
+`fixtures/`. Each fixture runs the production compiler pipeline for each
+frontend and backend, and checks the state that named phases leave behind. Most
+fixtures run through both JSON and GQL.
 
-The emitted AST includes the ClickHouse text-excerpt pass and the row window
-pass, so `Limit` shows the fetched rows (the page plus one probe row) and
-`Offset` shows the lowered SKIP. In the logical tree, `Limit` and `Offset` show
-the requested LIMIT and SKIP.
+Assertions live under `physical.<backend>.<phase>.<slot>`:
+
+```yaml
+physical:
+  clickhouse:
+    normalize:
+      input: {expect: ["(Limit 2 (Input traversal (...)))"]}
+    plan_clickhouse:
+      query_plan: {expect: ["(Scan Table(gl_user) AS u)"], point_lookup: true}
+    response_policy:
+      node: {expect: ["(Limit 3 (Project u.username AS u_username (_)))"]}
+    settings:
+      query_config: {equals: {transform_null_in: "0"}, absent: [join_order_algorithm]}
+    hydrate_plan:
+      hydration_plan: static
+    security:
+      node: {expect: ["(Filter false, ... (_))"]}
+    codegen:
+      output:
+        sql: {contains: [gl_merge_request], not_contains: [gl_edge]}
+        indexes: [{table: gl_merge_request, name: idx_title}]
+```
+
+A phase key must name a phase of that pipeline, and each slot must be a state
+field the phase writes. The runner rejects other keys. Each slot has one
+contract:
+
+| Slot | Contract |
+|---|---|
+| `input` | Patterns on the logical tree |
+| `query_plan` | Patterns on the planned tree, and `point_lookup` |
+| `node` | Patterns on the SQL AST |
+| `query_config` | `equals` and `absent` on the ClickHouse settings |
+| `hydration_plan` | `none`, `static`, or `dynamic` |
+| `output` | `sql` text checks, and `indexes` that the layout declares and the SQL reads |
+
+After `paginate`, `Limit` shows the fetched rows (the page plus one probe row)
+and `Offset` shows the lowered SKIP. In `input`, `Limit` and `Offset` show the
+requested LIMIT and SKIP. `security` sets the user, with the same shape as a
+query scenario's `config.security`. Hydration fixtures run the hydration
+pipeline, which has no `normalize` or `paginate` phase.
 
 Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
 for one fixture. Other fixtures keep the default ontology.
@@ -26,34 +64,13 @@ is a default for each case, and each case needs its own `name`.
 
 The fixtures cover access-path choices and their important eligibility guards.
 
-Final-output assertions use these optional ClickHouse fields:
-
-```yaml
-physical:
-  clickhouse:
-    final_ast:
-      expect: ["(Filter false, ... (_))"]
-    sql:
-      contains: ["SETTINGS use_query_cache = 0"]
-      not_contains: ["gl_edge"]
-    indexes:
-      - { table: gl_merge_request, name: idx_title }
-    settings:
-      contains: ["transform_null_in = 0"]
-```
-
-`sql` checks the rendered query. `indexes` checks the ClickHouse layout and
-requires the rendered SQL to read that table. `settings` checks the rendered
-SETTINGS clause. `hydration` checks the hydration plan kind: `none`, `static`,
-or `dynamic`. Data-correctness scenarios reject these fields.
-
 `scenarios/` holds the compiler checks for the data-correctness scenarios. It
 mirrors the scenario tree: `scenarios/search/filter_starts_with.yaml` checks the
 query in `server/data_correctness/scenarios/search/filter_starts_with.yaml`.
 Production route cases stay in `edge_scans/production_variant_routes.yaml`.
 
 CTE assertions refer to top-level named query definitions, not execution order.
-Use one of these forms in a planned or emitted assertion block:
+Use one of these forms in a pattern block:
 
 ```yaml
 ctes:
@@ -93,8 +110,8 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
   The YAML fixture independently covers the large dynamic mode.
 - The explain view flattens associative OR expressions. Static prefix fixtures
   verify predicate content, but do not assert the internal balanced-tree depth.
-- Scope enforcement, role scans, virtual-property hydration, and backend
-  code-generation optimizations are outside this harness.
+- Virtual-property hydration and backend code-generation optimizations are
+  outside this harness.
 
 ## Keep in Rust
 

@@ -1,4 +1,3 @@
----
 cases:
   - name: ends_with filter returns the matching username regardless of case and prunes granules with the ngram skip index
     query:
@@ -16,10 +15,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - endsWith(lower(u.username), lower('ICE'))
-          not_contains: []
-        indexes:
-          - table: gl_user
-            name: idx_username_ngram
+        codegen:
+          output:
+            sql:
+              contains:
+                - endsWith(lower(u.username), lower('ICE'))
+              not_contains: []
+            indexes:
+              - table: gl_user
+                name: idx_username_ngram

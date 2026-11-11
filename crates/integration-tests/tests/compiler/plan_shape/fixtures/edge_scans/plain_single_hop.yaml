@@ -6,26 +6,32 @@ query:
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN a, b
 
-logical:
-  expect: ["(EdgeScan CALLS a->b AS e0)"]
-
 physical:
   clickhouse:
-    planned:
-      bind:
-        - (CTE $edge (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.source_id = 1, ... (_)))))
-        - (CTE $ids (Project _orbit_id_source.target_id AS id (_)))
-      expect:
-        - (Filter b._deleted = false (Deduplicate LimitBy ... (Filter b.id IN $ids.id (_))))
-      reject: ["(Deduplicate Final (Scan Table(gl_definition) AS b))"]
-    emitted:
-      expect:
-        - (Join ON b.id = _orbit_edge_0.target_id (_) (_))
-        - (Filter _orbit_edge_0.source_id = 1, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
-        - (Filter StartsWith(b.traversal_path, scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), b.id IN ?.id (Scan Table(gl_definition) AS b))
-      reject: ["(Deduplicate Final (Scan Table(gl_definition) AS b))"]
+    normalize:
+      input:
+        expect: ["(EdgeScan CALLS a->b AS e0)"]
+    plan_clickhouse:
+      query_plan:
+        bind:
+          - (CTE $edge (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.source_id = 1, ... (_)))))
+          - (CTE $ids (Project _orbit_id_source.target_id AS id (_)))
+        expect:
+          - (Filter b._deleted = false (Deduplicate LimitBy ... (Filter b.id IN $ids.id (_))))
+        reject: ["(Deduplicate Final (Scan Table(gl_definition) AS b))"]
+    response_policy:
+      node:
+        expect:
+          - (Join ON b.id = _orbit_edge_0.target_id (_) (_))
+          - (Filter _orbit_edge_0.source_id = 1, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
+          - (Filter StartsWith(b.traversal_path, scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_definition AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), b.id IN ?.id (Scan Table(gl_definition) AS b))
+        reject: ["(Deduplicate Final (Scan Table(gl_definition) AS b))"]
   duckdb:
-    planned:
-      expect: ["(Join ON b.id = _orbit_edge_0.target_id (_) (Bind b (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS b)))))", "(Join ON a.id = _orbit_edge_0.source_id (_) (Bind a (Filter ... (Bind a (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS a)))))))"]
-      ctes: { absent: true }
-      reject: ["(SemiJoin ... (_) (_))"]
+    normalize:
+      input:
+        expect: ["(EdgeScan CALLS a->b AS e0)"]
+    plan_duckdb:
+      query_plan:
+        expect: ["(Join ON b.id = _orbit_edge_0.target_id (_) (Bind b (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS b)))))", "(Join ON a.id = _orbit_edge_0.source_id (_) (Bind a (Filter ... (Bind a (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS a)))))))"]
+        ctes: { absent: true }
+        reject: ["(SemiJoin ... (_) (_))"]

@@ -5,19 +5,22 @@ cases:
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username"],"filters":{"username":{"eq":"admin"}}}],"limit":10}
       gql: |
         MATCH (u:User {username: 'admin'}) RETURN u.username LIMIT 10
-    logical:
-      expect: ["(Filter u.username = 'admin' (NodeScan User AS u))"]
     physical:
       clickhouse:
-        planned:
-          bind:
-            - (CTE $candidates (Project u.id AS id (Filter u.username = 'admin', ... (Scan Table(gl_user) AS u))))
-          expect:
-            - (Filter u.username = 'admin', u._deleted = false (Deduplicate LimitBy u.id (Filter u.id IN $candidates.id (Scan Table(gl_user) AS u))))
-          reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
-        emitted:
-          expect: ["(Limit 11 (_))", "(Filter u.id IN ?.id (Scan Table(gl_user) AS u))"]
-          reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
+        normalize:
+          input:
+            expect: ["(Filter u.username = 'admin' (NodeScan User AS u))"]
+        plan_clickhouse:
+          query_plan:
+            bind:
+              - (CTE $candidates (Project u.id AS id (Filter u.username = 'admin', ... (Scan Table(gl_user) AS u))))
+            expect:
+              - (Filter u.username = 'admin', u._deleted = false (Deduplicate LimitBy u.id (Filter u.id IN $candidates.id (Scan Table(gl_user) AS u))))
+            reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
+        response_policy:
+          node:
+            expect: ["(Limit 11 (_))", "(Filter u.id IN ?.id (Scan Table(gl_user) AS u))"]
+            reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
 
   - name: A multi-filter ordered single-node search keeps one node read without a join
     query:
@@ -27,14 +30,17 @@ cases:
         MATCH (u:User)
         WHERE u.username STARTS WITH 'admin' AND u.state IN ['active', 'blocked'] AND u.created_at >= '2024-01-01'
         RETURN u.username, u.state, u.created_at ORDER BY u.created_at DESC LIMIT 50
-    logical:
-      expect: ["(NodeScan User AS u)"]
     physical:
       clickhouse:
-        planned:
-          expect:
-            - (Deduplicate LimitBy u.id (Filter u.id IN ?.id, ... (Scan Table(gl_user) AS u)))
-          reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
-        emitted:
-          expect: ["(Limit 51 (_))", "(Sort NullIf(u.created_at, '1970-01-01 00:00:00') DESC (_))"]
-          reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
+        normalize:
+          input:
+            expect: ["(NodeScan User AS u)"]
+        plan_clickhouse:
+          query_plan:
+            expect:
+              - (Deduplicate LimitBy u.id (Filter u.id IN ?.id, ... (Scan Table(gl_user) AS u)))
+            reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
+        response_policy:
+          node:
+            expect: ["(Limit 51 (_))", "(Sort NullIf(u.created_at, '1970-01-01 00:00:00') DESC (_))"]
+            reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]

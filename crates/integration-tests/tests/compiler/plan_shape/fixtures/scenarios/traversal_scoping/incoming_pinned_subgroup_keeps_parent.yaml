@@ -1,4 +1,3 @@
----
 cases:
   - name: Incoming containment from a pinned subgroup keeps its ancestor's scope
     query:
@@ -12,7 +11,9 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - gl_edge
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - gl_edge
+              not_contains: []

@@ -218,8 +218,8 @@ fn property_filter(alias: &str, property: &str, filter: &InputFilter) -> String 
     format!("{alias}.{property} {operator} {value}")
 }
 
-pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
-    let planned = match plan {
+pub fn planned(plan: &QueryPlan) -> Tree {
+    match plan {
         QueryPlan::Traversal(plan) => execution_tree(&plan.operation.execution),
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
@@ -403,8 +403,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 })
                 .collect(),
         ),
-    };
-    (planned, emitted(ast))
+    }
 }
 
 pub fn emitted(ast: &Node) -> Tree {

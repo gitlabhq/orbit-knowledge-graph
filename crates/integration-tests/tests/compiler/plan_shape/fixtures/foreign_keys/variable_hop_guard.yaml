@@ -6,12 +6,14 @@ query:
   gql: |
     MATCH (u:User {id: 1})-[:AUTHORED*2]->(mr:MergeRequest) RETURN u, mr
 
-logical:
-  expect:
-    - (NodeScan User AS u)
-
 physical:
   clickhouse:
-    planned:
-      expect:
-        - (Scan Table(gl_edge) ...)
+    normalize:
+      input:
+        expect:
+          - (NodeScan User AS u)
+
+    plan_clickhouse:
+      query_plan:
+        expect:
+          - (Scan Table(gl_edge) ...)

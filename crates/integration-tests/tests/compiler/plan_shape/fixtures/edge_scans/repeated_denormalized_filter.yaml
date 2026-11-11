@@ -8,12 +8,14 @@ query:
     WHERE a.definition_type = 'function' AND a.definition_type = 'class'
     RETURN count(b) AS n
 
-logical:
-  expect:
-    - (Aggregate COUNT(b) AS n (_))
-
 physical:
   clickhouse:
-    planned:
-      expect:
-        - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:function'], _orbit_edge_0.source_tags HAS ANY ['definition_type:class'], ... (_))
+    normalize:
+      input:
+        expect:
+          - (Aggregate COUNT(b) AS n (_))
+
+    plan_clickhouse:
+      query_plan:
+        expect:
+          - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:function'], _orbit_edge_0.source_tags HAS ANY ['definition_type:class'], ... (_))

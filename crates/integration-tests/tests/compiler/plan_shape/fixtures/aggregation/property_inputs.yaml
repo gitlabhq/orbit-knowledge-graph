@@ -13,26 +13,37 @@ query:
     MATCH (d:Definition) WHERE d.id IN [1, 2]
     RETURN d.name, count(d) AS n LIMIT 5
 
-logical:
-  expect:
-    - (Filter d.id IN [1, 2] (NodeScan Definition AS d))
-    - (Aggregate group d.name AS d_name, COUNT(d) AS n (_))
-
 physical:
   clickhouse:
-    planned:
-      expect:
-        - (Deduplicate LimitBy ... (_))
-        - (Scan Table(gl_definition) AS d)
-        - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
-    emitted:
-      expect:
-        - (Aggregate group d.name, Concat(Substring(d.name, 1, 349525), If(ByteLength(d.name) > ByteLength(Substring(d.name, 1, 349525)), ' [truncated]', '')) AS d_name, COUNT() AS n (_))
+    normalize:
+      input:
+        expect:
+          - (Filter d.id IN [1, 2] (NodeScan Definition AS d))
+          - (Aggregate group d.name AS d_name, COUNT(d) AS n (_))
+
+    plan_clickhouse:
+      query_plan:
+        expect:
+          - (Deduplicate LimitBy ... (_))
+          - (Scan Table(gl_definition) AS d)
+          - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
+    response_policy:
+      node:
+        expect:
+          - (Aggregate group d.name, Concat(Substring(d.name, 1, 349525), If(ByteLength(d.name) > ByteLength(Substring(d.name, 1, 349525)), ' [truncated]', '')) AS d_name, COUNT() AS n (_))
   duckdb:
-    planned:
-      expect:
-        - (Project (Filter ... (Bind d (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS d))))))
-        - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
-    emitted:
-      expect:
-        - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
+    normalize:
+      input:
+        expect:
+          - (Filter d.id IN [1, 2] (NodeScan Definition AS d))
+          - (Aggregate group d.name AS d_name, COUNT(d) AS n (_))
+
+    plan_duckdb:
+      query_plan:
+        expect:
+          - (Project (Filter ... (Bind d (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS d))))))
+          - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
+    paginate:
+      node:
+        expect:
+          - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))

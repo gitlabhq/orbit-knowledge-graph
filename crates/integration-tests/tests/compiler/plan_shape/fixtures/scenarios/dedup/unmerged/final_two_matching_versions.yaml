@@ -1,4 +1,3 @@
----
 cases:
   - name: A FINAL read over two matching versions of a merge request returns the latest one once
     query:
@@ -9,10 +8,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - AS mr FINAL
-          not_contains:
-            - tuple(mr.traversal_path, mr.id) IN
+        codegen:
+          output:
+            sql:
+              contains:
+                - AS mr FINAL
+              not_contains:
+                - tuple(mr.traversal_path, mr.id) IN
     missing_frontends:
       json: The original query scenario supplies only GQL.

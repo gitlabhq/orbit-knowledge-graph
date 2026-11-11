@@ -1,4 +1,3 @@
----
 cases:
   - name: starts_with filter returns rows with matching prefix regardless of case and prunes granules with the ngram skip index
     query:
@@ -17,10 +16,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - startsWith(lower(u.username), lower('ALI'))
-          not_contains: []
-        indexes:
-          - table: gl_user
-            name: idx_username_ngram
+        codegen:
+          output:
+            sql:
+              contains:
+                - startsWith(lower(u.username), lower('ALI'))
+              not_contains: []
+            indexes:
+              - table: gl_user
+                name: idx_username_ngram

@@ -1,4 +1,3 @@
----
 cases:
   - name: A filtered Project join does not resurrect a version before its tombstone
     query:
@@ -13,9 +12,11 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - AS p FINAL
-            - p.name = 'project'
-            - p._deleted = false
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - AS p FINAL
+                - p.name = 'project'
+                - p._deleted = false
+              not_contains: []

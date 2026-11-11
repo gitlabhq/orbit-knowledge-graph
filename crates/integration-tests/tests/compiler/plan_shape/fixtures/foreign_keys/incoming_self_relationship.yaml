@@ -14,16 +14,18 @@ query:
     MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline)
     RETURN canceling.id, canceled.id
 
-logical:
-  expect:
-    - (EdgeScan AUTO_CANCELED_BY canceled->canceling AS e0)
-
 physical:
   clickhouse:
-    planned:
-      expect:
-        - (Scan Table(gl_pipeline) AS canceled)
-        - (Project canceled.id AS _orbit_e0_src, canceled.auto_canceled_by_id AS _orbit_e0_dst, ... (_))
-      reject:
-        - (Join ON canceled.id = canceling.auto_canceled_by_id (_) (_))
-        - (Project canceled.auto_canceled_by_id AS _orbit_e0_src, canceled.id AS _orbit_e0_dst, ... (_))
+    normalize:
+      input:
+        expect:
+          - (EdgeScan AUTO_CANCELED_BY canceled->canceling AS e0)
+
+    plan_clickhouse:
+      query_plan:
+        expect:
+          - (Scan Table(gl_pipeline) AS canceled)
+          - (Project canceled.id AS _orbit_e0_src, canceled.auto_canceled_by_id AS _orbit_e0_dst, ... (_))
+        reject:
+          - (Join ON canceled.id = canceling.auto_canceled_by_id (_) (_))
+          - (Project canceled.auto_canceled_by_id AS _orbit_e0_src, canceled.id AS _orbit_e0_dst, ... (_))

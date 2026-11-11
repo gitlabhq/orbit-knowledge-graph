@@ -1,4 +1,3 @@
----
 cases:
   - name: A time window filter compares the stored column directly so the minmax index can prune
     query:
@@ -9,10 +8,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - "mr.merged_at >= "
-          not_contains:
-            - nullIf
+        codegen:
+          output:
+            sql:
+              contains:
+                - "mr.merged_at >= "
+              not_contains:
+                - nullIf
     missing_frontends:
       json: The original query scenario supplies only GQL.

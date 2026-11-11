@@ -7,12 +7,14 @@ query:
     MATCH p = ANY SHORTEST (u:User {id: 1, username: 'nonexistent'})-[:MEMBER_OF*1..2]->(g:Group {id: 100})
     RETURN p
 
-logical:
-  expect:
-    - (NodeScan User AS u)
-
 physical:
   clickhouse:
-    emitted:
-      expect:
-        - (Filter u.username = 'nonexistent', ... (_))
+    normalize:
+      input:
+        expect:
+          - (NodeScan User AS u)
+
+    response_policy:
+      node:
+        expect:
+          - (Filter u.username = 'nonexistent', ... (_))

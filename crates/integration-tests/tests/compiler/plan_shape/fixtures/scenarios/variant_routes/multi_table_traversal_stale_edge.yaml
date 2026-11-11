@@ -1,4 +1,3 @@
----
 cases:
   - name: Variable-depth traversal across both edge tables skips edges whose latest version is a tombstone in either table
     ontology_overlay: variant_routes
@@ -12,8 +11,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - gl_edge
-            - gl_code_edge
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - gl_edge
+                - gl_code_edge
+              not_contains: []

@@ -7,14 +7,19 @@ query:
   gql: |
     MATCH (caller:Definition)-[:CALLS]->(callee:Definition {id: 12001}) RETURN caller.id, callee.id
 
-logical:
-  expect: ["(EdgeScan CALLS caller->callee AS e0)"]
-
 physical:
   clickhouse:
-    planned:
-      expect: ["(Scan Table(gl_code_edge_by_target) AS _orbit_edge_0)"]
-      reject: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"]
+    normalize:
+      input:
+        expect: ["(EdgeScan CALLS caller->callee AS e0)"]
+    plan_clickhouse:
+      query_plan:
+        expect: ["(Scan Table(gl_code_edge_by_target) AS _orbit_edge_0)"]
+        reject: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"]
   duckdb:
-    planned:
-      expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]
+    normalize:
+      input:
+        expect: ["(EdgeScan CALLS caller->callee AS e0)"]
+    plan_duckdb:
+      query_plan:
+        expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]

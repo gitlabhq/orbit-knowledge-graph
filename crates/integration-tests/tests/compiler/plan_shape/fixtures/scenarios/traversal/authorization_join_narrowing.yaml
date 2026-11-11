@@ -1,4 +1,3 @@
----
 cases:
   - name: pinned_target_narrows_the_caller_join
     query:
@@ -11,11 +10,13 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - caller.id IN (SELECT id FROM _orbit_relation_
-            - WITH _orbit_relation_4 AS MATERIALIZED (SELECT _orbit_edge_0.relationship_kind
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - caller.id IN (SELECT id FROM _orbit_relation_
+                - WITH _orbit_relation_4 AS MATERIALIZED (SELECT _orbit_edge_0.relationship_kind
+              not_contains: []
 
   - name: pinned_target_scopes_the_caller_join
     query:
@@ -28,10 +29,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - startsWith(caller.traversal_path, (SELECT
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - startsWith(caller.traversal_path, (SELECT
+              not_contains: []
 
   - name: pinned_source_narrows_the_callee_join
     query:
@@ -44,11 +47,13 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - callee.id IN (SELECT id FROM _orbit_relation_
-            - WITH _orbit_relation_4 AS MATERIALIZED (SELECT _orbit_edge_0.relationship_kind
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - callee.id IN (SELECT id FROM _orbit_relation_
+                - WITH _orbit_relation_4 AS MATERIALIZED (SELECT _orbit_edge_0.relationship_kind
+              not_contains: []
 
   - name: unpinned_partner_keeps_the_full_join
     query:
@@ -59,10 +64,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - AS callee ON (callee.id = _orbit_edge_0.target_id)
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - AS callee ON (callee.id = _orbit_edge_0.target_id)
+              not_contains: []
     missing_frontends:
       json: The original query scenario supplies only GQL.
 
@@ -77,10 +84,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - caller.id IN (SELECT id FROM _orbit_relation_
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - caller.id IN (SELECT id FROM _orbit_relation_
+              not_contains: []
 
   - name: pinned_source_drops_a_denied_callee
     query:
@@ -93,7 +102,9 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - callee.id IN (SELECT id FROM _orbit_relation_
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - callee.id IN (SELECT id FROM _orbit_relation_
+              not_contains: []

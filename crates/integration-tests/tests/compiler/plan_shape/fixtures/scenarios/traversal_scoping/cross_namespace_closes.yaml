@@ -1,4 +1,3 @@
----
 cases:
   - name: Cross-namespace CLOSES edge does not hydrate a work item outside the caller scope
     query:
@@ -21,4 +20,5 @@ cases:
         - 1/100/
     physical:
       clickhouse:
-        hydration: static
+        hydrate_plan:
+          hydration_plan: static

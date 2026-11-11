@@ -12,29 +12,40 @@ query:
     MATCH (f:File) WHERE f.id IN [1, 2]
     RETURN f.path ORDER BY f.id DESC LIMIT 5
 
-logical:
-  expect:
-    - (Project f.path (Filter f.id IN [1, 2] (NodeScan File AS f)))
-    - (Limit 5 (Sort f.id DESC (_)))
-
 physical:
   clickhouse:
-    planned:
-      expect:
-        - (Project f.path AS f_path (Filter f._deleted = false (Deduplicate LimitBy ... (Filter f.id IN [1, 2] (_)))))
-      reject:
-        - (Project f.id AS f_id, ... (_))
-    emitted:
-      expect:
-        - (Limit 6 (Sort f.id DESC (_)))
-      reject:
-        - (Project f.id AS f_id, ... (_))
+    normalize:
+      input:
+        expect:
+          - (Project f.path (Filter f.id IN [1, 2] (NodeScan File AS f)))
+          - (Limit 5 (Sort f.id DESC (_)))
+
+    plan_clickhouse:
+      query_plan:
+        expect:
+          - (Project f.path AS f_path (Filter f._deleted = false (Deduplicate LimitBy ... (Filter f.id IN [1, 2] (_)))))
+        reject:
+          - (Project f.id AS f_id, ... (_))
+    response_policy:
+      node:
+        expect:
+          - (Limit 6 (Sort f.id DESC (_)))
+        reject:
+          - (Project f.id AS f_id, ... (_))
   duckdb:
-    planned:
-      expect:
-        - (Project f.path AS f_path (Filter ... (Bind f (Filter ... (Deduplicate Final (Scan Table(gl_file) AS f))))))
-      reject:
-        - (Project f.id AS f_id, ... (_))
-    emitted:
-      expect:
-        - (Limit 6 (Sort f.id DESC (_)))
+    normalize:
+      input:
+        expect:
+          - (Project f.path (Filter f.id IN [1, 2] (NodeScan File AS f)))
+          - (Limit 5 (Sort f.id DESC (_)))
+
+    plan_duckdb:
+      query_plan:
+        expect:
+          - (Project f.path AS f_path (Filter ... (Bind f (Filter ... (Deduplicate Final (Scan Table(gl_file) AS f))))))
+        reject:
+          - (Project f.id AS f_id, ... (_))
+    paginate:
+      node:
+        expect:
+          - (Limit 6 (Sort f.id DESC (_)))

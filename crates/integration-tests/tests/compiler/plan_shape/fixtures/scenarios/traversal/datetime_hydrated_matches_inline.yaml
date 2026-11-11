@@ -1,4 +1,3 @@
----
 cases:
   - name: Hydrated datetime renders in the same ISO 8601 UTC form as the inline path
     query:
@@ -19,8 +18,11 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains: []
-          not_contains:
-            - AS n_created_at
-        hydration: static
+        hydrate_plan:
+          hydration_plan: static
+        codegen:
+          output:
+            sql:
+              contains: []
+              not_contains:
+                - AS n_created_at

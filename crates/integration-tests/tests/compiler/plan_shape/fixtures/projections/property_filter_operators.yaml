@@ -24,28 +24,34 @@ query:
       AND p.name IS NOT NULL AND p.description IS NULL
     RETURN p.name
 
-logical:
-  expect:
-    - (Filter contains(p.name, 'orbit'), starts_with(p.name, 'git'), ends_with(p.name, 'lab'), token_match(p.name, 'graph'), all_tokens(p.name, 'graph query'), any_tokens(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL (_))
-
 physical:
   clickhouse:
-    planned:
-      expect:
-        - (Filter contains(p.name, 'orbit'), starts_with(p.name, 'git'), ends_with(p.name, 'lab'), token_match(p.name, 'graph'), all_tokens(p.name, 'graph query'), any_tokens(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL, ... (_))
-    emitted:
-      expect:
-        - (Filter Contains(Lower(p.name), Lower('orbit')), StartsWith(Lower(p.name), Lower('git')), EndsWith(Lower(p.name), Lower('lab')), TokenMatch(Lower(p.name), Lower('graph')), AllTokens(Lower(p.name), Lower('graph query')), AnyTokens(Lower(p.name), Lower('code data')), p.name IS NOT NULL, p.description IS NULL, ... (_))
-    final_ast:
-      expect:
-        - (Filter Contains(Lower(p.name), Lower('orbit')), StartsWith(Lower(p.name), Lower('git')), EndsWith(Lower(p.name), Lower('lab')), TokenMatch(Lower(p.name), Lower('graph')), AllTokens(Lower(p.name), Lower('graph query')), AnyTokens(Lower(p.name), Lower('code data')), p.name IS NOT NULL, p.description IS NULL, ... (_))
-    sql:
-      contains:
-        - "multiSearchAny(lower(p.name), [lower('orbit')])"
-        - "startsWith(lower(p.name), lower('git'))"
-        - "endsWith(lower(p.name), lower('lab'))"
-        - "hasToken(lower(p.name), lower('graph'))"
-        - "hasAllTokens(lower(p.name), lower('graph query'))"
-        - "hasAnyTokens(lower(p.name), lower('code data'))"
-    indexes:
-      - { table: gl_project, name: idx_name_ngram }
+    normalize:
+      input:
+        expect:
+          - (Filter contains(p.name, 'orbit'), starts_with(p.name, 'git'), ends_with(p.name, 'lab'), token_match(p.name, 'graph'), all_tokens(p.name, 'graph query'), any_tokens(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL (_))
+
+    plan_clickhouse:
+      query_plan:
+        expect:
+          - (Filter contains(p.name, 'orbit'), starts_with(p.name, 'git'), ends_with(p.name, 'lab'), token_match(p.name, 'graph'), all_tokens(p.name, 'graph query'), any_tokens(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL, ... (_))
+    response_policy:
+      node:
+        expect:
+          - (Filter Contains(Lower(p.name), Lower('orbit')), StartsWith(Lower(p.name), Lower('git')), EndsWith(Lower(p.name), Lower('lab')), TokenMatch(Lower(p.name), Lower('graph')), AllTokens(Lower(p.name), Lower('graph query')), AnyTokens(Lower(p.name), Lower('code data')), p.name IS NOT NULL, p.description IS NULL, ... (_))
+    security:
+      node:
+        expect:
+          - (Filter Contains(Lower(p.name), Lower('orbit')), StartsWith(Lower(p.name), Lower('git')), EndsWith(Lower(p.name), Lower('lab')), TokenMatch(Lower(p.name), Lower('graph')), AllTokens(Lower(p.name), Lower('graph query')), AnyTokens(Lower(p.name), Lower('code data')), p.name IS NOT NULL, p.description IS NULL, ... (_))
+    codegen:
+      output:
+        sql:
+          contains:
+            - "multiSearchAny(lower(p.name), [lower('orbit')])"
+            - "startsWith(lower(p.name), lower('git'))"
+            - "endsWith(lower(p.name), lower('lab'))"
+            - "hasToken(lower(p.name), lower('graph'))"
+            - "hasAllTokens(lower(p.name), lower('graph query'))"
+            - "hasAnyTokens(lower(p.name), lower('code data'))"
+        indexes:
+          - { table: gl_project, name: idx_name_ngram }

@@ -10,26 +10,35 @@ query:
   gql: |
     MATCH (f:File {language: 'rust'}) RETURN f.id, f.path LIMIT 10
 
-logical:
-  expect:
-    - (Project f.id, f.path (Filter f.language = 'rust' (NodeScan File AS f)))
-
 physical:
   clickhouse:
-    planned:
-      exact: |
-        (Project f.id AS f_id, f.path AS f_path
-          (Filter f.language = 'rust', f._deleted = false
-            (Deduplicate Final (Scan Table(gl_file) AS f))))
-    emitted:
-      exact: |
-        (Limit 11
+    normalize:
+      input:
+        expect:
+          - (Project f.id, f.path (Filter f.language = 'rust' (NodeScan File AS f)))
+
+    plan_clickhouse:
+      query_plan:
+        exact: |
           (Project f.id AS f_id, f.path AS f_path
             (Filter f.language = 'rust', f._deleted = false
-              (Bind f (Project * (Deduplicate Final (Scan Table(gl_file) AS f)))))))
+              (Deduplicate Final (Scan Table(gl_file) AS f))))
+    response_policy:
+      node:
+        exact: |
+          (Limit 11
+            (Project f.id AS f_id, f.path AS f_path
+              (Filter f.language = 'rust', f._deleted = false
+                (Bind f (Project * (Deduplicate Final (Scan Table(gl_file) AS f)))))))
   duckdb:
-    planned:
-      exact: |
-        (Project f.id AS f_id, f.path AS f_path
-          (Filter f.language = 'rust', f._deleted = false
-            (Deduplicate Final (Scan Table(gl_file) AS f))))
+    normalize:
+      input:
+        expect:
+          - (Project f.id, f.path (Filter f.language = 'rust' (NodeScan File AS f)))
+
+    plan_duckdb:
+      query_plan:
+        exact: |
+          (Project f.id AS f_id, f.path AS f_path
+            (Filter f.language = 'rust', f._deleted = false
+              (Deduplicate Final (Scan Table(gl_file) AS f))))

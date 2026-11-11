@@ -1,4 +1,3 @@
----
 cases:
   - name: Containment over CONTAINS edges counts only direct projects
     query:
@@ -12,10 +11,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - AS g FINAL
-            - relationship_kind = 'CONTAINS'
-            - source_kind = 'Group'
-            - target_kind = 'Project'
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - AS g FINAL
+                - relationship_kind = 'CONTAINS'
+                - source_kind = 'Group'
+                - target_kind = 'Project'
+              not_contains: []

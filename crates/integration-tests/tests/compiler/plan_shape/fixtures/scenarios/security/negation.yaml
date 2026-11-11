@@ -1,4 +1,3 @@
----
 cases:
   - name: negation_far_node_scan_keeps_scope
     query:
@@ -13,8 +12,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - gl_group AS g WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _orbit_relation_
-            - LIMIT 1 BY g.traversal_path, g.id) AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')])) AND (g._deleted = false))
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - gl_group AS g WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _orbit_relation_
+                - LIMIT 1 BY g.traversal_path, g.id) AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')])) AND (g._deleted = false))
+              not_contains: []

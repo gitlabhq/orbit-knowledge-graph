@@ -1,4 +1,3 @@
----
 cases:
   - name: A node aliased like a generated edge column keeps its properties
     query:
@@ -19,8 +18,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains: []
-          not_contains:
-            - AS e0_type
-            - AS e0_src
+        codegen:
+          output:
+            sql:
+              contains: []
+              not_contains:
+                - AS e0_type
+                - AS e0_src

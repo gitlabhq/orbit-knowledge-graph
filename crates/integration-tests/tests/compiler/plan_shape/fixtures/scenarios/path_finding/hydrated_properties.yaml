@@ -1,4 +1,3 @@
----
 cases:
   - name: every_entity_hydrated
     query:
@@ -18,4 +17,5 @@ cases:
         - 1/
     physical:
       clickhouse:
-        hydration: dynamic
+        hydrate_plan:
+          hydration_plan: dynamic

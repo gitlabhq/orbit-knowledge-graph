@@ -7,13 +7,14 @@ query:
   gql: |
     MATCH (callee:Definition {id: 12001})<-[:CALLS]-(caller) RETURN callee, caller
 
-logical:
-  expect: ["(Input neighbors (...))"]
-
 physical:
   clickhouse:
-    emitted:
-      expect:
-        - (Union ALL AS _orbit_neighbor_edge (_) (_))
-        - (Scan Table(gl_code_edge) AS _orbit_neighbor_edge_arm)
-        - (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm)
+    normalize:
+      input:
+        expect: ["(Input neighbors (...))"]
+    response_policy:
+      node:
+        expect:
+          - (Union ALL AS _orbit_neighbor_edge (_) (_))
+          - (Scan Table(gl_code_edge) AS _orbit_neighbor_edge_arm)
+          - (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm)

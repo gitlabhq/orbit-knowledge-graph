@@ -6,15 +6,17 @@ query:
   gql: |
     MATCH (u:User {id: 1})--(neighbor) RETURN u, neighbor
 
-logical:
-  expect: ["(Input neighbors (...))"]
-
 physical:
   clickhouse:
-    planned:
-      expect: ["(Neighbors center=u direction=outgoing directional ... (_))"]
-    emitted:
-      expect:
-        - (Filter _orbit_neighbor_edge_arm.source_kind = 'User', _orbit_neighbor_edge_arm.source_id = 1, ... (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm))
-      reject:
-        - (Filter _orbit_neighbor_edge_arm.target_kind = 'User', ... (_))
+    normalize:
+      input:
+        expect: ["(Input neighbors (...))"]
+    plan_clickhouse:
+      query_plan:
+        expect: ["(Neighbors center=u direction=outgoing directional ... (_))"]
+    response_policy:
+      node:
+        expect:
+          - (Filter _orbit_neighbor_edge_arm.source_kind = 'User', _orbit_neighbor_edge_arm.source_id = 1, ... (Scan Table(gl_edge) AS _orbit_neighbor_edge_arm))
+        reject:
+          - (Filter _orbit_neighbor_edge_arm.target_kind = 'User', ... (_))

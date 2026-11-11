@@ -6,12 +6,14 @@ query:
   gql: |
     MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(neighbor) RETURN p, neighbor
 
-logical:
-  expect:
-    - (Input neighbors (...))
-
 physical:
   clickhouse:
-    emitted:
-      expect:
-        - (SemiJoin _orbit_neighbor_edge_arm.traversal_path IN subquery (_) (Project _orbit_center_rows.traversal_path AS traversal_path (Scan Table(_orbit_center_rows) AS _orbit_center_rows)))
+    normalize:
+      input:
+        expect:
+          - (Input neighbors (...))
+
+    response_policy:
+      node:
+        expect:
+          - (SemiJoin _orbit_neighbor_edge_arm.traversal_path IN subquery (_) (Project _orbit_center_rows.traversal_path AS traversal_path (Scan Table(_orbit_center_rows) AS _orbit_center_rows)))

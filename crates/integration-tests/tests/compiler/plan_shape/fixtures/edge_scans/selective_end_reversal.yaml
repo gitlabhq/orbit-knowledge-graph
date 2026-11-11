@@ -6,18 +6,20 @@ query:
   gql: |
     MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition {id: 7}) RETURN a, b, c
 
-logical:
-  expect: ["(EdgeScan CALLS a->b AS e0)"]
-
 physical:
   clickhouse:
-    planned:
-      expect:
-        - (Join ON _orbit_edge_1.source_id = _orbit_edge_0.target_id (_) (_))
-        - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.target_id = 7, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))))
-        - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))))
-    emitted:
-      expect:
-        - (Join ON _orbit_edge_1.source_id = _orbit_edge_0.target_id (_) (_))
-        - (Filter _orbit_edge_1.target_id = 7, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))
-        - (Filter _orbit_edge_0.target_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
+    normalize:
+      input:
+        expect: ["(EdgeScan CALLS a->b AS e0)"]
+    plan_clickhouse:
+      query_plan:
+        expect:
+          - (Join ON _orbit_edge_1.source_id = _orbit_edge_0.target_id (_) (_))
+          - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.target_id = 7, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))))
+          - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))))
+    response_policy:
+      node:
+        expect:
+          - (Join ON _orbit_edge_1.source_id = _orbit_edge_0.target_id (_) (_))
+          - (Filter _orbit_edge_1.target_id = 7, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))
+          - (Filter _orbit_edge_0.target_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))

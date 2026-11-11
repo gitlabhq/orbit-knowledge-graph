@@ -1,4 +1,3 @@
----
 cases:
   - name: A text filter at the end of a group chain prunes with the ngram index inside a materialized CTE that reads another CTE
     query:
@@ -11,13 +10,15 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - AS MATERIALIZED
-            - multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])
-          not_contains: []
-        indexes:
-          - table: gl_merge_request
-            name: idx_title_ngram
+        codegen:
+          output:
+            sql:
+              contains:
+                - AS MATERIALIZED
+                - multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])
+              not_contains: []
+            indexes:
+              - table: gl_merge_request
+                name: idx_title_ngram
     missing_frontends:
       json: The original query scenario supplies only GQL.

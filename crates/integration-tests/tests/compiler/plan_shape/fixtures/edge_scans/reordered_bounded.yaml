@@ -7,17 +7,22 @@ query:
   gql: |
     MATCH (caller:Definition)-[:CALLS*1..3]->(callee:Definition {id: 12001}) RETURN caller, callee
 
-logical:
-  expect: ["(EdgeScan CALLS caller->callee AS e0 HOPS 1..3)"]
-
 physical:
   clickhouse:
-    planned:
-      expect:
-        - (Scan Table(gl_code_edge_by_target) ...)
-        - (Filter _orbit_e1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e1.relationship_kind = 'CALLS', _orbit_e1.target_kind = 'Definition', _orbit_e1.target_id = 12001 (_))))
-        - (Project prepend((_orbit_e2.target_id, _orbit_e2.target_kind), _orbit_depth_1._orbit_path_nodes) AS _orbit_path_nodes, ... (_))
-      reject: ["(Scan Table(gl_code_edge) ...)"]
+    normalize:
+      input:
+        expect: ["(EdgeScan CALLS caller->callee AS e0 HOPS 1..3)"]
+    plan_clickhouse:
+      query_plan:
+        expect:
+          - (Scan Table(gl_code_edge_by_target) ...)
+          - (Filter _orbit_e1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_e1.relationship_kind = 'CALLS', _orbit_e1.target_kind = 'Definition', _orbit_e1.target_id = 12001 (_))))
+          - (Project prepend((_orbit_e2.target_id, _orbit_e2.target_kind), _orbit_depth_1._orbit_path_nodes) AS _orbit_path_nodes, ... (_))
+        reject: ["(Scan Table(gl_code_edge) ...)"]
   duckdb:
-    planned:
-      expect: ["(Scan Table(gl_edge) ...)"]
+    normalize:
+      input:
+        expect: ["(EdgeScan CALLS caller->callee AS e0 HOPS 1..3)"]
+    plan_duckdb:
+      query_plan:
+        expect: ["(Scan Table(gl_edge) ...)"]

@@ -1,4 +1,3 @@
----
 cases:
   - name: A four-hop chain from a group through CONTAINS counts diff files per project
     query:
@@ -29,10 +28,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        sql:
-          contains:
-            - gl_group AS _orbit_scope FINAL WHERE
-            - _orbit_scope.full_path = 'g701'
-            - AS g FINAL
-            - relationship_kind = 'CONTAINS'
-          not_contains: []
+        codegen:
+          output:
+            sql:
+              contains:
+                - gl_group AS _orbit_scope FINAL WHERE
+                - _orbit_scope.full_path = 'g701'
+                - AS g FINAL
+                - relationship_kind = 'CONTAINS'
+              not_contains: []
