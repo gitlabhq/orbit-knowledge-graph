@@ -67,6 +67,15 @@ test('a long grep flag does not take its value for the pattern', () => {
   }
 })
 
+test('a sql flag does not take its value for the query', () => {
+  for (const sql of ['orbit sql', 'orbit workspace sql']) {
+    for (const flag of ['-F', '--format']) {
+      expect(describeOrbitCall('Bash', { command: `${sql} ${flag} json 'SELECT 1'` })?.detail).toBe('SELECT 1')
+    }
+    expect(describeOrbitCall('Bash', { command: `${sql} -f query.sql` })?.detail).toBe('')
+  }
+})
+
 test('calls that are not Orbit calls are left alone', () => {
   expect(describeOrbitCall('Bash', { command: 'ls -la' })).toBe(null)
   expect(describeOrbitCall('Read', { file_path: 'README.md' })).toBe(null)
