@@ -56,10 +56,14 @@ pub(super) fn selectivity(
                 true => " (NOT conditions do not count)",
                 false => "",
             };
+            let example = anchors.first().map_or(String::new(), |anchor| {
+                format!(
+                    ", such as WHERE {}.id = 42",
+                    query.name(anchor.binding.output)
+                )
+            });
             return Err(QueryError::Validation(format!(
-                "add filters or node_ids to at least one node, such as \
-                 (p:Project {{full_path: 'group/project'}}) or WHERE mr.project_id = \
-                 42{hint}{negation}"
+                "add filters or node_ids to at least one node{example}{hint}{negation}"
             )));
         }
         _ => {}
