@@ -1,0 +1,13 @@
+name: Neighbors read only the relationship kinds a store on the connection binds
+
+query: |
+  MATCH (f:File)--(n) WHERE f.id IN [1, 2, 3] RETURN n
+
+physical:
+  duckdb:
+    planned:
+      expect:
+        - (Filter ..., _orbit_neighbor_edge.relationship_kind IN ['CALLS', 'CONTAINS', 'DEFINES', 'IMPORTS'] (Scan Table(gl_edge) AS _orbit_neighbor_edge))
+      reject:
+        - (Filter ..., _orbit_neighbor_edge.relationship_kind IN ['CALLS', 'CONTAINS', 'DEFINES', 'IMPORTS', 'ON_BRANCH'] (_))
+        - (Filter ..., _orbit_neighbor_edge.relationship_kind IN ['CALLS', 'CONTAINS', 'DEFINES', 'IMPORTS', 'IN_PROJECT'] (_))
