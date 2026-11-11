@@ -1,17 +1,15 @@
 use std::collections::HashMap;
 
 use crate::constants::{DEFAULT_PRIMARY_KEY as KEY, EDGE_RESERVED_COLUMNS};
-use crate::{DataType, EnumType};
+use crate::{DataType, FieldSelectivity};
 use indexmap::IndexMap;
 
-use super::catalog::{
-    Attribute, Domain, Entity, GraphCatalog, Property, Relationship, RelationshipVariant,
-};
+use super::catalog::{Domain, GraphCatalog};
 use super::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 use crate::catalog::Diagnostics;
 use crate::spec::{
-    AttributeSpec, DefaultValue, EntitySpec, GraphFragment, PropertyDetail, PropertySpec,
-    RelationshipSpec, parse_variant, parse_word,
+    Attribute, DefaultValue, Entity, GraphFragment, Property, Raw, Relationship,
+    RelationshipVariant, Short, parse_variant, parse_word,
 };
 
 impl GraphCatalog {
@@ -88,7 +86,7 @@ impl GraphCatalog {
         package: &str,
         domain: Option<String>,
         name: String,
-        spec: EntitySpec,
+        spec: Entity<Raw>,
         diagnostics: &mut Diagnostics,
     ) {
         let id = EntityId(self.entities.len());
@@ -106,7 +104,7 @@ impl GraphCatalog {
         self.entity_ids.insert(name.clone(), id);
         let mut names = HashMap::with_capacity(spec.properties.len());
         let mut properties = Vec::with_capacity(spec.properties.len());
-        for (property, spec) in spec.properties {
+        for (property, Short(spec)) in spec.properties {
             let property_id = PropertyId(self.properties.len());
             let Some(declared) =
                 declare_property(id, property_id, property, spec, package, diagnostics)
@@ -126,9 +124,8 @@ impl GraphCatalog {
                 })
             })
             .collect();
-        if let Some(label) = &spec.label
-            && !names.contains_key(label)
-        {
+        if !names.contains_key(&spec.label) {
+            let label = &spec.label;
             diagnostics.error(package, format!("{name} label {label} is not a property"));
         }
         self.property_ids.push(names);
@@ -138,17 +135,17 @@ impl GraphCatalog {
             package: package.to_string(),
             domain,
             description: spec.description,
-            label: spec.label.unwrap_or_default(),
-            style: spec.style.unwrap_or_default(),
-            properties,
+            label: spec.label,
             defaults,
+            style: spec.style,
+            properties,
         });
     }
 
     fn declare_relationships(
         &mut self,
         package: &str,
-        relationships: IndexMap<String, RelationshipSpec>,
+        relationships: IndexMap<String, Relationship<Raw>>,
         diagnostics: &mut Diagnostics,
     ) {
         for (name, spec) in relationships {
@@ -167,7 +164,7 @@ impl GraphCatalog {
                     id
                 }
             };
-            for (attribute, spec) in spec.attributes {
+            for (attribute, Short(spec)) in spec.attributes {
                 self.declare_attribute(relationship, attribute, spec, package, diagnostics);
             }
             for (variant, declared) in &spec.variants {
@@ -214,7 +211,7 @@ impl GraphCatalog {
         &mut self,
         relationship: RelationshipId,
         name: String,
-        spec: AttributeSpec,
+        spec: Attribute<Raw>,
         package: &str,
         diagnostics: &mut Diagnostics,
     ) {
@@ -226,7 +223,7 @@ impl GraphCatalog {
             );
             return;
         }
-        let written = spec.data_type();
+        let written = &spec.data_type;
         let Some((data_type, nullable)) =
             parse_type(written).filter(|(data_type, _)| *data_type != DataType::Enum)
         else {
@@ -250,9 +247,9 @@ impl GraphCatalog {
             id,
             relationship,
             name,
-            description: spec.description().map(str::to_string),
             data_type,
             nullable,
+            description: spec.description,
         });
     }
 
@@ -270,11 +267,11 @@ fn declare_property(
     entity: EntityId,
     id: PropertyId,
     name: String,
-    spec: PropertySpec,
+    spec: Property<Raw>,
     package: &str,
     diagnostics: &mut Diagnostics,
 ) -> Option<Property> {
-    let written = spec.data_type();
+    let written = &spec.data_type;
     let Some((data_type, nullable)) = parse_type(written) else {
         diagnostics.error(
             package,
@@ -282,39 +279,29 @@ fn declare_property(
         );
         return None;
     };
-    let detail = match spec {
-        PropertySpec::Type(_) => PropertyDetail::default(),
-        PropertySpec::Detail(detail) => detail,
-    };
     if data_type == DataType::Enum
-        && detail
-            .values
+        && spec
+            .enum_values
             .as_ref()
             .is_none_or(|values| values.is_empty())
     {
         diagnostics.error(package, format!("enum property {name} declares no values"));
     }
-    let enum_type = if detail.stored_as_text {
-        EnumType::String
-    } else {
-        EnumType::Int
-    };
-    let selectivity = detail
-        .selectivity
-        .unwrap_or_else(|| crate::FieldSelectivity::from_data_type(data_type));
     let property = Property {
         id,
-        selectivity,
         entity,
         name,
-        description: detail.description,
         data_type,
         nullable,
-        unique: detail.unique,
-        enum_values: detail.values,
-        enum_type,
-        terminal_values: detail.terminal,
-        default: detail.default,
+        description: spec.description,
+        unique: spec.unique,
+        enum_values: spec.enum_values,
+        enum_type: spec.enum_type,
+        terminal_values: spec.terminal_values,
+        selectivity: spec
+            .selectivity
+            .unwrap_or_else(|| FieldSelectivity::from_data_type(data_type)),
+        default: spec.default,
     };
     check_default(&property, package, diagnostics);
     Some(property)

@@ -420,6 +420,7 @@ kind: graph
 package: test
 entities:
   TestNode:
+    label: name
     properties: {id: int64, name: string, project_id: string, branch: string, path: string}
 "#;
         let service = format!(
@@ -554,6 +555,7 @@ kind: graph
 package: test
 entities:
   User:
+    label: username
     defaults: [{}]
     properties: {{id: int64, username: string, state: string, is_admin: bool, is_auditor: bool}}
 "#,

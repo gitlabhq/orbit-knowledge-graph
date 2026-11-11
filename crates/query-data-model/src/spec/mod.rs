@@ -9,8 +9,7 @@ pub use authorization::{
     ScopeVariants,
 };
 pub use graph::{
-    AttributeDetail, AttributeSpec, DefaultValue, EntitySpec, GraphFragment, PropertyDetail,
-    PropertySpec, RelationshipSpec, VariantSpec,
+    Attribute, DefaultValue, Entity, GraphFragment, Property, Relationship, RelationshipVariant,
 };
 pub use service::{LookupSpec, ServiceFragment};
 pub use source::{
@@ -20,13 +19,18 @@ pub use source::{
 };
 pub use storage::{
     AccessHints, BackendOptions, Binding, ColumnStorage, CopySources, Discriminator, EdgeIndex,
-    EngineSpec, EntityStorage, Key, KeySpec, Naming, OneOrMany, OptionValue, Raw, Resolved,
-    StorageFragment, decode_options, encode_options,
+    EngineSpec, EntityStorage, Key, KeySpec, OneOrMany, OptionValue, StorageFragment,
+    decode_options, encode_options,
 };
 
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 
+use indexmap::IndexMap;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+use crate::{Endpoint, EntityId, PropertyId, RelationshipId};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -132,4 +136,89 @@ where
     T: Deserialize<'de>,
 {
     Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// A value a spec field holds in either stage.
+pub trait Value: Debug + Clone + PartialEq + Serialize + DeserializeOwned {}
+
+impl<T: Debug + Clone + PartialEq + Serialize + DeserializeOwned> Value for T {}
+
+/// How specs name graph elements: by written name before the loader resolves them, by id after.
+pub trait Naming: Value + Copy + Default {
+    type Entity: Value;
+    type Property: Value;
+    type Relationship: Value;
+    /// The written type, such as `int64?`, before resolve; the data type after.
+    type Type: Value;
+    /// Whether an endpoint enriches before resolve; the properties it carries after.
+    type Enrich: Value + Default;
+    type Key: Debug + Clone + PartialEq;
+    type Copies: Debug + Clone + PartialEq;
+    /// A field the loader fills in.
+    type Loaded<T: Value + Default>: Value + Default;
+    /// A field the written form may omit and the loader defaults.
+    type Defaulted<T: Value>: Value;
+    /// Members written as a map by name, resolved to ids in declaration order.
+    type Members<T: Value, Id: Value>: Value + Default;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Raw;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Resolved;
+
+impl Naming for Raw {
+    type Entity = String;
+    type Property = String;
+    type Relationship = String;
+    type Type = String;
+    type Enrich = bool;
+    type Key = KeySpec;
+    type Copies = CopySources;
+    type Loaded<T: Value + Default> = ();
+    type Defaulted<T: Value> = Option<T>;
+    type Members<T: Value, Id: Value> = IndexMap<String, T>;
+}
+
+impl Naming for Resolved {
+    type Entity = EntityId;
+    type Property = PropertyId;
+    type Relationship = RelationshipId;
+    type Type = crate::DataType;
+    type Enrich = IndexMap<PropertyId, String>;
+    type Key = Key;
+    type Copies = Vec<(Endpoint, PropertyId)>;
+    type Loaded<T: Value + Default> = T;
+    type Defaulted<T: Value> = T;
+    type Members<T: Value, Id: Value> = Vec<Id>;
+}
+
+/// A value written as its full form, or as just the value of its `KEY` field.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct Short<T>(pub T);
+
+pub trait ShortForm {
+    const KEY: &'static str;
+}
+
+impl<'de, T: ShortForm + Deserialize<'de>> Deserialize<'de> for Short<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Form<T> {
+            Key(String),
+            Full(T),
+        }
+        let value = match Form::deserialize(deserializer)? {
+            Form::Full(full) => return Ok(Self(full)),
+            Form::Key(value) => value,
+        };
+        let written = std::iter::once((T::KEY, value));
+        T::deserialize(serde::de::value::MapDeserializer::<_, D::Error>::new(
+            written,
+        ))
+        .map(Self)
+    }
 }

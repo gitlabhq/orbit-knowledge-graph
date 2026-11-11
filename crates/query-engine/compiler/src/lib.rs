@@ -170,7 +170,7 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use query_data_model::spec::{ColumnStorage, Fragment, OptionValue, PropertySpec};
+    use query_data_model::spec::{ColumnStorage, Fragment, OptionValue};
     use std::sync::LazyLock;
 
     static MODEL: LazyLock<Arc<Catalog<ClickHouse>>> =
@@ -276,8 +276,8 @@ mod tests {
             match fragment {
                 Fragment::Graph(graph) => {
                     if let Some(user) = graph.entities.get_mut("User") {
-                        user.properties
-                            .insert("traversal_path".into(), PropertySpec::Type("string".into()));
+                        let property = orbit_utils::yaml::from_str("string").unwrap();
+                        user.properties.insert("traversal_path".into(), property);
                     }
                 }
                 Fragment::Storage(storage) if storage.store == "graph" => {

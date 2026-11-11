@@ -1,37 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::{DataType, EnumType};
-
 use super::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
-
-#[derive(Debug)]
-pub struct Property {
-    pub id: PropertyId,
-    pub entity: EntityId,
-    pub name: String,
-    pub description: Option<String>,
-    pub data_type: DataType,
-    pub nullable: bool,
-    pub unique: bool,
-    pub enum_values: Option<BTreeMap<i64, String>>,
-    pub enum_type: EnumType,
-    pub terminal_values: Vec<String>,
-    pub selectivity: crate::FieldSelectivity,
-    pub default: Option<crate::spec::DefaultValue>,
-}
-
-#[derive(Debug)]
-pub struct Entity {
-    pub id: EntityId,
-    pub name: String,
-    pub package: String,
-    pub domain: Option<String>,
-    pub description: Option<String>,
-    pub label: String,
-    pub style: Style,
-    pub properties: Vec<PropertyId>,
-    pub defaults: Vec<PropertyId>,
-}
+use crate::spec::{Attribute, Entity, Property, Relationship, RelationshipVariant};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,43 +23,6 @@ impl Default for Style {
 pub struct Domain {
     pub name: String,
     pub description: Option<String>,
-}
-
-#[derive(Debug)]
-pub struct RelationshipVariant {
-    pub id: RelationshipVariantId,
-    pub relationship: RelationshipId,
-    pub source: EntityId,
-    pub target: EntityId,
-    pub cardinality: crate::Cardinality,
-}
-
-impl RelationshipVariant {
-    pub fn endpoint(&self, side: crate::Endpoint) -> EntityId {
-        match side {
-            crate::Endpoint::Source => self.source,
-            crate::Endpoint::Target => self.target,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Relationship {
-    pub id: RelationshipId,
-    pub name: String,
-    pub description: Option<String>,
-    pub variants: Vec<RelationshipVariantId>,
-    pub attributes: Vec<AttributeId>,
-}
-
-#[derive(Debug)]
-pub struct Attribute {
-    pub id: AttributeId,
-    pub relationship: RelationshipId,
-    pub name: String,
-    pub description: Option<String>,
-    pub data_type: DataType,
-    pub nullable: bool,
 }
 
 #[derive(Debug, Default)]

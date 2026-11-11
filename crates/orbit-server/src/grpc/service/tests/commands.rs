@@ -363,8 +363,7 @@ async fn test_expand_all_wildcard() {
 }
 
 fn custom_node_model() -> Arc<Catalog<ClickHouse>> {
-    let graph =
-        "kind: graph\npackage: test\nentities:\n  CustomNode:\n    properties: {id: int64}\n";
+    let graph = "kind: graph\npackage: test\nentities:\n  CustomNode:\n    label: id\n    properties: {id: int64}\n";
     let authorization =
         "kind: authorization\npackage: test\nentities:\n  CustomNode: {scope: global}\n";
     let storage = "kind: storage

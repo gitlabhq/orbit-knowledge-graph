@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use super::{explicit_null, is_false};
+use super::{Naming, Raw, explicit_null, is_false};
 use crate::{Endpoint, ForeignKey, PropertyId};
 
 pub type BackendOptions = IndexMap<String, OptionValue>;
@@ -28,32 +28,6 @@ pub fn decode_options<T: DeserializeOwned>(
     options: &BackendOptions,
 ) -> Result<T, serde_json::Error> {
     serde_json::from_str(&serde_json::to_string(options)?)
-}
-
-/// How storage specs name graph elements: by written name before the loader resolves them,
-/// by id after.
-pub trait Naming {
-    type Property: Debug + Clone + PartialEq;
-    type Key: Debug + Clone + PartialEq;
-    type Copies: Debug + Clone + PartialEq;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Raw;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Resolved;
-
-impl Naming for Raw {
-    type Property = String;
-    type Key = KeySpec;
-    type Copies = CopySources;
-}
-
-impl Naming for Resolved {
-    type Property = PropertyId;
-    type Key = Key;
-    type Copies = Vec<(Endpoint, PropertyId)>;
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

@@ -351,11 +351,13 @@ package: test
 domain: core
 entities:
   Project:
+    label: name
     properties:
       id: {type: int64, description: Unique ID.}
       name: string
       traversal_path: string
   MergeRequest:
+    label: title
     properties:
       id: {type: int64, description: Unique ID.}
       state: {type: enum, values: {1: opened, 2: merged}}

@@ -3,8 +3,11 @@ use std::collections::BTreeMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use super::is_false;
-use crate::{Cardinality, FieldSelectivity, Style};
+use super::{Naming, Raw, Resolved, Short, ShortForm, is_false};
+use crate::{
+    AttributeId, Cardinality, EntityId, EnumType, FieldSelectivity, PropertyId, RelationshipId,
+    RelationshipVariantId, Style,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -15,49 +18,56 @@ pub struct GraphFragment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub domain_description: Option<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub entities: IndexMap<String, EntitySpec>,
+    pub entities: IndexMap<String, Entity<Raw>>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub relationships: IndexMap<String, RelationshipSpec>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EntitySpec {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub defaults: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub style: Option<Style>,
-    pub properties: IndexMap<String, PropertySpec>,
+    pub relationships: IndexMap<String, Relationship<Raw>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum PropertySpec {
-    Type(String),
-    Detail(PropertyDetail),
+#[serde(deny_unknown_fields, bound = "")]
+pub struct Entity<S: Naming = Resolved> {
+    #[serde(skip)]
+    pub id: S::Loaded<EntityId>,
+    #[serde(skip)]
+    pub name: S::Loaded<String>,
+    #[serde(skip)]
+    pub package: S::Loaded<String>,
+    #[serde(skip)]
+    pub domain: S::Loaded<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub label: String,
+    #[serde(default)]
+    pub defaults: Vec<S::Property>,
+    #[serde(default)]
+    pub style: Style,
+    pub properties: S::Members<Short<Property<S>>, PropertyId>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PropertyDetail {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, bound = "")]
+pub struct Property<S: Naming = Resolved> {
+    #[serde(skip)]
+    pub id: S::Loaded<PropertyId>,
+    #[serde(skip)]
+    pub entity: S::Loaded<EntityId>,
+    #[serde(skip)]
+    pub name: S::Loaded<String>,
     #[serde(rename = "type")]
-    pub data_type: String,
+    pub data_type: S::Type,
+    #[serde(skip)]
+    pub nullable: S::Loaded<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub unique: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub values: Option<BTreeMap<i64, String>>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub stored_as_text: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub terminal: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selectivity: Option<FieldSelectivity>,
+    #[serde(default, rename = "values", skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<BTreeMap<i64, String>>,
+    #[serde(default, rename = "stored_as_text", with = "stored_as_text")]
+    pub enum_type: EnumType,
+    #[serde(default, rename = "terminal", skip_serializing_if = "Vec::is_empty")]
+    pub terminal_values: Vec<String>,
+    pub selectivity: S::Defaulted<FieldSelectivity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<DefaultValue>,
 }
@@ -72,36 +82,66 @@ pub enum DefaultValue {
     String(String),
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RelationshipSpec {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, bound = "")]
+pub struct Relationship<S: Naming = Resolved> {
+    #[serde(skip)]
+    pub id: S::Loaded<RelationshipId>,
+    #[serde(skip)]
+    pub name: S::Loaded<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub variants: IndexMap<String, VariantSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub attributes: IndexMap<String, AttributeSpec>,
+    pub variants: S::Members<RelationshipVariant<S>, RelationshipVariantId>,
+    #[serde(default)]
+    pub attributes: S::Members<Short<Attribute<S>>, AttributeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct VariantSpec {
+#[serde(deny_unknown_fields, bound = "")]
+pub struct RelationshipVariant<S: Naming = Resolved> {
+    #[serde(skip)]
+    pub id: S::Loaded<RelationshipVariantId>,
+    #[serde(skip)]
+    pub relationship: S::Loaded<RelationshipId>,
+    #[serde(skip)]
+    pub source: S::Loaded<EntityId>,
+    #[serde(skip)]
+    pub target: S::Loaded<EntityId>,
     pub cardinality: Cardinality,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum AttributeSpec {
-    Type(String),
-    Detail(AttributeDetail),
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AttributeDetail {
+#[serde(deny_unknown_fields, bound = "")]
+pub struct Attribute<S: Naming = Resolved> {
+    #[serde(skip)]
+    pub id: S::Loaded<AttributeId>,
+    #[serde(skip)]
+    pub relationship: S::Loaded<RelationshipId>,
+    #[serde(skip)]
+    pub name: S::Loaded<String>,
     #[serde(rename = "type")]
-    pub data_type: String,
+    pub data_type: S::Type,
+    #[serde(skip)]
+    pub nullable: S::Loaded<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+}
+
+impl<S: Naming> ShortForm for Property<S> {
+    const KEY: &'static str = "type";
+}
+
+impl<S: Naming> ShortForm for Attribute<S> {
+    const KEY: &'static str = "type";
+}
+
+impl RelationshipVariant {
+    pub fn endpoint(&self, side: crate::Endpoint) -> EntityId {
+        match side {
+            crate::Endpoint::Source => self.source,
+            crate::Endpoint::Target => self.target,
+        }
+    }
 }
 
 impl DefaultValue {
@@ -116,34 +156,19 @@ impl DefaultValue {
     }
 }
 
-impl PropertySpec {
-    pub fn data_type(&self) -> &str {
-        match self {
-            Self::Type(data_type) => data_type,
-            Self::Detail(detail) => &detail.data_type,
-        }
+mod stored_as_text {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use crate::EnumType;
+
+    pub fn serialize<S: Serializer>(kind: &EnumType, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bool(*kind == EnumType::String)
     }
 
-    pub fn detail(&self) -> Option<&PropertyDetail> {
-        match self {
-            Self::Type(_) => None,
-            Self::Detail(detail) => Some(detail),
-        }
-    }
-}
-
-impl AttributeSpec {
-    pub fn data_type(&self) -> &str {
-        match self {
-            Self::Type(data_type) => data_type,
-            Self::Detail(detail) => &detail.data_type,
-        }
-    }
-
-    pub fn description(&self) -> Option<&str> {
-        match self {
-            Self::Type(_) => None,
-            Self::Detail(detail) => detail.description.as_deref(),
-        }
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<EnumType, D::Error> {
+        Ok(match bool::deserialize(deserializer)? {
+            true => EnumType::String,
+            false => EnumType::Int,
+        })
     }
 }
