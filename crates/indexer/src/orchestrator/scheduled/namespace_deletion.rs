@@ -16,8 +16,10 @@ use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskEr
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::Envelope;
 use orbit_server_config::{NamespaceDeletionSchedulerConfig, ScheduleConfiguration};
+use orbit_utils::traversal_path::TraversalPath;
 
 const CHECKPOINT_KEY: &str = "namespace_deletion_scheduler";
+const LIFETIME_RECONCILE_KEY_PREFIX: &str = "maintenance.lifetime_reconcile";
 const GRACE_PERIOD_DAYS: i64 = 30;
 
 pub struct NamespaceDeletionScheduler {
@@ -116,6 +118,13 @@ impl NamespaceDeletionScheduler {
                         );
                     }
                 }
+                if let Err(error) = self.reconcile_lifetime_once(root).await {
+                    warn!(
+                        safe(ERROR_TYPE) = "lifetime_reconcile",
+                        expanded(ERROR_MESSAGE) = %error,
+                        "lifetime reconciliation failed, retrying on a later tick"
+                    );
+                }
                 reconciled += 1;
             };
             reconcile.instrument(span).await;
@@ -126,6 +135,36 @@ impl NamespaceDeletionScheduler {
             "reconciled moved entities for enabled namespaces"
         );
         Ok(())
+    }
+
+    /// Runs the one-off lifetime reconciliation of a root, and records it once every table
+    /// statement succeeded so a later tick skips the root.
+    async fn reconcile_lifetime_once(&self, root: &TraversalPath) -> Result<(), TaskError> {
+        let key = format!("{LIFETIME_RECONCILE_KEY_PREFIX}.{root}");
+        if self
+            .checkpoint_store
+            .load(&key)
+            .await
+            .map_err(TaskError::new)?
+            .is_some()
+        {
+            return Ok(());
+        }
+        let started = Utc::now();
+        let failed: Vec<String> = self
+            .store
+            .reconcile_lifetime(root)
+            .await
+            .into_iter()
+            .filter_map(|outcome| Some(format!("{}: {}", outcome.table, outcome.error?)))
+            .collect();
+        if !failed.is_empty() {
+            return Err(TaskError::new(failed.join("; ")));
+        }
+        self.checkpoint_store
+            .save(&key, &Checkpoint::new(started), WriteDurability::Durable)
+            .await
+            .map_err(TaskError::new)
     }
 
     async fn record_newly_deleted_namespaces(&self) -> Result<(), TaskError> {
@@ -271,7 +310,7 @@ mod tests {
     use super::*;
     use crate::modules::namespace_deletion::store::test_utils::MockNamespaceDeletionStore;
     use crate::modules::namespace_deletion::store::{
-        DeletedNamespaceEntry, NamespaceScheduleEntry,
+        DeletedNamespaceEntry, NamespaceScheduleEntry, TableDeletionOutcome,
     };
     use crate::testkit::mocks::MockNatsServices;
 
@@ -281,20 +320,26 @@ mod tests {
     use crate::types::{Envelope, Subscription};
     use orbit_utils::traversal_path::TraversalPath;
 
-    struct MockCheckpointStore;
+    #[derive(Default)]
+    struct MockCheckpointStore {
+        saved: parking_lot::Mutex<std::collections::HashMap<String, Checkpoint>>,
+    }
 
     #[async_trait]
     impl CheckpointStore for MockCheckpointStore {
-        async fn load(&self, _key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
-            Ok(None)
+        async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
+            Ok(self.saved.lock().get(key).cloned())
         }
 
         async fn save(
             &self,
-            _key: &str,
-            _checkpoint: &Checkpoint,
+            key: &str,
+            checkpoint: &Checkpoint,
             _durability: WriteDurability,
         ) -> Result<(), CheckpointError> {
+            self.saved
+                .lock()
+                .insert(key.to_string(), checkpoint.clone());
             Ok(())
         }
 
@@ -317,7 +362,7 @@ mod tests {
     fn scheduler_with_store(store: Arc<dyn NamespaceDeletionStore>) -> NamespaceDeletionScheduler {
         NamespaceDeletionScheduler::new(
             store,
-            Arc::new(MockCheckpointStore),
+            Arc::new(MockCheckpointStore::default()),
             Arc::new(MockNatsServices::new()),
             ScheduledTaskMetrics::new(),
             orbit_server_config::AppConfig::embedded_defaults()
@@ -359,7 +404,7 @@ mod tests {
         let nats = Arc::new(MockNatsServices::new());
         let scheduler = NamespaceDeletionScheduler::new(
             store,
-            Arc::new(MockCheckpointStore),
+            Arc::new(MockCheckpointStore::default()),
             nats.clone(),
             ScheduledTaskMetrics::new(),
             orbit_server_config::AppConfig::embedded_defaults()
@@ -396,6 +441,39 @@ mod tests {
         scheduler.run().await.unwrap();
 
         assert_eq!(store.reconcile_calls(), vec!["1/100/", "1/200/"]);
+    }
+
+    #[tokio::test]
+    async fn reconciles_each_root_s_lifetime_once() {
+        let store = Arc::new(
+            MockNamespaceDeletionStore::new()
+                .with_enabled_roots(vec![TraversalPath::new_unchecked("1/100/")]),
+        );
+        let scheduler = scheduler_with_store(store.clone());
+
+        scheduler.run().await.unwrap();
+        scheduler.run().await.unwrap();
+
+        assert_eq!(store.lifetime_calls(), vec!["1/100/"]);
+    }
+
+    #[tokio::test]
+    async fn retries_a_lifetime_reconcile_that_failed() {
+        let store = Arc::new(
+            MockNamespaceDeletionStore::new()
+                .with_enabled_roots(vec![TraversalPath::new_unchecked("1/100/")])
+                .with_deletion_outcomes(vec![TableDeletionOutcome {
+                    table: "gl_edge".into(),
+                    duration_seconds: 0.0,
+                    error: Some("timeout".into()),
+                }]),
+        );
+        let scheduler = scheduler_with_store(store.clone());
+
+        scheduler.run().await.unwrap();
+        scheduler.run().await.unwrap();
+
+        assert_eq!(store.lifetime_calls(), vec!["1/100/", "1/100/"]);
     }
 
     #[tokio::test]
@@ -452,7 +530,7 @@ mod tests {
         let nats = Arc::new(DuplicateNatsServices);
         let scheduler = NamespaceDeletionScheduler::new(
             store,
-            Arc::new(MockCheckpointStore),
+            Arc::new(MockCheckpointStore::default()),
             nats,
             ScheduledTaskMetrics::new(),
             orbit_server_config::AppConfig::embedded_defaults()

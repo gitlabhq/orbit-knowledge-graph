@@ -130,12 +130,15 @@ async fn run_deletion_handler(
 ) {
     let graph = Arc::new(context.config.build_client("graph"));
     let datalake = Arc::new(context.config.build_client("graph"));
-    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
-        datalake,
-        graph,
-        catalog,
-        &indexer::testkit::siphon_source(),
-    ));
+    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(
+        ClickHouseNamespaceDeletionStore::new(
+            datalake,
+            graph,
+            catalog,
+            &indexer::testkit::siphon_source(),
+        )
+        .expect("deletion statements build"),
+    );
     let handler = NamespaceDeletionHandler::new(
         store,
         DeletionMetrics::new(),
@@ -423,7 +426,7 @@ async fn scheduled_reconcile_removes_a_moved_project_under_a_root_over_the_uri_c
         .await;
 
     index_moved_root(&context).await;
-    assert_active_row_count(&context, &t("gl_project"), MOVED_FROM_PATH, 1).await;
+    assert_active_row_count(&context, &t("gl_project"), MOVED_FROM_PATH, 0).await;
     assert_active_row_count(&context, &t("gl_project"), MOVED_TO_PATH, 1).await;
 
     run_namespace_deletion_scheduler(&context).await;
@@ -447,12 +450,15 @@ async fn run_namespace_deletion_scheduler(context: &TestContext) {
     let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
         .expect("embedded catalog must load");
     let graph = Arc::new(context.config.build_client("graph"));
-    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
-        Arc::new(context.config.build_client("graph")),
-        graph.clone(),
-        &catalog,
-        &indexer::testkit::siphon_source(),
-    ));
+    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(
+        ClickHouseNamespaceDeletionStore::new(
+            Arc::new(context.config.build_client("graph")),
+            graph.clone(),
+            &catalog,
+            &indexer::testkit::siphon_source(),
+        )
+        .expect("deletion statements build"),
+    );
     NamespaceDeletionScheduler::new(
         store,
         Arc::new(ClickHouseCheckpointStore::new(graph)),
@@ -564,12 +570,15 @@ async fn reconcile_root(
 ) {
     let graph = Arc::new(context.config.build_client("graph"));
     let datalake = Arc::new(context.config.build_client("graph"));
-    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
-        datalake,
-        graph,
-        catalog,
-        &indexer::testkit::siphon_source(),
-    ));
+    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(
+        ClickHouseNamespaceDeletionStore::new(
+            datalake,
+            graph,
+            catalog,
+            &indexer::testkit::siphon_source(),
+        )
+        .expect("deletion statements build"),
+    );
 
     let outcomes = store
         .reconcile_moved_entities(&TraversalPath::new_unchecked(root))

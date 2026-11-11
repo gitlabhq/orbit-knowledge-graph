@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::ArrowClickHouseClient;
+use clickhouse_client::{ArrowClickHouseClient, ArrowQuery};
 use orbit_log_fields::{error, warn};
 use thiserror::Error;
 
@@ -165,6 +165,28 @@ impl ClickHouseWriter {
                         );
                         WRITE_RETRY.retry_or_give_up(attempt, (), e)
                     }
+                }
+            }
+        })
+        .await
+    }
+
+    /// Runs a tombstoning `INSERT ... SELECT` with the parameters `bind` sets, retried like a write.
+    pub async fn tombstone(
+        &self,
+        sql: &str,
+        bind: impl Fn(ArrowQuery) -> ArrowQuery,
+    ) -> Result<(), WriteError> {
+        if self.noop {
+            return Ok(());
+        }
+        drive(&WRITE_RETRY, |attempt| {
+            let fut = bind(self.client.insert_query(sql)).execute();
+            async move {
+                match fut.await.map_err(WriteError::from) {
+                    Ok(()) => Step::Done(()),
+                    Err(e @ WriteError::Unavailable(_)) => Step::GiveUp(e),
+                    Err(e) => WRITE_RETRY.retry_or_give_up(attempt, (), e),
                 }
             }
         })

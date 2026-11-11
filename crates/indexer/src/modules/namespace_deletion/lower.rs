@@ -1,20 +1,17 @@
 use query_data_model::{
-    Catalog, ClickHouse, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+    Catalog, ClickHouse, DELETED_COLUMN, DataModelError, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
-pub struct DeletionStatement {
-    /// Unprefixed table name.
-    pub table: String,
-    /// Full SQL with the schema-version prefix applied to the table name.
-    pub sql: String,
-}
+use crate::lifetime::Lifetime;
+pub use crate::lifetime::Tombstone as DeletionStatement;
 
-/// Builds `INSERT INTO ... SELECT` statements that soft-delete all rows for a
-/// namespace across every graph table.
+/// Builds the `INSERT INTO ... SELECT` statements that soft-delete a namespace, in order.
 ///
-/// For each namespaced node table and the shared edge table, emits:
+/// The edges, in every edge table, of the namespace's live nodes go first, so an edge stored
+/// under another namespace's path dies with its endpoint. Then every namespaced node table and
+/// every edge table tombstones its rows under the path:
 /// ```sql
 /// INSERT INTO {prefixed_table} ({sort_key..., unchanging columns..., _deleted, _version})
 /// SELECT {sort_key..., unchanging columns..., true, now64(6)}
@@ -22,8 +19,13 @@ pub struct DeletionStatement {
 /// WHERE startsWith(traversal_path, {traversal_path:String})
 ///   AND _deleted = false
 /// ```
-pub fn build_deletion_statements(catalog: &Catalog<ClickHouse>) -> Vec<DeletionStatement> {
-    build_statements(catalog, None)
+pub fn build_deletion_statements(
+    catalog: &Catalog<ClickHouse>,
+) -> Result<Vec<DeletionStatement>, DataModelError> {
+    let lifetime = Lifetime::from_catalog(catalog)?;
+    let mut statements = lifetime.edges_under_path();
+    statements.extend(build_statements(catalog, &lifetime, None)?);
+    Ok(statements)
 }
 
 pub struct ReconcileStatement {
@@ -31,65 +33,53 @@ pub struct ReconcileStatement {
     pub tombstone: DeletionStatement,
 }
 
-pub fn build_reconcile_statements(catalog: &Catalog<ClickHouse>) -> Vec<ReconcileStatement> {
-    build_statements(catalog, Some(STALE_PATH_PREDICATE))
-        .into_iter()
-        .map(|tombstone| {
-            let prefixed = prefixed_table_name(&tombstone.table, *SCHEMA_VERSION);
-            ReconcileStatement {
-                live_paths_sql: format!(
-                    "SELECT DISTINCT {TRAVERSAL_PATH_COLUMN} FROM {prefixed} \
-                     WHERE startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
-                     AND {DELETED_COLUMN} = false"
-                ),
-                tombstone,
-            }
-        })
-        .collect()
+pub fn build_reconcile_statements(
+    catalog: &Catalog<ClickHouse>,
+) -> Result<Vec<ReconcileStatement>, DataModelError> {
+    let lifetime = Lifetime::from_catalog(catalog)?;
+    Ok(
+        build_statements(catalog, &lifetime, Some(STALE_PATH_PREDICATE))?
+            .into_iter()
+            .map(|tombstone| {
+                let prefixed = prefixed_table_name(&tombstone.table, *SCHEMA_VERSION);
+                ReconcileStatement {
+                    live_paths_sql: format!(
+                        "SELECT DISTINCT {TRAVERSAL_PATH_COLUMN} FROM {prefixed} \
+                         WHERE startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
+                         AND {DELETED_COLUMN} = false"
+                    ),
+                    tombstone,
+                }
+            })
+            .collect(),
+    )
 }
 
 const STALE_PATH_PREDICATE: &str = "AND traversal_path IN {stale_paths:Array(String)}";
 
-struct DeletionTable<'a> {
-    table: &'a str,
-    sort_key: &'a [String],
-    carried: Vec<&'a str>,
+struct DeletionTable {
+    table: String,
+    sort_key: Vec<String>,
+    carried: Vec<String>,
 }
 
-fn deletion_tables(catalog: &Catalog<ClickHouse>) -> Vec<DeletionTable<'_>> {
-    let graph = catalog.graph();
-    let Ok(schema) = catalog.schema() else {
-        return Vec::new();
-    };
-    let sort_key = |table: &str| schema.table(table).map_or(&[][..], |table| &table.sort_key);
-    let mut entities: Vec<_> = graph
-        .entities()
-        .filter(|entity| catalog.has_path_column(entity.id))
-        .collect();
-    entities.sort_by_key(|entity| entity.name.as_str());
-    let mut tables: Vec<DeletionTable<'_>> = entities
-        .into_iter()
-        .filter_map(|entity| {
-            let table = catalog.table_of(entity.id)?;
-            let sort_key = sort_key(table);
-            let carried = entity
-                .properties
-                .iter()
-                .map(|property| graph.property(*property))
-                .filter(|property| {
-                    catalog.model().immutable(property.id) && catalog.column(property.id).is_some()
-                })
-                .map(|property| property.name.as_str())
-                .filter(|name| !sort_key.iter().any(|key| key == name))
-                .collect();
-            Some(DeletionTable {
-                table,
-                sort_key,
-                carried,
-            })
+/// Every namespaced node table, then every edge table, keyed by its sort key.
+fn deletion_tables(
+    catalog: &Catalog<ClickHouse>,
+    lifetime: &Lifetime,
+) -> Result<Vec<DeletionTable>, DataModelError> {
+    let schema = catalog.schema()?;
+    let mut tables: Vec<_> = lifetime
+        .nodes()
+        .iter()
+        .map(|node| DeletionTable {
+            table: node.table.clone(),
+            sort_key: node.sort_key.clone(),
+            carried: node.carried.clone(),
         })
         .collect();
-    let relationships: Vec<_> = graph
+    let relationships: Vec<_> = catalog
+        .graph()
         .relationships()
         .map(|relationship| relationship.id)
         .collect();
@@ -98,46 +88,41 @@ fn deletion_tables(catalog: &Catalog<ClickHouse>) -> Vec<DeletionTable<'_>> {
     edge_tables.sort();
     edge_tables.dedup();
     for table in edge_tables {
-        if let Some(table) = schema.table(&table) {
-            tables.push(DeletionTable {
-                table: &table.name,
-                sort_key: &table.sort_key,
-                carried: Vec::new(),
-            });
-        }
+        let sort_key = schema
+            .table(&table)
+            .ok_or_else(|| DataModelError::Invalid(format!("{table} has no schema")))?
+            .sort_key
+            .clone();
+        tables.push(DeletionTable {
+            table,
+            sort_key,
+            carried: Vec::new(),
+        });
     }
-    tables
+    Ok(tables)
 }
 
 fn build_statements(
     catalog: &Catalog<ClickHouse>,
+    lifetime: &Lifetime,
     extra_predicate: Option<&str>,
-) -> Vec<DeletionStatement> {
-    deletion_tables(catalog)
-        .into_iter()
-        .map(|table| {
-            build_deletion_insert(
-                table.table,
-                &prefixed_table_name(table.table, *SCHEMA_VERSION),
-                table.sort_key,
-                &table.carried,
-                extra_predicate,
-            )
-        })
-        .collect()
+) -> Result<Vec<DeletionStatement>, DataModelError> {
+    Ok(deletion_tables(catalog, lifetime)?
+        .iter()
+        .map(|table| build_deletion_insert(table, extra_predicate))
+        .collect())
 }
 
 fn build_deletion_insert(
-    unprefixed_table: &str,
-    prefixed_table: &str,
-    sort_key: &[String],
-    carried_columns: &[&str],
+    table: &DeletionTable,
     extra_predicate: Option<&str>,
 ) -> DeletionStatement {
-    let carried_cols = sort_key
+    let prefixed_table = prefixed_table_name(&table.table, *SCHEMA_VERSION);
+    let carried_cols = table
+        .sort_key
         .iter()
+        .chain(&table.carried)
         .map(String::as_str)
-        .chain(carried_columns.iter().copied())
         .collect::<Vec<_>>()
         .join(", ");
     let insert_columns = format!("{carried_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
@@ -150,7 +135,7 @@ fn build_deletion_insert(
          AND ({DELETED_COLUMN} = false){extra})"
     );
     DeletionStatement {
-        table: unprefixed_table.to_string(),
+        table: table.table.clone(),
         sql,
     }
 }
@@ -169,6 +154,17 @@ mod tests {
         catalog.edge_tables(&relationships)
     }
 
+    /// The node and edge table statements, after the edge cascade that runs first.
+    fn table_statements(catalog: &Catalog<ClickHouse>) -> Vec<DeletionStatement> {
+        let cascade = Lifetime::from_catalog(catalog)
+            .unwrap()
+            .edges_under_path()
+            .len();
+        build_deletion_statements(catalog)
+            .unwrap()
+            .split_off(cascade)
+    }
+
     fn find_statement<'a>(
         statements: &'a [DeletionStatement],
         table: &str,
@@ -180,9 +176,39 @@ mod tests {
     }
 
     #[test]
+    fn edges_of_the_namespace_nodes_are_tombstoned_first_in_every_edge_table() {
+        let catalog = catalog();
+        let statements = build_deletion_statements(&catalog).unwrap();
+        let cascade = Lifetime::from_catalog(&catalog).unwrap().edges_under_path();
+        assert!(!cascade.is_empty());
+        assert_eq!(statements[..cascade.len()], cascade[..]);
+        let member_of = cascade
+            .iter()
+            .find(|statement| {
+                statement.sql.contains("'MEMBER_OF'")
+                    && statement.sql.contains("target_kind = 'Group'")
+            })
+            .expect("a cascade for the MEMBER_OF edges of a group");
+        let group = prefixed_table_name("gl_group", *SCHEMA_VERSION);
+        assert!(
+            member_of.sql.contains(&format!(
+                "e.target_id IN (SELECT id FROM {group} FINAL WHERE startsWith(traversal_path, {{traversal_path:String}}))"
+            )),
+            "{}",
+            member_of.sql
+        );
+        assert!(
+            !cascade
+                .iter()
+                .any(|statement| statement.sql.contains("_kind = 'User'")),
+            "a global entity has no namespace to delete"
+        );
+    }
+
+    #[test]
     fn covers_every_namespaced_node_table_plus_edge_table() {
         let catalog = catalog();
-        let statements = build_deletion_statements(&catalog);
+        let statements = table_statements(&catalog);
 
         let generated_tables: Vec<&str> = statements.iter().map(|s| s.table.as_str()).collect();
 
@@ -219,7 +245,7 @@ mod tests {
     #[test]
     fn excludes_nodes_without_traversal_path() {
         let catalog = catalog();
-        let statements = build_deletion_statements(&catalog);
+        let statements = table_statements(&catalog);
 
         let generated_tables: Vec<&str> = statements.iter().map(|s| s.table.as_str()).collect();
 
@@ -241,7 +267,7 @@ mod tests {
     #[test]
     fn every_statement_has_required_sql_structure() {
         let catalog = catalog();
-        let statements = build_deletion_statements(&catalog);
+        let statements = table_statements(&catalog);
 
         for statement in &statements {
             let sql = &statement.sql;
@@ -274,7 +300,7 @@ mod tests {
     #[test]
     fn node_statement_selects_sort_key_columns() {
         let catalog = catalog();
-        let statements = build_deletion_statements(&catalog);
+        let statements = table_statements(&catalog);
         let statement = find_statement(&statements, "gl_project");
 
         assert!(
@@ -292,15 +318,16 @@ mod tests {
     #[test]
     fn node_statements_carry_the_unchanging_columns() {
         let catalog = catalog();
-        let statements = build_deletion_statements(&catalog);
-        let tables = deletion_tables(&catalog);
+        let statements = table_statements(&catalog);
+        let lifetime = Lifetime::from_catalog(&catalog).unwrap();
+        let tables = deletion_tables(&catalog, &lifetime).unwrap();
         let carried = tables
             .iter()
             .find(|table| table.table == "gl_file")
             .expect("gl_file table")
             .carried
             .clone();
-        assert!(carried.contains(&"path"), "{carried:?}");
+        assert!(carried.iter().any(|column| column == "path"), "{carried:?}");
         let statement = find_statement(&statements, "gl_file");
         for column in carried {
             assert_eq!(
@@ -315,7 +342,7 @@ mod tests {
     #[test]
     fn edge_statements_select_sort_key_columns_for_all_tables() {
         let catalog = catalog();
-        let statements = build_deletion_statements(&catalog);
+        let statements = table_statements(&catalog);
 
         let schema = catalog.schema().expect("schema");
         for edge_table in edge_tables() {
@@ -335,11 +362,11 @@ mod tests {
     #[test]
     fn reconcile_covers_the_same_tables_as_deletion() {
         let catalog = catalog();
-        let deletion: Vec<String> = build_deletion_statements(&catalog)
+        let deletion: Vec<String> = table_statements(&catalog)
             .into_iter()
             .map(|s| s.table)
             .collect();
-        let reconcile = build_reconcile_statements(&catalog);
+        let reconcile = build_reconcile_statements(&catalog).unwrap();
 
         assert_eq!(deletion.len(), reconcile.len());
         for statement in &reconcile {
@@ -349,7 +376,7 @@ mod tests {
 
     #[test]
     fn reconcile_tombstones_only_the_stale_paths_it_reads() {
-        let statements = build_reconcile_statements(&catalog());
+        let statements = build_reconcile_statements(&catalog()).unwrap();
         let statement = statements
             .iter()
             .find(|s| s.tombstone.table == "gl_project")

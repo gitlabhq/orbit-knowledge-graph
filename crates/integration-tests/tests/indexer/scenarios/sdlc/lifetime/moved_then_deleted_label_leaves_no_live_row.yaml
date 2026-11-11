@@ -1,0 +1,40 @@
+# The delete arrives under the new path only, so the old row must already be gone: the write at
+# the new path tombstoned it.
+description: A moved then deleted label leaves no live row at its old path
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+        - { id: 2000, namespace_id: 100, traversal_path: "1/100/2000/" }
+      siphon_labels:
+        - { id: 5, title: bug, color: "#ff0000", description: Bugs, project_id: 1000, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    expect:
+      nodes:
+        gl_label:
+          rows:
+            - { id: 5, traversal_path: "1/100/1000/" }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Label, watermark: "2024-01-18 00:00:00.000000", cursor_values: "null", indexed_at: "2024-01-18 00:00:00.000000" }
+      siphon_labels:
+        - { id: 5, title: bug, color: "#ff0000", description: Bugs, project_id: 2000, traversal_path: "1/100/2000/", _siphon_replicated_at: "2024-01-19 10:00:00" }
+    expect:
+      nodes:
+        gl_label:
+          rows:
+            - { id: 5, traversal_path: "1/100/2000/" }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Label, watermark: "2024-01-20 00:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 00:00:00.000000" }
+      siphon_labels:
+        - { id: 5, title: bug, color: "#ff0000", description: Bugs, project_id: 2000, traversal_path: "1/100/2000/", _siphon_deleted: true, _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      nodes:
+        gl_label:
+          count: 0

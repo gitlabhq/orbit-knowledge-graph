@@ -29,6 +29,7 @@ pub mod checkpoint;
 pub mod clickhouse;
 pub mod config;
 pub mod engine;
+pub mod lifetime;
 pub mod locking;
 pub mod modules;
 pub mod nats;
@@ -348,7 +349,7 @@ pub async fn run_dispatcher(
             Arc::clone(&deletion_graph),
             &candidate,
             &siphon,
-        ));
+        )?);
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
 
     let backfill = Arc::new(CodeBackfill::new(

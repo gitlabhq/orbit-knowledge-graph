@@ -49,12 +49,10 @@ pub fn register_handlers(
                 "the model declares no {SIPHON_SOURCE} source"
             )))
         })?;
-    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
-        datalake_client,
-        graph_client,
-        catalog,
-        siphon,
-    ));
+    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(
+        ClickHouseNamespaceDeletionStore::new(datalake_client, graph_client, catalog, siphon)
+            .map_err(HandlerInitError::new)?,
+    );
 
     let policy = namespace_deletion_topic_policy()
         .with_optional_override(config.engine.topics.get(NAMESPACE_DELETION_TOPIC));

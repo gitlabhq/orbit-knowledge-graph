@@ -8,6 +8,7 @@ use query_data_model::{Catalog, ClickHouse};
 use super::extract::{ClickHouseExtractDeclaration, ExtractSpec, compile_extract_spec};
 use super::transform;
 use super::{Plan, Plans, TransformDeclaration, TransformSpec};
+use crate::lifetime::Lifetime;
 
 pub(in crate::modules::sdlc) struct Sizing<'a> {
     pub global_batch_size: u64,
@@ -54,10 +55,15 @@ pub(in crate::modules::sdlc) fn build_plans(
     catalog: &Catalog<ClickHouse>,
     sizing: Sizing<'_>,
 ) -> Result<Plans, PlanError> {
+    let lifetime =
+        Lifetime::from_catalog(catalog).map_err(|error| PlanError::Invalid(error.to_string()))?;
     let mut plans = PlanSet::default();
     for pipeline in catalog.model().sources().pipelines() {
         let plan = match pipeline.writer {
-            Writer::Entity(entity) => build_node_plan(entity, pipeline, catalog, &sizing)?,
+            Writer::Entity(entity) => Plan {
+                lifetime: Some(lifetime.of_node(entity)),
+                ..build_node_plan(entity, pipeline, catalog, &sizing)?
+            },
             Writer::Relationship(_) => build_edge_plan(pipeline, catalog, &sizing)?,
             Writer::Derived(_) => build_derived_plan(pipeline, catalog, &sizing)?,
         };
@@ -174,6 +180,7 @@ fn assemble(
         sort_key: pipeline.order_by.clone(),
         batch_size: sizing.resolve(&pipeline.name, pipeline.scope),
         transform,
+        lifetime: None,
     }
 }
 
@@ -398,6 +405,7 @@ mod tests {
             sort_key: vec![],
             batch_size: 1,
             transform: TransformSpec::DataFusion(vec![]),
+            lifetime: None,
         }
         };
         set.insert(plan("dup")).expect("first insert");

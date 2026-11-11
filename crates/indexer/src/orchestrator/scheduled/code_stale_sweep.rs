@@ -188,7 +188,7 @@ fn node_sweep(table: &str, checkpoint_table: &str, carried_columns: &[String]) -
 }
 
 fn edge_sweep(edge_table: &str, checkpoint_table: &str, table_names: &CodeTableNames) -> String {
-    let written = table_names.written_variants_sql(edge_table);
+    let written = table_names.written_variants_sql();
     if table_names.branch_scoped(edge_table) {
         return format!(
             r#"
@@ -319,19 +319,19 @@ mod tests {
             sql.contains("('CALLS', 'Definition', 'Definition')"),
             "{sql}"
         );
-        assert!(!sql.contains("('CALLS', 'File', 'Definition')"), "{sql}");
     }
 
     #[test]
-    fn plain_edge_sweep_keeps_the_code_indexer_variants_and_min_watermark() {
+    fn shared_edge_sweep_keeps_every_code_indexer_variant_and_min_watermark() {
         let (names, _, edge) = split_names();
         let sql = edge_sweep(&edge, "v9_cp", &names);
-        assert!(
-            sql.contains(
-                "(s.relationship_kind, s.source_kind, s.target_kind) IN (('CALLS', 'File', 'Definition'), ('CALLS', 'File', 'ImportedSymbol'))"
-            ),
-            "{sql}"
-        );
+        for variant in [
+            "('CALLS', 'File', 'Definition')",
+            "('CONTAINS', 'Directory', 'File')",
+            "('ON_BRANCH', 'File', 'Branch')",
+        ] {
+            assert!(sql.contains(variant), "{sql}");
+        }
         assert!(
             sql.contains("min(indexed_at)"),
             "a shared traversal_path must take the oldest branch watermark: {sql}"

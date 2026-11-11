@@ -25,6 +25,7 @@ use super::partitioning::PartitionAssignment;
 use crate::checkpoint::Checkpoint;
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::handler::HandlerError;
+use crate::lifetime::NodeLifetime;
 use orbit_utils::traversal_path::TraversalPath;
 
 #[derive(Debug, Clone, Default)]
@@ -265,6 +266,8 @@ pub(in crate::modules::sdlc) struct Plan {
     pub sort_key: Vec<String>,
     pub batch_size: u64,
     pub transform: TransformSpec,
+    /// The tombstones a written block of a node plan's rows triggers.
+    pub lifetime: Option<NodeLifetime>,
 }
 
 #[derive(Clone)]
@@ -439,6 +442,7 @@ mod tests {
                  LIMIT {{{{batch_size}}}}"
             ))
             .expect("valid template"),
+            lifetime: None,
             watermark_column: "_siphon_watermark".to_string(),
             deleted_column: "_siphon_deleted".to_string(),
             sort_key,

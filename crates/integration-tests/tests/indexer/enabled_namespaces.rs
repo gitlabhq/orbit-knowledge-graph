@@ -37,7 +37,8 @@ async fn moved_entity_reconcile_skips_a_disabled_namespace_before_the_delete_mer
         Arc::new(context.create_client()),
         &catalog,
         &indexer::testkit::siphon_source(),
-    );
+    )
+    .expect("deletion statements build");
 
     let roots = store.enabled_namespace_roots().await.unwrap();
 

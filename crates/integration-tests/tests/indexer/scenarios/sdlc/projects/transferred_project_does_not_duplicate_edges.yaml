@@ -24,7 +24,8 @@ steps:
 
   # Rails rewrites the route row and touches the project. The pre-move route row
   # stays readable until a merge collapses it, so the extract sees both paths and
-  # must not re-emit the project — or its edges — under the old one.
+  # must not re-emit the project — or its edges — under the old one. The row written
+  # under the new path tombstones the old row of the same project.
   - seed:
       checkpoint:
         - { key: ns.100.Project, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
@@ -36,7 +37,6 @@ steps:
       nodes:
         gl_project:
           rows:
-            - { id: 1000, traversal_path: "1/100/1000/" }
             - { id: 1000, traversal_path: "1/100/200/1000/" }
       edges:
         - kind: CONTAINS

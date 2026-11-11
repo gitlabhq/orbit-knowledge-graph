@@ -246,6 +246,12 @@ impl Pipeline {
                 .record_transform_duration(transform_elapsed.as_secs_f64());
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
+            let written_nodes = plan.lifetime.as_ref().zip(
+                grouped
+                    .first()
+                    .filter(|batches| !batches.is_empty())
+                    .cloned(),
+            );
             let mut write_futures = FuturesUnordered::new();
             for (index, batches) in grouped.into_iter().enumerate() {
                 if batches.is_empty() {
@@ -282,6 +288,9 @@ impl Pipeline {
                     observer.record_graph_write(&report.table, report.rows, report.bytes);
                     stats.written_rows += report.rows;
                     stats.written_bytes += report.bytes;
+                }
+                if let Some((lifetime, nodes)) = &written_nodes {
+                    lifetime.written(&context.writer, nodes).await?;
                 }
                 Ok::<_, HandlerError>(write_start.elapsed())
             };
@@ -542,6 +551,7 @@ mod tests {
                     .to_string(),
             )
             .expect("valid template"),
+            lifetime: None,
             watermark_column: "_siphon_watermark".to_string(),
             deleted_column: "_siphon_deleted".to_string(),
             sort_key: vec!["id".to_string()],

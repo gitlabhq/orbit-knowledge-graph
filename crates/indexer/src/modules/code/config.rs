@@ -5,6 +5,8 @@ use query_data_model::{Catalog, ClickHouse, DataModelError};
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
+use crate::lifetime::{Lifetime, Tombstone};
+
 const PROJECT_COLUMN: &str = "project_id";
 const BRANCH_COLUMN: &str = "branch";
 
@@ -15,8 +17,10 @@ pub struct CodeTableNames {
     pub definition: String,
     pub imported_symbol: String,
     edge_tables: HashMap<String, Vec<(String, String, String)>>,
+    shared_edge_table: Option<String>,
     branch_scoped: HashSet<String>,
     node_columns: HashMap<String, Vec<String>>,
+    foreign_edges: HashMap<String, Vec<Tombstone>>,
 }
 
 impl CodeTableNames {
@@ -34,7 +38,9 @@ impl CodeTableNames {
                 ))
             })?;
 
+        let foreign = Lifetime::foreign_to(catalog, CODE_INDEXER_SOURCE)?;
         let mut node_columns = HashMap::new();
+        let mut foreign_edges = HashMap::new();
         for entity in writes.entities.iter().map(|entity| graph.entity(*entity)) {
             let table = catalog.table_of(entity.id).ok_or_else(|| {
                 DataModelError::Invalid(format!("{} has no graph table", entity.name))
@@ -53,7 +59,9 @@ impl CodeTableNames {
                 .map(|property| property.name.clone())
                 .filter(|name| !sort_key.contains(name))
                 .collect();
-            node_columns.insert(prefixed_table_name(table, *SCHEMA_VERSION), carried);
+            let table = prefixed_table_name(table, *SCHEMA_VERSION);
+            foreign_edges.insert(table.clone(), foreign.edges_of(entity.id));
+            node_columns.insert(table, carried);
         }
 
         let mut edge_tables: HashMap<String, Vec<(String, String, String)>> = HashMap::new();
@@ -98,9 +106,18 @@ impl CodeTableNames {
             definition: table("Definition")?,
             imported_symbol: table("ImportedSymbol")?,
             edge_tables,
+            shared_edge_table: catalog
+                .shared_edge_table()
+                .map(|table| prefixed_table_name(table, *SCHEMA_VERSION)),
             branch_scoped,
             node_columns,
+            foreign_edges,
         })
+    }
+
+    /// Tombstones, for `ids`, the edges other writers wrote of the nodes in `table`.
+    pub fn foreign_edges(&self, table: &str) -> &[Tombstone] {
+        self.foreign_edges.get(table).map_or(&[], Vec::as_slice)
     }
 
     /// Unchanging non-key columns a tombstone for `table` must carry.
@@ -131,13 +148,15 @@ impl CodeTableNames {
             })
     }
 
-    /// For stale data cleanup.
+    /// The tables the code indexer's edges live in, and the shared edge table a code migration
+    /// clones with the edges an earlier version routed there.
     pub fn edge_table_names(&self) -> Vec<&str> {
         let mut tables: Vec<&str> = self
             .edge_tables
             .values()
             .flatten()
             .map(|(_, _, table)| table.as_str())
+            .chain(self.shared_edge_table.as_deref())
             .collect();
         tables.sort();
         tables.dedup();
@@ -158,17 +177,15 @@ impl CodeTableNames {
         self.branch_scoped.contains(table)
     }
 
-    /// The predicate on `s` that keeps the rows of `table` whose variant the code indexer writes.
-    pub fn written_variants_sql(&self, table: &str) -> String {
+    /// The predicate on `s` that keeps the edges of the variants the code indexer writes.
+    pub fn written_variants_sql(&self) -> String {
         let mut variants: Vec<String> = self
             .edge_tables
             .iter()
             .flat_map(|(relationship, routes)| {
-                routes.iter().filter(|(_, _, routed)| routed == table).map(
-                    move |(source, target, _)| {
-                        format!("('{relationship}', '{source}', '{target}')")
-                    },
-                )
+                routes.iter().map(move |(source, target, _)| {
+                    format!("('{relationship}', '{source}', '{target}')")
+                })
             })
             .collect();
         variants.sort();
@@ -202,11 +219,15 @@ mod tests {
     }
 
     #[test]
-    fn edge_tables_are_the_tables_of_the_variants_the_code_indexer_writes() {
+    fn edge_tables_are_the_code_variant_tables_and_the_shared_table() {
         let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
         let names = CodeTableNames::from_catalog(&catalog).expect("code tables must resolve");
         let gl_code_edge = prefixed_table_name("gl_code_edge", *SCHEMA_VERSION);
-        assert_eq!(names.edge_table_names(), [gl_code_edge.as_str()]);
+        let gl_edge = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
+        assert_eq!(
+            names.edge_table_names(),
+            [gl_code_edge.as_str(), gl_edge.as_str()]
+        );
         assert!(names.branch_scoped(&gl_code_edge));
     }
 }

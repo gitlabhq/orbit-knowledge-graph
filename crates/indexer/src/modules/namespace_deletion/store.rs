@@ -14,10 +14,11 @@ use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 
 use query_data_model::catalog::sources::DataSource;
-use query_data_model::{Catalog, ClickHouse};
+use query_data_model::{Catalog, ClickHouse, DataModelError};
 
 use super::lower::{self, DeletionStatement, ReconcileStatement};
 use crate::checkpoint::namespace_position_key;
+use crate::lifetime::Lifetime;
 
 const CURRENT_ROUTES_UNDER_ROOT: &str = r#"
 SELECT DISTINCT traversal_path FROM project_namespace_traversal_paths FINAL
@@ -209,6 +210,13 @@ pub trait NamespaceDeletionStore: Send + Sync {
         root_traversal_path: &TraversalPath,
     ) -> Vec<TableDeletionOutcome>;
 
+    /// Tombstones the edges of tombstoned nodes and the old-path rows of moved identities
+    /// under the root, once, for rows written before the indexer applied both rules.
+    async fn reconcile_lifetime(
+        &self,
+        root_traversal_path: &TraversalPath,
+    ) -> Vec<TableDeletionOutcome>;
+
     async fn delete_namespace_checkpoints(
         &self,
         traversal_path: &TraversalPath,
@@ -244,6 +252,7 @@ pub struct ClickHouseNamespaceDeletionStore {
     graph: Arc<ArrowClickHouseClient>,
     deletion_statements: Vec<DeletionStatement>,
     reconcile_statements: Vec<ReconcileStatement>,
+    lifetime_statements: Vec<DeletionStatement>,
     siphon: SiphonQueries,
 }
 
@@ -253,14 +262,15 @@ impl ClickHouseNamespaceDeletionStore {
         graph: Arc<ArrowClickHouseClient>,
         catalog: &Catalog<ClickHouse>,
         siphon: &DataSource,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, DataModelError> {
+        Ok(Self {
             datalake,
             graph,
-            deletion_statements: lower::build_deletion_statements(catalog),
-            reconcile_statements: lower::build_reconcile_statements(catalog),
+            deletion_statements: lower::build_deletion_statements(catalog)?,
+            reconcile_statements: lower::build_reconcile_statements(catalog)?,
+            lifetime_statements: Lifetime::from_catalog(catalog)?.reconcile_under_path(),
             siphon: SiphonQueries::new(siphon),
-        }
+        })
     }
 
     async fn tombstone(
@@ -396,6 +406,14 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
                     .collect()
             })
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
+    }
+
+    async fn reconcile_lifetime(
+        &self,
+        root_traversal_path: &TraversalPath,
+    ) -> Vec<TableDeletionOutcome> {
+        self.tombstone(&self.lifetime_statements, root_traversal_path)
+            .await
     }
 
     async fn reconcile_moved_entities(
@@ -577,6 +595,7 @@ pub mod test_utils {
     pub struct MockNamespaceDeletionStore {
         delete_calls: Mutex<Vec<TraversalPath>>,
         reconcile_calls: Mutex<Vec<TraversalPath>>,
+        lifetime_calls: Mutex<Vec<TraversalPath>>,
         delete_checkpoint_calls: Mutex<Vec<i64>>,
         mark_complete_calls: Mutex<Vec<(i64, TraversalPath)>>,
         schedule_calls: Mutex<Vec<(i64, TraversalPath, String)>>,
@@ -610,6 +629,7 @@ pub mod test_utils {
             Self {
                 delete_calls: Mutex::new(Vec::new()),
                 reconcile_calls: Mutex::new(Vec::new()),
+                lifetime_calls: Mutex::new(Vec::new()),
                 delete_checkpoint_calls: Mutex::new(Vec::new()),
                 mark_complete_calls: Mutex::new(Vec::new()),
                 schedule_calls: Mutex::new(Vec::new()),
@@ -666,6 +686,10 @@ pub mod test_utils {
             self.reconcile_calls.lock().clone()
         }
 
+        pub fn lifetime_calls(&self) -> Vec<TraversalPath> {
+            self.lifetime_calls.lock().clone()
+        }
+
         pub fn mark_complete_calls(&self) -> Vec<(i64, TraversalPath)> {
             self.mark_complete_calls.lock().clone()
         }
@@ -709,6 +733,14 @@ pub mod test_utils {
             self.reconcile_calls
                 .lock()
                 .push(root_traversal_path.clone());
+            self.deletion_outcomes.clone()
+        }
+
+        async fn reconcile_lifetime(
+            &self,
+            root_traversal_path: &TraversalPath,
+        ) -> Vec<TableDeletionOutcome> {
+            self.lifetime_calls.lock().push(root_traversal_path.clone());
             self.deletion_outcomes.clone()
         }
 

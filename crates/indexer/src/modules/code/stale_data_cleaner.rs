@@ -9,7 +9,10 @@ use thiserror::Error;
 use super::config::CodeTableNames;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, insert_overrides};
 use crate::durability::WriteDurability;
+use crate::lifetime::{IDS_PER_PARAM, Tombstone};
+use clickhouse_client::FromArrowColumn;
 use orbit_utils::traversal_path::TraversalPath;
+use std::collections::HashMap;
 
 #[async_trait]
 pub trait StaleDataCleaner: Send + Sync {
@@ -41,6 +44,7 @@ pub struct ClickHouseStaleDataCleaner {
     client: Arc<ArrowClickHouseClient>,
     node_queries: Vec<(String, String)>,
     edge_queries: Vec<(String, String)>,
+    foreign_edges: HashMap<String, Vec<Tombstone>>,
 }
 
 impl ClickHouseStaleDataCleaner {
@@ -69,6 +73,10 @@ impl ClickHouseStaleDataCleaner {
 
         Self {
             client,
+            foreign_edges: node_tables
+                .iter()
+                .map(|table| (table.to_string(), table_names.foreign_edges(table).to_vec()))
+                .collect(),
             node_queries,
             edge_queries,
         }
@@ -98,7 +106,7 @@ impl ClickHouseStaleDataCleaner {
     }
 
     fn build_edge_delete_query(edge_table: &str, table_names: &CodeTableNames) -> String {
-        let written = table_names.written_variants_sql(edge_table);
+        let written = table_names.written_variants_sql();
         if table_names.branch_scoped(edge_table) {
             return format!(
                 r#"
@@ -181,13 +189,29 @@ impl ClickHouseStaleDataCleaner {
             return Ok(());
         }
 
+        let edges = self.foreign_edges.get(table).map_or(&[][..], Vec::as_slice);
+        let ids = match edges {
+            [] => Vec::new(),
+            _ => i64::extract_column(&stale, 3).map_err(|e| query_error(e.to_string()))?,
+        };
         let sql = self
             .client
             .build_insert_sql_with_overrides(table, insert_overrides(WriteDurability::Durable));
         self.client
             .insert_arrow_streaming_with_sql(table, &sql, stale)
             .await
-            .map_err(|e| query_error(e.to_string()))
+            .map_err(|e| query_error(e.to_string()))?;
+        for edge in edges {
+            for ids in ids.chunks(IDS_PER_PARAM) {
+                self.client
+                    .insert_query(&edge.sql)
+                    .param("ids", ids)
+                    .execute()
+                    .await
+                    .map_err(|e| query_error(e.to_string()))?;
+            }
+        }
+        Ok(())
     }
 }
 
