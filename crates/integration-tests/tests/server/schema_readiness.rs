@@ -41,19 +41,24 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const NEW_PROPERTY_VALUE: &str = "new property";
 
 /// Removes `Project.description` and `MergeRequest.merged_at`, which v2 adds.
-const V1_EDITS: [(&str, &str, &str); 7] = [
+const V1_EDITS: [(&str, &str, &str); 8] = [
     (
         "gitlab.core/graph.yaml",
-        "(e.g. gitlab-org/gitlab)., unique: true}\n      name: {type: string, description: Display name.}\n      description: {type: string, description: Description text.}\n",
-        "(e.g. gitlab-org/gitlab)., unique: true}\n      name: {type: string, description: Display name.}\n",
+        "(e.g. gitlab-org/gitlab)., unique: true, default: ''}\n      name: {type: string, description: Display name., default: ''}\n      description: {type: string, description: Description text., default: ''}\n",
+        "(e.g. gitlab-org/gitlab)., unique: true, default: ''}\n      name: {type: string, description: Display name., default: ''}\n",
     ),
     (
-        "gitlab.core/graph_store.yaml",
-        "        description: {default: \"''\", codec: [ZSTD(3)]}\n        visibility_level: {default: \"''\", codec: [LZ4]}\n        full_path: {default: \"''\", codec: [ZSTD(3)]}\n        created_at: {codec: [Delta(8), ZSTD(1)]}\n        updated_at: {codec: [Delta(8), ZSTD(1)]}\n        archived:",
-        "        visibility_level: {default: \"''\", codec: [LZ4]}\n        full_path: {default: \"''\", codec: [ZSTD(3)]}\n        created_at: {codec: [Delta(8), ZSTD(1)]}\n        updated_at: {codec: [Delta(8), ZSTD(1)]}\n        archived:",
+        "gitlab.core/storage/clickhouse.yaml",
+        "      name: {backend: {type: String, codec: [ZSTD(1)]}}\n      description: {backend: {type: String, codec: [ZSTD(3)]}}\n      visibility_level:",
+        "      name: {backend: {type: String, codec: [ZSTD(1)]}}\n      visibility_level:",
     ),
     (
-        "gitlab.core/graph_store.yaml",
+        "gitlab.core/storage/clickhouse.yaml",
+        "    access: {filter: [archived, id, full_path], text: [name, description], order: [id]}\n",
+        "    access: {filter: [archived, id, full_path], text: [name], order: [id]}\n",
+    ),
+    (
+        "gitlab.core/storage/clickhouse.yaml",
         "        archived: minmax\n        id: bloom_filter(0.0001)\n        name: text\n        full_path: bloom_filter(0.0001)\n        description: text\n",
         "        archived: minmax\n        id: bloom_filter(0.0001)\n        name: text\n        full_path: bloom_filter(0.0001)\n",
     ),
@@ -63,17 +68,17 @@ const V1_EDITS: [(&str, &str, &str); 7] = [
         "",
     ),
     (
-        "gitlab.code_review/graph_store.yaml",
-        "        merged_at: {codec: [Delta(8), ZSTD(1)]}\n",
+        "gitlab.code_review/storage/clickhouse.yaml",
+        "      merged_at: {backend: {type: \"DateTime64(0, 'UTC')\", codec: [Delta(8), ZSTD(1)]}}\n",
         "",
     ),
     (
-        "gitlab.code_review/graph_store.yaml",
+        "gitlab.code_review/storage/clickhouse.yaml",
         "      - merged_at\n",
         "",
     ),
     (
-        "gitlab.code_review/source.yaml",
+        "gitlab.code_review/sources/siphon.yaml",
         "      merged_at: metric_merged_at\n",
         "",
     ),

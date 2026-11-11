@@ -4,7 +4,9 @@ pub use render::{ExtractionRequest, RequestFilter, Window};
 
 use serde::Deserialize;
 
-use crate::catalog::{Diagnostics, ExecuteError, Row, StorageBackend, StoreInput};
+use crate::catalog::{
+    Diagnostics, ExecuteError, NoOptions, Row, StorageBackend, StoreInput, check_unrelational,
+};
 use crate::{EntityId, PropertyId};
 
 #[derive(Debug, Clone)]
@@ -18,10 +20,6 @@ pub trait DataExtraction {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LiveOptions {}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LiveRoute {}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -59,14 +57,15 @@ impl StorageBackend for Live {
     const KIND: &'static str = "live";
     type Options = LiveOptions;
     type SourceOptions = LiveSource;
-    type RouteOptions = LiveRoute;
+    type ColumnOptions = NoOptions;
     type Store = LiveStore;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> LiveStore {
         let graph = input.graph;
         let store = &input.store.name;
         let mut endpoints = Vec::new();
-        for source in input.sources {
+        check_unrelational(&input, diagnostics);
+        for source in input.entities {
             let name = &graph.entity(source.entity).name;
             if source.options.operation.is_empty() {
                 diagnostics.error(

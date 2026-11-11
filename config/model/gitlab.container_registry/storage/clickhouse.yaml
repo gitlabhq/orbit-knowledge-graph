@@ -1,0 +1,25 @@
+kind: storage
+package: gitlab.container_registry
+store: graph
+entities:
+  ContainerRepository:
+    table: gl_container_repository
+    columns:
+      id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      name: {backend: {type: String, codec: [ZSTD(1)]}}
+      status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      created_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      project_id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, status, project_id], text: [name], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        name: text
+        status: {type: set(4), granularity: 2}
+        project_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      path_lookups: {id: {table: gl_container_repository, key: id}}

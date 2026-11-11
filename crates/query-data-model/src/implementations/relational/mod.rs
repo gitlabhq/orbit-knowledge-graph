@@ -13,7 +13,7 @@ mod tables;
 
 pub use capabilities::{Capabilities, CurrentRows, RelationalBackend};
 pub use catalog::RelationshipRoute;
-pub use store::{RelationalStore, Versioning};
+pub use store::{RelationalStore, Versioning, entity_layout};
 pub use tables::{Column, Engine, Index, PathColumn, Projection, Table};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -23,8 +23,6 @@ pub struct RelationalOptions {
     pub version_column: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_column: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sort_key: Vec<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub edge_tables: IndexMap<String, EdgeTableSpec>,
 }
@@ -33,48 +31,11 @@ pub struct RelationalOptions {
 #[serde(deny_unknown_fields)]
 pub struct EdgeTableSpec {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub default: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub domains: Vec<String>,
+    pub shared: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sort_key: Vec<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub columns: IndexMap<String, String>,
-}
-
-impl RelationalOptions {
-    pub fn edge_table_for(
-        &self,
-        source_domain: Option<&str>,
-        target_domain: Option<&str>,
-    ) -> Option<&str> {
-        let in_domain = |domain: &str| {
-            self.edge_tables
-                .iter()
-                .find(|(_, table)| table.domains.iter().any(|d| d == domain))
-        };
-        let shared = source_domain
-            .filter(|domain| Some(*domain) == target_domain)
-            .and_then(in_domain);
-        shared
-            .or_else(|| self.edge_tables.iter().find(|(_, table)| table.default))
-            .map(|(name, _)| name.as_str())
-    }
-
-    /// An entity's sort key: the one its source declares, else the store's.
-    pub fn sort_key_of(&self, declared: &[String]) -> Vec<String> {
-        match declared {
-            [] => self.sort_key.clone(),
-            declared => declared.to_vec(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RelationalRoute {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub table: Option<String>,
 }
 
 pub trait RelationalFacts {

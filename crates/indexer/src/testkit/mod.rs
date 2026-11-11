@@ -30,15 +30,9 @@ pub fn patched_model(
 #[cfg(test)]
 pub fn variant_routes_catalog() -> query_data_model::Catalog<query_data_model::ClickHouse> {
     let model = patched_model(
-        "gitlab/graph_store.yaml",
-        "  CALLS: {columns: {project_id: project_id, branch: branch}}\n",
-        "  CALLS:
-    variants:
-      Definition -> Definition: {columns: {project_id: project_id, branch: branch}}
-      File -> Definition: {backend: {table: gl_edge}}
-      Definition -> ImportedSymbol: {columns: {project_id: project_id, branch: branch}}
-      File -> ImportedSymbol: {backend: {table: gl_edge}}
-",
+        "gitlab/storage/clickhouse.yaml",
+        "  CALLS:\n    Definition -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}\n    File -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}\n    Definition -> ImportedSymbol: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}\n    File -> ImportedSymbol: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}\n",
+        "  CALLS:\n    Definition -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}\n    File -> Definition: {edge_table: gl_edge}\n    Definition -> ImportedSymbol: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}\n    File -> ImportedSymbol: {edge_table: gl_edge}\n",
     );
     query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&model).unwrap()
 }

@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use super::ClickHouse;
 use super::schema::{self, Schema};
-use super::spec::{ClickHouseOptions, ClickHouseSource};
+use super::spec::{ClickHouseOptions, ClickHouseSource, ColumnSpec};
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
-use crate::implementations::relational::{RelationalFacts, RelationalRoute, RelationalStore};
+use crate::implementations::relational::{RelationalFacts, RelationalStore};
 use crate::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
     MaterializedJoin, MaterializedNode, MaterializedRelationship, TraversalPathLookup,
@@ -56,17 +56,28 @@ impl StorageBackend for ClickHouse {
     const KIND: &'static str = "clickhouse";
     type Options = ClickHouseOptions;
     type SourceOptions = ClickHouseSource;
-    type RouteOptions = RelationalRoute;
+    type ColumnOptions = ColumnSpec;
     type Store = ClickHouseStore;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> ClickHouseStore {
-        let mut relational =
-            RelationalStore::resolve(&input, &input.options.relational(), diagnostics);
+        let options = &input.options;
+        let edge_tables: Vec<(&str, bool)> = options
+            .edge_tables
+            .iter()
+            .map(|(name, table)| (name.as_str(), table.shared))
+            .collect();
+        let mut relational = RelationalStore::resolve(
+            &input,
+            options.version_column.as_ref(),
+            options.deleted_column.as_ref(),
+            &edge_tables,
+            diagnostics,
+        );
         annotate_sources(&input, &mut relational, diagnostics);
         resolve_denormalized(&input, &mut relational, diagnostics);
         resolve_joins(&input, &mut relational, diagnostics);
         let schema = schema::resolve(&input, &mut relational, diagnostics);
-        relational.check_attribute_columns(input.store, input.graph, diagnostics);
+        relational.check_attribute_columns(&input, diagnostics);
         ClickHouseStore { relational, schema }
     }
 }
@@ -78,7 +89,7 @@ fn annotate_sources(
 ) {
     let graph = input.graph;
     let store = input.store;
-    for source in &input.sources {
+    for source in &input.entities {
         let entity = source.entity;
         let name = &graph.entity(entity).name;
         let stored = |property: &str, diagnostics: &mut Diagnostics| {
@@ -94,7 +105,7 @@ fn annotate_sources(
         schema::check_indexes(
             source.package,
             &format!("store {} {name}", store.name),
-            &options.indexes,
+            options.indexes.as_ref().unwrap_or(&Default::default()),
             |target| {
                 shared.contains_key(target)
                     || graph

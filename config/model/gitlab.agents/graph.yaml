@@ -11,7 +11,7 @@ entities:
     label: flow_type
     defaults: [id, source, flow_type, session_started_at]
     properties:
-      id: {type: int64, description: Governance session ID., immutable: true}
+      id: {type: int64, description: Governance session ID.}
       flow_type:
         type: enum
         description: >-
@@ -56,14 +56,14 @@ entities:
           34: issue_to_merge_request
           35: convert_to_gitlab_ci
         stored_as_text: true
+        default: other
       source:
         type: enum
         description: Where the session was recorded. Only gitlab_duo sessions are indexed today.
         values: {0: gitlab_duo, 1: claude_code_compliance_api, 2: claude_code_glab, 3: mcp}
+        default: gitlab_duo
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
-      session_started_at: {type: timestamp, description: When the session started., immutable: true}
-      traversal_path: {type: string, description: Namespace path for authz.}
+      session_started_at: {type: timestamp, description: When the session started.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}

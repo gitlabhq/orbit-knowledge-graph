@@ -1,7 +1,9 @@
 mod access;
 mod backend;
+mod bindings;
 mod diagnostics;
 mod frontend;
+mod layout;
 mod lookups;
 pub mod sources;
 mod store;
@@ -9,13 +11,14 @@ mod store;
 pub use crate::Scope;
 pub use access::{Access, EntityAccess, Guard, PathHop, PropertyAccess, Redaction, RowFilter};
 pub use backend::{
-    Catalog, ExecuteError, Render, RouteInput, Row, SourceInput, StorageBackend, StoreInput,
+    Catalog, ExecuteError, NoOptions, Render, Row, SourceInput, StorageBackend, StoreInput,
+    check_unrelational,
 };
 pub use diagnostics::{Diagnostics, SpecError};
 pub use frontend::{Reversed, Unresolved};
 pub use lookups::{Lookup, Lookups};
 pub use sources::Sources;
-pub use store::{DeclaredRoute, Source, Store, VariantRoute};
+pub use store::{Source, Store, StoredColumn};
 
 use std::collections::HashSet;
 
@@ -62,18 +65,22 @@ impl Model {
         let access = Access::resolve(&graph, &authorizations, &mut diagnostics);
         let lookups = Lookups::resolve(&graph, &services, &mut diagnostics);
         let served: HashSet<PropertyId> = lookups.served().collect();
-        let mut stores = store::resolve(&graph, &storages, &served, &mut diagnostics);
+        let mut stores = layout::resolve(&graph, &storages, &served, &mut diagnostics);
         access.resolve_guards(&graph, &mut stores, &mut diagnostics);
         let sources = Sources::resolve(&graph, &sources, &served, &mut diagnostics);
         diagnostics.finish()?;
-        Ok(Self {
+        let mut model = Self {
             id: identity(fragments)?,
             graph,
             access,
             lookups,
             stores,
             sources,
-        })
+        };
+        let mut diagnostics = Diagnostics::default();
+        model.resolve_backends(&mut diagnostics);
+        diagnostics.finish()?;
+        Ok(model)
     }
 
     pub fn id(&self) -> ModelId {
@@ -102,6 +109,28 @@ impl Model {
 
     pub fn sources(&self) -> &Sources {
         &self.sources
+    }
+
+    /// Whether some store binds a variant to this property as its foreign key.
+    pub fn holds_foreign_key(&self, property: PropertyId) -> bool {
+        self.stores.iter().any(|store| {
+            store.bindings().any(|(_, _, binding)| {
+                binding
+                    .fk
+                    .as_ref()
+                    .is_some_and(|key| key.foreign_key.property == property)
+            })
+        })
+    }
+
+    /// Whether every store that holds the property marks it immutable.
+    pub fn immutable(&self, property: PropertyId) -> bool {
+        let mut holders = self
+            .stores
+            .iter()
+            .filter(|store| store.column(property).is_some())
+            .peekable();
+        holders.peek().is_some() && holders.all(|store| store.immutable(property))
     }
 }
 

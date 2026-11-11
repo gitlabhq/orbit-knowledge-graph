@@ -81,7 +81,7 @@ pub(super) fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<C
 
 /// The foreign key that names an entity's repository.
 fn anchor(code: &Catalog<OrbitCode>, entity: EntityId) -> Option<PropertyId> {
-    code.model().access().entity(entity)?.anchor
+    Some(code.model().access().entity(entity)?.anchor?.0)
 }
 
 fn repositories(predicate: &Predicate, anchor: Option<PropertyId>) -> Result<Vec<i64>> {

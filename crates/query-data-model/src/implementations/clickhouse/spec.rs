@@ -4,7 +4,6 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::TraversalPathKind;
-use crate::implementations::relational::{EdgeTableSpec, RelationalOptions};
 
 pub type Settings = IndexMap<String, String>;
 
@@ -17,8 +16,6 @@ pub struct ClickHouseOptions {
     pub deleted_column: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sort_key: Vec<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub columns: IndexMap<String, ColumnSpec>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
@@ -39,29 +36,6 @@ pub struct ClickHouseOptions {
     pub views: IndexMap<String, ViewSpec>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub refreshable_views: IndexMap<String, RefreshableViewSpec>,
-}
-
-impl ClickHouseOptions {
-    pub fn relational(&self) -> RelationalOptions {
-        RelationalOptions {
-            version_column: self.version_column.clone(),
-            deleted_column: self.deleted_column.clone(),
-            sort_key: self.sort_key.clone(),
-            edge_tables: self
-                .edge_tables
-                .iter()
-                .map(|(name, table)| {
-                    let spec = EdgeTableSpec {
-                        default: table.default,
-                        domains: table.domains.clone(),
-                        sort_key: table.sort_key.clone(),
-                        columns: IndexMap::new(),
-                    };
-                    (name.clone(), spec)
-                })
-                .collect(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -171,10 +145,8 @@ pub struct ClickHouseSource {
     pub primary_key: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<String>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub columns: IndexMap<String, ColumnSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub indexes: IndexMap<String, IndexSpecs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexes: Option<IndexMap<String, IndexSpecs>>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub projections: IndexMap<String, ProjectionSpec>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
@@ -191,9 +163,7 @@ pub struct ClickHouseSource {
 #[serde(deny_unknown_fields)]
 pub struct EdgeTable {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub default: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub domains: Vec<String>,
+    pub shared: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sort_key: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -208,8 +178,6 @@ pub struct EdgeTable {
     pub projections: IndexMap<String, ProjectionSpec>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub settings: Settings,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub writers: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

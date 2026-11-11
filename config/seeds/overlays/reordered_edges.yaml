@@ -1,4 +1,4 @@
-- file: gitlab/graph_store.yaml
+- file: gitlab/storage/clickhouse.yaml
   find: |4
           tables:
             namespace_storage_snapshot:

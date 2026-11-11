@@ -85,7 +85,7 @@ where
             pattern
                 .edge_column_filters(relation)
                 .into_iter()
-                .map(|(property, filter)| property_filter(alias, property, filter)),
+                .map(|(column, _, filter)| property_filter(alias, column, filter)),
         );
         predicates.extend(
             relation

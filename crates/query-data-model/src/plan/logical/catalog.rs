@@ -2,7 +2,7 @@ use super::limits::Limits;
 use super::{LogicalBuilder, LogicalPlan, PlanError, Rows};
 use crate::catalog::Store;
 use crate::plan::tracking::{self, Declared};
-use crate::{AttributeId, EntityId, Model, PropertyId, RelationshipId, RelationshipVariantId};
+use crate::{EntityId, Model, PropertyId, RelationshipId, RelationshipVariantId};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LogicalCatalog<'m> {
@@ -94,15 +94,13 @@ impl<'m> LogicalCatalog<'m> {
             && (self.model.lookup(property).is_some() || home.column(property).is_some())
     }
 
-    pub(super) fn attribute_realized(
-        self,
-        variants: &[RelationshipVariantId],
-        attribute: AttributeId,
-    ) -> bool {
+    /// Every variant keeps its rows in an edge table, which the loader checks holds each
+    /// attribute of the relationship.
+    pub(super) fn attribute_realized(self, variants: &[RelationshipVariantId]) -> bool {
         self.connection.is_none()
             || variants.iter().all(|variant| {
                 self.stores()
-                    .any(|store| store.attribute_column(*variant, attribute).is_some())
+                    .any(|store| store.edge_table(*variant).is_some())
             })
     }
 

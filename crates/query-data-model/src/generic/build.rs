@@ -10,15 +10,9 @@ use super::catalog::{
 use super::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 use crate::catalog::Diagnostics;
 use crate::spec::{
-    AttributeSpec, EntitySpec, GraphFragment, PropertyDetail, PropertySpec, RelationshipSpec,
-    parse_variant, parse_word,
+    AttributeSpec, DefaultValue, EntitySpec, GraphFragment, PropertyDetail, PropertySpec,
+    RelationshipSpec, parse_variant, parse_word,
 };
-
-struct PendingReference {
-    property: PropertyId,
-    package: String,
-    targets: Vec<String>,
-}
 
 impl GraphCatalog {
     pub(crate) fn from_spec(
@@ -26,7 +20,6 @@ impl GraphCatalog {
         diagnostics: &mut Diagnostics,
     ) -> Self {
         let mut graph = Self::default();
-        let mut pending = Vec::new();
         let mut entities = Vec::new();
         let mut relationships = Vec::new();
         for fragment in fragments {
@@ -50,9 +43,8 @@ impl GraphCatalog {
         }
         entities.sort_by(|left, right| left.2.cmp(&right.2));
         for (package, domain, name, spec) in entities {
-            graph.declare_entity(&package, domain, name, spec, &mut pending, diagnostics);
+            graph.declare_entity(&package, domain, name, spec, diagnostics);
         }
-        graph.resolve_references(pending, diagnostics);
         for (package, relationships) in relationships {
             graph.declare_relationships(&package, relationships, diagnostics);
         }
@@ -97,7 +89,6 @@ impl GraphCatalog {
         domain: Option<String>,
         name: String,
         spec: EntitySpec,
-        pending: &mut Vec<PendingReference>,
         diagnostics: &mut Diagnostics,
     ) {
         let id = EntityId(self.entities.len());
@@ -117,18 +108,11 @@ impl GraphCatalog {
         let mut properties = Vec::with_capacity(spec.properties.len());
         for (property, spec) in spec.properties {
             let property_id = PropertyId(self.properties.len());
-            let Some((declared, targets)) =
+            let Some(declared) =
                 declare_property(id, property_id, property, spec, package, diagnostics)
             else {
                 continue;
             };
-            if !targets.is_empty() {
-                pending.push(PendingReference {
-                    property: property_id,
-                    package: package.to_string(),
-                    targets,
-                });
-            }
             names.insert(declared.name.clone(), property_id);
             properties.push(property_id);
             self.properties.push(declared);
@@ -161,35 +145,6 @@ impl GraphCatalog {
         });
     }
 
-    fn resolve_references(
-        &mut self,
-        pending: Vec<PendingReference>,
-        diagnostics: &mut Diagnostics,
-    ) {
-        for reference in pending {
-            let resolved = reference
-                .targets
-                .iter()
-                .filter_map(|target| {
-                    let found = self.entity_id(target);
-                    if found.is_none() {
-                        let property = &self.properties[reference.property.index()];
-                        let entity = &self.entities[property.entity.index()].name;
-                        diagnostics.error(
-                            &reference.package,
-                            format!(
-                                "{entity}.{} references unknown entity {target}",
-                                property.name
-                            ),
-                        );
-                    }
-                    found
-                })
-                .collect();
-            self.properties[reference.property.index()].references = resolved;
-        }
-    }
-
     fn declare_relationships(
         &mut self,
         package: &str,
@@ -215,7 +170,7 @@ impl GraphCatalog {
             for (attribute, spec) in spec.attributes {
                 self.declare_attribute(relationship, attribute, spec, package, diagnostics);
             }
-            for variant in &spec.variants {
+            for (variant, declared) in &spec.variants {
                 let Some((source, target)) = parse_variant(variant) else {
                     diagnostics.error(
                         package,
@@ -249,6 +204,7 @@ impl GraphCatalog {
                     relationship,
                     source,
                     target,
+                    cardinality: declared.cardinality,
                 });
             }
         }
@@ -317,7 +273,7 @@ fn declare_property(
     spec: PropertySpec,
     package: &str,
     diagnostics: &mut Diagnostics,
-) -> Option<(Property, Vec<String>)> {
+) -> Option<Property> {
     let written = spec.data_type();
     let Some((data_type, nullable)) = parse_type(written) else {
         diagnostics.error(
@@ -354,14 +310,42 @@ fn declare_property(
         description: detail.description,
         data_type,
         nullable,
-        mutable: !detail.immutable,
         unique: detail.unique,
         enum_values: detail.values,
         enum_type,
         terminal_values: detail.terminal,
-        references: Vec::new(),
+        default: detail.default,
     };
-    Some((property, detail.references))
+    check_default(&property, package, diagnostics);
+    Some(property)
+}
+
+fn check_default(property: &Property, package: &str, diagnostics: &mut Diagnostics) {
+    let Some(default) = &property.default else {
+        return;
+    };
+    let fits = matches!(
+        (property.data_type, default),
+        (DataType::Bool, DefaultValue::Bool(_))
+            | (DataType::Int, DefaultValue::Int(_))
+            | (
+                DataType::Float,
+                DefaultValue::Float(_) | DefaultValue::Int(_)
+            )
+            | (
+                DataType::String | DataType::Enum | DataType::Uuid,
+                DefaultValue::String(_)
+            )
+    );
+    if !fits {
+        diagnostics.error(
+            package,
+            format!(
+                "property {} default {default:?} is not a {:?}",
+                property.name, property.data_type
+            ),
+        );
+    }
 }
 
 fn parse_type(written: &str) -> Option<(DataType, bool)> {

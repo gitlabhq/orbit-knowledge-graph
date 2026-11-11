@@ -1,0 +1,134 @@
+kind: storage
+package: gitlab.core
+store: graph
+entities:
+  Group:
+    table: gl_group
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      name: {backend: {type: String, codec: [ZSTD(1)]}}
+      description: {backend: {type: String, codec: [ZSTD(3)]}}
+      visibility_level: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      full_path: {backend: {type: String, codec: [ZSTD(3)]}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, full_path], text: [name, description], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        name: text
+        full_path: bloom_filter(0.0001)
+        description: text
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, updated_at]
+      path_lookups: {id: {table: gl_group, key: id}, full_path: {table: gl_group, key: full_path}}
+
+  Note:
+    table: gl_note
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      note: {backend: {type: String, codec: [ZSTD(3)]}}
+      noteable_type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      noteable_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      line_code: {backend: {type: String, codec: [ZSTD(1)]}}
+      commit_id: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      st_diff: {backend: {type: String, codec: [ZSTD(3)]}}
+      discussion_id: {immutable: true, backend: {type: Nullable(String), codec: [ZSTD(1)]}}
+      resolved_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      internal: {backend: {type: Bool}}
+      confidential: {backend: {type: Nullable(Bool)}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      author_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [noteable_type, internal, confidential, id, discussion_id, noteable_id, project_id, author_id, created_at], text: [note], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        noteable_type: {type: set(14), granularity: 2}
+        internal: minmax
+        confidential: minmax
+        id: bloom_filter(0.0001)
+        note: text
+        discussion_id: bloom_filter(0.0001)
+        noteable_id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        author_id: bloom_filter(0.0001)
+        created_at: minmax
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      high_fan_out: [noteable_id]
+      epoch_nulls: [created_at, updated_at, resolved_at]
+      path_lookups: {id: {table: gl_note, key: id}}
+
+  Project:
+    table: gl_project
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      name: {backend: {type: String, codec: [ZSTD(1)]}}
+      description: {backend: {type: String, codec: [ZSTD(3)]}}
+      visibility_level: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      full_path: {backend: {type: String, codec: [ZSTD(3)]}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      archived: {backend: {type: Nullable(Bool)}}
+      star_count: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      last_activity_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [archived, id, full_path], text: [name, description], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        archived: minmax
+        id: bloom_filter(0.0001)
+        name: text
+        full_path: bloom_filter(0.0001)
+        description: text
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, updated_at, last_activity_at]
+      path_lookups:
+        id: {table: gl_project, key: id}
+        full_path: {table: gl_project, key: full_path}
+
+  User:
+    table: gl_user
+    path_column:
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      username: {backend: {type: String, codec: [ZSTD(1)]}}
+      email: {backend: {type: String, codec: [ZSTD(1)]}}
+      name: {backend: {type: String, codec: [ZSTD(1)]}}
+      first_name: {backend: {type: String, codec: [ZSTD(1)]}}
+      last_name: {backend: {type: String, codec: [ZSTD(1)]}}
+      state: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      avatar_url: {backend: {type: Nullable(String), codec: [ZSTD(1)]}}
+      public_email: {backend: {type: String, codec: [ZSTD(1)]}}
+      preferred_language: {backend: {type: String, codec: [ZSTD(1)]}}
+      last_activity_on: {backend: {type: Date32, codec: [Delta(4), ZSTD(1)], default: "'1970-01-01'"}}
+      private_profile: {backend: {type: Bool}}
+      is_admin: {backend: {type: Bool}}
+      is_auditor: {backend: {type: Bool}}
+      is_external: {backend: {type: Bool}}
+      user_type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+    access: {filter: [state, user_type, private_profile, is_admin, is_auditor, is_external], text: [username, name], order: [id]}
+    backend:
+      primary_key: [id]
+      indexes:
+        _deleted: minmax
+        state: {type: set(10), granularity: 2}
+        user_type: {type: set(26), granularity: 2}
+        private_profile: minmax
+        is_admin: minmax
+        is_auditor: minmax
+        is_external: minmax
+        username: text
+        name: text
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, updated_at, last_activity_on]

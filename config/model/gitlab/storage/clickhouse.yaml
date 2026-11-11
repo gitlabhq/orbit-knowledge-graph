@@ -4,13 +4,11 @@ store: graph
 engine:
   kind: clickhouse
   connection: main
-  table: gl_{entity}
   path_column: traversal_path
   backend:
     version_column: _version
     deleted_column: _deleted
     engine: ReplacingMergeTree(_version, _deleted)
-    sort_key: [traversal_path, id]
     columns:
       _version: {type: "DateTime64(6, 'UTC')", default: now64(6), codec: [Delta(8), ZSTD(1)]}
       _deleted: {type: Bool, default: "false"}
@@ -44,20 +42,7 @@ engine:
           target_id: bloom_filter(0.0001)
           source_tags: {type: text(tokenizer = 'array'), granularity: 64, name: source_tags_idx}
           target_tags: {type: text(tokenizer = 'array'), granularity: 64, name: target_tags_idx}
-        writers:
-        - BUILT_BY
-        - CHILD_OF
-        - DEPLOYED_TO
-        - Deployment
-        - Environment
-        - Job
-        - MergeRequest
-        - Pipeline
-        - SecurityScan
-        - Stage
-        - TRIGGERS_PIPELINE
       gl_code_edge:
-        domains: [source_code]
         sort_key:
         - traversal_path
         - relationship_kind
@@ -87,7 +72,6 @@ engine:
           branch: bloom_filter(0.0001)
           source_tags: {type: text(tokenizer = 'array'), granularity: 64, name: source_tags_idx}
           target_tags: {type: text(tokenizer = 'array'), granularity: 64, name: target_tags_idx}
-        writers: [Branch, Definition, Directory, File, ImportedSymbol]
       gl_diff_edge:
         sort_key:
         - traversal_path
@@ -112,9 +96,8 @@ engine:
           target_id: bloom_filter(0.0001)
           source_tags: {type: text(tokenizer = 'array'), granularity: 64, name: source_tags_idx}
           target_tags: {type: text(tokenizer = 'array'), granularity: 64, name: target_tags_idx}
-        writers: [IN_PROJECT, MergeRequest, MergeRequestDiff, MergeRequestDiffFile]
       gl_edge:
-        default: true
+        shared: true
         sort_key:
         - traversal_path
         - relationship_kind
@@ -138,31 +121,6 @@ engine:
           target_id: bloom_filter(0.0001)
           source_tags: {type: text(tokenizer = 'array'), granularity: 64, name: source_tags_idx}
           target_tags: {type: text(tokenizer = 'array'), granularity: 64, name: target_tags_idx}
-        writers:
-        - APPROVED
-        - ASSIGNED
-        - AgentSession
-        - CLOSES
-        - CONTAINS
-        - CREATED_MR
-        - ContainerRepository
-        - DECLARES_DEPENDENCY
-        - Dependency
-        - Group
-        - HAS_LABEL
-        - Label
-        - MEMBER_OF
-        - MergeRequest
-        - Milestone
-        - Note
-        - Package
-        - PackageFile
-        - Project
-        - RELATED_TO
-        - REOPENED
-        - REVIEWER
-        - SystemNote
-        - WorkItem
       gl_sec_edge:
         sort_key:
         - traversal_path
@@ -187,17 +145,6 @@ engine:
           target_id: bloom_filter(0.0001)
           source_tags: {type: text(tokenizer = 'array'), granularity: 64, name: source_tags_idx}
           target_tags: {type: text(tokenizer = 'array'), granularity: 64, name: target_tags_idx}
-        writers:
-        - FIXES
-        - Finding
-        - HAS_IDENTIFIER
-        - HAS_VULNERABILITY
-        - IN_PROJECT
-        - SecurityScan
-        - Vulnerability
-        - VulnerabilityIdentifier
-        - VulnerabilityOccurrence
-        - VulnerabilityScanner
     denormalized:
     - entity: Branch
       property: is_default
@@ -2850,175 +2797,244 @@ engine:
             )
           GROUP BY table
 relationships:
+  APPROVED:
+    User -> MergeRequest: {edge_table: gl_edge}
+
+  ASSIGNED:
+    User -> MergeRequest: {edge_table: gl_edge}
+    User -> WorkItem: {edge_table: gl_edge}
+
   AUTHORED:
-    variants:
-      User -> Note: {fk: author_id}
-      User -> MergeRequest: {fk: author_id}
-      User -> Vulnerability: {fk: author_id, backend: {table: gl_sec_edge}}
-      User -> WorkItem: {fk: author_id}
+    User -> Note: {fk: {on: target, column: author_id}, edge_table: gl_edge}
+    User -> MergeRequest: {fk: {on: target, column: author_id}, edge_table: gl_edge}
+    User -> Vulnerability: {fk: {on: target, column: author_id}, edge_table: gl_sec_edge}
+    User -> WorkItem: {fk: {on: target, column: author_id}, edge_table: gl_edge}
 
   AUTO_CANCELED_BY:
-    variants:
-      Pipeline -> Pipeline: {fk: auto_canceled_by_id, backend: {table: gl_ci_edge}}
-      Job -> Pipeline: {fk: auto_canceled_by_id, backend: {table: gl_ci_edge}}
+    Pipeline -> Pipeline: {fk: {on: source, column: auto_canceled_by_id}, edge_table: gl_ci_edge}
+    Job -> Pipeline: {fk: {on: source, column: auto_canceled_by_id}, edge_table: gl_ci_edge}
 
   BUILT_BY:
-    variants:
-      Package -> Pipeline: {backend: {table: gl_ci_edge}}
-      PackageFile -> Pipeline: {backend: {table: gl_ci_edge}}
+    Package -> Pipeline: {edge_table: gl_ci_edge}
+    PackageFile -> Pipeline: {edge_table: gl_ci_edge}
 
-  CALLS: {columns: {project_id: project_id, branch: branch}}
-  CHILD_OF: {variants: {Pipeline -> Pipeline: {backend: {table: gl_ci_edge}}}}
+  CALLS:
+    Definition -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+    File -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+    Definition -> ImportedSymbol: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+    File -> ImportedSymbol: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+
+  CHILD_OF:
+    Pipeline -> Pipeline: {edge_table: gl_ci_edge}
+
   CLOSED:
-    variants: {User -> WorkItem: {fk: closed_by_id}, User -> MergeRequest: {fk: closed_by_id}}
+    User -> WorkItem: {fk: {on: target, column: closed_by_id}, edge_table: gl_edge}
+    User -> MergeRequest: {fk: {on: target, column: closed_by_id}, edge_table: gl_edge}
+
+  CLOSES:
+    MergeRequest -> WorkItem: {edge_table: gl_edge}
 
   CONFIRMED_BY:
-    variants: {User -> Vulnerability: {fk: confirmed_by_id, backend: {table: gl_sec_edge}}}
+    User -> Vulnerability: {fk: {on: target, column: confirmed_by_id}, edge_table: gl_sec_edge}
 
   CONTAINS:
-    variants:
-      Project -> Branch:
-        columns: {project_id: project_id, branch: branch}
-        backend: {table: gl_code_edge}
-      Branch -> Directory: {columns: {project_id: project_id, branch: branch}}
-      Branch -> File: {columns: {project_id: project_id, branch: branch}}
-      Directory -> Directory: {columns: {project_id: project_id, branch: branch}}
-      Directory -> File: {columns: {project_id: project_id, branch: branch}}
+    Group -> Group: {edge_table: gl_edge}
+    Group -> Project: {edge_table: gl_edge}
+    User -> Project: {edge_table: gl_edge}
+    Project -> Branch: {edge_table: gl_code_edge, copies: {project_id: target.project_id}}
+    WorkItem -> WorkItem: {edge_table: gl_edge}
+    Branch -> Directory: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: target.branch}}
+    Branch -> File: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: target.branch}}
+    Directory -> Directory: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+    Directory -> File: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
 
   CREATED_FOR_MR:
-    variants: {Environment -> MergeRequest: {fk: merge_request_id, backend: {table: gl_ci_edge}}}
+    Environment -> MergeRequest: {fk: {on: source, column: merge_request_id}, edge_table: gl_ci_edge}
 
-  DEFINES: {columns: {project_id: project_id, branch: branch}}
-  DEPLOYED_BY: {variants: {User -> Deployment: {fk: user_id, backend: {table: gl_ci_edge}}}}
-  DEPLOYED_TO: {variants: {MergeRequest -> Deployment: {backend: {table: gl_ci_edge}}}}
+  CREATED_MR:
+    AgentSession -> MergeRequest: {edge_table: gl_edge}
+
+  CREATOR:
+    User -> Project: {edge_table: gl_edge}
+
+  DECLARES_DEPENDENCY:
+    Package -> Dependency: {edge_table: gl_edge}
+
+  DEFINES:
+    File -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+    Definition -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+
+  DEPLOYED_BY:
+    User -> Deployment: {fk: {on: target, column: user_id}, edge_table: gl_ci_edge}
+
+  DEPLOYED_TO:
+    MergeRequest -> Deployment: {edge_table: gl_ci_edge}
+
   DETECTED_BY:
-    variants:
-      Finding -> VulnerabilityScanner: {fk: scanner_id, backend: {table: gl_sec_edge}}
-      VulnerabilityOccurrence -> VulnerabilityScanner:
-        fk: scanner_id
-        backend: {table: gl_sec_edge}
+    Finding -> VulnerabilityScanner: {fk: {on: source, column: scanner_id}, edge_table: gl_sec_edge}
+    VulnerabilityOccurrence -> VulnerabilityScanner: {fk: {on: source, column: scanner_id}, edge_table: gl_sec_edge}
 
   DISMISSED_BY:
-    variants: {User -> Vulnerability: {fk: dismissed_by_id, backend: {table: gl_sec_edge}}}
+    User -> Vulnerability: {fk: {on: target, column: dismissed_by_id}, edge_table: gl_sec_edge}
 
-  EXTENDS: {columns: {project_id: project_id, branch: branch}}
-  FIXES: {variants: {MergeRequest -> Vulnerability: {backend: {table: gl_sec_edge}}}}
+  EXTENDS:
+    Definition -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+
+  FIXES:
+    MergeRequest -> Vulnerability: {edge_table: gl_sec_edge}
+
   HAS_DIFF:
-    variants:
-      MergeRequest -> MergeRequestDiff: {fk: merge_request_id, backend: {table: gl_diff_edge}}
+    MergeRequest -> MergeRequestDiff: {fk: {on: target, column: merge_request_id}, edge_table: gl_diff_edge}
 
   HAS_FILE:
-    variants:
-      MergeRequestDiff -> MergeRequestDiffFile:
-        fk: merge_request_diff_id
-        backend: {table: gl_diff_edge}
+    MergeRequestDiff -> MergeRequestDiffFile: {fk: {on: target, column: merge_request_diff_id}, edge_table: gl_diff_edge}
 
   HAS_FINDING:
-    variants:
-      Vulnerability -> VulnerabilityOccurrence: {fk: finding_id, backend: {table: gl_sec_edge}}
-      SecurityScan -> Finding: {fk: scan_id, backend: {table: gl_sec_edge}}
+    Vulnerability -> VulnerabilityOccurrence: {fk: {on: source, column: finding_id}, edge_table: gl_sec_edge}
+    SecurityScan -> Finding: {fk: {on: target, column: scan_id}, edge_table: gl_sec_edge}
 
   HAS_HEAD_PIPELINE:
-    variants: {MergeRequest -> Pipeline: {fk: head_pipeline_id, backend: {table: gl_ci_edge}}}
+    MergeRequest -> Pipeline: {fk: {on: source, column: head_pipeline_id}, edge_table: gl_ci_edge}
 
   HAS_IDENTIFIER:
-    variants:
-      Finding -> VulnerabilityIdentifier: {backend: {table: gl_sec_edge}}
-      VulnerabilityOccurrence -> VulnerabilityIdentifier:
-        fk: primary_identifier_id
-        backend: {table: gl_sec_edge}
+    Finding -> VulnerabilityIdentifier: {edge_table: gl_sec_edge}
+    VulnerabilityOccurrence -> VulnerabilityIdentifier: {fk: {on: source, column: primary_identifier_id}, edge_table: gl_sec_edge}
 
   HAS_JOB:
-    variants:
-      Stage -> Job: {fk: stage_id, backend: {table: gl_ci_edge}}
-      Pipeline -> Job: {fk: pipeline_id, backend: {table: gl_ci_edge}}
+    Stage -> Job: {fk: {on: target, column: stage_id}, edge_table: gl_ci_edge}
+    Pipeline -> Job: {fk: {on: target, column: pipeline_id}, edge_table: gl_ci_edge}
+
+  HAS_LABEL:
+    WorkItem -> Label: {edge_table: gl_edge}
+    MergeRequest -> Label: {edge_table: gl_edge}
 
   HAS_LATEST_DIFF:
-    variants:
-      MergeRequest -> MergeRequestDiff:
-        fk: latest_merge_request_diff_id
-        backend: {table: gl_diff_edge}
+    MergeRequest -> MergeRequestDiff: {fk: {on: source, column: latest_merge_request_diff_id}, edge_table: gl_diff_edge}
 
-  HAS_PACKAGE_FILE: {variants: {Package -> PackageFile: {fk: package_id}}}
-  HAS_STAGE: {variants: {Pipeline -> Stage: {fk: pipeline_id, backend: {table: gl_ci_edge}}}}
-  HAS_VULNERABILITY: {variants: {Package -> Vulnerability: {backend: {table: gl_sec_edge}}}}
-  IMPORTS: {columns: {project_id: project_id, branch: branch}}
+  HAS_NOTE:
+    MergeRequest -> Note: {fk: {on: target, column: noteable_id, type_column: noteable_type, type_value: MergeRequest}, index: {edge_table: gl_edge}}
+    WorkItem -> Note: {fk: {on: target, column: noteable_id, type_column: noteable_type, type_value: [Epic, Issue]}, index: {edge_table: gl_edge}}
+    Vulnerability -> Note: {fk: {on: target, column: noteable_id, type_column: noteable_type, type_value: Vulnerability}, index: {edge_table: gl_edge}}
+
+  HAS_PACKAGE_FILE:
+    Package -> PackageFile: {fk: {on: target, column: package_id}, edge_table: gl_edge}
+
+  HAS_STAGE:
+    Pipeline -> Stage: {fk: {on: target, column: pipeline_id}, edge_table: gl_ci_edge}
+
+  HAS_VULNERABILITY:
+    Package -> Vulnerability: {edge_table: gl_sec_edge}
+
+  IMPORTS:
+    File -> ImportedSymbol: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+    ImportedSymbol -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+
   IN_ENVIRONMENT:
-    variants: {Deployment -> Environment: {fk: environment_id, backend: {table: gl_ci_edge}}}
+    Deployment -> Environment: {fk: {on: source, column: environment_id}, edge_table: gl_ci_edge}
 
   IN_GROUP:
-    variants:
-      Milestone -> Group: {fk: group_id}
-      Label -> Group: {fk: group_id}
-      WorkItem -> Group: {fk: namespace_id}
+    Milestone -> Group: {fk: {on: source, column: group_id}, edge_table: gl_edge}
+    Label -> Group: {fk: {on: source, column: group_id}, edge_table: gl_edge}
+    WorkItem -> Group: {fk: {on: source, column: namespace_id}, edge_table: gl_edge}
 
   IN_MILESTONE:
-    variants:
-      WorkItem -> Milestone: {fk: milestone_id}
-      MergeRequest -> Milestone: {fk: milestone_id}
+    WorkItem -> Milestone: {fk: {on: source, column: milestone_id}, edge_table: gl_edge}
+    MergeRequest -> Milestone: {fk: {on: source, column: milestone_id}, edge_table: gl_edge}
 
   IN_PIPELINE:
-    variants:
-      SecurityScan -> Pipeline: {fk: pipeline_id, backend: {table: gl_ci_edge}}
-      Job -> Pipeline: {fk: pipeline_id, backend: {table: gl_ci_edge}}
+    SecurityScan -> Pipeline: {fk: {on: source, column: pipeline_id}, edge_table: gl_ci_edge}
+    Job -> Pipeline: {fk: {on: source, column: pipeline_id}, edge_table: gl_ci_edge}
 
   IN_PROJECT:
-    variants:
-      Note -> Project: {fk: project_id}
-      MergeRequest -> Project: {fk: project_id}
-      Pipeline -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
-      Stage -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
-      Job -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
-      Vulnerability -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
-      Finding -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
-      VulnerabilityIdentifier -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
-      WorkItem -> Project: {fk: project_id}
-      Milestone -> Project: {fk: project_id}
-      Label -> Project: {fk: project_id}
-      SecurityScan -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
-      Branch -> Project:
-        fk: project_id
-        columns: {project_id: project_id, branch: branch}
-        backend: {table: gl_code_edge}
-      Deployment -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
-      Environment -> Project: {fk: project_id, backend: {table: gl_ci_edge}}
-      MergeRequestDiff -> Project: {fk: project_id, backend: {table: gl_diff_edge}}
-      MergeRequestDiffFile -> Project: {fk: project_id, backend: {table: gl_diff_edge}}
-      VulnerabilityScanner -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
-      VulnerabilityOccurrence -> Project: {fk: project_id, backend: {table: gl_sec_edge}}
-      Package -> Project: {fk: project_id}
-      PackageFile -> Project: {fk: project_id}
-      ContainerRepository -> Project: {fk: project_id}
-      Dependency -> Project: {fk: project_id}
-      AgentSession -> Project: {fk: project_id}
+    Note -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+    MergeRequest -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+    Pipeline -> Project: {fk: {on: source, column: project_id}, edge_table: gl_ci_edge}
+    Stage -> Project: {fk: {on: source, column: project_id}, edge_table: gl_ci_edge}
+    Job -> Project: {fk: {on: source, column: project_id}, edge_table: gl_ci_edge}
+    Vulnerability -> Project: {fk: {on: source, column: project_id}, edge_table: gl_sec_edge}
+    Finding -> Project: {fk: {on: source, column: project_id}, edge_table: gl_sec_edge}
+    VulnerabilityIdentifier -> Project: {fk: {on: source, column: project_id}, edge_table: gl_sec_edge}
+    WorkItem -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+    Milestone -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+    Label -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+    SecurityScan -> Project: {fk: {on: source, column: project_id}, edge_table: gl_sec_edge}
+    Branch -> Project: {fk: {on: source, column: project_id}, edge_table: gl_code_edge, copies: {project_id: source.project_id}}
+    Deployment -> Project: {fk: {on: source, column: project_id}, edge_table: gl_ci_edge}
+    Environment -> Project: {fk: {on: source, column: project_id}, edge_table: gl_ci_edge}
+    MergeRequestDiff -> Project: {fk: {on: source, column: project_id}, edge_table: gl_diff_edge}
+    MergeRequestDiffFile -> Project: {fk: {on: source, column: project_id}, edge_table: gl_diff_edge}
+    VulnerabilityScanner -> Project: {fk: {on: source, column: project_id}, edge_table: gl_sec_edge}
+    VulnerabilityOccurrence -> Project: {fk: {on: source, column: project_id}, edge_table: gl_sec_edge}
+    Package -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+    PackageFile -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+    ContainerRepository -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+    Dependency -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+    AgentSession -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
 
-  LAST_EDITED_BY: {variants: {User -> MergeRequest: {fk: last_edited_by_id}}}
-  MERGED: {variants: {User -> MergeRequest: {fk: merge_user_id}}}
-  MERGED_AT_COMMIT: {variants: {MergeRequest -> Commit: {fk: merged_commit_id}}}
+  LAST_EDITED_BY:
+    User -> MergeRequest: {fk: {on: target, column: last_edited_by_id}, edge_table: gl_edge}
+
+  MEMBER_OF:
+    User -> Group: {edge_table: gl_edge}
+    User -> Project: {edge_table: gl_edge}
+
+  MENTIONS:
+    MergeRequest -> MergeRequest: {edge_table: gl_edge}
+    MergeRequest -> WorkItem: {edge_table: gl_edge}
+    WorkItem -> MergeRequest: {edge_table: gl_edge}
+    WorkItem -> WorkItem: {edge_table: gl_edge}
+
+  MERGED:
+    User -> MergeRequest: {fk: {on: target, column: merge_user_id}, edge_table: gl_edge}
+
+  MERGED_AT_COMMIT:
+    MergeRequest -> Commit: {fk: {on: source, column: merged_commit_id}, edge_table: gl_edge}
+
   OCCURRENCE_OF:
-    variants:
-      VulnerabilityOccurrence -> Vulnerability:
-        fk: vulnerability_id
-        backend: {table: gl_sec_edge}
+    VulnerabilityOccurrence -> Vulnerability: {fk: {on: source, column: vulnerability_id}, edge_table: gl_sec_edge}
 
-  ON_BRANCH: {columns: {project_id: project_id, branch: branch}}
-  RAN_BY: {variants: {SecurityScan -> Job: {fk: build_id, backend: {table: gl_ci_edge}}}}
+  ON_BRANCH:
+    Directory -> Branch: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: source.branch}}
+    File -> Branch: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: source.branch}}
+
+  OWNER:
+    User -> Group: {edge_table: gl_edge}
+
+  RAN_BY:
+    SecurityScan -> Job: {fk: {on: source, column: build_id}, edge_table: gl_ci_edge}
+
+  RELATED_TO:
+    WorkItem -> WorkItem: {edge_table: gl_edge}
+
+  REOPENED:
+    User -> MergeRequest: {edge_table: gl_edge}
+    User -> WorkItem: {edge_table: gl_edge}
+
   RESOLVED_BY:
-    variants: {User -> Vulnerability: {fk: resolved_by_id, backend: {table: gl_sec_edge}}}
+    User -> Vulnerability: {fk: {on: target, column: resolved_by_id}, edge_table: gl_sec_edge}
 
-  RUNS_ON: {variants: {Job -> Runner: {fk: runner_id, backend: {table: gl_ci_edge}}}}
+  REVIEWER:
+    User -> MergeRequest: {edge_table: gl_edge}
+
+  RUNS_ON:
+    Job -> Runner: {fk: {on: source, column: runner_id}, edge_table: gl_ci_edge}
+
   SCANS:
-    variants: {VulnerabilityScanner -> Project: {fk: project_id, backend: {table: gl_sec_edge}}}
+    VulnerabilityScanner -> Project: {fk: {on: source, column: project_id}, edge_table: gl_sec_edge}
 
-  SOURCE_PROJECT: {variants: {MergeRequest -> Project: {fk: source_project_id}}}
+  SOURCE_PROJECT:
+    MergeRequest -> Project: {fk: {on: source, column: source_project_id}, edge_table: gl_edge}
+
   TRIGGERED:
-    variants:
-      User -> Pipeline: {fk: user_id, backend: {table: gl_ci_edge}}
-      MergeRequest -> Pipeline: {fk: merge_request_id, backend: {table: gl_ci_edge}}
-      User -> Job: {fk: user_id, backend: {table: gl_ci_edge}}
+    User -> Pipeline: {fk: {on: target, column: user_id}, edge_table: gl_ci_edge}
+    MergeRequest -> Pipeline: {fk: {on: target, column: merge_request_id}, edge_table: gl_ci_edge}
+    User -> Job: {fk: {on: target, column: user_id}, edge_table: gl_ci_edge}
 
   TRIGGERED_BY_PIPELINE:
-    variants: {Job -> Pipeline: {fk: upstream_pipeline_id, backend: {table: gl_ci_edge}}}
+    Job -> Pipeline: {fk: {on: source, column: upstream_pipeline_id}, edge_table: gl_ci_edge}
 
-  TRIGGERS_PIPELINE: {variants: {Job -> Pipeline: {backend: {table: gl_ci_edge}}}}
-  UPDATED_BY: {variants: {User -> MergeRequest: {fk: updated_by_id}}}
+  TRIGGERS_PIPELINE:
+    Job -> Pipeline: {edge_table: gl_ci_edge}
+
+  UPDATED_BY:
+    User -> MergeRequest: {fk: {on: target, column: updated_by_id}, edge_table: gl_edge}

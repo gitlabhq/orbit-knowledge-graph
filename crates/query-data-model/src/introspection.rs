@@ -364,8 +364,11 @@ entities:
       project_id: int64
       traversal_path: string
 relationships:
-  IN_PROJECT: {variants: [MergeRequest -> Project]}
-  RELATES_TO: {variants: [MergeRequest -> MergeRequest, MergeRequest -> Project]}
+  IN_PROJECT: {variants: {MergeRequest -> Project: {cardinality: many_to_one}}}
+  RELATES_TO:
+    variants:
+      MergeRequest -> MergeRequest: {cardinality: many_to_many}
+      MergeRequest -> Project: {cardinality: many_to_many}
 ";
 
     const AUTHORIZATION: &str = "
@@ -389,17 +392,36 @@ store: graph
 engine:
   kind: clickhouse
   connection: main
-  table: gl_{entity}
   path_column: traversal_path
   backend:
     version_column: _version
     deleted_column: _deleted
-    sort_key: [traversal_path, id]
     edge_tables:
-      gl_edge: {default: true, sort_key: [traversal_path, source_id, relationship_kind, target_id]}
+      gl_edge: {shared: true, sort_key: [traversal_path, source_id, relationship_kind, target_id]}
 entities:
-  Project: {}
-  MergeRequest: {}
+  Project:
+    table: gl_project
+    columns:
+      id: {immutable: true, backend: {type: Int64}}
+      name: {backend: {type: String}}
+      traversal_path: {backend: {type: String}}
+    access: {order: [id]}
+  MergeRequest:
+    table: gl_merge_request
+    columns:
+      id: {immutable: true, backend: {type: Int64}}
+      state: {backend: {type: String}}
+      title: {backend: {type: Nullable(String)}}
+      body: {backend: {type: String}}
+      project_id: {backend: {type: Int64}}
+      traversal_path: {backend: {type: String}}
+    access: {order: [id]}
+relationships:
+  IN_PROJECT:
+    MergeRequest -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+  RELATES_TO:
+    MergeRequest -> MergeRequest: {edge_table: gl_edge}
+    MergeRequest -> Project: {edge_table: gl_edge}
 ";
 
     const LOCAL_STORE: &str = "
@@ -414,7 +436,7 @@ engine:
   backend:
     edge_tables:
       gl_edge:
-        default: true
+        shared: true
         sort_key: [traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind]
         columns:
           source_id: int64
@@ -424,15 +446,27 @@ engine:
           target_kind: string
           traversal_path: string
 entities:
-  MergeRequest: {table: gl_merge_request, exclude: [body]}
+  MergeRequest:
+    table: gl_merge_request
+    columns:
+      id: {immutable: true, backend: {type: BIGINT}}
+      state: {backend: {type: VARCHAR}}
+      title: {backend: {type: VARCHAR}}
+      project_id: {backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+    exclude: [body]
+    access: {order: [id]}
+relationships:
+  RELATES_TO:
+    MergeRequest -> MergeRequest: {edge_table: gl_edge}
 ";
 
     fn model() -> Model {
         Model::from_yaml([
             ("graph.yaml", GRAPH),
             ("authorization.yaml", AUTHORIZATION),
-            ("graph_store.yaml", GRAPH_STORE),
-            ("local_store.yaml", LOCAL_STORE),
+            ("storage/clickhouse.yaml", GRAPH_STORE),
+            ("storage/duckdb.yaml", LOCAL_STORE),
         ])
         .unwrap()
     }

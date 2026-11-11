@@ -8,21 +8,16 @@
         CALLS: same_namespace
   replace: |4
         CALLS: {variants: {Definition -> Definition: same_namespace, File -> Definition: same_namespace}}
-- file: gitlab/graph_store.yaml
-  find: |4
-              - Dependency
-              - Group
-  replace: |4
-              - Dependency
-              - File
-              - Group
-- file: gitlab/graph_store.yaml
-  find: |4
-        CALLS: {columns: {project_id: project_id, branch: branch}}
-  replace: |4
-        CALLS:
-          variants:
-            Definition -> Definition: {columns: {project_id: project_id, branch: branch}}
-            File -> Definition: {backend: {table: gl_edge}}
-            Definition -> ImportedSymbol: {columns: {project_id: project_id, branch: branch}}
-            File -> ImportedSymbol: {backend: {table: gl_edge}}
+- file: gitlab/storage/clickhouse.yaml
+  find: |2
+      CALLS:
+        Definition -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+        File -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+        Definition -> ImportedSymbol: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+        File -> ImportedSymbol: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+  replace: |2
+      CALLS:
+        Definition -> Definition: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+        File -> Definition: {edge_table: gl_edge}
+        Definition -> ImportedSymbol: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: [source.branch, target.branch]}}
+        File -> ImportedSymbol: {edge_table: gl_edge}

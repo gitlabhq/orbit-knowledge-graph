@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{RelationalFacts, RelationalOptions, RelationalRoute, Table};
-use crate::catalog::{Diagnostics, StorageBackend, Store, StoreInput};
+use super::{RelationalFacts, Table};
+use crate::catalog::{Diagnostics, Source, SourceInput, StorageBackend, StoreInput};
 use crate::{
-    DenormalizedCatalog, EntityId, GraphCatalog, MaterializedJoin, RelationshipVariantId,
-    TraversalPathKind, TraversalPathLookup,
+    DenormalizedCatalog, EntityId, MaterializedJoin, RelationshipVariantId, TraversalPathKind,
+    TraversalPathLookup,
 };
 
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ pub struct Versioning {
 #[derive(Debug)]
 pub struct RelationalStore {
     pub versioning: Option<Versioning>,
-    pub default_edge_table: Option<String>,
+    pub shared_edge_table: Option<String>,
     pub tables: Vec<Table>,
     pub denormalized: DenormalizedCatalog,
     pub joins: Vec<MaterializedJoin>,
@@ -53,13 +53,25 @@ impl RelationalStore {
         self.edge_routes[variant.index()].as_deref()
     }
 
-    pub fn resolve<B: StorageBackend<RouteOptions = RelationalRoute>>(
+    /// The store's versioning and the edge table of every variant it binds to one, checked
+    /// against the edge tables it declares.
+    pub fn resolve<B: StorageBackend>(
         input: &StoreInput<'_, B>,
-        options: &RelationalOptions,
+        version: Option<&String>,
+        deleted: Option<&String>,
+        edge_tables: &[(&str, bool)],
         diagnostics: &mut Diagnostics,
     ) -> Self {
         let store = input.store;
-        let versioning = match (&options.version_column, &options.deleted_column) {
+        let mut shared = edge_tables.iter().filter(|(_, shared)| *shared);
+        let shared_edge_table = shared.next().map(|(name, _)| name.to_string());
+        if shared.next().is_some() {
+            diagnostics.error(
+                &store.package,
+                format!("store {} shares more than one edge table", store.name),
+            );
+        }
+        let versioning = match (version, deleted) {
             (Some(version), Some(deleted)) => Some(Versioning {
                 version: version.clone(),
                 deleted: deleted.clone(),
@@ -76,93 +88,81 @@ impl RelationalStore {
                 None
             }
         };
-        let mut domains = HashSet::new();
-        for domain in options
-            .edge_tables
-            .values()
-            .flat_map(|table| &table.domains)
-        {
-            if !domains.insert(domain) {
+        let mut edge_routes = vec![None; input.graph.variants().count()];
+        for (variant, package, _) in store.bindings() {
+            let Some(table) = store.edge_table(variant) else {
+                continue;
+            };
+            if !edge_tables.iter().any(|(name, _)| *name == table) {
                 diagnostics.error(
-                    &store.package,
+                    package,
                     format!(
-                        "store {} assigns domain {domain} to two edge tables",
-                        store.name
+                        "store {} binds {} to undeclared edge table {table}",
+                        store.name,
+                        input
+                            .graph
+                            .relationship(input.graph.variant(variant).relationship)
+                            .name
                     ),
                 );
+                continue;
             }
-        }
-        let mut defaults = options
-            .edge_tables
-            .iter()
-            .filter(|(_, table)| table.default);
-        let default_edge_table = defaults.next().map(|(name, _)| name.clone());
-        if defaults.next().is_some() {
-            diagnostics.error(
-                &store.package,
-                format!("store {} has more than one default edge table", store.name),
-            );
+            edge_routes[variant.index()] = Some(table.to_string());
         }
         Self {
             versioning,
-            default_edge_table,
+            shared_edge_table,
             tables: Vec::new(),
             denormalized: DenormalizedCatalog::default(),
             joins: Vec::new(),
             high_fan_out: HashSet::new(),
             path_lookups: HashMap::new(),
             copies: Vec::new(),
-            edge_routes: edge_routes(input, options, diagnostics),
+            edge_routes,
         }
     }
 
-    pub fn check_attribute_columns(
+    /// Every attribute of a variant's relationship is a column of the variant's edge table.
+    pub fn check_attribute_columns<B: StorageBackend>(
         &self,
-        store: &Store,
-        graph: &GraphCatalog,
+        input: &StoreInput<'_, B>,
         diagnostics: &mut Diagnostics,
     ) {
-        for variant in graph.variants() {
-            let relationship = &graph.relationship(variant.relationship).name;
+        let (graph, store) = (input.graph, input.store);
+        for (variant, package, _) in store.bindings() {
+            let variant = graph.variant(variant);
+            let relationship = graph.relationship(variant.relationship);
             let label = || {
                 let (source, target) = (
                     &graph.entity(variant.source).name,
                     &graph.entity(variant.target).name,
                 );
-                format!("store {} {relationship}({source} -> {target})", store.name)
+                format!(
+                    "store {} {}({source} -> {target})",
+                    store.name, relationship.name
+                )
             };
-            let mut bound = store.attribute_columns(variant.id).peekable();
-            if bound.peek().is_none() {
-                continue;
-            }
-            let Some(name) = self.edge_table(variant.id) else {
-                diagnostics.error(
-                    &store.package,
-                    format!("{} binds attributes but uses no edge table", label()),
-                );
-                continue;
-            };
-            let table = self.table(name);
-            for (attribute, column) in bound {
-                let attribute = graph.attribute(attribute);
-                let found = table
-                    .and_then(|table| table.column(column))
-                    .and_then(|column| column.data_type);
-                match found {
+            for attribute in &relationship.attributes {
+                let attribute = graph.attribute(*attribute);
+                let table = self
+                    .edge_table(variant.id)
+                    .and_then(|name| self.table(name));
+                let found = table.and_then(|table| table.column(&attribute.name));
+                match found.and_then(|column| column.data_type) {
                     Some(found) if found == attribute.data_type => {}
                     Some(found) => diagnostics.error(
-                        &store.package,
+                        package,
                         format!(
-                            "{} binds {} to {name}.{column}, which is {found:?}, not {:?}",
+                            "{} stores attribute {} as {found:?}, not {:?}",
                             label(),
                             attribute.name,
                             attribute.data_type
                         ),
                     ),
                     None => diagnostics.error(
-                        &store.package,
+                        package,
                         format!(
-                            "{} binds {} to {name}.{column}, which does not exist",
+                            "{} has no edge column for attribute {}",
                             label(),
                             attribute.name
                         ),
@@ -173,59 +173,42 @@ impl RelationalStore {
     }
 }
 
-fn edge_routes<B: StorageBackend<RouteOptions = RelationalRoute>>(
-    input: &StoreInput<'_, B>,
-    options: &RelationalOptions,
+/// The table and sort key of an entity in a relational store: the sort key its backend block
+/// overrides, else the store's path column followed by the entity's access order.
+pub fn entity_layout<'a, B: StorageBackend>(
+    input: &'a StoreInput<'_, B>,
+    entity: &SourceInput<'_, B>,
+    sort_key: &[String],
     diagnostics: &mut Diagnostics,
-) -> Vec<Option<String>> {
+) -> Option<(&'a Source, &'a str, Vec<String>)> {
     let (graph, store) = (input.graph, input.store);
-    let on_connection = |entity: EntityId| {
-        input
-            .connection
-            .iter()
-            .any(|other| other.source(entity).is_some())
-    };
-    let mut routes = vec![None; graph.variants().count()];
-    for variant in graph.variants() {
-        if store.source(variant.source).is_none() || !on_connection(variant.target) {
-            continue;
-        }
-        let route = input
-            .routes
-            .iter()
-            .find(|route| route.relationship == variant.relationship);
-        let narrow = route.and_then(|route| {
-            route
-                .variants
+    let source = store.source(entity.entity)?;
+    let name = &graph.entity(entity.entity).name;
+    let table = diagnostics.require(source.table.as_deref(), entity.package, || {
+        format!("store {} binds {name} without a table", store.name)
+    })?;
+    let sort_key = match sort_key {
+        [] => {
+            let order = source
+                .access
+                .order
                 .iter()
-                .find(|(id, _)| *id == variant.id)
-                .map(|(_, options)| options)
-        });
-        let table = narrow
-            .and_then(|options| options.table.as_deref())
-            .or_else(|| route?.options.table.as_deref())
-            .or_else(|| {
-                options.edge_table_for(
-                    graph.entity(variant.source).domain.as_deref(),
-                    graph.entity(variant.target).domain.as_deref(),
-                )
-            });
-        let Some(table) = table else {
-            continue;
-        };
-        if !options.edge_tables.contains_key(table) {
-            let package = route.map_or(store.package.as_str(), |route| route.package);
-            diagnostics.error(
-                package,
-                format!(
-                    "store {} routes {} to undeclared edge table {table}",
-                    store.name,
-                    graph.relationship(variant.relationship).name
-                ),
-            );
-            continue;
+                .filter_map(|id| store.column(*id));
+            source
+                .path_column
+                .iter()
+                .map(String::as_str)
+                .chain(order)
+                .map(str::to_string)
+                .collect()
         }
-        routes[variant.id.index()] = Some(table.to_string());
+        declared => declared.to_vec(),
+    };
+    if sort_key.is_empty() {
+        diagnostics.error(
+            entity.package,
+            format!("store {} declares no access order for {name}", store.name),
+        );
     }
-    routes
+    Some((source, table, sort_key))
 }

@@ -86,7 +86,12 @@ impl Table {
     }
 
     /// The table that stores an entity, filtered by the source's path column.
-    pub fn of_source(source: &Source, sort_key: Vec<String>, columns: Vec<Column>) -> Self {
+    pub fn of_source(
+        source: &Source,
+        table: &str,
+        sort_key: Vec<String>,
+        columns: Vec<Column>,
+    ) -> Self {
         let path_columns = source.path_column.iter().map(|name| PathColumn {
             name: name.clone(),
             entity: Some(source.entity),
@@ -95,7 +100,7 @@ impl Table {
             entity: Some(source.entity),
             sort_key,
             path_columns: path_columns.collect(),
-            ..Self::new(&source.table, columns)
+            ..Self::new(table, columns)
         }
     }
 

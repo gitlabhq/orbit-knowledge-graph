@@ -191,22 +191,20 @@ fn platform(extra: &[(&str, &str)]) -> Model {
     Model::from_yaml(sources).unwrap()
 }
 
-fn calls(
-    catalog: LogicalCatalog<'_>,
-    via: &[&str],
-    column: &str,
-) -> Result<LogicalPlan, PlanError> {
+/// Edge-owned attributes on a relationship whose edge table holds a column for each.
+const ATTRIBUTES: (&str, &str) = (
+    "overlay/graph.yaml",
+    "kind: graph\npackage: overlay\nrelationships:\n  ON_BRANCH:\n    variants: {}\n    attributes: {branch: string, project_id: int64}\n",
+);
+
+fn on_branch(catalog: LogicalCatalog<'_>, column: &str) -> Result<LogicalPlan, PlanError> {
     catalog.build(|q| {
-        let rows = q.entities_as(catalog.entity("Definition")?, "d")?;
-        let from = rows.binding("d")?;
-        let via = via
-            .iter()
-            .map(|name| catalog.relationship(name))
-            .collect::<Result<Vec<_>, _>>()?;
+        let rows = q.entities_as(catalog.entity("File")?, "f")?;
+        let from = rows.binding("f")?;
         let step = Step::new(Direction::Outgoing)
-            .via(via)
-            .to(catalog.entity("Definition")?)
-            .named("callee")
+            .via([catalog.relationship("ON_BRANCH")?])
+            .to(catalog.entity("Branch")?)
+            .named("b")
             .edge("r");
         let rows = q.traverse(rows, from, step)?;
         let value = rows.edge_column(rows.binding("r")?, column)?;
@@ -217,8 +215,8 @@ fn calls(
 
 #[test]
 fn edges_filter_and_select_relationship_attributes() {
-    let model = platform(&[]);
-    let plan = calls(model.logical(), &["CALLS", "DEFINES"], "branch").unwrap();
+    let model = platform(&[ATTRIBUTES]);
+    let plan = on_branch(model.logical(), "branch").unwrap();
     let operations: Vec<_> = plan.nodes().map(|node| plan.operation(node)).collect();
     let LogicalOperation::Filter(Predicate::Compare {
         left: Expr::Attribute { attribute, .. },
@@ -237,23 +235,26 @@ fn edges_filter_and_select_relationship_attributes() {
 
 #[test]
 fn edge_attributes_are_checked_at_construction() {
-    let model = platform(&[]);
-    let unknown = calls(model.logical(), &["CALLS"], "brnch").unwrap_err();
+    let model = platform(&[ATTRIBUTES]);
+    let unknown = on_branch(model.logical(), "brnch").unwrap_err();
     assert_eq!(unknown.class(), ErrorClass::Reference);
     assert_eq!(
         unknown.to_string(),
         "unknown column brnch; available: relationship_kind, source_id, source_kind, target_id, target_kind, branch, project_id"
     );
-    let typed = calls(model.logical(), &["CALLS"], "project_id").unwrap_err();
+    let typed = on_branch(model.logical(), "project_id").unwrap_err();
     assert_eq!(typed.class(), ErrorClass::Type);
 
-    let hidden = platform(&[(
-        "overlay/authorization.yaml",
-        "kind: authorization\npackage: overlay\nproperties:\n  CALLS.branch: { hidden: true }\n",
-    )]);
-    let error = calls(hidden.logical(), &["CALLS"], "branch").unwrap_err();
+    let hidden = platform(&[
+        ATTRIBUTES,
+        (
+            "overlay/authorization.yaml",
+            "kind: authorization\npackage: overlay\nproperties:\n  ON_BRANCH.branch: { hidden: true }\n",
+        ),
+    ]);
+    let error = on_branch(hidden.logical(), "branch").unwrap_err();
     assert_eq!(error.class(), ErrorClass::Policy);
-    assert_eq!(error.to_string(), "CALLS.branch is hidden");
+    assert_eq!(error.to_string(), "ON_BRANCH.branch is hidden");
 }
 
 #[test]

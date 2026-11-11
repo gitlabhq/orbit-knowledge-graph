@@ -373,20 +373,21 @@ store: graph
 engine:
   kind: clickhouse
   connection: main
-  table: gl_{entity}
   backend:
     version_column: _version
     deleted_column: _deleted
-    sort_key: [id]
     edge_tables:
-      gl_edge: {default: true, sort_key: [source_id, relationship_kind, target_id]}
+      gl_edge: {shared: true, sort_key: [source_id, relationship_kind, target_id]}
 entities:
-  CustomNode: {}
+  CustomNode:
+    table: gl_custom_node
+    columns: {id: {immutable: true, backend: {type: Int64}}}
+    access: {order: [id]}
 ";
     let model = query_data_model::Model::from_yaml([
         ("graph.yaml", graph),
         ("authorization.yaml", authorization),
-        ("storage.yaml", storage),
+        ("storage/clickhouse.yaml", storage),
     ])
     .expect("custom model loads");
     Arc::new(Catalog::<ClickHouse>::from_model(&Arc::new(model)).expect("custom catalog loads"))

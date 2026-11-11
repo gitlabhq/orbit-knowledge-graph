@@ -243,7 +243,7 @@ impl<'m> Rows<'m> {
         if attribute.access.admin_only && !edge.catalog.admin() {
             return Err(PlanError::AdminOnly(attribute.name));
         }
-        if !edge.catalog.attribute_realized(variants, attribute.id) {
+        if !edge.catalog.attribute_realized(variants) {
             let (owner, name) = attribute.name.split_once('.').unwrap_or(("", name));
             return Err(PlanError::Unavailable {
                 owner: owner.to_string(),

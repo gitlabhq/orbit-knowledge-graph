@@ -12,17 +12,13 @@ entities:
       id:
         type: int64
         description: Derived ID (hash of project_id + branch name).
-        immutable: true
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
       name:
         type: string
         description: Branch name (e.g., main, feature/new-login).
-        immutable: true
-      is_default: {type: boolean, description: Whether this is the project's default branch.}
+      is_default: {type: boolean, description: Whether this is the project's default branch., default: true}
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Commit:
@@ -34,12 +30,10 @@ entities:
       id:
         type: int64
         description: "Synthetic id: sipHash64(target_project_id, sha). Edges must derive target_id with the same formula."
-        immutable: true
       sha:
         type: string
         description: Clean hex commit SHA (40-char SHA-1 or 64-char SHA-256).
-        immutable: true
-      project_id: {type: int64, description: Owning project ID., immutable: true, references: [Project]}
+      project_id: {type: int64, description: Owning project ID.}
       traversal_path: {type: string, description: Namespace path for authz.}
 
   Definition:
@@ -48,30 +42,28 @@ entities:
     label: name
     defaults: [id, name, fqn, definition_type, file_path, commit_sha, start_line, end_line]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
+      id: {type: int64, description: Unique ID.}
       traversal_path: {type: string, description: Namespace path for authz.}
-      project_id: {type: int64, description: Owning project ID., immutable: true, references: [Project]}
-      branch: {type: string, description: Git branch., immutable: true}
-      commit_sha: {type: string, description: Indexed commit SHA.}
-      file_path: {type: string, description: Containing file path., immutable: true}
+      project_id: {type: int64, description: Owning project ID.}
+      branch: {type: string, description: Git branch.}
+      commit_sha: {type: string, description: Indexed commit SHA., default: ''}
+      file_path: {type: string, description: Containing file path.}
       fqn:
         type: string
         description: "Fully qualified name (e.g., MyModule::MyClass#my_method)."
-        immutable: true
-      name: {type: string, description: Short name., immutable: true}
+      name: {type: string, description: Short name.}
       definition_type:
         type: string
         description: >-
           Definition kind (e.g., Class, Module, Method, Function, Struct, Enum, Trait,
           Lambda).
-        immutable: true
         selectivity: low
-      start_line: {type: int64, description: Start line., immutable: true}
-      end_line: {type: int64, description: End line., immutable: true}
-      start_byte: {type: int64, description: Start byte offset., immutable: true}
-      end_byte: {type: int64, description: End byte offset., immutable: true}
-      start_char: {type: int64, description: Start column., immutable: true}
-      end_char: {type: int64, description: End column., immutable: true}
+      start_line: {type: int64, description: Start line.}
+      end_line: {type: int64, description: End line.}
+      start_byte: {type: int64, description: Start byte offset.}
+      end_byte: {type: int64, description: End byte offset.}
+      start_char: {type: int64, description: Start column.}
+      end_char: {type: int64, description: End column.}
       content:
         type: string?
         description: Source text, resolved from Gitaly via start_byte/end_byte.
@@ -82,13 +74,13 @@ entities:
     label: path
     defaults: [id, path, name, commit_sha]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
+      id: {type: int64, description: Unique ID.}
       traversal_path: {type: string, description: Namespace path for authz.}
-      project_id: {type: int64, description: Owning project ID., immutable: true, references: [Project]}
-      branch: {type: string, description: Git branch., immutable: true}
-      commit_sha: {type: string, description: Indexed commit SHA.}
-      path: {type: string, description: Relative path within the repository., immutable: true}
-      name: {type: string, description: Directory name., immutable: true}
+      project_id: {type: int64, description: Owning project ID.}
+      branch: {type: string, description: Git branch.}
+      commit_sha: {type: string, description: Indexed commit SHA., default: ''}
+      path: {type: string, description: Relative path within the repository.}
+      name: {type: string, description: Directory name.}
 
   File:
     style: {size: 24, color: "#22D3EE"}
@@ -96,26 +88,25 @@ entities:
     label: path
     defaults: [id, path, name, language, commit_sha]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
+      id: {type: int64, description: Unique ID.}
       traversal_path: {type: string, description: Namespace path for authz.}
-      project_id: {type: int64, description: Owning project ID., immutable: true, references: [Project]}
-      branch: {type: string, description: Git branch., immutable: true}
-      commit_sha: {type: string, description: Indexed commit SHA.}
-      path: {type: string, description: Relative path within the repository., immutable: true}
-      name: {type: string, description: File name including extension., immutable: true}
+      project_id: {type: int64, description: Owning project ID.}
+      branch: {type: string, description: Git branch.}
+      commit_sha: {type: string, description: Indexed commit SHA., default: ''}
+      path: {type: string, description: Relative path within the repository.}
+      name: {type: string, description: File name including extension.}
       extension:
         type: string
         description: Extension (e.g., rb, py, java).
-        immutable: true
         selectivity: low
       language:
         type: string
         description: Programming language (e.g., ruby, python, java).
-        immutable: true
         selectivity: low
       size_bytes:
         type: int64
         description: Uncompressed file size in bytes, measured at index time.
+        default: 0
       content: {type: string?, description: "Raw source text, resolved from Gitaly at query time."}
       reason:
         type: string
@@ -123,6 +114,8 @@ entities:
           Why the file was skipped or failed to index (e.g. oversize, timeout_parse,
           invalid_utf8). Empty for files indexed successfully.
         selectivity: low
+
+        default: ''
 
   ImportedSymbol:
     style: {size: 22, color: "#5EEAD4"}
@@ -138,29 +131,27 @@ entities:
     - start_line
     - end_line
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
+      id: {type: int64, description: Unique ID.}
       traversal_path: {type: string, description: Namespace path for authz.}
-      project_id: {type: int64, description: Owning project ID., immutable: true, references: [Project]}
-      branch: {type: string, description: Git branch., immutable: true}
-      commit_sha: {type: string, description: Indexed commit SHA.}
-      file_path: {type: string, description: Containing file path., immutable: true}
+      project_id: {type: int64, description: Owning project ID.}
+      branch: {type: string, description: Git branch.}
+      commit_sha: {type: string, description: Indexed commit SHA., default: ''}
+      file_path: {type: string, description: Containing file path.}
       import_type:
         type: string
         description: Import kind (e.g., module, symbol, wildcard).
-        immutable: true
         selectivity: low
       import_path:
         type: string
         description: Source module or path of the import.
-        immutable: true
-      identifier_name: {type: string, description: Imported symbol name., immutable: true}
+      identifier_name: {type: string, description: Imported symbol name., default: ''}
       identifier_alias:
         type: string
         description: Import alias (e.g., 'import numpy as np').
-        immutable: true
-      start_line: {type: int64, description: Start line., immutable: true}
-      end_line: {type: int64, description: End line., immutable: true}
-      start_byte: {type: int64, description: Start byte offset., immutable: true}
-      end_byte: {type: int64, description: End byte offset., immutable: true}
-      start_char: {type: int64, description: Start column., immutable: true}
-      end_char: {type: int64, description: End column., immutable: true}
+        default: ''
+      start_line: {type: int64, description: Start line.}
+      end_line: {type: int64, description: End line.}
+      start_byte: {type: int64, description: Start byte offset.}
+      end_byte: {type: int64, description: End byte offset.}
+      start_char: {type: int64, description: Start column.}
+      end_char: {type: int64, description: End column.}

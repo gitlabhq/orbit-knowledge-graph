@@ -1,274 +1,320 @@
 kind: graph
 package: gitlab
 relationships:
-  APPROVED: {description: User who approved a merge request, variants: [User -> MergeRequest]}
+  APPROVED: {description: User who approved a merge request, variants: {User -> MergeRequest: {cardinality: many_to_many}}}
+
   ASSIGNED:
     description: Assignment relationship between users and entities
-    variants: [User -> MergeRequest, User -> WorkItem]
+    variants:
+      User -> MergeRequest: {cardinality: many_to_many}
+      User -> WorkItem: {cardinality: many_to_many}
 
   AUTHORED:
     description: Authorship relationship between users and entities
-    variants: [User -> Note, User -> MergeRequest, User -> Vulnerability, User -> WorkItem]
+    variants:
+      User -> Note: {cardinality: one_to_many}
+      User -> MergeRequest: {cardinality: one_to_many}
+      User -> Vulnerability: {cardinality: one_to_many}
+      User -> WorkItem: {cardinality: one_to_many}
 
   AUTO_CANCELED_BY:
     description: Entity was auto-canceled by a newer pipeline
-    variants: [Pipeline -> Pipeline, Job -> Pipeline]
+    variants:
+      Pipeline -> Pipeline: {cardinality: many_to_one}
+      Job -> Pipeline: {cardinality: many_to_one}
 
   BUILT_BY:
     description: Package or package file was built by a CI/CD pipeline
-    variants: [Package -> Pipeline, PackageFile -> Pipeline]
+    variants:
+      Package -> Pipeline: {cardinality: many_to_many}
+      PackageFile -> Pipeline: {cardinality: many_to_many}
 
   CALLS:
     description: Call relationships in source code representing function/method invocations
     variants:
-    - Definition -> Definition
-    - File -> Definition
-    - Definition -> ImportedSymbol
-    - File -> ImportedSymbol
-    attributes: {project_id: int64, branch: string}
+      Definition -> Definition: {cardinality: many_to_many}
+      File -> Definition: {cardinality: many_to_many}
+      Definition -> ImportedSymbol: {cardinality: many_to_many}
+      File -> ImportedSymbol: {cardinality: many_to_many}
 
   CHILD_OF:
     description: >-
       Pipeline was triggered as a child of another pipeline (downstream pipeline
       relationship)
-    variants: [Pipeline -> Pipeline]
+    variants: {Pipeline -> Pipeline: {cardinality: many_to_many}}
 
   CLOSED:
     description: User who closed a work item
-    variants: [User -> WorkItem, User -> MergeRequest]
+    variants:
+      User -> WorkItem: {cardinality: one_to_many}
+      User -> MergeRequest: {cardinality: one_to_many}
 
   CLOSES:
     description: Merge request closes a work item when merged
-    variants: [MergeRequest -> WorkItem]
+    variants: {MergeRequest -> WorkItem: {cardinality: many_to_many}}
 
-  CONFIRMED_BY: {description: User who confirmed a vulnerability, variants: [User -> Vulnerability]}
+  CONFIRMED_BY: {description: User who confirmed a vulnerability, variants: {User -> Vulnerability: {cardinality: one_to_many}}}
+
   CONTAINS:
     description: Container relationship for core entities (hierarchy/ownership)
     variants:
-    - Group -> Group
-    - Group -> Project
-    - User -> Project
-    - Project -> Branch
-    - WorkItem -> WorkItem
-    - Branch -> Directory
-    - Branch -> File
-    - Directory -> Directory
-    - Directory -> File
-    attributes: {project_id: int64, branch: string}
+      Group -> Group: {cardinality: many_to_many}
+      Group -> Project: {cardinality: many_to_many}
+      User -> Project: {cardinality: many_to_many}
+      Project -> Branch: {cardinality: many_to_many}
+      WorkItem -> WorkItem: {cardinality: many_to_many}
+      Branch -> Directory: {cardinality: many_to_many}
+      Branch -> File: {cardinality: many_to_many}
+      Directory -> Directory: {cardinality: many_to_many}
+      Directory -> File: {cardinality: many_to_many}
 
   CREATED_FOR_MR:
     description: Environment was first created by a merge request pipeline
-    variants: [Environment -> MergeRequest]
+    variants: {Environment -> MergeRequest: {cardinality: many_to_one}}
 
   CREATED_MR:
     description: Agent session created a merge request
-    variants: [AgentSession -> MergeRequest]
+    variants: {AgentSession -> MergeRequest: {cardinality: many_to_many}}
 
-  CREATOR: {description: User created project, variants: [User -> Project]}
+  CREATOR: {description: User created project, variants: {User -> Project: {cardinality: many_to_many}}}
+
   DECLARES_DEPENDENCY:
     description: Package declares a dependency
-    variants: [Package -> Dependency]
+    variants: {Package -> Dependency: {cardinality: many_to_many}}
 
   DEFINES:
     description: Definition relationships in source code
-    variants: [File -> Definition, Definition -> Definition]
-    attributes: {project_id: int64, branch: string}
+    variants:
+      File -> Definition: {cardinality: many_to_many}
+      Definition -> Definition: {cardinality: many_to_many}
 
-  DEPLOYED_BY: {description: User who triggered a deployment, variants: [User -> Deployment]}
+  DEPLOYED_BY: {description: User who triggered a deployment, variants: {User -> Deployment: {cardinality: one_to_many}}}
+
   DEPLOYED_TO:
     description: Merge request was deployed as part of a deployment
-    variants: [MergeRequest -> Deployment]
+    variants: {MergeRequest -> Deployment: {cardinality: many_to_many}}
 
   DETECTED_BY:
     description: Finding was detected by a vulnerability scanner
-    variants: [Finding -> VulnerabilityScanner, VulnerabilityOccurrence -> VulnerabilityScanner]
+    variants:
+      Finding -> VulnerabilityScanner: {cardinality: many_to_one}
+      VulnerabilityOccurrence -> VulnerabilityScanner: {cardinality: many_to_one}
 
-  DISMISSED_BY: {description: User who dismissed a vulnerability, variants: [User -> Vulnerability]}
+  DISMISSED_BY: {description: User who dismissed a vulnerability, variants: {User -> Vulnerability: {cardinality: one_to_many}}}
+
   EXTENDS:
     description: >-
       Supertype relationships in source code (inheritance, interface implementation,
       struct embedding, mixin composition)
-    variants: [Definition -> Definition]
-    attributes: {project_id: int64, branch: string}
+    variants: {Definition -> Definition: {cardinality: many_to_many}}
 
   FIXES:
     description: Merge request fixes a vulnerability
-    variants: [MergeRequest -> Vulnerability]
+    variants: {MergeRequest -> Vulnerability: {cardinality: many_to_many}}
 
   HAS_DIFF:
     description: Diff snapshots of a merge request
-    variants: [MergeRequest -> MergeRequestDiff]
+    variants: {MergeRequest -> MergeRequestDiff: {cardinality: one_to_many}}
 
   HAS_FILE:
     description: Files changed in a merge request diff
-    variants: [MergeRequestDiff -> MergeRequestDiffFile]
+    variants: {MergeRequestDiff -> MergeRequestDiffFile: {cardinality: one_to_many}}
 
   HAS_FINDING:
     description: Entity has associated finding or vulnerability occurrence
-    variants: [Vulnerability -> VulnerabilityOccurrence, SecurityScan -> Finding]
+    variants:
+      Vulnerability -> VulnerabilityOccurrence: {cardinality: many_to_one}
+      SecurityScan -> Finding: {cardinality: one_to_many}
 
   HAS_HEAD_PIPELINE:
     description: >-
       Merge request's head pipeline (pipeline running against the tip of the source
       branch)
-    variants: [MergeRequest -> Pipeline]
+    variants: {MergeRequest -> Pipeline: {cardinality: many_to_one}}
 
   HAS_IDENTIFIER:
     description: Entity has associated vulnerability identifier (CVE, CWE, etc.)
     variants:
-    - Finding -> VulnerabilityIdentifier
-    - VulnerabilityOccurrence -> VulnerabilityIdentifier
+      Finding -> VulnerabilityIdentifier: {cardinality: many_to_many}
+      VulnerabilityOccurrence -> VulnerabilityIdentifier: {cardinality: many_to_one}
 
   HAS_JOB:
     description: Pipeline or stage contains job relationship
-    variants: [Stage -> Job, Pipeline -> Job]
+    variants:
+      Stage -> Job: {cardinality: one_to_many}
+      Pipeline -> Job: {cardinality: one_to_many}
 
   HAS_LABEL:
     description: Entity has a label applied
-    variants: [WorkItem -> Label, MergeRequest -> Label]
+    variants:
+      WorkItem -> Label: {cardinality: many_to_many}
+      MergeRequest -> Label: {cardinality: many_to_many}
 
   HAS_LATEST_DIFF:
     description: >-
       Merge request's most recent diff snapshot (points to the latest
       MergeRequestDiff)
-    variants: [MergeRequest -> MergeRequestDiff]
+    variants: {MergeRequest -> MergeRequestDiff: {cardinality: many_to_one}}
 
   HAS_NOTE:
     description: Entity has a note/comment attached
-    variants: [MergeRequest -> Note, WorkItem -> Note, Vulnerability -> Note]
+    variants:
+      MergeRequest -> Note: {cardinality: one_to_many}
+      WorkItem -> Note: {cardinality: one_to_many}
+      Vulnerability -> Note: {cardinality: one_to_many}
 
   HAS_PACKAGE_FILE:
     description: Package contains a package file
-    variants: [Package -> PackageFile]
+    variants: {Package -> PackageFile: {cardinality: one_to_many}}
 
-  HAS_STAGE: {description: Pipeline contains stage relationship, variants: [Pipeline -> Stage]}
+  HAS_STAGE: {description: Pipeline contains stage relationship, variants: {Pipeline -> Stage: {cardinality: one_to_many}}}
+
   HAS_VULNERABILITY:
     description: Registry package is affected by a known security vulnerability
-    variants: [Package -> Vulnerability]
+    variants: {Package -> Vulnerability: {cardinality: many_to_many}}
 
   IMPORTS:
     description: Import relationships in source code
-    variants: [File -> ImportedSymbol, ImportedSymbol -> Definition]
-    attributes: {project_id: int64, branch: string}
+    variants:
+      File -> ImportedSymbol: {cardinality: many_to_many}
+      ImportedSymbol -> Definition: {cardinality: many_to_many}
 
   IN_ENVIRONMENT:
     description: Deployment targets an environment
-    variants: [Deployment -> Environment]
+    variants: {Deployment -> Environment: {cardinality: many_to_one}}
 
   IN_GROUP:
     description: Entity belongs to a group
-    variants: [Milestone -> Group, Label -> Group, WorkItem -> Group]
+    variants:
+      Milestone -> Group: {cardinality: many_to_one}
+      Label -> Group: {cardinality: many_to_one}
+      WorkItem -> Group: {cardinality: many_to_one}
 
   IN_MILESTONE:
     description: Entity belongs to a milestone
-    variants: [WorkItem -> Milestone, MergeRequest -> Milestone]
+    variants:
+      WorkItem -> Milestone: {cardinality: many_to_one}
+      MergeRequest -> Milestone: {cardinality: many_to_one}
 
   IN_PIPELINE:
     description: Entity belongs to a pipeline
-    variants: [SecurityScan -> Pipeline, Job -> Pipeline]
+    variants:
+      SecurityScan -> Pipeline: {cardinality: many_to_one}
+      Job -> Pipeline: {cardinality: many_to_one}
 
   IN_PROJECT:
     description: Project association for entities
     variants:
-    - Note -> Project
-    - MergeRequest -> Project
-    - Pipeline -> Project
-    - Stage -> Project
-    - Job -> Project
-    - Vulnerability -> Project
-    - Finding -> Project
-    - VulnerabilityIdentifier -> Project
-    - WorkItem -> Project
-    - Milestone -> Project
-    - Label -> Project
-    - SecurityScan -> Project
-    - Branch -> Project
-    - Deployment -> Project
-    - Environment -> Project
-    - MergeRequestDiff -> Project
-    - MergeRequestDiffFile -> Project
-    - VulnerabilityScanner -> Project
-    - VulnerabilityOccurrence -> Project
-    - Package -> Project
-    - PackageFile -> Project
-    - ContainerRepository -> Project
-    - Dependency -> Project
-    - AgentSession -> Project
-    attributes: {project_id: int64, branch: string}
+      Note -> Project: {cardinality: many_to_one}
+      MergeRequest -> Project: {cardinality: many_to_one}
+      Pipeline -> Project: {cardinality: many_to_one}
+      Stage -> Project: {cardinality: many_to_one}
+      Job -> Project: {cardinality: many_to_one}
+      Vulnerability -> Project: {cardinality: many_to_one}
+      Finding -> Project: {cardinality: many_to_one}
+      VulnerabilityIdentifier -> Project: {cardinality: many_to_one}
+      WorkItem -> Project: {cardinality: many_to_one}
+      Milestone -> Project: {cardinality: many_to_one}
+      Label -> Project: {cardinality: many_to_one}
+      SecurityScan -> Project: {cardinality: many_to_one}
+      Branch -> Project: {cardinality: many_to_one}
+      Deployment -> Project: {cardinality: many_to_one}
+      Environment -> Project: {cardinality: many_to_one}
+      MergeRequestDiff -> Project: {cardinality: many_to_one}
+      MergeRequestDiffFile -> Project: {cardinality: many_to_one}
+      VulnerabilityScanner -> Project: {cardinality: many_to_one}
+      VulnerabilityOccurrence -> Project: {cardinality: many_to_one}
+      Package -> Project: {cardinality: many_to_one}
+      PackageFile -> Project: {cardinality: many_to_one}
+      ContainerRepository -> Project: {cardinality: many_to_one}
+      Dependency -> Project: {cardinality: many_to_one}
+      AgentSession -> Project: {cardinality: many_to_one}
 
   LAST_EDITED_BY:
     description: User who most recently edited an entity's content (title/description)
-    variants: [User -> MergeRequest]
+    variants: {User -> MergeRequest: {cardinality: one_to_many}}
 
   MEMBER_OF:
     description: A user is a member of a group or project
-    variants: [User -> Group, User -> Project]
+    variants:
+      User -> Group: {cardinality: many_to_many}
+      User -> Project: {cardinality: many_to_many}
 
   MENTIONS:
     description: >-
       One merge request or work item references another in its description or a
       comment, recorded from the cross-reference system note GitLab writes on mention.
     variants:
-    - MergeRequest -> MergeRequest
-    - MergeRequest -> WorkItem
-    - WorkItem -> MergeRequest
-    - WorkItem -> WorkItem
+      MergeRequest -> MergeRequest: {cardinality: many_to_many}
+      MergeRequest -> WorkItem: {cardinality: many_to_many}
+      WorkItem -> MergeRequest: {cardinality: many_to_many}
+      WorkItem -> WorkItem: {cardinality: many_to_many}
 
-  MERGED: {description: User who merged a merge request, variants: [User -> MergeRequest]}
+  MERGED: {description: User who merged a merge request, variants: {User -> MergeRequest: {cardinality: one_to_many}}}
+
   MERGED_AT_COMMIT:
     description: The commit a merge request was merged at, sourced from the merge_requests row.
-    variants: [MergeRequest -> Commit]
+    variants: {MergeRequest -> Commit: {cardinality: many_to_one}}
 
   OCCURRENCE_OF:
     description: Vulnerability occurrence is an occurrence of a vulnerability
-    variants: [VulnerabilityOccurrence -> Vulnerability]
+    variants: {VulnerabilityOccurrence -> Vulnerability: {cardinality: many_to_one}}
 
   ON_BRANCH:
     description: Code entities belong to a specific branch
-    variants: [Directory -> Branch, File -> Branch]
-    attributes: {project_id: int64, branch: string}
+    variants:
+      Directory -> Branch: {cardinality: many_to_many}
+      File -> Branch: {cardinality: many_to_many}
 
   OWNER:
     description: Ownership relationship between users and groups/projects
-    variants: [User -> Group]
+    variants: {User -> Group: {cardinality: many_to_many}}
 
-  RAN_BY: {description: Security scan was executed by a CI job, variants: [SecurityScan -> Job]}
+  RAN_BY: {description: Security scan was executed by a CI job, variants: {SecurityScan -> Job: {cardinality: many_to_one}}}
+
   RELATED_TO:
     description: Related or blocking relationship between work items
-    variants: [WorkItem -> WorkItem]
+    variants: {WorkItem -> WorkItem: {cardinality: many_to_many}}
 
   REOPENED:
     description: User who reopened a merge request or work item (ADR 013)
-    variants: [User -> MergeRequest, User -> WorkItem]
+    variants:
+      User -> MergeRequest: {cardinality: many_to_many}
+      User -> WorkItem: {cardinality: many_to_many}
 
-  RESOLVED_BY: {description: User who resolved a vulnerability, variants: [User -> Vulnerability]}
+  RESOLVED_BY: {description: User who resolved a vulnerability, variants: {User -> Vulnerability: {cardinality: one_to_many}}}
+
   REVIEWER:
     description: Review assignment relationship between users and merge requests
-    variants: [User -> MergeRequest]
+    variants: {User -> MergeRequest: {cardinality: many_to_many}}
 
-  RUNS_ON: {description: Job executed on a runner, variants: [Job -> Runner]}
+  RUNS_ON: {description: Job executed on a runner, variants: {Job -> Runner: {cardinality: many_to_one}}}
+
   SCANS:
     description: VulnerabilityScanner scans a project for security vulnerabilities
-    variants: [VulnerabilityScanner -> Project]
+    variants: {VulnerabilityScanner -> Project: {cardinality: many_to_one}}
 
   SOURCE_PROJECT:
     description: Merge request's source project (differs from target project for fork-based MRs)
-    variants: [MergeRequest -> Project]
+    variants: {MergeRequest -> Project: {cardinality: many_to_one}}
 
   TRIGGERED:
     description: Trigger relationship between entities
-    variants: [User -> Pipeline, MergeRequest -> Pipeline, User -> Job]
+    variants:
+      User -> Pipeline: {cardinality: one_to_many}
+      MergeRequest -> Pipeline: {cardinality: one_to_many}
+      User -> Job: {cardinality: one_to_many}
 
   TRIGGERED_BY_PIPELINE:
     description: >-
       Job was triggered by an upstream pipeline (child pipeline relationship from the
       job side)
-    variants: [Job -> Pipeline]
+    variants: {Job -> Pipeline: {cardinality: many_to_one}}
 
   TRIGGERS_PIPELINE:
     description: Bridge job triggered a downstream pipeline
-    variants: [Job -> Pipeline]
+    variants: {Job -> Pipeline: {cardinality: many_to_many}}
 
   UPDATED_BY:
     description: User who most recently updated an entity (non-content changes)
-    variants: [User -> MergeRequest]
+    variants: {User -> MergeRequest: {cardinality: one_to_many}}

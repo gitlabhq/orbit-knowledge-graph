@@ -94,6 +94,28 @@ impl FieldSelectivity {
     }
 }
 
+/// How many rows of each endpoint one row of the other endpoint links to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Cardinality {
+    OneToOne,
+    OneToMany,
+    ManyToOne,
+    ManyToMany,
+}
+
+impl Cardinality {
+    /// Whether a foreign key on `holder` can carry the variant.
+    pub fn allows_key_on(self, holder: crate::Endpoint) -> bool {
+        match self {
+            Self::OneToOne => true,
+            Self::OneToMany => holder == crate::Endpoint::Target,
+            Self::ManyToOne => holder == crate::Endpoint::Source,
+            Self::ManyToMany => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TraversalPathKind {

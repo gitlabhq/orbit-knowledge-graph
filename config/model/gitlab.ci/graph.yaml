@@ -9,39 +9,36 @@ entities:
     label: id
     defaults: [id, iid, status, ref, sha]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      iid: {type: int64, description: Project-scoped deployment number., immutable: true}
+      id: {type: int64, description: Unique ID.}
+      iid: {type: int64, description: Project-scoped deployment number.}
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
-      ref: {type: string, description: Git ref (branch or tag) deployed., immutable: true}
-      tag: {type: boolean, description: Whether the ref is a tag., immutable: true}
-      sha: {type: string, description: Deployed commit SHA., immutable: true}
+      ref: {type: string, description: Git ref (branch or tag) deployed., default: ''}
+      tag: {type: boolean, description: Whether the ref is a tag., default: false}
+      sha: {type: string, description: Deployed commit SHA., default: ''}
       status:
         type: enum
         description: Execution status.
         values: {0: created, 1: running, 2: success, 3: failed, 4: canceled, 5: skipped, 6: blocked}
         terminal: [success, failed, canceled, skipped]
+        default: ''
       deployable_type:
         type: string
         description: Polymorphic type (typically CommitStatus, the STI base class for Ci::Build).
-        immutable: true
         selectivity: low
-      deployable_id: {type: int64?, description: Deployable ID., immutable: true}
-      on_stop: {type: string, description: Job name that stops this deployment.}
-      archived: {type: boolean, description: Whether archived.}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+        default: ''
+      deployable_id: {type: int64?, description: Deployable ID.}
+      on_stop: {type: string, description: Job name that stops this deployment., default: ''}
+      archived: {type: boolean, description: Whether archived., default: false}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       finished_at: {type: timestamp?, description: Execution finish timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
       environment_id:
         type: int64
         description: Target environment ID.
-        immutable: true
-        references: [Environment]
-      user_id: {type: int64?, description: Deploying user ID., immutable: true, references: [User]}
-      traversal_path: {type: string, description: Namespace path for authz.}
+      user_id: {type: int64?, description: Deploying user ID.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   Environment:
     style: {size: 22, color: "#0EA5E9"}
@@ -49,46 +46,46 @@ entities:
     label: name
     defaults: [id, name, state, tier]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
+      id: {type: int64, description: Unique ID.}
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
-      name: {type: string, description: "Name (e.g. 'production', 'staging', 'review/feature-x')."}
-      slug: {type: string, description: URL-safe slug derived from name.}
-      external_url: {type: string, description: External URL of the environment.}
+      name: {type: string, description: "Name (e.g. 'production', 'staging', 'review/feature-x').", default: ''}
+      slug: {type: string, description: URL-safe slug derived from name., default: ''}
+      external_url: {type: string, description: External URL of the environment., default: ''}
       environment_type:
         type: string
         description: Category from name prefix before first '/' (e.g. 'review'); empty when no '/'.
         selectivity: low
+        default: ''
       state:
         type: enum
         description: Lifecycle state.
         values: {0: available, 1: stopping, 2: stopped}
         stored_as_text: true
+        default: available
       tier:
         type: enum
         description: Deployment tier.
         values: {0: production, 1: staging, 2: testing, 3: development, 4: other}
+        default: ''
       auto_stop_at: {type: timestamp?, description: Scheduled auto-stop timestamp.}
       auto_delete_at: {type: timestamp?, description: Scheduled auto-delete timestamp.}
       auto_stop_setting:
         type: enum
         description: Auto-stop behavior.
         values: {0: always, 1: with_action}
+        default: always
       cluster_agent_id: {type: int64?, description: Associated Kubernetes cluster agent ID.}
-      kubernetes_namespace: {type: string, description: Target Kubernetes namespace.}
-      flux_resource_path: {type: string, description: Flux resource path for GitOps.}
-      description: {type: string, description: Free-form description.}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      kubernetes_namespace: {type: string, description: Target Kubernetes namespace., default: ''}
+      flux_resource_path: {type: string, description: Flux resource path for GitOps., default: ''}
+      description: {type: string, description: Free-form description., default: ''}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
       merge_request_id:
         type: int64?
         description: MR that created this review environment.
-        immutable: true
-        references: [MergeRequest]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   Job:
     style: {size: 24, color: "#8B5CF6"}
@@ -96,8 +93,8 @@ entities:
     label: name
     defaults: [id, name, status, ref]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      name: {type: string, description: Job name from .gitlab-ci.yml., immutable: true}
+      id: {type: int64, description: Unique ID.}
+      name: {type: string, description: Job name from .gitlab-ci.yml., default: ''}
       status:
         type: enum
         description: Execution status.
@@ -117,21 +114,24 @@ entities:
           12: canceling
         stored_as_text: true
         terminal: [success, failed, canceled, skipped]
-      ref: {type: string, description: Branch or tag name., immutable: true}
-      tag: {type: boolean?, description: Whether running on a git tag., immutable: true}
+        default: ''
+      ref: {type: string, description: Branch or tag name., default: ''}
+      tag: {type: boolean?, description: Whether running on a git tag.}
       allow_failure:
         type: boolean
         description: Whether failure is allowed without failing the pipeline.
-      coverage: {type: string, description: Reported code coverage percentage.}
+        default: false
+      coverage: {type: string, description: Reported code coverage percentage., default: ''}
       environment:
         type: string
         description: Target environment name (e.g. production, staging).
+        default: ''
       when:
         type: enum
         description: Run condition.
-        immutable: true
         values: {0: on_success, 1: on_failure, 2: always, 3: manual, 4: delayed}
         stored_as_text: true
+        default: ''
       retried: {type: boolean?, description: Whether superseded by a retry.}
       failure_reason:
         type: enum
@@ -183,7 +183,8 @@ entities:
           1013: duo_workflow_not_allowed
           1014: job_router_failure
           1015: job_token_expired
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+        default: ''
+      created_at: {type: timestamp?, description: Creation timestamp.}
       started_at: {type: timestamp?, description: Execution start timestamp.}
       finished_at: {type: timestamp?, description: Execution finish timestamp.}
       queued_at: {type: timestamp?, description: Queue timestamp.}
@@ -202,9 +203,9 @@ entities:
       type:
         type: string
         description: "STI class: Ci::Build, Ci::Bridge, or GenericCommitStatus."
-        immutable: true
         selectivity: low
-      runner_id: {type: int64?, description: Executing runner ID., references: [Runner]}
+        default: ''
+      runner_id: {type: int64?, description: Executing runner ID.}
       timeout: {type: int64?, description: Effective timeout in seconds.}
       timeout_source:
         type: enum
@@ -214,38 +215,30 @@ entities:
           2: project_timeout_source
           3: runner_timeout_source
           4: job_timeout_source
+        default: ''
       exit_code: {type: int64?, description: Process exit code from the runner.}
       scheduling_type:
         type: enum
         description: "Scheduling mode: stage or DAG."
-        immutable: true
         values: {0: stage, 1: dag}
+        default: ''
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
-      user_id: {type: int64?, description: Triggering user ID., immutable: true, references: [User]}
+      user_id: {type: int64?, description: Triggering user ID.}
       upstream_pipeline_id:
         type: int64?
         description: Upstream pipeline ID for bridge jobs.
-        immutable: true
-        references: [Pipeline]
       stage_id:
         type: int64?
         description: Containing stage ID.
-        immutable: true
-        references: [Stage]
       pipeline_id:
         type: int64?
         description: Containing pipeline ID. Source column is commit_id (legacy Rails naming).
-        immutable: true
-        references: [Pipeline]
       auto_canceled_by_id:
         type: int64?
         description: Pipeline ID that auto-canceled this job.
-        references: [Pipeline]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   Pipeline:
     style: {size: 30, color: "#6366F1"}
@@ -255,10 +248,10 @@ entities:
     label: id
     defaults: [id, iid, status, ref, source]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      iid: {type: int64?, description: Project-scoped pipeline number., immutable: true}
-      sha: {type: string, description: Commit SHA the pipeline runs against., immutable: true}
-      ref: {type: string, description: Branch or tag name., immutable: true}
+      id: {type: int64, description: Unique ID.}
+      iid: {type: int64?, description: Project-scoped pipeline number.}
+      sha: {type: string, description: Commit SHA the pipeline runs against., default: ''}
+      ref: {type: string, description: Branch or tag name., default: ''}
       status:
         type: enum
         description: Execution status.
@@ -278,10 +271,10 @@ entities:
           12: canceling
         stored_as_text: true
         terminal: [success, failed, canceled, skipped]
+        default: ''
       source:
         type: enum
         description: Trigger source.
-        immutable: true
         values:
           0: unknown
           1: push
@@ -303,7 +296,8 @@ entities:
           17: duo_workflow
           18: pipeline_execution_policy_schedule
           19: dependency_management_security_update
-      tag: {type: boolean, description: Whether running on a git tag., immutable: true}
+        default: ''
+      tag: {type: boolean, description: Whether running on a git tag., default: false}
       duration:
         type: int64?
         description: >-
@@ -326,33 +320,29 @@ entities:
           28: composite_identity_forbidden
           29: pipeline_ref_creation_failure
           30: filtered_by_no_pipeline
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+        default: ''
+      created_at: {type: timestamp?, description: Creation timestamp.}
       started_at: {type: timestamp?, description: Execution start timestamp.}
       finished_at: {type: timestamp?, description: Execution finish timestamp.}
-      committed_at: {type: timestamp?, description: Commit timestamp., immutable: true}
+      committed_at: {type: timestamp?, description: Commit timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
       before_sha:
         type: string
         description: Previous commit SHA before the triggering push.
-        immutable: true
-      yaml_errors: {type: string, description: CI config parsing errors.}
+        default: ''
+      yaml_errors: {type: string, description: CI config parsing errors., default: ''}
       protected: {type: boolean?, description: Whether the ref is protected.}
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
-      user_id: {type: int64?, description: Triggering user ID., immutable: true, references: [User]}
+      user_id: {type: int64?, description: Triggering user ID.}
       merge_request_id:
         type: int64?
         description: Triggering MR ID.
-        immutable: true
-        references: [MergeRequest]
       auto_canceled_by_id:
         type: int64?
         description: Pipeline ID that auto-canceled this one.
-        references: [Pipeline]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   Runner:
     style: {size: 22, color: "#A78BFA"}
@@ -360,24 +350,25 @@ entities:
     label: name
     defaults: [id, runner_type, name, active]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
+      id: {type: int64, description: Unique ID.}
       runner_type:
         type: enum
         description: "Scope: instance, group, or project."
-        immutable: true
         values: {1: instance_type, 2: group_type, 3: project_type}
-      name: {type: string, description: Human-readable runner name.}
-      description: {type: string, description: Maintainer-provided description.}
-      active: {type: boolean, description: Whether currently accepting jobs.}
-      locked: {type: boolean, description: Whether locked to its assignment.}
-      run_untagged: {type: boolean, description: Whether it picks up untagged jobs.}
+        default: ''
+      name: {type: string, description: Human-readable runner name., default: ''}
+      description: {type: string, description: Maintainer-provided description., default: ''}
+      active: {type: boolean, description: Whether currently accepting jobs., default: true}
+      locked: {type: boolean, description: Whether locked to its assignment., default: false}
+      run_untagged: {type: boolean, description: Whether it picks up untagged jobs., default: true}
       access_level:
         type: enum
         description: Whether restricted to protected refs.
         values: {0: not_protected, 1: ref_protected}
+        default: ''
       maximum_timeout: {type: int64?, description: Max job timeout in seconds.}
       organization_id: {type: int64?, description: Cell organization ID.}
-      created_at: {type: timestamp?, description: Registration timestamp., immutable: true}
+      created_at: {type: timestamp?, description: Registration timestamp.}
       contacted_at: {type: timestamp?, description: Last contact timestamp.}
 
   Stage:
@@ -388,8 +379,8 @@ entities:
     label: name
     defaults: [id, name, status]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      name: {type: string, description: "Stage name (e.g. build, test, deploy).", immutable: true}
+      id: {type: int64, description: Unique ID.}
+      name: {type: string, description: "Stage name (e.g. build, test, deploy).", default: ''}
       status:
         type: enum
         description: Execution status.
@@ -408,17 +399,14 @@ entities:
           11: waiting_for_callback
           12: canceling
         terminal: [success, failed, canceled, skipped]
+        default: ''
       position: {type: int64?, description: Order within the pipeline (0-indexed).}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
       pipeline_id:
         type: int64?
         description: Containing pipeline ID.
-        immutable: true
-        references: [Pipeline]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}

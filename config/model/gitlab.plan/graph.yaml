@@ -9,23 +9,19 @@ entities:
     label: title
     defaults: [id, title, color]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      title: {type: string, description: Label title.}
-      description: {type: string, description: Description text.}
-      color: {type: string, description: Hex color code.}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      id: {type: int64, description: Unique ID.}
+      title: {type: string, description: Label title., default: ''}
+      description: {type: string, description: Description text., default: ''}
+      color: {type: string, description: Hex color code., default: ''}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
       project_id:
         type: int64?
         description: Owning project ID. Null for group-scoped.
-        immutable: true
-        references: [Project]
       group_id:
         type: int64?
         description: Owning group ID. Null for project-scoped.
-        immutable: true
-        references: [Group]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   Milestone:
     style: {size: 30, color: "#D946EF"}
@@ -33,26 +29,22 @@ entities:
     label: title
     defaults: [id, iid, title, state, due_date, start_date]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      iid: {type: int64?, description: Scoped milestone number., immutable: true}
-      title: {type: string, description: Title.}
-      description: {type: string, description: Description text.}
-      state: {type: string, description: "State (active, closed).", selectivity: low}
+      id: {type: int64, description: Unique ID.}
+      iid: {type: int64?, description: Scoped milestone number.}
+      title: {type: string, description: Title., default: ''}
+      description: {type: string, description: Description text., default: ''}
+      state: {type: string, description: "State (active, closed).", selectivity: low, default: ''}
       due_date: {type: date?, description: Due date.}
       start_date: {type: date?, description: Start date.}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
       project_id:
         type: int64?
         description: Owning project ID. Null for group-scoped.
-        immutable: true
-        references: [Project]
       group_id:
         type: int64?
         description: Owning group ID. Null for project-scoped.
-        immutable: true
-        references: [Group]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   WorkItem:
     style: {size: 32, color: "#EC4899"}
@@ -62,11 +54,11 @@ entities:
     label: title
     defaults: [id, iid, title, state, work_item_type]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      iid: {type: int64, description: Scoped work item number., immutable: true}
-      title: {type: string, description: Title.}
-      description: {type: string, description: Description body (markdown).}
-      state: {type: enum, description: Current state., values: {1: opened, 2: closed}}
+      id: {type: int64, description: Unique ID.}
+      iid: {type: int64, description: Scoped work item number.}
+      title: {type: string, description: Title., default: ''}
+      description: {type: string, description: Description body (markdown)., default: ''}
+      state: {type: enum, description: Current state., values: {1: opened, 2: closed}, default: ''}
       work_item_type:
         type: enum
         description: Work item type.
@@ -80,24 +72,21 @@ entities:
           7: key_result
           8: epic
           9: ticket
-      confidential: {type: boolean, description: Confidential flag.}
+        default: ''
+      confidential: {type: boolean, description: Confidential flag., default: false}
       due_date: {type: date?, description: Due date.}
       start_date: {type: date?, description: Start date.}
       weight: {type: int64?, description: Weight/points assigned.}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
       closed_at: {type: timestamp?, description: Closed timestamp.}
       project_id:
         type: int64?
         description: Owning project ID. Null for group-scoped.
-        immutable: true
-        references: [Project]
-      author_id: {type: int64?, description: Author user ID., immutable: true, references: [User]}
-      milestone_id: {type: int64?, description: Associated milestone ID., references: [Milestone]}
+      author_id: {type: int64?, description: Author user ID.}
+      milestone_id: {type: int64?, description: Associated milestone ID.}
       namespace_id:
         type: int64
         description: Owning namespace (group) ID.
-        immutable: true
-        references: [Group]
-      closed_by_id: {type: int64?, description: User ID who closed this., references: [User]}
-      traversal_path: {type: string, description: Namespace path for authz.}
+      closed_by_id: {type: int64?, description: User ID who closed this.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}

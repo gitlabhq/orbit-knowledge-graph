@@ -25,9 +25,17 @@ pub struct EntityAccessSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redaction: Option<RedactionSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub anchor: Option<String>,
+    pub anchor: Option<AnchorSpec>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub delegated: bool,
+}
+
+/// A property that holds the id of the namespace entity a row belongs to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnchorSpec {
+    pub property: String,
+    pub entity: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

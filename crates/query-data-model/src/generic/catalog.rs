@@ -12,13 +12,12 @@ pub struct Property {
     pub description: Option<String>,
     pub data_type: DataType,
     pub nullable: bool,
-    pub mutable: bool,
     pub unique: bool,
     pub enum_values: Option<BTreeMap<i64, String>>,
     pub enum_type: EnumType,
     pub terminal_values: Vec<String>,
-    pub references: Vec<EntityId>,
     pub selectivity: crate::FieldSelectivity,
+    pub default: Option<crate::spec::DefaultValue>,
 }
 
 #[derive(Debug)]
@@ -62,6 +61,16 @@ pub struct RelationshipVariant {
     pub relationship: RelationshipId,
     pub source: EntityId,
     pub target: EntityId,
+    pub cardinality: crate::Cardinality,
+}
+
+impl RelationshipVariant {
+    pub fn endpoint(&self, side: crate::Endpoint) -> EntityId {
+        match side {
+            crate::Endpoint::Source => self.source,
+            crate::Endpoint::Target => self.target,
+        }
+    }
 }
 
 #[derive(Debug)]

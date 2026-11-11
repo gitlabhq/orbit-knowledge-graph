@@ -7,12 +7,15 @@ entities:
     label: summary
     defaults: [id, summary, created_at]
     properties:
-      id: { type: int64, immutable: true }
+      id: int64
       summary: string
-      created_at: { type: timestamp, immutable: true }
-      project_id: { type: int64, immutable: true, references: [Project] }
+      created_at: timestamp
+      project_id: int64
 relationships:
   IN_PROJECT:
-    variants: [AgentMemory -> Project]
+    variants:
+      AgentMemory -> Project: { cardinality: many_to_one }
   REMEMBERS:
-    variants: [AgentMemory -> MergeRequest, AgentMemory -> Note]
+    variants:
+      AgentMemory -> MergeRequest: { cardinality: many_to_many }
+      AgentMemory -> Note: { cardinality: many_to_many }

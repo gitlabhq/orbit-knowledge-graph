@@ -20,7 +20,7 @@ pub(super) use layout::check_indexes;
 pub use layout::default_index_name;
 pub use render::DictionaryCredentials;
 pub(super) use resolve::resolve;
-pub use types::{data_type, nullable, storage_type};
+pub use types::{data_type, nullable};
 
 impl Catalog<ClickHouse> {
     pub fn schema(&self) -> Result<&Schema, DataModelError> {

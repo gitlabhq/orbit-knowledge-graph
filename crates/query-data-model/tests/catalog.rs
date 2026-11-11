@@ -3,23 +3,21 @@ use std::path::Path;
 use query_data_model::catalog::RowFilter;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::duckdb::DuckDb;
-use query_data_model::{DataModelError, Direction, Endpoint, Model};
+use query_data_model::{DataModelError, Direction, Endpoint, Model, Packages};
 
 fn package_sources(packages: &[&str]) -> Vec<(String, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/packages");
-    let mut sources = Vec::new();
-    for package in packages {
-        let mut files: Vec<_> = std::fs::read_dir(root.join(package))
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect();
-        files.sort();
-        for file in files {
-            let name = format!("{package}/{}", file.file_name().unwrap().to_string_lossy());
-            sources.push((name, std::fs::read_to_string(file).unwrap()));
-        }
-    }
-    sources
+    let all = Packages::read_dir(&root).unwrap();
+    packages
+        .iter()
+        .flat_map(|package| {
+            let prefix = format!("{package}/");
+            all.sources()
+                .iter()
+                .filter(move |(name, _)| name.starts_with(&prefix))
+                .map(|(name, yaml)| (name.clone(), yaml.clone()))
+        })
+        .collect()
 }
 
 fn load(packages: &[&str]) -> Result<std::sync::Arc<Model>, DataModelError> {
@@ -89,7 +87,10 @@ fn a_clickhouse_catalog_resolves_tables_columns_and_routes() {
     let title = model.property(request, "title").unwrap().id;
     let diff = model.property(request, "diff").unwrap().id;
 
-    assert_eq!(store.source(request).unwrap().table, "gl_merge_request");
+    assert_eq!(
+        store.source(request).unwrap().table.as_deref(),
+        Some("gl_merge_request")
+    );
     assert!(catalog.text_index(title));
     assert_eq!(
         facts.relational.versioning.as_ref().unwrap().version,
@@ -145,7 +146,12 @@ fn one_query_can_join_stores_on_the_same_connection() {
 
     let tables: Vec<_> = catalog
         .sources(issue)
-        .map(|(store, source)| (store.name.as_str(), source.table.as_str()))
+        .map(|(store, source)| {
+            (
+                store.name.as_str(),
+                source.table.as_deref().unwrap_or_default(),
+            )
+        })
         .collect();
     assert_eq!(
         tables,
@@ -176,27 +182,20 @@ fn one_query_can_join_stores_on_the_same_connection() {
 }
 
 #[test]
-fn stores_on_another_connection_are_not_joinable() {
-    let model = load_with(&["gitlab", "linear"], |name, yaml| {
-        if name == "linear/storage.yaml" {
+fn a_foreign_key_must_join_within_its_connection() {
+    let errors = spec_errors(load_with(&["gitlab", "linear"], |name, yaml| {
+        if name == "linear/storage/clickhouse.lake.yaml" {
             yaml.replace("connection: main", "connection: lake")
         } else {
             yaml
         }
-    })
-    .unwrap();
-    let relates = model
-        .graph()
-        .variant_named("RELATES_TO", "LinearIssue", "MergeRequest")
-        .unwrap();
-    let main = model.physical::<ClickHouse>("main").unwrap();
-    assert!(main.store("lake").is_none());
-    assert!(
-        main.routes(relates.id)
-            .all(|route| route.foreign_key.is_none())
+    }));
+    assert_eq!(
+        errors,
+        [
+            "integration.linear: store lake binds RELATES_TO(LinearIssue -> MergeRequest), whose other endpoint is not on connection lake"
+        ]
     );
-    let lake = model.physical::<ClickHouse>("lake").unwrap();
-    assert_eq!(lake.routes(relates.id).count(), 0);
 }
 
 #[test]
@@ -211,15 +210,13 @@ fn a_catalog_rejects_stores_of_another_backend() {
 
 #[test]
 fn backends_reject_unknown_options() {
-    let model = load_with(&["gitlab"], |name, yaml| {
-        if name == "gitlab/storage.yaml" {
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| {
+        if name == "gitlab/storage/clickhouse.yaml" {
             yaml.replace("deleted_column:", "delete_column:")
         } else {
             yaml
         }
-    })
-    .unwrap();
-    let errors = spec_errors(model.physical::<ClickHouse>("main"));
+    }));
     assert_eq!(errors.len(), 1);
     assert!(
         errors[0].starts_with("gitlab: store graph: unknown field `delete_column`"),
@@ -276,11 +273,13 @@ fn guards_follow_path_columns_or_reach_one_through_the_graph() {
 #[test]
 fn an_entity_that_cannot_be_authorized_fails_the_load() {
     let errors = spec_errors(load_with(&["gitlab", "agent_memory"], |name, yaml| {
-        if name == "gitlab/storage.yaml" {
-            yaml.replace("  IN_PROJECT: { fk: project_id }\n", "")
-        } else {
-            yaml
-        }
+        match name {
+        "agent_memory/storage/clickhouse.yaml" => yaml.replace(
+            "AgentMemory -> Project: { fk: { on: source, column: project_id }, edge_table: gl_edge }",
+            "AgentMemory -> Project: { edge_table: gl_edge }",
+        ),
+        _ => yaml,
+    }
     }));
     assert_eq!(
         errors,
@@ -293,7 +292,10 @@ fn an_entity_that_cannot_be_authorized_fails_the_load() {
 #[test]
 fn redaction_alone_authorizes_an_entity_without_a_path() {
     let model = load_with(&["gitlab", "agent_memory"], |name, yaml| match name {
-        "gitlab/storage.yaml" => yaml.replace("  IN_PROJECT: { fk: project_id }\n", ""),
+        "agent_memory/storage/clickhouse.yaml" => yaml.replace(
+            "AgentMemory -> Project: { fk: { on: source, column: project_id }, edge_table: gl_edge }",
+            "AgentMemory -> Project: { edge_table: gl_edge }",
+        ),
         "agent_memory/authorization.yaml" => yaml.replace(
             "{ scope: namespace, role: developer }",
             "{ scope: namespace, role: developer, redaction: { resource: agent_memory, ability: read_agent_memory } }",
@@ -390,11 +392,11 @@ fn packages_cannot_redeclare_another_package_entity() {
 #[test]
 fn every_bad_reference_is_reported_in_one_load() {
     let errors = spec_errors(load_with(&["gitlab"], |name, yaml| match name {
-        "gitlab/storage.yaml" => yaml.replace(
-            "  User: { path_column: null, backend: { sort_key: [id] } }",
-            "  User: { path_column: null, columns: { usernam: login } }",
+        "gitlab/storage/clickhouse.yaml" => yaml.replace(
+            "      username: { backend: { type: String } }",
+            "      usernam: { backend: { type: String } }",
         ),
-        "gitlab/graph.yaml" => yaml.replace("User -> Note]", "User -> Notes]"),
+        "gitlab/graph.yaml" => yaml.replace("User -> Note: {", "User -> Notes: {"),
         _ => yaml,
     }));
     assert_eq!(
@@ -402,6 +404,8 @@ fn every_bad_reference_is_reported_in_one_load() {
         [
             "gitlab: AUTHORED variant `User -> Notes` names an unknown entity",
             "gitlab: store graph names unknown property User.usernam",
+            "gitlab: store graph binds unknown variant AUTHORED(User -> Note)",
+            "gitlab: User.username is neither stored nor excluded by any store",
         ]
     );
 }
@@ -444,22 +448,18 @@ fn frontend_errors_name_the_alternatives() {
     );
 }
 
-const HAS_NOTE_ATTRIBUTES: &str = "    variants: [MergeRequest -> Note]
+const ATTRIBUTE_COLUMNS: &str = "thread: { type: String }, position: { type: Nullable(Int64) }";
+
+const HAS_NOTE_VARIANT: &str = "      MergeRequest -> Note: { cardinality: one_to_many }\n";
+
+const HAS_NOTE_ATTRIBUTES: &str = "      MergeRequest -> Note: { cardinality: one_to_many }
     attributes:
       position: int64?
-      thread: { type: string, description: Discussion the note belongs to }";
+      thread: { type: string, description: Discussion the note belongs to }\n";
 
 #[test]
 fn relationships_declare_typed_attributes() {
-    let model = load_with(
-        &["gitlab"],
-        edit_one(
-            "gitlab/graph.yaml",
-            "    variants: [MergeRequest -> Note]",
-            HAS_NOTE_ATTRIBUTES,
-        ),
-    )
-    .unwrap();
+    let model = load_with(&["gitlab"], attribute_storage(ATTRIBUTE_COLUMNS)).unwrap();
     let graph = model.graph();
     let has_note = graph.relationship_id("HAS_NOTE").unwrap();
     let names: Vec<_> = graph
@@ -492,27 +492,22 @@ fn relationships_declare_typed_attributes() {
 
 #[test]
 fn access_entries_apply_to_relationship_attributes() {
+    let storage = attribute_storage(ATTRIBUTE_COLUMNS);
     let model = load_with(&["gitlab"], |name, yaml| match name {
-        "gitlab/graph.yaml" => {
-            yaml.replace("    variants: [MergeRequest -> Note]", HAS_NOTE_ATTRIBUTES)
-        }
         "gitlab/authorization.yaml" => {
             yaml + "  HAS_NOTE.thread: { hidden: true, filterable: false }\n  HAS_NOTE.mood: { hidden: true }\n"
         }
-        _ => yaml,
+        _ => storage(name, yaml),
     });
     assert_eq!(
         spec_errors(model),
         ["gitlab: authorization names unknown property HAS_NOTE.mood"]
     );
     let model = load_with(&["gitlab"], |name, yaml| match name {
-        "gitlab/graph.yaml" => {
-            yaml.replace("    variants: [MergeRequest -> Note]", HAS_NOTE_ATTRIBUTES)
-        }
         "gitlab/authorization.yaml" => {
             yaml + "  HAS_NOTE.thread: { hidden: true, filterable: false }\n"
         }
-        _ => yaml,
+        _ => storage(name, yaml),
     })
     .unwrap();
     let graph = model.graph();
@@ -532,9 +527,9 @@ fn bad_relationship_attributes_fail_the_load() {
         &["gitlab"],
         edit_one(
             "gitlab/graph.yaml",
-            "    variants: [MergeRequest -> Note]",
-            "    variants: [MergeRequest -> Note]
-    attributes: { source_id: int64, mood: feeling, state: enum }",
+            HAS_NOTE_VARIANT,
+            "      MergeRequest -> Note: { cardinality: one_to_many }
+    attributes: { source_id: int64, mood: feeling, state: enum }\n",
         ),
     ));
     assert_eq!(
@@ -547,74 +542,46 @@ fn bad_relationship_attributes_fail_the_load() {
     );
 }
 
-fn attribute_storage(
-    edge_columns: &'static str,
-    route: &'static str,
-) -> impl Fn(&str, String) -> String {
+fn attribute_storage(edge_columns: &'static str) -> impl Fn(&str, String) -> String {
     move |name, yaml| {
         match name {
-        "gitlab/graph.yaml" => yaml.replace("    variants: [MergeRequest -> Note]", HAS_NOTE_ATTRIBUTES),
-        "gitlab/storage.yaml" => yaml
-            .replace(
-                "sort_key: [traversal_path, source_id, relationship_kind, target_id] }",
-                &format!("sort_key: [traversal_path, source_id, relationship_kind, target_id], columns: {{ {edge_columns} }} }}"),
-            )
-            .replace("relationships:\n", &format!("relationships:\n  HAS_NOTE: {route}\n")),
+        "gitlab/graph.yaml" => yaml.replace(HAS_NOTE_VARIANT, HAS_NOTE_ATTRIBUTES),
+        "gitlab/storage/clickhouse.yaml" => yaml.replace(
+            "sort_key: [traversal_path, source_id, relationship_kind, target_id] }",
+            &format!(
+                "sort_key: [traversal_path, source_id, relationship_kind, target_id], columns: {{ {edge_columns} }} }}"
+            ),
+        ),
         _ => yaml,
     }
     }
 }
 
 #[test]
-fn stores_bind_relationship_attributes_to_edge_columns() {
+fn edge_tables_hold_a_column_for_every_relationship_attribute() {
     let model = load_with(
         &["gitlab"],
         attribute_storage(
-            "note_thread: { type: LowCardinality(String) }, position: { type: Nullable(Int32) }",
-            "{ columns: { thread: note_thread, position: position } }",
+            "thread: { type: LowCardinality(String) }, position: { type: Nullable(Int32) }",
         ),
     )
     .unwrap();
-    let graph = model.graph();
-    let has_note = graph
-        .variant_named("HAS_NOTE", "MergeRequest", "Note")
-        .unwrap();
-    let thread = graph.attribute_id(has_note.relationship, "thread").unwrap();
     let catalog = model.physical::<ClickHouse>("main").unwrap();
-    let store = catalog.store("graph").unwrap();
-    assert_eq!(
-        store.attribute_column(has_note.id, thread),
-        Some("note_thread")
-    );
+    let edge = catalog.physical_table("gl_edge").unwrap();
+    assert!(edge.has_column("thread") && edge.has_column("position"));
 }
 
 #[test]
-fn attribute_bindings_need_a_matching_edge_column() {
+fn attributes_need_a_matching_edge_column() {
     let errors = spec_errors(load_with(
         &["gitlab"],
-        attribute_storage(
-            "position: { type: String }",
-            "{ columns: { thread: note_thread, position: position, mood: mood } }",
-        ),
+        attribute_storage("position: { type: String }"),
     ));
     assert_eq!(
         errors,
-        ["gitlab: store graph binds unknown attribute HAS_NOTE.mood"]
-    );
-    let model = load_with(
-        &["gitlab"],
-        attribute_storage(
-            "position: { type: String }",
-            "{ variants: { MergeRequest -> Note: { columns: { thread: note_thread, position: position } } } }",
-        ),
-    )
-    .unwrap();
-    let errors = spec_errors(model.physical::<ClickHouse>("main"));
-    assert_eq!(
-        errors,
         [
-            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) binds thread to gl_edge.note_thread, which does not exist",
-            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) binds position to gl_edge.position, which is String, not Int",
+            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) stores attribute position as String, not Int",
+            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) has no edge column for attribute thread",
         ]
     );
 }
@@ -673,11 +640,17 @@ fn packages_sharing_a_domain_agree_on_its_description() {
 fn a_misspelled_relationship_key_fails_the_load() {
     let errors = spec_errors(load_with(
         &["gitlab"],
-        edit_one("gitlab/storage.yaml", "fk: project_id", "fk: projet_id"),
+        edit_one(
+            "gitlab/storage/clickhouse.yaml",
+            "MergeRequest -> Project: { fk: { on: source, column: project_id }",
+            "MergeRequest -> Project: { fk: { on: source, column: projet_id }",
+        ),
     ));
     assert_eq!(
         errors,
-        ["gitlab: IN_PROJECT foreign key projet_id is on no endpoint of any variant"]
+        [
+            "gitlab: store graph IN_PROJECT(MergeRequest -> Project) foreign key projet_id is not a column of MergeRequest"
+        ]
     );
 }
 
@@ -686,7 +659,7 @@ fn a_misspelled_shared_field_fails_the_load() {
     let errors = spec_errors(load_with(
         &["gitlab"],
         edit_one(
-            "gitlab/storage.yaml",
+            "gitlab/storage/clickhouse.yaml",
             "  connection: main",
             "  conection: main",
         ),
@@ -703,7 +676,7 @@ fn trusted_and_untrusted_stores_cannot_share_a_connection() {
     let errors = spec_errors(load_with(
         &["gitlab", "linear"],
         edit_one(
-            "linear/storage.yaml",
+            "linear/storage/clickhouse.lake.yaml",
             "  connection: main\n",
             "  connection: main\n  trusted: true\n",
         ),
@@ -721,7 +694,7 @@ fn one_connection_has_one_backend() {
     let errors = spec_errors(load_with(
         &["gitlab", "linear"],
         edit_one(
-            "linear/storage.yaml",
+            "linear/storage/clickhouse.lake.yaml",
             "  kind: clickhouse",
             "  kind: duckdb",
         ),
@@ -737,9 +710,9 @@ fn a_lookup_property_cannot_also_be_a_column() {
     let errors = spec_errors(load_with(
         &["gitlab"],
         edit_one(
-            "gitlab/storage.yaml",
-            "  MergeRequest:\n",
-            "  MergeRequest:\n    columns: { diff: patch }\n",
+            "gitlab/storage/clickhouse.yaml",
+            "      iid: { immutable: true, backend: { type: Int64 } }\n",
+            "      iid: { immutable: true, backend: { type: Int64 } }\n      diff: { backend: { type: String } }\n",
         ),
     ));
     assert_eq!(
@@ -753,21 +726,19 @@ fn backend_annotations_need_a_stored_column() {
     let model = load_with(
         &["gitlab"],
         edit_one(
-            "gitlab/storage.yaml",
+            "gitlab/storage/clickhouse.yaml",
             "indexes: { title: text,",
             "indexes: { diff: text, title: text,",
         ),
-    )
-    .unwrap();
-    let errors = spec_errors(model.physical::<ClickHouse>("main"));
+    );
+    let errors = spec_errors(model);
     assert_eq!(
         errors,
         ["gitlab: store graph MergeRequest indexes unknown column diff"]
     );
 }
 
-const MANAGED_STORE: &str = r#"    sort_key: [traversal_path, id]
-    engine: ReplacingMergeTree(_version, _deleted)
+const MANAGED_STORE: &str = r#"    engine: ReplacingMergeTree(_version, _deleted)
     columns:
       _version: { type: "DateTime64(6, 'UTC')", default: now64(6), codec: [Delta(8), ZSTD(1)] }
       _deleted: { type: Bool, default: "false" }
@@ -776,10 +747,10 @@ const MANAGED_STORE: &str = r#"    sort_key: [traversal_path, id]
 
 fn managed(extra: &'static str) -> impl Fn(&str, String) -> String {
     move |name, yaml| {
-        if name == "gitlab/storage.yaml" {
+        if name == "gitlab/storage/clickhouse.yaml" {
             yaml.replace(
-                "    sort_key: [traversal_path, id]\n",
-                &format!("{MANAGED_STORE}{extra}"),
+                "    deleted_column: _deleted\n",
+                &format!("    deleted_column: _deleted\n{MANAGED_STORE}{extra}"),
             )
         } else {
             yaml
@@ -855,9 +826,8 @@ fn a_managed_store_rejects_unknown_physical_references() {
       misrouted: { select: "SELECT 1", to: gl_missing }
 "#,
         ),
-    )
-    .unwrap();
-    let errors = spec_errors(model.physical::<ClickHouse>("main"));
+    );
+    let errors = spec_errors(model);
     assert_eq!(
         errors,
         [

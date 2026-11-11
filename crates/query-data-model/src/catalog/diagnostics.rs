@@ -37,6 +37,14 @@ impl Diagnostics {
         found
     }
 
+    pub fn len(&self) -> usize {
+        self.errors.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.errors.is_empty()
+    }
+
     pub fn finish(self) -> Result<(), crate::DataModelError> {
         if self.errors.is_empty() {
             Ok(())

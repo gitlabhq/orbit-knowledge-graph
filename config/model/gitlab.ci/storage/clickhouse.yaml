@@ -1,0 +1,227 @@
+kind: storage
+package: gitlab.ci
+store: graph
+entities:
+  Deployment:
+    table: gl_deployment
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      iid: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      ref: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      tag: {immutable: true, backend: {type: Bool}}
+      sha: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      deployable_type: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      deployable_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      on_stop: {backend: {type: String, codec: [ZSTD(1)]}}
+      archived: {backend: {type: Bool}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      finished_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      environment_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      user_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [status, archived, id, project_id, environment_id, user_id], text: [ref], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        status: {type: set(8), granularity: 2}
+        archived: minmax
+        id: bloom_filter(0.0001)
+        ref: text
+        project_id: bloom_filter(0.0001)
+        environment_id: bloom_filter(0.0001)
+        user_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, finished_at, updated_at]
+      path_lookups: {id: {table: gl_deployment, key: id}}
+
+  Environment:
+    table: gl_environment
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      name: {backend: {type: String, codec: [ZSTD(1)]}}
+      slug: {backend: {type: String, codec: [ZSTD(1)]}}
+      external_url: {backend: {type: String, codec: [ZSTD(1)]}}
+      environment_type: {backend: {type: String, codec: [ZSTD(1)]}}
+      state: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      tier: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      auto_stop_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      auto_delete_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      auto_stop_setting: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      cluster_agent_id: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      kubernetes_namespace: {backend: {type: String, codec: [ZSTD(1)]}}
+      flux_resource_path: {backend: {type: String, codec: [ZSTD(1)]}}
+      description: {backend: {type: String, codec: [ZSTD(3)]}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      merge_request_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [state, tier, id, project_id, merge_request_id], text: [environment_type, name], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        state: {type: set(4), granularity: 2}
+        tier: {type: set(8), granularity: 2}
+        environment_type: text
+        id: bloom_filter(0.0001)
+        name: text
+        project_id: bloom_filter(0.0001)
+        merge_request_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [auto_stop_at, auto_delete_at, created_at, updated_at]
+      path_lookups: {id: {table: gl_environment, key: id}}
+
+  Job:
+    table: gl_job
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      name: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      ref: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      tag: {immutable: true, backend: {type: Nullable(Bool)}}
+      allow_failure: {backend: {type: Bool}}
+      coverage: {backend: {type: String, codec: [ZSTD(1)]}}
+      environment: {backend: {type: String, codec: [ZSTD(1)]}}
+      when: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      retried: {backend: {type: Nullable(Bool)}}
+      failure_reason: {backend: {type: String, codec: [ZSTD(1)]}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      started_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      finished_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      queued_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      duration: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      queued_duration: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      runner_id: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      timeout: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      timeout_source: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      exit_code: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      scheduling_type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      user_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      upstream_pipeline_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      stage_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      pipeline_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      auto_canceled_by_id: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [status, allow_failure, retried, id, project_id, user_id, upstream_pipeline_id, stage_id, pipeline_id, runner_id, auto_canceled_by_id, failure_reason], text: [name, ref], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        status: {type: set(16), granularity: 2}
+        allow_failure: minmax
+        retried: minmax
+        id: bloom_filter(0.0001)
+        name: text
+        ref: text
+        project_id: bloom_filter(0.0001)
+        user_id: bloom_filter(0.0001)
+        upstream_pipeline_id: bloom_filter(0.0001)
+        stage_id: bloom_filter(0.0001)
+        pipeline_id: bloom_filter(0.0001)
+        runner_id: bloom_filter(0.0001)
+        auto_canceled_by_id: bloom_filter(0.0001)
+        failure_reason: {type: set(64), granularity: 2}
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      high_fan_out: [pipeline_id]
+      epoch_nulls: [created_at, started_at, finished_at, queued_at]
+      path_lookups: {id: {table: gl_job, key: id}}
+
+  Pipeline:
+    table: gl_pipeline
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      iid: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      sha: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      ref: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      source: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      tag: {immutable: true, backend: {type: Bool}}
+      duration: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      failure_reason: {backend: {type: String, codec: [ZSTD(1)]}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      started_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      finished_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      committed_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      before_sha: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      yaml_errors: {backend: {type: String, codec: [ZSTD(3)]}}
+      protected: {backend: {type: Nullable(Bool)}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      user_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      merge_request_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      auto_canceled_by_id: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [status, tag, id, source, project_id, user_id, merge_request_id, auto_canceled_by_id], text: [ref], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        status: {type: set(16), granularity: 2}
+        tag: minmax
+        id: bloom_filter(0.0001)
+        source: {type: set(20), granularity: 2}
+        ref: text
+        project_id: bloom_filter(0.0001)
+        user_id: bloom_filter(0.0001)
+        merge_request_id: bloom_filter(0.0001)
+        auto_canceled_by_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, started_at, finished_at, committed_at, updated_at]
+      path_lookups: {id: {table: gl_pipeline, key: id}}
+
+  Runner:
+    table: gl_runner
+    path_column:
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      runner_type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      name: {backend: {type: String, codec: [ZSTD(1)]}}
+      description: {backend: {type: String, codec: [ZSTD(1)]}}
+      active: {backend: {type: Bool}}
+      locked: {backend: {type: Bool}}
+      run_untagged: {backend: {type: Bool}}
+      access_level: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      maximum_timeout: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      organization_id: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      contacted_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+    access: {filter: [runner_type], text: [name], order: [id]}
+    backend:
+      primary_key: [id]
+      indexes: {_deleted: minmax, runner_type: {type: set(4), granularity: 2}, name: text}
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, contacted_at]
+
+  Stage:
+    table: gl_stage
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      name: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      position: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      pipeline_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, status, project_id, pipeline_id], text: [name], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        name: text
+        status: {type: set(16), granularity: 2}
+        project_id: bloom_filter(0.0001)
+        pipeline_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      high_fan_out: [pipeline_id]
+      epoch_nulls: [created_at, updated_at]
+      path_lookups: {id: {table: gl_stage, key: id}}

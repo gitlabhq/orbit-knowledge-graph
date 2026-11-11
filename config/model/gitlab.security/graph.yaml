@@ -9,33 +9,28 @@ entities:
     label: uuid
     defaults: [id, uuid, name, severity]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      uuid: {type: uuid, description: Unique UUID., immutable: true}
-      name: {type: string, description: Finding name.}
-      description: {type: string, description: Detailed description.}
-      solution: {type: string, description: Recommended remediation.}
+      id: {type: int64, description: Unique ID.}
+      uuid: {type: uuid, description: Unique UUID., default: ''}
+      name: {type: string, description: Finding name., default: ''}
+      description: {type: string, description: Detailed description., default: ''}
+      solution: {type: string, description: Recommended remediation., default: ''}
       severity:
         type: enum
         description: Severity level.
         values: {1: info, 2: unknown, 4: low, 5: medium, 6: high, 7: critical}
-      deduplicated: {type: boolean, description: Deduplicated flag.}
-      overridden_uuid: {type: uuid, description: UUID of the overridden finding., immutable: true}
+        default: ''
+      deduplicated: {type: boolean, description: Deduplicated flag., default: false}
+      overridden_uuid: {type: uuid, description: UUID of the overridden finding., default: ''}
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
       scan_id:
         type: int64
         description: Producing security scan ID.
-        immutable: true
-        references: [SecurityScan]
       scanner_id:
         type: int64
         description: Detecting scanner ID.
-        immutable: true
-        references: [VulnerabilityScanner]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   SecurityScan:
     style: {size: 26, color: "#B91C1C"}
@@ -43,11 +38,10 @@ entities:
     label: id
     defaults: [id, scan_type, status]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
+      id: {type: int64, description: Unique ID.}
       scan_type:
         type: enum
         description: Scan type.
-        immutable: true
         values:
           1: sast
           2: dependency_scanning
@@ -58,6 +52,7 @@ entities:
           7: api_fuzzing
           8: cluster_image_scanning
           9: sarif
+        default: ''
       status:
         type: enum
         description: Current status.
@@ -70,27 +65,23 @@ entities:
           5: preparation_failed
           6: purged
         terminal: [succeeded, job_failed, report_error, preparation_failed, purged]
+        default: ''
       latest:
         type: boolean
         description: Whether this is the latest scan of its type for the project.
-      created_at: {type: timestamp, description: Creation timestamp., immutable: true}
+        default: true
+      created_at: {type: timestamp, description: Creation timestamp.}
       updated_at: {type: timestamp, description: Last update timestamp.}
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
       pipeline_id:
         type: int64?
         description: Pipeline ID that ran this scan.
-        immutable: true
-        references: [Pipeline]
       build_id:
         type: int64
         description: Job (build) ID that executed this scan.
-        immutable: true
-        references: [Job]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   Vulnerability:
     style: {size: 34, color: "#DC2626"}
@@ -100,21 +91,22 @@ entities:
     label: title
     defaults: [id, title, state, severity, report_type]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      title: {type: string, description: Summary title.}
-      description: {type: string, description: Detailed description.}
+      id: {type: int64, description: Unique ID.}
+      title: {type: string, description: Summary title., default: ''}
+      description: {type: string, description: Detailed description., default: ''}
       state:
         type: enum
         description: Current state.
         values: {1: detected, 2: dismissed, 3: resolved, 4: confirmed}
+        default: ''
       severity:
         type: enum
         description: Severity level.
         values: {1: info, 2: unknown, 4: low, 5: medium, 6: high, 7: critical}
+        default: ''
       report_type:
         type: enum
         description: Security scan type that detected this.
-        immutable: true
         values:
           0: sast
           1: dependency_scanning
@@ -127,9 +119,10 @@ entities:
           8: container_scanning_for_registry
           9: sarif
           99: generic
-      resolved_on_default_branch: {type: boolean, description: Resolved on default branch.}
-      present_on_default_branch: {type: boolean, description: Present on default branch.}
-      created_at: {type: timestamp, description: Creation timestamp., immutable: true}
+        default: ''
+      resolved_on_default_branch: {type: boolean, description: Resolved on default branch., default: false}
+      present_on_default_branch: {type: boolean, description: Present on default branch., default: true}
+      created_at: {type: timestamp, description: Creation timestamp.}
       updated_at: {type: timestamp, description: Last update timestamp.}
       detected_at: {type: timestamp?, description: First detection timestamp.}
       resolved_at: {type: timestamp?, description: Resolution timestamp.}
@@ -138,18 +131,14 @@ entities:
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
       finding_id:
         type: int64
         description: Associated vulnerability occurrence ID.
-        immutable: true
-        references: [VulnerabilityOccurrence]
-      author_id: {type: int64, description: Author user ID., immutable: true, references: [User]}
-      confirmed_by_id: {type: int64?, description: Confirming user ID., references: [User]}
-      resolved_by_id: {type: int64?, description: Resolving user ID., references: [User]}
-      dismissed_by_id: {type: int64?, description: Dismissing user ID., references: [User]}
-      traversal_path: {type: string, description: Namespace path for authz.}
+      author_id: {type: int64, description: Author user ID.}
+      confirmed_by_id: {type: int64?, description: Confirming user ID.}
+      resolved_by_id: {type: int64?, description: Resolving user ID.}
+      dismissed_by_id: {type: int64?, description: Dismissing user ID.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   VulnerabilityIdentifier:
     style: {size: 22, color: "#7F1D1D"}
@@ -157,26 +146,24 @@ entities:
     label: name
     defaults: [id, name, external_type, external_id]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
+      id: {type: int64, description: Unique ID.}
       external_type:
         type: string
         description: Identifier type (e.g. cve, cwe, gemnasium).
-        immutable: true
         selectivity: low
+        default: ''
       external_id:
         type: string
         description: Identifier value (e.g. CVE-2021-44228).
-        immutable: true
-      name: {type: string, description: Human-readable name.}
-      url: {type: string, description: Reference URL. May be empty for some identifier types.}
-      created_at: {type: timestamp, description: Creation timestamp., immutable: true}
+        default: ''
+      name: {type: string, description: Human-readable name., default: ''}
+      url: {type: string, description: Reference URL. May be empty for some identifier types., default: ''}
+      created_at: {type: timestamp, description: Creation timestamp.}
       updated_at: {type: timestamp, description: Last update timestamp.}
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   VulnerabilityOccurrence:
     style: {size: 28, color: "#EF4444"}
@@ -184,28 +171,30 @@ entities:
     label: uuid
     defaults: [id, uuid, name, severity, report_type]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      uuid: {type: uuid, description: Unique UUID., immutable: true}
-      name: {type: string, description: Occurrence name.}
-      description: {type: string, description: Detailed description.}
-      solution: {type: string, description: Recommended remediation.}
+      id: {type: int64, description: Unique ID.}
+      uuid: {type: uuid, description: Unique UUID., default: ''}
+      name: {type: string, description: Occurrence name., default: ''}
+      description: {type: string, description: Detailed description., default: ''}
+      solution: {type: string, description: Recommended remediation., default: ''}
       cve:
         type: string
         description: >-
           Legacy fingerprint for deduplication. Not necessarily a CVE ID despite the
           column name.
+        default: ''
       location:
         type: string
         description: "Vulnerability location (serialized JSON: file, dependency, image, or kubernetes_resource)."
-      location_fingerprint: {type: string, description: Location fingerprint.}
+        default: '{}'
+      location_fingerprint: {type: string, description: Location fingerprint., default: ''}
       severity:
         type: enum
         description: Severity level.
         values: {1: info, 2: unknown, 4: low, 5: medium, 6: high, 7: critical}
+        default: ''
       report_type:
         type: enum
         description: Security report type.
-        immutable: true
         values:
           0: sast
           1: dependency_scanning
@@ -218,39 +207,33 @@ entities:
           8: container_scanning_for_registry
           9: sarif
           99: generic
+        default: ''
       detection_method:
         type: enum
         description: Detection method.
-        immutable: true
         values:
           0: gitlab_security_report
           1: external_security_report
           2: bug_bounty
           3: code_review
           4: security_audit
-      created_at: {type: timestamp, description: Creation timestamp., immutable: true}
+        default: ''
+      created_at: {type: timestamp, description: Creation timestamp.}
       updated_at: {type: timestamp, description: Last update timestamp.}
       detected_at: {type: timestamp?, description: Detection timestamp.}
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
       scanner_id:
         type: int64
         description: Detecting scanner ID.
-        immutable: true
-        references: [VulnerabilityScanner]
       vulnerability_id:
         type: int64?
         description: Linked vulnerability ID.
-        references: [Vulnerability]
       primary_identifier_id:
         type: int64
         description: Primary identifier (CVE/CWE) ID.
-        immutable: true
-        references: [VulnerabilityIdentifier]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   VulnerabilityScanner:
     style: {size: 24, color: "#FCA5A5"}
@@ -258,18 +241,16 @@ entities:
     label: name
     defaults: [id, name, vendor]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
+      id: {type: int64, description: Unique ID.}
       external_id:
         type: string
         description: External ID (e.g. gemnasium, bandit).
-        immutable: true
-      name: {type: string, description: Display name.}
-      vendor: {type: string, description: "Scanner vendor (default: GitLab).", selectivity: low}
-      created_at: {type: timestamp, description: Creation timestamp., immutable: true}
+        default: ''
+      name: {type: string, description: Display name., default: ''}
+      vendor: {type: string, description: "Scanner vendor (default: GitLab).", selectivity: low, default: GitLab}
+      created_at: {type: timestamp, description: Creation timestamp.}
       updated_at: {type: timestamp, description: Last update timestamp.}
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}

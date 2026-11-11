@@ -1,0 +1,74 @@
+kind: storage
+package: gitlab.source_code
+store: local
+entities:
+  Definition:
+    table: gl_definition
+    columns:
+      id: {immutable: true, backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+      project_id: {immutable: true, backend: {type: BIGINT}}
+      branch: {immutable: true, backend: {type: VARCHAR}}
+      commit_sha: {backend: {type: VARCHAR}}
+      file_path: {immutable: true, backend: {type: VARCHAR}}
+      fqn: {immutable: true, backend: {type: VARCHAR}}
+      name: {immutable: true, backend: {type: VARCHAR}}
+      definition_type: {immutable: true, backend: {type: VARCHAR}}
+      start_line: {immutable: true, backend: {type: BIGINT}}
+      end_line: {immutable: true, backend: {type: BIGINT}}
+      start_byte: {immutable: true, backend: {type: BIGINT}}
+      end_byte: {immutable: true, backend: {type: BIGINT}}
+      start_char: {immutable: true, backend: {type: BIGINT}}
+      end_char: {immutable: true, backend: {type: BIGINT}}
+    exclude: [content]
+    access: {order: [project_id, branch, id]}
+
+  Directory:
+    table: gl_directory
+    columns:
+      id: {immutable: true, backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+      project_id: {immutable: true, backend: {type: BIGINT}}
+      branch: {immutable: true, backend: {type: VARCHAR}}
+      commit_sha: {backend: {type: VARCHAR}}
+      path: {immutable: true, backend: {type: VARCHAR}}
+      name: {immutable: true, backend: {type: VARCHAR}}
+    access: {order: [project_id, branch, id]}
+
+  File:
+    table: gl_file
+    columns:
+      id: {immutable: true, backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+      project_id: {immutable: true, backend: {type: BIGINT}}
+      branch: {immutable: true, backend: {type: VARCHAR}}
+      commit_sha: {backend: {type: VARCHAR}}
+      path: {immutable: true, backend: {type: VARCHAR}}
+      name: {immutable: true, backend: {type: VARCHAR}}
+      extension: {immutable: true, backend: {type: VARCHAR}}
+      language: {immutable: true, backend: {type: VARCHAR}}
+      size_bytes: {backend: {type: BIGINT}}
+      reason: {backend: {type: VARCHAR}}
+    exclude: [content]
+    access: {order: [project_id, branch, id]}
+
+  ImportedSymbol:
+    table: gl_imported_symbol
+    columns:
+      id: {immutable: true, backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+      project_id: {immutable: true, backend: {type: BIGINT}}
+      branch: {immutable: true, backend: {type: VARCHAR}}
+      commit_sha: {backend: {type: VARCHAR}}
+      file_path: {immutable: true, backend: {type: VARCHAR}}
+      import_type: {immutable: true, backend: {type: VARCHAR}}
+      import_path: {immutable: true, backend: {type: VARCHAR}}
+      identifier_name: {immutable: true, backend: {type: VARCHAR}}
+      identifier_alias: {immutable: true, backend: {type: VARCHAR}}
+      start_line: {immutable: true, backend: {type: BIGINT}}
+      end_line: {immutable: true, backend: {type: BIGINT}}
+      start_byte: {immutable: true, backend: {type: BIGINT}}
+      end_byte: {immutable: true, backend: {type: BIGINT}}
+      start_char: {immutable: true, backend: {type: BIGINT}}
+      end_char: {immutable: true, backend: {type: BIGINT}}
+    access: {order: [project_id, branch, id]}

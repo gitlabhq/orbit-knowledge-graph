@@ -1,0 +1,71 @@
+kind: storage
+package: gitlab
+store: graph
+engine:
+  kind: clickhouse
+  connection: main
+  path_column: traversal_path
+  backend:
+    version_column: _version
+    deleted_column: _deleted
+    edge_tables:
+      gl_edge: { shared: true, sort_key: [traversal_path, source_id, relationship_kind, target_id] }
+entities:
+  Group:
+    table: gl_group
+    columns:
+      id: { immutable: true, backend: { type: Int64 } }
+      name: { backend: { type: String } }
+      full_path: { backend: { type: String } }
+      traversal_path: { backend: { type: String } }
+    access: { order: [id] }
+  Project:
+    table: gl_project
+    columns:
+      id: { immutable: true, backend: { type: Int64 } }
+      name: { backend: { type: String } }
+      full_path: { backend: { type: String } }
+      traversal_path: { backend: { type: String } }
+    access: { order: [id] }
+  User:
+    table: gl_user
+    path_column: null
+    columns:
+      id: { immutable: true, backend: { type: Int64 } }
+      username: { backend: { type: String } }
+      email: { backend: { type: Nullable(String) } }
+    access: { order: [id] }
+  MergeRequest:
+    table: gl_merge_request
+    columns:
+      id: { immutable: true, backend: { type: Int64 } }
+      iid: { immutable: true, backend: { type: Int64 } }
+      title: { backend: { type: String } }
+      state: { backend: { type: LowCardinality(String) } }
+      project_id: { immutable: true, backend: { type: Int64 } }
+      author_id: { backend: { type: Nullable(Int64) } }
+      traversal_path: { backend: { type: String } }
+    access: { filter: [state, project_id, id], text: [title], order: [id] }
+    backend:
+      indexes: { title: text, state: set, project_id: bloom_filter, id: [bloom_filter, minmax] }
+  Note:
+    table: gl_note
+    columns:
+      id: { immutable: true, backend: { type: Int64 } }
+      body: { backend: { type: String } }
+      project_id: { backend: { type: Int64 } }
+      author_id: { backend: { type: Nullable(Int64) } }
+      traversal_path: { backend: { type: String } }
+    access: { text: [body], order: [id] }
+relationships:
+  CONTAINS:
+    Group -> Project: { edge_table: gl_edge }
+    Group -> Group: { edge_table: gl_edge }
+  IN_PROJECT:
+    MergeRequest -> Project: { fk: { on: source, column: project_id }, edge_table: gl_edge }
+    Note -> Project: { fk: { on: source, column: project_id }, edge_table: gl_edge }
+  AUTHORED:
+    User -> MergeRequest: { fk: { on: target, column: author_id }, edge_table: gl_edge }
+    User -> Note: { fk: { on: target, column: author_id }, edge_table: gl_edge }
+  HAS_NOTE:
+    MergeRequest -> Note: { edge_table: gl_edge }

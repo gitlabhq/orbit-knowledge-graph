@@ -26,6 +26,7 @@ impl ExportTables {
             .entities()
             .filter_map(|entity| {
                 let (store, source) = catalog.source(entity.id)?;
+                let table = source.table.clone()?;
                 let columns = entity
                     .properties
                     .iter()
@@ -37,7 +38,7 @@ impl ExportTables {
                     .collect();
                 Some(EntityTable {
                     entity: entity.name.clone(),
-                    table: source.table.clone(),
+                    table,
                     columns,
                 })
             })
@@ -45,8 +46,8 @@ impl ExportTables {
         entities.sort_by(|a, b| a.entity.cmp(&b.entity));
 
         let edge_table = catalog
-            .default_edge_table()
-            .ok_or_else(|| LoadError::new("the local store has no default edge table"))?;
+            .shared_edge_table()
+            .ok_or_else(|| LoadError::new("the local store shares no edge table"))?;
         let edge_columns = catalog
             .physical_table(edge_table)
             .ok_or_else(|| LoadError::new(format!("the local store has no table {edge_table}")))?

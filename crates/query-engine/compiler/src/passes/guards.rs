@@ -16,7 +16,10 @@ pub struct PathGuard {
 pub fn scan<B: RelationalBackend>(catalog: &Catalog<B>, table: Table) -> Option<Vec<PathGuard>> {
     let (store, facts) = catalog.stores().nth(table.store())?;
     let name = catalog.table_name(table);
-    if let Some(source) = store.sources().find(|source| source.table == name) {
+    if let Some(source) = store
+        .sources()
+        .find(|source| source.table.as_deref() == Some(name))
+    {
         let guard = store.guard(source.entity)?;
         return Some(match &guard.filter {
             RowFilter::Path { column } => vec![PathGuard {

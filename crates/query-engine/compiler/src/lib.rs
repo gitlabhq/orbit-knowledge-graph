@@ -170,7 +170,7 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use query_data_model::spec::{Fragment, PropertySpec};
+    use query_data_model::spec::{ColumnStorage, Fragment, OptionValue, PropertySpec};
     use std::sync::LazyLock;
 
     static MODEL: LazyLock<Arc<Catalog<ClickHouse>>> =
@@ -283,6 +283,14 @@ mod tests {
                 Fragment::Storage(storage) if storage.store == "graph" => {
                     if let Some(user) = storage.entities.get_mut("User") {
                         user.path_column = None;
+                        let backend = [("type".to_string(), OptionValue::String("String".into()))];
+                        user.columns.insert(
+                            "traversal_path".into(),
+                            ColumnStorage {
+                                backend: backend.into_iter().collect(),
+                                ..ColumnStorage::default()
+                            },
+                        );
                     }
                 }
                 Fragment::Authorization(access) => {

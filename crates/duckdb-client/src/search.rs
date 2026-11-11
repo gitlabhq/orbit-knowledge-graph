@@ -59,7 +59,10 @@ impl NodeHydrator {
         );
         Ok(Self {
             entity_type: entity.name.clone(),
-            table: source.table.clone(),
+            table: source
+                .table
+                .clone()
+                .context("the local store holds the entity without a table")?,
             columns,
             properties,
         })

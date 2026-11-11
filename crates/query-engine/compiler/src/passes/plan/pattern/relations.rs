@@ -186,7 +186,7 @@ where
                 edge_tables = model.edge_tables(relationships);
             }
             if edge_tables.is_empty() {
-                edge_tables.extend(model.default_edge_table().map(str::to_string));
+                edge_tables.extend(model.shared_edge_table().map(str::to_string));
             }
             let (start, end) = edge_columns(direction);
             let pinned: Vec<&str> = [(from, start), (to, end)]

@@ -421,7 +421,7 @@ mod tests {
         );
         assert_eq!(
             transforms[1].destination_table,
-            prefixed_table_name(catalog.default_edge_table().unwrap(), *SCHEMA_VERSION),
+            prefixed_table_name("gl_edge", *SCHEMA_VERSION),
         );
     }
 

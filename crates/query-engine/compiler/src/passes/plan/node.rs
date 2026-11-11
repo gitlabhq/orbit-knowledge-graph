@@ -31,7 +31,7 @@ impl<'p> Node<'p> {
         Self {
             alias: binding.name,
             entity: &graph.entity(binding.entity).name,
-            table: source.map(|source| source.table.as_str()),
+            table: source.and_then(|source| source.table.as_deref()),
             redaction: redaction_column(model, binding.entity).unwrap_or(DEFAULT_PRIMARY_KEY),
             pinned: anchor.pinned,
             range: anchor.range,

@@ -5,12 +5,12 @@ mod source;
 mod storage;
 
 pub use authorization::{
-    AuthorizationFragment, EntityAccessSpec, PropertyAccess, RedactionSpec, ScopeSpec,
+    AnchorSpec, AuthorizationFragment, EntityAccessSpec, PropertyAccess, RedactionSpec, ScopeSpec,
     ScopeVariants,
 };
 pub use graph::{
-    AttributeDetail, AttributeSpec, EntitySpec, GraphFragment, PropertyDetail, PropertySpec,
-    RelationshipSpec,
+    AttributeDetail, AttributeSpec, DefaultValue, EntitySpec, GraphFragment, PropertyDetail,
+    PropertySpec, RelationshipSpec, VariantSpec,
 };
 pub use service::{LookupSpec, ServiceFragment};
 pub use source::{
@@ -19,8 +19,9 @@ pub use source::{
     RelationshipSourceSpec, SourceDeclaration, SourceFragment, TEMPLATE_EXTENSION,
 };
 pub use storage::{
-    BackendOptions, EngineSpec, OptionValue, RouteSpec, SourceSpec, StorageFragment,
-    decode_options, encode_options,
+    AccessHints, BackendOptions, Binding, ColumnStorage, CopySources, Discriminator, EdgeIndex,
+    EngineSpec, EntityStorage, Key, KeySpec, Naming, OneOrMany, OptionValue, Raw, Resolved,
+    StorageFragment, decode_options, encode_options,
 };
 
 use std::collections::BTreeMap;

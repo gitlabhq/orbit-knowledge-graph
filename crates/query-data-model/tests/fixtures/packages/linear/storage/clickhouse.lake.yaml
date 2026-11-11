@@ -1,0 +1,22 @@
+kind: storage
+package: integration.linear
+store: lake
+engine:
+  kind: clickhouse
+  connection: main
+  path_column: traversal_path
+entities:
+  LinearIssue:
+    table: linear_tickets
+    path_column: trav_path
+    columns:
+      id: { immutable: true, column: ticket_id, backend: { type: Int64 } }
+      title: { column: ticket_title, backend: { type: String } }
+      body: { column: ticket_body, backend: { type: String } }
+      state: { backend: { type: LowCardinality(String) } }
+      merge_request_id: { backend: { type: Nullable(Int64) } }
+      traversal_path: { column: trav_path, backend: { type: String } }
+    access: { order: [id] }
+relationships:
+  RELATES_TO:
+    LinearIssue -> MergeRequest: { fk: { on: source, column: merge_request_id } }

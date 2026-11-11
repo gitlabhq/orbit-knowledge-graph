@@ -1,0 +1,47 @@
+kind: storage
+package: gitlab
+store: local
+engine:
+  kind: duckdb
+  connection: local
+  trusted: true
+  path_column: traversal_path
+  backend:
+    edge_tables:
+      gl_edge:
+        shared: true
+        sort_key:
+        - traversal_path
+        - relationship_kind
+        - source_id
+        - target_id
+        - source_kind
+        - target_kind
+        columns:
+          source_id: int64
+          source_kind: string
+          relationship_kind: string
+          target_id: int64
+          target_kind: string
+          traversal_path: string
+relationships:
+  CALLS:
+    Definition -> Definition: {edge_table: gl_edge}
+    File -> Definition: {edge_table: gl_edge}
+    Definition -> ImportedSymbol: {edge_table: gl_edge}
+    File -> ImportedSymbol: {edge_table: gl_edge}
+
+  CONTAINS:
+    Directory -> Directory: {edge_table: gl_edge}
+    Directory -> File: {edge_table: gl_edge}
+
+  DEFINES:
+    File -> Definition: {edge_table: gl_edge}
+    Definition -> Definition: {edge_table: gl_edge}
+
+  EXTENDS:
+    Definition -> Definition: {edge_table: gl_edge}
+
+  IMPORTS:
+    File -> ImportedSymbol: {edge_table: gl_edge}
+    ImportedSymbol -> Definition: {edge_table: gl_edge}

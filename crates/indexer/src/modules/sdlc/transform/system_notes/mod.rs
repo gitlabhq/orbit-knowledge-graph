@@ -1,7 +1,7 @@
 //! SystemNotes `BlockTransform` implementation (ADR 013, ADR 015).
 //!
 //! Parses system-note bodies extracted by the model's derived `SystemNote` pipeline
-//! (`config/model/gitlab/source.yaml`), resolves GFM reference
+//! (`config/model/gitlab/sources/siphon.yaml`), resolves GFM reference
 //! tokens against the datalake, and emits `gl_edge` rows. Rides the shared
 //! SDLC pipeline — only the transform body is custom Rust; extraction,
 //! paging, checkpointing, and writing are all inherited.
@@ -40,10 +40,11 @@ use crate::modules::sdlc::transform::{
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::catalog::sources::DataSource;
+use query_data_model::catalog::sources::{DataSource, Transform};
+use query_data_model::{Catalog, ClickHouse};
 
 /// Registry key for this transform; also the `SystemNote` `transform` value in
-/// `config/model/gitlab/source.yaml`.
+/// `config/model/gitlab/sources/siphon.yaml`.
 pub(in crate::modules::sdlc) const TRANSFORM_NAME: &str = "system_notes";
 
 use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};
@@ -130,6 +131,29 @@ impl BlockTransform for SystemNotesTransform {
             output_index: 0,
             batch,
         }])
+    }
+}
+
+/// The one edge table that every variant the transform emits is bound to.
+pub(in crate::modules::sdlc) fn edge_table(
+    catalog: &Catalog<ClickHouse>,
+) -> Result<&str, std::io::Error> {
+    let sources = catalog.model().sources();
+    let graph = catalog.graph();
+    let tables: BTreeSet<&str> = sources
+        .pipelines()
+        .iter()
+        .filter(|pipeline| matches!(&pipeline.transform, Transform::Rust(name) if name == TRANSFORM_NAME))
+        .flat_map(|pipeline| sources.emitted_relationships(pipeline))
+        .flat_map(|relationship| graph.relationship(relationship).variants.clone())
+        .filter_map(|variant| catalog.edge_table(variant))
+        .collect();
+    match tables.into_iter().collect::<Vec<_>>()[..] {
+        [table] => Ok(table),
+        ref found => Err(std::io::Error::other(format!(
+            "the {TRANSFORM_NAME} transform emits into {} edge tables, not one",
+            found.len()
+        ))),
     }
 }
 

@@ -1,7 +1,0 @@
-kind: storage
-package: integration.linear
-store: graph
-entities:
-  LinearIssue:
-    backend:
-      indexes: { title: text }

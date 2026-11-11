@@ -7,18 +7,20 @@ entities:
     label: title
     defaults: [id, title, state]
     properties:
-      id: { type: int64, immutable: true }
+      id: int64
       title: string
       body: string
       state:
         type: enum
         stored_as_text: true
         values: { 0: backlog, 1: todo, 2: in_progress, 3: done, 4: canceled }
-      merge_request_id: { type: int64?, references: [MergeRequest] }
+      merge_request_id: int64?
       traversal_path: string
 relationships:
   CLOSES:
     description: A Linear ticket closed by a merge request.
-    variants: [MergeRequest -> LinearIssue]
+    variants:
+      MergeRequest -> LinearIssue: { cardinality: many_to_many }
   RELATES_TO:
-    variants: [LinearIssue -> MergeRequest]
+    variants:
+      LinearIssue -> MergeRequest: { cardinality: many_to_one }

@@ -76,7 +76,9 @@ fn deletion_tables(catalog: &Catalog<ClickHouse>) -> Vec<DeletionTable<'_>> {
                 .properties
                 .iter()
                 .map(|property| graph.property(*property))
-                .filter(|property| !property.mutable && catalog.column(property.id).is_some())
+                .filter(|property| {
+                    catalog.model().immutable(property.id) && catalog.column(property.id).is_some()
+                })
                 .map(|property| property.name.as_str())
                 .filter(|name| !sort_key.iter().any(|key| key == name))
                 .collect();
@@ -92,7 +94,7 @@ fn deletion_tables(catalog: &Catalog<ClickHouse>) -> Vec<DeletionTable<'_>> {
         .map(|relationship| relationship.id)
         .collect();
     let mut edge_tables = catalog.edge_tables(&relationships);
-    edge_tables.extend(catalog.default_edge_table().map(str::to_string));
+    edge_tables.extend(catalog.shared_edge_table().map(str::to_string));
     edge_tables.sort();
     edge_tables.dedup();
     for table in edge_tables {

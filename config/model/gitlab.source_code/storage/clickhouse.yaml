@@ -1,0 +1,145 @@
+kind: storage
+package: gitlab.source_code
+store: graph
+entities:
+  Branch:
+    table: gl_branch
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      name: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      is_default: {backend: {type: Bool}}
+    access: {filter: [id, project_id], text: [name], order: [project_id, id]}
+    backend:
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        name: text
+      path_lookups: {id: {table: gl_branch, key: id}}
+
+  Commit:
+    table: gl_commit
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [Delta(8), LZ4]}}
+      sha: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, project_id, sha], order: [project_id, id]}
+    backend:
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        sha: bloom_filter(0.0001)
+      path_lookups: {id: {table: gl_commit, key: id}}
+
+  Definition:
+    table: gl_definition
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      branch: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      commit_sha: {backend: {type: String, codec: [ZSTD(1)]}}
+      file_path: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
+      fqn: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
+      name: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
+      definition_type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      start_line: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      end_line: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      start_byte: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      end_byte: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      start_char: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      end_char: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+    access: {filter: [id, project_id, definition_type], text: [name, fqn, file_path], order: [project_id, branch, id]}
+    backend:
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        name: text
+        fqn: text
+        file_path: text
+        definition_type: {type: set(20), granularity: 2}
+      settings: {index_granularity: "1024"}
+      path_lookups: {id: {table: gl_definition, key: id}}
+
+  Directory:
+    table: gl_directory
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      branch: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      commit_sha: {backend: {type: String, codec: [ZSTD(1)]}}
+      path: {immutable: true, backend: {type: String, codec: [ZSTD(3)]}}
+      name: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, project_id], text: [name, path], order: [project_id, branch, id]}
+    backend:
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        name: text
+        path: text
+      settings: {index_granularity: "1024"}
+      path_lookups: {id: {table: gl_directory, key: id}}
+
+  File:
+    table: gl_file
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      branch: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      commit_sha: {backend: {type: String, codec: [ZSTD(1)]}}
+      path: {immutable: true, backend: {type: String, codec: [ZSTD(3)]}}
+      name: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      extension: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      language: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      size_bytes: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      reason: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+    access: {filter: [id, project_id], text: [name, path], order: [project_id, branch, id]}
+    backend:
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        name: text
+        path: text
+      settings: {index_granularity: "1024"}
+      path_lookups: {id: {table: gl_file, key: id}}
+
+  ImportedSymbol:
+    table: gl_imported_symbol
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      branch: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      commit_sha: {backend: {type: String, codec: [ZSTD(1)]}}
+      file_path: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
+      import_type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      import_path: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
+      identifier_name: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
+      identifier_alias: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
+      start_line: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      end_line: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      start_byte: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      end_byte: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      start_char: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      end_char: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+    access: {filter: [id, project_id, identifier_name, import_type], text: [file_path, import_path], order: [project_id, branch, id]}
+    backend:
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        project_id: bloom_filter(0.0001)
+        identifier_name: bloom_filter(0.0001)
+        file_path: text
+        import_path: text
+        import_type: {type: set(10), granularity: 2}
+      settings: {index_granularity: "1024"}
+      path_lookups: {id: {table: gl_imported_symbol, key: id}}

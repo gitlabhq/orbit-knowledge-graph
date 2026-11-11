@@ -6,8 +6,8 @@ use super::{Column, RelationalFacts, Table};
 use crate::catalog::{Catalog, Lookup, Redaction, StorageBackend};
 use crate::implementations::clickhouse::backend::IndexKind;
 use crate::{
-    DenormalizedKey, DenormalizedProperty, EntityId, ForeignKey, MaterializedJoin, PropertyId,
-    RelationshipId, RelationshipVariant, RelationshipVariantId, TraversalPathLookup,
+    DenormalizedKey, DenormalizedProperty, Endpoint, EntityId, ForeignKey, MaterializedJoin,
+    PropertyId, RelationshipId, RelationshipVariant, RelationshipVariantId, TraversalPathLookup,
 };
 
 /// One edge table of a relationship, with the variants it stores.
@@ -44,7 +44,7 @@ where
     B::Store: RelationalFacts,
 {
     pub fn table_of(&self, entity: EntityId) -> Option<&str> {
-        Some(&self.source(entity)?.1.table)
+        self.source(entity)?.1.table.as_deref()
     }
 
     pub fn has_path_column(&self, entity: EntityId) -> bool {
@@ -113,8 +113,7 @@ where
                 Some((key.key.property, variant.target))
             });
         let declared = graph.entities().filter_map(|entity| {
-            let anchor = self.model().access().entity(entity.id)?.anchor?;
-            let target = *graph.property(anchor).references.first()?;
+            let (anchor, target) = self.model().access().entity(entity.id)?.anchor?;
             self.table_of(target).map(|_| (anchor, target))
         });
         variants.chain(declared)
@@ -187,9 +186,22 @@ where
             .collect()
     }
 
-    pub fn default_edge_table(&self) -> Option<&str> {
+    /// The edge table that many packages' variants share; a migration that rewrites any of
+    /// its rows rebuilds every table.
+    pub fn shared_edge_table(&self) -> Option<&str> {
         self.stores()
-            .find_map(|(_, facts)| facts.relational().default_edge_table.as_deref())
+            .find_map(|(_, facts)| facts.relational().shared_edge_table.as_deref())
+    }
+
+    /// The edge column of a variant that copies `property` of its `endpoint`.
+    pub fn copy(
+        &self,
+        variant: RelationshipVariantId,
+        endpoint: Endpoint,
+        property: PropertyId,
+    ) -> Option<&str> {
+        self.stores()
+            .find_map(|(store, _)| store.copy(variant, endpoint, property))
     }
 
     /// A table any store of the connection holds.
@@ -227,7 +239,9 @@ where
     fn stored_column(&self, property: PropertyId) -> Option<(&Table, &Column)> {
         let entity = self.graph().property(property).entity;
         let (store, facts) = self.home(entity)?;
-        let table = facts.relational().table(&store.source(entity)?.table)?;
+        let table = facts
+            .relational()
+            .table(store.source(entity)?.table.as_deref()?)?;
         Some((table, table.column(store.column(property)?)?))
     }
 

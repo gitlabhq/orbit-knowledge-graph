@@ -391,21 +391,27 @@ store: graph
 engine:
   kind: clickhouse
   connection: main
-  table: "gl_{{entity}}"
-  backend: {{version_column: _version, deleted_column: _deleted, sort_key: [id]}}
+  backend: {{version_column: _version, deleted_column: _deleted}}
 entities:
   {entity}
 "#
         );
-        let sources = [("graph.yaml", graph), ("storage.yaml", storage.as_str())]
-            .into_iter()
-            .chain(rest.iter().map(|yaml| ("extra.yaml", *yaml)));
+        let sources = [
+            ("graph.yaml", graph),
+            ("storage/clickhouse.yaml", storage.as_str()),
+        ]
+        .into_iter()
+        .chain(rest.iter().map(|yaml| ("extra.yaml", *yaml)));
         let model = Arc::new(Model::from_yaml(sources).unwrap());
         Catalog::<ClickHouse>::from_model(&model).unwrap()
     }
 
     fn model(dependencies: &[&str], disabled: bool) -> Catalog<ClickHouse> {
-        stored_model("TestNode: {}", dependencies, disabled)
+        stored_model(
+            "TestNode: {table: gl_test_node, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, project_id: {backend: {type: String}}, branch: {backend: {type: String}}, path: {backend: {type: String}}}}",
+            dependencies,
+            disabled,
+        )
     }
 
     fn stored_model(entity: &str, dependencies: &[&str], disabled: bool) -> Catalog<ClickHouse> {
@@ -495,7 +501,11 @@ lookups:
 
     #[test]
     fn inject_skips_keys_the_store_does_not_hold() {
-        let model = stored_model("TestNode: {exclude: [path]}", &["branch", "path"], false);
+        let model = stored_model(
+            "TestNode: {table: gl_test_node, exclude: [path], access: {order: [id]}, columns: {id: {backend: {type: Int64}}, project_id: {backend: {type: String}}, branch: {backend: {type: String}}}}",
+            &["branch", "path"],
+            false,
+        );
         let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
         let mut columns = vec![];
 
@@ -557,7 +567,11 @@ properties:
   User.is_admin: {admin_only: true}
   User.is_auditor: {admin_only: true}
 "#;
-        catalog("User: {}", &graph, &[access])
+        catalog(
+            "User: {table: gl_user, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, username: {backend: {type: String}}, state: {backend: {type: String}}, is_admin: {backend: {type: Bool}}, is_auditor: {backend: {type: Bool}}}}",
+            &graph,
+            &[access],
+        )
     }
 
     use crate::testkit::{admin_ctx, non_admin_ctx};

@@ -46,7 +46,7 @@ fn catalog_routes_preserve_variant_endpoints_on_each_backend() {
             .unwrap()
             .id;
         assert_eq!(remote.edge_table(variant), Some(table));
-        assert_eq!(local.edge_table(variant), local.default_edge_table());
+        assert_eq!(local.edge_table(variant), local.shared_edge_table());
     }
 }
 

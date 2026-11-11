@@ -1,0 +1,102 @@
+kind: storage
+package: gitlab.plan
+store: graph
+entities:
+  Label:
+    table: gl_label
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      title: {backend: {type: String, codec: [ZSTD(1)]}}
+      description: {backend: {type: String, codec: [ZSTD(3)]}}
+      color: {backend: {type: String, codec: [ZSTD(1)]}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      group_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, project_id, group_id], text: [title, description], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        title: text
+        description: text
+        project_id: bloom_filter(0.0001)
+        group_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, updated_at]
+      path_lookups: {id: {table: gl_label, key: id}}
+
+  Milestone:
+    table: gl_milestone
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      iid: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      title: {backend: {type: String, codec: [ZSTD(1)]}}
+      description: {backend: {type: String, codec: [ZSTD(3)]}}
+      state: {backend: {type: String, codec: [ZSTD(1)]}}
+      due_date: {backend: {type: Date32, codec: [Delta(4), ZSTD(1)], default: "'1970-01-01'"}}
+      start_date: {backend: {type: Date32, codec: [Delta(4), ZSTD(1)], default: "'1970-01-01'"}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      group_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, state, project_id, group_id], text: [title, description], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        title: text
+        state: {type: set(4), granularity: 2}
+        description: text
+        project_id: bloom_filter(0.0001)
+        group_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [due_date, start_date, created_at, updated_at]
+      path_lookups: {id: {table: gl_milestone, key: id}}
+
+  WorkItem:
+    table: gl_work_item
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      iid: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      title: {backend: {type: String, codec: [ZSTD(1)]}}
+      description: {backend: {type: String, codec: [ZSTD(3)]}}
+      state: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      work_item_type: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      confidential: {backend: {type: Bool}}
+      due_date: {backend: {type: Date32, codec: [Delta(4), ZSTD(1)], default: "'1970-01-01'"}}
+      start_date: {backend: {type: Date32, codec: [Delta(4), ZSTD(1)], default: "'1970-01-01'"}}
+      weight: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      closed_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      project_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      author_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      milestone_id: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      namespace_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      closed_by_id: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [state, work_item_type, confidential, id, project_id, author_id, milestone_id, namespace_id, closed_by_id, iid], text: [title, description], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        state: {type: set(10), granularity: 2}
+        work_item_type: {type: set(10), granularity: 2}
+        confidential: minmax
+        id: bloom_filter(0.0001)
+        title: text
+        description: text
+        project_id: bloom_filter(0.0001)
+        author_id: bloom_filter(0.0001)
+        milestone_id: bloom_filter(0.0001)
+        namespace_id: bloom_filter(0.0001)
+        closed_by_id: bloom_filter(0.0001)
+        iid: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [due_date, start_date, created_at, updated_at, closed_at]
+      path_lookups: {id: {table: gl_work_item, key: id}}

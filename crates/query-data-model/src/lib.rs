@@ -31,5 +31,6 @@ pub use implementations::relational::PathColumn;
 pub use implementations::relational::RelationshipRoute;
 pub use packages::Packages;
 pub use types::{
-    DataType, EdgeVariantScope, EnumType, FieldSelectivity, RequiredRole, Scope, TraversalPathKind,
+    Cardinality, DataType, EdgeVariantScope, EnumType, FieldSelectivity, RequiredRole, Scope,
+    TraversalPathKind,
 };

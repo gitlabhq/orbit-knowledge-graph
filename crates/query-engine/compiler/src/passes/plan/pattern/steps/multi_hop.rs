@@ -60,7 +60,7 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
         let covered = pattern.edge_column_filters(relation);
         let required: Vec<String> = covered
             .iter()
-            .map(|(property, _)| (*property).to_string())
+            .map(|(column, _, _)| (*column).to_string())
             .collect();
         let (start_id, end_id) = edge_columns(relation.direction);
         let toward_sources = relation.direction == Direction::Incoming;
@@ -90,7 +90,7 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
         first_predicates.extend(
             covered
                 .iter()
-                .map(|(property, filter)| property_filter(&first_hop, property, filter)),
+                .map(|(column, _, filter)| property_filter(&first_hop, column, filter)),
         );
         let first = self.hop_rows(&first_hop, first_predicates)?;
         let first_path = OutputValue::Path(vec![(

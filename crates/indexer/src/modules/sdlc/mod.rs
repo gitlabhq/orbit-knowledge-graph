@@ -98,11 +98,7 @@ pub async fn register_handlers(
                     "the model declares no {SIPHON_SOURCE} source"
                 )))
             })?,
-        catalog.default_edge_table().ok_or_else(|| {
-            HandlerInitError::new(std::io::Error::other(
-                "the model declares no default edge table",
-            ))
-        })?,
+        transform::system_notes::edge_table(catalog).map_err(HandlerInitError::new)?,
         entity_handler_config.system_notes_resolve_lookup_batch_size,
     );
     let transform_registry = Arc::new(transform_registry);

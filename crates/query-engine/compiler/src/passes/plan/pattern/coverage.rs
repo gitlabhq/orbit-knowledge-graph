@@ -4,8 +4,7 @@ use crate::passes::codegen::SqlBackend;
 use std::collections::HashSet;
 
 use query_data_model::constants::*;
-use query_data_model::implementations::relational::Table;
-use query_data_model::{DenormalizedDirection, DenormalizedProperty};
+use query_data_model::{DenormalizedDirection, DenormalizedProperty, Endpoint};
 
 use super::{EdgeRelation, NodePlan, Pattern};
 use crate::passes::plan::filters::{BoundFilter, FilterOwner, bind_filter, lowerable_denorm};
@@ -65,25 +64,43 @@ impl<B: SqlBackend> Pattern<'_, B> {
             Some(key) => key.node == node,
             None => {
                 self.denorm_facts(relation, node, filter).is_some()
-                    || self.edge_stores(relation, node, property, filter)
+                    || self.copied(relation, node, property, filter).is_some()
             }
         })
     }
 
-    fn edge_stores(
+    /// The edge column that copies a node's property, when a filter on it can run on the edge.
+    fn copied(
         &self,
         relation: &EdgeRelation,
         node: &str,
         property: &str,
         filter: &BoundFilter,
-    ) -> bool {
-        filter.rhs.is_none()
-            && relation.fk.is_none()
-            && relation.max_hops == 1
-            && relation.endpoint_column(node).is_some()
-            && self
-                .edge_table(relation)
-                .is_some_and(|table| table.has_column(property))
+    ) -> Option<&str> {
+        if filter.rhs.is_some() || relation.fk.is_some() || relation.max_hops != 1 {
+            return None;
+        }
+        let side = match relation.endpoint_column(node)? {
+            SOURCE_ID_COLUMN => Endpoint::Source,
+            _ => Endpoint::Target,
+        };
+        let table = relation.single_edge_table()?;
+        let graph = self.model.graph();
+        graph
+            .variants()
+            .filter(|variant| {
+                relation.relationships.is_empty()
+                    || relation.relationships.contains(&variant.relationship)
+            })
+            .filter(|variant| self.model.edge_table(variant.id) == Some(table))
+            .find_map(|variant| {
+                let entity = match side {
+                    Endpoint::Source => variant.source,
+                    Endpoint::Target => variant.target,
+                };
+                let property = graph.property_id(entity, property)?;
+                self.model.copy(variant.id, side, property)
+            })
     }
 
     pub fn has_uncovered_filter(&self, node: &NodePlan) -> bool {
@@ -115,12 +132,9 @@ impl<B: SqlBackend> Pattern<'_, B> {
             .any(|relation| relation.fk.as_ref().is_some_and(|key| key.node == node))
     }
 
-    fn edge_table(&self, relation: &EdgeRelation) -> Option<&Table> {
-        self.model.physical_table(relation.single_edge_table()?)
-    }
-
-    /// Endpoint filters on properties the edge table stores as columns, each property once.
-    pub fn edge_column_filters(&self, relation: &EdgeRelation) -> Vec<(&str, &BoundFilter)> {
+    /// Endpoint filters on properties the edge copies, each with its edge column, each property
+    /// once.
+    pub fn edge_column_filters(&self, relation: &EdgeRelation) -> Vec<(&str, &str, &BoundFilter)> {
         let mut seen = HashSet::new();
         [&relation.from_node, &relation.to_node]
             .into_iter()
@@ -130,12 +144,10 @@ impl<B: SqlBackend> Pattern<'_, B> {
                     .iter()
                     .map(move |(property, filter)| (node.as_str(), property.as_str(), filter))
             })
-            .filter(|(node, property, filter)| {
-                self.edge_stores(relation, node, property, filter)
-                    && !EDGE_RESERVED_COLUMNS.contains(property)
-                    && seen.insert(*property)
+            .filter_map(|(node, property, filter)| {
+                let column = self.copied(relation, node, property, filter)?;
+                seen.insert(property).then_some((column, property, filter))
             })
-            .map(|(_, property, filter)| (property, filter))
             .collect()
     }
 
@@ -161,10 +173,11 @@ impl<B: SqlBackend> Pattern<'_, B> {
             .flat_map(|relation| {
                 self.edge_column_filters(relation)
                     .into_iter()
-                    .map(move |(property, filter)| (relation, property, filter))
+                    .map(move |(_, property, filter)| (relation, property, filter))
             })
             .filter(|(relation, property, filter)| {
-                self.edge_stores(relation, &node.alias, property, filter)
+                self.copied(relation, &node.alias, property, filter)
+                    .is_some()
                     && table.has_column(property)
                     && seen.insert(*property)
             })

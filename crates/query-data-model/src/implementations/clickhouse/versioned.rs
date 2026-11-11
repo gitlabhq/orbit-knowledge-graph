@@ -8,10 +8,7 @@ use super::ClickHouse;
 use super::spec::{ClickHouseOptions, ClickHouseSource};
 use crate::DataModelError;
 use crate::catalog::StorageBackend;
-use crate::implementations::relational::RelationalRoute;
-use crate::spec::{
-    BackendOptions, Fragment, RouteSpec, StorageFragment, decode_options, encode_options,
-};
+use crate::spec::{BackendOptions, Fragment, StorageFragment, decode_options, encode_options};
 
 pub fn versioned(fragments: Vec<Fragment>, prefix: &str) -> Result<Vec<Fragment>, DataModelError> {
     let stores: HashSet<String> = fragments
@@ -43,7 +40,6 @@ pub fn versioned(fragments: Vec<Fragment>, prefix: &str) -> Result<Vec<Fragment>
 fn prefix_store(storage: &mut StorageFragment, prefix: &str) -> Result<(), DataModelError> {
     let name = |table: &str| format!("{prefix}{table}");
     if let Some(engine) = &mut storage.engine {
-        engine.table = engine.table.as_deref().map(name);
         rewrite::<ClickHouseOptions>(&mut engine.backend, |options| {
             options.edge_tables = prefix_keys(std::mem::take(&mut options.edge_tables), prefix);
             options.copies = prefix_keys(std::mem::take(&mut options.copies), prefix);
@@ -76,21 +72,15 @@ fn prefix_store(storage: &mut StorageFragment, prefix: &str) -> Result<(), DataM
             }
         })?;
     }
-    for route in storage.relationships.values_mut() {
-        prefix_route(route, prefix)?;
-    }
-    Ok(())
-}
-
-fn prefix_route(route: &mut RouteSpec, prefix: &str) -> Result<(), DataModelError> {
-    rewrite::<RelationalRoute>(&mut route.backend, |options| {
-        options.table = options
-            .table
-            .as_deref()
-            .map(|table| format!("{prefix}{table}"));
-    })?;
-    for variant in route.variants.values_mut() {
-        prefix_route(variant, prefix)?;
+    for binding in storage
+        .relationships
+        .values_mut()
+        .flat_map(IndexMap::values_mut)
+    {
+        binding.edge_table = binding.edge_table.as_deref().map(name);
+        if let Some(index) = &mut binding.index {
+            index.edge_table = name(&index.edge_table);
+        }
     }
     Ok(())
 }

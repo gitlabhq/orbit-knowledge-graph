@@ -95,8 +95,8 @@ impl Graph {
             })
             .collect();
         let edge_table = catalog
-            .default_edge_table()
-            .context("the data model declares no default edge table")?
+            .shared_edge_table()
+            .context("the data model shares no edge table")?
             .to_string();
         Ok(Self {
             nodes,

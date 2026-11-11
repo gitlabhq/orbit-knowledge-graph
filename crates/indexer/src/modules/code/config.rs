@@ -36,7 +36,9 @@ impl CodeTableNames {
                 .properties
                 .iter()
                 .map(|property| graph.property(*property))
-                .filter(|property| !property.mutable && catalog.column(property.id).is_some())
+                .filter(|property| {
+                    catalog.model().immutable(property.id) && catalog.column(property.id).is_some()
+                })
                 .map(|property| property.name.clone())
                 .filter(|name| !sort_key.contains(name))
                 .collect();

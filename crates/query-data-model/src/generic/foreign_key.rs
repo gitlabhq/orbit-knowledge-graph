@@ -1,6 +1,7 @@
 use super::{EntityId, GraphCatalog, PropertyId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Endpoint {
     Source,
     Target,

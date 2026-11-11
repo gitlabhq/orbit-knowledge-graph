@@ -210,7 +210,7 @@ pub(crate) fn relationship_tables(
     let variants = &catalog.graph().relationship(relationship).variants;
     if variants.is_empty() {
         return catalog
-            .default_edge_table()
+            .shared_edge_table()
             .map(str::to_string)
             .into_iter()
             .collect();
@@ -236,7 +236,7 @@ pub(crate) fn code_domain_tables(catalog: &Catalog<ClickHouse>) -> BTreeSet<Stri
 
 pub(crate) fn edge_tables(catalog: &Catalog<ClickHouse>) -> Vec<String> {
     let mut tables = catalog.edge_tables(&[]);
-    tables.extend(catalog.default_edge_table().map(str::to_string));
+    tables.extend(catalog.shared_edge_table().map(str::to_string));
     tables.sort();
     tables.dedup();
     tables
@@ -262,10 +262,10 @@ pub fn widen_scope_for_shared_table_writers(
     }
 
     let edge_tables = edge_tables(catalog);
-    let default_edge_table = catalog.default_edge_table();
+    let shared_edge_table = catalog.shared_edge_table();
     for table in schema.versioned_tables().map(|table| &table.name) {
         if matches!(requested_scope, MigrationScope::Code)
-            && Some(table.as_str()) == default_edge_table
+            && Some(table.as_str()) == shared_edge_table
         {
             continue;
         }
@@ -279,7 +279,7 @@ pub fn widen_scope_for_shared_table_writers(
         let scope_writes_to_table = writers.iter().any(|writer| invalidated.contains(writer));
         let has_writer_outside_scope = writers.iter().any(|writer| !invalidated.contains(writer));
 
-        if Some(table.as_str()) == default_edge_table && scope_writes_to_table {
+        if Some(table.as_str()) == shared_edge_table && scope_writes_to_table {
             return MigrationScope::Full;
         }
         if scope_writes_to_table && has_writer_outside_scope {

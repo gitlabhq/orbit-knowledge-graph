@@ -1,0 +1,19 @@
+kind: storage
+package: tenant.agent_memory
+store: graph
+entities:
+  AgentMemory:
+    table: tenant_agent_memory
+    path_column: null
+    columns:
+      id: { immutable: true, backend: { type: Int64 } }
+      summary: { backend: { type: String } }
+      created_at: { immutable: true, backend: { type: "DateTime64(6, 'UTC')" } }
+      project_id: { immutable: true, backend: { type: Int64 } }
+    access: { order: [id] }
+relationships:
+  IN_PROJECT:
+    AgentMemory -> Project: { fk: { on: source, column: project_id }, edge_table: gl_edge }
+  REMEMBERS:
+    AgentMemory -> MergeRequest: { edge_table: gl_edge }
+    AgentMemory -> Note: { edge_table: gl_edge }

@@ -1,21 +1,52 @@
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
-use super::{Access, Diagnostics, Model, Source, Store};
+use super::store::Facts;
+use super::{Access, Diagnostics, Model, Source, Sources, Store};
+use crate::implementations::{
+    clickhouse::ClickHouse, duckdb::DuckDb, live::Live, orbit_code::OrbitCode,
+};
 use crate::plan::tracking::{Language, Plan};
-use crate::spec::{BackendOptions, decode_options, format_variant};
-use crate::{DataModelError, EntityId, GraphCatalog, RelationshipId, RelationshipVariantId};
+use crate::spec::{BackendOptions, decode_options};
+use crate::{DataModelError, EntityId, GraphCatalog, PropertyId};
 
-pub trait StorageBackend: Sized {
+pub trait StorageBackend: Sized + 'static {
     const KIND: &'static str;
     type Options: DeserializeOwned + Default;
     type SourceOptions: DeserializeOwned + Default;
-    type RouteOptions: DeserializeOwned + Default;
-    type Store: Debug;
+    type ColumnOptions: DeserializeOwned + Default;
+    type Store: Debug + Send + Sync + std::panic::RefUnwindSafe + 'static;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
+}
+
+/// The options of a backend block that takes none.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NoOptions {}
+
+/// A store that holds no rows names no tables.
+pub fn check_unrelational<B: StorageBackend>(
+    input: &StoreInput<'_, B>,
+    diagnostics: &mut Diagnostics,
+) {
+    let store = input.store;
+    for source in store.sources() {
+        if let Some(table) = &source.table {
+            diagnostics.error(
+                &source.package,
+                format!(
+                    "store {} is {} and holds no table, but binds {} to {table}",
+                    store.name,
+                    store.kind,
+                    input.graph.entity(source.entity).name
+                ),
+            );
+        }
+    }
 }
 
 /// One result row of a backend service, keyed by the request's field names.
@@ -34,34 +65,30 @@ pub trait Render {
     fn render(&self, plan: &Plan<Self::Language>) -> Result<Self::Request, Self::Error>;
 }
 
-pub struct SourceInput<'a, O> {
+/// One entity a store holds, with its backend blocks parsed.
+pub struct SourceInput<'a, B: StorageBackend> {
     pub entity: EntityId,
     pub package: &'a str,
-    pub options: O,
-}
-
-pub struct RouteInput<'a, O> {
-    pub relationship: RelationshipId,
-    pub package: &'a str,
-    pub options: O,
-    pub variants: Vec<(RelationshipVariantId, O)>,
+    pub options: B::SourceOptions,
+    pub columns: Vec<(PropertyId, B::ColumnOptions)>,
 }
 
 pub struct StoreInput<'a, B: StorageBackend> {
     pub graph: &'a GraphCatalog,
     pub access: &'a Access,
+    pub sources: &'a Sources,
     pub store: &'a Store,
-    pub connection: &'a [&'a Store],
+    pub connection: Vec<&'a Store>,
     pub options: B::Options,
-    pub sources: Vec<SourceInput<'a, B::SourceOptions>>,
-    pub routes: Vec<RouteInput<'a, B::RouteOptions>>,
+    pub entities: Vec<SourceInput<'a, B>>,
 }
 
 #[derive(Debug)]
 pub struct Catalog<B: StorageBackend> {
     model: Arc<Model>,
     connection: String,
-    stores: Vec<(usize, B::Store)>,
+    stores: Vec<usize>,
+    backend: PhantomData<fn() -> B>,
 }
 
 impl<B: StorageBackend> Catalog<B> {
@@ -78,9 +105,10 @@ impl<B: StorageBackend> Catalog<B> {
     }
 
     pub fn stores(&self) -> impl Iterator<Item = (&Store, &B::Store)> {
-        self.stores
-            .iter()
-            .map(|(index, facts)| (&self.model.stores[*index], facts))
+        self.stores.iter().filter_map(|index| {
+            let store = &self.model.stores[*index];
+            Some((store, store.facts::<B::Store>()?))
+        })
     }
 
     pub fn store(&self, name: &str) -> Option<&Store> {
@@ -120,11 +148,10 @@ impl Model {
         self: &Arc<Self>,
         connection: &str,
     ) -> Result<Catalog<B>, DataModelError> {
-        let indexes: Vec<usize> = (0..self.stores.len())
+        let stores: Vec<usize> = (0..self.stores.len())
             .filter(|index| self.stores[*index].connection == connection)
             .collect();
-        let members: Vec<&Store> = indexes.iter().map(|index| &self.stores[*index]).collect();
-        let Some(first) = members.first() else {
+        let Some(first) = stores.first().map(|index| &self.stores[*index]) else {
             return Err(DataModelError::UnknownReference {
                 kind: "connection",
                 name: connection.to_string(),
@@ -138,87 +165,103 @@ impl Model {
             );
             diagnostics.finish()?;
         }
-        let mut diagnostics = Diagnostics::default();
-        let inputs: Vec<StoreInput<'_, B>> = members
-            .iter()
-            .map(|store| self.input::<B>(store, &members, &mut diagnostics))
-            .collect();
-        diagnostics.finish()?;
-        let mut diagnostics = Diagnostics::default();
-        let stores = indexes
-            .iter()
-            .zip(inputs)
-            .map(|(index, input)| (*index, B::resolve(input, &mut diagnostics)))
-            .collect();
-        diagnostics.finish()?;
         Ok(Catalog {
             model: Arc::clone(self),
             connection: connection.to_string(),
             stores,
+            backend: PhantomData,
         })
     }
 
-    fn input<'a, B: StorageBackend>(
-        &'a self,
-        store: &'a Store,
-        connection: &'a [&'a Store],
-        diagnostics: &mut Diagnostics,
-    ) -> StoreInput<'a, B> {
-        let graph = &self.graph;
-        let context = format!("store {}", store.name);
-        let sources = store
-            .source_options
-            .iter()
-            .map(|(entity, package, options)| SourceInput {
-                entity: *entity,
-                package,
-                options: parse(
-                    package,
-                    &format!("{context} {}", graph.entity(*entity).name),
-                    options,
-                    diagnostics,
-                ),
+    /// Parses every store's backend blocks and resolves its backend facts, once per model.
+    pub(super) fn resolve_backends(&mut self, diagnostics: &mut Diagnostics) {
+        let backends: [&dyn Resolve; 4] = [
+            &Backend::<ClickHouse>(PhantomData),
+            &Backend::<DuckDb>(PhantomData),
+            &Backend::<OrbitCode>(PhantomData),
+            &Backend::<Live>(PhantomData),
+        ];
+        let facts: Vec<_> = (0..self.stores.len())
+            .map(|index| {
+                let store = &self.stores[index];
+                let backend = backends.iter().find(|backend| backend.kind() == store.kind);
+                let backend = diagnostics.require(backend, &store.package, || {
+                    format!(
+                        "store {} has unknown engine kind {}",
+                        store.name, store.kind
+                    )
+                })?;
+                backend.resolve(self, index, diagnostics)
             })
             .collect();
-        let routes = store
-            .routes
+        for (store, facts) in self.stores.iter_mut().zip(facts) {
+            store.facts = facts;
+        }
+    }
+}
+
+trait Resolve {
+    fn kind(&self) -> &'static str;
+    fn resolve(&self, model: &Model, store: usize, diagnostics: &mut Diagnostics) -> Option<Facts>;
+}
+
+struct Backend<B>(PhantomData<fn() -> B>);
+
+impl<B: StorageBackend> Resolve for Backend<B> {
+    fn kind(&self) -> &'static str {
+        B::KIND
+    }
+
+    fn resolve(&self, model: &Model, index: usize, diagnostics: &mut Diagnostics) -> Option<Facts> {
+        let store = &model.stores[index];
+        let errors = diagnostics.len();
+        let graph = &model.graph;
+        let context = format!("store {}", store.name);
+        let entities = store
+            .entity_options
             .iter()
-            .map(|route| {
-                let name = &graph.relationship(route.relationship).name;
-                let label = format!("{context} route {name}");
-                RouteInput {
-                    relationship: route.relationship,
-                    package: &route.package,
-                    options: parse(&route.package, &label, &route.backend, diagnostics),
-                    variants: route
-                        .variants
-                        .iter()
-                        .map(|narrow| {
-                            let variant = graph.variant(narrow.variant);
-                            let label = format!(
-                                "{label}({})",
-                                format_variant(
-                                    &graph.entity(variant.source).name,
-                                    &graph.entity(variant.target).name
-                                )
-                            );
-                            let options =
-                                parse(&route.package, &label, &narrow.backend, diagnostics);
-                            (narrow.variant, options)
-                        })
-                        .collect(),
+            .map(|entity| {
+                let name = &graph.entity(entity.entity).name;
+                let package = entity.package.as_str();
+                let columns = entity
+                    .columns
+                    .iter()
+                    .map(|(property, options)| {
+                        let label =
+                            format!("{context} column {name}.{}", graph.property(*property).name);
+                        (*property, parse(package, &label, options, diagnostics))
+                    })
+                    .collect();
+                SourceInput {
+                    entity: entity.entity,
+                    package,
+                    options: parse(
+                        package,
+                        &format!("{context} {name}"),
+                        &entity.options,
+                        diagnostics,
+                    ),
+                    columns,
                 }
             })
             .collect();
-        StoreInput {
-            access: &self.access,
+        let input = StoreInput::<B> {
             graph,
+            access: &model.access,
+            sources: &model.sources,
             store,
-            connection,
+            connection: model
+                .stores
+                .iter()
+                .filter(|other| other.connection == store.connection)
+                .collect(),
             options: parse(&store.package, &context, &store.options, diagnostics),
-            sources,
-            routes,
+            entities,
+        };
+        if diagnostics.len() > errors {
+            return None;
         }
+        Some(Box::new(B::resolve(input, diagnostics)))
     }
 }
 

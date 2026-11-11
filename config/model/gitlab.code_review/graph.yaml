@@ -9,38 +9,36 @@ entities:
     label: title
     defaults: [id, iid, title, state, source_branch, target_branch]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      iid: {type: int64?, description: Project-scoped merge request number., immutable: true}
-      title: {type: string, description: Title.}
-      description: {type: string, description: Description body (markdown).}
-      source_branch: {type: string, description: Source branch name.}
-      target_branch: {type: string, description: Target branch name.}
+      id: {type: int64, description: Unique ID.}
+      iid: {type: int64?, description: Project-scoped merge request number.}
+      title: {type: string, description: Title., default: ''}
+      description: {type: string, description: Description body (markdown)., default: ''}
+      source_branch: {type: string, description: Source branch name., default: ''}
+      target_branch: {type: string, description: Target branch name., default: ''}
       state:
         type: enum
         description: Current state.
         values: {1: opened, 2: closed, 3: merged, 4: locked}
         terminal: [merged]
+        default: ''
       merge_status:
         type: string
         description: "Mergeability status: unchecked, preparing, checking, can_be_merged, cannot_be_merged, cannot_be_merged_recheck, cannot_be_merged_rechecking."
         selectivity: low
-      draft: {type: boolean, description: Whether this is a draft/WIP merge request.}
-      squash: {type: boolean, description: Whether to squash commits on merge.}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+        default: unchecked
+      draft: {type: boolean, description: Whether this is a draft/WIP merge request., default: false}
+      squash: {type: boolean, description: Whether to squash commits on merge., default: false}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
-      merge_commit_sha: {type: string, description: Merge commit SHA.}
+      merge_commit_sha: {type: string, description: Merge commit SHA., default: ''}
       discussion_locked: {type: boolean?, description: Whether discussions are locked.}
       prepared_at: {type: timestamp?, description: Preparation timestamp.}
       project_id:
         type: int64
         description: Owning project ID. Stored on the node for redaction without an edge lookup.
-        immutable: true
-        references: [Project]
       merged_commit_id:
         type: int64?
         description: Synthetic Commit id the MR was merged at. NULL until merged, then immutable.
-        immutable: true
-        references: [Commit]
       latest_build_started_at: {type: timestamp?, description: Latest CI build start timestamp.}
       latest_build_finished_at: {type: timestamp?, description: Latest CI build finish timestamp.}
       first_deployed_to_production_at:
@@ -61,35 +59,30 @@ entities:
       first_contribution:
         type: boolean
         description: Whether this is the author's first contribution to the project.
+        default: false
       reviewer_first_assigned_at:
         type: timestamp?
         description: First reviewer assignment timestamp.
-      author_id: {type: int64?, description: Author user ID., immutable: true, references: [User]}
-      merge_user_id: {type: int64?, description: User ID who merged., references: [User]}
-      updated_by_id: {type: int64?, description: User ID who last updated., references: [User]}
+      author_id: {type: int64?, description: Author user ID.}
+      merge_user_id: {type: int64?, description: User ID who merged.}
+      updated_by_id: {type: int64?, description: User ID who last updated.}
       last_edited_by_id:
         type: int64?
         description: User ID who last edited the description.
-        references: [User]
       closed_by_id:
         type: int64?
         description: User ID who most recently closed.
-        references: [User]
-      milestone_id: {type: int64?, description: Associated milestone ID., references: [Milestone]}
+      milestone_id: {type: int64?, description: Associated milestone ID.}
       source_project_id:
         type: int64?
         description: Source project ID (may differ from target for cross-project MRs).
-        immutable: true
-        references: [Project]
       head_pipeline_id:
         type: int64?
         description: Pipeline ID on the head commit.
-        references: [Pipeline]
       latest_merge_request_diff_id:
         type: int64?
         description: Most recent diff snapshot ID.
-        references: [MergeRequestDiff]
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
       diff: {type: string?, description: Full unified diff. Resolved from GitLab at query time.}
 
   MergeRequestDiff:
@@ -100,49 +93,48 @@ entities:
     label: id
     defaults: [id, merge_request_id, state]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
+      id: {type: int64, description: Unique ID.}
       merge_request_id:
         type: int64
         description: Parent merge request ID.
-        immutable: true
-        references: [MergeRequest]
       state:
         type: string
         description: "Diff state: empty, without_files, collected, overflow. Deprecated values may still appear: timeout, overflow_commits_safe_size, overflow_diff_files_limit, overflow_diff_lines_limit."
         selectivity: low
+        default: ''
       base_commit_sha:
         type: string
         description: Base commit SHA (common ancestor).
-        immutable: true
+        default: ''
       head_commit_sha:
         type: string
         description: Head commit SHA (latest on source branch).
-        immutable: true
+        default: ''
       start_commit_sha:
         type: string
         description: Start commit SHA (target branch tip at diff creation).
-        immutable: true
+        default: ''
       commits_count: {type: int64?, description: Number of commits.}
       files_count: {type: int64?, description: Number of files changed.}
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
       diff_type:
         type: enum
         description: Source branch (regular) or merge-head state.
-        immutable: true
         values: {1: regular, 2: merge_head}
+        default: regular
       real_size:
         type: string
         description: Non-truncated diff size from Gitaly, as a stringified integer.
+        default: ''
       stored_externally:
         type: boolean
         description: Whether diff content is in external object storage.
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+        default: false
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
       patch: {type: string?, description: Full unified patch. Resolved from GitLab at query time.}
 
   MergeRequestDiffFile:
@@ -154,34 +146,29 @@ entities:
       id:
         type: int64
         description: "Synthetic identifier: sipHash64(merge_request_diff_id, relative_order)."
-        immutable: true
-      merge_request_id: {type: int64, description: Parent merge request ID., immutable: true}
+      merge_request_id: {type: int64, description: Parent merge request ID.}
       merge_request_diff_id:
         type: int64
         description: Parent merge request diff ID.
-        immutable: true
-        references: [MergeRequestDiff]
       project_id:
         type: int64
         description: Owning project ID.
-        immutable: true
-        references: [Project]
       too_large:
         type: boolean
         description: Whether the diff is too large to display.
-        immutable: true
+        default: false
       new_path:
         type: string
         description: File path after the change. Differs from old_path only on renames.
-        immutable: true
+        default: ''
       old_path:
         type: string
         description: File path before the change. Preferred for file lookups.
-        immutable: true
-      new_file: {type: boolean, description: Whether this is a newly added file., immutable: true}
-      renamed_file: {type: boolean, description: Whether this file was renamed., immutable: true}
-      deleted_file: {type: boolean, description: Whether this file was deleted., immutable: true}
-      binary: {type: boolean?, description: Whether this is a binary file., immutable: true}
+        default: ''
+      new_file: {type: boolean, description: Whether this is a newly added file., default: false}
+      renamed_file: {type: boolean, description: Whether this file was renamed., default: false}
+      deleted_file: {type: boolean, description: Whether this file was deleted., default: false}
+      binary: {type: boolean?, description: Whether this is a binary file.}
       generated:
         type: boolean?
         description: Whether auto-generated (e.g. lockfiles, minified bundles).
@@ -189,11 +176,13 @@ entities:
         type: string
         description: Git mode bits before the change (e.g. 100644).
         selectivity: low
+        default: ''
       b_mode:
         type: string
         description: Git mode bits after the change (e.g. 100755).
         selectivity: low
-      traversal_path: {type: string, description: Namespace path for authz.}
+        default: ''
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
       diff:
         type: string?
         description: >-

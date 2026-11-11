@@ -9,17 +9,18 @@ entities:
     label: name
     defaults: [id, name, full_path, visibility_level]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      full_path: {type: string, description: Full path (e.g. gitlab-org/quality)., unique: true}
-      name: {type: string, description: Display name.}
-      description: {type: string, description: Description text.}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      id: {type: int64, description: Unique ID.}
+      full_path: {type: string, description: Full path (e.g. gitlab-org/quality)., unique: true, default: ''}
+      name: {type: string, description: Display name., default: ''}
+      description: {type: string, description: Description text., default: ''}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
       visibility_level:
         type: enum
         description: Visibility level.
         values: {0: private, 10: internal, 20: public}
-      traversal_path: {type: string, description: Namespace path for authz.}
+        default: ''
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   Note:
     style: {size: 24, color: "#64748B"}
@@ -27,12 +28,11 @@ entities:
     label: id
     defaults: [id, noteable_type, noteable_id, created_at]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      note: {type: string, description: Text content (markdown).}
+      id: {type: int64, description: Unique ID.}
+      note: {type: string, description: Text content (markdown)., default: ''}
       noteable_type:
         type: enum
         description: Type of object the note is attached to.
-        immutable: true
         values:
           0: Issue
           1: MergeRequest
@@ -45,31 +45,29 @@ entities:
           8: AbuseReport
           9: ComplianceManagement::Projects::ComplianceViolation
         stored_as_text: true
+        default: ''
       noteable_id:
         type: int64?
         description: ID of the attached object. Null for commits.
-        immutable: true
-        references: [WorkItem]
-      line_code: {type: string, description: Line position identifier for diff notes.}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      line_code: {type: string, description: Line position identifier for diff notes., default: ''}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
-      discussion_id: {type: string?, description: Discussion thread ID., immutable: true}
+      discussion_id: {type: string?, description: Discussion thread ID.}
       resolved_at: {type: timestamp?, description: Resolution timestamp.}
       internal:
         type: boolean
         description: Only visible to users with Reporter+ access on the parent resource.
+        default: false
       confidential:
         type: boolean?
         description: "Legacy alias for internal; synced on create. Being renamed per gitlab#367923."
-      commit_id: {type: string, description: Commit SHA for commit notes., immutable: true}
-      st_diff: {type: string, description: Serialized diff snippet for diff notes.}
+      commit_id: {type: string, description: Commit SHA for commit notes., default: ''}
+      st_diff: {type: string, description: Serialized diff snippet for diff notes., default: ''}
       project_id:
         type: int64?
         description: Owning project ID.
-        immutable: true
-        references: [Project]
-      author_id: {type: int64?, description: Author user ID., immutable: true, references: [User]}
-      traversal_path: {type: string, description: Namespace path for authz.}
+      author_id: {type: int64?, description: Author user ID.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   Project:
     style: {size: 40, color: "#3B82F6"}
@@ -77,20 +75,21 @@ entities:
     label: name
     defaults: [id, name, full_path, visibility_level]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      full_path: {type: string, description: Full path (e.g. gitlab-org/gitlab)., unique: true}
-      name: {type: string, description: Display name.}
-      description: {type: string, description: Description text.}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+      id: {type: int64, description: Unique ID.}
+      full_path: {type: string, description: Full path (e.g. gitlab-org/gitlab)., unique: true, default: ''}
+      name: {type: string, description: Display name., default: ''}
+      description: {type: string, description: Description text., default: ''}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at: {type: timestamp?, description: Last update timestamp.}
       visibility_level:
         type: enum
         description: Visibility level.
         values: {0: private, 10: internal, 20: public}
+        default: ''
       archived: {type: boolean, description: Archived flag.}
       star_count: {type: int64, description: Number of stars.}
       last_activity_at: {type: timestamp?, description: Last activity timestamp.}
-      traversal_path: {type: string, description: Namespace path for authz.}
+      traversal_path: {type: string, description: Namespace path for authz., default: 0/}
 
   User:
     style: {size: 32, color: "#10B981"}
@@ -98,18 +97,19 @@ entities:
     label: username
     defaults: [id, username, name, state]
     properties:
-      id: {type: int64, description: Unique ID., immutable: true}
-      username: {type: string, description: Unique handle., unique: true}
+      id: {type: int64, description: Unique ID.}
+      username: {type: string, description: Unique handle., unique: true, default: ''}
       email:
         type: string
         description: >-
           Primary email. Admins only until per-cell authz lands (gated by
           `read_user_email_address`).
         unique: true
-      name: {type: string, description: Display name.}
-      first_name: {type: string, description: First name. Not on any public surface; admins only.}
-      last_name: {type: string, description: Last name. Not on any public surface; admins only.}
-      created_at: {type: timestamp?, description: Creation timestamp., immutable: true}
+        default: ''
+      name: {type: string, description: Display name., default: ''}
+      first_name: {type: string, description: First name. Not on any public surface; admins only., default: ''}
+      last_name: {type: string, description: Last name. Not on any public surface; admins only., default: ''}
+      created_at: {type: timestamp?, description: Creation timestamp.}
       updated_at:
         type: timestamp?
         description: Last update timestamp. Not on any public surface; admins only.
@@ -124,30 +124,33 @@ entities:
           4: banned
           5: deactivated
         stored_as_text: true
+        default: ''
       avatar_url:
         type: string?
         description: Avatar upload filename (not a URL; the full URL is computed at runtime).
-      public_email: {type: string, description: "Public email, if set."}
+      public_email: {type: string, description: "Public email, if set.", default: ''}
       preferred_language:
         type: string
         description: >-
           Preferred UI language. Self-only on REST; admins only until per-cell authz
           lands.
+        default: ''
       last_activity_on: {type: date?, description: Last activity date.}
       private_profile:
         type: boolean
         description: Private profile flag. Self-only on REST; admins only here.
-      is_admin: {type: boolean, description: Instance administrator flag.}
-      is_auditor: {type: boolean, description: Auditor role flag.}
+        default: false
+      is_admin: {type: boolean, description: Instance administrator flag., default: false}
+      is_auditor: {type: boolean, description: Auditor role flag., default: false}
       is_external:
         type: boolean
         description: >-
           External user flag. Self-only on REST, admin-only via UserWithAdmin; admins
           only here.
+        default: false
       user_type:
         type: enum
         description: Account type.
-        immutable: true
         values:
           0: human
           1: support_bot
@@ -164,3 +167,4 @@ entities:
           15: placeholder
           16: duo_code_review_bot
           17: import_user
+        default: ''

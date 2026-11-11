@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use query_data_model::catalog::{RowFilter, Scope};
 use query_data_model::implementations::clickhouse::ClickHouse;
-use query_data_model::{Model, Packages};
+use query_data_model::{Endpoint, Model, Packages};
 
 fn model() -> Arc<Model> {
     Packages::embedded().load().unwrap()
@@ -26,30 +26,49 @@ fn graph_store_entities_filter_on_their_own_path_column() {
 }
 
 #[test]
-fn code_edges_bind_project_and_branch_attributes_in_the_graph_store_only() {
+fn code_edges_copy_endpoint_project_and_branch_in_the_graph_store_only() {
     let model = model();
     let graph = model.graph();
     let catalog = model.physical::<ClickHouse>("main").unwrap();
     let store = catalog.store("graph").unwrap();
-    let column = |relationship: &str, source: &str, target: &str| {
+    let copy = |relationship: &str, source: &str, target: &str, endpoint: Endpoint| {
         let variant = graph.variant_named(relationship, source, target).unwrap();
-        let branch = graph.attribute_id(variant.relationship, "branch").unwrap();
-        store.attribute_column(variant.id, branch)
+        let entity = match endpoint {
+            Endpoint::Source => variant.source,
+            Endpoint::Target => variant.target,
+        };
+        let branch = graph.property_id(entity, "branch")?;
+        store.copy(variant.id, endpoint, branch)
     };
-    assert_eq!(column("CALLS", "Definition", "Definition"), Some("branch"));
-    assert_eq!(column("CONTAINS", "Branch", "File"), Some("branch"));
-    assert_eq!(column("CONTAINS", "Group", "Project"), None);
-    let unbound = |store: &query_data_model::catalog::Store| {
+    assert_eq!(
+        copy("CALLS", "Definition", "Definition", Endpoint::Source),
+        Some("branch")
+    );
+    assert_eq!(
+        copy("CALLS", "Definition", "Definition", Endpoint::Target),
+        Some("branch")
+    );
+    assert_eq!(
+        copy("CONTAINS", "Directory", "File", Endpoint::Target),
+        Some("branch")
+    );
+    assert_eq!(copy("CONTAINS", "Branch", "File", Endpoint::Source), None);
+    assert!(
         graph
-            .variants()
-            .all(|variant| store.attribute_columns(variant.id).next().is_none())
+            .relationships()
+            .all(|relationship| relationship.attributes.is_empty())
+    );
+    let copies_nothing = |store: &query_data_model::catalog::Store| {
+        store
+            .bindings()
+            .all(|(_, _, binding)| binding.copies.is_empty())
     };
     assert!(
         model
             .stores()
             .iter()
             .filter(|store| store.name != "graph")
-            .all(unbound)
+            .all(copies_nothing)
     );
 }
 

@@ -1,0 +1,75 @@
+kind: storage
+package: gitlab.packages
+store: graph
+entities:
+  Dependency:
+    table: gl_dependency
+    columns:
+      id: {backend: {type: Int64, codec: [Delta(8), LZ4]}}
+      name: {backend: {type: String, codec: [ZSTD(1)]}}
+      version_pattern: {backend: {type: String, codec: [ZSTD(1)]}}
+      project_id: {backend: {type: Int64, codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, project_id], text: [name], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.001)
+        name: text
+        project_id: bloom_filter(0.001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      path_lookups: {id: {table: gl_dependency, key: id}}
+
+  Package:
+    table: gl_package
+    columns:
+      id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      name: {backend: {type: String, codec: [ZSTD(1)]}}
+      version: {backend: {type: Nullable(String), codec: [ZSTD(1)]}}
+      package_type: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      created_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      project_id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, package_type, status, project_id], text: [name], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.0001)
+        name: text
+        package_type: {type: set(16), granularity: 2}
+        status: {type: set(8), granularity: 2}
+        project_id: bloom_filter(0.0001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, updated_at]
+      path_lookups: {id: {table: gl_package, key: id}}
+
+  PackageFile:
+    table: gl_package_file
+    columns:
+      id: {backend: {type: Int64, codec: [Delta(8), LZ4]}}
+      file_name: {backend: {type: String, codec: [ZSTD(1)]}}
+      size: {backend: {type: Nullable(Int64), codec: [ZSTD(1)]}}
+      file_sha256: {backend: {type: Nullable(String), codec: [ZSTD(1)]}}
+      status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      created_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
+      project_id: {backend: {type: Int64, codec: [Delta(8), LZ4]}}
+      package_id: {backend: {type: Int64, codec: [Delta(8), LZ4]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, status, project_id, package_id], text: [file_name], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+      indexes:
+        _deleted: minmax
+        id: bloom_filter(0.001)
+        file_name: text
+        status: {type: set(8), granularity: 2}
+        project_id: bloom_filter(0.001)
+        package_id: bloom_filter(0.001)
+      settings: {add_minmax_index_for_temporal_columns: "1"}
+      epoch_nulls: [created_at, updated_at]
+      path_lookups: {id: {table: gl_package_file, key: id}}

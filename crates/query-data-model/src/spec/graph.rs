@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use super::is_false;
-use crate::{FieldSelectivity, Style};
+use crate::{Cardinality, FieldSelectivity, Style};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,8 +49,6 @@ pub struct PropertyDetail {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
-    pub immutable: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
     pub unique: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub values: Option<BTreeMap<i64, String>>,
@@ -58,10 +56,20 @@ pub struct PropertyDetail {
     pub stored_as_text: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terminal: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub references: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selectivity: Option<FieldSelectivity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<DefaultValue>,
+}
+
+/// The value a row takes when its source omits the property.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DefaultValue {
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -69,9 +77,15 @@ pub struct PropertyDetail {
 pub struct RelationshipSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub variants: Vec<String>,
+    pub variants: IndexMap<String, VariantSpec>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub attributes: IndexMap<String, AttributeSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VariantSpec {
+    pub cardinality: Cardinality,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,6 +102,18 @@ pub struct AttributeDetail {
     pub data_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+}
+
+impl DefaultValue {
+    /// The value as a SQL literal.
+    pub fn literal(&self) -> String {
+        match self {
+            Self::Bool(value) => value.to_string(),
+            Self::Int(value) => value.to_string(),
+            Self::Float(value) => value.to_string(),
+            Self::String(value) => format!("'{}'", value.replace('\'', "''")),
+        }
+    }
 }
 
 impl PropertySpec {

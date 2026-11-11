@@ -1,24 +1,31 @@
 use std::collections::HashSet;
 
+use indexmap::IndexMap;
+
 use super::layout::{build_indexes, merge, projections};
 use super::resolve::Resolver;
-use super::{Column, GraphTable, Table, storage_type};
-use crate::EntityId;
-use crate::catalog::Scope;
-use crate::implementations::clickhouse::spec::ClickHouseSource;
+use super::{Column, GraphTable, Table};
+use crate::catalog::{Scope, SourceInput};
+use crate::implementations::clickhouse::ClickHouse;
+use crate::implementations::clickhouse::spec::{IndexDetail, IndexSpec, IndexSpecs};
+use crate::implementations::relational::entity_layout;
+use crate::spec::{AccessHints, Resolved};
+use crate::{DataType, GraphCatalog};
 
 impl Resolver<'_, '_> {
     pub(super) fn entity_tables(&mut self) {
         let input = self.input;
         let (graph, store) = (input.graph, input.store);
-        for source in &input.sources {
+        for source in &input.entities {
             let entity = source.entity;
-            let Some(bound) = store.source(entity) else {
+            let options = &source.options;
+            let Some((bound, table, sort_key)) =
+                entity_layout(input, source, &options.sort_key, self.diagnostics)
+            else {
                 continue;
             };
-            let options = &source.options;
             let context = format!("{} {}", self.context(), graph.entity(entity).name);
-            let mut columns = self.entity_columns(entity, source.package, options);
+            let mut columns = self.entity_columns(source);
             self.shared_columns(&mut columns);
             let shared = &self.layout.columns;
             let column_of = |target: &str| {
@@ -28,7 +35,11 @@ impl Resolver<'_, '_> {
                     .or_else(|| shared.iter().any(|c| c.name == target).then_some(target))
                     .map(str::to_string)
             };
-            let indexes = build_indexes(&options.indexes, column_of);
+            let declared = options
+                .indexes
+                .clone()
+                .unwrap_or_else(|| derived_indexes(graph, &bound.access));
+            let indexes = build_indexes(&declared, column_of);
             let engine = self.engine(source.package, &context, options.engine.as_deref());
             if self.creates() {
                 let has_path_column = bound
@@ -36,7 +47,7 @@ impl Resolver<'_, '_> {
                     .as_ref()
                     .is_some_and(|path| columns.iter().any(|column| &column.name == path));
                 self.schema.graph_tables.push(GraphTable {
-                    name: bound.table.clone(),
+                    name: table.to_string(),
                     global: input
                         .access
                         .entity(entity)
@@ -45,86 +56,96 @@ impl Resolver<'_, '_> {
                 });
                 self.schema
                     .writers
-                    .entry(bound.table.clone())
+                    .entry(table.to_string())
                     .or_default()
                     .insert(graph.entity(entity).name.clone());
             }
-            let sort_key = match options.sort_key.as_slice() {
-                [] => input.options.sort_key.clone(),
-                declared => declared.to_vec(),
-            };
             self.tables.push(Table {
                 indexes,
                 projections: projections(&options.projections),
                 engine,
                 primary_key: options.primary_key.clone(),
                 settings: merge(&self.layout.settings, &options.settings),
-                ..Table::of_source(bound, sort_key, columns)
+                ..Table::of_source(bound, table, sort_key, columns)
             });
         }
     }
 
-    /// The stored properties, those the source lays out first and in its order.
-    fn entity_columns(
-        &mut self,
-        entity: EntityId,
-        package: &str,
-        options: &ClickHouseSource,
-    ) -> Vec<Column> {
+    /// The stored properties in the order the store lists them.
+    fn entity_columns(&mut self, source: &SourceInput<'_, ClickHouse>) -> Vec<Column> {
         let (graph, store) = (self.input.graph, self.input.store);
-        let name = &graph.entity(entity).name;
-        let declared = &options.columns;
-        let epoch: HashSet<_> = options
+        let epoch: HashSet<_> = source
+            .options
             .epoch_nulls
             .iter()
-            .filter_map(|property| graph.property_id(entity, property))
+            .filter_map(|property| graph.property_id(source.entity, property))
             .collect();
-        let stored: Vec<_> = graph
-            .entity(entity)
-            .properties
-            .iter()
-            .copied()
-            .filter(|property| store.column(*property).is_some())
-            .collect();
-        let mut ordered = Vec::with_capacity(stored.len());
-        for (property, spec) in declared {
-            let id = graph
-                .property_id(entity, property)
-                .filter(|id| stored.contains(id));
-            let Some(id) = self.diagnostics.require(id, package, || {
-                format!(
-                    "store {} lays out {name}.{property}, which it does not store",
-                    store.name
-                )
-            }) else {
+        let mut columns = Vec::with_capacity(source.columns.len());
+        for (id, spec) in &source.columns {
+            let property = graph.property(*id);
+            let storage_type =
+                self.diagnostics
+                    .require(spec.storage_type.clone(), source.package, || {
+                        format!(
+                            "store {} column {}.{} declares no storage type",
+                            store.name,
+                            graph.entity(source.entity).name,
+                            property.name
+                        )
+                    });
+            let Some(storage_type) = storage_type else {
                 continue;
             };
-            ordered.push((id, Some(spec)));
+            columns.push(Column {
+                name: store.column(*id).unwrap_or_default().to_string(),
+                property: Some(*id),
+                data_type: Some(property.data_type),
+                storage_type,
+                nullable: property.nullable && !epoch.contains(id),
+                default: spec
+                    .default
+                    .clone()
+                    .or_else(|| property.default.as_ref().map(|value| value.literal())),
+                codecs: spec.codec.clone(),
+                null_as_epoch: epoch.contains(id),
+            });
         }
-        ordered.extend(
-            stored
-                .iter()
-                .filter(|id| !declared.contains_key(&graph.property(**id).name))
-                .map(|id| (*id, None)),
-        );
-        ordered
-            .into_iter()
-            .map(|(id, spec)| {
-                let property = graph.property(id);
-                let nullable = property.nullable && !epoch.contains(&id);
-                Column {
-                    name: store.column(id).unwrap_or_default().to_string(),
-                    property: Some(id),
-                    data_type: Some(property.data_type),
-                    storage_type: spec
-                        .and_then(|spec| spec.storage_type.clone())
-                        .unwrap_or_else(|| storage_type(property.data_type, nullable)),
-                    nullable,
-                    default: spec.and_then(|spec| spec.default.clone()),
-                    codecs: spec.map(|spec| spec.codec.clone()).unwrap_or_default(),
-                    null_as_epoch: epoch.contains(&id),
-                }
-            })
-            .collect()
+        columns
     }
+}
+
+/// The skip indexes an entity's access hints ask for, when its backend block declares none.
+fn derived_indexes(
+    graph: &GraphCatalog,
+    access: &AccessHints<Resolved>,
+) -> IndexMap<String, IndexSpecs> {
+    let mut indexes = IndexMap::new();
+    for id in &access.filter {
+        let property = graph.property(*id);
+        let spec = match property.data_type {
+            DataType::Bool | DataType::Date | DataType::DateTime => {
+                IndexSpec::Kind("minmax".into())
+            }
+            DataType::Enum => IndexSpec::Detail(IndexDetail {
+                kind: format!(
+                    "set({})",
+                    property
+                        .enum_values
+                        .as_ref()
+                        .map_or(0, |values| values.len())
+                ),
+                granularity: 2,
+                name: None,
+            }),
+            _ => IndexSpec::Kind("bloom_filter(0.0001)".into()),
+        };
+        indexes.insert(property.name.clone(), IndexSpecs::One(spec));
+    }
+    for id in &access.text {
+        indexes.insert(
+            graph.property(*id).name.clone(),
+            IndexSpecs::One(IndexSpec::Kind("text".into())),
+        );
+    }
+    indexes
 }

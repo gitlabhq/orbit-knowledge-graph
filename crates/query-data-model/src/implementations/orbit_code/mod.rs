@@ -5,7 +5,9 @@ pub use render::{RequestField, StructuralSearchRequest};
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-use crate::catalog::{Diagnostics, ExecuteError, Row, StorageBackend, StoreInput};
+use crate::catalog::{
+    Diagnostics, ExecuteError, NoOptions, Row, StorageBackend, StoreInput, check_unrelational,
+};
 use crate::{EntityId, PropertyId};
 
 #[derive(Debug, Clone)]
@@ -19,10 +21,6 @@ pub trait CodeSearch {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CodeOptions {}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CodeRoute {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,14 +67,15 @@ impl StorageBackend for OrbitCode {
     const KIND: &'static str = "orbit_code";
     type Options = CodeOptions;
     type SourceOptions = CodeSource;
-    type RouteOptions = CodeRoute;
+    type ColumnOptions = NoOptions;
     type Store = CodeStore;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> CodeStore {
         let graph = input.graph;
         let store_name = &input.store.name;
         let mut store = CodeStore::default();
-        for source in input.sources {
+        check_unrelational(&input, diagnostics);
+        for source in input.entities {
             let name = &graph.entity(source.entity).name;
             let mut properties = Vec::new();
             for (property, modes) in source.options.search {

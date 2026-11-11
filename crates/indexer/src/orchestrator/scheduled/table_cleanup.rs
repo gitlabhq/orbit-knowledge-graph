@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn reordered_tables_are_not_included() {
         let model = crate::testkit::patched_model(
-            "gitlab/graph_store.yaml",
+            "gitlab/storage/clickhouse.yaml",
             "    tables:\n      namespace_storage_snapshot:\n",
             "    copies:
       gl_code_edge_by_target:

@@ -4,7 +4,7 @@ entities:
   SlackMessage:
     label: text
     properties:
-      id: {type: string, immutable: true}
+      id: {type: string}
       channel: {type: string}
       author: {type: string}
       text: {type: string}

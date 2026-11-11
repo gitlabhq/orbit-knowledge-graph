@@ -6,7 +6,7 @@ entities:
     label: full_path
     defaults: [id, name, full_path]
     properties:
-      id: { type: int64, immutable: true }
+      id: int64
       name: string
       full_path: { type: string, unique: true }
       traversal_path: string
@@ -14,7 +14,7 @@ entities:
     label: full_path
     defaults: [id, name, full_path]
     properties:
-      id: { type: int64, immutable: true }
+      id: int64
       name: string
       full_path: { type: string, unique: true }
       traversal_path: string
@@ -22,7 +22,7 @@ entities:
     label: username
     defaults: [id, username]
     properties:
-      id: { type: int64, immutable: true }
+      id: int64
       username: { type: string, unique: true }
       email: string?
   MergeRequest:
@@ -30,32 +30,39 @@ entities:
     label: title
     defaults: [id, iid, title, state]
     properties:
-      id: { type: int64, immutable: true }
-      iid: { type: int64, immutable: true }
-      title: string
+      id: int64
+      iid: int64
+      title: { type: string, default: "" }
       state:
         type: enum
         values: { 1: opened, 2: closed, 3: merged, 4: locked }
         terminal: [merged]
-      project_id: { type: int64, immutable: true, references: [Project] }
-      author_id: { type: int64?, references: [User] }
+      project_id: int64
+      author_id: int64?
       diff: string?
       traversal_path: string
   Note:
     label: body
     defaults: [id, body]
     properties:
-      id: { type: int64, immutable: true }
+      id: int64
       body: string
-      project_id: { type: int64, references: [Project] }
-      author_id: { type: int64?, references: [User] }
+      project_id: int64
+      author_id: int64?
       traversal_path: string
 relationships:
   CONTAINS:
-    variants: [Group -> Project, Group -> Group]
+    variants:
+      Group -> Project: { cardinality: one_to_many }
+      Group -> Group: { cardinality: one_to_many }
   IN_PROJECT:
-    variants: [MergeRequest -> Project, Note -> Project]
+    variants:
+      MergeRequest -> Project: { cardinality: many_to_one }
+      Note -> Project: { cardinality: many_to_one }
   AUTHORED:
-    variants: [User -> MergeRequest, User -> Note]
+    variants:
+      User -> MergeRequest: { cardinality: one_to_many }
+      User -> Note: { cardinality: one_to_many }
   HAS_NOTE:
-    variants: [MergeRequest -> Note]
+    variants:
+      MergeRequest -> Note: { cardinality: one_to_many }

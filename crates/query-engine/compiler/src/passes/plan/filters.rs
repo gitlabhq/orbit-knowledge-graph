@@ -164,12 +164,11 @@ pub fn bind_filter(
             .unwrap_or_default(),
         namespace_anchor: property_id
             .is_some_and(|property| anchor_keys(model).iter().any(|(key, _)| *key == property)),
-        foreign_key: property_id
-            .is_some_and(|property| !graph.property(property).references.is_empty()),
+        foreign_key: property_id.is_some_and(|property| model.model().holds_foreign_key(property)),
         in_sort_key,
         text_indexed: property_id.is_some_and(|property| model.text_index(property)),
         unique: property_id.is_some_and(|property| graph.property(property).unique),
-        immutable: property_id.is_some_and(|property| !graph.property(property).mutable),
+        immutable: property_id.is_some_and(|property| model.model().immutable(property)),
         null_as_epoch: NullAsEpoch {
             column: data_type
                 .filter(|_| property_id.is_some_and(|property| model.null_as_epoch(property))),

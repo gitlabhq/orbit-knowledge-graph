@@ -1,48 +1,49 @@
+use std::any::Any;
 use std::collections::HashSet;
+use std::fmt::Debug;
+use std::panic::RefUnwindSafe;
 
-use crate::constants::DEFAULT_PRIMARY_KEY;
-use indexmap::IndexMap;
-
-use super::Diagnostics;
 use super::access::Guard;
-use crate::spec::{
-    BackendOptions, EngineSpec, RouteSpec, SourceSpec, StorageFragment, format_variant,
-    parse_variant, snake_case,
-};
-use crate::{
-    AttributeId, EntityId, ForeignKey, GraphCatalog, PropertyId, RelationshipId,
-    RelationshipVariantId,
-};
+use crate::spec::{AccessHints, BackendOptions, Binding, Resolved};
+use crate::{Endpoint, EntityId, ForeignKey, PropertyId, RelationshipVariantId};
 
+/// A store's backend facts, which only the backend's catalog reads.
+pub(super) type Facts = Box<dyn BackendFacts>;
+
+pub(super) trait BackendFacts: Any + Debug + Send + Sync + RefUnwindSafe {
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl<T: Any + Debug + Send + Sync + RefUnwindSafe> BackendFacts for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// One entity a store holds: its table, when the store is relational, and how queries read it.
 #[derive(Debug, Clone)]
 pub struct Source {
     pub entity: EntityId,
-    pub table: String,
+    pub package: String,
+    pub table: Option<String>,
     pub key: String,
     pub path_column: Option<String>,
+    pub access: AccessHints<Resolved>,
 }
 
-/// A store's route for a relationship, with the variants it narrows resolved to ids.
-#[derive(Debug, Clone)]
-pub struct DeclaredRoute {
-    pub relationship: RelationshipId,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredColumn {
+    pub name: String,
+    pub immutable: bool,
+}
+
+/// The backend blocks of one entity, which the store's backend parses at load.
+#[derive(Debug)]
+pub(crate) struct EntityOptions {
+    pub entity: EntityId,
     pub package: String,
-    pub fk: Option<String>,
-    pub backend: BackendOptions,
-    pub variants: Vec<VariantRoute>,
-}
-
-#[derive(Debug, Clone)]
-pub struct VariantRoute {
-    pub variant: RelationshipVariantId,
-    pub fk: Option<String>,
-    pub backend: BackendOptions,
-}
-
-impl DeclaredRoute {
-    pub fn variant(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
-        self.variants.iter().find(|route| route.variant == variant)
-    }
+    pub options: BackendOptions,
+    pub columns: Vec<(PropertyId, BackendOptions)>,
 }
 
 #[derive(Debug)]
@@ -54,14 +55,14 @@ pub struct Store {
     pub path_column: Option<String>,
     pub package: String,
     pub(crate) options: BackendOptions,
-    pub(crate) source_options: Vec<(EntityId, String, BackendOptions)>,
-    pub(crate) routes: Vec<DeclaredRoute>,
-    sources: Vec<Option<Source>>,
-    columns: Vec<Option<String>>,
-    excluded: HashSet<PropertyId>,
-    foreign_keys: Vec<Option<ForeignKey>>,
-    attribute_columns: Vec<Vec<(AttributeId, String)>>,
+    pub(crate) entity_options: Vec<EntityOptions>,
+    pub(super) sources: Vec<Option<Source>>,
+    pub(super) columns: Vec<Option<StoredColumn>>,
+    pub(super) excluded: HashSet<PropertyId>,
+    pub(super) bindings: Vec<Option<(String, Binding<Resolved>)>>,
+    pub(super) declared: HashSet<RelationshipVariantId>,
     pub(super) guards: Vec<Option<Guard>>,
+    pub(super) facts: Option<Facts>,
 }
 
 impl Store {
@@ -74,441 +75,70 @@ impl Store {
     }
 
     pub fn column(&self, property: PropertyId) -> Option<&str> {
-        self.columns[property.index()].as_deref()
+        Some(&self.columns[property.index()].as_ref()?.name)
+    }
+
+    pub fn immutable(&self, property: PropertyId) -> bool {
+        self.columns[property.index()]
+            .as_ref()
+            .is_some_and(|column| column.immutable)
     }
 
     pub fn excludes(&self, property: PropertyId) -> bool {
         self.excluded.contains(&property)
     }
 
-    pub fn foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey> {
-        self.foreign_keys[variant.index()]
+    pub fn binding(&self, variant: RelationshipVariantId) -> Option<&Binding<Resolved>> {
+        Some(&self.bindings[variant.index()].as_ref()?.1)
     }
 
-    pub fn attribute_columns(
+    pub fn bindings(
         &self,
-        variant: RelationshipVariantId,
-    ) -> impl Iterator<Item = (AttributeId, &str)> {
-        self.attribute_columns[variant.index()]
+    ) -> impl Iterator<Item = (RelationshipVariantId, &str, &Binding<Resolved>)> {
+        self.bindings
             .iter()
-            .map(|(attribute, column)| (*attribute, column.as_str()))
+            .enumerate()
+            .filter_map(|(index, bound)| {
+                let (package, binding) = bound.as_ref()?;
+                Some((RelationshipVariantId(index), package.as_str(), binding))
+            })
     }
 
-    pub fn attribute_column(
+    /// The foreign key a plan can join on; a discriminated key is not one.
+    pub fn foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey> {
+        let key = self.binding(variant)?.fk.as_ref()?;
+        key.discriminator.is_none().then_some(key.foreign_key)
+    }
+
+    /// The edge table a variant's rows live in, or the one derived from its foreign key.
+    pub fn edge_table(&self, variant: RelationshipVariantId) -> Option<&str> {
+        let binding = self.binding(variant)?;
+        let index = binding
+            .index
+            .as_ref()
+            .map(|index| index.edge_table.as_str());
+        binding.edge_table.as_deref().or(index)
+    }
+
+    /// The edge column that copies `property` of the variant's `endpoint`.
+    pub fn copy(
         &self,
         variant: RelationshipVariantId,
-        attribute: AttributeId,
+        endpoint: Endpoint,
+        property: PropertyId,
     ) -> Option<&str> {
-        self.attribute_columns(variant)
-            .find(|(bound, _)| *bound == attribute)
-            .map(|(_, column)| column)
+        self.binding(variant)?
+            .copies
+            .iter()
+            .find(|(_, sources)| sources.contains(&(endpoint, property)))
+            .map(|(column, _)| column.as_str())
     }
 
     pub fn guard(&self, entity: EntityId) -> Option<&Guard> {
         self.guards[entity.index()].as_ref()
     }
 
-    pub fn route(&self, relationship: RelationshipId) -> Option<&DeclaredRoute> {
-        self.routes
-            .iter()
-            .find(|route| route.relationship == relationship)
-    }
-}
-
-pub(super) fn resolve(
-    graph: &GraphCatalog,
-    fragments: &[&StorageFragment],
-    served: &HashSet<PropertyId>,
-    diagnostics: &mut Diagnostics,
-) -> Vec<Store> {
-    let mut grouped = IndexMap::<&str, Vec<&StorageFragment>>::new();
-    for fragment in fragments {
-        grouped.entry(&fragment.store).or_default().push(fragment);
-    }
-    let mut stores: Vec<Store> = grouped
-        .into_iter()
-        .filter_map(|(name, fragments)| {
-            let (package, engine) = declare_engine(name, &fragments, diagnostics)?;
-            let mut store = Store::new(name, package, engine, graph);
-            for fragment in &fragments {
-                store.declare_sources(fragment, engine, served, graph, diagnostics);
-            }
-            store.source_options.sort_by_key(|(entity, _, _)| *entity);
-            store.declare_routes(&fragments, graph, diagnostics);
-            Some(store)
-        })
-        .collect();
-    let keys: Vec<Vec<Option<ForeignKey>>> = stores
-        .iter()
-        .map(|store| store.resolve_foreign_keys(&stores, graph, diagnostics))
-        .collect();
-    for (store, keys) in stores.iter_mut().zip(keys) {
-        store.foreign_keys = keys;
-    }
-    check_connections(&stores, diagnostics);
-    stores
-}
-
-fn check_connections(stores: &[Store], diagnostics: &mut Diagnostics) {
-    for (index, store) in stores.iter().enumerate() {
-        let Some(first) = stores[..index]
-            .iter()
-            .find(|other| other.connection == store.connection)
-        else {
-            continue;
-        };
-        if first.kind != store.kind {
-            diagnostics.error(
-                &store.package,
-                format!(
-                    "store {} is {} but connection {} is {}",
-                    store.name, store.kind, store.connection, first.kind
-                ),
-            );
-        }
-        if first.trusted != store.trusted {
-            diagnostics.error(
-                &store.package,
-                format!(
-                    "store {} and store {} share connection {} but only one is trusted",
-                    store.name, first.name, store.connection
-                ),
-            );
-        }
-    }
-}
-
-fn declare_engine<'a>(
-    name: &str,
-    fragments: &[&'a StorageFragment],
-    diagnostics: &mut Diagnostics,
-) -> Option<(&'a str, &'a EngineSpec)> {
-    let mut engines = fragments
-        .iter()
-        .filter_map(|fragment| Some((fragment.package.as_str(), fragment.engine.as_ref()?)));
-    let Some(first) = engines.next() else {
-        diagnostics.error(
-            &fragments[0].package,
-            format!("store {name} declares no engine"),
-        );
-        return None;
-    };
-    if let Some((package, _)) = engines.next() {
-        diagnostics.error(package, format!("store {name} declares its engine twice"));
-    }
-    Some(first)
-}
-
-impl Store {
-    fn new(name: &str, package: &str, engine: &EngineSpec, graph: &GraphCatalog) -> Self {
-        Self {
-            name: name.to_string(),
-            connection: engine
-                .connection
-                .clone()
-                .unwrap_or_else(|| engine.kind.clone()),
-            kind: engine.kind.clone(),
-            trusted: engine.trusted,
-            path_column: engine.path_column.clone(),
-            package: package.to_string(),
-            options: engine.backend.clone(),
-            source_options: Vec::new(),
-            routes: Vec::new(),
-            sources: (0..graph.entities().count()).map(|_| None).collect(),
-            columns: vec![None; graph.properties().count()],
-            excluded: HashSet::new(),
-            foreign_keys: vec![None; graph.variants().count()],
-            attribute_columns: vec![Vec::new(); graph.variants().count()],
-            guards: vec![None; graph.entities().count()],
-        }
-    }
-
-    fn declare_sources(
-        &mut self,
-        fragment: &StorageFragment,
-        engine: &EngineSpec,
-        served: &HashSet<PropertyId>,
-        graph: &GraphCatalog,
-        diagnostics: &mut Diagnostics,
-    ) {
-        let package = fragment.package.as_str();
-        for (name, spec) in &fragment.entities {
-            let Some(entity) = diagnostics.require(graph.entity_id(name), package, || {
-                format!("store {} binds unknown entity {name}", self.name)
-            }) else {
-                continue;
-            };
-            if self.sources[entity.index()].is_some() {
-                diagnostics.error(package, format!("store {} binds {name} twice", self.name));
-                continue;
-            }
-            let pattern = engine.table.as_deref().unwrap_or("{entity}");
-            let table = spec
-                .table
-                .clone()
-                .unwrap_or_else(|| pattern.replace("{entity}", &snake_case(name)));
-            let columns = self.stored_columns(entity, spec, served, graph, package, diagnostics);
-            for (property, column) in columns {
-                self.columns[property.index()] = Some(column);
-            }
-            let key = graph
-                .property_id(entity, DEFAULT_PRIMARY_KEY)
-                .and_then(|id| self.column(id))
-                .map(str::to_string);
-            let Some(key) = diagnostics.require(key, package, || {
-                format!("store {} does not store the id of {name}", self.name)
-            }) else {
-                continue;
-            };
-            let path_column = match &spec.path_column {
-                Some(column) => column.clone(),
-                None => engine.path_column.clone(),
-            };
-            self.sources[entity.index()] = Some(Source {
-                entity,
-                table,
-                key,
-                path_column,
-            });
-            self.source_options
-                .push((entity, package.to_string(), spec.backend.clone()));
-        }
-    }
-
-    fn stored_columns(
-        &mut self,
-        entity: EntityId,
-        spec: &SourceSpec,
-        served: &HashSet<PropertyId>,
-        graph: &GraphCatalog,
-        package: &str,
-        diagnostics: &mut Diagnostics,
-    ) -> Vec<(PropertyId, String)> {
-        let name = &graph.entity(entity).name;
-        let resolve = |property: &str, diagnostics: &mut Diagnostics| {
-            diagnostics.require(graph.property_id(entity, property), package, || {
-                format!(
-                    "store {} names unknown property {name}.{property}",
-                    self.name
-                )
-            })
-        };
-        let renamed: Vec<(PropertyId, &String)> = spec
-            .columns
-            .iter()
-            .filter_map(|(property, column)| Some((resolve(property, diagnostics)?, column)))
-            .collect();
-        let excluded: HashSet<PropertyId> = spec
-            .exclude
-            .iter()
-            .filter_map(|p| resolve(p, diagnostics))
-            .collect();
-        let candidates: Vec<PropertyId> = if spec.only.is_empty() {
-            graph.entity(entity).properties.clone()
-        } else {
-            spec.only
-                .iter()
-                .filter_map(|p| resolve(p, diagnostics))
-                .collect()
-        };
-        self.excluded.extend(
-            graph
-                .entity(entity)
-                .properties
-                .iter()
-                .filter(|property| excluded.contains(property) || !candidates.contains(property)),
-        );
-        candidates
-            .into_iter()
-            .filter(|property| !excluded.contains(property))
-            .filter_map(|property| {
-                let renamed = renamed.iter().find(|(id, _)| *id == property);
-                if served.contains(&property) {
-                    if renamed.is_some() {
-                        diagnostics.error(
-                            package,
-                            format!(
-                                "store {} stores {name}.{}, which a lookup provides",
-                                self.name,
-                                graph.property(property).name
-                            ),
-                        );
-                    }
-                    return None;
-                }
-                let column = renamed.map_or_else(
-                    || graph.property(property).name.clone(),
-                    |(_, column)| (*column).clone(),
-                );
-                Some((property, column))
-            })
-            .collect()
-    }
-
-    fn declare_routes(
-        &mut self,
-        fragments: &[&StorageFragment],
-        graph: &GraphCatalog,
-        diagnostics: &mut Diagnostics,
-    ) {
-        for fragment in fragments {
-            let package = fragment.package.as_str();
-            for (name, spec) in &fragment.relationships {
-                let relationship =
-                    diagnostics.require(graph.relationship_id(name), package, || {
-                        format!("store {} routes unknown relationship {name}", self.name)
-                    });
-                let Some(relationship) = relationship else {
-                    continue;
-                };
-                if self.route(relationship).is_some() {
-                    diagnostics.error(package, format!("store {} routes {name} twice", self.name));
-                    continue;
-                }
-                let mut narrowed = Vec::new();
-                for (variant, narrow) in &spec.variants {
-                    let known = parse_variant(variant)
-                        .and_then(|(source, target)| graph.variant_named(name, source, target));
-                    let known = diagnostics.require(known, package, || {
-                        format!(
-                            "store {} routes unknown variant {name}({variant})",
-                            self.name
-                        )
-                    });
-                    narrowed.extend(known.map(|known| (known.id, narrow)));
-                }
-                self.bind_attributes(relationship, spec, &narrowed, graph, package, diagnostics);
-                self.routes.push(DeclaredRoute {
-                    relationship,
-                    package: package.to_string(),
-                    fk: spec.fk.clone(),
-                    backend: spec.backend.clone(),
-                    variants: narrowed
-                        .into_iter()
-                        .map(|(variant, narrow)| VariantRoute {
-                            variant,
-                            fk: narrow.fk.clone(),
-                            backend: narrow.backend.clone(),
-                        })
-                        .collect(),
-                });
-            }
-        }
-    }
-
-    fn bind_attributes(
-        &mut self,
-        relationship: RelationshipId,
-        spec: &RouteSpec,
-        narrowed: &[(RelationshipVariantId, &RouteSpec)],
-        graph: &GraphCatalog,
-        package: &str,
-        diagnostics: &mut Diagnostics,
-    ) {
-        let name = &graph.relationship(relationship).name;
-        let store = self.name.clone();
-        let mut resolve = |columns: &IndexMap<String, String>| -> Vec<(AttributeId, String)> {
-            columns
-                .iter()
-                .filter_map(|(attribute, column)| {
-                    let id = graph.attribute_id(relationship, attribute);
-                    let id = diagnostics.require(id, package, || {
-                        format!("store {store} binds unknown attribute {name}.{attribute}")
-                    })?;
-                    Some((id, column.clone()))
-                })
-                .collect()
-        };
-        let shared = resolve(&spec.columns);
-        for id in &graph.relationship(relationship).variants {
-            let mut bound = shared.clone();
-            let narrow = narrowed.iter().find(|(variant, _)| variant == id);
-            for (attribute, column) in narrow
-                .map(|(_, narrow)| resolve(&narrow.columns))
-                .unwrap_or_default()
-            {
-                bound.retain(|(other, _)| *other != attribute);
-                bound.push((attribute, column));
-            }
-            self.attribute_columns[id.index()] = bound;
-        }
-    }
-
-    fn resolve_foreign_keys(
-        &self,
-        stores: &[Store],
-        graph: &GraphCatalog,
-        diagnostics: &mut Diagnostics,
-    ) -> Vec<Option<ForeignKey>> {
-        let on_connection = |entity: EntityId| {
-            stores
-                .iter()
-                .any(|store| store.connection == self.connection && store.source(entity).is_some())
-        };
-        let mut keys = vec![None; graph.variants().count()];
-        for route in &self.routes {
-            let mut matched = false;
-            for id in &graph.relationship(route.relationship).variants {
-                let variant = graph.variant(*id);
-                let explicit = route.variant(*id).and_then(|narrow| narrow.fk.as_deref());
-                let Some(column) = explicit.or(route.fk.as_deref()) else {
-                    continue;
-                };
-                let label = format!(
-                    "{}({})",
-                    graph.relationship(route.relationship).name,
-                    format_variant(
-                        &graph.entity(variant.source).name,
-                        &graph.entity(variant.target).name
-                    )
-                );
-                let found = ForeignKey::resolve(graph, variant.source, variant.target, column);
-                matched |= found.is_some();
-                let joinable = found.filter(|key| {
-                    let holder = key.holder_entity(variant.source, variant.target);
-                    let referenced = key.referenced_entity(variant.source, variant.target);
-                    self.source(holder).is_some()
-                        && self.column(key.property).is_some()
-                        && on_connection(referenced)
-                });
-                let Some(key) = joinable else {
-                    if explicit.is_some() {
-                        diagnostics.error(
-                            &route.package,
-                            format!(
-                                "{label} foreign key {column} is not joinable on connection {}",
-                                self.connection
-                            ),
-                        );
-                    }
-                    continue;
-                };
-                let referenced = key.referenced_entity(variant.source, variant.target);
-                if !graph
-                    .property(key.property)
-                    .references
-                    .contains(&referenced)
-                {
-                    diagnostics.error(
-                        &route.package,
-                        format!(
-                            "{label} foreign key {column} does not reference the other endpoint in the graph"
-                        ),
-                    );
-                    continue;
-                }
-                keys[id.index()] = Some(key);
-            }
-            if let Some(column) = route.fk.as_deref().filter(|_| !matched) {
-                diagnostics.error(
-                    &route.package,
-                    format!(
-                        "{} foreign key {column} is on no endpoint of any variant",
-                        graph.relationship(route.relationship).name
-                    ),
-                );
-            }
-        }
-        keys
+    pub(super) fn facts<T: 'static>(&self) -> Option<&T> {
+        self.facts.as_deref()?.as_any().downcast_ref()
     }
 }

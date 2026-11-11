@@ -272,7 +272,7 @@ impl Contents<'_> {
             property.name,
             property.data_type,
             property.nullable,
-            property.mutable,
+            !self.catalog.model().immutable(id),
             property.enum_type,
             property.enum_values,
         )
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn node_index_change_rebuilds_its_entity_and_keeps_edge_rows() {
         let derived = derive_embedded_edit(
-            "gitlab.plan/graph_store.yaml",
+            "gitlab.plan/storage/clickhouse.yaml",
             "        description: text\n",
             "",
         );
@@ -511,7 +511,11 @@ mod tests {
 
     #[test]
     fn extract_template_change_rebuilds_its_writer() {
-        let derived = derive_embedded_edit("gitlab.core/group.sql.j2", "SELECT", "SELECT DISTINCT");
+        let derived = derive_embedded_edit(
+            "gitlab.core/sources/group.sql.j2",
+            "SELECT",
+            "SELECT DISTINCT",
+        );
         assert_eq!(
             derived.tables.get("gl_group"),
             Some(&TableChange::Contents(entity_set(&["Group"])))
@@ -525,9 +529,9 @@ mod tests {
     #[test]
     fn code_table_change_derives_code_scope() {
         let derived = derive_embedded_edit(
-            "gitlab.source_code/graph_store.yaml",
-            "fqn: {codec: [ZSTD(9)]}",
-            "fqn: {codec: [ZSTD(3)]}",
+            "gitlab.source_code/storage/clickhouse.yaml",
+            "fqn: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}",
+            "fqn: {immutable: true, backend: {type: String, codec: [ZSTD(3)]}}",
         );
         assert_eq!(derived.scope, MigrationScope::Code, "{:?}", derived.tables);
     }

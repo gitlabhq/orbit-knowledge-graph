@@ -11,19 +11,17 @@ use query_data_model::{DataModelError, Direction, EntityId, Model};
 
 fn package_sources(packages: &[&str]) -> Vec<(String, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/packages");
-    let mut sources = Vec::new();
-    for package in packages {
-        let mut files: Vec<_> = std::fs::read_dir(root.join(package))
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect();
-        files.sort();
-        for file in files {
-            let name = format!("{package}/{}", file.file_name().unwrap().to_string_lossy());
-            sources.push((name, std::fs::read_to_string(file).unwrap()));
-        }
-    }
-    sources
+    let all = query_data_model::Packages::read_dir(&root).unwrap();
+    packages
+        .iter()
+        .flat_map(|package| {
+            let prefix = format!("{package}/");
+            all.sources()
+                .iter()
+                .filter(move |(name, _)| name.starts_with(&prefix))
+                .map(|(name, yaml)| (name.clone(), yaml.clone()))
+        })
+        .collect()
 }
 
 fn load(packages: &[&str]) -> Arc<Model> {

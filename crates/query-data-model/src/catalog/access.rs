@@ -23,7 +23,7 @@ pub struct EntityAccess {
     pub role: Option<RequiredRole>,
     pub redaction: Option<Redaction>,
     /// A foreign key to the namespace entity that holds the row; a filter on it bounds the entity.
-    pub anchor: Option<PropertyId>,
+    pub anchor: Option<(PropertyId, EntityId)>,
     /// The backend applies the caller's own visibility through the caller's sign-in.
     pub delegated: bool,
 }
@@ -139,12 +139,14 @@ impl Access {
                     owner: None,
                 })
             });
-            let anchor = spec.anchor.as_deref().and_then(|column| {
-                let id = graph
-                    .property_id(entity, column)
-                    .filter(|id| graph.property(*id).references.len() == 1);
-                diagnostics.require(id, package, || {
-                    format!("{name} anchor {column} is not a property that references one entity")
+            let anchor = spec.anchor.as_ref().and_then(|anchor| {
+                let id = graph.property_id(entity, &anchor.property);
+                let target = graph.entity_id(&anchor.entity);
+                diagnostics.require(id.zip(target), package, || {
+                    format!(
+                        "{name} anchor {} names no property of {name} or no entity {}",
+                        anchor.property, anchor.entity
+                    )
                 })
             });
             if self.entities[entity.index()]

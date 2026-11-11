@@ -221,7 +221,10 @@ async fn incremental_flag_dead_letters_an_export_the_local_tables_cannot_map() {
     let mock = MockGitlabServer::start().await;
     mock.add_project(2802, "main", &[("src/main.py", "def f():\n    pass\n")]);
     let mut sources = query_data_model::Packages::embedded().sources().clone();
-    sources.remove("gitlab.source_code/local_store.yaml");
+    sources.remove("gitlab.source_code/storage/duckdb.yaml");
+    let engine = sources.get_mut("gitlab/storage/duckdb.yaml").unwrap();
+    let bindings = engine.find("relationships:").unwrap();
+    engine.truncate(bindings);
     let model = query_data_model::Packages::new(sources).load().unwrap();
     let specs = indexer::modules::code::ConverterSpecs::new(
         &query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&model).unwrap(),
