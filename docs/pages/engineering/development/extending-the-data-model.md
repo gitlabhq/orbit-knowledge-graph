@@ -1,6 +1,6 @@
 # Extending the data model
 
-The data model is being built in the [data model spike MR](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3346).
+The [data model spike MR](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3346) is a reference implementation and is not meant to merge.
 This guide shows its packages and APIs, and it changes with the code.
 [ADR 024](../adr/024_pluggable_data_model.md) records the design and explains how it works.
 
@@ -68,12 +68,16 @@ The platform package declares the permissions and scope kinds that every package
 # packages/gitlab/authorization.yaml
 kind: authorization
 package: gitlab
-permissions: [read, read_code, read_merge_request, read_vulnerability]
+permissions: [read, read_user, read_code, read_merge_request, read_vulnerability]
 scopes:
   namespace: {kind: hierarchy}
   user: {kind: owner, entity: User}
 entities:
-  User: {scope: global, permission: read}
+  User:
+    scope: global
+    permission: read
+    checks:
+      - {provider: rails, permission: read_user}
 ```
 
 An entity without its own scope key reaches one through a relationship. A `Commit` takes its project's path:
@@ -135,9 +139,9 @@ engine:
 
 A variant binds to an edge table only when both endpoint identities match its ID column types. An integration whose entities have string IDs declares its own edge table with `String` columns.
 
-`access` says how the columns are queried, in terms every backend understands. ClickHouse turns it into its skip indexes and sort key, so an integration author never writes ClickHouse details. The `backend` block overrides that only where a platform package needs to.
+`access` says how the columns are queried, in terms every backend understands. ClickHouse turns it into its skip indexes and sort key, so no package writes index or sort-key details. Column storage types stay explicit. The `backend` block overrides the derived indexes only where a platform package needs to.
 
-The entity's home store must list every property of the graph, or exclude it by name with `exclude: [...]`. Another store lists exactly the properties it holds. The loader rejects a property that its home store neither stores nor excludes. It also rejects a column without a storage type and a binding without a table. A forgotten column fails at load, not at query time.
+The entity's home store must list every property of the graph, or exclude it by name with `exclude: [...]`. Another store lists exactly the properties it holds. The loader rejects a property that its home store neither stores nor excludes. A relational store must also name its table and type every column. A live or code store holds no table: it lists the properties it serves, and its backend checks its own fields. A forgotten column fails at load, not at query time.
 
 The source fragment says where the indexer reads it from:
 
@@ -152,9 +156,14 @@ entities:
     order_by: [traversal_path, id]
     query: merge_request.sql.j2
     columns: {state: state_id, project_id: target_project_id}
+relationships:
+  APPROVED:
+    User -> MergeRequest:
+      tables: [siphon_approvals]
+      columns: {source: user_id, target: merge_request_id}
 ```
 
-A relationship that a foreign key carries needs no source entry. The indexer writes `author_id` with the merge request row, and the storage binding is enough.
+A relationship that a foreign key carries needs no source entry. The indexer writes `author_id` with the merge request row, and the storage binding is enough. An edge-table variant such as `APPROVED` needs its own entry, because its rows come from their own table.
 
 A relationship can declare typed attributes in the graph when the data belongs to the edge itself, such as the access level of a membership. Queries filter and select them like properties, and storage binds each one to an edge column.
 
@@ -216,12 +225,27 @@ entities:
   SlackMessage:
     identity: id
     label: text
+    default_columns: [id, channel, author, text, sent_at]
     properties:
       id: {type: string}
+      workspace: {type: string}
       channel: {type: string}
       author: {type: string}
       text: {type: string}
       sent_at: {type: timestamp}
+  SlackWorkspace:
+    identity: id
+    label: name
+    default_columns: [id, name]
+    properties:
+      id: {type: string}
+      name: {type: string}
+      namespace_id: {type: int64}
+relationships:
+  IN_WORKSPACE:
+    variants: {SlackMessage -> SlackWorkspace: {cardinality: many_to_one}}
+  INSTALLED_IN:
+    variants: {SlackWorkspace -> Group: {cardinality: many_to_one}}
 ```
 
 ```yaml
@@ -246,22 +270,46 @@ store: slack
 engine:
   kind: live
   connection: data_extraction
-  path_column: traversal_path
 entities:
   SlackMessage:
     columns:
       id: {immutable: true}
+      workspace: {}
       channel: {}
       author: {}
       text: {}
       sent_at: {}
+    access: {filter: [workspace, channel, author, sent_at], text: [text]}
     backend:
       operation: search.messages
-      filters: [channel, author, sent_at]
-      text: text
+relationships:
+  IN_WORKSPACE:
+    SlackMessage -> SlackWorkspace: {fk: {on: source, column: workspace}}
 ```
 
-The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit. A filter the operation cannot push down is a construction error.
+The workspaces themselves are indexed into the graph store from the integration's installation records, so `INSTALLED_IN` is a foreign key on a `SlackWorkspace` row:
+
+```yaml
+# packages/integration.slack/storage/clickhouse.yaml
+kind: storage
+package: integration.slack
+store: graph
+entities:
+  SlackWorkspace:
+    table: slack_workspace
+    columns:
+      id: {immutable: true, backend: {type: String}}
+      name: {backend: {type: String}}
+      namespace_id: {backend: {type: Int64}}
+    access: {order: [id]}
+relationships:
+  INSTALLED_IN:
+    SlackWorkspace -> Group: {fk: {on: source, column: namespace_id}}
+```
+
+A data lake source fragment writes `SlackWorkspace`, like the Jira source above. The live store holds no rows, so `SlackMessage` needs no writer.
+
+The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit. The `access` hints say which filters the operation pushes down. A filter it cannot push down is a construction error.
 
 ```cypher
 MATCH (m:SlackMessage)
@@ -337,9 +385,15 @@ engine:
   connection: code_indexing
 entities:
   File:
+    columns:
+      path: {}
+      content: {}
+    access: {text: [path, content]}
     backend:
       search: {content: [trigram, structural], path: [trigram]}
 ```
+
+`access` marks `path` and `content` as searchable. The `backend` block names the match modes that only Orbit Next understands.
 
 A query for every call to `compile` in a project's Rust files plans into a code plan:
 
@@ -376,6 +430,7 @@ entities:
   Memory:
     identity: id
     label: summary
+    default_columns: [id, summary]
     properties:
       id: {type: string}
       summary: {type: string, default: ""}
@@ -408,6 +463,15 @@ relationships:
 kind: storage
 package: tenant.agent_memory
 store: graph
+engine:
+  edge_tables:
+    gl_memory_edge:
+      columns:
+        source_id: {backend: {type: String}}
+        target_id: {backend: {type: Int64}}
+        target_kind: {backend: {type: LowCardinality(String)}}
+        relationship_kind: {backend: {type: LowCardinality(String)}}
+        traversal_path: {backend: {type: String}}
 entities:
   Memory:
     table: gl_memory
@@ -415,12 +479,22 @@ entities:
       id: {immutable: true, backend: {type: String}}
       summary: {backend: {type: String, codec: [ZSTD(3)]}}
       traversal_path: {backend: {type: String}}
-    backend:
-      primary_key: [traversal_path, id]
+    access: {text: [summary], order: [traversal_path, id]}
 relationships:
   ABOUT:
-    Memory -> MergeRequest: {edge_table: gl_edge}
-    Memory -> Project: {edge_table: gl_edge}
+    Memory -> MergeRequest: {edge_table: gl_memory_edge}
+    Memory -> Project: {edge_table: gl_memory_edge}
+```
+
+`Memory` has string IDs and points at entities with integer IDs. So its edges live in their own table, with a `String` source column and an `Int64` target column. The agent memory API writes both:
+
+```yaml
+# packages/tenant.agent_memory/sources/agent_api.yaml
+kind: source
+package: tenant.agent_memory
+source: agent_api
+entities: [Memory]
+relationships: [ABOUT]
 ```
 
 A user-scoped entity names its owner relationship instead of a scope key:
@@ -485,12 +559,12 @@ authorization:
     gitlab_session:
       module: gitlab.session
       connection: rails
-      permissions: {read: reporter, read_code: reporter, read_merge_request: reporter, read_vulnerability: developer}
+      permissions: {read: reporter, read_code: reporter, read_merge_request: reporter, read_vulnerability: security_manager}
     rails: {module: gitlab.abilities, connection: rails, batch: 1000}
     slack: {module: slack.sign_in, connection: data_extraction}
 ```
 
-GitLab's access levels appear only in the `gitlab.session` options. Another deployment binds other modules to the same contract:
+GitLab's access levels appear only in the `gitlab.session` options. A deployment that loads its own packages, not the GitLab ones, binds other modules to the same contract:
 
 ```yaml
 authorization:
@@ -501,7 +575,7 @@ authorization:
     cedar: {module: cedar, policies: "s3://example-authz/policies.cedar"}
 ```
 
-`spicedb` answers `Scopes` with `LookupResources` and `Check` with `CheckBulkPermissions`. `cedar` answers `Check` with `is_authorized` per row, over the columns the check lists in `attributes`. A row comes back only if every check on its entity allows it. Every provider fails closed.
+`spicedb` answers `Scopes` with `LookupResources` and `Check` with `CheckBulkPermissions`. `cedar` answers `Check` with `is_authorized` per row, over the graph properties the check lists in `attributes`. Storage maps those properties to columns, as it does for every policy. A row comes back only if every check on its entity allows it. Every provider fails closed.
 
 Tests use seeded fakes for each query, like the existing redaction mock.
 
@@ -545,7 +619,8 @@ The loader collects every error, names its package, and fails once. A missing de
 - An unknown entity, property, relationship, variant, permission, scope, provider, field or template.
 - An entity or variant declared twice, or a second authorization entry.
 - An entity with no `id`, or no authorization entry.
-- A property that its home store neither stores nor excludes, a stored column without a storage type, or a binding without a table. Nothing is inferred.
+- A property that its home store neither stores nor excludes. In a relational store, a column without a storage type or an entity without a table. Nothing is inferred.
+- An entity without `default_columns`.
 - A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none`, or checks by any provider. An integration package may declare only `Credentials` checks. A tenant overlay declares no checks, and its entities must be namespace- or user-scoped.
 - A backend that stores a non-global entity or a relationship but has no `enforce` entry for it.
 - A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.

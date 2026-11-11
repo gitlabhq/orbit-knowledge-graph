@@ -339,7 +339,7 @@ end
 
 A tenant's model is the active version of every package that applies to it.
 The migration scope is the diff of the physical catalogs and the source fragments. It is a floor: a ledger entry can widen it but never narrow it.
-A shared edge table is cloned intact. Only its in-scope writers re-emit their rows, and after each namespace finishes, a sweep tombstones that writer's older rows in the namespace.
+A shared edge table is cloned intact. Each edge-table variant has exactly one writer, so the in-scope variants' writers re-emit their rows, and after each namespace finishes, a sweep tombstones that variant's older rows in the namespace.
 The query engine never sees a model whose tables are not built yet, and the indexer and the query engine always agree on one package version.
 
 ### 4. Catalogs give each connection a typed view
@@ -554,7 +554,7 @@ Every stage gets its own policy, and plan tests assert the logical plan, the pla
 
 - A package that fails its load checks is rejected, and the previous model keeps serving. Publishing must run the same checks, so authors see the errors first.
 - The loader is strict. A fragment cannot carry unknown fields for later use.
-- A test loads every shipped package, collects every declared name, and fails if one appears as a literal in the non-test source of the query engine, the indexer, the migrations or the server. A hard-coded table, entity or connection name fails CI.
+- A test loads every shipped package and collects the names it owns: entities, relationships, tables, stores, connections, sources and providers. It fails if one of them appears as a literal in the non-test source of the query engine, the indexer, the migrations or the server. Property names such as `id` or `state` are left out, because they are ordinary words in code. A hard-coded table, entity or connection name fails CI.
 - Every scoped entity declares a policy for each backend that stores it. A new backend for an existing entity needs an authorization change as well as a storage change.
 - The query engine has no built-in authorization system. A deployment without Rails supplies its own `Identify` and `Scopes` modules, and a `Check` module where its scope answer is not exact.
 - A change to storage goes live only after its backfill. A change that only adds query metadata takes effect on the next load.
