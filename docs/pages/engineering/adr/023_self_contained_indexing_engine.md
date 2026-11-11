@@ -47,7 +47,7 @@ They also need new ontology versions at runtime, with no deploy.
 4. **A worker splits only its own work.** Child tasks join the job of their parent. Work for another team starts in that team's planner, when the first task ends.
 5. **Helm owns capacity.** Each pod reads only its own config: the lanes and sinks it pulls, with their slots and pools. Helm decides which configs run, and how many pods run each one. KEDA scales each deployment on its pending tasks.
 6. **NATS and pod disks hold no facts.** NATS holds work in flight, dedupe markers and leases. A lease stores its holder and its expiry, with no NATS TTL. A NATS wipe costs one recovery campaign. A pod's disk is a cache. A task is acked only when its data is durable somewhere else.
-7. **ClickHouse records what ran.** The ledger keeps each task and job that did work, so an admin can replay it. Metrics keep the stats.
+7. **ClickHouse records what ran.** The ledger keeps each task and job that did work, with its rows for each label and its time. An admin can replay a job, and a tenant can read the jobs of its own keys. A run with no change updates only the check row of its key. Metrics keep the stats of the cluster.
 8. **Two kinds of schema.** The binary owns the system schema. The engine migrates it at startup, with steps that only change metadata. A failed step rebuilds the store and starts a recovery campaign. The ontology registry owns the indexed data schema. A campaign fills a new version in the background.
 
 ## Consequences
@@ -60,6 +60,8 @@ They also need new ontology versions at runtime, with no deploy.
 - A system table change that rewrites data is a new table and a campaign.
 - Live work writes to two versions during a campaign. Code jobs run two times while it lasts.
 - The ledger shares the graph cluster for now. If it loads the cluster too much, it moves to its own backend.
+- Jobs are sorted by tenant, and tasks by worker and time. A view of one tenant reads jobs. A view across tenants reads tasks.
+- An event from outside Orbit is a hint, not a fact. A reconciler or a sweep must find the work that a lost event did not start.
 - The version scope of ADR 017 must travel with the version in the registry. A reviewed file cannot follow a runtime change.
 - V2 replaces the V1 concurrency and timeout keys. Both config blocks are accepted until V1 is removed.
 

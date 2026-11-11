@@ -41,6 +41,8 @@ A planner can wake on a schedule or on a stream of changes from Siphon.
 It can also wake when a task of another worker ends.
 The engine also calls every planner in two more cases: a manual request, and a sweep over all its work.
 
+A stream can come from a system outside Orbit. That system publishes a small change event on a subject that the engine owns. It can publish only on its own subject.
+
 An event only says that something changed. The data stays in its source, such as GitLab or the Git lake.
 If an event is lost, a sweep or a reconciler reads the source again.
 
@@ -90,10 +92,14 @@ The fetch does not know who reads the lake. A new reader adds one planner and on
 
 ### 6. The ledger records what ran
 
-Every task that did work is recorded in ClickHouse, with its input and its result.
-An admin can show any job of the last 30 days and replay it.
-A task that found nothing to do writes nothing, so the ledger stays small.
-Metrics hold the counts and the durations.
+Every task that did work is recorded in ClickHouse, with its input, its result, its rows and its time.
+A worker counts its rows under labels that it picks, such as one label for each kind of entity. So one task can write many kinds of rows, and the counts stay apart.
+When the last task of a job ends, the job keeps the sum of its rows and its start and end times.
+
+An admin can show any task of the last 30 days and replay its job.
+A tenant can list its own jobs, and see when each key last ran and how many rows it wrote.
+A task that found nothing to do writes no task row. It only updates the time when its key was last checked.
+Metrics hold the counts and the durations of the cluster.
 
 ### 7. Reconcilers keep facts true
 
@@ -108,7 +114,24 @@ It never starts work itself. It asks a planner to plan some work again, or to st
 | Code freshness | Each project is indexed at its newest commit | Plans stale projects again. This heals lost push events. |
 | Namespace removal | A disabled group has no graph data | Plans the deletion of its data |
 
-### 8. Schemas change without downtime
+### 8. Tenants see their syncs
+
+Jobs are sorted by tenant, so a view of one tenant reads little data.
+For each key, the view can show:
+
+| Field | Meaning |
+|---|---|
+| Status | Pending, running, done or failed |
+| Last synced | The end of the newest job that did work |
+| Last checked | The last run of the key, with or without a change |
+| Rows | The rows of the newest job, for each label |
+| Duration | From the start of the first task to the end of the last task |
+| Wait | From the submit to the start of the first task |
+
+Today only an admin sends a manual request. Each request names one tenant, so a tenant can send its own requests later with no engine change.
+A manual request for a key gives one pending task, so many requests in a row cost one run.
+
+### 9. Schemas change without downtime
 
 Orbit has two kinds of schema, with opposite rules.
 
@@ -132,6 +155,8 @@ A newer version cancels an older campaign. A failed version is marked failed, an
 - **A shared dependency is down.** The worker asks for a throttle. The pod stops pulling from that lane until the delay ends, and no task fails while it waits.
 - **A repository is slower than its size suggests.** The lane timeout stops the run and moves the task to the big lane.
 - **An event is lost.** A reconciler or the next sweep finds the stale work and plans it again.
+- **An outside system stops sending events.** A reconciler compares the wanted state with what Orbit has, and plans the stale keys again.
+- **An outside system sends too many events.** The engine keeps one pending task for each key, so repeated events give one run. A cluster pool keyed by the publisher limits how many of its tasks run at once.
 - **A system table step fails.** The engine rebuilds the system tables and starts a recovery campaign, at most once for each release. A second failure stops indexing and alerts the admin. Queries keep working.
 - **A step on the active version pointer fails.** The engine never rebuilds this table. Indexing stops and alerts the admin. Queries keep using the last active version.
 - **ClickHouse is too old for the schema.** The engine checks the version at startup. Indexing stops with a clear error, and queries keep working.

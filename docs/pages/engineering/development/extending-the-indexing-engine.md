@@ -44,7 +44,22 @@ impl Trigger {
 `Done` fires when a task of another worker ends with `done`.
 `Trigger::done` is the only way to build it, so the build fails when the worker does not exist.
 The engine also calls every planner with `Manual` and `Sweep`.
-The admin API or a reconciler sends `Manual`. A campaign or a NATS recovery sends `Sweep`.
+An admin or a reconciler sends `Manual`, for the keys of one tenant. A campaign or a NATS recovery sends `Sweep`.
+
+A stream can read a subject that a system outside Orbit publishes.
+The engine creates the stream, with a retention of one day. Each publisher can write only to its own subject.
+The event says what changed, such as a key and a watermark. The data stays in its own store.
+The subject in this example is only a name for the example.
+
+```rust
+fn triggers() -> Vec<Trigger> {
+    vec![Trigger::Stream {
+        subjects: &["orbit.external.changed.>"],
+        batch: 500,
+        linger: Duration::from_secs(2),
+    }]
+}
+```
 
 ## Step 2: Write the planner
 
@@ -66,7 +81,7 @@ The code planner routes each repository by its size in the source of truth.
 async fn plan(&self, ctx: &mut PlanContext, fired: Fired) -> Result<(), PlanError> {
     let projects: Vec<ProjectRef> = match fired {
         Fired::Events(batch) => batch.decode()?,
-        Fired::Manual { keys } => self.projects.find(&keys).await?,
+        Fired::Manual { tenant, keys } => self.projects.find(&tenant, &keys).await?,
         Fired::Sweep { cursor, .. } => {
             let page = self.projects.page(cursor).await?;
             ctx.continue_from(page.next);
@@ -116,6 +131,10 @@ fn key(project: &ProjectRef) -> Key {
 
 The engine keeps one pending task for each worker and key, and the marker clears when the task starts. With `EXCLUSIVE`, it also takes a lease on the key, so two runs of one key never overlap. The input holds IDs, and the worker reads the current state when it runs.
 
+Pick the key for the unit that one run brings up to date, not for each kind of row in it.
+A key for each scope gives one task that writes every kind of row of that scope.
+Many events for one scope then give one pending task.
+
 A lease is a key in the `orbit_leases` bucket. Its value says who holds it and until when.
 
 ```rust
@@ -157,10 +176,21 @@ impl<O: Payload> Outcome<O> {
     pub fn done(output: O) -> Self;
     pub fn no_change() -> Self;
     pub fn spawn<W: Worker>(self, inputs: impl IntoIterator<Item = W::Input>) -> Self;
+    pub fn rows(self, label: &'static str, count: u64) -> Self;
 }
 ```
 
-`no_change` writes no ledger row and fires no `done` trigger.
+`rows` counts the rows that the task wrote under one label. Call it once for each label. The engine does not read the labels. It sums them for the job.
+
+```rust
+let mut outcome = Outcome::done(Indexed { from, to });
+for (entity, count) in written.by_entity() {
+    outcome = outcome.rows(entity, count);
+}
+Ok(outcome)
+```
+
+`no_change` writes no task row and fires no `done` trigger. It updates the check time of the key.
 
 ```rust
 if self.checkpoints.covers(&project).await? {
@@ -251,11 +281,11 @@ The namespace status reconciler reads the newest job for each namespace.
 let version = self.registry.active("gitlab").await?;
 for ns in self.status.not_indexed(&version).await? {
     let key = NamespaceEnable::key(&ns.at(&version));
-    match ctx.last_job::<NamespaceEnable>(&key).await? {
+    match ctx.last_job::<NamespaceEnable>(&ns.tenant, &key).await? {
         Some(job) if job.is_done() => self.status.indexed(&ns, &version).await?,
         Some(job) if job.is_failed() => self.status.failed(&ns, &version).await?,
         Some(_) => {}
-        None => ctx.replan::<NamespacePlanner>(vec![key]).await?,
+        None => ctx.replan::<NamespacePlanner>(&ns.tenant, vec![key]).await?,
     }
 }
 ```
@@ -470,27 +500,50 @@ Records travel through object storage, and NATS carries only a pointer to them. 
 | Table | One row for each | Retention |
 |---|---|---|
 | `engine_task` | Task that did work or failed | 30 days |
-| `engine_job` | Worker and key, with its last job | 30 days after that job |
+| `engine_job` | Job, sorted by tenant, worker and key | 14 days |
+| `engine_check` | Tenant, worker and key, with its last run | 14 days after that run |
 | `engine_campaign` | Campaign of one planner: its tag, status and next page | Forever |
 | `engine_schema_migrations` | Step of a system store | Forever |
 | `engine_generation` | NATS install | Forever |
 
+A key with no job in the last 14 days has no job row. A reconciler that reads it gets `None`, and plans the key again.
+
+Each read uses the sort key of one table, so no read scans a whole table.
+
+| Reader | Question | Table | Filter |
+|---|---|---|---|
+| Reconciler | Is the newest job of this key done? | `engine_job` | tenant, worker, key |
+| Tenant view | What are my keys, when did each run, and how many rows? | `engine_job`, `engine_check` | tenant, worker |
+| Tenant view | What did my last syncs write? | `engine_job` | tenant, worker, key |
+| Admin | Which tasks failed in the last hour, in all tenants? | `engine_task` | worker, hour |
+| Admin | Show this job, and replay it | `engine_task` | `job_id` index |
+
 A webserver reads job history through a read-only client.
 
 ```rust
+pub struct JobFilter {
+    pub tenant: Tenant,
+    pub worker: Option<&'static str>,
+    pub key: Option<Key>,
+    pub since: Option<DateTime<Utc>>,
+}
+
 impl LedgerReader {
     pub async fn jobs(&self, filter: JobFilter) -> Result<Vec<JobSummary>, LedgerError>;
-    pub async fn job(&self, id: JobId) -> Result<Option<JobDetail>, LedgerError>;
-    pub async fn task(&self, id: TaskId) -> Result<Option<TaskDetail>, LedgerError>;
+    pub async fn job(&self, tenant: &Tenant, id: JobId) -> Result<Option<JobDetail>, LedgerError>;
+    pub async fn task(&self, tenant: &Tenant, id: TaskId) -> Result<Option<TaskDetail>, LedgerError>;
+    pub async fn checks(&self, tenant: &Tenant, worker: &'static str) -> Result<Vec<KeyCheck>, LedgerError>;
 }
 ```
+
+Every read takes a tenant. The webserver takes it from the caller's token, never from the request.
 
 <details>
 <summary>Ledger DDL</summary>
 
 The tables use `ReplacingMergeTree(_version)`.
-Sort key columns never change. Each task keeps one row. Reads use `FINAL`.
-In `engine_job`, `_version` is the `created_at` of the job. A newer job always wins.
+Sort key columns never change. Each task and each job keeps one row. Reads use `FINAL`.
+Job IDs are UUIDv7, so they sort by time. The newest job of a key has the highest `job_id`.
 
 ```sql
 CREATE TABLE IF NOT EXISTS engine_task (
@@ -510,8 +563,11 @@ CREATE TABLE IF NOT EXISTS engine_task (
     error_class LowCardinality(String),
     error_message String CODEC(ZSTD(3)),
     input String CODEC(ZSTD(3)),
+    output String CODEC(ZSTD(3)),
+    rows Map(LowCardinality(String), UInt64),
     pod LowCardinality(String),
     created_at DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
+    started_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     INDEX idx_task task_id TYPE bloom_filter(0.0001) GRANULARITY 1,
@@ -524,16 +580,29 @@ ORDER BY (worker, toStartOfHour(created_at), task_id)
 TTL toDateTime(created_at) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS engine_job (
+    tenant LowCardinality(String),
     worker LowCardinality(String),
     key String CODEC(ZSTD(1)),
     job_id UUID,
     status Enum8('running' = 1, 'done' = 2, 'failed' = 3, 'lost' = 4),
+    tasks UInt32,
+    rows Map(LowCardinality(String), UInt64),
     created_at DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
+    started_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    _version DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1))
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1))
 ) ENGINE = ReplacingMergeTree(_version)
-ORDER BY (worker, key)
-TTL toDateTime(created_at) + INTERVAL 30 DAY;
+ORDER BY (tenant, worker, key, job_id)
+TTL toDateTime(created_at) + INTERVAL 14 DAY;
+
+CREATE TABLE IF NOT EXISTS engine_check (
+    tenant LowCardinality(String),
+    worker LowCardinality(String),
+    key String CODEC(ZSTD(1)),
+    checked_at DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1))
+) ENGINE = ReplacingMergeTree(checked_at)
+ORDER BY (tenant, worker, key)
+TTL toDateTime(checked_at) + INTERVAL 14 DAY;
 
 CREATE TABLE IF NOT EXISTS engine_campaign (
     tag LowCardinality(String),
