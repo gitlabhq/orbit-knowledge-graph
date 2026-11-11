@@ -17,42 +17,66 @@ pub use source::{
     ReindexTrigger, RelationshipSourceSpec, SourceDeclaration, SourceFragment, TEMPLATE_EXTENSION,
 };
 pub use storage::{
-    AccessHints, BackendOptions, Binding, ColumnStorage, CopySources, Discriminator, EdgeIndex,
-    EngineSpec, EntityStorage, Key, KeySpec, OneOrMany, OptionValue, StorageFragment,
-    decode_options, encode_options,
+    AccessHints, Binding, Block, Blocks, ColumnStorage, CopySources, Discriminator, EdgeIndex,
+    EngineSpec, EntityStorage, Erased, Key, KeySpec, OneOrMany, StorageFragment, Typed,
 };
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
+use std::ops::{Deref, DerefMut};
 
 use indexmap::IndexMap;
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 
+use crate::catalog::{Diagnostics, ModelId, registered};
 use crate::{EntityId, PropertyId, RelationshipId};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// One package file. Its storage blocks parse only once the store's engine kind is known.
+#[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Fragment {
+pub enum Fragment<S = Box<StorageFragment>> {
     Graph(GraphFragment),
-    Storage(Box<StorageFragment>),
+    Storage(S),
     Authorization(AuthorizationFragment),
     Service(ServiceFragment),
     Source(Box<SourceFragment>),
 }
 
-impl Fragment {
-    pub fn parse(yaml: &str) -> Result<Self, orbit_utils::yaml::Error> {
-        orbit_utils::yaml::from_str(yaml)
-    }
+/// A storage fragment's store and engine kind, which choose the backend that parses its blocks.
+#[derive(Deserialize)]
+struct StorageHeader {
+    package: String,
+    store: String,
+    engine: Option<EngineKind>,
+}
 
-    pub fn parse_all<'a>(
+#[derive(Deserialize)]
+struct EngineKind {
+    kind: String,
+}
+
+/// The fragments of a set of packages, identified by the bytes they were parsed from.
+#[derive(Debug)]
+pub struct Fragments {
+    fragments: Vec<Fragment>,
+    id: ModelId,
+}
+
+impl Fragments {
+    pub fn parse<'a>(
         sources: impl IntoIterator<Item = (&'a str, &'a str)>,
-    ) -> Result<Vec<Self>, crate::DataModelError> {
-        let mut diagnostics = crate::catalog::Diagnostics::default();
+    ) -> Result<Self, crate::DataModelError> {
+        let sources: Vec<(&str, &str)> = sources.into_iter().collect();
+        let id = ModelId::digest(
+            sources
+                .iter()
+                .flat_map(|(name, text)| [name.as_bytes(), text.as_bytes()]),
+        );
+        let mut diagnostics = Diagnostics::default();
         let mut templates = BTreeMap::<&str, BTreeMap<String, String>>::new();
-        let mut fragments = Vec::new();
-        for (name, text) in sources {
+        let mut parsed = Vec::new();
+        for (name, text) in &sources {
             let (directory, file) = name.rsplit_once('/').unwrap_or(("", name));
             if file.ends_with(TEMPLATE_EXTENSION) {
                 templates
@@ -61,31 +85,82 @@ impl Fragment {
                     .insert(file.to_string(), text.to_string());
                 continue;
             }
-            match Self::parse(text) {
-                Ok(fragment) => fragments.push((directory, fragment)),
+            match orbit_utils::yaml::from_str::<Fragment<StorageHeader>>(text) {
+                Ok(fragment) => parsed.push((*name, directory, *text, fragment)),
                 Err(error) => diagnostics.error(name, error.to_string()),
             }
         }
-        diagnostics.finish()?;
-        Ok(fragments
-            .into_iter()
-            .map(|(directory, mut fragment)| {
-                if let Self::Source(source) = &mut fragment {
-                    source.templates = templates.get(directory).cloned().unwrap_or_default();
+        let mut kinds = HashMap::new();
+        for (_, _, _, fragment) in &parsed {
+            if let Fragment::Storage(StorageHeader {
+                store,
+                engine: Some(engine),
+                ..
+            }) = fragment
+            {
+                kinds
+                    .entry(store.clone())
+                    .or_insert_with(|| engine.kind.clone());
+            }
+        }
+        let mut fragments = Vec::with_capacity(parsed.len());
+        for (name, directory, text, fragment) in parsed {
+            fragments.push(match fragment {
+                Fragment::Storage(header) => {
+                    let (package, store) = (&header.package, &header.store);
+                    let Some(kind) = kinds.get(store) else {
+                        diagnostics.error(package, format!("store {store} declares no engine"));
+                        continue;
+                    };
+                    let Some(backend) = registered(kind) else {
+                        diagnostics.error(
+                            package,
+                            format!("store {store} has unknown engine kind {kind}"),
+                        );
+                        continue;
+                    };
+                    match backend.parse(text) {
+                        Ok(storage) => Fragment::Storage(Box::new(storage)),
+                        Err(error) => {
+                            diagnostics.error(name, error.to_string());
+                            continue;
+                        }
+                    }
                 }
-                fragment
-            })
-            .collect())
+                Fragment::Graph(graph) => Fragment::Graph(graph),
+                Fragment::Authorization(access) => Fragment::Authorization(access),
+                Fragment::Service(service) => Fragment::Service(service),
+                Fragment::Source(mut source) => {
+                    source.templates = templates.get(directory).cloned().unwrap_or_default();
+                    Fragment::Source(source)
+                }
+            });
+        }
+        diagnostics.finish()?;
+        Ok(Self { fragments, id })
     }
 
-    pub fn package(&self) -> &str {
-        match self {
-            Self::Graph(fragment) => &fragment.package,
-            Self::Storage(fragment) => &fragment.package,
-            Self::Authorization(fragment) => &fragment.package,
-            Self::Service(fragment) => &fragment.package,
-            Self::Source(fragment) => &fragment.package,
-        }
+    pub fn id(&self) -> ModelId {
+        self.id
+    }
+
+    /// Marks fragments rewritten under `tag`, so their model differs from the untagged one.
+    pub(crate) fn tag(&mut self, tag: &str) {
+        self.id = self.id.tagged(tag);
+    }
+}
+
+impl Deref for Fragments {
+    type Target = Vec<Fragment>;
+
+    fn deref(&self) -> &Vec<Fragment> {
+        &self.fragments
+    }
+}
+
+impl DerefMut for Fragments {
+    fn deref_mut(&mut self) -> &mut Vec<Fragment> {
+        &mut self.fragments
     }
 }
 
@@ -102,10 +177,6 @@ pub(crate) fn parse_word<'a, T: Deserialize<'a>>(word: &'a str) -> Option<T> {
     .ok()
 }
 
-pub(crate) fn format_variant(source: &str, target: &str) -> String {
-    format!("{source} -> {target}")
-}
-
 pub(crate) fn snake_case(name: &str) -> String {
     let mut snake = String::with_capacity(name.len() + 4);
     for (index, character) in name.char_indices() {
@@ -115,14 +186,6 @@ pub(crate) fn snake_case(name: &str) -> String {
         snake.extend(character.to_lowercase());
     }
     snake
-}
-
-fn is_false(value: &bool) -> bool {
-    !value
-}
-
-fn is_true(value: &bool) -> bool {
-    *value
 }
 
 fn yes() -> bool {
@@ -138,12 +201,12 @@ where
 }
 
 /// A value a spec field holds in either stage.
-pub trait Value: Debug + Clone + PartialEq + Serialize + DeserializeOwned {}
+pub trait Value: Debug + Clone + PartialEq + DeserializeOwned {}
 
-impl<T: Debug + Clone + PartialEq + Serialize + DeserializeOwned> Value for T {}
+impl<T: Debug + Clone + PartialEq + DeserializeOwned> Value for T {}
 
 /// How specs name graph elements: by written name before the loader resolves them, by id after.
-pub trait Naming: Value + Copy {
+pub trait Naming: Debug + Clone + Copy + PartialEq {
     type Entity: Value;
     type Property: Value;
     type Relationship: Value;
@@ -161,10 +224,10 @@ pub trait Naming: Value + Copy {
     type Members<T: Value, Id: Value>: Value + Default;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Raw;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Resolved;
 
 impl Naming for Raw {
@@ -194,8 +257,7 @@ impl Naming for Resolved {
 }
 
 /// A value written as its full form, or as just the value of its `KEY` field.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Short<T>(pub T);
 
 pub trait ShortForm {

@@ -9,3 +9,4 @@ entities:
       author: {type: string}
       text: {type: string}
       sent_at: {type: timestamp}
+      traversal_path: {type: string}

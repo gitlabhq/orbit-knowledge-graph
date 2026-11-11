@@ -166,7 +166,7 @@ fn catalog_with_partition_count(entity_name: &str, partitions: u32) -> Catalog<C
     let mut fragments = Packages::embedded()
         .fragments()
         .expect("embedded packages must parse");
-    for fragment in &mut fragments {
+    for fragment in fragments.iter_mut() {
         if let Fragment::Source(source) = fragment
             && let Some(entity) = source.entities.get_mut(entity_name)
         {

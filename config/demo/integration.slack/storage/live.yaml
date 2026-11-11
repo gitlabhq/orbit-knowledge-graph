@@ -13,6 +13,7 @@ entities:
       author: {}
       text: {}
       sent_at: {}
+      traversal_path: {}
     backend:
       operation: search.messages
       filters: [channel, author, sent_at]

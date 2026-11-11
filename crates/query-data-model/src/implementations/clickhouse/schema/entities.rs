@@ -42,17 +42,13 @@ impl Resolver<'_, '_> {
             let indexes = build_indexes(&declared, column_of);
             let engine = self.engine(source.package, &context, options.engine.as_deref());
             if self.creates() {
-                let has_path_column = bound
-                    .path_column
-                    .as_ref()
-                    .is_some_and(|path| columns.iter().any(|column| &column.name == path));
                 self.schema.graph_tables.push(GraphTable {
                     name: table.to_string(),
                     global: input
                         .access
                         .entity(entity)
                         .is_some_and(|access| access.scope == Scope::Global),
-                    has_path_column,
+                    has_path_column: bound.path_column.is_some(),
                 });
                 self.schema
                     .writers
@@ -81,33 +77,33 @@ impl Resolver<'_, '_> {
             .filter_map(|property| graph.property_id(source.entity, property))
             .collect();
         let mut columns = Vec::with_capacity(source.columns.len());
-        for (id, spec) in &source.columns {
-            let property = graph.property(*id);
-            let storage_type =
-                self.diagnostics
-                    .require(spec.storage_type.clone(), source.package, || {
-                        format!(
-                            "store {} column {}.{} declares no storage type",
-                            store.name,
-                            graph.entity(source.entity).name,
-                            property.name
-                        )
-                    });
-            let Some(storage_type) = storage_type else {
+        for column in &source.columns {
+            let (id, property) = (column.property, graph.property(column.property));
+            let spec = self
+                .diagnostics
+                .require(column.options.as_ref(), source.package, || {
+                    format!(
+                        "store {} column {}.{} declares no storage type",
+                        store.name,
+                        graph.entity(source.entity).name,
+                        property.name
+                    )
+                });
+            let Some(spec) = spec else {
                 continue;
             };
             columns.push(Column {
-                name: store.column(*id).unwrap_or_default().to_string(),
-                property: Some(*id),
+                name: column.name.to_string(),
+                property: Some(id),
                 data_type: Some(property.data_type),
-                storage_type,
-                nullable: property.nullable && !epoch.contains(id),
+                storage_type: spec.storage_type.clone(),
+                nullable: property.nullable && !epoch.contains(&id),
                 default: spec
                     .default
                     .clone()
                     .or_else(|| property.default.as_ref().map(|value| value.literal())),
                 codecs: spec.codec.clone(),
-                null_as_epoch: epoch.contains(id),
+                null_as_epoch: epoch.contains(&id),
             });
         }
         columns

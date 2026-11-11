@@ -219,7 +219,7 @@ fn backends_reject_unknown_options() {
     }));
     assert_eq!(errors.len(), 1);
     assert!(
-        errors[0].starts_with("gitlab: store graph: unknown field `delete_column`"),
+        errors[0].starts_with("gitlab/storage/clickhouse.yaml: unknown field `delete_column`"),
         "{errors:?}"
     );
 }
@@ -602,6 +602,10 @@ fn model_identity_changes_with_the_spec() {
     let extended = load(&["gitlab", "linear"]).unwrap();
     assert_eq!(first.id(), again.id());
     assert_ne!(first.id(), extended.id());
+    let fragments = || Packages::embedded().fragments().unwrap();
+    let prefixed =
+        query_data_model::implementations::clickhouse::versioned(fragments(), "v1_").unwrap();
+    assert_ne!(prefixed.id(), fragments().id());
 }
 
 fn edit_one(
@@ -820,7 +824,7 @@ fn a_managed_store_rejects_unknown_physical_references() {
         managed(
             r#"    copies: { gl_note_by_id: { source: gl_missing, sort_key: [id] } }
     tables:
-      audit: { engine: MergeTree, columns: { at: {} }, indexes: { actor: minmax } }
+      audit: { engine: MergeTree, columns: { at: { type: DateTime } }, indexes: { actor: minmax } }
     views:
       broken: { select: "SELECT 1" }
       misrouted: { select: "SELECT 1", to: gl_missing }
@@ -832,10 +836,42 @@ fn a_managed_store_rejects_unknown_physical_references() {
         errors,
         [
             "gitlab: copy gl_note_by_id names unknown table gl_missing",
-            "gitlab: store graph table audit column at declares no type",
             "gitlab: store graph table audit indexes unknown column actor",
             "gitlab: store graph view broken names neither a destination table nor an engine",
             "gitlab: store graph view misrouted writes unknown table gl_missing",
+        ]
+    );
+    let untyped = load_with(
+        &["gitlab"],
+        managed("    tables:\n      audit: { engine: MergeTree, columns: { at: {} } }\n"),
+    );
+    assert_eq!(
+        spec_errors(untyped),
+        ["gitlab/storage/clickhouse.yaml: missing field `type`"]
+    );
+}
+
+#[test]
+fn join_filters_reject_values_that_are_not_plain_words() {
+    let errors = spec_errors(load_with(
+        &["gitlab"],
+        managed(
+            r#"    joins:
+      gl_named_project:
+        sort_key: [t0_id]
+        sources:
+        - table: gl_project
+          columns: { id: t0_id }
+          filter: { name: "x' OR 1 = 1 --" }
+        nodes:
+        - { entity: Project, source: 0, key: t0_id }
+"#,
+        ),
+    ));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph join gl_named_project filters gl_project.name on `x' OR 1 = 1 --`, which is not a plain word"
         ]
     );
 }

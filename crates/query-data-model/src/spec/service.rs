@@ -1,9 +1,9 @@
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use super::{Naming, Raw, Resolved, is_false};
+use super::{Naming, Raw, Resolved};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceFragment {
     pub package: String,
@@ -11,7 +11,7 @@ pub struct ServiceFragment {
     pub lookups: IndexMap<String, Lookup<Raw>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct Lookup<S: Naming = Resolved> {
     #[serde(skip)]
@@ -22,8 +22,8 @@ pub struct Lookup<S: Naming = Resolved> {
     pub entity: S::Entity,
     pub provides: Vec<S::Property>,
     pub keys: Vec<S::Property>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub operators: Vec<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default)]
     pub disabled: bool,
 }

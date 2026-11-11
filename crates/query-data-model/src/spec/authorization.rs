@@ -1,36 +1,36 @@
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use super::{Naming, Raw, Resolved, is_false, is_true, yes};
+use super::{Naming, Raw, Resolved, yes};
 use crate::{EdgeVariantScope, EntityId, RequiredRole, Scope};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthorizationFragment {
     pub package: String,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub entities: IndexMap<String, EntityAccess<Raw>>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub relationships: IndexMap<String, ScopeSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub properties: IndexMap<String, PropertyAccess>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct EntityAccess<S: Naming = Resolved> {
     pub scope: Scope,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub role: Option<RequiredRole>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub redaction: Option<Redaction<S>>,
     /// A foreign key to the namespace entity that holds the row; a filter on it bounds the entity.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub anchor: Option<Anchor<S>>,
 }
 
 /// A property that holds the id of the namespace entity a row belongs to.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct Anchor<S: Naming = Resolved> {
     pub property: S::Property,
@@ -39,7 +39,7 @@ pub struct Anchor<S: Naming = Resolved> {
 
 impl Copy for Anchor {}
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct Redaction<S: Naming = Resolved> {
     pub resource: String,
@@ -49,31 +49,31 @@ pub struct Redaction<S: Naming = Resolved> {
     pub owner: S::Loaded<Option<EntityId>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum ScopeSpec {
     All(EdgeVariantScope),
     PerVariant(ScopeVariants),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeVariants {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub scope: Option<EdgeVariantScope>,
     pub variants: IndexMap<String, EdgeVariantScope>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PropertyAccess {
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default)]
     pub hidden: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default)]
     pub admin_only: bool,
-    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    #[serde(default = "yes")]
     pub filterable: bool,
-    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    #[serde(default = "yes")]
     pub like: bool,
 }
 

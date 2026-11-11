@@ -6,7 +6,7 @@ use super::{Column, GraphTable, Table, joins};
 use crate::catalog::sources::Writer;
 use crate::catalog::{Diagnostics, StoreInput};
 use crate::implementations::clickhouse::ClickHouse;
-use crate::implementations::relational::RelationalStore;
+use crate::implementations::relational::ReadPaths;
 
 /// The writers of each edge table: the pipelines that emit a variant bound to it, and for a
 /// variant no pipeline emits, the endpoints that no pipeline writes, which their own indexer
@@ -82,8 +82,7 @@ impl Resolver<'_, '_> {
         let mut writers = writers(input, self.diagnostics);
         for (name, spec) in &input.options.edge_tables {
             let context = format!("{} edge table {name}", self.context());
-            let mut columns =
-                declared_columns(&package, &context, &spec.columns, creates, self.diagnostics);
+            let mut columns = declared_columns(&spec.columns);
             if !creates {
                 for denormalized in &input.options.denormalized {
                     if !columns
@@ -155,7 +154,7 @@ impl Resolver<'_, '_> {
         }
     }
 
-    pub(super) fn copies(&mut self, relational: &mut RelationalStore) {
+    pub(super) fn copies(&mut self, paths: &mut ReadPaths) {
         for (name, copy) in &self.input.options.copies {
             let source = self.tables.iter().find(|table| table.name == copy.source);
             let Some(source) =
@@ -166,7 +165,7 @@ impl Resolver<'_, '_> {
             else {
                 continue;
             };
-            let copied = relational
+            let copied = paths
                 .copies
                 .iter()
                 .any(|(copy_name, _)| *copy_name == copy.source);
@@ -180,7 +179,7 @@ impl Resolver<'_, '_> {
                 sort_key: copy.sort_key.clone(),
                 ..source
             });
-            relational.copies.push((name.clone(), copy.source.clone()));
+            paths.copies.push((name.clone(), copy.source.clone()));
         }
     }
 }

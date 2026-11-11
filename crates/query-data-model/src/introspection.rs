@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::catalog::Store;
-use crate::{Catalog, DuckDb, Entity, EntityId, Model, Property, RelationshipVariant};
+use crate::{DuckDb, Entity, EntityId, Model, Property, RelationshipVariant, StorageBackend};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntrospectionScope {
@@ -51,9 +51,10 @@ impl IntrospectionScope {
 }
 
 fn local_store(model: &Model, entity: EntityId) -> Option<&Store> {
-    model.stores().iter().find(|store| {
-        store.connection == Catalog::<DuckDb>::CONNECTION && store.source(entity).is_some()
-    })
+    model
+        .stores()
+        .iter()
+        .find(|store| store.kind == DuckDb::KIND && store.source(entity).is_some())
 }
 
 #[derive(Debug, thiserror::Error)]

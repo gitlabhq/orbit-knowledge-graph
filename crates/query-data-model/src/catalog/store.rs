@@ -4,21 +4,15 @@ use std::fmt::Debug;
 use std::panic::RefUnwindSafe;
 
 use super::access::Guard;
-use crate::spec::{AccessHints, BackendOptions, Binding, Resolved};
+use crate::spec::{AccessHints, Binding, Resolved};
 use crate::{Endpoint, EntityId, ForeignKey, PropertyId, RelationshipVariantId};
 
 /// A store's backend facts, which only the backend's catalog reads.
-pub(super) type Facts = Box<dyn BackendFacts>;
+pub(crate) type Facts = Box<dyn BackendFacts>;
 
-pub(super) trait BackendFacts: Any + Debug + Send + Sync + RefUnwindSafe {
-    fn as_any(&self) -> &dyn Any;
-}
+pub(crate) trait BackendFacts: Any + Debug + Send + Sync + RefUnwindSafe {}
 
-impl<T: Any + Debug + Send + Sync + RefUnwindSafe> BackendFacts for T {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl<T: Any + Debug + Send + Sync + RefUnwindSafe> BackendFacts for T {}
 
 /// One entity a store holds: its table, when the store is relational, and how queries read it.
 #[derive(Debug, Clone)]
@@ -37,15 +31,6 @@ pub struct StoredColumn {
     pub immutable: bool,
 }
 
-/// The backend blocks of one entity, which the store's backend parses at load.
-#[derive(Debug)]
-pub(crate) struct EntityOptions {
-    pub entity: EntityId,
-    pub package: String,
-    pub options: BackendOptions,
-    pub columns: Vec<(PropertyId, BackendOptions)>,
-}
-
 #[derive(Debug)]
 pub struct Store {
     pub name: String,
@@ -54,8 +39,6 @@ pub struct Store {
     pub trusted: bool,
     pub path_column: Option<String>,
     pub package: String,
-    pub(crate) options: BackendOptions,
-    pub(crate) entity_options: Vec<EntityOptions>,
     pub(super) sources: Vec<Option<Source>>,
     pub(super) columns: Vec<Option<StoredColumn>>,
     pub(super) excluded: HashSet<PropertyId>,
@@ -139,6 +122,6 @@ impl Store {
     }
 
     pub(super) fn facts<T: 'static>(&self) -> Option<&T> {
-        self.facts.as_deref()?.as_any().downcast_ref()
+        (self.facts.as_deref()? as &dyn Any).downcast_ref()
     }
 }

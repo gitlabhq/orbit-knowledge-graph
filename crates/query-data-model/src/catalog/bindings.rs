@@ -6,8 +6,7 @@ use super::Diagnostics;
 use super::store::Store;
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::spec::{
-    Binding, Discriminator, Key, KeySpec, Raw, Resolved, StorageFragment, format_variant,
-    parse_variant,
+    Binding, Discriminator, Key, KeySpec, Raw, Resolved, StorageFragment, parse_variant,
 };
 use crate::{Endpoint, ForeignKey, GraphCatalog, PropertyId, RelationshipVariant};
 
@@ -198,28 +197,25 @@ fn check_shared_keys(graph: &GraphCatalog, store: &Store, diagnostics: &mut Diag
                 }
         });
         if let Some((other, _, _)) = clash {
-            let name = |variant: &RelationshipVariant| {
-                format!(
-                    "{}({})",
-                    graph.relationship(variant.relationship).name,
-                    format_variant(
-                        &graph.entity(variant.source).name,
-                        &graph.entity(variant.target).name
-                    )
-                )
-            };
             diagnostics.error(
                 package,
                 format!(
                     "store {} keys {} and {} on {} without distinct type values",
                     store.name,
-                    name(other),
-                    name(variant),
+                    label(graph, other),
+                    label(graph, variant),
                     graph.property(column).name
                 ),
             );
         }
     }
+}
+
+fn label(graph: &GraphCatalog, variant: &RelationshipVariant) -> String {
+    let relationship = &graph.relationship(variant.relationship).name;
+    let source = &graph.entity(variant.source).name;
+    let target = &graph.entity(variant.target).name;
+    format!("{relationship}({source} -> {target})")
 }
 
 /// The checks that span stores: every property and variant is bound somewhere, stores agree on
@@ -275,32 +271,16 @@ pub(super) fn check(
         check_shared_keys(graph, store, diagnostics);
     }
     for variant in graph.variants() {
-        let label = || {
-            format!(
-                "{}({})",
-                graph.relationship(variant.relationship).name,
-                format_variant(
-                    &graph.entity(variant.source).name,
-                    &graph.entity(variant.target).name
-                )
-            )
-        };
         let on = |connection: &str, entity| {
             stores
                 .iter()
                 .any(|store| store.connection == connection && store.source(entity).is_some())
         };
-        let mut bound = false;
-        for store in stores.iter() {
+        for store in stores {
             let holds =
                 store.source(variant.source).is_some() && on(&store.connection, variant.target);
-            if store.binding(variant.id).is_none() && store.declared.contains(&variant.id) {
-                bound = true;
-                continue;
-            }
             match store.binding(variant.id) {
                 Some(binding) => {
-                    bound = true;
                     let joins = binding.fk.as_ref().is_none_or(|key| {
                         let referenced = key
                             .foreign_key
@@ -314,26 +294,30 @@ pub(super) fn check(
                             format!(
                                 "store {} binds {}, whose other endpoint is not on connection {}",
                                 store.name,
-                                label(),
+                                label(graph, variant),
                                 store.connection
                             ),
                         );
                     }
                 }
-                None if holds => diagnostics.error(
+                None if holds && !store.declared.contains(&variant.id) => diagnostics.error(
                     &store.package,
                     format!(
                         "store {} holds both endpoints of {} but does not bind it",
                         store.name,
-                        label()
+                        label(graph, variant)
                     ),
                 ),
                 None => {}
             }
         }
-        if !bound {
+        if !stores
+            .iter()
+            .any(|store| store.declared.contains(&variant.id))
+        {
             let package = &graph.entity(variant.source).package;
-            diagnostics.error(package, format!("{} is bound in no store", label()));
+            let message = format!("{} is bound in no store", label(graph, variant));
+            diagnostics.error(package, message);
         }
     }
 }

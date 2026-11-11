@@ -10,9 +10,10 @@ mod store;
 
 pub use crate::Scope;
 pub use access::{Access, EntityAccess, Guard, PathHop, PropertyAccess, Redaction, RowFilter};
+pub(crate) use backend::registered;
 pub use backend::{
-    Catalog, ExecuteError, NoOptions, Render, Row, SourceInput, StorageBackend, StoreInput,
-    check_unrelational,
+    Catalog, ColumnInput, ExecuteError, NoOptions, Render, Row, SourceInput, StorageBackend,
+    StoreInput, check_unrelational,
 };
 pub use diagnostics::{Diagnostics, SpecError};
 pub use lookups::{Lookup, Lookups};
@@ -24,7 +25,7 @@ use std::collections::HashSet;
 
 use sha2::{Digest as _, Sha256};
 
-use crate::spec::Fragment;
+use crate::spec::{Fragment, Fragments};
 use crate::{DataModelError, GraphCatalog, PropertyId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -44,14 +45,14 @@ impl Model {
     pub fn from_yaml<'a>(
         sources: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Result<Self, DataModelError> {
-        Self::load(&Fragment::parse_all(sources)?)
+        Self::load(&Fragments::parse(sources)?)
     }
 
-    pub fn load(fragments: &[Fragment]) -> Result<Self, DataModelError> {
+    pub fn load(fragments: &Fragments) -> Result<Self, DataModelError> {
         let mut diagnostics = Diagnostics::default();
         let (mut graphs, mut authorizations, mut storages, mut services, mut sources) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        for fragment in fragments {
+        for fragment in fragments.iter() {
             match fragment {
                 Fragment::Graph(graph) => graphs.push(graph.clone()),
                 Fragment::Authorization(access) => authorizations.push(access),
@@ -65,12 +66,12 @@ impl Model {
         let access = Access::resolve(&graph, &authorizations, &mut diagnostics);
         let lookups = Lookups::resolve(&graph, &services, &mut diagnostics);
         let served: HashSet<PropertyId> = lookups.served().collect();
-        let mut stores = layout::resolve(&graph, &storages, &served, &mut diagnostics);
+        let (mut stores, blocks) = layout::resolve(&graph, &storages, &served, &mut diagnostics);
         access.resolve_guards(&graph, &mut stores, &mut diagnostics);
         let sources = Sources::resolve(&graph, &sources, &served, &mut diagnostics);
         diagnostics.finish()?;
         let mut model = Self {
-            id: identity(fragments)?,
+            id: fragments.id(),
             graph,
             access,
             lookups,
@@ -78,7 +79,7 @@ impl Model {
             sources,
         };
         let mut diagnostics = Diagnostics::default();
-        model.resolve_backends(&mut diagnostics);
+        model.resolve_backends(&blocks, &mut diagnostics);
         diagnostics.finish()?;
         Ok(model)
     }
@@ -130,25 +131,18 @@ impl Model {
     }
 }
 
-fn identity(fragments: &[Fragment]) -> Result<ModelId, DataModelError> {
-    struct Digest<'a>(&'a mut Sha256);
-    impl std::io::Write for Digest<'_> {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.update(bytes);
-            Ok(bytes.len())
+impl ModelId {
+    /// The digest of `parts`, each length-prefixed so no two sequences of parts collide.
+    pub(crate) fn digest<'a>(parts: impl IntoIterator<Item = &'a [u8]>) -> Self {
+        let mut hasher = Sha256::new();
+        for part in parts {
+            hasher.update(part.len().to_le_bytes());
+            hasher.update(part);
         }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
+        Self(hasher.finalize().into())
     }
-    let mut hasher = Sha256::new();
-    serde_json::to_writer(Digest(&mut hasher), fragments)
-        .map_err(|error| DataModelError::Invalid(error.to_string()))?;
-    for fragment in fragments {
-        if let Fragment::Source(source) = fragment {
-            serde_json::to_writer(Digest(&mut hasher), &source.templates)
-                .map_err(|error| DataModelError::Invalid(error.to_string()))?;
-        }
+
+    pub(crate) fn tagged(self, tag: &str) -> Self {
+        Self::digest([self.0.as_slice(), tag.as_bytes()])
     }
-    Ok(ModelId(hasher.finalize().into()))
 }

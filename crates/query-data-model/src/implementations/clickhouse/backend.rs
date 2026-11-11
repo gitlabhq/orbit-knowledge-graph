@@ -4,7 +4,7 @@ use super::ClickHouse;
 use super::schema::{self, Schema};
 use super::spec::{ClickHouseOptions, ClickHouseSource, ColumnSpec};
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
-use crate::implementations::relational::{RelationalFacts, RelationalStore};
+use crate::implementations::relational::{ReadPaths, RelationalFacts, RelationalStore};
 use crate::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
     MaterializedJoin, MaterializedNode, MaterializedRelationship, TraversalPathLookup,
@@ -37,6 +37,7 @@ impl IndexKind {
 #[derive(Debug)]
 pub struct ClickHouseStore {
     pub relational: RelationalStore,
+    pub read_paths: ReadPaths,
     schema: Option<Schema>,
 }
 
@@ -50,17 +51,21 @@ impl RelationalFacts for ClickHouseStore {
     fn relational(&self) -> &RelationalStore {
         &self.relational
     }
+
+    fn read_paths(&self) -> Option<&ReadPaths> {
+        Some(&self.read_paths)
+    }
 }
 
 impl StorageBackend for ClickHouse {
     const KIND: &'static str = "clickhouse";
     type Options = ClickHouseOptions;
     type SourceOptions = ClickHouseSource;
-    type ColumnOptions = ColumnSpec;
+    type ColumnOptions = Option<ColumnSpec>;
     type Store = ClickHouseStore;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> ClickHouseStore {
-        let options = &input.options;
+        let options = input.options;
         let edge_tables: Vec<(&str, bool)> = options
             .edge_tables
             .iter()
@@ -73,18 +78,23 @@ impl StorageBackend for ClickHouse {
             &edge_tables,
             diagnostics,
         );
-        annotate_sources(&input, &mut relational, diagnostics);
-        resolve_denormalized(&input, &mut relational, diagnostics);
-        resolve_joins(&input, &mut relational, diagnostics);
-        let schema = schema::resolve(&input, &mut relational, diagnostics);
+        let mut read_paths = ReadPaths::default();
+        annotate_sources(&input, &mut read_paths, diagnostics);
+        resolve_denormalized(&input, &mut read_paths, diagnostics);
+        resolve_joins(&input, &mut read_paths, diagnostics);
+        let schema = schema::resolve(&input, &mut relational, &mut read_paths, diagnostics);
         relational.check_attribute_columns(&input, diagnostics);
-        ClickHouseStore { relational, schema }
+        ClickHouseStore {
+            relational,
+            read_paths,
+            schema,
+        }
     }
 }
 
 fn annotate_sources(
     input: &StoreInput<'_, ClickHouse>,
-    relational: &mut RelationalStore,
+    paths: &mut ReadPaths,
     diagnostics: &mut Diagnostics,
 ) {
     let graph = input.graph;
@@ -100,20 +110,22 @@ fn annotate_sources(
                 format!("store {} does not store {name}.{property}", store.name)
             })
         };
-        let options = &source.options;
+        let options = source.options;
         let shared = &input.options.columns;
-        schema::check_indexes(
-            source.package,
-            &format!("store {} {name}", store.name),
-            options.indexes.as_ref().unwrap_or(&Default::default()),
-            |target| {
-                shared.contains_key(target)
-                    || graph
-                        .property_id(entity, target)
-                        .is_some_and(|id| store.column(id).is_some())
-            },
-            diagnostics,
-        );
+        if let Some(indexes) = &options.indexes {
+            schema::check_indexes(
+                source.package,
+                &format!("store {} {name}", store.name),
+                indexes,
+                |target| {
+                    shared.contains_key(target)
+                        || graph
+                            .property_id(entity, target)
+                            .is_some_and(|id| store.column(id).is_some())
+                },
+                diagnostics,
+            );
+        }
         for property in &options.epoch_nulls {
             stored(property, diagnostics);
         }
@@ -124,7 +136,7 @@ fn annotate_sources(
             .count()
             > 0;
         if fans_out {
-            relational.high_fan_out.insert(entity);
+            paths.high_fan_out.insert(entity);
         }
         for (kind, lookup) in &options.path_lookups {
             let property = diagnostics.require(
@@ -133,7 +145,7 @@ fn annotate_sources(
                 || format!("{name} path lookup key {} is not a property", lookup.key),
             );
             if let Some(property) = property {
-                relational.path_lookups.insert(
+                paths.path_lookups.insert(
                     (entity, *kind),
                     TraversalPathLookup {
                         table: lookup.table.clone(),
@@ -147,7 +159,7 @@ fn annotate_sources(
 
 fn resolve_denormalized(
     input: &StoreInput<'_, ClickHouse>,
-    relational: &mut RelationalStore,
+    paths: &mut ReadPaths,
     diagnostics: &mut Diagnostics,
 ) {
     let graph = input.graph;
@@ -160,23 +172,19 @@ fn resolve_denormalized(
         }) else {
             continue;
         };
-        let (Some(property), Some(relationship)) = (
-            graph.property_id(entity, &spec.property),
-            graph.relationship_id(&spec.relationship),
-        ) else {
+        let label = format!("denormalized property {}.{}", spec.entity, spec.property);
+        let property =
+            diagnostics.require(graph.property_id(entity, &spec.property), package, || {
+                format!("{label} names an unknown property")
+            });
+        let relationship =
+            diagnostics.require(graph.relationship_id(&spec.relationship), package, || {
+                format!("{label} names unknown relationship {}", spec.relationship)
+            });
+        let (Some(property), Some(relationship)) = (property, relationship) else {
             continue;
         };
-        let direction = match spec.side.as_str() {
-            "source" => DenormalizedDirection::Source,
-            "target" => DenormalizedDirection::Target,
-            side => {
-                diagnostics.error(
-                    package,
-                    format!("denormalized property side `{side}` is not source or target"),
-                );
-                continue;
-            }
-        };
+        let direction = spec.side;
         let key = DenormalizedKey {
             property,
             direction,
@@ -203,12 +211,12 @@ fn resolve_denormalized(
                 nullable: spec.nullable,
             });
     }
-    relational.denormalized = DenormalizedCatalog::new(properties, declared);
+    paths.denormalized = DenormalizedCatalog::new(properties, declared);
 }
 
 fn resolve_joins(
     input: &StoreInput<'_, ClickHouse>,
-    relational: &mut RelationalStore,
+    paths: &mut ReadPaths,
     diagnostics: &mut Diagnostics,
 ) {
     let graph = input.graph;
@@ -221,7 +229,12 @@ fn resolve_joins(
                 let entity = diagnostics.require(graph.entity_id(&node.entity), package, || {
                     format!("join {table} names unknown entity {}", node.entity)
                 })?;
-                let source = spec.sources.get(node.source)?;
+                let source = diagnostics.require(spec.sources.get(node.source), package, || {
+                    format!(
+                        "join {table} reads {} from unknown source {}",
+                        node.entity, node.source
+                    )
+                })?;
                 Some(MaterializedNode {
                     entity,
                     source_occurrence: node.source,
@@ -245,10 +258,23 @@ fn resolve_joins(
             .relationships
             .iter()
             .map(|relationship| {
-                let (source, target) = (
-                    nodes.get(relationship.source)?,
-                    nodes.get(relationship.target)?,
-                );
+                let mut node = |slot: usize| {
+                    diagnostics.require(nodes.get(slot), package, || {
+                        let name = &relationship.relationship;
+                        format!("join {table} relationship {name} names unknown node {slot}")
+                    })
+                };
+                let (source, target) = (node(relationship.source)?, node(relationship.target)?);
+                let edge = match relationship.edge {
+                    Some(edge) => {
+                        let source =
+                            diagnostics.require(spec.sources.get(edge), package, || {
+                                format!("join {table} reads an edge from unknown source {edge}")
+                            })?;
+                        source.columns.clone()
+                    }
+                    None => Default::default(),
+                };
                 let variant = graph.variant_named(
                     &relationship.relationship,
                     &graph.entity(source.entity).name,
@@ -267,18 +293,14 @@ fn resolve_joins(
                     edge_occurrence: relationship.edge,
                     source_id_column: source.identity_column.clone(),
                     target_id_column: target.identity_column.clone(),
-                    columns: relationship
-                        .edge
-                        .and_then(|edge| spec.sources.get(edge))
-                        .map(|edge| edge.columns.clone())
-                        .unwrap_or_default(),
+                    columns: edge,
                 })
             })
             .collect();
         let Some(relationships) = relationships else {
             continue;
         };
-        relational.joins.push(MaterializedJoin {
+        paths.joins.push(MaterializedJoin {
             table: table.clone(),
             nodes,
             relationships,

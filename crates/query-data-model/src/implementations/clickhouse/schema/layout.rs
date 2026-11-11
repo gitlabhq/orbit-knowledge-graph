@@ -19,7 +19,7 @@ pub(super) fn auxiliary_table(
     diagnostics: &mut Diagnostics,
 ) -> Option<Table> {
     let engine = parse_engine(package, context, &spec.engine, diagnostics)?;
-    let columns = declared_columns(package, context, &spec.columns, true, diagnostics);
+    let columns = declared_columns(&spec.columns);
     Some(Table {
         indexes: table_indexes(package, context, &spec.indexes, &columns, diagnostics),
         projections: projections(&spec.projections),
@@ -32,34 +32,16 @@ pub(super) fn auxiliary_table(
     })
 }
 
-/// A store that creates its tables must type every column it declares; one that does not may
-/// leave a column untyped.
-pub(super) fn declared_columns(
-    package: &str,
-    context: &str,
-    columns: &IndexMap<String, ColumnSpec>,
-    typed: bool,
-    diagnostics: &mut Diagnostics,
-) -> Vec<Column> {
+pub(super) fn declared_columns(columns: &IndexMap<String, ColumnSpec>) -> Vec<Column> {
     columns
         .iter()
-        .filter_map(|(name, spec)| {
-            let storage_type = match &spec.storage_type {
-                Some(storage_type) => storage_type.clone(),
-                None if typed => {
-                    diagnostics.error(package, format!("{context} column {name} declares no type"));
-                    return None;
-                }
-                None => String::new(),
-            };
-            Some(Column {
-                data_type: data_type(&storage_type),
-                nullable: nullable(&storage_type),
-                storage_type,
-                default: spec.default.clone(),
-                codecs: spec.codec.clone(),
-                ..Column::new(name, None)
-            })
+        .map(|(name, spec)| Column {
+            data_type: data_type(&spec.storage_type),
+            nullable: nullable(&spec.storage_type),
+            storage_type: spec.storage_type.clone(),
+            default: spec.default.clone(),
+            codecs: spec.codec.clone(),
+            ..Column::new(name, None)
         })
         .collect()
 }

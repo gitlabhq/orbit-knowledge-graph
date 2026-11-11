@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::DuckDb;
 use crate::DataType;
@@ -8,29 +8,29 @@ use crate::implementations::relational::{
 };
 use crate::spec::parse_word;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DuckDbSource {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub sort_key: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DuckDbColumn {
-    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
-    pub storage_type: Option<String>,
+    #[serde(rename = "type")]
+    pub storage_type: String,
 }
 
 impl StorageBackend for DuckDb {
     const KIND: &'static str = "duckdb";
     type Options = RelationalOptions;
     type SourceOptions = DuckDbSource;
-    type ColumnOptions = DuckDbColumn;
+    type ColumnOptions = Option<DuckDbColumn>;
     type Store = RelationalStore;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> RelationalStore {
-        let options = &input.options;
+        let options = input.options;
         let edge_tables: Vec<(&str, bool)> = options
             .edge_tables
             .iter()
@@ -63,26 +63,23 @@ fn entity_tables(input: &StoreInput<'_, DuckDb>, diagnostics: &mut Diagnostics) 
             let columns = entity
                 .columns
                 .iter()
-                .filter_map(|(id, options)| {
-                    let property = graph.property(*id);
-                    let storage_type = diagnostics.require(
-                        options.storage_type.clone(),
-                        entity.package,
-                        || {
+                .filter_map(|column| {
+                    let property = graph.property(column.property);
+                    let spec =
+                        diagnostics.require(column.options.as_ref(), entity.package, || {
                             format!(
                                 "store {} column {}.{} declares no storage type",
                                 store.name,
                                 graph.entity(entity.entity).name,
                                 property.name
                             )
-                        },
-                    )?;
+                        })?;
                     Some(Column {
-                        property: Some(*id),
-                        storage_type,
+                        property: Some(column.property),
+                        storage_type: spec.storage_type.clone(),
                         nullable: property.nullable,
                         default: property.default.as_ref().map(|value| value.literal()),
-                        ..Column::new(store.column(*id)?, Some(property.data_type))
+                        ..Column::new(column.name, Some(property.data_type))
                     })
                 })
                 .collect();

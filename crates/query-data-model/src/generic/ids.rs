@@ -1,17 +1,7 @@
 macro_rules! id {
     ($name:ident) => {
         #[derive(
-            Debug,
-            Clone,
-            Copy,
-            Default,
-            PartialEq,
-            Eq,
-            PartialOrd,
-            Ord,
-            Hash,
-            serde::Serialize,
-            serde::Deserialize,
+            Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize,
         )]
         pub struct $name(pub(crate) usize);
 

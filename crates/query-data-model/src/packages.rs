@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use rust_embed::Embed;
 
-use crate::spec::{Fragment, TEMPLATE_EXTENSION};
+use crate::spec::{Fragments, TEMPLATE_EXTENSION};
 use crate::{DataModelError, Model};
 
 #[derive(Embed)]
@@ -50,8 +50,8 @@ impl Packages {
         &self.sources
     }
 
-    pub fn fragments(&self) -> Result<Vec<Fragment>, DataModelError> {
-        Fragment::parse_all(
+    pub fn fragments(&self) -> Result<Fragments, DataModelError> {
+        Fragments::parse(
             self.sources
                 .iter()
                 .map(|(path, yaml)| (path.as_str(), yaml.as_str())),

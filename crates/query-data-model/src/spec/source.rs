@@ -2,41 +2,33 @@ use std::collections::BTreeMap;
 
 use indexmap::IndexMap;
 use serde::de::Error as _;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer};
 
-use super::{Naming, Raw, Resolved, Short, ShortForm, is_false};
+use super::{Naming, Raw, Resolved, Short, ShortForm};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::{EntityId, RelationshipVariantId};
 
 pub const GENERATED_QUERY: &str = "generated";
 pub const TEMPLATE_EXTENSION: &str = ".sql.j2";
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceFragment {
     pub package: String,
     pub source: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub declare: Option<SourceDeclaration>,
-    #[serde(
-        default,
-        skip_serializing_if = "IndexMap::is_empty",
-        deserialize_with = "entities"
-    )]
+    #[serde(default, deserialize_with = "entities")]
     pub entities: Pipelines,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub relationships: IndexMap<String, RelationshipSourceSpec>,
-    #[serde(
-        default,
-        skip_serializing_if = "IndexMap::is_empty",
-        deserialize_with = "derived"
-    )]
+    #[serde(default, deserialize_with = "derived")]
     pub derived: Pipelines,
     #[serde(skip)]
     pub templates: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceDeclaration {
     pub connection: String,
@@ -45,48 +37,34 @@ pub struct SourceDeclaration {
     pub deleted: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelationshipSourceSpec {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub reindex: Vec<Short<ReindexTrigger<Raw>>>,
     #[serde(deserialize_with = "relationship_pipelines")]
     pub pipelines: Pipelines,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PipelineSpec {
     pub tables: Vec<String>,
     pub order_by: Vec<String>,
     pub query: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub fields: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub lookups: Option<Vec<ExtractLookup<Raw>>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub reindex: Option<Vec<Short<ReindexTrigger<Raw>>>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub global: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub partition_count: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub columns: Option<IndexMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub binary: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub enrich: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub edges: Option<Vec<EdgeMapping<Raw>>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<Endpoint<Raw>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<Endpoint<Raw>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub emits: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub transform: Option<String>,
 }
 
@@ -176,13 +154,13 @@ fn derived<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Pipelines, D::E
     pipelines(deserializer, "derived")
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct ExtractLookup<S: Naming = Resolved> {
     pub entity: S::Entity,
     #[serde(rename = "id")]
     pub id_column: String,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub fields: IndexMap<String, String>,
     #[serde(skip)]
     pub table: S::Loaded<String>,
@@ -190,7 +168,7 @@ pub struct ExtractLookup<S: Naming = Resolved> {
     pub namespaced: S::Loaded<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct EdgeMapping<S: Naming = Resolved> {
     #[serde(rename = "label")]
@@ -199,15 +177,15 @@ pub struct EdgeMapping<S: Naming = Resolved> {
     pub source: Endpoint<S>,
     #[serde(rename = "to")]
     pub target: Endpoint<S>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub array_field: Option<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default)]
     pub mutable: bool,
     #[serde(skip)]
     pub variants: S::Loaded<Vec<RelationshipVariantId>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct Endpoint<S: Naming = Resolved> {
     pub field: String,
@@ -216,7 +194,7 @@ pub struct Endpoint<S: Naming = Resolved> {
     pub properties: S::Enrich,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged, bound = "")]
 pub enum EndpointKind<S: Naming = Resolved> {
     Entity(S::Entity),
@@ -227,7 +205,7 @@ pub enum EndpointKind<S: Naming = Resolved> {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct ReindexTrigger<S: Naming = Resolved> {
     pub table: String,
@@ -288,10 +266,10 @@ impl EndpointKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum PathSpec {
-    Column(#[serde(with = "column_path")] String),
+    Column(#[serde(deserialize_with = "column_path")] String),
     Dictionary {
         dictionary: String,
         key_column: String,
@@ -304,21 +282,11 @@ impl PathSpec {
     }
 }
 
-mod column_path {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    #[derive(Serialize, Deserialize)]
+fn column_path<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct ColumnPath {
         column: String,
     }
-
-    pub fn serialize<S: Serializer>(column: &str, serializer: S) -> Result<S::Ok, S::Error> {
-        let column = column.to_string();
-        ColumnPath { column }.serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
-        ColumnPath::deserialize(deserializer).map(|path| path.column)
-    }
+    ColumnPath::deserialize(deserializer).map(|path| path.column)
 }

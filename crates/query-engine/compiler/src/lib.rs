@@ -170,7 +170,8 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use query_data_model::spec::{ColumnStorage, Fragment, OptionValue};
+    use query_data_model::implementations::clickhouse::spec::ColumnSpec;
+    use query_data_model::spec::{ColumnStorage, Fragment, Fragments};
     use std::sync::LazyLock;
 
     static MODEL: LazyLock<Arc<Catalog<ClickHouse>>> =
@@ -239,17 +240,17 @@ mod tests {
         );
     }
 
-    fn packaged_model(fragments: &[Fragment]) -> Arc<Catalog<ClickHouse>> {
+    fn packaged_model(fragments: &Fragments) -> Arc<Catalog<ClickHouse>> {
         let model = Arc::new(query_data_model::Model::load(fragments).expect("model must load"));
         Arc::new(Catalog::<ClickHouse>::from_model(&model).expect("model must bind"))
     }
 
-    fn versioned(fragments: Vec<Fragment>, prefix: &str) -> Vec<Fragment> {
+    fn versioned(fragments: Fragments, prefix: &str) -> Fragments {
         query_data_model::implementations::clickhouse::versioned(fragments, prefix)
             .expect("prefix must apply")
     }
 
-    fn embedded_fragments() -> Vec<Fragment> {
+    fn embedded_fragments() -> Fragments {
         query_data_model::Packages::embedded()
             .fragments()
             .expect("packages must parse")
@@ -271,44 +272,49 @@ mod tests {
 
     #[test]
     fn compile_uses_supplied_model_for_scoped_user_table() {
-        let mut fragments = embedded_fragments();
-        for fragment in &mut fragments {
-            match fragment {
-                Fragment::Graph(graph) => {
-                    if let Some(user) = graph.entities.get_mut("User") {
-                        let property = orbit_utils::yaml::from_str("string").unwrap();
-                        user.properties.insert("traversal_path".into(), property);
+        let scoped = || {
+            let mut fragments = embedded_fragments();
+            for fragment in fragments.iter_mut() {
+                match fragment {
+                    Fragment::Graph(graph) => {
+                        if let Some(user) = graph.entities.get_mut("User") {
+                            let property = orbit_utils::yaml::from_str("string").unwrap();
+                            user.properties.insert("traversal_path".into(), property);
+                        }
                     }
-                }
-                Fragment::Storage(storage) if storage.store == "graph" => {
-                    if let Some(user) = storage.entities.get_mut("User") {
-                        user.path_column = None;
-                        let backend = [("type".to_string(), OptionValue::String("String".into()))];
-                        user.columns.insert(
-                            "traversal_path".into(),
-                            ColumnStorage {
-                                backend: backend.into_iter().collect(),
-                                ..ColumnStorage::default()
-                            },
-                        );
+                    Fragment::Storage(storage) if storage.store == "graph" => {
+                        if let Some(user) = storage.entities.get_mut("User") {
+                            user.path_column = None;
+                            let column = ColumnSpec {
+                                storage_type: "String".into(),
+                                default: None,
+                                codec: Vec::new(),
+                            };
+                            user.columns.insert(
+                                "traversal_path".into(),
+                                ColumnStorage {
+                                    immutable: false,
+                                    column: None,
+                                    backend: Box::new(Some(column)),
+                                },
+                            );
+                        }
                     }
-                }
-                Fragment::Authorization(access) => {
-                    if let Some(user) = access.entities.get_mut("User") {
-                        user.scope = query_data_model::Scope::Namespace;
+                    Fragment::Authorization(access) => {
+                        if let Some(user) = access.entities.get_mut("User") {
+                            user.scope = query_data_model::Scope::Namespace;
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
+            fragments
+        };
         let query = "MATCH (u:User {id: 1}) RETURN u{.id} LIMIT 1";
 
         for (model, expected_table) in [
-            (packaged_model(&fragments), "gl_user"),
-            (
-                packaged_model(&versioned(fragments.clone(), "v1_")),
-                "v1_gl_user",
-            ),
+            (packaged_model(&scoped()), "gl_user"),
+            (packaged_model(&versioned(scoped(), "v1_")), "v1_gl_user"),
         ] {
             let sql = compile(query, &model, &security_ctx())
                 .expect("should compile")
@@ -329,28 +335,31 @@ mod tests {
     fn compile_uses_each_models_global_tables_and_keeps_join_filters() {
         let query = "MATCH (user:User {id: 1, username: 'alice'})-[:MEMBER_OF]->(project:Project {name: 'orbit'}) RETURN user, project LIMIT 1";
 
-        let mut renamed = embedded_fragments();
-        for fragment in &mut renamed {
-            if let Fragment::Storage(storage) = fragment
-                && let Some(user) = storage.entities.get_mut("User")
-                && storage.store == "graph"
-            {
-                user.table = Some("gl_renamed_user".into());
+        let renamed = || {
+            let mut fragments = embedded_fragments();
+            for fragment in fragments.iter_mut() {
+                if let Fragment::Storage(storage) = fragment
+                    && let Some(user) = storage.entities.get_mut("User")
+                    && storage.store == "graph"
+                {
+                    user.table = Some("gl_renamed_user".into());
+                }
             }
-        }
+            fragments
+        };
 
         for (model, expected_user_table) in [
-            (packaged_model(&renamed), "gl_renamed_user"),
+            (packaged_model(&renamed()), "gl_renamed_user"),
             (Arc::clone(&MODEL), "gl_user"),
             (
-                packaged_model(&versioned(renamed.clone(), "v1_")),
+                packaged_model(&versioned(renamed(), "v1_")),
                 "v1_gl_renamed_user",
             ),
             (
                 packaged_model(&versioned(embedded_fragments(), "v2_")),
                 "v2_gl_user",
             ),
-            (packaged_model(&renamed), "gl_renamed_user"),
+            (packaged_model(&renamed()), "gl_renamed_user"),
         ] {
             let sql = compile(query, &model, &security_ctx())
                 .expect("should compile")

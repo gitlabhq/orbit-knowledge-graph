@@ -1,109 +1,168 @@
+use std::any::Any;
 use std::fmt::Debug;
 
 use indexmap::IndexMap;
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 
-use super::{Naming, Raw, explicit_null, is_false};
+use super::{Naming, Raw, explicit_null};
 use crate::{Endpoint, ForeignKey, PropertyId};
 
-pub type BackendOptions = IndexMap<String, OptionValue>;
+/// A backend block, typed by its store's backend when the fragment is parsed.
+pub trait Block: Any + Debug + Send + Sync {}
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum OptionValue {
-    Null,
-    Bool(bool),
-    Number(serde_json::Number),
-    String(String),
-    List(Vec<OptionValue>),
-    Map(IndexMap<String, OptionValue>),
+impl<T: Any + Debug + Send + Sync> Block for T {}
+
+impl dyn Block {
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
+
+    pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut T> {
+        (self as &mut dyn Any).downcast_mut()
+    }
 }
 
-pub fn encode_options(value: impl Serialize) -> Result<BackendOptions, serde_json::Error> {
-    serde_json::from_str(&serde_json::to_string(&value)?)
+/// The types of a storage fragment's backend blocks. A block the YAML omits reads as its
+/// type's default, so a backend that requires a block types it as an `Option`.
+pub trait Blocks {
+    type Engine: Debug;
+    type Entity: Debug;
+    type Column: Debug;
 }
 
-pub fn decode_options<T: DeserializeOwned>(
-    options: &BackendOptions,
-) -> Result<T, serde_json::Error> {
-    serde_json::from_str(&serde_json::to_string(options)?)
+/// The blocks of a fragment whose backend only the store's own catalog reads.
+#[derive(Debug)]
+pub struct Erased;
+
+impl Blocks for Erased {
+    type Engine = Box<dyn Block>;
+    type Entity = Box<dyn Block>;
+    type Column = Box<dyn Block>;
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StorageFragment {
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, bound = "K: Typed")]
+pub struct StorageFragment<K: Blocks = Erased> {
     pub package: String,
     pub store: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub engine: Option<EngineSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub entities: IndexMap<String, EntityStorage>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub engine: Option<EngineSpec<K>>,
+    #[serde(default)]
+    pub entities: IndexMap<String, EntityStorage<K>>,
+    #[serde(default)]
     pub relationships: IndexMap<String, IndexMap<String, Binding<Raw>>>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EngineSpec {
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, bound = "K: Typed")]
+pub struct EngineSpec<K: Blocks = Erased> {
     pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub connection: Option<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
+    pub connection: String,
+    #[serde(default)]
     pub trusted: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path_column: Option<String>,
-    #[serde(default, skip_serializing_if = "BackendOptions::is_empty")]
-    pub backend: BackendOptions,
+    #[serde(default)]
+    pub backend: K::Engine,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EntityStorage {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, bound = "K: Typed")]
+pub struct EntityStorage<K: Blocks = Erased> {
     pub table: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "explicit_null",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, deserialize_with = "explicit_null")]
     pub path_column: Option<Option<String>>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub columns: IndexMap<String, ColumnStorage>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
+    pub columns: IndexMap<String, ColumnStorage<K>>,
+    #[serde(default)]
     pub exclude: Vec<String>,
-    #[serde(default, skip_serializing_if = "AccessHints::is_empty")]
+    #[serde(default)]
     pub access: AccessHints<Raw>,
-    #[serde(default, skip_serializing_if = "BackendOptions::is_empty")]
-    pub backend: BackendOptions,
+    #[serde(default)]
+    pub backend: K::Entity,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ColumnStorage {
-    #[serde(default, skip_serializing_if = "is_false")]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, bound = "K: Typed")]
+pub struct ColumnStorage<K: Blocks = Erased> {
+    #[serde(default)]
     pub immutable: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column: Option<String>,
-    #[serde(default, skip_serializing_if = "BackendOptions::is_empty")]
-    pub backend: BackendOptions,
+    #[serde(default)]
+    pub backend: K::Column,
+}
+
+/// The blocks of one backend, which a fragment of its stores parses into.
+pub trait Typed:
+    Blocks<
+        Engine: Block + DeserializeOwned + Default,
+        Entity: Block + DeserializeOwned + Default,
+        Column: Block + DeserializeOwned + Default,
+    >
+{
+}
+
+impl<K: Typed> StorageFragment<K> {
+    pub(crate) fn parse(yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", bound = "K: Typed")]
+        enum Tagged<K: Typed> {
+            Storage(StorageFragment<K>),
+        }
+        let Tagged::Storage(fragment) = orbit_utils::yaml::from_str::<Tagged<K>>(yaml)?;
+        Ok(fragment.erase())
+    }
+
+    fn erase(self) -> StorageFragment {
+        fn erase<T: Block>(block: T) -> Box<dyn Block> {
+            Box::new(block)
+        }
+        let column = |column: ColumnStorage<K>| ColumnStorage {
+            immutable: column.immutable,
+            column: column.column,
+            backend: erase(column.backend),
+        };
+        let entity = |entity: EntityStorage<K>| EntityStorage {
+            table: entity.table,
+            path_column: entity.path_column,
+            columns: entity
+                .columns
+                .into_iter()
+                .map(|(name, spec)| (name, column(spec)))
+                .collect(),
+            exclude: entity.exclude,
+            access: entity.access,
+            backend: erase(entity.backend),
+        };
+        StorageFragment {
+            package: self.package,
+            store: self.store,
+            engine: self.engine.map(|engine| EngineSpec {
+                kind: engine.kind,
+                connection: engine.connection,
+                trusted: engine.trusted,
+                path_column: engine.path_column,
+                backend: erase(engine.backend),
+            }),
+            entities: self
+                .entities
+                .into_iter()
+                .map(|(name, spec)| (name, entity(spec)))
+                .collect(),
+            relationships: self.relationships,
+        }
+    }
 }
 
 /// How queries read an entity, in terms every backend turns into its own indexes and order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(
+    default,
     deny_unknown_fields,
-    bound(
-        serialize = "S::Property: Serialize",
-        deserialize = "S::Property: Deserialize<'de>"
-    )
+    bound(deserialize = "S::Property: Deserialize<'de>")
 )]
 pub struct AccessHints<S: Naming> {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filter: Vec<S::Property>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub text: Vec<S::Property>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub order: Vec<S::Property>,
 }
 
@@ -117,47 +176,33 @@ impl<S: Naming> Default for AccessHints<S> {
     }
 }
 
-impl<S: Naming> AccessHints<S> {
-    pub fn is_empty(&self) -> bool {
-        self.filter.is_empty() && self.text.is_empty() && self.order.is_empty()
-    }
-}
-
 /// Where one relationship variant's rows live: a foreign key, an edge table, or both.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(
     deny_unknown_fields,
-    bound(
-        serialize = "S::Key: Serialize, S::Copies: Serialize",
-        deserialize = "S::Key: Deserialize<'de>, S::Copies: Deserialize<'de>"
-    )
+    bound(deserialize = "S::Key: Deserialize<'de>, S::Copies: Deserialize<'de>")
 )]
 pub struct Binding<S: Naming> {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fk: Option<S::Key>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edge_table: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<EdgeIndex>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub copies: IndexMap<String, S::Copies>,
 }
 
 /// An edge table that the variant's writer derives from its foreign key, read in its place.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EdgeIndex {
     pub edge_table: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KeySpec {
     pub on: Endpoint,
     pub column: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub type_column: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub type_value: Option<OneOrMany>,
 }
 
@@ -176,7 +221,7 @@ pub struct Discriminator {
 }
 
 /// One written value or a list of them.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum OneOrMany {
     One(String),

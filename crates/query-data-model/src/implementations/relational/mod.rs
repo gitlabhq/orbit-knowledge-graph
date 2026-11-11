@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::catalog::{Catalog, StorageBackend};
 use crate::{ForeignKey, RelationshipVariantId};
@@ -13,33 +13,31 @@ mod tables;
 
 pub use capabilities::{Capabilities, CurrentRows, RelationalBackend};
 pub use catalog::RelationshipRoute;
-pub use store::{RelationalStore, Versioning, entity_layout};
+pub use store::{ReadPaths, RelationalStore, Versioning, entity_layout};
 pub use tables::{Column, Engine, Index, PathColumn, Projection, Table};
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct RelationalOptions {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version_column: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_column: Option<String>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub edge_tables: IndexMap<String, EdgeTableSpec>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct EdgeTableSpec {
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub shared: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sort_key: Vec<String>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub columns: IndexMap<String, String>,
 }
 
 pub trait RelationalFacts {
     fn relational(&self) -> &RelationalStore;
+
+    fn read_paths(&self) -> Option<&ReadPaths> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

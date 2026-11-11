@@ -40,13 +40,13 @@ fn overlay_name() -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-pub fn overlay_fragments(name: &str) -> Vec<query_data_model::spec::Fragment> {
+pub fn overlay_fragments(name: &str) -> query_data_model::spec::Fragments {
     query_data_model::testkit::overlay(name)
         .fragments()
         .unwrap_or_else(|e| panic!("model overlay '{name}' does not parse: {e}"))
 }
 
-fn unprefixed_fragments() -> Vec<query_data_model::spec::Fragment> {
+fn unprefixed_fragments() -> query_data_model::spec::Fragments {
     match overlay_name() {
         Some(name) => overlay_fragments(&name),
         None => query_data_model::Packages::embedded()
@@ -56,25 +56,25 @@ fn unprefixed_fragments() -> Vec<query_data_model::spec::Fragment> {
 }
 
 fn load_model(
-    fragments: &[query_data_model::spec::Fragment],
+    fragments: &query_data_model::spec::Fragments,
 ) -> std::sync::Arc<query_data_model::Model> {
     std::sync::Arc::new(query_data_model::Model::load(fragments).expect("test model should load"))
 }
 
 fn versioned_fragments(
-    fragments: Vec<query_data_model::spec::Fragment>,
-) -> Vec<query_data_model::spec::Fragment> {
+    fragments: query_data_model::spec::Fragments,
+) -> query_data_model::spec::Fragments {
     query_data_model::implementations::clickhouse::versioned(fragments, &TABLE_PREFIX)
         .expect("test tables should take the schema prefix")
 }
 
 /// The prefixed fragments behind [`load_data_model`].
-pub fn load_fragments() -> Vec<query_data_model::spec::Fragment> {
+pub fn load_fragments() -> query_data_model::spec::Fragments {
     versioned_fragments(unprefixed_fragments())
 }
 
 pub fn versioned_data_model(
-    fragments: Vec<query_data_model::spec::Fragment>,
+    fragments: query_data_model::spec::Fragments,
 ) -> std::sync::Arc<query_data_model::Catalog<query_data_model::ClickHouse>> {
     let fragments = versioned_fragments(fragments);
     std::sync::Arc::new(
@@ -86,7 +86,7 @@ pub fn versioned_data_model(
 }
 
 pub fn graph_schema(
-    fragments: &[query_data_model::spec::Fragment],
+    fragments: &query_data_model::spec::Fragments,
 ) -> orbit_migrations::schema::GraphSchema {
     let physical = orbit_migrations::schema::Schema::from_model(&load_model(fragments))
         .expect("test model should resolve a ClickHouse schema");
