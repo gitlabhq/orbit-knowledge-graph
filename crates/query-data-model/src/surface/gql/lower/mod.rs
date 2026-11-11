@@ -240,8 +240,9 @@ impl Edge<'_> {
 
     fn inline<'m>(&self, q: &mut LogicalBuilder<'m>, rows: Rows<'m>) -> Built<'m> {
         let link = rows.edge().ok_or(PlanError::NoEntity)?;
-        let predicates =
-            conditions::entries(&self.properties, |name| Ok(rows.edge_column(link, name)?))?;
+        let predicates = conditions::entries(&self.properties, q.catalog().model(), |name| {
+            Ok(rows.edge_column(link, name)?)
+        })?;
         conjoin(q, rows, predicates)
     }
 }
@@ -259,7 +260,9 @@ fn bind<'m>(q: &mut LogicalBuilder<'m>, node: &Node<'_>) -> Built<'m> {
 
 fn inline<'m>(q: &mut LogicalBuilder<'m>, rows: Rows<'m>, node: &Node<'_>) -> Built<'m> {
     let binding = rows.binding(&node.alias)?;
-    let predicates = conditions::entries(&node.properties, |name| Ok(binding.property(name)?))?;
+    let predicates = conditions::entries(&node.properties, q.catalog().model(), |name| {
+        Ok(binding.property(name)?)
+    })?;
     conjoin(q, rows, predicates)
 }
 

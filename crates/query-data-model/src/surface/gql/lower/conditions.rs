@@ -85,6 +85,7 @@ fn tree(tree: BooleanExpression<Leaf<'_>>, rows: &Rows<'_>) -> Result<Predicate,
 
 pub(super) fn entries(
     entries: &[MapEntry<'_>],
+    model: &crate::Model,
     mut column: impl FnMut(&str) -> Result<Expr, SurfaceError>,
 ) -> Result<Vec<Predicate>, SurfaceError> {
     entries
@@ -92,7 +93,11 @@ pub(super) fn entries(
         .map(|entry| {
             let key = &entry.key.value;
             match &entry.value {
-                Value::Scalar(literal) => Ok(column(key)?.eq(pinned(key, literal.clone()))),
+                Value::Scalar(literal) => {
+                    let left = column(key)?;
+                    let literal = pinned(&left, model, literal.clone());
+                    Ok(left.eq(literal))
+                }
                 Value::List(_) => Err(invalid(
                     entry.key.span,
                     &format!("{key} takes one value in a property map; write WHERE n.{key} IN [...] for several"),
@@ -112,10 +117,16 @@ fn leaf(leaf: Leaf<'_>, rows: &Rows<'_>) -> Result<Predicate, SurfaceError> {
         } => (span, subject, op, operand),
         Leaf::Structural { span, .. } => return Err(invalid(span, STRUCTURAL)),
     };
-    let (left, property) = match &subject {
-        Subject::Property(property) => (column(rows, property)?, property.property.value.as_str()),
-        Subject::Type(variable) => (rows.binding(&variable.value)?.field(EdgeField::Kind)?, ""),
+    let (left, binding) = match &subject {
+        Subject::Property(property) => {
+            (column(rows, property)?, rows.binding(&property.node.value)?)
+        }
+        Subject::Type(variable) => {
+            let binding = rows.binding(&variable.value)?;
+            (binding.field(EdgeField::Kind)?, binding)
+        }
     };
+    let model = binding.catalog().model();
     let comparison = op.comparison();
     Ok(match (op, operand) {
         (Operator::IsNull, _) => left.is_null(true),
@@ -125,7 +136,11 @@ fn leaf(leaf: Leaf<'_>, rows: &Rows<'_>) -> Result<Predicate, SurfaceError> {
             left.compare(comparison, column(rows, &right)?)
         }
         (Operator::In, Some(Operand::Value(Value::List(values)))) => {
-            left.one_of(values.into_iter().map(|value| pinned(property, value)))
+            let values: Vec<_> = values
+                .into_iter()
+                .map(|value| pinned(&left, model, value))
+                .collect();
+            left.one_of(values)
         }
         (_, Some(Operand::Value(Value::Scalar(literal)))) => match (op.matching(), comparison) {
             (Some(matching), _) => match literal {
@@ -136,7 +151,7 @@ fn leaf(leaf: Leaf<'_>, rows: &Rows<'_>) -> Result<Predicate, SurfaceError> {
             },
             (None, Some(comparison)) => {
                 let literal = match comparison {
-                    crate::plan::logical::Comparison::Eq => pinned(property, literal),
+                    crate::plan::logical::Comparison::Eq => pinned(&left, model, literal),
                     _ => literal,
                 };
                 left.compare(comparison, literal)
@@ -163,13 +178,18 @@ pub(super) fn column(rows: &Rows<'_>, property: &Property<'_>) -> Result<Expr, S
     })
 }
 
-/// Node ids arrive as integers, so a quoted id still pins the node.
-fn pinned(property: &str, literal: Literal) -> Literal {
-    match literal {
-        Literal::String(text) if property == crate::DEFAULT_PRIMARY_KEY => text
-            .parse()
-            .map_or_else(|_| Literal::String(text), Literal::Int),
-        other => other,
+/// An integer identity arrives as a number, so a quoted integer still pins the node.
+fn pinned(left: &Expr, model: &crate::Model, literal: Literal) -> Literal {
+    let graph = model.graph();
+    match (left, literal) {
+        (Expr::Property { property, .. }, Literal::String(text))
+            if graph.property(*property).data_type == crate::DataType::Int
+                && graph.entity(graph.property(*property).entity).identity == [*property] =>
+        {
+            text.parse()
+                .map_or_else(|_| Literal::String(text), Literal::Int)
+        }
+        (_, other) => other,
     }
 }
 

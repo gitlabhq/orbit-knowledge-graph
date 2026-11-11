@@ -1,5 +1,3 @@
-use crate::constants::DEFAULT_PRIMARY_KEY;
-
 use orbit_server_config::QueryLimits;
 
 use super::{Expr, PlanError, Predicate};
@@ -22,7 +20,12 @@ pub(super) fn in_values(
         Predicate::In {
             left: Expr::Property { property, .. },
             values,
-        } if model.graph().property(*property).name == DEFAULT_PRIMARY_KEY => {
+        } if model
+            .graph()
+            .entity(model.graph().property(*property).entity)
+            .identity
+            == [*property] =>
+        {
             at_most("pinned ids", values.len(), limits.pinned_ids)
         }
         Predicate::And(all) => all

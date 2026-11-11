@@ -1,6 +1,5 @@
 use super::{Access, Check, EntityAccess, Policy, ScopeId, ScopeKind};
 use crate::catalog::Diagnostics;
-use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::spec::{CheckSpec, PolicySpec, PolicyWord, ScopeKeySpec};
 use crate::types::{Cardinality, DataType};
 use crate::{EntityId, GraphCatalog, Hop};
@@ -139,8 +138,8 @@ impl Context<'_> {
             format!("{name} checks unknown permission {}", row.permission)
         });
         let (object, id) = match (&row.object, &row.id) {
-            (Some(object), Some(id)) => (Some(object.as_str()), id.as_str()),
-            (None, None) => (None, DEFAULT_PRIMARY_KEY),
+            (Some(object), Some(id)) => (Some(object.as_str()), Some(id.as_str())),
+            (None, None) => (None, None),
             _ => {
                 self.error(format!(
                     "{name} check names one of object and id; it names both or neither"
@@ -157,10 +156,22 @@ impl Context<'_> {
             }
             None => None,
         };
-        let id = self.graph.property_id(self.entity, id);
-        let id = self.diagnostics.require(id, self.package, || {
-            format!("{name} check id is not a property of {name}")
-        })?;
+        let id = match id {
+            Some(id) => self.diagnostics.require(
+                self.graph.property_id(self.entity, id),
+                self.package,
+                || format!("{name} check id is not a property of {name}"),
+            )?,
+            None => match self.graph.entity(self.entity).identity.as_slice() {
+                [identity] => *identity,
+                _ => {
+                    self.error(format!(
+                        "{name} check keys rows by its identity, which is not one property; name an object and id"
+                    ));
+                    return None;
+                }
+            },
+        };
         let key = self.graph.property(id);
         if !matches!(
             key.data_type,

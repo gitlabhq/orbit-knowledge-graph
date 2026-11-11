@@ -1190,6 +1190,7 @@ fn every_entity_declares_a_typed_identity_and_default_columns() {
             "gitlab: entity Note declares no default_columns",
             "gitlab: User identity email is String?; an identity is a non-null integer, string or uuid",
             "gitlab: User identity mail is not a property",
+            "gitlab: Group check keys rows by its identity, which is not one property; name an object and id",
             "gitlab: store graph CONTAINS(Group -> Project) names an edge table but the store does not hold its source",
             "gitlab: store graph CONTAINS(Group -> Group) names an edge table but the store does not hold its source",
             "gitlab: store graph AUTHORED(User -> MergeRequest) foreign key author_id is Int but User.email is String; keys are never cast",

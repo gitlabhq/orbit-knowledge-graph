@@ -28,7 +28,10 @@ impl ForeignKey {
         Some(Self {
             holder,
             property,
-            referenced_key: graph.property_id(referenced, crate::constants::DEFAULT_PRIMARY_KEY)?,
+            referenced_key: match graph.entity(referenced).identity.as_slice() {
+                [identity] => *identity,
+                _ => return None,
+            },
         })
     }
 
