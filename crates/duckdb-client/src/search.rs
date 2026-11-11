@@ -7,6 +7,7 @@ use serde_json::{Map, Value};
 
 use crate::{DuckDbClient, i64_column, sql_lit, string_column};
 use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX};
+use orbit_utils::vfs_policies::EXCLUDED_INDEXING_DIRS;
 
 pub const GLOB_CHARS: [char; 3] = ['*', '?', '['];
 
@@ -211,9 +212,14 @@ pub fn path_scope(col: &str, paths: &[String], include_excluded: bool) -> String
 }
 
 pub fn excluded_path_predicate(col: &str) -> String {
+    let directory_likes = EXCLUDED_INDEXING_DIRS
+        .iter()
+        .flat_map(|dir| [format!("{dir}/%"), format!("%/{dir}/%")]);
     let likes = EXCLUDE_LIKE
         .iter()
-        .map(|pat| format!("{col} LIKE {}", sql_lit(pat)));
+        .map(|pat| pat.to_string())
+        .chain(directory_likes)
+        .map(|pat| format!("{col} LIKE {}", sql_lit(&pat)));
     let regexes = EXCLUDE_REGEX
         .iter()
         .map(|re| format!("regexp_matches({col}, {})", sql_lit(re)));

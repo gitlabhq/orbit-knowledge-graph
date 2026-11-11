@@ -9,7 +9,11 @@ const EXCLUDED_EXTENSIONS: &[&str] = &[
     "bin", "dat",
 ];
 const EXCLUDED_SUFFIXES: &[&str] = &[".min.js", ".min.mjs", ".min.cjs"];
-const EXCLUDED_DIRECTORIES: &[&str] = &["doc-locale", "docs-locale"];
+/// Directory names whose whole subtree is machine-generated content: recorded
+/// as bare nodes, never loaded or parsed. Matched case-insensitively on any
+/// path segment. `doc-locale`/`docs-locale` are GitLab's machine-translated
+/// documentation directories (see docs.gitlab.com documentation testing).
+pub const EXCLUDED_INDEXING_DIRS: &[&str] = &["doc-locale", "docs-locale"];
 const BINARY_SNIFF_BYTES: usize = 8000;
 const MAX_LINE_LENGTH: usize = 64 * 1024;
 const MAX_AVG_LINE_LENGTH: usize = 16 * 1024;
@@ -65,7 +69,7 @@ fn in_excluded_directory(path: &str) -> bool {
         return false;
     };
     directories.split('/').any(|segment| {
-        EXCLUDED_DIRECTORIES
+        EXCLUDED_INDEXING_DIRS
             .iter()
             .any(|excluded| segment.eq_ignore_ascii_case(excluded))
     })

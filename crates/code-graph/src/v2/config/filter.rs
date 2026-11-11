@@ -234,11 +234,7 @@ static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
     builder.build().expect("static excluded-indexing globset")
 });
 
-/// Directory names whose whole subtree is machine-generated content: recorded
-/// as bare nodes, never loaded or parsed. Matched case-insensitively on any
-/// path segment. `doc-locale`/`docs-locale` are GitLab's machine-translated
-/// documentation directories (see docs.gitlab.com documentation testing).
-pub const EXCLUDED_INDEXING_DIRS: &[&str] = &["doc-locale", "docs-locale"];
+pub use orbit_utils::vfs_policies::EXCLUDED_INDEXING_DIRS;
 
 fn in_excluded_directory(rel_path: &Path) -> bool {
     let mut components = rel_path.components().peekable();
