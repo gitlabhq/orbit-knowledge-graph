@@ -66,11 +66,12 @@ cases:
   - name: and_not_callee_name_in
     description: AND NOT callee.name IN keeps a call whose callee is outside the exclusion list
     query: |
-      MATCH (caller:Definition)-[:CALLS {project_id: 1000}]->(callee:Definition)
+      MATCH (caller:Definition {project_id: 1000})-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'compile' AND NOT callee.name IN ['run_query']
       RETURN caller.name, callee.name LIMIT 20
     expect:
       node_count: 2
+      skip_requirements: ["filter:project_id"]
       nodes:
         Definition:
           ids: [12000, 12001]
@@ -88,12 +89,12 @@ cases:
   - name: and_not_callee_name_in_excluded
     description: AND NOT callee.name IN removes a call whose callee is in the exclusion list
     query: |
-      MATCH (caller:Definition)-[:CALLS {project_id: 1000}]->(callee:Definition)
+      MATCH (caller:Definition {project_id: 1000})-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'compile' AND NOT callee.name IN ['helper']
       RETURN caller.name, callee.name LIMIT 20
     expect:
       node_count: 0
-      skip_requirements: ["filter:name"]
+      skip_requirements: ["filter:name", "filter:project_id"]
       edges:
         CALLS: []
 

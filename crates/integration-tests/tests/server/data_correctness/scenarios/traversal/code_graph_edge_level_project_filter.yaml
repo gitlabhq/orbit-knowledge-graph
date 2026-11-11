@@ -1,10 +1,11 @@
-description: Relationship-level project_id filter scopes the CALLS edge scan
+description: An endpoint project_id filter scopes the CALLS edge scan through its copied column
 
 query: |
-  MATCH (caller:Definition)-[:CALLS {project_id: 1000}]->(callee:Definition) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, callee.name LIMIT 20
+  MATCH (caller:Definition {project_id: 1000})-[:CALLS]->(callee:Definition) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, callee.name LIMIT 20
 
 expect:
   node_count: 3
+  skip_requirements: ["filter:project_id"]
   referential_integrity: true
   nodes:
     Definition:
