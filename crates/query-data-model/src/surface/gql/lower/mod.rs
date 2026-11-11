@@ -249,7 +249,7 @@ impl Edge<'_> {
 fn bind<'m>(q: &mut LogicalBuilder<'m>, node: &Node<'_>) -> Built<'m> {
     let label = node.label.as_deref().ok_or_else(|| {
         SurfaceError::schema(format!(
-            "({0}) needs a label, such as ({0}:Project); only the far endpoint of a neighbors query may omit it",
+            "({0}) needs a label, such as ({0}:Entity); only the far endpoint of a neighbors query may omit it",
             node.alias
         ))
     })?;

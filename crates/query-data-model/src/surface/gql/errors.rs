@@ -62,7 +62,7 @@ fn rule_label(rule: &Rule) -> String {
         Rule::Debug => "DEBUG",
         Rule::SchemaCall => "CALL db.schema()",
         Rule::Pattern | Rule::PatternElement | Rule::NodePattern => {
-            "a node pattern such as (n:Label)"
+            "a node pattern such as (n:Entity)"
         }
         Rule::PatternElementChain | Rule::RelationshipPattern => {
             "a relationship such as -[:TYPE]->"

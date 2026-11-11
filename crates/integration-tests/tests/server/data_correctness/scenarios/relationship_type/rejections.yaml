@@ -126,7 +126,7 @@ cases:
     query: |
       MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE mr.title = type(r) RETURN u, mr.title LIMIT 10
     expect: { compile_error: "function type() is not supported: type() takes one relationship variable and
-          works in WHERE type(r) = 'CLOSES'" }
+          works in WHERE type(r) = 'TYPE'" }
 
   - name: variable_length
     description: WHERE type(r) on a variable-length relationship rejects and points to the typed pattern

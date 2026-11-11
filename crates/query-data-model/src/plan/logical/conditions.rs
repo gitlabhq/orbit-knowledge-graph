@@ -96,7 +96,7 @@ fn kinds(model: &Model, predicate: &Predicate) -> Result<(), PlanError> {
             Conjunct::Leaf { predicate, .. } => predicate,
             Conjunct::Negated(group) if group.exprs().iter().any(is_kind) => {
                 return Err(PlanError::shape(
-                    "type(r) cannot be used inside a NOT group; write it as its own condition joined with AND, such as NOT type(r) = 'CLOSES'",
+                    "type(r) cannot be used inside a NOT group; write it as its own condition joined with AND, such as NOT type(r) = 'TYPE'",
                 ));
             }
             Conjunct::Negated(_) => continue,
@@ -106,7 +106,7 @@ fn kinds(model: &Model, predicate: &Predicate) -> Result<(), PlanError> {
         }
         let names = kind_names(leaf).ok_or_else(|| {
             PlanError::shape(
-                "type(r) supports =, <>, or IN with relationship type names, such as type(r) = 'CLOSES' or type(r) IN ['CLOSES', 'MENTIONS']",
+                "type(r) supports =, <>, or IN with relationship type names, such as type(r) = 'TYPE' or type(r) IN ['TYPE', 'OTHER']",
             )
         })?;
         if names.iter().any(|name| model.relationship(name).is_err()) {

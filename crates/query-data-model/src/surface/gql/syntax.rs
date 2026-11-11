@@ -93,7 +93,7 @@ impl QueryParser {
     }
 
     fn LegacyShortestPath(input: Node) -> Result<()> {
-        Err(input.error("use ANY SHORTEST (a)-[:CONTAINS*1..3]->(b) for shortest paths"))
+        Err(input.error("use ANY SHORTEST (a)-[:TYPE*1..3]->(b) for shortest paths"))
     }
 
     fn PathSearch(input: Node) -> Result<()> {
@@ -771,7 +771,7 @@ fn unsupported_function(call: &Node, in_where: bool) -> Error<Rule> {
     let name = call.children().next().map_or("", |node| node.as_str());
     let hint = match name.to_ascii_lowercase().as_str() {
         "type" => {
-            "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], RETURN type(r), and ORDER BY type(r)"
+            "type() takes one relationship variable and works in WHERE type(r) = 'TYPE', WHERE type(r) IN ['TYPE', 'OTHER'], RETURN type(r), and ORDER BY type(r)"
         }
         "count" | "sum" | "avg" | "min" | "max" if in_where => &format!(
             "{name}() belongs in RETURN with an alias, as in RETURN count(mr) AS n; WHERE cannot filter on an aggregate"
