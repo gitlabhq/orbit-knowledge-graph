@@ -1,0 +1,22 @@
+description: Outgoing neighbors of a pinned center outside the caller's paths return nothing, even for edges stored under the caller's paths
+
+config:
+  unmerged_seed: true
+  security: { org_id: 1, paths: ["1/100/99541/99544/"] }
+  redaction:
+    allow:
+      group: [99541, 99544]
+  extra_seed:
+    gl_group:
+      - { id: 99541, name: Outside Center, full_path: public-group/outside-center, visibility_level: public, traversal_path: "1/100/99541/", _version: "2024-01-01 00:00:00" }
+      - { id: 99544, name: Caller Group, full_path: public-group/outside-center/caller, visibility_level: public, traversal_path: "1/100/99541/99544/", _version: "2024-01-01 00:00:00" }
+    gl_edge:
+      - { traversal_path: "1/100/99541/99544/", source_id: 99541, source_kind: Group, relationship_kind: CONTAINS, target_id: 99544, target_kind: Group, source_tags: [], target_tags: [], _version: "2024-01-01 00:00:00" }
+
+query:
+  gql: |
+    MATCH (g:Group {id: 99541})-[:`CONTAINS`]->(n) RETURN g, n
+
+expect:
+  skip_requirements: [node_ids, neighbors, "relationship:CONTAINS"]
+  node_count: 0

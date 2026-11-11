@@ -69,15 +69,15 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     let direction = *direction;
     let joins_center = *joins_center;
     let cnp = &plan.nodes[center_alias];
-    let center_id = center_alias.to_string();
-    let center_entity = cnp.entity.clone().unwrap_or_default();
-    let center_table = cnp.table.clone().unwrap_or_default();
+    let center_id = center_alias.as_str();
+    let center_entity = cnp.entity.as_deref().unwrap_or_default();
+    let center_table = cnp.table.as_deref().unwrap_or_default();
     let center_uses_default_pk = cnp.uses_default_pk();
-    let center_redaction_col = cnp.redaction_id_column.clone();
+    let center_redaction_col = cnp.redaction_id_column.as_str();
     let center_has_tp = cnp.has_traversal_path;
-    let center_node_ids = cnp.node_ids.clone();
-    let center_filters = cnp.filters.clone();
-    let center_id_range = cnp.id_range.clone();
+    let center_node_ids = cnp.node_ids.as_slice();
+    let center_filters = cnp.filters.as_slice();
+    let center_id_range = cnp.id_range.as_ref();
     let checks_center_rows = !center_node_ids.is_empty() && !joins_center;
     let edge_alias = neighbor_edge_alias();
     let center_rows = center_rows_cte();
@@ -85,26 +85,29 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     let center_join = joins_center.then(|| {
         let mut scan_where: Vec<Expr> = center_filters
             .iter()
-            .map(|(prop, filter)| filter_to_expr(&center_id, prop, filter))
+            .map(|(prop, filter)| filter_to_expr(center_id, prop, filter))
             .collect();
         if !center_node_ids.is_empty() {
             scan_where.push(id_list_predicate(
-                &center_id,
+                center_id,
                 DEFAULT_PRIMARY_KEY,
-                &center_node_ids,
+                center_node_ids,
             ));
         }
-        if let Some(range) = &center_id_range {
-            scan_where.push(id_range_predicate(&center_id, range));
+        if let Some(range) = center_id_range {
+            scan_where.push(id_range_predicate(center_id, range));
         }
         let mut select = vec![
-            SelectExpr::col(&center_id, DEFAULT_PRIMARY_KEY),
-            SelectExpr::col(&center_id, DELETED_COLUMN),
+            SelectExpr::col(center_id, DEFAULT_PRIMARY_KEY),
+            SelectExpr::col(center_id, DELETED_COLUMN),
         ];
         if !center_uses_default_pk {
-            select.push(SelectExpr::col(&center_id, &center_redaction_col));
+            select.push(SelectExpr::col(center_id, center_redaction_col));
         }
-        dedup_subquery(&center_id, &center_table, select, scan_where).0
+        if let Some(ob) = input.order_by.as_ref().filter(|ob| ob.node == center_id) {
+            select.push(SelectExpr::col(center_id, &ob.property));
+        }
+        dedup_subquery(center_id, center_table, select, scan_where).0
     });
 
     let order_by = match &input.order_by {
@@ -152,10 +155,10 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         let arm_where = |a: &str| -> Vec<Expr> {
             let mut wp = vec![Expr::eq(
                 Expr::col(a, center_kind_col),
-                Expr::string(&center_entity),
+                Expr::string(center_entity),
             )];
             if !center_node_ids.is_empty() {
-                wp.push(id_list_predicate(a, center_edge_col, &center_node_ids));
+                wp.push(id_list_predicate(a, center_edge_col, center_node_ids));
             }
             if let Some(f) = rel_kind_filter(a, arm_kinds) {
                 wp.push(f);
@@ -176,7 +179,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
 
         let mut where_parts: Vec<Expr> = Vec::new();
         // Denorm tags aren't in the per-arm projection, so they filter the union output alias.
-        for (_, filter) in &center_filters {
+        for (_, filter) in center_filters {
             let Some(property) = filter.property else {
                 continue;
             };
@@ -225,48 +228,48 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
                 center_subq.clone(),
                 Expr::eq(
                     Expr::col(edge_alias, center_edge_col),
-                    Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
+                    Expr::col(center_id, DEFAULT_PRIMARY_KEY),
                 ),
             );
-            where_parts.push(deleted_false(&center_id));
+            where_parts.push(deleted_false(center_id));
         }
 
         if center_uses_default_pk {
             select.push(SelectExpr::new(
                 Expr::col(edge_alias, center_edge_col),
-                redaction_id_column(&center_id),
+                redaction_id_column(center_id),
             ));
         } else {
             if !joins_center {
                 from = TableRef::join(
                     JoinType::Inner,
                     from,
-                    TableRef::scan_final(&center_table, &center_id),
+                    TableRef::scan_final(center_table, center_id),
                     Expr::eq(
                         Expr::col(edge_alias, center_edge_col),
-                        Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
+                        Expr::col(center_id, DEFAULT_PRIMARY_KEY),
                     ),
                 );
-                where_parts.push(deleted_false(&center_id));
+                where_parts.push(deleted_false(center_id));
             }
             select.push(SelectExpr::new(
-                Expr::col(&center_id, &center_redaction_col),
-                redaction_id_column(&center_id),
+                Expr::col(center_id, center_redaction_col),
+                redaction_id_column(center_id),
             ));
             select.push(SelectExpr::new(
-                Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
-                primary_key_column(&center_id),
+                Expr::col(center_id, DEFAULT_PRIMARY_KEY),
+                primary_key_column(center_id),
             ));
         }
         select.push(SelectExpr::new(
-            Expr::string(&center_entity),
-            redaction_type_column(&center_id),
+            Expr::string(center_entity),
+            redaction_type_column(center_id),
         ));
 
         if center_has_tp {
             select.push(SelectExpr::new(
                 Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
-                traversal_path_column(&center_id),
+                traversal_path_column(center_id),
             ));
         }
 
@@ -326,11 +329,11 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         let (order_by, limit_by) = latest_row_dedup(center_rows, center_sort_key);
         let latest = Query {
             select: vec![SelectExpr::star()],
-            from: TableRef::scan(&center_table, center_rows),
+            from: TableRef::scan(center_table, center_rows),
             where_clause: Some(id_list_predicate(
                 center_rows,
                 DEFAULT_PRIMARY_KEY,
-                &center_node_ids,
+                center_node_ids,
             )),
             order_by,
             limit_by,
