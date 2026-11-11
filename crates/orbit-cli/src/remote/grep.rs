@@ -94,6 +94,16 @@ impl Budget {
     }
 }
 
+impl Budget {
+    fn refund(&self) {
+        let _ = self
+            .0
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |sent| {
+                sent.checked_sub(1)
+            });
+    }
+}
+
 impl PartialEq for Budget {
     fn eq(&self, _: &Self) -> bool {
         true
@@ -883,11 +893,31 @@ struct GraphNode {
     properties: serde_json::Map<String, serde_json::Value>,
 }
 
-struct GraphHits {
+#[derive(Default)]
+struct GraphHits<'a> {
     rows: Vec<String>,
+    searched: Vec<(&'a str, &'a str)>,
+    skipped: Vec<(&'a str, &'a str)>,
     failed: Vec<String>,
+    rejected: Vec<String>,
     error: Option<RemoteError>,
     truncated: bool,
+}
+
+impl GraphHits<'_> {
+    const ROWS: usize = 10;
+    const VALUE_CHARS: usize = 100;
+}
+
+enum GraphFailure {
+    Rejected(String),
+    Failed(RemoteError),
+}
+
+#[derive(Deserialize)]
+struct GraphError {
+    code: String,
+    message: String,
 }
 
 async fn graph_search(request: &Request, resolved: Resolved, kind: &str, query: &str) -> Outcome {
@@ -930,35 +960,39 @@ async fn graph_search(request: &Request, resolved: Resolved, kind: &str, query: 
         .iter()
         .flat_map(|field| terms.iter().map(move |term| (field.as_str(), *term)))
         .collect();
-    let (sent, skipped) = planned.split_at(request.budget.take(planned.len()));
-    if sent.is_empty() {
+    let hits = match graph_hits(&resolved, name, entity, &scope, planned, &request.budget).await {
+        Ok(hits) => hits,
+        Err(outcome) => return outcome,
+    };
+    if hits.searched.is_empty() && hits.rejected.is_empty() {
         return Outcome::NoMatches(format!(
             "{name} not searched: this grep already sent {} graph queries",
             Budget::QUERIES
         ));
     }
-    let hits = match graph_hits(&resolved.client, name, entity, &scope, sent).await {
-        Ok(hits) => hits,
-        Err(outcome) => return outcome,
-    };
     let shown = format!("{}/{}", resolved.api_host, scope.shown());
     let mut notes = Vec::new();
+    if !hits.rejected.is_empty() {
+        notes.push(format!("not searched: {}", hits.rejected.join(", ")));
+    }
     if !hits.failed.is_empty() {
         notes.push(format!("unavailable: {}", hits.failed.join(", ")));
     }
-    if !skipped.is_empty() {
+    if !hits.skipped.is_empty() {
         notes.push(format!(
             "not searched (a grep sends at most {} graph queries): {}; `{launcher} query` searches them",
             Budget::QUERIES,
-            listed(skipped)
+            listed(&hits.skipped)
         ));
     }
     match (hits.rows.is_empty(), hits.error) {
-        (true, Some(error)) if hits.failed.len() == sent.len() => {
+        (true, Some(error)) if hits.failed.len() == hits.searched.len() => {
             outcome_for(&request.target, &error)
         }
+        (true, _) if hits.searched.is_empty() => Outcome::NoMatches(notes.join("\n")),
         (true, _) => {
-            notes.insert(0, format!("no {name} matched {} in {shown}", listed(sent)));
+            let searched = listed(&hits.searched);
+            notes.insert(0, format!("no {name} matched {searched} in {shown}"));
             Outcome::NoMatches(notes.join("\n"))
         }
         (false, _) => {
@@ -972,49 +1006,61 @@ async fn graph_search(request: &Request, resolved: Resolved, kind: &str, query: 
     }
 }
 
-async fn graph_hits(
-    client: &OrbitClient,
+async fn graph_hits<'a>(
+    resolved: &Resolved,
     name: &str,
     entity: &Entity,
     scope: &GraphScope,
-    searches: &[(&str, &str)],
-) -> Result<GraphHits, Outcome> {
-    let tasks: Vec<_> = searches
-        .iter()
-        .map(|(field, term)| {
-            let text = graph_query(name, scope, &entity.columns, field, term);
-            let client = client.clone();
-            tokio::spawn(async move { graph_nodes(&client, &text).await })
-        })
-        .collect();
-    let mut hits = GraphHits {
-        rows: Vec::new(),
-        failed: Vec::new(),
-        error: None,
-        truncated: false,
-    };
+    mut pending: Vec<(&'a str, &'a str)>,
+    budget: &Budget,
+) -> Result<GraphHits<'a>, Outcome> {
+    let mut hits = GraphHits::default();
     let mut seen = std::collections::HashSet::new();
-    for (&(field, term), task) in searches.iter().zip(tasks) {
-        match task
-            .await
-            .map_err(|error| Outcome::Failed(error.to_string()))?
-        {
-            Ok(result) => {
-                hits.truncated |= result.pagination.has_more;
-                for node in result.nodes.iter().filter(|node| node.kind == name) {
-                    if seen.insert(node.id.clone()) {
-                        hits.rows
-                            .push(graph_row(name, node, &entity.columns, field));
+    loop {
+        let granted = budget.take(pending.len());
+        if granted == 0 {
+            break;
+        }
+        let round: Vec<_> = pending.drain(..granted).collect();
+        let tasks: Vec<_> = round
+            .iter()
+            .map(|(field, term)| {
+                let text = graph_query(name, scope, &entity.columns, field, term);
+                let client = resolved.client.clone();
+                tokio::spawn(async move { graph_nodes(&client, &text).await })
+            })
+            .collect();
+        for (&(field, term), task) in round.iter().zip(tasks) {
+            match task
+                .await
+                .map_err(|error| Outcome::Failed(error.to_string()))?
+            {
+                Ok(result) => {
+                    hits.searched.push((field, term));
+                    hits.truncated |= result.pagination.has_more;
+                    for node in result.nodes.iter().filter(|node| node.kind == name) {
+                        if seen.insert(node.id.clone()) {
+                            hits.rows
+                                .push(graph_row(name, node, &entity.columns, field));
+                        }
                     }
                 }
-            }
-            Err(error) => {
-                let reason = first_line(&error.message);
-                hits.failed.push(format!("{field} {term:?} ({reason})"));
-                hits.error.get_or_insert(error);
+                Err(GraphFailure::Rejected(reason)) => {
+                    budget.refund();
+                    hits.rejected.push(format!("{term:?} ({reason})"));
+                    pending.retain(|(_, other)| *other != term);
+                }
+                Err(GraphFailure::Failed(error)) => {
+                    hits.searched.push((field, term));
+                    hits.failed
+                        .push(format!("{field} {term:?} ({})", first_line(&error.message)));
+                    hits.error.get_or_insert(error);
+                }
             }
         }
+        hits.rejected.dedup();
     }
+    hits.skipped = pending;
     Ok(hits)
 }
 
@@ -1214,19 +1260,35 @@ fn graph_query(
         returned.push(format!(".{field}"));
     }
     format!(
-        "MATCH {matched} WHERE n.{field} CONTAINS {} RETURN n{{{}}}",
+        "MATCH {matched} WHERE n.{field} CONTAINS {} RETURN n{{{}}} LIMIT {}",
         gql(term),
-        returned.join(", ")
+        returned.join(", "),
+        GraphHits::ROWS
     )
 }
 
-async fn graph_nodes(client: &OrbitClient, query: &str) -> Result<GraphResult, RemoteError> {
+async fn graph_nodes(client: &OrbitClient, query: &str) -> Result<GraphResult, GraphFailure> {
     let request = serde_json::json!({"query": query, "response_format": "raw"}).to_string();
-    let body = client.grep_query(request.into_bytes()).await?;
+    let (status, body) = client
+        .grep_query(request.into_bytes())
+        .await
+        .map_err(GraphFailure::Failed)?;
+    if status == 400 {
+        return Err(match serde_json::from_slice::<GraphError>(&body) {
+            Ok(error) if error.code == "compile_error" => GraphFailure::Rejected(error.message),
+            _ => GraphFailure::Failed(super::error::map_http_error(
+                status,
+                &String::from_utf8_lossy(&body),
+            )),
+        });
+    }
     serde_json::from_slice::<GraphResponse>(&body)
         .map(|response| response.result)
         .map_err(|error| {
-            RemoteError::new(EXIT_GENERIC, format!("unreadable graph response: {error}"))
+            GraphFailure::Failed(RemoteError::new(
+                EXIT_GENERIC,
+                format!("unreadable graph response: {error}"),
+            ))
         })
 }
 
@@ -1249,6 +1311,13 @@ fn graph_row(entity: &str, node: &GraphNode, columns: &[String], field: &str) ->
             .collect::<Vec<_>>()
             .join(" ")
             .replace(char::is_control, "");
+        let text = match text.chars().count() > GraphHits::VALUE_CHARS {
+            true => {
+                let cut: String = text.chars().take(GraphHits::VALUE_CHARS).collect();
+                format!("{cut}…")
+            }
+            false => text,
+        };
         let _ = write!(row, " {column}={text}");
     }
     row

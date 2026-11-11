@@ -173,17 +173,28 @@ impl OrbitClient {
         self.post_json(QUERY_PATH, body).await
     }
 
-    pub(crate) async fn grep_query(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+    pub(crate) async fn grep_query(&self, body: Vec<u8>) -> Result<(u16, Vec<u8>), RemoteError> {
         let response = self
-            .send(
+            .send_raw(
                 self.http
                     .post(self.url(QUERY_PATH))
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .body(body)
                     .timeout(GREP_REQUEST_TIMEOUT),
             )
-            .await?;
-        read_body(response).await
+            .await
+            .map_err(|error| {
+                RemoteError::new(
+                    EXIT_GENERIC,
+                    request_failure_message("Orbit request", &error),
+                )
+            })?;
+        let status = response.status().as_u16();
+        let body = read_body(response).await?;
+        match status {
+            200..=299 | 400 => Ok((status, body)),
+            _ => Err(map_http_error(status, &String::from_utf8_lossy(&body))),
+        }
     }
 
     pub(crate) async fn graphql<Q, V>(
