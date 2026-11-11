@@ -23,7 +23,7 @@ WITH projects AS (
          FROM {project_table:Identifier} FINAL
          WHERE _deleted = 0
            AND {in_scopes}),
-     code AS (
+     coverage AS (
          SELECT project_id,
                 countIf(indexed_at IS NOT NULL) > 0 AS is_indexed,
                 NOT is_indexed AND countIf(attempts >= {max_code_attempts:Int64}) > 0 AS is_gap
@@ -34,11 +34,11 @@ WITH projects AS (
          GROUP BY project_id)
 SELECT scope,
        toInt64(uniqExact(projects.id)) AS total_known,
-       toInt64(uniqExactIf(projects.id, code.is_indexed)) AS indexed,
-       toInt64(uniqExactIf(projects.id, code.is_gap)) AS gaps
+       toInt64(uniqExactIf(projects.id, coverage.is_indexed)) AS indexed,
+       toInt64(uniqExactIf(projects.id, coverage.is_gap)) AS gaps
 FROM projects
 ARRAY JOIN path_prefixes AS scope
-LEFT JOIN code ON code.project_id = projects.id
+LEFT JOIN coverage ON coverage.project_id = projects.id
 WHERE scope IN {scopes:Array(String)}
 GROUP BY scope
 "#;

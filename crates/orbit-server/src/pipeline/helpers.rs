@@ -221,7 +221,7 @@ fn classify_execution_error(msg: &str) -> String {
             "Query timed out. The query is likely scanning a large portion \
              of the graph. Try: add selective filters (project_id, state), \
              reduce hops/max_depth, specify rel_types, or use node_ids \
-             to pin high-cardinality entities like Definition or File."
+             to pin high-cardinality entities."
         }
         Some(ClickHouseLimit::TooManyBytes) => {
             "Query read too much data. Try: add a project_id filter to \
@@ -230,7 +230,7 @@ fn classify_execution_error(msg: &str) -> String {
         }
         Some(ClickHouseLimit::TooManyRows) => {
             "Query scanned too many rows. Filters like name or path on \
-             entities like Definition or File may not be selective enough \
+             high-cardinality entities may not be selective enough \
              without project_id scoping. Try: add project_id, use node_ids, \
              or pre-resolve broad filters with a separate lookup query."
         }
