@@ -426,7 +426,7 @@ async fn scheduled_reconcile_removes_a_moved_project_under_a_root_over_the_uri_c
         .await;
 
     index_moved_root(&context).await;
-    assert_active_row_count(&context, &t("gl_project"), MOVED_FROM_PATH, 0).await;
+    assert_active_row_count(&context, &t("gl_project"), MOVED_FROM_PATH, 1).await;
     assert_active_row_count(&context, &t("gl_project"), MOVED_TO_PATH, 1).await;
 
     run_namespace_deletion_scheduler(&context).await;
@@ -436,6 +436,24 @@ async fn scheduled_reconcile_removes_a_moved_project_under_a_root_over_the_uri_c
     }
     assert_active_row_count(&context, &t("gl_project"), MOVED_TO_PATH, 1).await;
     assert_active_row_count(&context, &t("gl_group"), MOVED_ROOT_PATH, 3).await;
+
+    context
+        .execute(&format!(
+            "INSERT INTO {} (key, watermark, cursor_values, indexed_at) VALUES \
+             ('ns.{MOVED_ROOT_ID}.Project', '2024-01-20 20:00:00.000000', 'null', '2024-01-20 20:00:00.000000')",
+            t("checkpoint")
+        ))
+        .await;
+    context
+        .execute(
+            "INSERT INTO siphon_projects (id, namespace_id, _siphon_replicated_at, _siphon_deleted) \
+             VALUES (5000, 520, '2024-01-20 21:00:00', true)",
+        )
+        .await;
+    index_moved_root(&context).await;
+    for path in [MOVED_FROM_PATH, MOVED_TO_PATH] {
+        assert_active_row_count(&context, &t("gl_project"), path, 0).await;
+    }
 }
 
 async fn index_moved_root(context: &TestContext) {

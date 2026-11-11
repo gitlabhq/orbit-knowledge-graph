@@ -3,11 +3,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use arrow::array::{AsArray, BooleanArray, StringArray};
+use arrow::array::{AsArray, BooleanArray};
 use arrow::datatypes::{DataType as ArrowType, Int64Type, UInt64Type};
 use arrow::record_batch::RecordBatch;
 use orbit_arrow::ArrowUtils;
-use orbit_utils::clickhouse::strings_per_array_param;
 use query_data_model::{
     Catalog, ClickHouse, DEFAULT_PRIMARY_KEY, DELETED_COLUMN, DataModelError, EntityId,
     RelationshipVariantId, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
@@ -224,23 +223,6 @@ impl Lifetime {
         self.nodes.iter().find(|node| node.entity == entity)
     }
 
-    /// Tombstones the entity's live rows in `ids:Array(Int64)` whose `(traversal_path, id)` is
-    /// not among the `keys:Array(Tuple(String, Int64))` just written.
-    pub fn identity(&self, entity: EntityId) -> Option<Tombstone> {
-        let node = self.node(entity)?;
-        let (columns, prefixed) = (node.columns(), node.prefixed());
-        Some(Tombstone {
-            table: node.table.clone(),
-            sql: format!(
-                "INSERT INTO {prefixed} ({columns}, {DELETED_COLUMN}, {VERSION_COLUMN}) \
-                 SELECT {columns}, true, now64(6) FROM {prefixed} \
-                 WHERE {DEFAULT_PRIMARY_KEY} IN {{ids:Array(Int64)}} AND {DELETED_COLUMN} = false \
-                 AND ({TRAVERSAL_PATH_COLUMN}, {DEFAULT_PRIMARY_KEY}) NOT IN \
-                 {{keys:Array(Tuple(String, Int64))}}"
-            ),
-        })
-    }
-
     /// Tombstones the live edges, in every edge table, of the entity's nodes in `ids`.
     pub fn edges_of(&self, entity: EntityId) -> Vec<Tombstone> {
         self.sides(entity)
@@ -316,7 +298,6 @@ impl Lifetime {
     /// The tombstones that one block of the entity's written node rows triggers.
     pub fn of_node(&self, entity: EntityId) -> NodeLifetime {
         NodeLifetime {
-            identity: self.identity(entity),
             edges: self.edges_of(entity),
         }
     }
@@ -325,36 +306,20 @@ impl Lifetime {
 /// The tombstones a block of one entity's written node rows triggers.
 #[derive(Debug, Clone)]
 pub struct NodeLifetime {
-    identity: Option<Tombstone>,
     edges: Vec<Tombstone>,
 }
 
 impl NodeLifetime {
-    /// Applies both rules to one written block: other rows of the written identities are
-    /// tombstoned, and so are the edges of the deleted nodes.
+    /// Tombstones the edges of the nodes a written block deletes. Moves are handled where
+    /// routes change, in the stale-route reconciliation.
     pub async fn written(
         &self,
         writer: &ClickHouseWriter,
         batches: &[RecordBatch],
     ) -> Result<(), WriteError> {
-        let rows = WrittenRows::read(batches, self.identity.is_some())?;
-        if let Some(identity) = &self.identity {
-            let paths: Vec<&str> = rows.keys.iter().map(|(path, _)| path.as_str()).collect();
-            let per_param = strings_per_array_param(&paths).min(IDS_PER_PARAM);
-            for keys in rows.keys.chunks(per_param) {
-                let ids: Vec<i64> = keys.iter().map(|(_, id)| *id).collect();
-                writer
-                    .tombstone(&identity.sql, |query| {
-                        query.param("ids", &ids).param("keys", keys)
-                    })
-                    .await?;
-            }
-        }
-        if rows.deleted.is_empty() {
-            return Ok(());
-        }
+        let deleted = deleted_ids(batches)?;
         for edges in &self.edges {
-            for ids in rows.deleted.chunks(IDS_PER_PARAM) {
+            for ids in deleted.chunks(IDS_PER_PARAM) {
                 writer
                     .tombstone(&edges.sql, |query| query.param("ids", ids))
                     .await?;
@@ -367,63 +332,42 @@ impl NodeLifetime {
 /// Ids per bound array parameter, under the URL budget of one parameter.
 pub(crate) const IDS_PER_PARAM: usize = 2_000;
 
-/// The keys of one block of an entity's written node rows.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct WrittenRows {
-    /// `(traversal_path, id)` of every row; empty for an entity without a path column.
-    pub keys: Vec<(String, i64)>,
-    pub deleted: Vec<i64>,
-}
-
-impl WrittenRows {
-    pub fn read(batches: &[RecordBatch], namespaced: bool) -> Result<Self, WriteError> {
-        let missing = |name: &str| {
-            WriteError::Write(format!(
-                "written node rows have no {name} column of its type"
-            ))
+/// The ids of the rows a written block of node rows tombstones.
+pub fn deleted_ids(batches: &[RecordBatch]) -> Result<Vec<i64>, WriteError> {
+    let missing = |name: &str| {
+        WriteError::Write(format!(
+            "written node rows have no {name} column of its type"
+        ))
+    };
+    let mut deleted_ids = Vec::new();
+    for batch in batches {
+        let ids = batch
+            .column_by_name(DEFAULT_PRIMARY_KEY)
+            .ok_or_else(|| missing(DEFAULT_PRIMARY_KEY))?;
+        // A hashed id arrives as UInt64; the Int64 column stores it wrapped.
+        let id = |row: usize| match ids.data_type() {
+            ArrowType::Int64 => ids.as_primitive::<Int64Type>().value(row),
+            _ => ids.as_primitive::<UInt64Type>().value(row) as i64,
         };
-        let mut rows = Self::default();
-        for batch in batches {
-            let ids = batch
-                .column_by_name(DEFAULT_PRIMARY_KEY)
-                .ok_or_else(|| missing(DEFAULT_PRIMARY_KEY))?;
-            // A hashed id arrives as UInt64; the Int64 column stores it wrapped.
-            let id = |row: usize| match ids.data_type() {
-                ArrowType::Int64 => ids.as_primitive::<Int64Type>().value(row),
-                _ => ids.as_primitive::<UInt64Type>().value(row) as i64,
-            };
-            if !matches!(ids.data_type(), ArrowType::Int64 | ArrowType::UInt64) {
-                return Err(missing(DEFAULT_PRIMARY_KEY));
-            }
-            let deleted = ArrowUtils::get_column_by_name::<BooleanArray>(batch, DELETED_COLUMN)
-                .ok_or_else(|| missing(DELETED_COLUMN))?;
-            let paths = if namespaced {
-                let paths =
-                    ArrowUtils::get_column_by_name::<StringArray>(batch, TRAVERSAL_PATH_COLUMN)
-                        .ok_or_else(|| missing(TRAVERSAL_PATH_COLUMN))?;
-                Some(paths)
-            } else {
-                None
-            };
-            for row in 0..batch.num_rows() {
-                let id = id(row);
-                if deleted.value(row) {
-                    rows.deleted.push(id);
-                }
-                if let Some(paths) = paths {
-                    rows.keys.push((paths.value(row).to_string(), id));
-                }
+        if !matches!(ids.data_type(), ArrowType::Int64 | ArrowType::UInt64) {
+            return Err(missing(DEFAULT_PRIMARY_KEY));
+        }
+        let deleted = ArrowUtils::get_column_by_name::<BooleanArray>(batch, DELETED_COLUMN)
+            .ok_or_else(|| missing(DELETED_COLUMN))?;
+        for row in 0..batch.num_rows() {
+            if deleted.value(row) {
+                deleted_ids.push(id(row));
             }
         }
-        Ok(rows)
     }
+    Ok(deleted_ids)
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use arrow::array::Int64Array;
+    use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
 
     use super::*;
@@ -478,27 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn identity_tombstones_the_other_paths_of_the_written_ids() {
-        let (catalog, lifetime) = lifetime();
-        let sql = lifetime
-            .identity(entity(&catalog, "Group"))
-            .expect("a namespaced entity")
-            .sql;
-        let group = prefixed_table_name("gl_group", *SCHEMA_VERSION);
-        assert!(
-            sql.starts_with(&format!("INSERT INTO {group} (traversal_path, id")),
-            "{sql}"
-        );
-        assert!(sql.contains("id IN {ids:Array(Int64)}"), "{sql}");
-        assert!(
-            sql.contains("(traversal_path, id) NOT IN {keys:Array(Tuple(String, Int64))}"),
-            "{sql}"
-        );
-        assert!(lifetime.identity(entity(&catalog, "User")).is_none());
-    }
-
-    #[test]
-    fn written_rows_hold_every_key_and_the_deleted_ids() {
+    fn a_written_block_yields_its_deleted_ids() {
         let schema = Arc::new(Schema::new(vec![
             Field::new(DEFAULT_PRIMARY_KEY, DataType::Int64, false),
             Field::new(TRAVERSAL_PATH_COLUMN, DataType::Utf8, false),
@@ -513,13 +437,6 @@ mod tests {
             ],
         )
         .unwrap();
-        let rows = WrittenRows::read(&[batch], true).unwrap();
-        assert_eq!(
-            rows,
-            WrittenRows {
-                keys: vec![("1/2/".into(), 1), ("1/3/".into(), 2)],
-                deleted: vec![2],
-            }
-        );
+        assert_eq!(deleted_ids(&[batch]).unwrap(), [2]);
     }
 }
