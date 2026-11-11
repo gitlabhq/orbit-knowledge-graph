@@ -2,7 +2,7 @@ use super::{Access, Check, EntityAccess, Policy, ScopeId, ScopeKind};
 use crate::catalog::Diagnostics;
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::spec::{CheckSpec, PolicySpec, PolicyWord, ScopeKeySpec};
-use crate::types::Cardinality;
+use crate::types::{Cardinality, DataType};
 use crate::{EntityId, GraphCatalog, Hop};
 
 /// Resolves one entity's written policies and checks.
@@ -161,6 +161,17 @@ impl Context<'_> {
         let id = self.diagnostics.require(id, self.package, || {
             format!("{name} check id is not a property of {name}")
         })?;
+        let key = self.graph.property(id);
+        if !matches!(
+            key.data_type,
+            DataType::Int | DataType::String | DataType::Uuid
+        ) {
+            self.error(format!(
+                "{name} check keys rows by {}, a {:?}; a key is an integer, string or uuid",
+                key.name, key.data_type
+            ));
+            return None;
+        }
         Some(Check::Rows {
             provider: row.provider.clone(),
             permission: permission?,

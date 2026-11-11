@@ -186,7 +186,7 @@ impl PipelineStage for MockAuthorizationStage {
             .map(|check| ResourceAuthorization {
                 provider: check.provider.clone(),
                 resource_type: check.resource_type.clone(),
-                authorized: check.ids.iter().map(|id| (*id, true)).collect(),
+                authorized: check.ids.iter().map(|id| (id.clone(), true)).collect(),
             })
             .collect();
 

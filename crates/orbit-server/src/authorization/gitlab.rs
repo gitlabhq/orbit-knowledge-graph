@@ -17,7 +17,7 @@ use tonic::{Status, Streaming};
 use crate::auth::authz::SecurityContextError;
 use crate::auth::{Claims, build_security_context};
 use crate::proto::ExecuteQueryMessage;
-use crate::redaction::{RedactionExchangeError, RedactionService, ResourceCheck};
+use crate::redaction::{RailsResource, RedactionExchangeError, RedactionService};
 
 /// The request stream Rails holds open, over which it answers ability checks.
 pub struct RailsExchange {
@@ -255,8 +255,7 @@ impl Provider<Check> for RailsAbilities {
             .requests
             .iter()
             .map(|request| {
-                Ok(ResourceCheck {
-                    provider: String::new(),
+                Ok(RailsResource {
                     resource_type: request.resource.clone(),
                     ids: request.ids.iter().map(rails_id).collect::<Result<_, _>>()?,
                     ability: request.permission.clone(),

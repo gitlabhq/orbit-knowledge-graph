@@ -138,7 +138,7 @@ impl ScopeSet {
 }
 
 /// The key of a scope or an object, in the type its declaring property holds.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Key {
     Int(i64),
     Text(String),

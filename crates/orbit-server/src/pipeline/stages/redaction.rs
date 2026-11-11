@@ -40,7 +40,8 @@ mod tests {
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use query_engine::compiler::{EntityAuthConfig, ResultContext};
+    use orbit_authorization::Key;
+    use query_engine::compiler::{EntityAuthConfig, KeyKind, ResultContext};
     use query_engine::pipeline::NoOpObserver;
     use query_engine::types::{QueryResult, ResourceAuthorization};
     use std::sync::Arc;
@@ -68,6 +69,7 @@ mod tests {
                 ability: "read".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
+                key_kind: KeyKind::Int,
                 provider: "rails".to_string(),
             },
         );
@@ -92,7 +94,10 @@ mod tests {
         let auth = vec![ResourceAuthorization {
             provider: "rails".to_string(),
             resource_type: "project".to_string(),
-            authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
+            authorized: [(10, true), (20, false), (30, true)]
+                .into_iter()
+                .map(|(id, ok)| (Key::Int(id), ok))
+                .collect(),
         }];
         let mut ctx = seed_ctx(auth);
         let mut obs = NoOpObserver;

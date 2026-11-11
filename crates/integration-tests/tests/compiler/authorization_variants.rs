@@ -1,18 +1,22 @@
 //! One authorization contract serves GitLab and other systems: the same packages and compiler
 //! run against a Zanzibar-style, an OIDC-groups and a Slack sign-in deployment of seeded fakes.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use arrow::array::{Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
+use compiler::CompiledQueryContext;
 use compiler::orbit_authorization::{Caller, CheckRequest, Grants, Key, Request, ScopeSet};
 use integration_testkit::authorization_variants::fakes::OidcToken;
 use integration_testkit::authorization_variants::{deployment, platform, registry};
 use orbit_server::authorization::{BindError, Deployment};
-use query_data_model::{Catalog, ClickHouse};
-use query_engine::types::{QueryResult, ResourceAuthorization};
+use orbit_server::pipeline::{AuthorizationStage, RedactionStage};
+use query_data_model::{Catalog, ClickHouse, Packages, Tier};
+use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext};
+use query_engine::shared::ExtractionOutput;
+use query_engine::types::QueryResult;
 
 fn bind(variant: &str, packages: &[&str]) -> (Arc<Catalog<ClickHouse>>, Deployment) {
     let model = platform(packages).load().unwrap();
@@ -54,10 +58,43 @@ fn compiled(
     (compiled.base.sql, arrays)
 }
 
+/// The rows that survive the server's authorization and redaction stages, which ask the
+/// deployment's providers about every row check.
+async fn through_the_server(
+    deployment: Arc<Deployment>,
+    caller: Caller,
+    compiled: &CompiledQueryContext,
+    batch: RecordBatch,
+) -> QueryResult {
+    let mut ctx = QueryPipelineContext {
+        query_json: String::new(),
+        compiled: None,
+        security_context: None,
+        grants: None,
+        server_extensions: Default::default(),
+        phases: Default::default(),
+    };
+    ctx.server_extensions.insert(deployment);
+    ctx.server_extensions.insert(caller);
+    ctx.phases.insert(ExtractionOutput {
+        query_result: QueryResult::from_batches(&[batch], &compiled.base.result_context).unwrap(),
+    });
+    let authorized = AuthorizationStage
+        .execute(&mut ctx, &mut NoOpObserver)
+        .await
+        .unwrap();
+    ctx.phases.insert(authorized);
+    RedactionStage
+        .execute(&mut ctx, &mut NoOpObserver)
+        .await
+        .unwrap()
+        .query_result
+}
+
 /// The ids of `Document` rows that every provider the entity's checks name allows.
 async fn redacted(
-    deployment: &Deployment,
-    caller: &Caller,
+    deployment: Arc<Deployment>,
+    caller: Caller,
     catalog: &Arc<Catalog<ClickHouse>>,
     grants: &Grants,
     ids: &[i64],
@@ -80,40 +117,7 @@ async fn redacted(
         ],
     )
     .unwrap();
-    let mut result = QueryResult::from_batches(&[batch], &compiled.base.result_context).unwrap();
-    let mut by_provider: BTreeMap<String, Vec<CheckRequest>> = BTreeMap::new();
-    for check in result.resource_checks() {
-        by_provider
-            .entry(check.provider)
-            .or_default()
-            .push(CheckRequest {
-                permission: check.ability,
-                resource: check.resource_type,
-                ids: check.ids.into_iter().map(Key::Int).collect(),
-            });
-    }
-    let mut authorizations = Vec::new();
-    for (provider, requests) in by_provider {
-        let allowed = deployment
-            .check(caller, &provider, requests.clone())
-            .await
-            .unwrap();
-        for (request, allowed) in requests.into_iter().zip(allowed) {
-            authorizations.push(ResourceAuthorization {
-                provider: provider.clone(),
-                resource_type: request.resource,
-                authorized: request
-                    .ids
-                    .iter()
-                    .map(|key| match key {
-                        Key::Int(id) => (*id, allowed.contains(key)),
-                        other => panic!("Document is keyed by integer ids, not {other:?}"),
-                    })
-                    .collect(),
-            });
-        }
-    }
-    result.apply_authorizations(&authorizations);
+    let result = through_the_server(deployment, caller, &compiled, batch).await;
     let mut ids: Vec<i64> = result
         .authorized_rows()
         .filter_map(|row| row.get("_orbit_d_id")?.as_int64().copied())
@@ -125,6 +129,7 @@ async fn redacted(
 #[tokio::test]
 async fn a_zanzibar_deployment_scopes_with_keys_and_checks_every_row_check() {
     let (catalog, deployment) = bind("zanzibar", &["acme", "acme.checked"]);
+    let deployment = Arc::new(deployment);
     let (caller, grants) = signed_in(&deployment, "alice", &[]).await;
     assert_eq!(
         grants.scope_set("team", "read").unwrap(),
@@ -147,12 +152,12 @@ async fn a_zanzibar_deployment_scopes_with_keys_and_checks_every_row_check() {
     );
 
     assert_eq!(
-        redacted(&deployment, &caller, &catalog, &grants, &[1, 2, 3, 4]).await,
+        redacted(deployment.clone(), caller, &catalog, &grants, &[1, 2, 3, 4]).await,
         [1, 3]
     );
     let (bob, bob_grants) = signed_in(&deployment, "bob", &[]).await;
     assert_eq!(
-        redacted(&deployment, &bob, &catalog, &bob_grants, &[1, 2, 4]).await,
+        redacted(deployment, bob, &catalog, &bob_grants, &[1, 2, 4]).await,
         [4]
     );
 }
@@ -265,4 +270,72 @@ async fn a_check_answers_string_keyed_rows_with_text_keys() {
         .await
         .unwrap();
     assert_eq!(allowed, [BTreeSet::new()]);
+}
+
+#[tokio::test]
+async fn the_server_redacts_string_keyed_rows_a_check_denies() {
+    let (catalog, deployment) = bind("messages", &["acme", "acme.messages"]);
+    let (alice, grants) = signed_in(&deployment, "alice", &["team-a"]).await;
+    let compiled = compiler::compile(
+        "MATCH (m:Message) WHERE m.id IN ['m1', 'm2', 'm3'] RETURN m.text LIMIT 10",
+        &catalog,
+        &grants,
+    )
+    .unwrap();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("_orbit_m_id", DataType::Utf8, false),
+        Field::new("_orbit_m_type", DataType::Utf8, false),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from(vec!["m1", "m2", "m3"])),
+            Arc::new(StringArray::from(vec!["Message"; 3])),
+        ],
+    )
+    .unwrap();
+    let result = through_the_server(Arc::new(deployment), alice, &compiled, batch).await;
+    let ids: Vec<&str> = result
+        .authorized_rows()
+        .filter_map(|row| row.get("_orbit_m_id")?.as_string().map(String::as_str))
+        .collect();
+    assert_eq!(ids, ["m1", "m3"]);
+    assert_eq!(result.len() - result.authorized_count(), 1);
+}
+
+#[test]
+fn a_check_that_keys_rows_by_a_boolean_fails_the_load() {
+    let mut sources = platform(&["acme", "acme.messages"]).sources().clone();
+    let mut edit = |path: &str, from: &str, to: &str| {
+        let text = sources.get_mut(path).unwrap();
+        assert!(text.contains(from), "{path} holds no {from}");
+        *text = text.replace(from, to);
+    };
+    edit(
+        "acme.messages/graph.yaml",
+        "      team_key: string\n",
+        "      team_key: string\n      pinned: boolean\n",
+    );
+    edit(
+        "acme.messages/storage/clickhouse.yaml",
+        "      team_key: {backend: {type: String}}\n",
+        "      team_key: {backend: {type: String}}\n      pinned: {backend: {type: Bool}}\n",
+    );
+    edit(
+        "acme.messages/authorization.yaml",
+        "open: [id, text]",
+        "open: [id, text, pinned]",
+    );
+    edit(
+        "acme.messages/authorization.yaml",
+        "checks: [{provider: slack, permission: read, resource: message}]",
+        "checks: [{provider: slack, permission: read, resource: message}, \
+         {provider: slack, permission: read, resource: message, object: Message, id: pinned}]",
+    );
+    let error = Packages::new(Tier::Platform, sources)
+        .load()
+        .unwrap_err()
+        .to_string();
+    let expected = "Message check keys rows by pinned, a Bool; a key is an integer, string or uuid";
+    assert!(error.contains(expected), "{error}");
 }

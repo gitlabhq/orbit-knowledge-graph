@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
+use orbit_authorization::Key;
 use orbit_server::redaction::{ResourceAuthorization, ResourceCheck};
 
 pub struct MockRedactionService {
-    pub authorizations: HashMap<String, HashMap<i64, bool>>,
+    pub authorizations: HashMap<String, HashMap<Key, bool>>,
 }
 
 impl Default for MockRedactionService {
@@ -25,7 +26,7 @@ impl MockRedactionService {
             .entry(resource_type.to_string())
             .or_default();
         for id in ids {
-            map.insert(*id, true);
+            map.insert(Key::Int(*id), true);
         }
     }
 
@@ -35,7 +36,7 @@ impl MockRedactionService {
             .entry(resource_type.to_string())
             .or_default();
         for id in ids {
-            map.insert(*id, false);
+            map.insert(Key::Int(*id), false);
         }
     }
 
@@ -53,7 +54,7 @@ impl MockRedactionService {
                             .and_then(|m| m.get(id))
                             .copied()
                             .unwrap_or(false);
-                        (*id, allowed)
+                        (id.clone(), allowed)
                     })
                     .collect();
 

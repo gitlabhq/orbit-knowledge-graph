@@ -16,7 +16,7 @@
 //! valid against the current schema), not result correctness. `expect: error`
 //! entries are deliberate invalid controls and must fail.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
@@ -91,11 +91,7 @@ impl PipelineStage for AuthorizeAllStage {
             .map(|c| ResourceAuthorization {
                 provider: c.provider.clone(),
                 resource_type: c.resource_type.clone(),
-                authorized: c
-                    .ids
-                    .iter()
-                    .map(|id| (*id, true))
-                    .collect::<HashMap<i64, bool>>(),
+                authorized: c.ids.iter().map(|id| (id.clone(), true)).collect(),
             })
             .collect();
         Ok(AuthorizationOutput {

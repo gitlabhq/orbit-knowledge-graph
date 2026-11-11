@@ -10,8 +10,6 @@ use crate::proto::{
     ResourceToAuthorize as ProtoResourceToAuthorize, execute_query_message, redaction_exchange,
 };
 
-use super::ResourceCheck;
-
 #[derive(Debug)]
 pub enum RedactionExchangeError {
     StreamClosed,
@@ -38,6 +36,14 @@ impl RedactionExchangeError {
 pub struct RailsAuthorization {
     pub resource_type: String,
     pub authorized: std::collections::HashMap<i64, bool>,
+}
+
+/// One Rails ability over integer ids, as the exchange sends it.
+#[derive(Debug, Clone)]
+pub struct RailsResource {
+    pub resource_type: String,
+    pub ids: Vec<i64>,
+    pub ability: String,
 }
 
 pub struct RedactionExchangeResult {
@@ -79,7 +85,7 @@ pub struct RedactionService;
 
 impl RedactionService {
     pub async fn request_authorization<M: RedactionMessage>(
-        resources: &[ResourceCheck],
+        resources: &[RailsResource],
         tx: &mpsc::Sender<Result<M, Status>>,
         stream: &mut Streaming<M>,
     ) -> Result<RedactionExchangeResult, RedactionExchangeError> {

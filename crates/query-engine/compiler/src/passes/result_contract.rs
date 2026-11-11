@@ -1,6 +1,6 @@
-use query_data_model::Catalog;
 use query_data_model::catalog::Check;
 use query_data_model::implementations::relational::plan::RelationalPlan;
+use query_data_model::{Catalog, DataType};
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::Direction;
@@ -34,6 +34,26 @@ pub struct EntityAuthConfig {
     pub ability: String,
     pub auth_id_column: String,
     pub owner_entity: Option<String>,
+    pub key_kind: KeyKind,
+}
+
+/// The type of key a row check sends its provider, from the property it keys rows by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyKind {
+    Int,
+    Text,
+    Uuid,
+}
+
+impl KeyKind {
+    /// The loader admits only integer, string and uuid check keys.
+    fn of(data_type: DataType) -> Self {
+        match data_type {
+            DataType::Int => Self::Int,
+            DataType::Uuid => Self::Uuid,
+            _ => Self::Text,
+        }
+    }
 }
 
 /// The row checks each checked entity's returned rows go through, by entity name; a row comes
@@ -60,6 +80,7 @@ pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, Vec<Enti
                         ability: access.permission(*permission).name.clone(),
                         auth_id_column: graph.property(*id).name.clone(),
                         owner_entity: object.map(|owner| graph.entity(owner).name.clone()),
+                        key_kind: KeyKind::of(graph.property(*id).data_type),
                     }),
                     Check::Delegated { .. } => None,
                 })

@@ -6,7 +6,8 @@ use compiler::constants::{
     edge_kinds_column, neighbor_id_column, neighbor_type_column, path_column,
 };
 use compiler::internal_column_prefix;
-use compiler::{QueryType, RedactionNode, ResultContext};
+use compiler::orbit_authorization::Key;
+use compiler::{EntityAuthConfig, KeyKind, QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
 use orbit_arrow::{ArrowUtils, ColumnValue};
@@ -37,6 +38,16 @@ impl NodeRef {
             properties: HashMap::new(),
             owner_id: None,
         }
+    }
+
+    /// The key the check sends its provider for this node: its owner's id when the check names
+    /// an owner, else its own.
+    pub fn check_key(&self, check: &EntityAuthConfig) -> Option<Key> {
+        let id = match check.owner_entity {
+            Some(_) => self.owner_id?,
+            None => self.id,
+        };
+        key(check.key_kind, &ColumnValue::Int64(id))
     }
 }
 
@@ -92,8 +103,9 @@ impl QueryResultRow {
             .map(|s| s.as_str())
     }
 
-    pub fn node_ref(&self, node: &RedactionNode) -> Option<NodeRef> {
-        Some(NodeRef::new(self.get_id(node)?, self.get_type(node)?))
+    /// The key the check sends its provider for this row's node.
+    pub fn check_key(&self, node: &RedactionNode, check: &EntityAuthConfig) -> Option<Key> {
+        key(check.key_kind, self.columns.get(&node.id_column)?)
     }
 
     pub fn path_nodes(&self) -> &[NodeRef] {
@@ -323,50 +335,29 @@ impl QueryResult {
     }
 
     pub fn resource_checks(&self) -> Vec<ResourceCheck> {
-        let mut ids: HashMap<(&str, &str, &str), HashSet<i64>> = HashMap::new();
-
+        let mut keys = HashMap::new();
+        let ctx = &self.ctx;
         for row in &self.rows {
-            for redaction_node in self.ctx.nodes() {
-                let Some(node_ref) = row.node_ref(redaction_node) else {
+            for node in ctx.nodes() {
+                let Some(entity) = row.get_type(node) else {
                     continue;
                 };
-                for auth in self.ctx.entity_checks(&node_ref.entity_type) {
-                    ids.entry((
-                        auth.provider.as_str(),
-                        auth.resource_type.as_str(),
-                        auth.ability.as_str(),
-                    ))
-                    .or_default()
-                    .insert(node_ref.id);
+                for check in ctx.entity_checks(entity) {
+                    request(&mut keys, check, row.check_key(node, check));
                 }
             }
-
             for node_ref in &row.dynamic_nodes {
-                for auth in self.ctx.entity_checks(&node_ref.entity_type) {
-                    let auth_id = if auth.owner_entity.is_some() {
-                        let Some(id) = node_ref.owner_id else {
-                            continue;
-                        };
-                        id
-                    } else {
-                        node_ref.id
-                    };
-                    ids.entry((
-                        auth.provider.as_str(),
-                        auth.resource_type.as_str(),
-                        auth.ability.as_str(),
-                    ))
-                    .or_default()
-                    .insert(auth_id);
+                for check in ctx.entity_checks(&node_ref.entity_type) {
+                    request(&mut keys, check, node_ref.check_key(check));
                 }
             }
         }
 
-        ids.into_iter()
-            .map(|((provider, resource_type, ability), ids)| ResourceCheck {
+        keys.into_iter()
+            .map(|((provider, resource_type, ability), keys)| ResourceCheck {
                 provider: provider.to_string(),
                 resource_type: resource_type.to_string(),
-                ids: ids.into_iter().collect(),
+                ids: keys.into_iter().collect(),
                 ability: ability.to_string(),
             })
             .collect()
@@ -408,40 +399,27 @@ impl QueryResult {
     /// that cannot be verified as authorized is marked unauthorized.
     pub fn apply_authorizations(&mut self, authorizations: &[ResourceAuthorization]) -> usize {
         let mut redacted_count = 0;
-        let redaction_nodes: Vec<_> = self.ctx.nodes().cloned().collect();
-
-        for row in &mut self.rows {
-            if !row.authorized {
-                continue;
-            }
-
-            for redaction_node in &redaction_nodes {
-                let Some(node_ref) = row.node_ref(redaction_node) else {
-                    row.set_unauthorized();
-                    redacted_count += 1;
-                    break;
-                };
-                if !is_authorized(&node_ref, authorizations, &self.ctx) {
-                    row.set_unauthorized();
-                    redacted_count += 1;
-                    break;
-                }
-            }
-
-            if row.authorized {
-                for node_ref in &row.dynamic_nodes {
-                    let mut node_ref = node_ref.clone();
-                    if !resolve_dynamic_auth_id(&mut node_ref, &self.ctx)
-                        || !is_authorized(&node_ref, authorizations, &self.ctx)
-                    {
-                        row.set_unauthorized();
-                        redacted_count += 1;
-                        break;
-                    }
-                }
+        let ctx = &self.ctx;
+        for row in self.rows.iter_mut().filter(|row| row.authorized) {
+            let statics = ctx.nodes().all(|node| {
+                row.get_type(node).is_some_and(|entity| {
+                    allows(ctx.entity_checks(entity), authorizations, |check| {
+                        row.check_key(node, check)
+                    })
+                })
+            });
+            let dynamics = row.dynamic_nodes.iter().all(|node_ref| {
+                allows(
+                    ctx.entity_checks(&node_ref.entity_type),
+                    authorizations,
+                    |check| node_ref.check_key(check),
+                )
+            });
+            if !(statics && dynamics) {
+                row.set_unauthorized();
+                redacted_count += 1;
             }
         }
-
         redacted_count
     }
 
@@ -463,35 +441,49 @@ impl QueryResult {
     }
 }
 
-fn is_authorized(
-    node_ref: &NodeRef,
+type Requests<'c> = HashMap<(&'c str, &'c str, &'c str), HashSet<Key>>;
+
+fn request<'c>(requests: &mut Requests<'c>, check: &'c EntityAuthConfig, key: Option<Key>) {
+    if let Some(key) = key {
+        requests
+            .entry((
+                check.provider.as_str(),
+                check.resource_type.as_str(),
+                check.ability.as_str(),
+            ))
+            .or_default()
+            .insert(key);
+    }
+}
+
+/// Every check of the node allows the key it derives from the row; a node without checks or
+/// without a key fails closed.
+fn allows(
+    checks: &[EntityAuthConfig],
     authorizations: &[ResourceAuthorization],
-    ctx: &ResultContext,
+    key: impl Fn(&EntityAuthConfig) -> Option<Key>,
 ) -> bool {
-    let checks = ctx.entity_checks(&node_ref.entity_type);
     !checks.is_empty()
         && checks.iter().all(|check| {
-            authorizations
-                .iter()
-                .find(|a| a.provider == check.provider && a.resource_type == check.resource_type)
-                .and_then(|answer| answer.authorized.get(&node_ref.id).copied())
-                == Some(true)
+            key(check).is_some_and(|key| {
+                authorizations
+                    .iter()
+                    .find(|a| {
+                        a.provider == check.provider && a.resource_type == check.resource_type
+                    })
+                    .and_then(|answer| answer.authorized.get(&key).copied())
+                    == Some(true)
+            })
         })
 }
 
-fn resolve_dynamic_auth_id(node_ref: &mut NodeRef, ctx: &ResultContext) -> bool {
-    let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
-        return true;
-    };
-    if auth_config.owner_entity.is_none() {
-        return true;
-    }
-    match node_ref.owner_id {
-        Some(owner_id) => {
-            node_ref.id = owner_id;
-            true
-        }
-        None => false,
+/// A row value as the key of a check, in the type the check's provider keys by.
+fn key(kind: KeyKind, value: &ColumnValue) -> Option<Key> {
+    match (kind, value) {
+        (KeyKind::Int, ColumnValue::Int64(id)) => Some(Key::Int(*id)),
+        (KeyKind::Text, ColumnValue::String(key)) => Some(Key::Text(key.clone())),
+        (KeyKind::Uuid, ColumnValue::String(key)) => Some(Key::Uuid(key.clone())),
+        _ => None,
     }
 }
 
@@ -503,6 +495,13 @@ mod tests {
     use compiler::EntityAuthConfig;
     use std::collections::HashSet;
     use std::sync::Arc;
+
+    fn answers<const N: usize>(answers: [(i64, bool); N]) -> HashMap<Key, bool> {
+        answers
+            .into_iter()
+            .map(|(id, ok)| (Key::Int(id), ok))
+            .collect()
+    }
 
     fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
         let fields: Vec<Field> = columns
@@ -543,6 +542,7 @@ mod tests {
                 ability: "read_user".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
+                key_kind: KeyKind::Int,
                 provider: "rails".to_string(),
             },
         );
@@ -553,6 +553,7 @@ mod tests {
                 ability: "read".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
+                key_kind: KeyKind::Int,
                 provider: "rails".to_string(),
             },
         );
@@ -564,14 +565,12 @@ mod tests {
             ResourceAuthorization {
                 provider: "rails".to_string(),
                 resource_type: "user".to_string(),
-                authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
+                authorized: answers([(1, true), (2, true), (3, true)]),
             },
             ResourceAuthorization {
                 provider: "rails".to_string(),
                 resource_type: "project".to_string(),
-                authorized: [(100, true), (200, true), (300, true)]
-                    .into_iter()
-                    .collect(),
+                authorized: answers([(100, true), (200, true), (300, true)]),
             },
         ]
     }
@@ -668,10 +667,6 @@ mod tests {
 
             assert_eq!(row.get_id(d), Some(1000));
             assert_eq!(row.get_public_id(d), Some(5000));
-
-            let node_ref = row.node_ref(d).unwrap();
-            assert_eq!(node_ref.id, 1000);
-            assert_eq!(node_ref.entity_type, "Definition");
         }
 
         #[test]
@@ -686,19 +681,21 @@ mod tests {
         }
 
         #[test]
-        fn node_ref_combines_id_and_type() {
+        fn check_key_reads_the_redaction_id_in_the_check_key_type() {
             let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let row = &result.rows()[0];
             let u = result.ctx().get("u").unwrap();
             let p = result.ctx().get("p").unwrap();
+            let user = &result.ctx().entity_checks("User")[0];
+            let project = &result.ctx().entity_checks("Project")[0];
 
-            let user_ref = row.node_ref(u).unwrap();
-            assert_eq!(user_ref.id, 1);
-            assert_eq!(user_ref.entity_type, "User");
-
-            let project_ref = row.node_ref(p).unwrap();
-            assert_eq!(project_ref.id, 100);
-            assert_eq!(project_ref.entity_type, "Project");
+            assert_eq!(row.check_key(u, user), Some(Key::Int(1)));
+            assert_eq!(row.check_key(p, project), Some(Key::Int(100)));
+            let text = EntityAuthConfig {
+                key_kind: KeyKind::Text,
+                ..user.clone()
+            };
+            assert_eq!(row.check_key(u, &text), None);
         }
 
         #[test]
@@ -717,7 +714,8 @@ mod tests {
             };
             assert_eq!(row.get_id(&ghost), None);
             assert_eq!(row.get_type(&ghost), None);
-            assert!(row.node_ref(&ghost).is_none());
+            let user = &result.ctx().entity_checks("User")[0];
+            assert!(row.check_key(&ghost, user).is_none());
         }
 
         #[test]
@@ -868,14 +866,12 @@ mod tests {
                 ResourceAuthorization {
                     provider: "rails".to_string(),
                     resource_type: "user".to_string(),
-                    authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
+                    authorized: answers([(1, true), (2, true), (3, true)]),
                 },
                 ResourceAuthorization {
                     provider: "rails".to_string(),
                     resource_type: "project".to_string(),
-                    authorized: [(100, true), (200, false), (300, true)]
-                        .into_iter()
-                        .collect(),
+                    authorized: answers([(100, true), (200, false), (300, true)]),
                 },
             ];
 
@@ -896,14 +892,12 @@ mod tests {
                 ResourceAuthorization {
                     provider: "rails".to_string(),
                     resource_type: "user".to_string(),
-                    authorized: [(1, false), (2, true), (3, false)].into_iter().collect(),
+                    authorized: answers([(1, false), (2, true), (3, false)]),
                 },
                 ResourceAuthorization {
                     provider: "rails".to_string(),
                     resource_type: "project".to_string(),
-                    authorized: [(100, true), (200, true), (300, true)]
-                        .into_iter()
-                        .collect(),
+                    authorized: answers([(100, true), (200, true), (300, true)]),
                 },
             ];
 
@@ -937,6 +931,7 @@ mod tests {
                     ability: "view".to_string(),
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
+                    key_kind: KeyKind::Int,
                     provider: "cedar".to_string(),
                 },
             );
@@ -948,7 +943,7 @@ mod tests {
             authorizations.push(ResourceAuthorization {
                 provider: "cedar".to_string(),
                 resource_type: "project".to_string(),
-                authorized: [(100, true), (200, false)].into_iter().collect(),
+                authorized: answers([(100, true), (200, false)]),
             });
 
             let redacted = result.apply_authorizations(&authorizations);
@@ -972,7 +967,7 @@ mod tests {
             let authorizations = vec![ResourceAuthorization {
                 provider: "rails".to_string(),
                 resource_type: "user".to_string(),
-                authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
+                authorized: answers([(1, true), (2, true), (3, true)]),
             }];
 
             let redacted = result.apply_authorizations(&authorizations);
@@ -989,14 +984,12 @@ mod tests {
                 ResourceAuthorization {
                     provider: "rails".to_string(),
                     resource_type: "user".to_string(),
-                    authorized: [(1, true)].into_iter().collect(),
+                    authorized: answers([(1, true)]),
                 },
                 ResourceAuthorization {
                     provider: "rails".to_string(),
                     resource_type: "project".to_string(),
-                    authorized: [(100, true), (200, true), (300, true)]
-                        .into_iter()
-                        .collect(),
+                    authorized: answers([(100, true), (200, true), (300, true)]),
                 },
             ];
 
@@ -1032,6 +1025,7 @@ mod tests {
                     ability: "read_user".to_string(),
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
+                    key_kind: KeyKind::Int,
                     provider: "rails".to_string(),
                 },
             );
@@ -1042,6 +1036,7 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
+                    key_kind: KeyKind::Int,
                     provider: "rails".to_string(),
                 },
             );
@@ -1053,12 +1048,12 @@ mod tests {
                 ResourceAuthorization {
                     provider: "rails".to_string(),
                     resource_type: "user".to_string(),
-                    authorized: [(1, true)].into_iter().collect(),
+                    authorized: answers([(1, true)]),
                 },
                 ResourceAuthorization {
                     provider: "rails".to_string(),
                     resource_type: "project".to_string(),
-                    authorized: [(1000, true)].into_iter().collect(),
+                    authorized: answers([(1000, true)]),
                 },
             ];
 
@@ -1089,6 +1084,7 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
+                    key_kind: KeyKind::Int,
                     provider: "rails".to_string(),
                 },
             );
@@ -1099,6 +1095,7 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
+                    key_kind: KeyKind::Int,
                     provider: "rails".to_string(),
                 },
             );
@@ -1112,7 +1109,7 @@ mod tests {
             vec![ResourceAuthorization {
                 provider: "rails".to_string(),
                 resource_type: "project".to_string(),
-                authorized: [(1000, true), (1001, false)].into_iter().collect(),
+                authorized: answers([(1000, true), (1001, false)]),
             }]
         }
 
@@ -1232,7 +1229,7 @@ mod tests {
         }
 
         #[test]
-        fn node_ref_returns_none_if_id_null() {
+        fn check_key_is_none_if_id_null() {
             let batch = make_batch(vec![
                 ("_orbit_u_id", Arc::new(Int64Array::from(vec![None]))),
                 ("_orbit_u_type", Arc::new(StringArray::from(vec!["User"]))),
@@ -1240,11 +1237,12 @@ mod tests {
 
             let result = QueryResult::from_batches(&[batch], &user_ctx()).unwrap();
             let u = result.ctx().get("u").unwrap();
-            assert!(result.rows()[0].node_ref(u).is_none());
+            let user = test_ctx().entity_checks("User")[0].clone();
+            assert!(result.rows()[0].check_key(u, &user).is_none());
         }
 
         #[test]
-        fn node_ref_returns_none_if_type_null() {
+        fn a_row_without_a_type_is_redacted() {
             let batch = make_batch(vec![
                 ("_orbit_u_id", Arc::new(Int64Array::from(vec![1]))),
                 (
@@ -1253,9 +1251,10 @@ mod tests {
                 ),
             ]);
 
-            let result = QueryResult::from_batches(&[batch], &user_ctx()).unwrap();
-            let u = result.ctx().get("u").unwrap();
-            assert!(result.rows()[0].node_ref(u).is_none());
+            let mut ctx = user_ctx();
+            ctx.add_entity_auth("User", test_ctx().entity_checks("User")[0].clone());
+            let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
+            assert_eq!(result.apply_authorizations(&full_auth()), 1);
         }
     }
 

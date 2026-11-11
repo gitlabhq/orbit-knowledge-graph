@@ -4,6 +4,6 @@ pub use query_engine::types::{
     NodeRef, QueryResult, QueryResultRow, ResourceAuthorization, ResourceCheck,
 };
 pub use stream::{
-    RailsAuthorization, RedactionExchangeError, RedactionExchangeResult, RedactionMessage,
-    RedactionService,
+    RailsAuthorization, RailsResource, RedactionExchangeError, RedactionExchangeResult,
+    RedactionMessage, RedactionService,
 };
