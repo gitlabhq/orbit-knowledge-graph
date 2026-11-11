@@ -651,7 +651,11 @@ impl ResponseView {
 
     /// Assert row values by position. Satisfies [`Requirement::AggregationSort`]
     /// when every row is listed.
-    pub fn assert_row_values(&self, expected: &[std::collections::BTreeMap<String, Value>]) {
+    pub fn assert_row_values(
+        &self,
+        expected: &[std::collections::BTreeMap<String, Value>],
+        label: &str,
+    ) {
         for (index, row) in expected.iter().enumerate() {
             for (column, value) in row {
                 match value {
@@ -660,7 +664,7 @@ impl ResponseView {
                     }
                     Value::String(text) => self.assert_row_value_str(index, column, text),
                     Value::Null => self.assert_row_value_null(index, column),
-                    _ => panic!("unsupported row_values type for {column}"),
+                    _ => panic!("{label}: unsupported row_values type for {column}"),
                 }
             }
         }

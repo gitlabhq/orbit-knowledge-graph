@@ -73,7 +73,6 @@ struct PhysicalAssertions {
     point_lookup: Option<bool>,
     sql: Option<SqlAssertions>,
     indexes: Vec<IndexAssertion>,
-    settings: Option<SqlAssertions>,
     hydration: Option<compiler::HydrationKind>,
 }
 
@@ -89,7 +88,6 @@ impl PhysicalAssertions {
         self.final_ast.is_some()
             || self.sql.is_some()
             || !self.indexes.is_empty()
-            || self.settings.is_some()
             || self.hydration.is_some()
     }
 }
@@ -469,11 +467,10 @@ fn check_final_output(
         ));
     }
     let sql = compiled.base.render();
-    for (kind, checks) in [("SQL", &assertions.sql), ("SETTINGS", &assertions.settings)] {
-        if let Some(checks) = checks {
-            failures.extend(checks.check(&sql, &format!("{label}: {kind}")));
-        }
+    if let Some(checks) = &assertions.sql {
+        failures.extend(checks.check(&sql, &format!("{label}: SQL")));
     }
+    let scans = explain::emitted(&compiled.ast).to_string();
     for index in &assertions.indexes {
         let declared = model
             .layout()
@@ -491,9 +488,9 @@ fn check_final_output(
                 "{label}: table {} has no index {}",
                 index.table, index.name
             ));
-        } else if !sql.contains(&index.table) {
+        } else if !scans.contains(&format!("Scan Table({}) ", index.table)) {
             failures.push(format!(
-                "{label}: SQL does not read indexed table {}\n{sql}",
+                "{label}: query does not scan indexed table {}\n{scans}",
                 index.table
             ));
         }

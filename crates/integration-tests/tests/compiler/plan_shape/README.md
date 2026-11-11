@@ -38,13 +38,10 @@ physical:
       not_contains: ["gl_edge"]
     indexes:
       - { table: gl_merge_request, name: idx_title }
-    settings:
-      contains: ["transform_null_in = 0"]
 ```
 
 `sql` checks the rendered query. `indexes` checks the ClickHouse layout and
-requires the rendered SQL to read that table. `settings` checks the rendered
-SETTINGS clause. `hydration` checks the hydration plan kind: `none`, `static`,
+requires the final query to scan that table. `hydration` checks the hydration plan kind: `none`, `static`,
 or `dynamic`. Data-correctness scenarios reject these fields.
 
 `scenarios/` holds the compiler checks for the data-correctness scenarios. It
