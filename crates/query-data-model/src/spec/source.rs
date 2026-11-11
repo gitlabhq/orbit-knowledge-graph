@@ -92,41 +92,32 @@ pub struct PipelineSpec {
 
 type Pipelines = IndexMap<String, PipelineSpec>;
 
-struct Section {
-    name: &'static str,
-    allows: &'static [&'static str],
-    requires: &'static [&'static str],
+/// The fields each source section allows, and those it requires.
+fn rules(section: &str) -> (&'static [&'static str], &'static [&'static str]) {
+    match section {
+        "entities" => (
+            &[
+                "filter",
+                "reindex",
+                "global",
+                "partition_count",
+                "columns",
+                "binary",
+                "enrich",
+                "edges",
+            ],
+            &[],
+        ),
+        "relationships" => (
+            &["fields", "filter", "lookups", "from", "to"],
+            &["from", "to"],
+        ),
+        _ => (&["reindex", "emits", "transform"], &["emits", "transform"]),
+    }
 }
 
-const ENTITIES: Section = Section {
-    name: "entities",
-    allows: &[
-        "filter",
-        "reindex",
-        "global",
-        "partition_count",
-        "columns",
-        "binary",
-        "enrich",
-        "edges",
-    ],
-    requires: &[],
-};
-
-const RELATIONSHIPS: Section = Section {
-    name: "relationships",
-    allows: &["fields", "filter", "lookups", "from", "to"],
-    requires: &["from", "to"],
-};
-
-const DERIVED: Section = Section {
-    name: "derived",
-    allows: &["reindex", "emits", "transform"],
-    requires: &["emits", "transform"],
-};
-
 impl PipelineSpec {
-    fn check(&self, name: &str, section: &Section) -> Result<(), String> {
+    fn check(&self, name: &str, section: &str) -> Result<(), String> {
         let present = [
             ("fields", self.fields.is_some()),
             ("filter", self.filter.is_some()),
@@ -143,16 +134,16 @@ impl PipelineSpec {
             ("emits", self.emits.is_some()),
             ("transform", self.transform.is_some()),
         ];
-        let section_name = section.name;
+        let (allows, requires) = rules(section);
         for (field, set) in present {
-            if set && !section.allows.contains(&field) {
+            if set && !allows.contains(&field) {
                 return Err(format!(
-                    "pipeline {name} sets {field}, which the {section_name} section does not allow"
+                    "pipeline {name} sets {field}, which the {section} section does not allow"
                 ));
             }
-            if !set && section.requires.contains(&field) {
+            if !set && requires.contains(&field) {
                 return Err(format!(
-                    "pipeline {name} omits {field}, which the {section_name} section requires"
+                    "pipeline {name} omits {field}, which the {section} section requires"
                 ));
             }
         }
@@ -162,7 +153,7 @@ impl PipelineSpec {
 
 fn pipelines<'de, D: Deserializer<'de>>(
     deserializer: D,
-    section: &Section,
+    section: &str,
 ) -> Result<Pipelines, D::Error> {
     let pipelines = Pipelines::deserialize(deserializer)?;
     for (name, spec) in &pipelines {
@@ -172,18 +163,19 @@ fn pipelines<'de, D: Deserializer<'de>>(
 }
 
 fn entities<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Pipelines, D::Error> {
-    pipelines(deserializer, &ENTITIES)
+    pipelines(deserializer, "entities")
 }
 
 fn relationship_pipelines<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Pipelines, D::Error> {
-    pipelines(deserializer, &RELATIONSHIPS)
+    pipelines(deserializer, "relationships")
 }
 
 fn derived<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Pipelines, D::Error> {
-    pipelines(deserializer, &DERIVED)
+    pipelines(deserializer, "derived")
 }
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct ExtractLookup<S: Naming = Resolved> {
