@@ -55,7 +55,7 @@ fn indexes(scenario: &Scenario) -> Vec<&IndexAssertion> {
         .get("clickhouse")
         .into_iter()
         .flat_map(|phases| phases.values())
-        .filter_map(|slots| slots.output.as_ref())
+        .filter_map(|fields| fields.output.as_ref())
         .flat_map(|output| &output.indexes)
         .collect()
 }

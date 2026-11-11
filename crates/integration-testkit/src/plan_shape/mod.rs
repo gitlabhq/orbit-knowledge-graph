@@ -24,7 +24,7 @@ struct Scenario {
     ontology_overlay: Option<String>,
     query: BTreeMap<String, String>,
     missing_frontends: BTreeMap<String, String>,
-    physical: BTreeMap<String, BTreeMap<String, SlotAssertions>>,
+    physical: BTreeMap<String, BTreeMap<String, StateAssertions>>,
     hydration: Option<HydrationSetup>,
     security: Option<SecurityOverride>,
 }
@@ -52,9 +52,9 @@ impl TryFrom<RawScenario> for Scenario {
         for (backend, entries) in raw.physical {
             let phases = aliases::resolve(&backend, hydration, raw.logical.as_ref(), entries)?
                 .into_iter()
-                .map(|(phase, slots)| {
-                    serde_json::from_value(slots)
-                        .map(|slots| (phase.clone(), slots))
+                .map(|(phase, state)| {
+                    serde_json::from_value(state)
+                        .map(|state| (phase.clone(), state))
                         .map_err(|error| format!("{backend}.{phase}: {error}"))
                 })
                 .collect::<Result<_, String>>()?;
@@ -107,7 +107,7 @@ struct HydrationSetup {
 
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct SlotAssertions {
+struct StateAssertions {
     input: Option<Assertions>,
     query_plan: Option<PlanAssertions>,
     node: Option<Assertions>,
@@ -116,8 +116,8 @@ struct SlotAssertions {
     output: Option<OutputAssertions>,
 }
 
-impl SlotAssertions {
-    fn slots(&self) -> impl Iterator<Item = &'static str> + '_ {
+impl StateAssertions {
+    fn fields(&self) -> impl Iterator<Item = &'static str> + '_ {
         [
             ("input", self.input.is_some()),
             ("query_plan", self.query_plan.is_some()),
@@ -127,7 +127,7 @@ impl SlotAssertions {
             ("output", self.output.is_some()),
         ]
         .into_iter()
-        .filter_map(|(slot, present)| present.then_some(slot))
+        .filter_map(|(field, present)| present.then_some(field))
     }
 }
 
@@ -405,9 +405,9 @@ fn check(scenario: &Scenario, models: &Models, path: &Path) -> Vec<String> {
                 path.display(),
                 scenario.name.as_deref().unwrap_or("unnamed")
             );
-            if phases.is_empty() || phases.values().any(|slots| slots.slots().next().is_none()) {
+            if phases.is_empty() || phases.values().any(|state| state.fields().next().is_none()) {
                 failures.push(format!(
-                    "{label}: every phase needs at least one slot assertion"
+                    "{label}: every phase needs at least one state field assertion"
                 ));
                 continue;
             }
@@ -425,7 +425,7 @@ fn check_pipeline(
     backend: &str,
     language: &str,
     raw: &str,
-    phases: &BTreeMap<String, SlotAssertions>,
+    phases: &BTreeMap<String, StateAssertions>,
     label: &str,
 ) -> Vec<String> {
     let security = || crate::query_scenario::build_security(&scenario.security);
@@ -523,7 +523,7 @@ fn hydration_input(
 }
 
 struct Expectations<'a> {
-    phases: &'a BTreeMap<String, SlotAssertions>,
+    phases: &'a BTreeMap<String, StateAssertions>,
     index_exists: &'a dyn Fn(&str, &str) -> bool,
     label: &'a str,
 }
@@ -550,7 +550,7 @@ impl Expectations<'_> {
 
     fn unknown_targets(&self, table: &PhaseTable) -> Vec<String> {
         let mut failures = Vec::new();
-        for (phase, slots) in self.phases {
+        for (phase, state) in self.phases {
             let Some((_, mutates)) = table.iter().find(|(name, _)| name == phase) else {
                 let known: Vec<_> = table.iter().map(|(name, _)| *name).collect();
                 failures.push(format!(
@@ -559,9 +559,9 @@ impl Expectations<'_> {
                 ));
                 continue;
             };
-            for slot in slots.slots().filter(|slot| !mutates.contains(slot)) {
+            for field in state.fields().filter(|field| !mutates.contains(field)) {
                 failures.push(format!(
-                    "{}.{phase}: phase {phase} does not write {slot}; it writes {mutates:?}",
+                    "{}.{phase}: phase {phase} does not write {field}; it writes {mutates:?}",
                     self.label
                 ));
             }
@@ -570,19 +570,21 @@ impl Expectations<'_> {
     }
 
     fn check_phase<C: CompilerCtx>(&self, phase: &str, ctx: &C) -> Vec<String> {
-        let Some(slots) = self.phases.get(phase) else {
+        let Some(state) = self.phases.get(phase) else {
             return vec![];
         };
         let label = format!("{}.{phase}", self.label);
         let mut failures = Vec::new();
-        let mut check = |slot: &str, result: Option<Result<(), String>>| match result {
+        let mut check = |field: &str, result: Option<Result<(), String>>| {
+            match result {
             Some(Err(error)) => failures.push(error),
             None => failures.push(format!(
-                "{label}.{slot}: empty after the phase; assert it before the phase that consumes it"
+                "{label}.{field}: empty after the phase; assert it before the phase that consumes it"
             )),
             Some(Ok(())) => {}
+        }
         };
-        if let Some(assertions) = &slots.input {
+        if let Some(assertions) = &state.input {
             check(
                 "input",
                 ctx.input().as_ref().map(|input| {
@@ -590,7 +592,7 @@ impl Expectations<'_> {
                 }),
             );
         }
-        if let Some(assertions) = &slots.query_plan {
+        if let Some(assertions) = &state.query_plan {
             check(
                 "query_plan",
                 ctx.query_plan().as_ref().map(|plan| {
@@ -607,7 +609,7 @@ impl Expectations<'_> {
                 }),
             );
         }
-        if let Some(assertions) = &slots.node {
+        if let Some(assertions) = &state.node {
             check(
                 "node",
                 ctx.node().as_ref().map(|node| {
@@ -615,7 +617,7 @@ impl Expectations<'_> {
                 }),
             );
         }
-        if let Some(assertions) = &slots.query_config {
+        if let Some(assertions) = &state.query_config {
             check(
                 "query_config",
                 ctx.query_config().as_ref().map(|config| {
@@ -624,7 +626,7 @@ impl Expectations<'_> {
                 }),
             );
         }
-        if let Some(expected) = slots.hydration_plan {
+        if let Some(expected) = state.hydration_plan {
             check(
                 "hydration_plan",
                 ctx.hydration_plan().as_ref().map(|plan| {
@@ -638,7 +640,7 @@ impl Expectations<'_> {
                 }),
             );
         }
-        if let Some(assertions) = &slots.output {
+        if let Some(assertions) = &state.output {
             check(
                 "output",
                 ctx.output().as_ref().map(|output| {
@@ -878,7 +880,7 @@ cases:
 }
 
 #[test]
-fn fixtures_name_phases_that_run_and_slots_they_write() {
+fn fixtures_name_phases_that_run_and_fields_they_write() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::write(
         directory.path().join("targets.yaml"),
@@ -917,7 +919,7 @@ cases:
 }
 
 #[test]
-fn aliases_resolve_to_phase_slots_and_reject_double_targets() {
+fn aliases_resolve_to_state_fields_and_reject_double_targets() {
     let parse = |physical: &str| {
         orbit_utils::yaml::from_str::<Scenario>(&format!(
             "name: aliases\nquery: {{json: q, gql: q}}\nlogical: {{expect: ['(_)']}}\nphysical: {physical}"
@@ -941,11 +943,11 @@ fn aliases_resolve_to_phase_slots_and_reject_double_targets() {
 }
 
 #[test]
-fn empty_slot_contracts_are_rejected() {
-    assert!(orbit_utils::yaml::from_str::<SlotAssertions>("query_plan: {}").is_err());
-    assert!(orbit_utils::yaml::from_str::<SlotAssertions>("query_plan: {expct: []}").is_err());
+fn empty_state_field_contracts_are_rejected() {
+    assert!(orbit_utils::yaml::from_str::<StateAssertions>("query_plan: {}").is_err());
+    assert!(orbit_utils::yaml::from_str::<StateAssertions>("query_plan: {expct: []}").is_err());
     assert!(
-        orbit_utils::yaml::from_str::<SlotAssertions>("query_plan: {point_lookup: true}").is_ok()
+        orbit_utils::yaml::from_str::<StateAssertions>("query_plan: {point_lookup: true}").is_ok()
     );
     assert!(!SqlAssertions::default().check("SELECT 1", "sql").is_empty());
     assert!(
@@ -1093,7 +1095,7 @@ fn yaml_exact_assertions_preserve_projection_order_and_reject_holes() {
             .unwrap_err()
             .contains("wildcards")
     );
-    assert!(orbit_utils::yaml::from_str::<SlotAssertions>("expect: ['(Scan t)']").is_err());
+    assert!(orbit_utils::yaml::from_str::<StateAssertions>("expect: ['(Scan t)']").is_err());
 }
 
 #[test]
@@ -1115,7 +1117,7 @@ reject:
 
 #[test]
 fn yaml_phase_assertions_cannot_match_another_phase() {
-    let assertions: SlotAssertions = orbit_utils::yaml::from_str(
+    let assertions: StateAssertions = orbit_utils::yaml::from_str(
         r#"
 query_plan:
   expect: ["(Scan Table(planned) AS p)"]

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-/// (alias, pipeline, phase, slot path): `alias` under `physical.<pipeline>` means `<phase>.<path>`.
+/// (alias, pipeline, phase, state field path): `alias` under `physical.<pipeline>` means `<phase>.<path>`.
 #[rustfmt::skip]
 const ALIASES: &[(&str, &str, &str, &str)] = &[
     ("logical",      "clickhouse",           "normalize",       "input"),
@@ -42,7 +42,7 @@ pub(super) fn resolve(
 ) -> Result<BTreeMap<String, Value>, String> {
     let mut phases: BTreeMap<String, Value> = BTreeMap::new();
     let mut put = |phase: &str, path: &str, value: Value, source: &str| -> Result<(), String> {
-        let (parents, slot) = path.rsplit_once('.').unwrap_or(("", path));
+        let (parents, field) = path.rsplit_once('.').unwrap_or(("", path));
         let mut target = phases
             .entry(phase.to_string())
             .or_insert_with(|| Value::Object(Map::new()));
@@ -53,10 +53,10 @@ pub(super) fn resolve(
                 .entry(key)
                 .or_insert_with(|| Value::Object(Map::new()));
         }
-        let slots = target
+        let fields = target
             .as_object_mut()
             .ok_or_else(|| format!("{backend}.{phase}: expected a mapping"))?;
-        match slots.insert(slot.to_string(), value) {
+        match fields.insert(field.to_string(), value) {
             Some(_) => Err(format!("{backend}: {source} sets {phase}.{path} twice")),
             None => Ok(()),
         }
@@ -75,11 +75,11 @@ pub(super) fn resolve(
         } else if ALIASES.iter().any(|(alias, ..)| *alias == key) {
             return Err(format!("{backend}: {key} has no target on this backend"));
         } else {
-            let Value::Object(slots) = value else {
-                return Err(format!("{backend}.{key}: expected slot assertions"));
+            let Value::Object(fields) = value else {
+                return Err(format!("{backend}.{key}: expected state field assertions"));
             };
-            for (slot, assertions) in slots {
-                put(&key, &slot, assertions, &key)?;
+            for (field, assertions) in fields {
+                put(&key, &field, assertions, &key)?;
             }
         }
     }

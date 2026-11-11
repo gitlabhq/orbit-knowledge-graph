@@ -5,7 +5,7 @@ Run `mise test:plan-shape`. The runner discovers YAML files recursively under
 frontend and backend, and checks the state that named phases leave behind. Most
 fixtures run through both JSON and GQL.
 
-Assertions live under `physical.<backend>.<phase>.<slot>`:
+Assertions live under `physical.<backend>.<phase>.<state field>`:
 
 ```yaml
 physical:
@@ -41,13 +41,13 @@ Common targets have aliases, declared in one table in
 | `settings` | `settings.query_config` |
 | `sql`, `indexes` | `codegen.output` |
 
-An alias and an explicit phase entry cannot set the same slot.
+An alias and an explicit phase entry cannot set the same state field.
 
-A phase key must name a phase of that pipeline, and each slot must be a state
-field the phase writes. The runner rejects other keys. Each slot has one
+A phase key must name a phase of that pipeline, and each state field must be one
+the phase writes. The runner rejects other keys. Each state field has one
 contract:
 
-| Slot | Contract |
+| State field | Contract |
 |---|---|
 | `input` | Patterns on the logical tree |
 | `query_plan` | Patterns on the planned tree, and `point_lookup` |
