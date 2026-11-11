@@ -1,3 +1,4 @@
+---
 cases:
   - name: A node pinned to more than eight anchors keeps only the authorization filter
     query:
@@ -14,10 +15,8 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - startsWith(p.traversal_path, '1/')
-              not_contains:
-                - AS _orbit_scope
+        sql:
+          contains:
+            - startsWith(p.traversal_path, '1/')
+          not_contains:
+            - AS _orbit_scope

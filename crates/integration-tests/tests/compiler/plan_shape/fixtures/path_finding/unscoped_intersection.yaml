@@ -6,17 +6,15 @@ query:
   gql: |
     MATCH p = ANY SHORTEST (a:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(b:Project {id: 100}) RETURN p
 
+logical:
+  expect: ["(Input path_finding (...))"]
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect: ["(Input path_finding (...))"]
-    plan_clickhouse:
-      query_plan:
-        expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=false ... (_) (_))"]
-    response_policy:
-      node:
-        ctes:
-          exact_order: [_orbit_forward, _orbit_backward]
-        expect: ["(Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND (_orbit_forward._orbit_end_kind = _orbit_backward._orbit_end_kind) (_) (_))"]
-        reject: ["(CTE _orbit_path_scope (_))"]
+    planned:
+      expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=false ... (_) (_))"]
+    emitted:
+      ctes:
+        exact_order: [_orbit_forward, _orbit_backward]
+      expect: ["(Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND (_orbit_forward._orbit_end_kind = _orbit_backward._orbit_end_kind) (_) (_))"]
+      reject: ["(CTE _orbit_path_scope (_))"]

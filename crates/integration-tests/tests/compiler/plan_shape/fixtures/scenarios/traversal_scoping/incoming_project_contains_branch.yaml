@@ -1,3 +1,4 @@
+---
 cases:
   - name: Incoming containment does not count the project's outgoing branches
     query:
@@ -17,11 +18,9 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - gl_code_edge
-              not_contains: []
+        sql:
+          contains:
+            - gl_code_edge
+          not_contains: []
     missing_frontends:
       gql: The original query scenario supplies only JSON.

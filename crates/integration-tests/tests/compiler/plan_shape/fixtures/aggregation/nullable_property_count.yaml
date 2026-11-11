@@ -7,14 +7,12 @@ query:
     MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
     RETURN count(mr.merged_at) AS n
 
+logical:
+  expect:
+    - (Aggregate COUNT(mr.merged_at) AS n (_))
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (Aggregate COUNT(mr.merged_at) AS n (_))
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Scan Table(gl_merge_request) ...)
+    planned:
+      expect:
+        - (Scan Table(gl_merge_request) ...)

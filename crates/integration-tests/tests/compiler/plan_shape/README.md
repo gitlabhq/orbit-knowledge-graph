@@ -28,6 +28,21 @@ physical:
         indexes: [{table: gl_merge_request, name: idx_title}]
 ```
 
+Common targets have aliases, declared in one table in
+`integration-testkit/src/plan_shape/aliases.rs`:
+
+| Alias | Target |
+|---|---|
+| `logical` (top level) | `normalize.input`, or `plan_clickhouse.input` for hydration fixtures |
+| `planned`, `point_lookup` | `plan_clickhouse.query_plan` or `plan_duckdb.query_plan` |
+| `emitted` | `response_policy.node` on ClickHouse, `paginate.node` on DuckDB |
+| `final_ast` | `security.node` |
+| `hydration` | `hydrate_plan.hydration_plan` |
+| `settings` | `settings.query_config` |
+| `sql`, `indexes` | `codegen.output` |
+
+An alias and an explicit phase entry cannot set the same slot.
+
 A phase key must name a phase of that pipeline, and each slot must be a state
 field the phase writes. The runner rejects other keys. Each slot has one
 contract:

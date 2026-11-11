@@ -1,3 +1,4 @@
+---
 cases:
   - name: equality
     query:
@@ -18,15 +19,13 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - lower(mr.title) = lower(
-              not_contains: []
-            indexes:
-              - table: gl_merge_request
-                name: idx_title
+        sql:
+          contains:
+            - lower(mr.title) = lower(
+          not_contains: []
+        indexes:
+          - table: gl_merge_request
+            name: idx_title
 
   - name: membership
     query:
@@ -47,12 +46,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - lower(mr.title) IN tuple(lower(
-              not_contains: []
-            indexes:
-              - table: gl_merge_request
-                name: idx_title
+        sql:
+          contains:
+            - lower(mr.title) IN tuple(lower(
+          not_contains: []
+        indexes:
+          - table: gl_merge_request
+            name: idx_title

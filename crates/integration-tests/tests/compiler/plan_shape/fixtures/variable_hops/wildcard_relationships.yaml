@@ -6,16 +6,14 @@ query:
   gql: |
     MATCH (u:User {id: 1})-[*2]->(p:Project {id: 1000}) RETURN u, p
 
+logical:
+  expect:
+    - (NodeScan User AS u)
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (NodeScan User AS u)
-
-    response_policy:
-      node:
-        expect:
-          - (Scan Table(gl_edge) ...)
-        reject:
-          - (Filter _orbit_e1.relationship_kind IN ['CONTAINS', 'CREATOR', 'MEMBER_OF'], ... (_))
+    emitted:
+      expect:
+        - (Scan Table(gl_edge) ...)
+      reject:
+        - (Filter _orbit_e1.relationship_kind IN ['CONTAINS', 'CREATOR', 'MEMBER_OF'], ... (_))

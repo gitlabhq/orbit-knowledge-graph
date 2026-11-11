@@ -1,3 +1,4 @@
+---
 cases:
   - name: Inline datetime renders as ISO 8601 UTC
     query:
@@ -14,11 +15,8 @@ cases:
         - 1/
     physical:
       clickhouse:
-        hydrate_plan:
-          hydration_plan: none
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS n_created_at
-              not_contains: []
+        sql:
+          contains:
+            - AS n_created_at
+          not_contains: []
+        hydration: none

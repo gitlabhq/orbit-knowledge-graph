@@ -6,22 +6,16 @@ query:
   gql: |
     MATCH (f:File) WHERE f.id >= 1 AND f.id <= 10000 RETURN f.path LIMIT 2
 
+logical:
+  expect: ["(Limit 2 (Input traversal (...)))"]
+  reject: ["(Offset ... (_))"]
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect: ["(Limit 2 (Input traversal (...)))"]
-        reject: ["(Offset ... (_))"]
-    response_policy:
-      node:
-        expect: ["(Limit 3 (Project f.path AS f_path (_)))"]
-        reject: ["(Offset ... (_))", "(Limit ... (Sort ... (_)))"]
+    emitted:
+      expect: ["(Limit 3 (Project f.path AS f_path (_)))"]
+      reject: ["(Offset ... (_))", "(Limit ... (Sort ... (_)))"]
   duckdb:
-    normalize:
-      input:
-        expect: ["(Limit 2 (Input traversal (...)))"]
-        reject: ["(Offset ... (_))"]
-    paginate:
-      node:
-        expect: ["(Limit 3 (Project f.path AS f_path (_)))"]
-        reject: ["(Offset ... (_))", "(Limit ... (Sort ... (_)))"]
+    emitted:
+      expect: ["(Limit 3 (Project f.path AS f_path (_)))"]
+      reject: ["(Offset ... (_))", "(Limit ... (Sort ... (_)))"]

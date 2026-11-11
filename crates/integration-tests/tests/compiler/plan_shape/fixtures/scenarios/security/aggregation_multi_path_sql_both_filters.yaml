@@ -1,3 +1,4 @@
+---
 cases:
   - name: Multi-path aggregation SQL contains startsWith predicates for both paths
     query:
@@ -22,11 +23,9 @@ cases:
         - 1/102/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - startsWith
-                - 1/100/
-                - 1/102/
-              not_contains: []
+        sql:
+          contains:
+            - startsWith
+            - 1/100/
+            - 1/102/
+          not_contains: []

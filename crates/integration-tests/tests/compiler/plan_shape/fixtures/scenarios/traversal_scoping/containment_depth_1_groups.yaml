@@ -1,3 +1,4 @@
+---
 cases:
   - name: Containment over CONTAINS edges excludes the anchor and deeper groups
     query:
@@ -11,12 +12,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS g FINAL
-                - relationship_kind = 'CONTAINS'
-                - source_kind = 'Group'
-                - target_kind = 'Group'
-              not_contains: []
+        sql:
+          contains:
+            - AS g FINAL
+            - relationship_kind = 'CONTAINS'
+            - source_kind = 'Group'
+            - target_kind = 'Group'
+          not_contains: []

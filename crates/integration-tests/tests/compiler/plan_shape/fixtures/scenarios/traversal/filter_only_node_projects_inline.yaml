@@ -1,3 +1,4 @@
+---
 cases:
   - name: Filter-only group node is projected from its join; the lazy user node still hydrates
     query:
@@ -18,13 +19,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        hydrate_plan:
-          hydration_plan: static
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS g_name
-                - AS g_visibility_level
-              not_contains:
-                - AS u_username
+        sql:
+          contains:
+            - AS g_name
+            - AS g_visibility_level
+          not_contains:
+            - AS u_username
+        hydration: static

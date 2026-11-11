@@ -15,19 +15,17 @@ cases:
       gql: |
         MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
         RETURN u{.id, .username}, count(mr) AS mr_count
+    logical:
+      expect: ["(Aggregate group u AS u, COUNT(mr) AS mr_count (_))"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(Aggregate group u AS u, COUNT(mr) AS mr_count (_))"]
-        plan_clickhouse:
-          query_plan:
-            expect:
-              - (Join ON u.id = mr.author_id (_) (_))
-              - (Project _orbit_id_source.author_id AS id (Bind _orbit_id_source (_)))
-              - (Filter u.id IN ?.id (Scan Table(gl_user) AS u))
-            reject:
-              - (Deduplicate Final (Scan Table(gl_user) AS u))
+        planned:
+          expect:
+            - (Join ON u.id = mr.author_id (_) (_))
+            - (Project _orbit_id_source.author_id AS id (Bind _orbit_id_source (_)))
+            - (Filter u.id IN ?.id (Scan Table(gl_user) AS u))
+          reject:
+            - (Deduplicate Final (Scan Table(gl_user) AS u))
 
   - name: An unfiltered deferred FK endpoint reads only the keys its holder reached
     query:
@@ -43,19 +41,17 @@ cases:
       gql: |
         MATCH (u:User)-[:MERGED]->(mr:MergeRequest {state: 'merged'})
         RETURN u.id, u.username, mr.id, mr.title, mr.merged_at
+    logical:
+      expect: ["(Filter mr.state = 'merged' (_))"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(Filter mr.state = 'merged' (_))"]
-        plan_clickhouse:
-          query_plan:
-            expect:
-              - (Project _orbit_id_source.merge_user_id AS id (Bind _orbit_id_source (_)))
-              - (Filter u.id IN ?.id (Scan Table(gl_user) AS u))
-              - (Filter mr.merge_user_id IN ?.id (_))
-            reject:
-              - (Deduplicate Final (Scan Table(gl_user) AS u))
+        planned:
+          expect:
+            - (Project _orbit_id_source.merge_user_id AS id (Bind _orbit_id_source (_)))
+            - (Filter u.id IN ?.id (Scan Table(gl_user) AS u))
+            - (Filter mr.merge_user_id IN ?.id (_))
+          reject:
+            - (Deduplicate Final (Scan Table(gl_user) AS u))
 
   - name: An FK holder reads only rows whose key an earlier hop reached
     query:
@@ -75,14 +71,12 @@ cases:
       gql: |
         MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})
         RETURN p.id, mr.id
+    logical:
+      expect: ["(Filter mr.state = 'merged' (_))"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(Filter mr.state = 'merged' (_))"]
-        plan_clickhouse:
-          query_plan:
-            expect:
-              - (Filter mr.state = 'merged', mr.project_id IN ?.id, mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
-            reject:
-              - (Deduplicate LimitBy ... (Scan Table(gl_merge_request) AS mr))
+        planned:
+          expect:
+            - (Filter mr.state = 'merged', mr.project_id IN ?.id, mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
+          reject:
+            - (Deduplicate LimitBy ... (Scan Table(gl_merge_request) AS mr))

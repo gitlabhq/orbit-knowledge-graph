@@ -1,3 +1,4 @@
+mod aliases;
 mod clickhouse;
 mod explain;
 mod operator;
@@ -17,16 +18,58 @@ use serde::Deserialize;
 use crate::query_scenario::SecurityOverride;
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "RawScenario")]
 struct Scenario {
+    name: Option<String>,
+    ontology_overlay: Option<String>,
+    query: BTreeMap<String, String>,
+    missing_frontends: BTreeMap<String, String>,
+    physical: BTreeMap<String, BTreeMap<String, SlotAssertions>>,
+    hydration: Option<HydrationSetup>,
+    security: Option<SecurityOverride>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawScenario {
     name: Option<String>,
     ontology_overlay: Option<String>,
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
-    physical: BTreeMap<String, BTreeMap<String, SlotAssertions>>,
+    logical: Option<serde_json::Value>,
+    physical: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
     hydration: Option<HydrationSetup>,
     security: Option<SecurityOverride>,
+}
+
+impl TryFrom<RawScenario> for Scenario {
+    type Error = String;
+
+    fn try_from(raw: RawScenario) -> Result<Self, String> {
+        let hydration = raw.hydration.is_some();
+        let mut physical = BTreeMap::new();
+        for (backend, entries) in raw.physical {
+            let phases = aliases::resolve(&backend, hydration, raw.logical.as_ref(), entries)?
+                .into_iter()
+                .map(|(phase, slots)| {
+                    serde_json::from_value(slots)
+                        .map(|slots| (phase.clone(), slots))
+                        .map_err(|error| format!("{backend}.{phase}: {error}"))
+                })
+                .collect::<Result<_, String>>()?;
+            physical.insert(backend, phases);
+        }
+        Ok(Self {
+            name: raw.name,
+            ontology_overlay: raw.ontology_overlay,
+            query: raw.query,
+            missing_frontends: raw.missing_frontends,
+            physical,
+            hydration: raw.hydration,
+            security: raw.security,
+        })
+    }
 }
 
 impl Scenario {
@@ -871,6 +914,30 @@ cases:
             "[{frontend}/clickhouse].normalize: phase normalize does not write output"
         ))));
     }
+}
+
+#[test]
+fn aliases_resolve_to_phase_slots_and_reject_double_targets() {
+    let parse = |physical: &str| {
+        orbit_utils::yaml::from_str::<Scenario>(&format!(
+            "name: aliases\nquery: {{json: q, gql: q}}\nlogical: {{expect: ['(_)']}}\nphysical: {physical}"
+        ))
+    };
+    let scenario = parse("{clickhouse: {planned: {expect: ['(_)']}, point_lookup: true, sql: {contains: [x]}, indexes: [{table: t, name: i}]}, duckdb: {emitted: {expect: ['(_)']}}}").unwrap();
+    let clickhouse = &scenario.physical["clickhouse"];
+    assert!(clickhouse["normalize"].input.is_some());
+    let plan = clickhouse["plan_clickhouse"].query_plan.as_ref().unwrap();
+    assert_eq!(plan.point_lookup, Some(true));
+    let output = clickhouse["codegen"].output.as_ref().unwrap();
+    assert!(output.sql.is_some() && output.indexes.len() == 1);
+    assert!(scenario.physical["duckdb"]["paginate"].node.is_some());
+    assert!(
+        parse(
+            "{clickhouse: {emitted: {expect: ['(_)']}, response_policy: {node: {expect: ['(_)']}}}}"
+        )
+        .is_err()
+    );
+    assert!(parse("{duckdb: {final_ast: {expect: ['(_)']}}}").is_err());
 }
 
 #[test]

@@ -1,3 +1,4 @@
+---
 cases:
   - name: date_field_compares_with_timestamp_field
     query:
@@ -10,11 +11,9 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - nullIf(wi.due_date, toDate32('1970-01-01')) >= nullIf(wi.created_at, toDateTime64('1970-01-01 00:00:00', 6, 'UTC'))
-              not_contains: []
+        sql:
+          contains:
+            - nullIf(wi.due_date, toDate32('1970-01-01')) >= nullIf(wi.created_at, toDateTime64('1970-01-01 00:00:00', 6, 'UTC'))
+          not_contains: []
     missing_frontends:
       json: The original query scenario supplies only GQL.

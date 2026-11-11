@@ -9,15 +9,13 @@ query:
 missing_frontends:
   json: JSON filters cannot express grouped negation.
 
+logical:
+  expect:
+    - (EdgeScan IN_PROJECT mr->p AS e1)
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (EdgeScan IN_PROJECT mr->p AS e1)
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Join ON p.id = mr.project_id (_) (_))
-          - (Scan Table(gl_project) AS p)
+    planned:
+      expect:
+        - (Join ON p.id = mr.project_id (_) (_))
+        - (Scan Table(gl_project) AS p)

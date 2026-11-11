@@ -6,18 +6,15 @@ query:
   gql: |
     MATCH (d:Definition {id: 1, name: 'caller'})-[:CALLS]-(neighbor) RETURN d, neighbor
 
+logical:
+  expect:
+    - (Input neighbors (...))
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (Input neighbors (...))
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Neighbors center=d direction=both directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_filter=true ... (_))
-    response_policy:
-      node:
-        expect:
-          - (Union ALL (_) (_))
+    planned:
+      expect:
+        - (Neighbors center=d direction=both directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_filter=true ... (_))
+    emitted:
+      expect:
+        - (Union ALL (_) (_))

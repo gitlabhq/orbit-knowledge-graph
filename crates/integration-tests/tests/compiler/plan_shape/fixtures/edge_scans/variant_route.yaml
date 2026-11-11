@@ -7,19 +7,14 @@ query:
   gql: |
     MATCH (file:File {id: 11000})-[:CALLS]->(callee:Definition) RETURN file.id, callee.id
 
+logical:
+  expect: ["(EdgeScan CALLS file->callee AS e0)"]
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect: ["(EdgeScan CALLS file->callee AS e0)"]
-    plan_clickhouse:
-      query_plan:
-        expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]
-        reject: ["(Scan Table(gl_code_edge) ...)"]
+    planned:
+      expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]
+      reject: ["(Scan Table(gl_code_edge) ...)"]
   duckdb:
-    normalize:
-      input:
-        expect: ["(EdgeScan CALLS file->callee AS e0)"]
-    plan_duckdb:
-      query_plan:
-        expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]
+    planned:
+      expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]

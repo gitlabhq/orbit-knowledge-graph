@@ -1,3 +1,4 @@
+---
 cases:
   - name: Rows of a project with no Project row are still returned; the missing anchor falls back to the authorization filter
     query:
@@ -14,10 +15,8 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS _orbit_scope WHERE
-                - = '0/')
-              not_contains: []
+        sql:
+          contains:
+            - AS _orbit_scope WHERE
+            - = '0/')
+          not_contains: []

@@ -1,3 +1,4 @@
+---
 cases:
   - name: starts_with on a sort-key column such as branch compares exact case so the primary key keeps pruning
     query:
@@ -17,10 +18,8 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - startsWith(d.branch, 'MAI')
-              not_contains:
-                - lower(d.branch)
+        sql:
+          contains:
+            - startsWith(d.branch, 'MAI')
+          not_contains:
+            - lower(d.branch)

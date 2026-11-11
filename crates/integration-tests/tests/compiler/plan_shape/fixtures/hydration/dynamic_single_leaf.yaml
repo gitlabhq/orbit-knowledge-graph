@@ -11,13 +11,12 @@ hydration:
   paths:
     f: ["1/", "1/100/"]
 
+logical:
+  expect: ["(Input hydration (...))"]
+
 physical:
   clickhouse:
-    plan_clickhouse:
-      input:
-        expect: ["(Input hydration (...))"]
-      query_plan:
-        expect: ["(Filter f.traversal_path PREFIX UNION ['1/100/'], f.id IN [1] (_))"]
-    response_policy:
-      node:
-        expect: ["(Filter StartsWith(f.traversal_path, '1/100/'), f.id = 1 (Scan Table(gl_file) AS f))"]
+    planned:
+      expect: ["(Filter f.traversal_path PREFIX UNION ['1/100/'], f.id IN [1] (_))"]
+    emitted:
+      expect: ["(Filter StartsWith(f.traversal_path, '1/100/'), f.id = 1 (Scan Table(gl_file) AS f))"]

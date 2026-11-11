@@ -9,13 +9,12 @@ query:
 hydration:
   dynamic: true
 
+logical:
+  expect: ["(Input hydration (...))"]
+
 physical:
   clickhouse:
-    plan_clickhouse:
-      input:
-        expect: ["(Input hydration (...))"]
-      query_plan:
-        expect: ["(Filter f.id IN [1, 2] (Scan Table(gl_file) AS f))"]
-    response_policy:
-      node:
-        expect: ["(Filter f.id IN [1, 2] (Scan Table(gl_file) AS f))"]
+    planned:
+      expect: ["(Filter f.id IN [1, 2] (Scan Table(gl_file) AS f))"]
+    emitted:
+      expect: ["(Filter f.id IN [1, 2] (Scan Table(gl_file) AS f))"]

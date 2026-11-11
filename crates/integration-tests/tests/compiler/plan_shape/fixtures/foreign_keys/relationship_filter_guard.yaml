@@ -7,14 +7,12 @@ query:
     MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest)
     WHERE r.source_id = 999999 RETURN u, mr
 
+logical:
+  expect:
+    - (EdgeScan AUTHORED u->mr AS e0 ...)
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (EdgeScan AUTHORED u->mr AS e0 ...)
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Filter _orbit_edge_0.source_id = 999999, ... (_))
+    planned:
+      expect:
+        - (Filter _orbit_edge_0.source_id = 999999, ... (_))

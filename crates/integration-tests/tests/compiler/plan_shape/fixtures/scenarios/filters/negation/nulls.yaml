@@ -13,9 +13,8 @@ cases:
     physical:
       clickhouse:
         settings:
-          query_config:
-            equals:
-              transform_null_in: "0"
+          equals:
+            transform_null_in: "0"
 
   - name: transform_null_in_absent_without_not
     query:
@@ -31,9 +30,8 @@ cases:
     physical:
       clickhouse:
         settings:
-          query_config:
-            absent:
-              - transform_null_in
+          absent:
+            - transform_null_in
 
   - name: transform_null_in_absent_when_not_folds
     query:
@@ -49,6 +47,5 @@ cases:
     physical:
       clickhouse:
         settings:
-          query_config:
-            absent:
-              - transform_null_in
+          absent:
+            - transform_null_in

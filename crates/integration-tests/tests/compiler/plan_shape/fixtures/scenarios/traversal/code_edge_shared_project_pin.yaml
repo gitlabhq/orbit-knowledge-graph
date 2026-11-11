@@ -1,3 +1,4 @@
+---
 cases:
   - name: source_project_filter_pins_target_scan
     query:
@@ -10,12 +11,10 @@ cases:
         - 1/100/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - (d.project_id = 1000)
-              not_contains: []
+        sql:
+          contains:
+            - (d.project_id = 1000)
+          not_contains: []
 
   - name: target_project_filter_pins_source_scan
     query:
@@ -28,12 +27,10 @@ cases:
         - 1/100/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - (i.project_id = 1002)
-              not_contains: []
+        sql:
+          contains:
+            - (i.project_id = 1002)
+          not_contains: []
 
   - name: no_project_filter_keeps_both_projects
     query:
@@ -46,13 +43,11 @@ cases:
         - 1/100/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains: []
-              not_contains:
-                - i.project_id =
-                - d.project_id =
+        sql:
+          contains: []
+          not_contains:
+            - i.project_id =
+            - d.project_id =
 
   - name: branch_filter_stays_on_the_edge_and_keeps_rows
     query:
@@ -65,15 +60,13 @@ cases:
         - 1/100/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - (_orbit_edge_0.branch = 'main')
-                - (d.project_id = 1000)
-              not_contains:
-                - d.branch =
-                - f.branch =
+        sql:
+          contains:
+            - (_orbit_edge_0.branch = 'main')
+            - (d.project_id = 1000)
+          not_contains:
+            - d.branch =
+            - f.branch =
 
   - name: cross_project_decoy_edge_is_not_reachable
     query:
@@ -86,9 +79,7 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - (caller.project_id = 1001)
-              not_contains: []
+        sql:
+          contains:
+            - (caller.project_id = 1001)
+          not_contains: []

@@ -6,14 +6,12 @@ cases:
       gql: |
         MATCH (a:Pipeline {id: 99000})-[r:CHILD_OF|AUTO_CANCELED_BY]->(b:Pipeline)
         RETURN a, b, type(r)
+    logical:
+      expect: ["(EdgeScan CHILD_OF|AUTO_CANCELED_BY a->b AS e0)"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(EdgeScan CHILD_OF|AUTO_CANCELED_BY a->b AS e0)"]
-        plan_clickhouse:
-          query_plan:
-            expect:
-              - (Deduplicate LimitBy ... (_))
-              - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
-              - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, ... (_))
+        planned:
+          expect:
+            - (Deduplicate LimitBy ... (_))
+            - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
+            - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, ... (_))

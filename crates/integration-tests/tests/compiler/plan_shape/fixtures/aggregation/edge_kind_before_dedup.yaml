@@ -7,14 +7,13 @@ query:
   gql: |
     MATCH (u:User)-[:APPROVED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, count(mr) AS n
 
+logical:
+  expect: ["(Aggregate ... (_))"]
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect: ["(Aggregate ... (_))"]
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Deduplicate LimitBy ... (Filter _orbit_edge_0.relationship_kind = 'APPROVED', ... (Scan Table(gl_edge) AS _orbit_edge_0)))
-        reject:
-          - (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0))
+    planned:
+      expect:
+        - (Deduplicate LimitBy ... (Filter _orbit_edge_0.relationship_kind = 'APPROVED', ... (Scan Table(gl_edge) AS _orbit_edge_0)))
+      reject:
+        - (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0))

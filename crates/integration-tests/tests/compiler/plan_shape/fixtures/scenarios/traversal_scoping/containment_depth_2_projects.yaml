@@ -1,3 +1,4 @@
+---
 cases:
   - name: Containment over CONTAINS edges counts only projects two hops away
     query:
@@ -11,11 +12,9 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS g FINAL
-                - relationship_kind = 'CONTAINS'
-                - 2 AS _orbit_depth
-              not_contains: []
+        sql:
+          contains:
+            - AS g FINAL
+            - relationship_kind = 'CONTAINS'
+            - 2 AS _orbit_depth
+          not_contains: []

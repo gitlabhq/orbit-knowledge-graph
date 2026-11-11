@@ -11,23 +11,21 @@ hydration:
   paths:
     f: ["1/", "1/100/", "1/200/"]
 
+logical:
+  expect:
+    - (Input hydration (...))
+
 physical:
   clickhouse:
-    plan_clickhouse:
-      input:
-        expect:
-          - (Input hydration (...))
-
-      query_plan:
-        expect:
-          - |
-            (Hydration
-              (Project f.path
-                (Filter f._deleted = false
-                  (Deduplicate LimitBy ...
-                    (Filter f.traversal_path PREFIX UNION ['1/100/', '1/200/'], f.id IN [1, 2]
-                      (Scan Table(gl_file) AS f))))))
-    response_policy:
-      node:
-        expect:
-          - (Filter StartsWith(f.traversal_path, '1/100/') OR StartsWith(f.traversal_path, '1/200/'), f.id IN [1, 2] (_))
+    planned:
+      expect:
+        - |
+          (Hydration
+            (Project f.path
+              (Filter f._deleted = false
+                (Deduplicate LimitBy ...
+                  (Filter f.traversal_path PREFIX UNION ['1/100/', '1/200/'], f.id IN [1, 2]
+                    (Scan Table(gl_file) AS f))))))
+    emitted:
+      expect:
+        - (Filter StartsWith(f.traversal_path, '1/100/') OR StartsWith(f.traversal_path, '1/200/'), f.id IN [1, 2] (_))

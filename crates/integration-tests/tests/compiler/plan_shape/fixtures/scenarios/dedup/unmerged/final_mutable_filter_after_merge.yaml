@@ -1,3 +1,4 @@
+---
 cases:
   - name: stale_status_excluded
     query:
@@ -8,14 +9,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS p FINAL
-                - use_skip_indexes_if_final_exact_mode = 1
-              not_contains:
-                - tuple(p.traversal_path, p.id) IN
+        sql:
+          contains:
+            - AS p FINAL
+            - use_skip_indexes_if_final_exact_mode = 1
+          not_contains:
+            - tuple(p.traversal_path, p.id) IN
     missing_frontends:
       json: The original query scenario supplies only GQL.
 
@@ -28,12 +27,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS p FINAL
-              not_contains: []
+        sql:
+          contains:
+            - AS p FINAL
+          not_contains: []
     missing_frontends:
       json: The original query scenario supplies only GQL.
 
@@ -46,13 +43,11 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS j FINAL
-              not_contains:
-                - tuple(j.traversal_path, j.id) IN
+        sql:
+          contains:
+            - AS j FINAL
+          not_contains:
+            - tuple(j.traversal_path, j.id) IN
     missing_frontends:
       json: The original query scenario supplies only GQL.
 
@@ -65,12 +60,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - tuple(j.traversal_path, j.id) IN
-              not_contains:
-                - AS j FINAL
+        sql:
+          contains:
+            - tuple(j.traversal_path, j.id) IN
+          not_contains:
+            - AS j FINAL
     missing_frontends:
       json: The original query scenario supplies only GQL.

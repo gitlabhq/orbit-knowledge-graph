@@ -6,16 +6,14 @@ query:
   gql: |
     MATCH p = ANY SHORTEST (a:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(b:Project) WHERE b.id >= 100 AND b.id <= 200 RETURN p
 
+logical:
+  expect: ["(Input path_finding (...))"]
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect: ["(Input path_finding (...))"]
-    plan_clickhouse:
-      query_plan:
-        expect: ["(Filter b.id >= 100, b.id <= 200, ... (_))"]
-    response_policy:
-      node:
-        ctes:
-          exact_order: [_orbit_nf_b, _orbit_forward, _orbit_backward]
-        expect: ["(CTE _orbit_nf_b (Limit 500 (_)))", "(Filter b.id >= 100, b.id <= 200 (_))"]
+    planned:
+      expect: ["(Filter b.id >= 100, b.id <= 200, ... (_))"]
+    emitted:
+      ctes:
+        exact_order: [_orbit_nf_b, _orbit_forward, _orbit_backward]
+      expect: ["(CTE _orbit_nf_b (Limit 500 (_)))", "(Filter b.id >= 100, b.id <= 200 (_))"]

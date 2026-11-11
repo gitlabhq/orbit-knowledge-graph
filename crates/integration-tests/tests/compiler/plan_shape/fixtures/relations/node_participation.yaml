@@ -7,17 +7,15 @@ cases:
         MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
         WHERE mr.merged_at >= '2024-01-01T00:00:00Z'
         RETURN count(mr) AS n
+    logical:
+      expect: ["(Aggregate COUNT(mr) AS n (_))"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(Aggregate COUNT(mr) AS n (_))"]
-        plan_clickhouse:
-          query_plan:
-            bind:
-              - (CTE $mrs (Project mr.id AS id (Filter mr.merged_at >= '2024-01-01T00:00:00Z', ... (Deduplicate Final (_)))))
-            expect:
-              - (Filter _orbit_edge_0.target_id IN $mrs.id, ... (_))
+        planned:
+          bind:
+            - (CTE $mrs (Project mr.id AS id (Filter mr.merged_at >= '2024-01-01T00:00:00Z', ... (Deduplicate Final (_)))))
+          expect:
+            - (Filter _orbit_edge_0.target_id IN $mrs.id, ... (_))
 
   - name: Endpoint IDs and ranges remain visible on the edge relation
     query:
@@ -27,16 +25,14 @@ cases:
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
         WHERE p.id IN [1000, 1001] AND p.id >= 1000 AND p.id <= 1001
         RETURN mr.title, p.name
+    logical:
+      expect: ["(Filter p.id IN [1000, 1001], p.id >= 1000, p.id <= 1001 (_))"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(Filter p.id IN [1000, 1001], p.id >= 1000, p.id <= 1001 (_))"]
-        plan_clickhouse:
-          query_plan:
-            expect:
-              - (Filter mr.project_id IN [1000, 1001], mr.project_id >= 1000, mr.project_id <= 1001, ... (_))
-              - (Scan Table(gl_merge_request) AS mr)
+        planned:
+          expect:
+            - (Filter mr.project_id IN [1000, 1001], mr.project_id >= 1000, mr.project_id <= 1001, ... (_))
+            - (Scan Table(gl_merge_request) AS mr)
 
   - name: Nullable aggregate properties retain current node rows and arguments
     query:
@@ -45,13 +41,11 @@ cases:
       gql: |
         MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
         RETURN count(mr.merged_at) AS n
+    logical:
+      expect: ["(Aggregate COUNT(mr.merged_at) AS n (_))"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(Aggregate COUNT(mr.merged_at) AS n (_))"]
-        plan_clickhouse:
-          query_plan:
-            expect:
-              - (Join ON mr.id = _orbit_edge_0.target_id (_) (Bind mr (_)))
-              - (Aggregate COUNT(mr.merged_at) FILTER ? AS n (_))
+        planned:
+          expect:
+            - (Join ON mr.id = _orbit_edge_0.target_id (_) (Bind mr (_)))
+            - (Aggregate COUNT(mr.merged_at) FILTER ? AS n (_))

@@ -5,18 +5,16 @@ cases:
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"},{"id":"d","entity":"Definition"},{"id":"e","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"},{"type":"CALLS","from":"c","to":"d"},{"type":"CALLS","from":"d","to":"e"}]}
+    logical:
+      expect: ["(EdgeScan CALLS a->b AS e0)"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(EdgeScan CALLS a->b AS e0)"]
-        plan_clickhouse:
-          query_plan:
-            expect:
-              - (Filter _orbit_edge_1.source_id IN ? . id, ... (_))
-              - (Filter _orbit_edge_2.source_id IN ? . id, ... (_))
-            occurrences:
-              - { pattern: "(Project _orbit_id_source.target_id AS id (_))", count: 4 }
+        planned:
+          expect:
+            - (Filter _orbit_edge_1.source_id IN ? . id, ... (_))
+            - (Filter _orbit_edge_2.source_id IN ? . id, ... (_))
+          occurrences:
+            - { pattern: "(Project _orbit_id_source.target_id AS id (_))", count: 4 }
 
   - name: One reached ID set narrows every branch arm
     query:
@@ -26,20 +24,18 @@ cases:
         MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest),
           (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
         RETURN u.id, mr.id, p.id, pipe.id
+    logical:
+      expect: ["(EdgeScan APPROVED u->mr AS e0)"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(EdgeScan APPROVED u->mr AS e0)"]
-        plan_clickhouse:
-          query_plan:
-            bind:
-              - (CTE $mr_ids (Project _orbit_id_source.target_id AS id (_)))
-            expect:
-              - (Filter mr.id IN $mr_ids.id, ... (_))
-            occurrences:
-              - pattern: (Scan Table(gl_merge_request) AS mr)
-                count: 1
+        planned:
+          bind:
+            - (CTE $mr_ids (Project _orbit_id_source.target_id AS id (_)))
+          expect:
+            - (Filter mr.id IN $mr_ids.id, ... (_))
+          occurrences:
+            - pattern: (Scan Table(gl_merge_request) AS mr)
+              count: 1
 
   - name: Shared uncovered endpoint filters materialize matching IDs once
     query:
@@ -48,20 +44,18 @@ cases:
       gql: |
         MATCH (u:User {username: 'alice'})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
         RETURN p.id, count(p) AS n
+    logical:
+      expect: ["(Aggregate group p.id AS p_id, COUNT(p) AS n (_))"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(Aggregate group p.id AS p_id, COUNT(p) AS n (_))"]
-        plan_clickhouse:
-          query_plan:
-            bind:
-              - (CTE $users (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
-            expect:
-              - (Filter _orbit_edge_0.source_id IN $users.id, ... (_))
-            occurrences:
-              - pattern: (CTE ? (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
-                count: 1
+        planned:
+          bind:
+            - (CTE $users (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
+          expect:
+            - (Filter _orbit_edge_0.source_id IN $users.id, ... (_))
+          occurrences:
+            - pattern: (CTE ? (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
+              count: 1
 
   - name: Repeated low-cardinality row filters stay inline
     query:
@@ -71,15 +65,13 @@ cases:
         MATCH (a:Definition {definition_type: 'function'})-[:CALLS]->(b:Definition),
           (a)-[:CALLS]->(c:Definition)
         RETURN a.id, b.id, c.id
+    logical:
+      expect: ["(Filter a.definition_type = 'function' (_))"]
     physical:
       clickhouse:
-        normalize:
-          input:
-            expect: ["(Filter a.definition_type = 'function' (_))"]
-        plan_clickhouse:
-          query_plan:
-            expect:
-              - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:function'], ... (_))
-              - (Filter _orbit_edge_1.relationship_kind = 'CALLS', ... (_))
-            reject:
-              - (CTE ? (Filter ?.source_tags HAS ANY ['definition_type:function'], ... (_)))
+        planned:
+          expect:
+            - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:function'], ... (_))
+            - (Filter _orbit_edge_1.relationship_kind = 'CALLS', ... (_))
+          reject:
+            - (CTE ? (Filter ?.source_tags HAS ANY ['definition_type:function'], ... (_)))

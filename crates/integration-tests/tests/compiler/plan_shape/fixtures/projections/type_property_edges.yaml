@@ -16,18 +16,15 @@ query:
     MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 9970})
     RETURN u.username, u.user_type, g.name ORDER BY u.username LIMIT 5
 
+logical:
+  expect:
+    - (EdgeScan MEMBER_OF u->g AS e0)
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (EdgeScan MEMBER_OF u->g AS e0)
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, _orbit_edge_0.source_id AS _orbit_e0_src, _orbit_edge_0.source_kind AS _orbit_e0_src_kind, _orbit_edge_0.target_id AS _orbit_e0_dst, _orbit_edge_0.target_kind AS _orbit_e0_dst_kind, u.user_type AS u_user_type, ... (_))
-    response_policy:
-      node:
-        expect:
-          - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, _orbit_edge_0.source_id AS _orbit_e0_src, _orbit_edge_0.source_kind AS _orbit_e0_src_kind, _orbit_edge_0.target_id AS _orbit_e0_dst, _orbit_edge_0.target_kind AS _orbit_e0_dst_kind, u.user_type AS u_user_type, ... (_))
+    planned:
+      expect:
+        - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, _orbit_edge_0.source_id AS _orbit_e0_src, _orbit_edge_0.source_kind AS _orbit_e0_src_kind, _orbit_edge_0.target_id AS _orbit_e0_dst, _orbit_edge_0.target_kind AS _orbit_e0_dst_kind, u.user_type AS u_user_type, ... (_))
+    emitted:
+      expect:
+        - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, _orbit_edge_0.source_id AS _orbit_e0_src, _orbit_edge_0.source_kind AS _orbit_e0_src_kind, _orbit_edge_0.target_id AS _orbit_e0_dst, _orbit_edge_0.target_kind AS _orbit_e0_dst_kind, u.user_type AS u_user_type, ... (_))

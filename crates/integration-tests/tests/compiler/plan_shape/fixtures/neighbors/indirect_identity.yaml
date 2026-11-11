@@ -10,35 +10,24 @@ query:
   gql: |
     MATCH (d:Definition {id: 1})-[:CALLS]-(neighbor) RETURN d, neighbor
 
+logical:
+  expect:
+    - (Input neighbors (...))
+    - (Filter d.id IN [1] (NodeScan Definition AS d))
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (Input neighbors (...))
-          - (Filter d.id IN [1] (NodeScan Definition AS d))
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Neighbors center=d direction=both directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_filter=false relationships=[CALLS] ... (_))
-          - (NodeScan Definition AS d)
-    response_policy:
-      node:
-        expect:
-          - (Scan Table(gl_code_edge) ...)
+    planned:
+      expect:
+        - (Neighbors center=d direction=both directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_filter=false relationships=[CALLS] ... (_))
+        - (NodeScan Definition AS d)
+    emitted:
+      expect:
+        - (Scan Table(gl_code_edge) ...)
   duckdb:
-    normalize:
-      input:
-        expect:
-          - (Input neighbors (...))
-          - (Filter d.id IN [1] (NodeScan Definition AS d))
-
-    plan_duckdb:
-      query_plan:
-        expect:
-          - (Neighbors center=d direction=both ... (_))
-    paginate:
-      node:
-        expect:
-          - (Scan Table(gl_edge) ...)
+    planned:
+      expect:
+        - (Neighbors center=d direction=both ... (_))
+    emitted:
+      expect:
+        - (Scan Table(gl_edge) ...)

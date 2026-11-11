@@ -7,14 +7,12 @@ query:
     MATCH path = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(p:Project {id: 100})
     RETURN path
 
+logical:
+  expect:
+    - (Input path_finding (...))
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (Input path_finding (...))
-
-    response_policy:
-      node:
-        expect:
-          - (Deduplicate LimitBy 1 BY _orbit_paths._orbit_path_start, _orbit_paths._orbit_path_end (_))
+    emitted:
+      expect:
+        - (Deduplicate LimitBy 1 BY _orbit_paths._orbit_path_start, _orbit_paths._orbit_path_end (_))

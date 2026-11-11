@@ -1,3 +1,4 @@
+---
 cases:
   - name: token_match, all_tokens, and any_tokens each exclude one row regardless of case and prune granules with the text skip index
     query:
@@ -18,14 +19,12 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - hasToken(lower(mr.title), lower('FIX'))
-                - hasAllTokens(lower(mr.title), lower('LOGIN Crash'))
-                - hasAnyTokens(lower(mr.title), lower('URGENT ios'))
-              not_contains: []
-            indexes:
-              - table: gl_merge_request
-                name: idx_title
+        sql:
+          contains:
+            - hasToken(lower(mr.title), lower('FIX'))
+            - hasAllTokens(lower(mr.title), lower('LOGIN Crash'))
+            - hasAnyTokens(lower(mr.title), lower('URGENT ios'))
+          not_contains: []
+        indexes:
+          - table: gl_merge_request
+            name: idx_title

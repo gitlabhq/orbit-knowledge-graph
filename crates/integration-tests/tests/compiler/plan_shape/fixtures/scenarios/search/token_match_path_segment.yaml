@@ -1,3 +1,4 @@
+---
 cases:
   - name: token_match on a file path matches one segment regardless of case, so main matches crates/orbit/src/main.rs
     query:
@@ -18,8 +19,6 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            indexes:
-              - table: gl_definition
-                name: idx_file_path
+        indexes:
+          - table: gl_definition
+            name: idx_file_path

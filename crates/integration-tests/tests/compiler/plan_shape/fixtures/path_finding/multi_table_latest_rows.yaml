@@ -7,18 +7,15 @@ query:
     MATCH path = ANY SHORTEST (a:Pipeline {id: 99000})-[:CHILD_OF|AUTO_CANCELED_BY*1..2]->(b:Pipeline {id: 99002})
     RETURN path
 
+logical:
+  expect:
+    - (Input path_finding (...))
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (Input path_finding (...))
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=[gl_ci_edge] relationships=[CHILD_OF, AUTO_CANCELED_BY] ... (_) (_))
-    response_policy:
-      node:
-        expect:
-          - (Deduplicate Final (Scan Table(gl_ci_edge) AS _orbit_e1))
+    planned:
+      expect:
+        - (PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=[gl_ci_edge] relationships=[CHILD_OF, AUTO_CANCELED_BY] ... (_) (_))
+    emitted:
+      expect:
+        - (Deduplicate Final (Scan Table(gl_ci_edge) AS _orbit_e1))

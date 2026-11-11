@@ -1,3 +1,4 @@
+---
 cases:
   - name: "A filter on a relationship backed by a foreign key keeps the edge scan and excludes rows. The filter on the edge's source_id removes merge request 2000.\n"
     query:
@@ -12,9 +13,7 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - source_id != 2000
-              not_contains: []
+        sql:
+          contains:
+            - source_id != 2000
+          not_contains: []

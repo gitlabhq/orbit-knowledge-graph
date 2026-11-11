@@ -7,16 +7,14 @@ query:
     MATCH (a:Pipeline {id: 99000})-[:CHILD_OF|AUTO_CANCELED_BY]->(b:Pipeline)
     RETURN a,b
 
+logical:
+  expect:
+    - (NodeScan Pipeline AS a)
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (NodeScan Pipeline AS a)
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
-        reject:
-          - (Scan Table(gl_edge) ...)
+    planned:
+      expect:
+        - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
+      reject:
+        - (Scan Table(gl_edge) ...)

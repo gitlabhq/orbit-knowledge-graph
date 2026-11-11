@@ -270,14 +270,13 @@ hydration:
         "1/256/",
       ]
 
+logical:
+  expect: ["(Input hydration (...))"]
+
 physical:
   clickhouse:
-    plan_clickhouse:
-      input:
-        expect: ["(Input hydration (...))"]
-      query_plan:
-        expect: ["(Filter f.traversal_path PREFIX SET ?, f.id IN [1] (_))"]
-        reject: ["(Filter f.traversal_path PREFIX UNION ?, ... (_))"]
-    response_policy:
-      node:
-        expect: ["(Filter ArrayExists(_orbit_path -> StartsWith(f.traversal_path, _orbit_path), ?), f.id = 1 (_))"]
+    planned:
+      expect: ["(Filter f.traversal_path PREFIX SET ?, f.id IN [1] (_))"]
+      reject: ["(Filter f.traversal_path PREFIX UNION ?, ... (_))"]
+    emitted:
+      expect: ["(Filter ArrayExists(_orbit_path -> StartsWith(f.traversal_path, _orbit_path), ?), f.id = 1 (_))"]

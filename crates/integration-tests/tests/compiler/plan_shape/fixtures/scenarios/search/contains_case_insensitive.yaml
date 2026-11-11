@@ -1,3 +1,4 @@
+---
 cases:
   - name: contains ignores case, spans a token boundary, matches a word prefix, and prunes granules with the ngram skip index
     query:
@@ -18,12 +19,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])
-              not_contains: []
-            indexes:
-              - table: gl_merge_request
-                name: idx_title_ngram
+        sql:
+          contains:
+            - multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])
+          not_contains: []
+        indexes:
+          - table: gl_merge_request
+            name: idx_title_ngram

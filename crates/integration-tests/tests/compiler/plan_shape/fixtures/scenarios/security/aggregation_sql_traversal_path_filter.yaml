@@ -1,3 +1,4 @@
+---
 cases:
   - name: Compiled aggregation SQL contains startsWith traversal_path filter
     query:
@@ -21,11 +22,9 @@ cases:
         - 1/100/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - startsWith
-                - traversal_path
-                - 1/100/
-              not_contains: []
+        sql:
+          contains:
+            - startsWith
+            - traversal_path
+            - 1/100/
+          not_contains: []

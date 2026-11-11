@@ -8,14 +8,13 @@ query:
 
 hydration: {}
 
+logical:
+  expect: ["(Input hydration (...))"]
+
 physical:
   clickhouse:
-    plan_clickhouse:
-      input:
-        expect: ["(Input hydration (...))"]
-      query_plan:
-        expect: ["(Hydration (Project f.path (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.project_id, f.branch, f.id (_)))))"]
-    response_policy:
-      node:
-        expect: ["(Project f.id AS id, f._deleted AS _deleted, f.path AS path (_))"]
-        reject: ["(Project * (_))", "(Deduplicate Final (_))", "(Filter StartsWith(f.traversal_path, ?), ... (_))"]
+    planned:
+      expect: ["(Hydration (Project f.path (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.project_id, f.branch, f.id (_)))))"]
+    emitted:
+      expect: ["(Project f.id AS id, f._deleted AS _deleted, f.path AS path (_))"]
+      reject: ["(Project * (_))", "(Deduplicate Final (_))", "(Filter StartsWith(f.traversal_path, ?), ... (_))"]

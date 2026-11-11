@@ -1,3 +1,4 @@
+---
 cases:
   - name: contains treats %, _, and backslash as plain characters with independent decoys and ngram index pruning
     query:
@@ -17,8 +18,6 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            indexes:
-              - table: gl_merge_request
-                name: idx_title_ngram
+        indexes:
+          - table: gl_merge_request
+            name: idx_title_ngram

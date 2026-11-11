@@ -5,23 +5,18 @@ cases:
         {"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4000]}]}
       gql: |
         MATCH (w:WorkItem {id: 4000}) RETURN w
+    logical: { expect: ["(Filter w.id IN [4000] (_))"] }
     physical:
       clickhouse:
-        normalize:
-          input: { expect: ["(Filter w.id IN [4000] (_))"] }
-        plan_clickhouse:
-          query_plan:
-            point_lookup: true
-
+        point_lookup: true
         settings:
-          query_config:
-            exact:
-              max_ast_depth: "10000"
-              max_ast_elements: "1000000"
-              max_execution_time: "30"
-              max_expanded_ast_elements: "10000000"
-              query_cache_ttl: "10"
-              use_query_cache: "0"
+          exact:
+            max_ast_depth: "10000"
+            max_ast_elements: "1000000"
+            max_execution_time: "30"
+            max_expanded_ast_elements: "10000000"
+            query_cache_ttl: "10"
+            use_query_cache: "0"
 
   - name: An open joined node is not a point lookup
     query:
@@ -29,29 +24,24 @@ cases:
         {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000]},{"id":"w","entity":"WorkItem"}],"relationships":[{"type":"IN_PROJECT","from":"w","to":"p"}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(w:WorkItem) RETURN p, w LIMIT 10
+    logical: { expect: ["(EdgeScan IN_PROJECT w->p AS e0)"] }
     physical:
       clickhouse:
-        normalize:
-          input: { expect: ["(EdgeScan IN_PROJECT w->p AS e0)"] }
-        plan_clickhouse:
-          query_plan:
-            point_lookup: false
-
+        point_lookup: false
         settings:
-          query_config:
-            exact:
-              max_ast_depth: "10000"
-              max_ast_elements: "1000000"
-              max_execution_time: "30"
-              max_expanded_ast_elements: "10000000"
-              optimize_move_to_prewhere_if_final: "1"
-              query_cache_nondeterministic_function_handling: "'ignore'"
-              query_cache_system_table_handling: "'ignore'"
-              query_cache_ttl: "10"
-              use_index_for_in_with_subqueries_max_values: "1000000"
-              use_query_cache: "1"
-              use_skip_indexes_if_final: "1"
-              use_skip_indexes_if_final_exact_mode: "1"
+          exact:
+            max_ast_depth: "10000"
+            max_ast_elements: "1000000"
+            max_execution_time: "30"
+            max_expanded_ast_elements: "10000000"
+            optimize_move_to_prewhere_if_final: "1"
+            query_cache_nondeterministic_function_handling: "'ignore'"
+            query_cache_system_table_handling: "'ignore'"
+            query_cache_ttl: "10"
+            use_index_for_in_with_subqueries_max_values: "1000000"
+            use_query_cache: "1"
+            use_skip_indexes_if_final: "1"
+            use_skip_indexes_if_final_exact_mode: "1"
 
   - name: Pinned nodes over single hops form a point lookup
     query:
@@ -59,28 +49,23 @@ cases:
         {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[100]},{"id":"p","entity":"Project","node_ids":[1000]},{"id":"w","entity":"WorkItem","node_ids":[4000]}],"relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"w","to":"p"}]}
       gql: |
         MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project {id: 1000})<-[:IN_PROJECT]-(w:WorkItem {id: 4000}) RETURN g, p, w
+    logical: { expect: ["(Filter g.id IN [100] (_))", "(Filter p.id IN [1000] (_))", "(Filter w.id IN [4000] (_))"] }
     physical:
       clickhouse:
-        normalize:
-          input: { expect: ["(Filter g.id IN [100] (_))", "(Filter p.id IN [1000] (_))", "(Filter w.id IN [4000] (_))"] }
-        plan_clickhouse:
-          query_plan:
-            point_lookup: true
-
+        point_lookup: true
         settings:
-          query_config:
-            exact:
-              enable_materialized_cte: "1"
-              max_ast_depth: "10000"
-              max_ast_elements: "1000000"
-              max_execution_time: "30"
-              max_expanded_ast_elements: "10000000"
-              optimize_move_to_prewhere_if_final: "1"
-              query_cache_ttl: "10"
-              use_index_for_in_with_subqueries_max_values: "1000000"
-              use_query_cache: "0"
-              use_skip_indexes_if_final: "1"
-              use_skip_indexes_if_final_exact_mode: "1"
+          exact:
+            enable_materialized_cte: "1"
+            max_ast_depth: "10000"
+            max_ast_elements: "1000000"
+            max_execution_time: "30"
+            max_expanded_ast_elements: "10000000"
+            optimize_move_to_prewhere_if_final: "1"
+            query_cache_ttl: "10"
+            use_index_for_in_with_subqueries_max_values: "1000000"
+            use_query_cache: "0"
+            use_skip_indexes_if_final: "1"
+            use_skip_indexes_if_final_exact_mode: "1"
 
   - name: A variable hop prevents point lookup classification
     query:
@@ -88,27 +73,22 @@ cases:
         {"query_type":"traversal","nodes":[{"id":"a","entity":"WorkItem","node_ids":[4000]},{"id":"b","entity":"WorkItem","node_ids":[4001]}],"relationships":[{"type":"RELATED_TO","from":"a","to":"b","hops":[1,3]}]}
       gql: |
         MATCH (a:WorkItem {id: 4000})-[:RELATED_TO*1..3]->(b:WorkItem {id: 4001}) RETURN a, b
+    logical: { expect: ["(EdgeScan RELATED_TO a->b AS e0 HOPS 1..3)"] }
     physical:
       clickhouse:
-        normalize:
-          input: { expect: ["(EdgeScan RELATED_TO a->b AS e0 HOPS 1..3)"] }
-        plan_clickhouse:
-          query_plan:
-            point_lookup: false
-
+        point_lookup: false
         settings:
-          query_config:
-            exact:
-              enable_materialized_cte: "1"
-              max_ast_depth: "10000"
-              max_ast_elements: "1000000"
-              max_execution_time: "30"
-              max_expanded_ast_elements: "10000000"
-              query_cache_nondeterministic_function_handling: "'ignore'"
-              query_cache_system_table_handling: "'ignore'"
-              query_cache_ttl: "10"
-              use_index_for_in_with_subqueries_max_values: "1000000"
-              use_query_cache: "1"
+          exact:
+            enable_materialized_cte: "1"
+            max_ast_depth: "10000"
+            max_ast_elements: "1000000"
+            max_execution_time: "30"
+            max_expanded_ast_elements: "10000000"
+            query_cache_nondeterministic_function_handling: "'ignore'"
+            query_cache_system_table_handling: "'ignore'"
+            query_cache_ttl: "10"
+            use_index_for_in_with_subqueries_max_values: "1000000"
+            use_query_cache: "1"
 
   - name: A pinned aggregation is a point lookup
     query:
@@ -116,23 +96,18 @@ cases:
         {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4000]}],"aggregations":[{"count":"w","as":"c"}]}
       gql: |
         MATCH (w:WorkItem {id: 4000}) RETURN count(w) AS c
+    logical: { expect: ["(Aggregate COUNT(w) AS c (_))"] }
     physical:
       clickhouse:
-        normalize:
-          input: { expect: ["(Aggregate COUNT(w) AS c (_))"] }
-        plan_clickhouse:
-          query_plan:
-            point_lookup: true
-
+        point_lookup: true
         settings:
-          query_config:
-            exact:
-              max_ast_depth: "10000"
-              max_ast_elements: "1000000"
-              max_execution_time: "30"
-              max_expanded_ast_elements: "10000000"
-              query_cache_ttl: "10"
-              use_query_cache: "0"
+          exact:
+            max_ast_depth: "10000"
+            max_ast_elements: "1000000"
+            max_execution_time: "30"
+            max_expanded_ast_elements: "10000000"
+            query_cache_ttl: "10"
+            use_query_cache: "0"
 
   - name: An ID range is not a point lookup
     query:
@@ -140,25 +115,20 @@ cases:
         {"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","id_range":{"start":1,"end":100000}}],"limit":10}
       gql: |
         MATCH (w:WorkItem) WHERE w.id >= 1 AND w.id <= 100000 RETURN w LIMIT 10
+    logical: { expect: ["(Filter w.id >= 1, w.id <= 100000 (_))"] }
     physical:
       clickhouse:
-        normalize:
-          input: { expect: ["(Filter w.id >= 1, w.id <= 100000 (_))"] }
-        plan_clickhouse:
-          query_plan:
-            point_lookup: false
-
+        point_lookup: false
         settings:
-          query_config:
-            exact:
-              max_ast_depth: "10000"
-              max_ast_elements: "1000000"
-              max_execution_time: "30"
-              max_expanded_ast_elements: "10000000"
-              query_cache_nondeterministic_function_handling: "'ignore'"
-              query_cache_system_table_handling: "'ignore'"
-              query_cache_ttl: "10"
-              use_query_cache: "1"
+          exact:
+            max_ast_depth: "10000"
+            max_ast_elements: "1000000"
+            max_execution_time: "30"
+            max_expanded_ast_elements: "10000000"
+            query_cache_nondeterministic_function_handling: "'ignore'"
+            query_cache_system_table_handling: "'ignore'"
+            query_cache_ttl: "10"
+            use_query_cache: "1"
 
   - name: Neighbors are not point lookups
     query:
@@ -166,23 +136,19 @@ cases:
         {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4000]}],"neighbors":{"direction":"both"},"limit":10}
       gql: |
         MATCH (w:WorkItem {id: 4000})--(n) RETURN w, n LIMIT 10
+    logical: { expect: ["(Filter w.id IN [4000] (_))"] }
     physical:
       clickhouse:
-        normalize:
-          input: { expect: ["(Filter w.id IN [4000] (_))"] }
-        plan_clickhouse:
-          query_plan:
-            point_lookup: false
+        point_lookup: false
         settings:
-          query_config:
-            exact:
-              enable_materialized_cte: "1"
-              max_ast_depth: "10000"
-              max_ast_elements: "1000000"
-              max_execution_time: "30"
-              max_expanded_ast_elements: "10000000"
-              query_cache_nondeterministic_function_handling: "'ignore'"
-              query_cache_system_table_handling: "'ignore'"
-              query_cache_ttl: "10"
-              use_index_for_in_with_subqueries_max_values: "1000000"
-              use_query_cache: "1"
+          exact:
+            enable_materialized_cte: "1"
+            max_ast_depth: "10000"
+            max_ast_elements: "1000000"
+            max_execution_time: "30"
+            max_expanded_ast_elements: "10000000"
+            query_cache_nondeterministic_function_handling: "'ignore'"
+            query_cache_system_table_handling: "'ignore'"
+            query_cache_ttl: "10"
+            use_index_for_in_with_subqueries_max_values: "1000000"
+            use_query_cache: "1"

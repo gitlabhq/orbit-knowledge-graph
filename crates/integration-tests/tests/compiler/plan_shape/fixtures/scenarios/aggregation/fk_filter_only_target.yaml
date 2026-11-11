@@ -1,3 +1,4 @@
+---
 cases:
   - name: FK aggregation filters through the referenced target key without projecting the target
     query:
@@ -20,12 +21,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS p FINAL
-                - p.name = 'Public Project'
-                - mr.project_id IN (SELECT id FROM _orbit_relation_
-              not_contains:
-                - gl_edge
+        sql:
+          contains:
+            - AS p FINAL
+            - p.name = 'Public Project'
+            - mr.project_id IN (SELECT id FROM _orbit_relation_
+          not_contains:
+            - gl_edge

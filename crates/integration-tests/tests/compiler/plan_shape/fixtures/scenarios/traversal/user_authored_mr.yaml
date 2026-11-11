@@ -1,3 +1,4 @@
+---
 cases:
   - name: User-MergeRequest AUTHORED traversal returns correct edges and node properties
     query:
@@ -18,13 +19,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        hydrate_plan:
-          hydration_plan: static
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS mr_title
-                - AS mr_state
-              not_contains:
-                - AS u_username
+        sql:
+          contains:
+            - AS mr_title
+            - AS mr_state
+          not_contains:
+            - AS u_username
+        hydration: static

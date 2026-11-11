@@ -1,3 +1,4 @@
+---
 cases:
   - name: A narrowed FK target counts its rows when the latest version matches the mutable filter
     query:
@@ -12,11 +13,9 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS p FINAL
-                - p.star_count = 1
-                - gl_edge
-              not_contains: []
+        sql:
+          contains:
+            - AS p FINAL
+            - p.star_count = 1
+            - gl_edge
+          not_contains: []

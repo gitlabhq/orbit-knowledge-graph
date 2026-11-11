@@ -12,21 +12,18 @@ query:
     MATCH (n:Note) WHERE n.id >= 1 AND n.id <= 100
     RETURN date_trunc('month', n.created_at), count(n) AS n
 
+logical:
+  expect:
+    - (Filter n.id >= 1, n.id <= 100 (NodeScan Note AS n))
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (Filter n.id >= 1, n.id <= 100 (NodeScan Note AS n))
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Aggregate group bucket(month, n.created_at), bucket(month, n.created_at) AS n_created_at_month, COUNT() AS n (_))
-          - (Filter n._deleted = false (Deduplicate LimitBy ... (Filter n.id >= 1, n.id <= 100 (_))))
-    response_policy:
-      node:
-        expect:
-          - (Aggregate group bucket(month, NullIf(n.created_at, '1970-01-01 00:00:00')), bucket(month, NullIf(n.created_at, '1970-01-01 00:00:00')) AS n_created_at_month, COUNT() AS n (_))
-          - (Filter n._deleted = false (_))
-          - (Filter n.id >= 1, n.id <= 100 (_))
+    planned:
+      expect:
+        - (Aggregate group bucket(month, n.created_at), bucket(month, n.created_at) AS n_created_at_month, COUNT() AS n (_))
+        - (Filter n._deleted = false (Deduplicate LimitBy ... (Filter n.id >= 1, n.id <= 100 (_))))
+    emitted:
+      expect:
+        - (Aggregate group bucket(month, NullIf(n.created_at, '1970-01-01 00:00:00')), bucket(month, NullIf(n.created_at, '1970-01-01 00:00:00')) AS n_created_at_month, COUNT() AS n (_))
+        - (Filter n._deleted = false (_))
+        - (Filter n.id >= 1, n.id <= 100 (_))

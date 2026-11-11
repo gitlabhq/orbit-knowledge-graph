@@ -6,20 +6,18 @@ query:
   gql: |
     MATCH p = ANY SHORTEST (a:User {username: 'alice'})-[:MEMBER_OF*1..1]->(b:Group {id: 100}) RETURN p
 
+logical:
+  expect: ["(Filter a.username = 'alice' (_))"]
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect: ["(Filter a.username = 'alice' (_))"]
-    plan_clickhouse:
-      query_plan:
-        expect: ["(PathFinding a->b depth=1 forward=1 backward=0 scoped=false ... (_) (_))"]
-    response_policy:
-      node:
-        ctes:
-          exact_order: [_orbit_nf_a, _orbit_forward]
-        expect:
-          - (CTE _orbit_nf_a (Limit 500 (_)))
-          - (Filter a.username = 'alice', Lower(a.username) = Lower('alice') (Deduplicate Final (Scan Table(gl_user) AS a)))
-          - (Filter _orbit_e1.source_id IN _orbit_nf_a.id, ... (_))
-        reject: ["(CTE _orbit_path_scope (_))", "(Scan Table(gl_group) ...)"]
+    planned:
+      expect: ["(PathFinding a->b depth=1 forward=1 backward=0 scoped=false ... (_) (_))"]
+    emitted:
+      ctes:
+        exact_order: [_orbit_nf_a, _orbit_forward]
+      expect:
+        - (CTE _orbit_nf_a (Limit 500 (_)))
+        - (Filter a.username = 'alice', Lower(a.username) = Lower('alice') (Deduplicate Final (Scan Table(gl_user) AS a)))
+        - (Filter _orbit_e1.source_id IN _orbit_nf_a.id, ... (_))
+      reject: ["(CTE _orbit_path_scope (_))", "(Scan Table(gl_group) ...)"]

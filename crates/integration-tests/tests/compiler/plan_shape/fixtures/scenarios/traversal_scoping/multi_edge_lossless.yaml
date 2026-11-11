@@ -1,3 +1,4 @@
+---
 cases:
   - name: Project-scoped MR-MRDiff-MRDiffFile chain returns all diff files without loss
     query:
@@ -23,9 +24,7 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - gl_project AS _orbit_scope WHERE
-              not_contains: []
+        sql:
+          contains:
+            - gl_project AS _orbit_scope WHERE
+          not_contains: []

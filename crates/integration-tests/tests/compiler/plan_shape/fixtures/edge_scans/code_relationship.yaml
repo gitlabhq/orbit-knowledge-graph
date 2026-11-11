@@ -14,29 +14,20 @@ query:
     MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition)
     RETURN caller.id, callee.id
 
+logical:
+  expect:
+    - (Filter caller.id IN [1] (NodeScan Definition AS caller))
+    - (EdgeScan CALLS caller->callee AS e0)
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (Filter caller.id IN [1] (NodeScan Definition AS caller))
-          - (EdgeScan CALLS caller->callee AS e0)
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Scan Table(gl_code_edge) AS _orbit_edge_0)
-          - (Filter _orbit_edge_0.source_id = 1, ... (_))
+    planned:
+      expect:
+        - (Scan Table(gl_code_edge) AS _orbit_edge_0)
+        - (Filter _orbit_edge_0.source_id = 1, ... (_))
   duckdb:
-    normalize:
-      input:
-        expect:
-          - (Filter caller.id IN [1] (NodeScan Definition AS caller))
-          - (EdgeScan CALLS caller->callee AS e0)
-
-    plan_duckdb:
-      query_plan:
-        expect:
-          - (Join ON callee.id = _orbit_edge_0.target_id (_) (Bind callee (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS callee)))))
-          - (Join ON caller.id = _orbit_edge_0.source_id (_) (Bind caller (Filter ... (Bind caller (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS caller)))))))
-          - (Scan Table(gl_edge) AS _orbit_edge_0)
+    planned:
+      expect:
+        - (Join ON callee.id = _orbit_edge_0.target_id (_) (Bind callee (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS callee)))))
+        - (Join ON caller.id = _orbit_edge_0.source_id (_) (Bind caller (Filter ... (Bind caller (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS caller)))))))
+        - (Scan Table(gl_edge) AS _orbit_edge_0)

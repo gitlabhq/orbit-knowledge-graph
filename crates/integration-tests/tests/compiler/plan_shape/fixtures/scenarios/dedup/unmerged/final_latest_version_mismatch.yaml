@@ -1,3 +1,4 @@
+---
 cases:
   - name: A FINAL read drops the merge request when only an old version matches
     query:
@@ -8,12 +9,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - AS mr FINAL
-              not_contains:
-                - tuple(mr.traversal_path, mr.id) IN
+        sql:
+          contains:
+            - AS mr FINAL
+          not_contains:
+            - tuple(mr.traversal_path, mr.id) IN
     missing_frontends:
       json: The original query scenario supplies only GQL.

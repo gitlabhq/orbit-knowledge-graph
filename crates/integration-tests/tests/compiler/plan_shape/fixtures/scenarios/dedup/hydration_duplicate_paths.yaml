@@ -1,3 +1,4 @@
+---
 cases:
   - name: Hydration returns every requested entity when an earlier ID exists at two paths
     query:
@@ -10,7 +11,6 @@ cases:
         - 1/
     physical:
       clickhouse:
-        hydrate_plan:
-          hydration_plan: static
+        hydration: static
     missing_frontends:
       json: The original query scenario supplies only GQL.

@@ -8,22 +8,19 @@ query:
     MATCH (e0:Definition {id: 12000})-[:CALLS]->(b:Definition)
     RETURN e0.name, b.name
 
+logical:
+  expect:
+    - (EdgeScan CALLS e0->b AS e0)
+
 physical:
   clickhouse:
-    normalize:
-      input:
-        expect:
-          - (EdgeScan CALLS e0->b AS e0)
-
-    plan_clickhouse:
-      query_plan:
-        expect:
-          - (Scan Table(gl_code_edge) AS _orbit_edge_0)
-        reject:
-          - (Scan Table(gl_code_edge) AS e0)
-    response_policy:
-      node:
-        expect:
-          - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, _orbit_edge_0.source_id AS _orbit_e0_src, ... (_))
-        reject:
-          - (Scan Table(gl_code_edge) AS e0)
+    planned:
+      expect:
+        - (Scan Table(gl_code_edge) AS _orbit_edge_0)
+      reject:
+        - (Scan Table(gl_code_edge) AS e0)
+    emitted:
+      expect:
+        - (Project _orbit_edge_0.relationship_kind AS _orbit_e0_kind, _orbit_edge_0.source_id AS _orbit_e0_src, ... (_))
+      reject:
+        - (Scan Table(gl_code_edge) AS e0)
