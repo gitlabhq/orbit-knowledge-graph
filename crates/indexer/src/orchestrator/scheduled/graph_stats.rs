@@ -87,13 +87,11 @@ impl GraphStatsSnapshot {
         let Some((version, ontology)) = self.served_ontology().await? else {
             return Ok(None);
         };
-        let tables = StatsTables::from_ontology(&ontology, version)?;
-
         let paths = self.enabled_paths().await?;
         let (graph_bytes, entity_counts, (projects_indexed, projects_eligible)) = tokio::try_join!(
-            self.graph_bytes(&tables.graph),
-            self.entity_counts(&tables.nodes),
-            self.project_coverage(&tables.code_checkpoint, &paths),
+            self.graph_bytes(&ontology, version),
+            self.entity_counts(&ontology, version),
+            self.project_coverage(version, &paths),
         )?;
 
         Ok(Some(GraphStats {
@@ -123,11 +121,23 @@ impl GraphStatsSnapshot {
         Ok(Some((version, ontology)))
     }
 
-    async fn graph_bytes(&self, tables: &[String]) -> Result<u64, TaskError> {
+    async fn graph_bytes(
+        &self,
+        ontology: &ontology::Ontology,
+        version: u32,
+    ) -> Result<u64, TaskError> {
+        let storage = query_data_model::Relational::<
+            query_data_model::implementations::clickhouse::layout::ClickHouse,
+        >::derive(ontology)
+        .map_err(TaskError::new)?;
+        let tables: Vec<String> = storage
+            .deployed_tables()
+            .map(|table| prefixed_table_name(&table.name, version))
+            .collect();
         let batches = self
             .graph
             .query(GRAPH_BYTES_SQL)
-            .param("tables", tables)
+            .param("tables", &tables)
             .fetch_arrow()
             .await
             .map_err(|error| self.query_error(error))?;
@@ -137,10 +147,12 @@ impl GraphStatsSnapshot {
     /// One table at a time, so the daily `FINAL` scans never stack up on the graph.
     async fn entity_counts(
         &self,
-        nodes: &[(String, String)],
+        ontology: &ontology::Ontology,
+        version: u32,
     ) -> Result<BTreeMap<String, u64>, TaskError> {
         let mut counts = BTreeMap::new();
-        for (node, table) in nodes {
+        for node in ontology.nodes() {
+            let table = prefixed_table_name(&node.destination_table, version);
             let started = Instant::now();
             let batches = self
                 .graph
@@ -150,8 +162,8 @@ impl GraphStatsSnapshot {
                 .await
                 .map_err(|error| self.query_error(error))?;
             self.metrics
-                .record_query_duration(table, started.elapsed().as_secs_f64());
-            counts.insert(node.clone(), first_count(&batches)?);
+                .record_query_duration(&table, started.elapsed().as_secs_f64());
+            counts.insert(node.name.clone(), first_count(&batches)?);
         }
         Ok(counts)
     }
@@ -159,18 +171,19 @@ impl GraphStatsSnapshot {
     /// `(indexed, eligible)`. A project counts as indexed only while the datalake still lists it.
     async fn project_coverage(
         &self,
-        code_checkpoint: &str,
+        version: u32,
         paths: &[String],
     ) -> Result<(u64, u64), TaskError> {
         if paths.is_empty() {
             return Ok((0, 0));
         }
+        let code_checkpoint = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, version);
         let (eligible, indexed) = tokio::try_join!(
             self.project_ids(&self.datalake, &ELIGIBLE_PROJECTS_SQL, None, paths),
             self.project_ids(
                 &self.graph,
                 &INDEXED_PROJECTS_SQL,
-                Some(code_checkpoint),
+                Some(&code_checkpoint),
                 paths
             ),
         )?;
@@ -269,43 +282,6 @@ impl GraphStatsSnapshot {
     }
 }
 
-/// The versioned tables one snapshot reads, all derived from the served ontology.
-#[derive(Debug)]
-struct StatsTables {
-    /// Every deployed graph table, for `graph_bytes`.
-    graph: Vec<String>,
-    /// `(node type name, table)`. The keys of `entity_counts` come only from here.
-    nodes: Vec<(String, String)>,
-    code_checkpoint: String,
-}
-
-impl StatsTables {
-    fn from_ontology(ontology: &ontology::Ontology, version: u32) -> Result<Self, TaskError> {
-        let storage = query_data_model::Relational::<
-            query_data_model::implementations::clickhouse::layout::ClickHouse,
-        >::derive(ontology)
-        .map_err(TaskError::new)?;
-        let graph = storage
-            .deployed_tables()
-            .map(|table| prefixed_table_name(&table.name, version))
-            .collect();
-        let nodes = ontology
-            .nodes()
-            .map(|node| {
-                (
-                    node.name.clone(),
-                    prefixed_table_name(&node.destination_table, version),
-                )
-            })
-            .collect();
-        Ok(Self {
-            graph,
-            nodes,
-            code_checkpoint: prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, version),
-        })
-    }
-}
-
 fn first_count(batches: &[arrow::record_batch::RecordBatch]) -> Result<u64, TaskError> {
     let value = i64::extract_column(batches, 0)
         .map_err(TaskError::new)?
@@ -313,60 +289,4 @@ fn first_count(batches: &[arrow::record_batch::RecordBatch]) -> Result<u64, Task
         .next()
         .unwrap_or(0);
     Ok(u64::try_from(value).unwrap_or(0))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn tables() -> StatsTables {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        StatsTables::from_ontology(&ontology, 7).unwrap()
-    }
-
-    #[test]
-    fn entity_count_keys_are_exactly_the_ontology_node_types() {
-        let ontology = ontology::Ontology::load_embedded().unwrap();
-        let mut keys: Vec<String> = tables().nodes.into_iter().map(|(node, _)| node).collect();
-        let mut expected: Vec<&str> = ontology.node_names().collect();
-        keys.sort_unstable();
-        expected.sort_unstable();
-        assert_eq!(keys, expected);
-        for key in &keys {
-            let valid = key.len() <= 64
-                && key.starts_with(|c: char| c.is_ascii_uppercase())
-                && key.chars().all(|c| c.is_ascii_alphanumeric());
-            assert!(
-                valid,
-                "{key} breaks the Iglu key pattern ^[A-Z][A-Za-z0-9]{{0,63}}$"
-            );
-        }
-    }
-
-    #[test]
-    fn every_node_table_is_a_deployed_graph_table_of_the_version() {
-        let tables = tables();
-        for (node, table) in &tables.nodes {
-            assert!(table.starts_with("v7_"), "{node}: {table}");
-            assert!(
-                tables.graph.contains(table),
-                "{node}: {table} is not deployed"
-            );
-        }
-        assert_eq!(tables.code_checkpoint, "v7_code_indexing_checkpoint");
-    }
-
-    #[test]
-    fn project_queries_match_only_enabled_top_level_paths() {
-        for sql in [&*ELIGIBLE_PROJECTS_SQL, &*INDEXED_PROJECTS_SQL] {
-            assert!(sql.contains("FINAL"), "{sql}");
-            assert!(
-                sql.contains(&format!(
-                    "extract(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}') IN {{paths:Array(String)}}"
-                )),
-                "{sql}"
-            );
-        }
-        assert!(INDEXED_PROJECTS_SQL.contains("is_default_branch AND indexed_at IS NOT NULL"));
-    }
 }

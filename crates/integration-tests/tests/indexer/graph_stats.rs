@@ -5,27 +5,16 @@ use indexer::orchestrator::scheduled::{GraphStatsSnapshot, ScheduledTask, Schedu
 use indexer::schema::version::{
     SCHEMA_VERSION, ensure_version_table, mark_version_active, prefixed_table_name,
 };
-use labkit_events::StructuredEvent;
 use ontology::archive::OntologyArchive;
 use ontology::migrations::embedded_sources;
-use orbit_analytics::{AnalyticsTracker, GitlabInstanceWatch, ORBIT_GRAPH_STATS_SCHEMA};
+use orbit_analytics::{GitlabInstanceWatch, InMemoryAnalyticsTracker, ORBIT_GRAPH_STATS_SCHEMA};
 use orbit_server_config::{AppConfig, NatsConfiguration};
-use parking_lot::Mutex;
 
 use super::common::siphon::create_namespace;
 use super::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, start_nats};
 
 const ENABLED: i64 = 100;
 const NOT_ENABLED: i64 = 900;
-
-#[derive(Default)]
-struct Recorder(Mutex<Vec<StructuredEvent>>);
-
-impl AnalyticsTracker for Recorder {
-    fn track(&self, event: StructuredEvent) {
-        self.0.lock().push(event);
-    }
-}
 
 #[tokio::test]
 async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
@@ -96,10 +85,10 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
         ))
         .await;
 
-    let recorder = Arc::new(Recorder::default());
+    let tracker = Arc::new(InMemoryAnalyticsTracker::new());
     let defaults = AppConfig::embedded_defaults();
     let reporter = GraphStatsReporter::new(
-        recorder.clone(),
+        tracker.clone(),
         Arc::new(defaults.analytics.clone()),
         GitlabInstanceWatch::default(),
     );
@@ -113,7 +102,7 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
     );
     task.run().await.unwrap();
 
-    let events = std::mem::take(&mut *recorder.0.lock());
+    let events = tracker.drain();
     assert_eq!(events.len(), 1, "one snapshot per run");
     assert_eq!(events[0].action(), "gkg_graph_stats");
     let stats = &events[0]
