@@ -139,10 +139,11 @@ stages:
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (attributed_declarator (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      # An explicit specialization (Foo::bar<int>) is named without its template arguments.
       - match: '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: $Q:qualified_identifier parameters: $P)) body: $B)'
-        replace: '(__def (__defname @$Q $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
+        replace: '(__def (__defname @$Q|regex_loop("<[^<>]*>([^<]*>)$", "${1}")|regex_replace("\s*<([^<>=][^<>]*)?>$", "") $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $Q:qualified_identifier parameters: $P) body: $B)'
-        replace: '(__def (__defname @$Q $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
+        replace: '(__def (__defname @$Q|regex_loop("<[^<>]*>([^<]*>)$", "${1}")|regex_replace("\s*<([^<>=][^<>]*)?>$", "") $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition declarator: $Q:qualified_identifier body: $B)'
         replace: '(__def (__defname @$Q|regex_replace("\s*\(\s*\)\s*(const)?\s*$", "")|regex_replace("\s*/\*[^*]*\*/\s*$", "") $Q) (__function) $B)'
       - match: '(function_definition declarator: $C:operator_cast body: $B)'
@@ -173,6 +174,13 @@ stages:
       - match: '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (reference_declarator (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      # Explicit specializations (foo<int>) are named without their template arguments
+      - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (template_function name: $N:identifier) parameters: $P) body: $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - match: '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: (template_function name: $N:identifier) parameters: $P)) body: $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - match: '(function_definition type:? $RT:type_identifier declarator: (reference_declarator (function_declarator declarator: (template_function name: $N:identifier) parameters: $P)) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       # Fields
       - match: '(field_declaration type: $T:struct_specifier declarator: $N:field_identifier)'

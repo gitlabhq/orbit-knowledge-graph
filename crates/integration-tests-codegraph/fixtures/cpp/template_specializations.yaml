@@ -1,0 +1,101 @@
+name: C++ explicit template specialization names (kg#1118)
+
+fixtures:
+  - path: free.cpp
+    content: |
+      template<typename T> int foo(T a) { return 0; }
+      template<> int foo<int>(int a) { return a; }
+      template<> int foo<char, 2>(char a) { return a; }
+      template<> int *ptr_spec<int>(int a) { return 0; }
+      template<> int empty_args<>(int a) { return a; }
+      int plain_proto(int a);
+      template<> int spec_proto<int>(int a);
+
+  - path: members.cpp
+    content: |
+      template<> int Foo::bar<int>(int a) { return a; }
+      template<> int A::B::deep<int>(int a) { return a; }
+      template<> int *Foo::ptr_member<int>(int a) { return 0; }
+      template<> int Foo::nested<std::vector<int>>(int a) { return a; }
+      template<> int Foo::deeper<std::map<int, std::vector<int>>>(int a) { return a; }
+      int Foo::operator<=>(const Foo& o) const { return 0; }
+      int Stack<int>::push(int a) { return a; }
+      template<> int Stack<int>::emplace<int>(int a) { return a; }
+
+tests:
+  - name: "Explicit specialization of a free function template drops the template arguments"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'free::foo'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "foo", fqn: "free::foo" } }
+
+  - name: "No specialization keeps a template argument list in its name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+        AND d.name IN ['foo<int>', 'foo<char, 2>', 'ptr_spec<int>', 'empty_args<>', 'Stack<int>::emplace<int>', 'Foo::bar<int>', 'A::B::deep<int>',
+                       'Foo::ptr_member<int>', 'Foo::nested<std::vector<int>>',
+                       'Foo::deeper<std::map<int, std::vector<int>>>']
+      RETURN d.name AS name
+    assert: []
+
+  - name: "Pointer-returning specialization unwraps the declarator and drops the arguments"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'free::ptr_spec'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "ptr_spec", fqn: "free::ptr_spec" } }
+
+  - name: "Out-of-line member template specialization keeps the class qualifier"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+        AND d.name IN ['Foo::bar', 'A::B::deep', 'Foo::ptr_member', 'Foo::nested', 'Foo::deeper']
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { row: { name: "Foo::bar", fqn: "members::Foo::bar" } }
+      - { row: { name: "A::B::deep", fqn: "members::A::B::deep" } }
+      - { row: { name: "Foo::ptr_member", fqn: "members::Foo::ptr_member" } }
+      - { row: { name: "Foo::nested", fqn: "members::Foo::nested" } }
+      - { row: { name: "Foo::deeper", fqn: "members::Foo::deeper" } }
+
+  - name: "Empty template argument list is dropped"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'free::empty_args'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "empty_args" } }
+
+  - name: "Specialization of a class template's member keeps the qualifier's arguments"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.name IN ['Stack<int>::push', 'Stack<int>::emplace']
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "Stack<int>::push", fqn: "members::Stack<int>::push" } }
+      - { row: { name: "Stack<int>::emplace", fqn: "members::Stack<int>::emplace" } }
+
+  - name: "A specialization prototype is no more a definition than a plain prototype"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['plain_proto', 'spec_proto', 'spec_proto<int>']
+      RETURN d.name AS name
+    assert: []
+
+  - name: "Three-way comparison operator keeps its name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'members::Foo::operator<=>'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Foo::operator<=>" } }

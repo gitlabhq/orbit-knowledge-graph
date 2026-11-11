@@ -51,30 +51,34 @@ pub fn binding_declarator_name(binding: &N<'_>) -> Option<String> {
 }
 
 /// Keep class qualifiers because they identify out-of-line members in the FQN.
-/// Normalize conversion operators at any depth because `qualified_identifier`
-/// is right-recursive.
+/// Normalize conversion operators and drop the template arguments of an
+/// explicit specialization (`foo<int>` is named `foo`) at any depth because
+/// `qualified_identifier` is right-recursive.
 pub fn cpp_declarator_name(def: &N<'_>) -> Option<String> {
     let node = declared_name_node(def)?;
     if node.kind().as_ref() == "operator_cast" {
         return operator_cast_text(&node);
     }
-    if node.kind().as_ref() == "qualified_identifier"
-        && let Some(op_cast) = trailing_operator_cast(&node)
-        && let Some(op) = operator_cast_text(&op_cast)
-    {
-        let text = node.text();
-        let qualifier = &text[..op_cast.range().start - node.range().start];
-        return Some(format!("{qualifier}{op}"));
-    }
-    Some(node.text().to_string())
+    let last = trailing_name(&node)?;
+    let base = match last.kind().as_ref() {
+        "operator_cast" => operator_cast_text(&last),
+        "template_function" => last.field("name").map(|name| name.text().to_string()),
+        _ => None,
+    };
+    let Some(base) = base else {
+        return Some(node.text().to_string());
+    };
+    let text = node.text();
+    let qualifier = &text[..last.range().start - node.range().start];
+    Some(format!("{qualifier}{base}"))
 }
 
-fn trailing_operator_cast<'r>(node: &N<'r>) -> Option<N<'r>> {
+fn trailing_name<'r>(node: &N<'r>) -> Option<N<'r>> {
     let mut cur = node.clone();
     while cur.kind().as_ref() == "qualified_identifier" {
         cur = cur.children().filter(|c| c.is_named()).last()?;
     }
-    (cur.kind().as_ref() == "operator_cast").then_some(cur)
+    Some(cur)
 }
 
 /// Use the last token before the operator's parameter list. This preserves type
