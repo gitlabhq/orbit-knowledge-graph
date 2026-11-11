@@ -325,12 +325,14 @@ mod tests {
         keys.sort_unstable();
         expected.sort_unstable();
         assert_eq!(keys, expected);
-        // The Iglu key pattern is ^[A-Z][A-Za-z0-9]{0,63}$.
         for key in &keys {
             let valid = key.len() <= 64
                 && key.starts_with(|c: char| c.is_ascii_uppercase())
                 && key.chars().all(|c| c.is_ascii_alphanumeric());
-            assert!(valid, "{key} breaks the Iglu key pattern");
+            assert!(
+                valid,
+                "{key} breaks the Iglu key pattern ^[A-Z][A-Za-z0-9]{{0,63}}$"
+            );
         }
     }
 

@@ -58,7 +58,6 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
              VALUES ({ENABLED}, {ENABLED}, '1/{ENABLED}/', now(), now())"
         ))
         .await;
-    // Projects 1 to 3 are eligible. Project 4 was deleted, and project 5 is not in an enabled namespace.
     clickhouse
         .execute(&format!(
             "INSERT INTO project_namespace_traversal_paths (id, traversal_path, version, deleted) VALUES \
@@ -72,7 +71,6 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
         .await;
 
     let checkpoint = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
-    // Indexed default branches: projects 1, 2, 4 and 5. Only 1 and 2 still count.
     clickhouse
         .execute(&format!(
             "INSERT INTO {checkpoint} \
@@ -135,7 +133,13 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
     assert_eq!(keys.len(), ontology.node_names().count());
     assert!(keys.keys().all(|key| ontology.get_node(key).is_some()));
 
-    assert_eq!(stats["projects_eligible"], 3);
-    assert_eq!(stats["projects_indexed"], 2);
+    assert_eq!(
+        stats["projects_eligible"], 3,
+        "a deleted project and a project outside the enabled namespace do not count"
+    );
+    assert_eq!(
+        stats["projects_indexed"], 2,
+        "an unindexed branch, a deleted project and another namespace do not count"
+    );
     assert!(stats["graph_bytes"].as_i64().unwrap() > 0, "{stats}");
 }
