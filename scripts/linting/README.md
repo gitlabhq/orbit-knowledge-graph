@@ -21,6 +21,7 @@ folder so it can be removed as a unit (see *Removing the gates* below). Task #29
 | `comment_check_hook.sh` | Lefthook entry point: maps the checker's exit code 3 to a blocked commit and lets every other failure through. |
 | `comment_check_test.py` | Unit tests for the comment check (`mise run lint:comments:test`). |
 | `narration-comments.yml` | Lower-precision ast-grep-native fallback for the `block_label` half (see below). Committed for documentation / ast-grep-only setups; **not** the active gate. |
+| `rust-query-tests/` | ast-grep rule that rejects Rust tests with an embedded graph query (`mise run lint:query-tests`). Its own `sgconfig.yml`, rule tests, and a file baseline. |
 
 ## Prose linter
 
@@ -125,6 +126,22 @@ mise run lint:yaml
 mise run lint:yaml:fix
 mise run lint:yaml:test
 ```
+
+## Rust query tests
+
+Query behavior belongs in YAML: plan-shape fixtures check compiler output, and
+data-correctness scenarios check results. The `no-rust-query-tests` rule flags a
+test function in the compiler and integration-test crates when one of its string
+literals holds a GQL `MATCH (` or a JSON `"query_type"`. A test function is a
+`#[test]` or `#[tokio::test]` function, or a subtest that takes `&TestContext`.
+
+The rule has its own `sgconfig.yml`, so `lint:logs` does not load it. The
+`ignores` list in the rule is a baseline of the files that still hold such
+tests. A new file is checked at once. Remove a file from the baseline when its
+tests move to YAML.
+
+To keep one Rust test, put `// ast-grep-ignore: no-rust-query-tests` on the line
+above its `fn`, and say why in the test name or the commit.
 
 ## Where the gates run
 

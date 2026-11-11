@@ -1,0 +1,50 @@
+id: no-rust-query-tests
+language: rust
+severity: error
+message: Write this query test as a YAML fixture.
+note: |
+  Plan-shape fixtures check compiler output, and data-correctness scenarios
+  check query results. If only Rust can check this, put
+  `// ast-grep-ignore: no-rust-query-tests` on the line above `fn` and say why.
+rule:
+  kind: function_item
+  any:
+    - follows:
+        stopBy:
+          not:
+            any:
+              - kind: attribute_item
+              - kind: line_comment
+              - kind: block_comment
+        kind: attribute_item
+        regex: '^#\[(tokio::)?test'
+    - has:
+        field: parameters
+        regex: 'TestContext'
+  has:
+    stopBy: end
+    any:
+      - kind: string_literal
+      - kind: raw_string_literal
+    regex: 'MATCH \(|"query_type"'
+files:
+  - crates/query-engine/compiler/**
+  - crates/integration-tests/tests/compiler/**
+  - crates/integration-tests/tests/server/**
+ignores:
+  - crates/integration-tests/tests/compiler/dialects/clickhouse.rs
+  - crates/integration-tests/tests/compiler/dialects/duckdb.rs
+  - crates/integration-tests/tests/compiler/ontology.rs
+  - crates/integration-tests/tests/compiler/predicate_limits.rs
+  - crates/integration-tests/tests/compiler/virtual_columns.rs
+  - crates/integration-tests/tests/server/data_correctness/retained.rs
+  - crates/integration-tests/tests/server/error_outcomes.rs
+  - crates/integration-tests/tests/server/graph_formatter.rs
+  - crates/integration-tests/tests/server/redaction.rs
+  - crates/integration-tests/tests/server/toon_formatter.rs
+  - crates/query-engine/compiler/src/input.rs
+  - crates/query-engine/compiler/src/lib.rs
+  - crates/query-engine/compiler/src/passes/frontend/json_dsl.rs
+  - crates/query-engine/compiler/src/passes/normalize.rs
+  - crates/query-engine/compiler/src/passes/validate/mod.rs
+  - crates/query-engine/compiler/src/tp_bounds.rs

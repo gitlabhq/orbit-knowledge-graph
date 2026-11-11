@@ -223,6 +223,13 @@ run = [
 ]
 description = "Run clippy lint checks"
 
+[tasks."lint:query-tests"]
+description = "Reject Rust tests that embed a graph query outside the migration baseline"
+run = [
+  "ast-grep test -c scripts/linting/rust-query-tests/sgconfig.yml --skip-snapshot-tests",
+  "ast-grep scan -c scripts/linting/rust-query-tests/sgconfig.yml --off=unused-suppression --error crates",
+]
+
 [tasks."lint:logs"]
 run = [
   "ast-grep test --skip-snapshot-tests",
