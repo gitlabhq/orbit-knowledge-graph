@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use compiler::QueryError;
-use compiler::orbit_authorization::Grants;
+use compiler::orbit_authorization::{Grants, Key};
 use compiler::remote::{self, RemotePlan, RemoteRequest};
 use query_data_model::catalog::Row;
 use query_data_model::implementations::live::{DataExtraction, ExtractionRequest, RequestFilter};
@@ -460,12 +460,13 @@ fn code_rows_go_through_the_read_code_check() {
             permission: "read_code".into(),
             resource: "project".into(),
             field: "project_id".into(),
+            kind: compiler::KeyKind::Int,
         }]
     );
     let compiled = stages(CODE, &caller("1/9970/")).unwrap();
     let found = rows(&compiled.request, "alice");
     assert_eq!(
-        remote::apply_check(found.clone(), &checks[0], &[42].into()).len(),
+        remote::apply_check(found.clone(), &checks[0], &[Key::Int(42)].into()).len(),
         2
     );
     assert!(remote::apply_check(found, &checks[0], &Default::default()).is_empty());

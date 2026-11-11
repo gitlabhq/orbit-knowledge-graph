@@ -5,11 +5,13 @@ use async_trait::async_trait;
 use orbit_arrow::ColumnValue;
 use pipeline::PipelineError;
 
+use compiler::orbit_authorization::Key;
 use compiler::{QueryError, VirtualColumnRequest};
 
 pub type PropertyRow = HashMap<String, ColumnValue>;
 
-pub type PropertyMap = HashMap<(String, i64), PropertyRow>;
+/// Hydrated properties by entity name and node identity key.
+pub type PropertyMap = HashMap<(String, Key), PropertyRow>;
 
 pub type EntityVirtualColumns<'a> = (&'a str, &'a [VirtualColumnRequest]);
 
@@ -85,7 +87,7 @@ pub async fn resolve_virtual_columns(
     let max_batch = registry.max_batch_size();
 
     for &(entity_type, virtual_columns) in entity_virtual_columns {
-        let valid_keys: Vec<(String, i64)> = property_map
+        let valid_keys: Vec<(String, Key)> = property_map
             .keys()
             .filter(|(etype, _)| etype == entity_type)
             .cloned()

@@ -82,8 +82,14 @@ fn plans_built_in_code_cannot_read_hidden_or_admin_only_fields() {
     let model = MODEL.model();
     let arm = |entity: &str, column: &str| crate::hydration::HydrationRequest {
         arms: vec![
-            crate::hydration::HydrationArm::new(model, entity, &[1], &[column.into()], Vec::new())
-                .unwrap(),
+            crate::hydration::HydrationArm::new(
+                model,
+                entity,
+                &[orbit_authorization::Key::Int(1)],
+                &[column.into()],
+                Vec::new(),
+            )
+            .unwrap(),
         ],
         options: crate::hydration::HydrationCompileOptions::default(),
     };

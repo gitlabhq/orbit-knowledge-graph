@@ -79,7 +79,7 @@ fn center_rows<B: RelationalBackend>(
             let id = col(&[&rows], alias, DEFAULT_PRIMARY_KEY)?;
             let rows = q.filter(
                 rows,
-                ids::<B>(id, center.pinned.as_deref().unwrap_or_default()),
+                ids::<B>(id, center.pinned.as_deref().unwrap_or_default())?,
             )?;
             let keys = plan
                 .center_sort_key
@@ -172,7 +172,7 @@ impl Context<'_> {
          -> Built<Vec<Option<Expr>>> {
             let mut parts = vec![Some(eq(col(scope, alias, center_kind)?, string(entity)))];
             if let Some(pinned) = &center.pinned {
-                parts.push(Some(ids::<B>(col(scope, alias, center_edge)?, pinned)));
+                parts.push(Some(ids::<B>(col(scope, alias, center_edge)?, pinned)?));
             }
             if let Some(kinds) = relationship_kinds::<B>(scope, alias, arm.kinds)? {
                 parts.push(Some(kinds));
@@ -211,7 +211,7 @@ impl Context<'_> {
                 }
                 if let Some(pinned) = &center.pinned {
                     let id = col(scope, center_alias, DEFAULT_PRIMARY_KEY)?;
-                    parts.push(ids::<B>(id, pinned));
+                    parts.push(ids::<B>(id, pinned)?);
                 }
                 if let Some((start, end)) = center.range {
                     let id = col(scope, center_alias, DEFAULT_PRIMARY_KEY)?;
@@ -337,7 +337,7 @@ fn fused<B: RelationalBackend>(
         let side = |kind: &str, id: &str, direction| -> Built<Expr> {
             let mut parts = vec![eq(col(&scope, edge, kind)?, string(entity))];
             if let Some(pinned) = &center.pinned {
-                parts.push(ids::<B>(col(&scope, edge, id)?, pinned));
+                parts.push(ids::<B>(col(&scope, edge, id)?, pinned)?);
             }
             for tag in plan
                 .filters

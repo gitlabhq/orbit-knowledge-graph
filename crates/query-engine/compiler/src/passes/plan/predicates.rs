@@ -33,7 +33,7 @@ pub enum Predicate {
     },
     Ids {
         column: Column,
-        values: Vec<i64>,
+        values: Vec<orbit_authorization::Key>,
     },
     IdRange {
         column: Column,

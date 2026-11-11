@@ -15,7 +15,7 @@ pub(crate) struct Node<'p> {
     pub entity: &'p str,
     pub table: Option<&'p str>,
     pub redaction: &'p str,
-    pub pinned: Option<Vec<i64>>,
+    pub pinned: Option<Vec<orbit_authorization::Key>>,
     pub range: Option<(i64, i64)>,
     pub filters: Vec<(String, BoundFilter)>,
     pub has_traversal_path: bool,

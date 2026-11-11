@@ -343,7 +343,22 @@ fn hydration_request(
                 let endpoint = rows.endpoint()?;
                 let rows = match &anchor.pinned {
                     None => rows,
-                    Some(pinned) => q.pin(rows, endpoint.property("id")?, pinned)?,
+                    Some(pinned) => {
+                        let ids: Vec<_> = pinned
+                            .iter()
+                            .map(|key| {
+                                compiler::logical::anchors::literal(key)
+                                    .expect("pinned keys are single")
+                            })
+                            .collect();
+                        let graph = query.model.graph();
+                        let identity = graph.entity(binding.entity).identity[0];
+                        q.pin(
+                            rows,
+                            endpoint.property(&graph.property(identity).name)?,
+                            &ids,
+                        )?
+                    }
                 };
                 let projection = Projection::Graph {
                     binding: endpoint.output(),
@@ -758,7 +773,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         let paths = (0..count)
             .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
             .collect();
-        let arm = HydrationArm::new(model.model(), "File", &[1], &[], paths).unwrap();
+        let arm = HydrationArm::new(model.model(), "File", &[1.into()], &[], paths).unwrap();
         let request = HydrationRequest {
             arms: vec![arm],
             options: HydrationCompileOptions {

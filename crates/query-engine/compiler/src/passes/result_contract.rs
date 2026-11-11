@@ -59,7 +59,7 @@ pub enum KeyKind {
 
 impl KeyKind {
     /// The loader admits only integer, string and uuid check keys.
-    fn of(data_type: DataType) -> Self {
+    pub(crate) fn of(data_type: DataType) -> Self {
         match data_type {
             DataType::Int => Self::Int,
             DataType::Uuid => Self::Uuid,
@@ -141,7 +141,7 @@ pub struct ResultContext {
     nodes: HashMap<String, RedactionNode>,
     entity_auth: HashMap<String, Vec<EntityAuthConfig>>,
     edges: Vec<EdgeMeta>,
-    neighbors_center: Option<(String, i64)>,
+    neighbors_center: Option<(String, orbit_authorization::Key)>,
     labels: HashMap<String, String>,
 }
 
@@ -210,10 +210,10 @@ impl ResultContext {
         &self.edges
     }
 
-    pub fn neighbors_center(&self) -> Option<(&str, i64)> {
+    pub fn neighbors_center(&self) -> Option<(&str, &orbit_authorization::Key)> {
         self.neighbors_center
             .as_ref()
-            .map(|(entity, id)| (entity.as_str(), *id))
+            .map(|(entity, id)| (entity.as_str(), id))
     }
 
     pub fn label(&self, entity: &str) -> Option<&str> {
@@ -420,7 +420,7 @@ pub fn apply<B: SqlBackend>(
         && let Some([id]) = center.pinned.as_deref()
     {
         let entity = model.graph().entity(center.binding.entity);
-        ctx.neighbors_center = Some((entity.name.clone(), *id));
+        ctx.neighbors_center = Some((entity.name.clone(), id.clone()));
         ctx.labels = model
             .graph()
             .entities()

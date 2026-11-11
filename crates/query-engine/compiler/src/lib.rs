@@ -561,13 +561,16 @@ mod tests {
             (
                 context
                     .neighbors_center()
-                    .map(|(entity, id)| (entity.to_string(), id)),
+                    .map(|(entity, id)| (entity.to_string(), id.clone())),
                 context.label("User").map(str::to_string),
             )
         };
         assert_eq!(
             center("[1]"),
-            (Some(("User".into(), 1)), Some("username".into()))
+            (
+                Some(("User".into(), orbit_authorization::Key::Int(1))),
+                Some("username".into())
+            )
         );
         assert_eq!(center("[1, 2]"), (None, None));
     }

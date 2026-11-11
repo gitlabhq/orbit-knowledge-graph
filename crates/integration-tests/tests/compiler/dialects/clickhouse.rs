@@ -620,7 +620,11 @@ fn orbit_query_id_list_and_range_promote_independently() {
                 let embedded = embedded_model();
                 let logical = compiler::logical::Query::new(&statement.plan, embedded.model());
                 let anchor = &logical.anchors(&logical.leaves())[0];
-                assert_eq!(anchor.pinned, Some(vec![1, 2, 3, 5]), "{query}");
+                assert_eq!(
+                    anchor.pinned,
+                    Some([1, 2, 3, 5].map(Into::into).to_vec()),
+                    "{query}"
+                );
                 assert_eq!(anchor.range, Some((1, 3)), "{query}");
                 let id = |leaf: &compiler::logical::Leaf<'_>| matches!(leaf.left(), query_data_model::plan::logical::Expr::Property { property, .. } if logical.property_name(property) == "id");
                 assert!(!anchor.filters.iter().any(id), "{query}");

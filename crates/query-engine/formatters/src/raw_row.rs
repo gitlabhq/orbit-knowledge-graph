@@ -155,7 +155,7 @@ mod tests {
             node.properties
                 .insert("name".to_string(), ColumnValue::String("test".to_string()));
             node.properties
-                .insert("id".to_string(), ColumnValue::Int64(node.id));
+                .insert("id".to_string(), types::identity_value(&node.id).unwrap());
             node.properties.insert(
                 "type".to_string(),
                 ColumnValue::String("Ci::Build".to_string()),

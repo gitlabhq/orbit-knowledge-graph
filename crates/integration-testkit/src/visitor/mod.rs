@@ -26,11 +26,36 @@ pub use enforcement::{QueryRequirements, Requirement};
 use std::cell::RefCell;
 use std::collections::HashSet;
 
+use query_engine::compiler::orbit_authorization::Key;
 use query_engine::compiler::{QueryStats, QueryType};
 #[cfg(test)]
 use query_engine::formatters::ColumnDescriptor;
 use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor};
 use serde_json::{Map, Value};
+
+/// A response id as the integer every scenario of the GitLab packages keys its nodes by.
+pub fn int(id: &Key) -> i64 {
+    match id {
+        Key::Int(id) => *id,
+        other => panic!("expected an integer id, got {other}"),
+    }
+}
+
+/// The integer ids of the GitLab packages' rows, for tests that seed integer-keyed entities.
+pub trait IntIds {
+    fn int_id(&self, node: &query_engine::compiler::RedactionNode) -> Option<i64>;
+    fn int_public_id(&self, node: &query_engine::compiler::RedactionNode) -> Option<i64>;
+}
+
+impl IntIds for query_engine::types::QueryResultRow {
+    fn int_id(&self, node: &query_engine::compiler::RedactionNode) -> Option<i64> {
+        self.get_id(node).map(|key| int(&key))
+    }
+
+    fn int_public_id(&self, node: &query_engine::compiler::RedactionNode) -> Option<i64> {
+        self.get_public_id(node).map(|key| int(&key))
+    }
+}
 
 /// Wrapper that panics on drop if the inner value was never inspected.
 ///
@@ -258,7 +283,7 @@ impl ResponseView {
         self.response
             .nodes
             .iter()
-            .find(|n| n.entity_type == entity_type && n.id == id)
+            .find(|n| n.entity_type == entity_type && n.id == Key::Int(id))
     }
 
     pub fn nodes_of_type(&self, entity_type: &str) -> Vec<&GraphNode> {
@@ -277,7 +302,7 @@ impl ResponseView {
             .nodes
             .iter()
             .filter(|n| n.entity_type == entity_type)
-            .map(|n| n.id)
+            .map(|n| int(&n.id))
             .collect();
         MustInspect::new(ids, "node_ids()")
     }
@@ -288,7 +313,7 @@ impl ResponseView {
             .nodes
             .iter()
             .filter(|n| n.entity_type == entity_type)
-            .map(|n| n.id)
+            .map(|n| int(&n.id))
             .collect()
     }
 
@@ -296,7 +321,7 @@ impl ResponseView {
         self.response
             .nodes
             .iter()
-            .map(|n| (n.entity_type.clone(), n.id))
+            .map(|n| (n.entity_type.clone(), int(&n.id)))
             .collect()
     }
 
@@ -310,9 +335,9 @@ impl ResponseView {
     ) -> Option<&GraphEdge> {
         self.response.edges.iter().find(|e| {
             e.from == from
-                && e.from_id == from_id
+                && e.from_id == Key::Int(from_id)
                 && e.to == to
-                && e.to_id == to_id
+                && e.to_id == Key::Int(to_id)
                 && e.edge_type == edge_type
         })
     }
@@ -346,9 +371,9 @@ impl ResponseView {
             .map(|e| {
                 (
                     e.from.clone(),
-                    e.from_id,
+                    int(&e.from_id),
                     e.to.clone(),
-                    e.to_id,
+                    int(&e.to_id),
                     e.edge_type.clone(),
                 )
             })
@@ -832,7 +857,7 @@ impl ResponseView {
             .nodes
             .iter()
             .filter(|n| n.entity_type == entity_type)
-            .map(|n| n.id)
+            .map(|n| int(&n.id))
             .collect();
         let expected_set: HashSet<i64> = expected.iter().copied().collect();
         assert_eq!(actual, expected_set, "{entity_type} node IDs mismatch");
@@ -853,7 +878,7 @@ impl ResponseView {
             .edges
             .iter()
             .filter(|e| e.edge_type == edge_type)
-            .map(|e| (e.from_id, e.to_id))
+            .map(|e| (int(&e.from_id), int(&e.to_id)))
             .collect();
         let expected_set: HashSet<(i64, i64)> = expected.iter().copied().collect();
         assert_eq!(actual, expected_set, "{edge_type} edge set mismatch");
@@ -896,8 +921,8 @@ impl ResponseView {
     pub fn assert_referential_integrity(&self) {
         let all = self.all_node_ids();
         for edge in &self.response.edges {
-            let from = (edge.from.clone(), edge.from_id);
-            let to = (edge.to.clone(), edge.to_id);
+            let from = (edge.from.clone(), int(&edge.from_id));
+            let to = (edge.to.clone(), int(&edge.to_id));
             assert!(
                 all.contains(&from),
                 "edge references non-existent source node {from:?}"
@@ -963,7 +988,7 @@ fn assert_predicate_is_nontrivial(
 ) {
     let blank = GraphNode {
         entity_type: entity_type.to_string(),
-        id,
+        id: Key::Int(id),
         properties: serde_json::Map::new(),
     };
     assert!(
@@ -1063,7 +1088,7 @@ pub(crate) mod tests {
         }
         GraphNode {
             entity_type: entity_type.to_string(),
-            id,
+            id: Key::Int(id),
             properties,
         }
     }
@@ -1077,9 +1102,9 @@ pub(crate) mod tests {
     ) -> GraphEdge {
         GraphEdge {
             from: from.to_string(),
-            from_id,
+            from_id: Key::Int(from_id),
             to: to.to_string(),
-            to_id,
+            to_id: Key::Int(to_id),
             edge_type: edge_type.to_string(),
             depth: None,
             path_id: None,
@@ -1122,6 +1147,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         }
     }
 
@@ -1138,6 +1164,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         }
     }
 
@@ -1156,6 +1183,7 @@ pub(crate) mod tests {
             group_columns: Some(vec![]),
             rows: Some(vec![json!({"c": 2}).as_object().unwrap().clone()]),
             pagination: None,
+            group_ids: Default::default(),
         }
     }
 
@@ -1189,6 +1217,7 @@ pub(crate) mod tests {
                     .clone(),
             ]),
             pagination: None,
+            group_ids: Default::default(),
         }
     }
 
@@ -1209,6 +1238,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         }
     }
 
@@ -1230,7 +1260,7 @@ pub(crate) mod tests {
         let view = ResponseView::new(sample_response());
         let alice = view.find_node("User", 1).unwrap();
         assert_eq!(alice.entity_type, "User");
-        assert_eq!(alice.id, 1);
+        assert_eq!(alice.id, Key::Int(1));
     }
 
     #[test]
@@ -1279,8 +1309,8 @@ pub(crate) mod tests {
         let e = view
             .find_edge("User", 1, "Group", 100, "MEMBER_OF")
             .unwrap();
-        assert_eq!(e.from_id, 1);
-        assert_eq!(e.to_id, 100);
+        assert_eq!(e.from_id, Key::Int(1));
+        assert_eq!(e.to_id, Key::Int(100));
     }
 
     #[test]
@@ -1339,6 +1369,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         };
         let view = ResponseView::new(resp);
         assert_eq!(*view.path_ids(), vec![0, 2]);
@@ -1362,6 +1393,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         };
         let view = ResponseView::new(resp);
         let path = view.path(0);
@@ -1475,6 +1507,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         };
         ResponseView::new(resp).assert_referential_integrity();
     }
@@ -1584,6 +1617,7 @@ pub(crate) mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         };
         let view = ResponseView::new(resp);
         assert_eq!(view.node_count(), 0);
@@ -1618,6 +1652,7 @@ mod edge_coverage_tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         }
     }
 
@@ -1680,6 +1715,7 @@ mod edge_coverage_tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         };
         let view = ResponseView::new(resp);
         view.assert_all_edge_types_covered();
@@ -1696,6 +1732,7 @@ mod edge_coverage_tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         };
         let view = ResponseView::new(resp);
         view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
@@ -1722,6 +1759,7 @@ mod edge_coverage_tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         };
         let view = ResponseView::new(resp);
         view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 102)]);

@@ -36,7 +36,7 @@ pub struct NodePlan {
     pub joined: bool,
     pub filters: Vec<(String, BoundFilter)>,
     pub predicates: Vec<Predicate>,
-    pub node_ids: Option<Vec<i64>>,
+    pub node_ids: Option<Vec<orbit_authorization::Key>>,
     pub id_range: Option<(i64, i64)>,
     pub has_traversal_path: bool,
     pub read_scope: ReadScope,

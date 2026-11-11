@@ -52,7 +52,12 @@ pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_
     let paths: Vec<Vec<i64>> = result
         .rows()
         .iter()
-        .map(|row| row.path_nodes().iter().map(|node| node.id).collect())
+        .map(|row| {
+            row.path_nodes()
+                .iter()
+                .map(|node| integration_testkit::visitor::int(&node.id))
+                .collect()
+        })
         .collect();
 
     assert_eq!(

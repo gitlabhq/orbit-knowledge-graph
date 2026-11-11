@@ -35,7 +35,7 @@ pub(crate) struct Arm<'p> {
     alias: &'p str,
     entity: &'p str,
     table: &'p str,
-    ids: Option<Vec<i64>>,
+    ids: Option<Vec<orbit_authorization::Key>>,
     columns: Vec<(&'p str, Option<query_data_model::DataType>)>,
     path_filter: Option<PathFilter>,
     sort_key: &'p [String],
@@ -172,7 +172,7 @@ fn arm<B: RelationalBackend>(q: &mut RelationalBuilder<'_, B>, node: &Arm<'_>) -
         };
         predicates.extend(path_filter.map(Some));
         if let Some(ids) = &node.ids {
-            predicates.push(Some(id_list::<B>(col(&scope, alias, pk)?, ids)));
+            predicates.push(Some(id_list::<B>(col(&scope, alias, pk)?, ids)?));
         }
         let rows = filtered(q, rows, predicates)?;
         let mut names = vec![pk, DELETED_COLUMN];
@@ -289,7 +289,14 @@ mod tests {
 
     fn arm(paths: Vec<TraversalPath>) -> HydrationArm {
         let columns = ["title".to_string()];
-        HydrationArm::new(MODEL.model(), "MergeRequest", &[1], &columns, paths).unwrap()
+        HydrationArm::new(
+            MODEL.model(),
+            "MergeRequest",
+            &[orbit_authorization::Key::Int(1)],
+            &columns,
+            paths,
+        )
+        .unwrap()
     }
 
     fn render(arm: HydrationArm, dynamic: bool) -> (String, HashMap<String, ParamValue>) {

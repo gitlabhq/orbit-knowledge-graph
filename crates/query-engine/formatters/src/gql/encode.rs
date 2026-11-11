@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
+use compiler::orbit_authorization::Key;
 use compiler::{
     Direction, QueryType, RelationshipColumn, RelationshipColumnKind, ResultContext,
     neighbor_is_outgoing_column, relationship_type_column,
@@ -122,18 +123,19 @@ fn aggregation_table(output: &PipelineOutput) -> Table {
         .map(|group| group.name.clone())
         .chain(shape.measures.iter().map(|measure| measure.name.clone()))
         .collect();
-    let rows = GraphFormatter
-        .build_response(output)
+    let response = GraphFormatter.build_response(output);
+    let rows = response
         .rows
+        .as_deref()
         .unwrap_or_default()
         .iter()
         .map(|row| {
             columns
                 .iter()
                 .map(|column| match row.get(column) {
-                    Some(value) => group_node_cell(value).map_or_else(
+                    Some(value) => group_node_cell(value, &response.group_ids).map_or_else(
                         || literal(value, column),
-                        |(label, id, properties)| node_literal(label, id, properties),
+                        |(label, id, properties)| node_literal(label, &id, properties),
                     ),
                     None => null(),
                 })
@@ -148,7 +150,7 @@ fn row_node(row: &QueryResultRow, context: &ResultContext, alias: &str) -> Optio
     let properties = json_properties(&row.entity_properties(alias));
     Some(node_literal(
         row.get_type(node)?,
-        row.get_public_id(node)?,
+        &row.get_public_id(node)?,
         &properties,
     ))
 }
@@ -189,12 +191,17 @@ fn shortest_path(row: &QueryResultRow) -> Option<String> {
 fn dynamic_node(node: &NodeRef) -> String {
     node_literal(
         &node.entity_type,
-        node.id,
+        &node.id,
         &json_properties(&node.properties),
     )
 }
 
-fn node_literal(label: &str, id: i64, properties: &Map<String, Value>) -> String {
+fn node_literal(label: &str, id: &Key, properties: &Map<String, Value>) -> String {
+    let id = match id {
+        Key::Int(id) => id.to_string(),
+        Key::Text(id) | Key::Uuid(id) => quote_escaped(id),
+        Key::Composite(_) => quote_escaped(&id.to_string()),
+    };
     let mut out = format!("(:{label} {{id: {id}");
     for (key, value) in ordered_pairs(properties) {
         if !value.is_null() {

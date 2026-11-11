@@ -7,7 +7,8 @@ use query_data_model::plan::logical::limits::{Limits, MAX_COLUMNS};
 use query_data_model::plan::logical::{Columns, LogicalPlan, PlanError, Projection};
 
 use crate::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
-use crate::error::Result;
+use crate::error::{QueryError, Result};
+use orbit_authorization::Key;
 
 const HYDRATION_LIMITS: Limits = Limits {
     pins: MAX_DYNAMIC_HYDRATION_RESULTS,
@@ -34,18 +35,24 @@ impl HydrationArm {
     pub fn new(
         model: &Model,
         entity: &str,
-        ids: &[i64],
+        ids: &[Key],
         columns: &[String],
         traversal_paths: Vec<TraversalPath>,
     ) -> Result<Self> {
         let catalog = model.logical().with_limits(HYDRATION_LIMITS);
+        let ids = ids
+            .iter()
+            .map(crate::logical::anchors::literal)
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| QueryError::Validation("a composite key cannot pin one row".into()))?;
+        let key = identity(model, model.entity(entity).map_err(PlanError::from)?)?;
         let plan = catalog.build(|q| {
             let declared = catalog.entity(entity)?;
             let name = q.internal_name("hydrate")?;
             let rows = q.entities_as(declared, &name)?;
             let binding = rows.endpoint()?;
-            let id = binding.property("id")?;
-            let rows = q.pin(rows, id, ids)?;
+            let id = binding.property(key)?;
+            let rows = q.pin(rows, id, &ids)?;
             let entity = binding.entity().ok_or(PlanError::NoEntity)?;
             let listed = columns
                 .iter()
@@ -77,6 +84,18 @@ impl HydrationArm {
         if !keyed {
             self.traversal_paths.clear();
         }
+    }
+}
+
+/// The name of the one property that identifies the entity's rows.
+pub(crate) fn identity(model: &Model, entity: query_data_model::EntityId) -> Result<&str> {
+    let graph = model.graph();
+    match graph.entity(entity).identity.as_slice() {
+        [identity] => Ok(&graph.property(*identity).name),
+        _ => Err(QueryError::Validation(format!(
+            "{} has a composite identity, which no row read keys by",
+            graph.entity(entity).name
+        ))),
     }
 }
 

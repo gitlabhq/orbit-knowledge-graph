@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use query_engine::compiler::orbit_authorization::Key;
 use query_engine::compiler::{HydrationKind, QueryType};
 use serde::Deserialize;
 
@@ -435,12 +436,14 @@ pub struct TypedEdgeExpect {
 impl EdgeExpect {
     pub fn matches(&self, edge: &query_engine::formatters::GraphEdge) -> bool {
         match self {
-            Self::Pair([from, to]) => edge.from_id == *from && edge.to_id == *to,
+            Self::Pair([from, to]) => {
+                edge.from_id == Key::Int(*from) && edge.to_id == Key::Int(*to)
+            }
             Self::Typed(expected) => {
                 edge.from == expected.from
-                    && edge.from_id == expected.from_id
+                    && edge.from_id == Key::Int(expected.from_id)
                     && edge.to == expected.to
-                    && edge.to_id == expected.to_id
+                    && edge.to_id == Key::Int(expected.to_id)
             }
         }
     }

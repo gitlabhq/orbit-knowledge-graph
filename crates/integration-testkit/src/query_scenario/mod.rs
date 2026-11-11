@@ -33,7 +33,7 @@ use response::{
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
-use crate::visitor::{NodeExt, Requirement, ResponseView};
+use crate::visitor::{NodeExt, Requirement, ResponseView, int};
 use crate::{SeededColumnResolver, collect_subtest_results, load_data_model};
 
 pub use duckdb::run_duckdb_dir;
@@ -752,7 +752,13 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 .iter()
                 .find(|edge| edge.edge_type == *kind && expected.matches(edge));
             let edge = edge.unwrap_or_else(|| panic!("{label}: expected {kind} edge {expected:?}"));
-            view.assert_edge_exists(&edge.from, edge.from_id, &edge.to, edge.to_id, kind);
+            view.assert_edge_exists(
+                &edge.from,
+                int(&edge.from_id),
+                &edge.to,
+                int(&edge.to_id),
+                kind,
+            );
         }
     }
     for (kind, edges) in &expect.edge_absent {
@@ -843,7 +849,10 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             std::collections::BTreeMap::new();
         for &pid in pids.iter() {
             if let Some(last) = view.path(pid).last() {
-                actual.entry(last.to.clone()).or_default().push(last.to_id);
+                actual
+                    .entry(last.to.clone())
+                    .or_default()
+                    .push(int(&last.to_id));
             }
         }
         for vals in actual.values_mut() {
@@ -883,7 +892,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             .iter()
             .map(|&pid| {
                 let edges = view.path(pid);
-                let dest_id = edges.last().map_or(0, |e| e.to_id);
+                let dest_id = edges.last().map_or(0, |e| int(&e.to_id));
                 (dest_id, edges)
             })
             .collect();
@@ -918,7 +927,11 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                     assert_eq!(&edge.from, from, "{label}: path {i} edge {j} from entity");
                 }
                 if let Some(from_id) = exp.from_id {
-                    assert_eq!(edge.from_id, from_id, "{label}: path {i} edge {j} from_id");
+                    assert_eq!(
+                        int(&edge.from_id),
+                        from_id,
+                        "{label}: path {i} edge {j} from_id"
+                    );
                 }
                 if let Some(ref t) = exp.edge_type {
                     assert_eq!(&edge.edge_type, t, "{label}: path {i} edge {j} type");
@@ -927,7 +940,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                     assert_eq!(&edge.to, to, "{label}: path {i} edge {j} to entity");
                 }
                 if let Some(to_id) = exp.to_id {
-                    assert_eq!(edge.to_id, to_id, "{label}: path {i} edge {j} to_id");
+                    assert_eq!(int(&edge.to_id), to_id, "{label}: path {i} edge {j} to_id");
                 }
                 if let Some(step) = exp.step {
                     assert_eq!(edge.step, Some(step), "{label}: path {i} edge {j} step");

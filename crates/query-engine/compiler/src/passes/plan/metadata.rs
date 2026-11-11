@@ -20,7 +20,7 @@ pub struct PlanMetadata {
 pub enum Term {
     Column(Column),
     Value(Box<OutputValue>),
-    Id(i64),
+    Id(orbit_authorization::Key),
     Output(String),
     Text(Column),
     Group(usize),
@@ -106,7 +106,7 @@ pub(super) fn bindings(
                 _,
             ) => NodeBinding::source(table, &source.column, None, None),
             (_, Some([id])) => NodeBinding::Values {
-                identity: Term::Id(*id),
+                identity: Term::Id(id.clone()),
                 table_alias: None,
                 traversal_path: None,
             },

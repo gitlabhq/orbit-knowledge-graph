@@ -22,8 +22,8 @@ fn file_property_map() -> PropertyMap {
     let mut props = PropertyRow::new();
     props.insert("path".into(), ColumnValue::String("src/lib.rs".into()));
     let mut map = PropertyMap::new();
-    map.insert(("File".into(), 1), props.clone());
-    map.insert(("File".into(), 2), props);
+    map.insert(("File".into(), 1.into()), props.clone());
+    map.insert(("File".into(), 2.into()), props);
     map
 }
 

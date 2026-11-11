@@ -27,6 +27,8 @@ pub struct RowCheck {
     pub permission: String,
     pub resource: String,
     pub field: String,
+    /// The type of the key the check reads from `field`.
+    pub kind: crate::KeyKind,
 }
 
 /// The row checks of the entity the plan reads.
@@ -51,6 +53,7 @@ pub fn row_checks(plan: &LogicalPlan, model: &Model) -> Vec<RowCheck> {
                 permission: access.permission(*permission).name.clone(),
                 resource: resource.clone(),
                 field: graph.property(*id).name.clone(),
+                kind: crate::KeyKind::of(graph.property(*id).data_type),
             }),
             Check::Delegated { .. } => None,
         })
@@ -61,15 +64,26 @@ pub fn row_checks(plan: &LogicalPlan, model: &Model) -> Vec<RowCheck> {
 pub fn apply_check(
     rows: Vec<Row>,
     check: &RowCheck,
-    allowed: &std::collections::BTreeSet<i64>,
+    allowed: &std::collections::BTreeSet<orbit_authorization::Key>,
 ) -> Vec<Row> {
     rows.into_iter()
         .filter(|row| {
             row.get(&check.field)
-                .and_then(serde_json::Value::as_i64)
-                .is_some_and(|id| allowed.contains(&id))
+                .and_then(|value| row_key(check.kind, value))
+                .is_some_and(|key| allowed.contains(&key))
         })
         .collect()
+}
+
+/// A remote row's field as the key of a check, in the type the check keys by.
+fn row_key(kind: crate::KeyKind, value: &serde_json::Value) -> Option<orbit_authorization::Key> {
+    use orbit_authorization::Key;
+    match (kind, value) {
+        (crate::KeyKind::Int, serde_json::Value::Number(id)) => id.as_i64().map(Key::Int),
+        (crate::KeyKind::Text, serde_json::Value::String(id)) => Some(Key::Text(id.clone())),
+        (crate::KeyKind::Uuid, serde_json::Value::String(id)) => Some(Key::Uuid(id.clone())),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

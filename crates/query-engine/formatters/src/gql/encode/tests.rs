@@ -4,6 +4,7 @@ use arrow::array::{Array, ArrayRef, Int64Array, ListArray, StringArray, StructAr
 use arrow::buffer::OffsetBuffer;
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
+use compiler::orbit_authorization::Key;
 use compiler::{
     EdgeMeta, ResultContext, edge_kinds_column, neighbor_id_column, neighbor_is_outgoing_column,
     neighbor_type_column, path_column, relationship_type_column,
@@ -122,7 +123,7 @@ fn values_use_cypher_shell_literals() {
         properties.insert(key.into(), value);
     }
     assert_eq!(
-        node_literal("User", 7, &properties),
+        node_literal("User", &Key::Int(7), &properties),
         "(:User {id: 7, username: \"zoë \\\"z\\\"\", confidential: FALSE, labels: [\"bug\", \"p1\"], score: 2.0})"
     );
     assert_eq!(literal(&json!(null), "x"), "NULL");
@@ -312,7 +313,7 @@ fn path_finding_prints_each_distinct_path_once() {
 fn truncated_text_reports_its_length_and_long_cells_skip_padding() {
     let mut properties = Map::new();
     properties.insert("description".into(), json!("x".repeat(250)));
-    assert!(node_literal("Issue", 1, &properties).ends_with("description_len: 250})"));
+    assert!(node_literal("Issue", &Key::Int(1), &properties).ends_with("description_len: 250})"));
 
     let long = "y".repeat(200);
     let table = render(&cells(&["n"]), &[cells(&[&long]), cells(&["short"])], None);

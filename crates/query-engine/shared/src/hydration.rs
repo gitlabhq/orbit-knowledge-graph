@@ -3,33 +3,29 @@
 
 use std::collections::HashMap;
 
-use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use compiler::constants::{
     hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
     traversal_path_column,
 };
+use compiler::orbit_authorization::Key;
 use compiler::{DynamicEntityColumns, HydrationArm, HydrationTemplate, Operator, VirtualFilter};
 use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
 use query_data_model::{DataType, Model};
-use types::QueryResult;
+use types::identity;
+use types::{QueryResult, QueryResultRow};
 
 pub use crate::content::PropertyMap;
 
 /// Tries the PK column first (`_orbit_{alias}_pk`), falling back to the
 /// redaction ID column (`_orbit_{alias}_id`).
-pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
-    let pk_col = primary_key_column(&template.node_alias);
-    let id_col = redaction_id_column(&template.node_alias);
-    let mut ids: Vec<i64> = result
+pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<Key> {
+    let mut ids: Vec<Key> = result
         .authorized_rows()
-        .filter_map(|row| {
-            row.get_column_i64(&pk_col)
-                .or_else(|| row.get_column_i64(&id_col))
-        })
+        .filter_map(|row| static_id(row, &template.node_alias))
         .collect();
     ids.sort_unstable();
     ids.dedup();
@@ -55,13 +51,13 @@ pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<Travers
 pub fn extract_dynamic_refs(
     result: &QueryResult,
     static_nodes: &[compiler::RedactionNode],
-) -> HashMap<String, Vec<i64>> {
-    let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
+) -> HashMap<String, Vec<Key>> {
+    let mut refs: HashMap<String, Vec<Key>> = HashMap::new();
     for row in result.authorized_rows() {
         for node_ref in row.dynamic_nodes() {
             refs.entry(node_ref.entity_type.clone())
                 .or_default()
-                .push(node_ref.id);
+                .push(node_ref.id.clone());
         }
         for node in static_nodes {
             if let Some(id) = row.get_public_id(node)
@@ -119,10 +115,17 @@ pub fn collect_dynamic_ref_paths(
         .collect()
 }
 
+/// A static node's identity: its primary key column, or its redaction id.
+fn static_id(row: &QueryResultRow, alias: &str) -> Option<Key> {
+    row.get(&primary_key_column(alias))
+        .and_then(identity)
+        .or_else(|| row.get(&redaction_id_column(alias)).and_then(identity))
+}
+
 pub fn hydration_arm(
     model: &Model,
     entity: &str,
-    ids: &[i64],
+    ids: &[Key],
     columns: &[String],
     traversal_paths: Vec<TraversalPath>,
 ) -> Result<HydrationArm, PipelineError> {
@@ -150,11 +153,10 @@ pub fn parse_hydration_batches(
 
     for batch in batches {
         for row_idx in 0..batch.num_rows() {
-            let Some(id) = ArrowUtils::get_column::<Int64Type>(batch, &id_col, row_idx) else {
+            let row_data = ArrowUtils::extract_row(batch, row_idx);
+            let Some(id) = row_data.get(&id_col).and_then(identity) else {
                 continue;
             };
-
-            let row_data = ArrowUtils::extract_row(batch, row_idx);
 
             let entity_type = row_data
                 .iter()
@@ -231,12 +233,7 @@ pub fn merge_static_properties(
 ) {
     for row in result.authorized_rows_mut() {
         for template in templates {
-            let pk_col = primary_key_column(&template.node_alias);
-            let id_col = redaction_id_column(&template.node_alias);
-            let id = row
-                .get_column_i64(&pk_col)
-                .or_else(|| row.get_column_i64(&id_col));
-            if let Some(id) = id
+            if let Some(id) = static_id(row, &template.node_alias)
                 && let Some(props) = property_map.get(&(template.entity_type.clone(), id))
             {
                 for (key, value) in props {
@@ -251,7 +248,9 @@ pub fn merge_static_properties(
 pub fn merge_dynamic_properties(result: &mut QueryResult, property_map: &PropertyMap) {
     for row in result.authorized_rows_mut() {
         for node_ref in row.dynamic_nodes_mut() {
-            if let Some(props) = property_map.get(&(node_ref.entity_type.clone(), node_ref.id)) {
+            if let Some(props) =
+                property_map.get(&(node_ref.entity_type.clone(), node_ref.id.clone()))
+            {
                 node_ref.properties = props.clone();
             }
         }
@@ -345,7 +344,7 @@ pub fn hydrate_static(
 pub fn hydrate_dynamic(
     model: &Model,
     entity_specs: &[DynamicEntityColumns],
-    refs: &HashMap<String, Vec<i64>>,
+    refs: &HashMap<String, Vec<Key>>,
     traversal_paths: &[TraversalPath],
     ref_paths: &HashMap<String, Vec<TraversalPath>>,
 ) -> Result<Vec<HydrationArm>, PipelineError> {
@@ -365,10 +364,10 @@ pub fn hydrate_dynamic(
             continue;
         }
 
-        let capped_ids: Vec<i64> = ids
+        let capped_ids: Vec<Key> = ids
             .iter()
-            .copied()
             .take(MAX_DYNAMIC_HYDRATION_RESULTS)
+            .cloned()
             .collect();
 
         let tps = if spec.has_traversal_path {
