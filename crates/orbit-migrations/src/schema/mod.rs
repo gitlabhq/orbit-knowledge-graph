@@ -1,7 +1,8 @@
 mod refreshable;
 
 pub use query_data_model::implementations::clickhouse::schema::{
-    Dictionary, DictionaryCredentials, Engine, MaterializedView, RefreshableView, Schema, Table,
+    Dictionary, DictionaryCredentials, Engine, EngineTable, MaterializedView, RefreshableView,
+    Schema, Table,
 };
 
 pub use refreshable::render_refreshable_view_select;

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::implementations::clickhouse::schema::EngineTable;
 use query_data_model::{Catalog, ClickHouse};
 use tonic::Status;
 
@@ -13,7 +14,6 @@ use crate::status_query::{
 };
 
 pub(super) const PROJECT_NODE: &str = "Project";
-const CODE_CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
 
 const PROJECT_COVERAGE_SQL: &str = r#"
 WITH projects AS (
@@ -115,15 +115,7 @@ fn find_coverage_tables(catalog: &Catalog<ClickHouse>) -> Result<(&str, &str), S
         .ok_or_else(|| Status::internal(format!("model missing required node: {PROJECT_NODE}")))?;
     let code_checkpoint_table = catalog
         .schema()
-        .map_err(|error| Status::internal(error.to_string()))?
-        .auxiliary_tables()
-        .iter()
-        .map(|table| table.table.name.as_str())
-        .find(|name| name.ends_with(CODE_CHECKPOINT_TABLE_SUFFIX))
-        .ok_or_else(|| {
-            Status::internal(format!(
-                "model missing auxiliary table ending with: {CODE_CHECKPOINT_TABLE_SUFFIX}"
-            ))
-        })?;
+        .and_then(|schema| schema.engine_table(EngineTable::CodeCheckpoints))
+        .map_err(|error| Status::internal(error.to_string()))?;
     Ok((project_table, code_checkpoint_table))
 }

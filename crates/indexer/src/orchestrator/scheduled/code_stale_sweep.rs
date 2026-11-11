@@ -11,12 +11,9 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::durability::WriteDurability;
 use crate::modules::code::config::CodeTableNames;
 use crate::orchestrator::scheduled::TaskError;
-use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
 
 pub(crate) const CHECKPOINT_KEY_PREFIX: &str = "maintenance.code_stale_sweep";
-
-const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 fn namespace_checkpoint_key(traversal_path: &TraversalPath) -> String {
     format!("{CHECKPOINT_KEY_PREFIX}.{traversal_path}")
@@ -36,7 +33,7 @@ impl CodeStaleSweep {
         checkpoint_store: Arc<dyn CheckpointStore>,
         sweeps_per_tick: usize,
     ) -> Self {
-        let checkpoint_table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let checkpoint_table = &table_names.checkpoints;
 
         let mut statements: Vec<(String, String)> = table_names
             .node_tables()
@@ -46,7 +43,7 @@ impl CodeStaleSweep {
                     table.to_string(),
                     node_sweep(
                         table,
-                        &checkpoint_table,
+                        checkpoint_table,
                         table_names.immutable_columns(table),
                     ),
                 )
@@ -55,7 +52,7 @@ impl CodeStaleSweep {
         statements.extend(table_names.edge_table_names().iter().map(|table| {
             (
                 table.to_string(),
-                edge_sweep(table, &checkpoint_table, table_names),
+                edge_sweep(table, checkpoint_table, table_names),
             )
         }));
 
@@ -250,6 +247,7 @@ fn edge_sweep(edge_table: &str, checkpoint_table: &str, table_names: &CodeTableN
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
     fn table_names() -> CodeTableNames {
         CodeTableNames::from_catalog(
@@ -365,9 +363,15 @@ mod tests {
             &Default::default(),
             "graph",
         );
-        let store = Arc::new(crate::checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-            graph.clone(),
-        )));
+        let catalog =
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap();
+        let store = Arc::new(
+            crate::checkpoint::ClickHouseCheckpointStore::new(
+                Arc::new(graph.clone()),
+                catalog.schema().unwrap(),
+            )
+            .unwrap(),
+        );
         let sweep = CodeStaleSweep::new(graph, &names, store, 10);
         let tables: Vec<&str> = sweep.statements.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(

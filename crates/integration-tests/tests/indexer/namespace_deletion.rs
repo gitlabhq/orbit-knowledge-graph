@@ -9,7 +9,6 @@ use common::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, create_namespace_with_path, create_project,
     handler_context, namespace_envelope, namespace_handler,
 };
-use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::handler::Handler;
 use indexer::modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, DeletionMetrics, NamespaceDeletionHandler,
@@ -479,7 +478,7 @@ async fn run_namespace_deletion_scheduler(context: &TestContext) {
     );
     NamespaceDeletionScheduler::new(
         store,
-        Arc::new(ClickHouseCheckpointStore::new(graph)),
+        Arc::new(indexer::testkit::checkpoint_store(graph)),
         Arc::new(MockNatsServices::new()),
         ScheduledTaskMetrics::new(),
         orbit_server_config::AppConfig::embedded_defaults()

@@ -14,6 +14,7 @@ use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 
 use query_data_model::catalog::sources::DataSource;
+use query_data_model::implementations::clickhouse::schema::{EngineTable, Schema};
 use query_data_model::{Catalog, ClickHouse, DataModelError};
 
 use super::lower::{self, DeletionStatement, ReconcileStatement};
@@ -71,8 +72,38 @@ HAVING argMax(namespaces.{del}, namespaces.{version}) = true
     }
 }
 
-fn mark_deletion_complete_sql() -> String {
-    let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
+/// Statements over the engine's own schedule and checkpoint tables.
+struct EngineQueries {
+    mark_complete: String,
+    schedule: String,
+    delete_sdlc_checkpoints: String,
+    delete_code_checkpoints: String,
+    due: String,
+}
+
+impl EngineQueries {
+    fn new(schema: &Schema) -> Result<Self, DataModelError> {
+        let table = |role| {
+            schema
+                .engine_table(role)
+                .map(|table| prefixed_table_name(table, *SCHEMA_VERSION))
+        };
+        let schedule = table(EngineTable::DeletionSchedule)?;
+        Ok(Self {
+            mark_complete: mark_deletion_complete_sql(&schedule),
+            schedule: schedule_deletion_insert_sql(&schedule),
+            delete_sdlc_checkpoints: delete_sdlc_checkpoints_sql(&table(
+                EngineTable::PipelineCheckpoints,
+            )?),
+            delete_code_checkpoints: delete_code_checkpoints_sql(&table(
+                EngineTable::CodeCheckpoints,
+            )?),
+            due: due_namespaces_query_sql(&schedule),
+        })
+    }
+}
+
+fn mark_deletion_complete_sql(table: &str) -> String {
     format!(
         r#"
 INSERT INTO {table} (namespace_id, traversal_path, scheduled_deletion_date, _deleted)
@@ -90,8 +121,7 @@ HAVING argMax(_deleted, _version) = false
     )
 }
 
-fn schedule_deletion_insert_sql() -> String {
-    let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
+fn schedule_deletion_insert_sql(table: &str) -> String {
     format!(
         r#"
 INSERT INTO {table} (namespace_id, traversal_path, scheduled_deletion_date)
@@ -100,8 +130,7 @@ VALUES ({{namespace_id:Int64}}, {{traversal_path:String}}, {{scheduled_deletion_
     )
 }
 
-fn delete_sdlc_checkpoints_sql() -> String {
-    let table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+fn delete_sdlc_checkpoints_sql(table: &str) -> String {
     format!(
         r#"
 INSERT INTO {table} (key, watermark, cursor_values, _deleted)
@@ -114,8 +143,7 @@ HAVING argMax(_deleted, _version) = false
     )
 }
 
-fn delete_code_checkpoints_sql() -> String {
-    let table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
+fn delete_code_checkpoints_sql(table: &str) -> String {
     format!(
         r#"
 INSERT INTO {table} (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, _deleted)
@@ -135,8 +163,7 @@ HAVING argMax(_deleted, _version) = false
     )
 }
 
-fn due_namespaces_query_sql() -> String {
-    let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
+fn due_namespaces_query_sql(table: &str) -> String {
     format!(
         r#"
 SELECT namespace_id, traversal_path
@@ -259,6 +286,7 @@ pub struct ClickHouseNamespaceDeletionStore {
     lifetime_statements: Vec<DeletionStatement>,
     current_routes: String,
     siphon: SiphonQueries,
+    engine: EngineQueries,
 }
 
 impl ClickHouseNamespaceDeletionStore {
@@ -279,6 +307,7 @@ impl ClickHouseNamespaceDeletionStore {
                 siphon.table("namespace_paths")?,
             ),
             siphon: SiphonQueries::new(siphon),
+            engine: EngineQueries::new(catalog.schema()?)?,
         })
     }
 
@@ -375,14 +404,14 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         let key_prefix = format!("{}.", namespace_position_key(namespace_id));
 
         self.graph
-            .insert_query(&delete_sdlc_checkpoints_sql())
+            .insert_query(&self.engine.delete_sdlc_checkpoints)
             .param("key_prefix", key_prefix)
             .execute()
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
         self.graph
-            .insert_query(&delete_code_checkpoints_sql())
+            .insert_query(&self.engine.delete_code_checkpoints)
             .param("traversal_path", traversal_path.as_str())
             .execute()
             .await
@@ -468,7 +497,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         traversal_path: &TraversalPath,
     ) -> Result<(), NamespaceDeletionStoreError> {
         self.graph
-            .insert_query(&mark_deletion_complete_sql())
+            .insert_query(&self.engine.mark_complete)
             .param("namespace_id", namespace_id)
             .param("traversal_path", traversal_path.as_str())
             .execute()
@@ -503,7 +532,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         scheduled_deletion_date: &str,
     ) -> Result<(), NamespaceDeletionStoreError> {
         self.graph
-            .insert_query(&schedule_deletion_insert_sql())
+            .insert_query(&self.engine.schedule)
             .param("namespace_id", namespace_id)
             .param("traversal_path", traversal_path.as_str())
             .param("scheduled_deletion_date", scheduled_deletion_date)
@@ -520,7 +549,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError> {
         let batches = self
             .graph
-            .query(&due_namespaces_query_sql())
+            .query(&self.engine.due)
             .fetch_arrow()
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;

@@ -13,7 +13,6 @@ use indexer::schema::version::{
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 use orbit_migrations::catalog::ModelCatalog;
-use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_server_config::{AppConfig, NatsConfiguration};
 use query_data_model::catalog::sources::EtlScope;
 
@@ -59,8 +58,8 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     clickhouse
         .execute(&format!(
             "CREATE TABLE {} AS {}",
-            prefixed_table_name(CHECKPOINT_TABLE, served),
-            prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION)
+            prefixed_table_name("checkpoint", served),
+            prefixed_table_name("checkpoint", *SCHEMA_VERSION)
         ))
         .await;
 
@@ -128,8 +127,11 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     let plans = plans_in(EtlScope::Namespaced);
     let global_plans = plans_in(EtlScope::Global);
     let (synced_global, never_synced_global) = global_plans.split_first().unwrap();
-    let served_store = ClickHouseCheckpointStore::for_version(Arc::new(graph.clone()), served);
-    let unserved_store = ClickHouseCheckpointStore::new(Arc::new(graph.clone()));
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap();
+    let schema = catalog.schema().unwrap();
+    let served_store =
+        ClickHouseCheckpointStore::for_version(Arc::new(graph.clone()), schema, served).unwrap();
+    let unserved_store = indexer::testkit::checkpoint_store(Arc::new(graph.clone()));
     let started = Utc::now();
     for plan in &plans {
         for (id, synced_minutes_ago) in [(IN_SYNC, 0), (PENDING, 10), (STALE, 180)] {

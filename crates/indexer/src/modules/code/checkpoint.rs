@@ -8,11 +8,10 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
 use orbit_arrow::ArrowUtils;
-use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
 use thiserror::Error;
 
-const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
+use super::config::CodeTableNames;
 
 #[derive(Debug, Error, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
@@ -103,11 +102,15 @@ pub(crate) type CheckpointClient = Arc<ArrowClickHouseClient>;
 
 pub struct ClickHouseCodeCheckpointStore {
     client: CheckpointClient,
+    table: String,
 }
 
 impl ClickHouseCodeCheckpointStore {
-    pub fn new(client: CheckpointClient) -> Self {
-        Self { client }
+    pub fn new(client: CheckpointClient, table_names: &CodeTableNames) -> Self {
+        Self {
+            client,
+            table: table_names.checkpoints.clone(),
+        }
     }
 
     fn extract_checkpoint(
@@ -174,7 +177,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
         project_id: i64,
         branch: &str,
     ) -> Result<Option<CodeCheckpoint>, CheckpointError> {
-        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let table = &self.table;
         let query = format!(
             r#"
             SELECT
@@ -207,7 +210,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
     }
 
     async fn save(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError> {
-        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let table = &self.table;
         let formatted_timestamp = checkpoint
             .indexed_at
             .map(|indexed_at| indexed_at.format(TIMESTAMP_FORMAT).to_string());

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use query_data_model::catalog::{Rule, ScopeKind};
 use query_data_model::implementations::clickhouse::ClickHouse;
+use query_data_model::implementations::clickhouse::schema::EngineTable;
 use query_data_model::{Endpoint, Model, Packages, Tier};
 
 fn model() -> Arc<Model> {
@@ -147,5 +148,31 @@ fn source_fragments_reject_fields_outside_their_section() {
     assert!(
         load_error(derived)
             .contains("pipeline D sets partition_count, which the derived section does not allow")
+    );
+}
+
+#[test]
+fn each_engine_table_role_names_one_declared_table() {
+    let model = model();
+    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let schema = catalog.schema().unwrap();
+    for role in [
+        EngineTable::PipelineCheckpoints,
+        EngineTable::CodeCheckpoints,
+        EngineTable::DeletionSchedule,
+    ] {
+        assert!(schema.engine_table(role).is_ok(), "{role}");
+    }
+
+    let mut sources = Packages::embedded().sources().clone();
+    let storage = sources.get_mut("gitlab/storage/clickhouse.yaml").unwrap();
+    *storage = storage.replace("role: deletion_schedule", "role: pipeline_checkpoints");
+    let error = Packages::new(Tier::Platform, sources)
+        .load()
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("repeats the table role pipeline_checkpoints"),
+        "{error}"
     );
 }

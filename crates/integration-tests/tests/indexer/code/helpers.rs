@@ -80,9 +80,6 @@ impl CodeIndexingDeps {
     ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
         let graph_client = Arc::new(clickhouse.config.build_client("graph"));
-        let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
-            &graph_client,
-        )));
         let table_names = Arc::new(
             CodeTableNames::from_catalog(
                 &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
@@ -90,6 +87,10 @@ impl CodeIndexingDeps {
             )
             .expect("code tables must resolve"),
         );
+        let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(
+            Arc::clone(&graph_client),
+            &table_names,
+        ));
 
         let stale_data_cleaner =
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));

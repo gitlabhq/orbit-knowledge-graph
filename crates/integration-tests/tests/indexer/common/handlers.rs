@@ -208,9 +208,9 @@ pub fn stale_edge_task(
     ctx: &TestContext,
 ) -> indexer::orchestrator::scheduled::StaleEdgeReconciliation {
     let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog must load");
-    let checkpoint_store = Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
-        Arc::new(ctx.config.build_client("graph")),
-    ));
+    let checkpoint_store = Arc::new(indexer::testkit::checkpoint_store(Arc::new(
+        ctx.config.build_client("graph"),
+    )));
     indexer::orchestrator::scheduled::StaleEdgeReconciliation::new(
         ctx.config.build_client("graph"),
         &catalog,

@@ -7,10 +7,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
+use query_data_model::DataModelError;
+use query_data_model::implementations::clickhouse::schema::{EngineTable, Schema};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-const CHECKPOINT_TABLE: &str = "checkpoint";
 
 /// The checkpoint key prefix for a given namespace, e.g. `ns.100`.
 ///
@@ -222,15 +222,23 @@ impl KeyFilter {
 }
 
 impl ClickHouseCheckpointStore {
-    pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        Self::for_version(client, *SCHEMA_VERSION)
+    pub fn new(
+        client: Arc<ArrowClickHouseClient>,
+        schema: &Schema,
+    ) -> Result<Self, DataModelError> {
+        Self::for_version(client, schema, *SCHEMA_VERSION)
     }
 
-    pub fn for_version(client: Arc<ArrowClickHouseClient>, version: u32) -> Self {
-        Self {
+    pub fn for_version(
+        client: Arc<ArrowClickHouseClient>,
+        schema: &Schema,
+        version: u32,
+    ) -> Result<Self, DataModelError> {
+        let table = schema.engine_table(EngineTable::PipelineCheckpoints)?;
+        Ok(Self {
             client,
-            table: prefixed_table_name(CHECKPOINT_TABLE, version),
-        }
+            table: prefixed_table_name(table, version),
+        })
     }
 
     // The newest row wins per key, except `indexed_at`: a page write from an overlapping run must

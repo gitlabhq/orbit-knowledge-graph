@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::catalog::sources::Role;
+use query_data_model::implementations::clickhouse::schema::EngineTable;
 use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, DataModelError};
 
@@ -58,6 +59,7 @@ pub struct CodeTableNames {
     pub file: String,
     pub definition: String,
     pub imported_symbol: String,
+    pub checkpoints: String,
     edge_tables: HashMap<String, Vec<(String, String, String)>>,
     shared_edge_table: Option<String>,
     branch_scoped: HashSet<String>,
@@ -148,6 +150,10 @@ impl CodeTableNames {
             file: table(&kinds.file)?,
             definition: table(&kinds.definition)?,
             imported_symbol: table(&kinds.imported_symbol)?,
+            checkpoints: prefixed_table_name(
+                schema.engine_table(EngineTable::CodeCheckpoints)?,
+                *SCHEMA_VERSION,
+            ),
             edge_tables,
             shared_edge_table: catalog
                 .shared_edge_table()

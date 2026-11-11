@@ -15,6 +15,7 @@ use orbit_server_config::{NamespaceFreshnessConfig, ScheduleConfiguration};
 use parking_lot::Mutex;
 use query_data_model::Model;
 use query_data_model::catalog::sources::{DataSource, EtlScope, PipelineDescriptor};
+use query_data_model::implementations::clickhouse::schema::Schema;
 
 use super::datalake::render_change_query;
 use crate::checkpoint::{
@@ -203,8 +204,12 @@ impl NamespaceFreshness {
         let siphon = model.sources().source_named(SIPHON_SOURCE).ok_or_else(|| {
             TaskError::new(format!("the model declares no {SIPHON_SOURCE} source"))
         })?;
-        let checkpoint_store =
-            ClickHouseCheckpointStore::for_version(Arc::new(self.graph.clone()), version);
+        let checkpoint_store = ClickHouseCheckpointStore::for_version(
+            Arc::new(self.graph.clone()),
+            &Schema::from_model(&model).map_err(TaskError::new)?,
+            version,
+        )
+        .map_err(TaskError::new)?;
         let global_prefix = format!("{GLOBAL_SCOPE_KEY}.");
         let now = Utc::now();
         let scanned_from = now - self.scan_window;

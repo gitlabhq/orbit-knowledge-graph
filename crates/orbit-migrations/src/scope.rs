@@ -1,12 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::schema::Schema;
+use crate::schema::{EngineTable, Schema};
 use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor, RowWriter, Writer};
 use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, EntityId, RelationshipId};
 use serde::{Deserialize, Serialize};
-
-pub const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -424,7 +422,10 @@ fn migration_action_for_table(
         return TableMigrationAction::CloneFromActive;
     }
 
-    if table == CODE_INDEXING_CHECKPOINT_TABLE {
+    if schema
+        .engine_table(EngineTable::CodeCheckpoints)
+        .is_ok_and(|code_checkpoints| code_checkpoints == table)
+    {
         return if matches!(scope, MigrationScope::Code) {
             TableMigrationAction::RebuildEmpty
         } else {

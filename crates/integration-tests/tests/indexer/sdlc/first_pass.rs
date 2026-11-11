@@ -49,7 +49,7 @@ async fn insert_checkpoint_row(
 }
 
 fn checkpoint_store(ctx: &TestContext) -> ClickHouseCheckpointStore {
-    ClickHouseCheckpointStore::new(Arc::new(ctx.config.build_client("graph")))
+    indexer::testkit::checkpoint_store(Arc::new(ctx.config.build_client("graph")))
 }
 
 pub async fn stale_page_write_after_completion_keeps_indexed_at(ctx: &TestContext) {

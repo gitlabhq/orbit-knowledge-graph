@@ -17,17 +17,15 @@ use super::DispatchOutcome;
 use super::enabled_namespaces::resolved_enabled_namespaces_sql;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
+use crate::modules::code::config::CodeTableNames;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
-use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::catalog::sources::DataSource;
 
 pub const METRIC_NAME: &str = "dispatch.code_backfill";
-
-const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 pub const MAX_CODE_ATTEMPTS: i64 = 5;
 pub const CODE_RETRY_AFTER: Duration = Duration::from_secs(3600);
@@ -64,9 +62,14 @@ pub struct CodeBackfill {
     publish_window: usize,
     namespaces_with_pending: AtomicUsize,
     enabled_namespaces_sql: String,
+    checkpoints: String,
 }
 
 impl CodeBackfill {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the backfill wires its clients, lake source and code tables explicitly"
+    )]
     pub fn new(
         nats: Arc<dyn crate::nats::NatsServices>,
         graph: ArrowClickHouseClient,
@@ -75,6 +78,7 @@ impl CodeBackfill {
         campaign: Arc<CampaignState>,
         publish_window: usize,
         source: &DataSource,
+        code_tables: &CodeTableNames,
     ) -> Self {
         Self {
             nats,
@@ -85,6 +89,7 @@ impl CodeBackfill {
             publish_window,
             namespaces_with_pending: AtomicUsize::new(0),
             enabled_namespaces_sql: resolved_enabled_namespaces_sql(source),
+            checkpoints: code_tables.checkpoints.clone(),
         }
     }
 
@@ -165,11 +170,10 @@ impl CodeBackfill {
         &self,
         traversal_path: &TraversalPath,
     ) -> Result<HashSet<i64>, TaskError> {
-        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let mut batches = self
             .graph
             .query(CHECKPOINTED_PROJECT_IDS_QUERY)
-            .param("table", &table)
+            .param("table", &self.checkpoints)
             .param("traversal_path", traversal_path.as_str())
             .param("max_attempts", MAX_CODE_ATTEMPTS)
             .param("retry_after_secs", CODE_RETRY_AFTER.as_secs())
@@ -394,6 +398,7 @@ mod tests {
             Arc::new(CampaignState::new()),
             TEST_PUBLISH_WINDOW,
             &crate::testkit::siphon_source(),
+            &crate::testkit::code_tables(),
         )
     }
 

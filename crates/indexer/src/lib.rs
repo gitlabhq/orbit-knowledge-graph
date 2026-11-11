@@ -350,7 +350,10 @@ pub async fn run_dispatcher(
             &candidate,
             &siphon,
         )?);
-    let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
+    let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(
+        deletion_graph,
+        &physical,
+    )?);
 
     let backfill = Arc::new(CodeBackfill::new(
         services.nats.clone(),
@@ -360,6 +363,7 @@ pub async fn run_dispatcher(
         campaign.clone(),
         config.schedule.tasks.code_backfill.publish_window,
         &siphon,
+        &code_tables,
     ));
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
@@ -372,9 +376,10 @@ pub async fn run_dispatcher(
         Box::new(NamespaceDispatcher::new(
             services.nats.clone(),
             datalake,
-            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                clients.graph.clone(),
-            ))),
+            Arc::new(checkpoint::ClickHouseCheckpointStore::new(
+                Arc::new(clients.graph.clone()),
+                &physical,
+            )?),
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
             campaign.clone(),
@@ -407,9 +412,10 @@ pub async fn run_dispatcher(
         Box::new(StaleEdgeReconciliation::new(
             clients.graph.clone(),
             &candidate,
-            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                clients.graph.clone(),
-            ))),
+            Arc::new(checkpoint::ClickHouseCheckpointStore::new(
+                Arc::new(clients.graph.clone()),
+                &physical,
+            )?),
             metrics.clone(),
             config.schedule.tasks.stale_edge_reconciliation.clone(),
         )),

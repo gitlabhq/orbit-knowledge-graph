@@ -78,8 +78,9 @@ pub async fn register_handlers(
 
     let repository_service: Arc<dyn RepositoryService> =
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));
-    let checkpoint_store: Arc<dyn checkpoint::CodeCheckpointStore> =
-        Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
+    let checkpoint_store: Arc<dyn checkpoint::CodeCheckpointStore> = Arc::new(
+        ClickHouseCodeCheckpointStore::new(Arc::clone(&client), &table_names),
+    );
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(
         stale_data_cleaner::ClickHouseStaleDataCleaner::new(client, &table_names),
     );

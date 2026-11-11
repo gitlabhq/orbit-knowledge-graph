@@ -1221,11 +1221,15 @@ impl MigrationScenario {
     }
 
     async fn run_code_stale_sweep(&self) {
-        let table_names =
-            CodeTableNames::from_catalog(&catalog(&self.model)).expect("code tables must resolve");
-        let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
-            self.ctx.config.build_client("graph"),
-        )));
+        let catalog = catalog(&self.model);
+        let table_names = CodeTableNames::from_catalog(&catalog).expect("code tables must resolve");
+        let store = Arc::new(
+            ClickHouseCheckpointStore::new(
+                Arc::new(self.ctx.config.build_client("graph")),
+                catalog.schema().unwrap(),
+            )
+            .unwrap(),
+        );
         CodeStaleSweep::new(
             self.ctx.config.build_client("graph"),
             &table_names,

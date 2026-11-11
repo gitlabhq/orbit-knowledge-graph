@@ -7,8 +7,9 @@ use orbit_arrow::ArrowUtils;
 use orbit_utils::traversal_path::TopLevelSplit;
 use query_data_model::catalog::sources::DataSource;
 
-use crate::execute::{CHECKPOINT_TABLE, MigrationError};
+use crate::execute::MigrationError;
 use crate::ledger::MigrationLedger;
+use crate::schema::EngineTable;
 use crate::scope::{
     MigrationScope, find_invalidated_pipelines, widen_scope_for_shared_table_writers,
 };
@@ -145,7 +146,12 @@ pub async fn check_sdlc_reindex_progress(
     enabled_namespace_ids: &[i64],
 ) -> Result<SdlcReindexProgress, MigrationError> {
     let prefix = table_prefix(version);
-    let checkpoint_table = format!("{prefix}{CHECKPOINT_TABLE}");
+    let checkpoint_table = format!(
+        "{prefix}{}",
+        catalog
+            .schema()?
+            .engine_table(EngineTable::PipelineCheckpoints)?
+    );
     let pipelines = find_invalidated_pipelines(catalog, scope);
 
     let completed_namespace_ids =

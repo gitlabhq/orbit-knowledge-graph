@@ -69,7 +69,7 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
     let services = indexer::orchestrator::scheduled::connect(&nats_config(nats_url))
         .await
         .unwrap();
-    let checkpoint_store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
+    let checkpoint_store = Arc::new(indexer::testkit::checkpoint_store(Arc::new(
         ctx.config.build_client("graph"),
     )));
     let model = query_data_model::Packages::embedded().load().unwrap();
@@ -131,6 +131,7 @@ async fn dispatch_enabled_namespace_cdc(
             .code_backfill
             .publish_window,
         &indexer::testkit::siphon_source(),
+        &indexer::testkit::code_tables(),
     ));
     let route = EnabledNamespacesRoute::new(
         NamespaceIndexingDispatch::new(services.nats),

@@ -126,9 +126,16 @@ impl Resolver<'_, '_> {
             else {
                 continue;
             };
+            if let Some(role) = spec.role
+                && self.schema.engine_table(role).is_ok()
+            {
+                self.diagnostics
+                    .error(&package, format!("{context} repeats the table role {role}"));
+            }
             self.schema.auxiliary.push(AuxiliaryTable {
                 table,
                 versioned: spec.versioned,
+                role: spec.role,
             });
         }
     }

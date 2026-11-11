@@ -144,11 +144,23 @@ pub struct EdgeTable {
     pub settings: Settings,
 }
 
+/// A table the indexing engine reads by its declared role instead of by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::Display)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum EngineTable {
+    PipelineCheckpoints,
+    CodeCheckpoints,
+    DeletionSchedule,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TableSpec {
     #[serde(default = "yes")]
     pub versioned: bool,
+    #[serde(default)]
+    pub role: Option<EngineTable>,
     pub engine: String,
     pub columns: IndexMap<String, ColumnSpec>,
     #[serde(default)]

@@ -52,3 +52,31 @@ pub fn siphon_source() -> query_data_model::catalog::sources::DataSource {
         .expect("embedded siphon source")
         .clone()
 }
+
+#[expect(
+    clippy::expect_used,
+    reason = "the embedded model is validated at build time"
+)]
+pub fn checkpoint_store(
+    client: std::sync::Arc<crate::clickhouse::ArrowClickHouseClient>,
+) -> crate::checkpoint::ClickHouseCheckpointStore {
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        .expect("embedded catalog");
+    crate::checkpoint::ClickHouseCheckpointStore::new(
+        client,
+        catalog.schema().expect("embedded schema"),
+    )
+    .expect("embedded checkpoint table")
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "the embedded model is validated at build time"
+)]
+pub fn code_tables() -> crate::modules::code::config::CodeTableNames {
+    crate::modules::code::config::CodeTableNames::from_catalog(
+        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+            .expect("embedded catalog"),
+    )
+    .expect("embedded code tables")
+}

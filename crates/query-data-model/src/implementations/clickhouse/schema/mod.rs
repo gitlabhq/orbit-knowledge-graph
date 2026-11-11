@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::ClickHouse;
+pub use super::spec::EngineTable;
 use crate::{Catalog, DataModelError, Model};
 
 pub use crate::implementations::relational::{
@@ -49,6 +50,7 @@ pub struct Schema {
 pub struct AuxiliaryTable {
     pub table: Table,
     pub versioned: bool,
+    pub role: Option<EngineTable>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +105,17 @@ impl Schema {
 
     pub fn table(&self, name: &str) -> Option<&Table> {
         self.tables.iter().find(|table| table.name == name)
+    }
+
+    /// The unprefixed name of the auxiliary table declared for `role`.
+    pub fn engine_table(&self, role: EngineTable) -> Result<&str, DataModelError> {
+        self.auxiliary
+            .iter()
+            .find(|table| table.role == Some(role))
+            .map(|table| table.table.name.as_str())
+            .ok_or_else(|| {
+                DataModelError::Invalid(format!("no auxiliary table has the role {role}"))
+            })
     }
 
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {

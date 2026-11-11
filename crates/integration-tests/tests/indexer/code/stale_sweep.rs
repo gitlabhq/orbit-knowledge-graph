@@ -287,7 +287,7 @@ fn build_sweep(
         &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
     )
     .expect("code tables must resolve");
-    let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
+    let store = Arc::new(indexer::testkit::checkpoint_store(Arc::new(
         clickhouse.config.build_client("graph"),
     )));
     (

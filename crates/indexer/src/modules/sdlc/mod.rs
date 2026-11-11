@@ -69,8 +69,13 @@ pub async fn register_handlers(
     let graph_client = Arc::new(clients.graph.clone());
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(datalake_client));
-    let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
-        Arc::new(ClickHouseCheckpointStore::new(graph_client));
+    let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> = Arc::new(
+        ClickHouseCheckpointStore::new(
+            graph_client,
+            catalog.schema().map_err(HandlerInitError::new)?,
+        )
+        .map_err(HandlerInitError::new)?,
+    );
     let metrics = SdlcMetrics::new();
 
     let partition_strategies =
