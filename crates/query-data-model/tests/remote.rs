@@ -291,3 +291,31 @@ fn the_gql_surface_lowers_structural_matches_into_columns() {
         })
     );
 }
+
+#[test]
+fn a_via_step_whose_key_type_differs_from_the_target_id_fails_the_load() {
+    let mut sources = testkit::with_demo().sources().clone();
+    let graph = sources.get_mut("integration.slack/graph.yaml").unwrap();
+    *graph = graph.replace("group_id: {type: int64}", "group_id: {type: string}");
+    let storage = sources
+        .get_mut("integration.slack/storage/clickhouse.yaml")
+        .unwrap();
+    *storage = storage.replace(
+        "group_id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}",
+        "group_id: {backend: {type: String, codec: [ZSTD(1)]}}",
+    );
+    let (platform, demo): (Vec<_>, Vec<_>) = sources
+        .into_iter()
+        .partition(|(path, _)| !path.starts_with("integration.slack/"));
+    let error = Packages::new(Tier::Platform, platform.into_iter().collect())
+        .with(Packages::new(Tier::Integration, demo.into_iter().collect()))
+        .load()
+        .unwrap_err()
+        .to_string();
+    for expected in [
+        "INSTALLED_IN(SlackWorkspace -> Group) foreign key group_id is String but Group.id is Int; keys are never cast",
+        "SlackWorkspace's via step INSTALLED_IN has no foreign key on SlackWorkspace in any store",
+    ] {
+        assert!(error.contains(expected), "{error}");
+    }
+}

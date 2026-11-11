@@ -64,6 +64,40 @@ pub(super) fn resolve(
         let edges = edge_guards(graph, access, store, diagnostics);
         store.edge_guards = edges;
     }
+    via_keys(graph, stores, diagnostics);
+}
+
+/// Each `via` step is a foreign key on the entity it leaves, so a lookup can join it.
+fn via_keys(graph: &GraphCatalog, stores: &[Store], diagnostics: &mut Diagnostics) {
+    for store in stores {
+        for source in store.sources() {
+            let Some(Guard {
+                rule: Rule::Via(hops),
+                ..
+            }) = store.guard(source.entity)
+            else {
+                continue;
+            };
+            for hop in hops {
+                let keyed = stores.iter().any(|other| {
+                    other
+                        .foreign_key(hop.variant)
+                        .is_some_and(|key| key.holder == Endpoint::Source)
+                });
+                if !keyed {
+                    diagnostics.error(
+                        &source.package,
+                        format!(
+                            "{}'s via step {} has no foreign key on {} in any store",
+                            graph.entity(source.entity).name,
+                            graph.relationship(hop.relationship).name,
+                            graph.entity(hop.from).name
+                        ),
+                    );
+                }
+            }
+        }
+    }
 }
 
 fn entity_guard(

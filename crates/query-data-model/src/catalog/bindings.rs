@@ -157,11 +157,34 @@ impl Store {
             Endpoint::Source => Endpoint::Target,
             Endpoint::Target => Endpoint::Source,
         };
+        let referenced = variant.endpoint(other);
+        let referenced_key = graph.property_id(referenced, DEFAULT_PRIMARY_KEY);
+        let referenced_key = diagnostics.require(referenced_key, package, || {
+            format!(
+                "{label} references {}, which has no id",
+                graph.entity(referenced).name
+            )
+        })?;
+        let (held, id) = (
+            graph.property(property).data_type,
+            graph.property(referenced_key).data_type,
+        );
+        if held != id {
+            diagnostics.error(
+                package,
+                format!(
+                    "{label} foreign key {} is {held:?} but {}.id is {id:?}; keys are never cast",
+                    key.column,
+                    graph.entity(referenced).name
+                ),
+            );
+            return None;
+        }
         Some(Key {
             foreign_key: ForeignKey {
                 holder: key.on,
                 property,
-                referenced_key: graph.property_id(variant.endpoint(other), DEFAULT_PRIMARY_KEY)?,
+                referenced_key,
             },
             discriminator,
         })
