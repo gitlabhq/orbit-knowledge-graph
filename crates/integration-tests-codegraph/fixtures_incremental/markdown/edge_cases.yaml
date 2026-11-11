@@ -85,8 +85,6 @@ tests:
     assert:
       - { empty: true }
 
-  # Both engines hash the same file path, fqn and byte span, so a namespace
-  # that switches engines keeps its Section ids.
   - name: "section ids are the same in both engines"
     query: |
       MATCH (d:Definition)

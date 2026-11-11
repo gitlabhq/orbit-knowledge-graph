@@ -156,8 +156,6 @@ impl SupportLang {
             .map_or_else(|| vec![self], |f| f.members.clone())
     }
 
-    /// Whether the language parses with a tree-sitter grammar; Markdown
-    /// parses with comrak instead.
     pub fn uses_tree_sitter(&self) -> bool {
         LANG_CONFIG.languages[self].grammar != COMRAK_GRAMMAR
     }

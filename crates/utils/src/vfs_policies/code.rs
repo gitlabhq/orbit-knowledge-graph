@@ -9,7 +9,6 @@ const EXCLUDED_EXTENSIONS: &[&str] = &[
     "bin", "dat",
 ];
 const EXCLUDED_SUFFIXES: &[&str] = &[".min.js", ".min.mjs", ".min.cjs"];
-/// Machine-translated documentation trees, matched on any directory segment.
 const EXCLUDED_DIRECTORIES: &[&str] = &["doc-locale", "docs-locale"];
 const BINARY_SNIFF_BYTES: usize = 8000;
 const MAX_LINE_LENGTH: usize = 64 * 1024;

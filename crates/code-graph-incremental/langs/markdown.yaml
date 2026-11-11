@@ -1,9 +1,3 @@
-# Markdown rewrite rules.
-# `src/markdown.rs` builds the tree from comrak: `document` holds nested
-# `section`s, each led by a `heading` (the plain heading text) and a
-# `section_key` (its escaped, sibling-unique FQN segment). Definitions hang
-# off the file stem (stem#Heading#Subheading), as in code-graph.
-
 stages:
   - name: normalize
     rules:

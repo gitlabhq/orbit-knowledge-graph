@@ -9,10 +9,8 @@ use rustc_hash::FxHashSet;
 /// escaped with `\` in the segment, so the FQN splits unambiguously.
 pub const FQN_SEPARATOR: &str = "#";
 
-/// Sections past this count in one file are dropped.
 pub const MAX_SECTIONS_PER_FILE: usize = 10_000;
 
-/// One heading and the content it owns, in document order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Section {
     /// Plain heading text: inline markup and closing `#`s removed.
@@ -20,9 +18,7 @@ pub struct Section {
     /// The section's FQN segment: the escaped name, suffixed `-N` when a
     /// sibling already uses it.
     pub segment: String,
-    /// Index of the enclosing section in the returned list.
     pub parent: Option<usize>,
-    /// Byte offset of the heading line.
     pub start: usize,
     /// Byte offset of the line after the heading (setext underline included).
     pub heading_end: usize,
@@ -83,7 +79,6 @@ pub fn sections(source: &str) -> Vec<Section> {
     sections
 }
 
-/// The FQN segments from the outermost section down to `index`.
 pub fn segment_path(sections: &[Section], index: usize) -> Vec<&str> {
     let mut path = Vec::new();
     let mut current = Some(index);
@@ -150,7 +145,6 @@ impl LineIndex {
         self.starts.get(line).copied().unwrap_or(self.len)
     }
 
-    /// The zero-based line and byte column of `offset`.
     pub fn position(&self, offset: usize) -> (usize, usize) {
         let line = self
             .starts
