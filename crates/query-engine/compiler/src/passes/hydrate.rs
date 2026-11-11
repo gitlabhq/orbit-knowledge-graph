@@ -557,7 +557,7 @@ entities:
   User:
     label: username
     defaults: [{}]
-    properties: {{id: int64, username: string, state: string, is_admin: bool, is_auditor: bool}}
+    properties: {{id: int64, username: string, state: string, is_admin: boolean, is_auditor: boolean}}
 "#,
             defaults.join(", ")
         );

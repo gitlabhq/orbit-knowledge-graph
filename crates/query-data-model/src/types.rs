@@ -2,51 +2,24 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DataType {
+    #[serde(rename = "string")]
     String,
+    #[serde(rename = "int64")]
     Int,
+    #[serde(rename = "float64")]
     Float,
+    #[serde(rename = "boolean")]
     Bool,
+    #[serde(rename = "date")]
     Date,
+    #[serde(rename = "timestamp")]
     DateTime,
+    #[serde(rename = "enum")]
     Enum,
+    #[serde(rename = "uuid")]
     Uuid,
-}
-
-impl<'de> Deserialize<'de> for DataType {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = <&str>::deserialize(deserializer)?;
-        match s {
-            "string" => Ok(Self::String),
-            "int64" | "int" | "integer" => Ok(Self::Int),
-            "float64" | "float" | "double" => Ok(Self::Float),
-            "boolean" | "bool" => Ok(Self::Bool),
-            "date" => Ok(Self::Date),
-            "timestamp" | "datetime" => Ok(Self::DateTime),
-            "enum" => Ok(Self::Enum),
-            "uuid" => Ok(Self::Uuid),
-            other => Err(serde::de::Error::unknown_variant(
-                other,
-                &[
-                    "string",
-                    "int64",
-                    "int",
-                    "integer",
-                    "float64",
-                    "float",
-                    "double",
-                    "boolean",
-                    "bool",
-                    "date",
-                    "timestamp",
-                    "datetime",
-                    "enum",
-                    "uuid",
-                ],
-            )),
-        }
-    }
 }
 
 impl fmt::Display for DataType {
