@@ -44,12 +44,13 @@ physical:
 
 `sql` checks the rendered query. `indexes` checks the ClickHouse layout and
 requires the rendered SQL to read that table. `settings` checks the rendered
-SETTINGS clause. Data-correctness scenarios reject these fields.
+SETTINGS clause. `hydration` checks the hydration plan kind: `none`, `static`,
+or `dynamic`. Data-correctness scenarios reject these fields.
 
-`migrated_data_correctness_sql.yaml` preserves every SQL and index assertion
-removed from the data-correctness suite. Each case uses the original query and
-the original assertion values. Production route cases remain grouped in
-`edge_scans/production_variant_routes.yaml`.
+`scenarios/` holds the compiler checks for the data-correctness scenarios. It
+mirrors the scenario tree: `scenarios/search/filter_starts_with.yaml` checks the
+query in `server/data_correctness/scenarios/search/filter_starts_with.yaml`.
+Production route cases stay in `edge_scans/production_variant_routes.yaml`.
 
 CTE assertions refer to top-level named query definitions, not execution order.
 Use one of these forms in a planned or emitted assertion block:
