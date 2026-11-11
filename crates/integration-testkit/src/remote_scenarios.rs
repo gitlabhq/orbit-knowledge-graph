@@ -382,7 +382,7 @@ fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture() {
     );
     assert_eq!(
         relational.err().unwrap().to_string(),
-        "schema violation: structural matches run on the code connection, not in SQL"
+        "schema violation: structural matches run on an orbit_code connection, not in SQL"
     );
 }
 

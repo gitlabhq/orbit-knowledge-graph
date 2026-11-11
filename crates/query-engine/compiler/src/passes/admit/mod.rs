@@ -8,8 +8,9 @@ mod rules;
 mod selectivity;
 
 use crate::passes::codegen::SqlBackend;
-use query_data_model::Catalog;
+use query_data_model::implementations::orbit_code::OrbitCode;
 use query_data_model::plan::logical::{Expr, LogicalOperation, Predicate, TimeUnit};
+use query_data_model::{Catalog, StorageBackend};
 
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
@@ -22,9 +23,10 @@ pub fn admit(query: Query<'_>, model: &Catalog<impl SqlBackend>, selectivity: bo
         .operations()
         .any(|(_, operation)| matches!(operation, LogicalOperation::Structural(_)))
     {
-        return Err(QueryError::Validation(
-            "structural matches run on the code connection, not in SQL".into(),
-        ));
+        return Err(QueryError::Validation(format!(
+            "structural matches run on an {} connection, not in SQL",
+            OrbitCode::KIND
+        )));
     }
     let facts = query.leaves();
     let anchors = query.anchors(&facts);
