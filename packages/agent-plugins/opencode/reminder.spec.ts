@@ -4,30 +4,41 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 
 const REMINDER = 'REMINDER-TEXT'
+const INSTRUCTIONS = 'INSTRUCTIONS-TEXT'
 const TEMPLATE = join(import.meta.dir, '../../../config/setup/opencode_plugin.js')
 
 type Result = { content?: unknown; output?: unknown }
 type Event = { tool: string; status: string; result?: Result }
+type ContextEvent = { system: { type: string; text: string }[] }
+type Hook = (name: string, callback: (event: any) => unknown) => Promise<void>
 type Plugin = {
-  setup(ctx: { tool: { hook(name: string, callback: (event: Event) => void): Promise<void> } }): Promise<void>
+  setup(ctx: { tool: { hook: Hook }; session: { hook: Hook } }): Promise<void>
   server(): Promise<{ 'tool.execute.after': (input: { tool: string }, output: { output: string }) => Promise<void> }>
 }
 
 let dir: string
 let plugin: Plugin
 const previousDataDir = process.env.ORBIT_DATA_DIR
+const previousPath = process.env.PATH
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'orbit-reminder-'))
   const source = (await Bun.file(TEMPLATE).text()).replace('{{reminder}}', REMINDER)
   writeFileSync(join(dir, 'orbit.js'), source)
   plugin = (await import(join(dir, 'orbit.js'))).default
+
+  const bin = join(dir, 'bin')
+  mkdirSync(bin)
+  writeFileSync(join(bin, 'glab'), `#!/bin/sh\necho ${INSTRUCTIONS}\n`, { mode: 0o755 })
+  writeFileSync(join(bin, 'orbit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+  process.env.PATH = `${bin}:${previousPath}`
 })
 
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true })
   if (previousDataDir === undefined) delete process.env.ORBIT_DATA_DIR
   else process.env.ORBIT_DATA_DIR = previousDataDir
+  process.env.PATH = previousPath
 })
 
 function withGraph(present: boolean) {
@@ -40,9 +51,12 @@ function withGraph(present: boolean) {
 }
 
 async function hookedSetup() {
-  let callback!: (event: Event) => void
-  await plugin.setup({ tool: { hook: async (_name, cb) => void (callback = cb) } })
-  return callback
+  const hooks = new Map<string, (event: any) => unknown>()
+  const hook: Hook = async (name, cb) => void hooks.set(name, cb)
+  await plugin.setup({ tool: { hook }, session: { hook } })
+  return Object.assign((event: Event) => void hooks.get('execute.after')!(event), {
+    context: (event: ContextEvent) => hooks.get('context')!(event),
+  })
 }
 
 const completed = (tool: string, result: Result): Event => ({ tool, status: 'completed', result })
@@ -107,6 +121,17 @@ test('setup reminds once per session, only for shell tools, only when completed,
   hook(second)
   expect(first.result?.content).toBe(`a\n\n${REMINDER}`)
   expect(second.result?.content).toBe('b')
+})
+
+test('setup adds the Orbit instructions to the system prompt once', async () => {
+  const { context } = await hookedSetup()
+  const event: ContextEvent = { system: [{ type: 'text', text: 'base' }] }
+  await context(event)
+  await context(event)
+  expect(event.system).toEqual([
+    { type: 'text', text: 'base' },
+    { type: 'text', text: INSTRUCTIONS },
+  ])
 })
 
 test('server appends the reminder once, only for shell tools, only with a graph', async () => {

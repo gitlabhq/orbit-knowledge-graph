@@ -1078,6 +1078,7 @@ mod tests {
         assert!(extension.contains(r#""hook-guard", "instructions""#));
         let opencode = read_embedded_text("opencode_plugin.js", false);
         assert!(opencode.contains("experimental.chat.system.transform"));
+        assert!(opencode.contains(r#"ctx.session.hook("context""#));
         assert!(opencode.contains(r#""hook-guard", "instructions""#));
         for (name, suffix) in [
             ("claude", "hook-guard instructions{{hook_gitlab}}"),
