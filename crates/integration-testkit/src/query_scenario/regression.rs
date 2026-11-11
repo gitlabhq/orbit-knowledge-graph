@@ -155,12 +155,12 @@ fn exact_null_and_string_properties_do_not_accept_missing_or_other_types() {
     rejects(
         query.clone(),
         "nodes: {Definition: {ids: [1], rows: [{id: 1, missing: null}]}}",
-        "property 'missing' mismatch",
+        "Definition/1.missing expected null",
     );
     rejects(
         query,
         "nodes: {Definition: {ids: [1], rows: [{id: 1, name: 1}]}}",
-        "property 'name' expected 1",
+        "Definition/1.name expected 1",
     );
 }
 

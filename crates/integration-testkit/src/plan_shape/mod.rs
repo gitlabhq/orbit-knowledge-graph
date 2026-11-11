@@ -599,11 +599,7 @@ impl Expectations<'_> {
             check(
                 "output",
                 ctx.output().as_ref().map(|output| {
-                    self.check_output(
-                        assertions,
-                        &output.base.render(),
-                        &format!("{label}.output"),
-                    )
+                    self.check_output(assertions, output, &format!("{label}.output"))
                 }),
             );
         }
@@ -613,12 +609,14 @@ impl Expectations<'_> {
     fn check_output(
         &self,
         assertions: &OutputAssertions,
-        sql: &str,
+        output: &compiler::CompiledQueryContext,
         label: &str,
     ) -> Result<(), String> {
         if assertions.sql.is_none() && assertions.indexes.is_empty() {
             return Err(format!("{label}: needs sql or indexes"));
         }
+        let sql = &output.base.render();
+        let scans = explain::emitted(&output.ast).to_string();
         let mut failures = assertions
             .sql
             .as_ref()
@@ -630,9 +628,9 @@ impl Expectations<'_> {
                     "{label}: table {} has no index {}",
                     index.table, index.name
                 ));
-            } else if !sql.contains(&index.table) {
+            } else if !scans.contains(&format!("Scan Table({}) ", index.table)) {
                 failures.push(format!(
-                    "{label}: SQL does not read indexed table {}\n{sql}",
+                    "{label}: query does not scan indexed table {}\n{scans}",
                     index.table
                 ));
             }

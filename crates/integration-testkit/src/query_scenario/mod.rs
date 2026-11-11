@@ -640,7 +640,12 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             for field in first.keys().filter(|field| {
                 *field != "id" && ne.rows.iter().all(|row| row.contains_key(*field))
             }) {
-                view.assert_filter(entity, field, |node| row_ids.contains(&node.id));
+                view.assert_filter(entity, field, |node| {
+                    ne.rows.iter().any(|row| {
+                        row["id"].as_i64() == Some(node.id)
+                            && property_matches(node, field, &row[field.as_str()], label)
+                    })
+                });
             }
         }
         for prop in &ne.prop_present {
@@ -899,7 +904,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if let Some(n) = expect.row_count {
         view.assert_row_count(n);
     }
-    view.assert_row_values(&expect.row_values);
+    view.assert_row_values(&expect.row_values, label);
     if let Some(expected) = expect.has_more {
         let pagination = view.response.pagination.as_ref();
         assert!(
@@ -984,34 +989,39 @@ fn try_expand_repeat(obj: &serde_json::Map<String, serde_json::Value>) -> Option
 }
 
 fn assert_property(
-    node: &dyn NodeExt,
+    node: &query_engine::formatters::GraphNode,
     prop: &str,
     expected: &serde_json::Value,
     entity: &str,
     id: i64,
     label: &str,
 ) {
+    assert!(
+        property_matches(node, prop, expected, label),
+        "{label}: {entity}/{id}.{prop} expected {expected}, got {:?}",
+        node.properties.get(prop)
+    );
+}
+
+fn property_matches(
+    node: &query_engine::formatters::GraphNode,
+    prop: &str,
+    expected: &serde_json::Value,
+    label: &str,
+) -> bool {
     match expected {
-        serde_json::Value::String(s) => node.assert_str(prop, s),
+        serde_json::Value::String(s) => node.prop_str(prop) == Some(s.as_str()),
         serde_json::Value::Object(m) if m.contains_key("repeat") => {
             let expanded = try_expand_repeat(m).unwrap_or_else(|| {
-                panic!("{label}: {entity}/{id}.{prop}: invalid repeat object, expected {{repeat: \"str\", count: N}}")
+                panic!(
+                    "{label}: {prop}: invalid repeat object, expected {{repeat: \"str\", count: N}}"
+                )
             });
-            node.assert_str(prop, &expanded);
+            node.prop_str(prop) == Some(expanded.as_str())
         }
-        serde_json::Value::Number(n) if n.is_i64() => {
-            node.assert_i64(prop, n.as_i64().unwrap());
-        }
-        serde_json::Value::Bool(b) => {
-            assert_eq!(
-                node.prop_bool(prop),
-                Some(*b),
-                "{label}: {entity}/{id}.{prop} expected {b}",
-            );
-        }
-        serde_json::Value::Null => {
-            node.assert_prop(prop, &serde_json::Value::Null);
-        }
+        serde_json::Value::Number(n) if n.is_i64() => node.prop_i64(prop) == n.as_i64(),
+        serde_json::Value::Bool(b) => node.prop_bool(prop) == Some(*b),
+        serde_json::Value::Null => node.properties.get(prop) == Some(&serde_json::Value::Null),
         _ => panic!("{label}: unsupported property value type for {prop}"),
     }
 }
