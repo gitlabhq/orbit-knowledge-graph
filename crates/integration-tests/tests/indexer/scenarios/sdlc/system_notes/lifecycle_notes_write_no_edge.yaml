@@ -1,7 +1,5 @@
-# There is no Commit node and the CLOSED edge variant for Commit is
-# undeclared, so the Commit-noteable lifecycle note must drop. totals
-# gl_edge: 1 proves no Commit-targeted edge of any kind was written.
-description: A lifecycle action on a Commit noteable produces no edge
+# CLOSED and MERGED belong to the noteable's foreign keys, so a lifecycle note writes no edge.
+description: Lifecycle notes write no edge
 scope: { namespace: 100 }
 
 seed:
@@ -20,8 +18,6 @@ targets: [SystemNote]
 expect:
   edges:
     - kind: CLOSED
-      count: 1
-      rows:
-        - { target_kind: WorkItem }
+      count: 0
   totals:
-    gl_edge: 1
+    gl_edge: 0

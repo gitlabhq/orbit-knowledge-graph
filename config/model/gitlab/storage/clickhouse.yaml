@@ -2896,7 +2896,7 @@ relationships:
     MergeRequest -> Pipeline: {fk: {on: source, column: head_pipeline_id}, edge_table: gl_ci_edge}
 
   HAS_IDENTIFIER:
-    VulnerabilityOccurrence -> VulnerabilityIdentifier: {fk: {on: source, column: primary_identifier_id}, edge_table: gl_sec_edge}
+    VulnerabilityOccurrence -> VulnerabilityIdentifier: {edge_table: gl_sec_edge}
 
   HAS_JOB:
     Stage -> Job: {fk: {on: target, column: stage_id}, edge_table: gl_ci_edge}

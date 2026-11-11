@@ -134,7 +134,7 @@ relationships:
   HAS_IDENTIFIER:
     description: Entity has associated vulnerability identifier (CVE, CWE, etc.)
     variants:
-      VulnerabilityOccurrence -> VulnerabilityIdentifier: {cardinality: many_to_one}
+      VulnerabilityOccurrence -> VulnerabilityIdentifier: {cardinality: many_to_many}
 
   HAS_JOB:
     description: Pipeline or stage contains job relationship
