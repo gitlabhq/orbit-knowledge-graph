@@ -34,6 +34,15 @@ config:
       - __crate_root
 
 stages:
+  # #[path = "tcp_mptcp.rs"] mod mptcp; loads the module from the file the attribute names,
+  # next to the declaring file, so its import points there instead of at mptcp.rs.
+  - name: path-attribute-modules
+    rules:
+      - match: '(source_file $$$A (attribute_item (attribute (identifier "path") value: (string_literal $P:string_content))) (mod_item name: $N !(declaration_list)) $$$B)'
+        replace: '(source_file @$ROOT $$$A (path_mod (path_mod_file @$P) (path_mod_name @$N)) $$$B)'
+      - match: '(declaration_list $$$A (attribute_item (attribute (identifier "path") value: (string_literal $P:string_content))) (mod_item name: $N !(declaration_list)) $$$B)'
+        replace: '(declaration_list $$$A (path_mod (path_mod_file @$P) (path_mod_name @$N)) $$$B)'
+
   - name: normalize
     rules:
       - match: '(foreign_mod_item body: (declaration_list $$$ITEMS:function_signature_item))'
@@ -147,6 +156,10 @@ stages:
 
   - name: imports
     rules:
+      # #[path = "f.rs"] mod foo;  the body lives in f.rs next to this file
+      - match: '(path_mod $P:path_mod_file $N:path_mod_name)'
+        replace: '(__import (__source @$N) (__source_path @$P|regex_replace("\.rs$", "")|prepend("#path:")) (__name @$N))'
+        tag: { import_type: ModDeclaration }
       # mod foo;  (a declaration, the body lives in another file)
       - match: '(mod_item name: $N !(declaration_list))'
         replace: '(__import (__source @$N) (__source_path "self") (__name @$N))'
@@ -495,6 +508,7 @@ stages:
       - match: '$M:__source_file'
         tag:
           mod_self: '@$M|regex_replace("\.rs$","")|regex_replace("(^|/)(mod|lib|main)$","")'
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
       - match: '(__import (__source_path "/^(self|super)(/|$)/"))'
         tag:
           source_rel: '@$ROOT|child_sym("__source_path")|regex_replace("^self(/|$)","./")|regex_loop("super(/|$)","../")'
@@ -507,6 +521,10 @@ stages:
       - match: '(__import (__source_path "/^(self|super)(/|$)/"))'
         tag:
           resolved_source: '@$ROOT|concat("/", "ancestor_tag:mod_self", "tag:source_rel")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+      # #[path = "f.rs"] is relative to the declaring file's directory, whatever its module
+      - match: '(__import (__source_path "/^#path:/"))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|replace("#path:", "")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("^/", "")'
 
 resolve:
   stages:
