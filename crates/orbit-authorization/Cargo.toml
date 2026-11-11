@@ -1,0 +1,13 @@
+[package]
+name = "orbit-authorization"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

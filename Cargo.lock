@@ -5888,6 +5888,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-authorization"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "orbit-billing"
 version = "0.1.0"
 dependencies = [
