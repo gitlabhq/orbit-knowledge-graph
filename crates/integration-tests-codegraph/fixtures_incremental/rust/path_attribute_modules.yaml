@@ -1,0 +1,38 @@
+name: "Rust: a module declared with #[path] resolves to the file the attribute names"
+
+# `#[path = "tcp_mptcp.rs"] mod mptcp;` loads the module from tcp_mptcp.rs, next to the
+# declaring file, instead of mptcp.rs or mptcp/mod.rs. Calls through `mptcp::` must reach
+# the definitions in tcp_mptcp.rs.
+
+fixtures:
+  - path: src/main.rs
+    content: |
+      mod tcp;
+      fn main() { tcp::tcp_print(); }
+
+  - path: src/tcp.rs
+    content: |
+      #[path = "tcp_mptcp.rs"]
+      mod mptcp;
+
+      pub fn tcp_print() {
+          mptcp::mptcp_print();
+          mptcp::capable_print();
+      }
+
+  - path: src/tcp_mptcp.rs
+    content: |
+      pub fn mptcp_print() { capable_print(); }
+      pub fn capable_print() {}
+
+tests:
+  - name: "calls through the module reach the file the attribute names"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.name = 'tcp_print'
+      RETURN b.name AS callee, b.file_path AS file
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: capable_print, file: src/tcp_mptcp.rs } }
+      - { row: { callee: mptcp_print, file: src/tcp_mptcp.rs } }
