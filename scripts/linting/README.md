@@ -21,7 +21,7 @@ folder so it can be removed as a unit (see *Removing the gates* below). Task #29
 | `comment_check_hook.sh` | Lefthook entry point: maps the checker's exit code 3 to a blocked commit and lets every other failure through. |
 | `comment_check_test.py` | Unit tests for the comment check (`mise run lint:comments:test`). |
 | `narration-comments.yml` | Lower-precision ast-grep-native fallback for the `block_label` half (see below). Committed for documentation / ast-grep-only setups; **not** the active gate. |
-| `rust-query-tests/` | ast-grep rule that rejects Rust tests with an embedded graph query (`mise run lint:query-tests`). Its own `sgconfig.yml`, rule tests, and a file baseline. |
+| `unit-tests/` | Opt-in gate for Rust tests (`mise run lint:unit-tests`): an ast-grep rule with its own `sgconfig.yml`, and `check.py`, which rejects test functions that a diff adds without a reason. |
 
 ## Prose linter
 
@@ -127,21 +127,33 @@ mise run lint:yaml:fix
 mise run lint:yaml:test
 ```
 
-## Rust query tests
+## Rust unit tests
 
-Query behavior belongs in YAML: plan-shape fixtures check compiler output, and
-data-correctness scenarios check results. The `no-rust-query-tests` rule flags a
-test function in the compiler and integration-test crates when one of its string
-literals holds a GQL `MATCH (` or a JSON `"query_type"`. A test function is a
-`#[test]` or `#[tokio::test]` function, or a subtest that takes `&TestContext`.
+Behavior tests belong in YAML: plan-shape fixtures check compiler output,
+data-correctness scenarios check query results, and indexer scenarios check
+indexing. A Rust unit test is opt-in, for logic that YAML cannot reach.
 
-The rule has its own `sgconfig.yml`, so `lint:logs` does not load it. The
-`ignores` list in the rule is a baseline of the files that still hold such
-tests. A new file is checked at once. Remove a file from the baseline when its
-tests move to YAML.
+The `unit-test` rule matches every Rust test function under `crates/`: a
+`#[test]`, `#[tokio::test]`, or `#[rstest]` function, or a subtest that takes
+`&TestContext`. `check.py` runs the rule on the files a diff changes and keeps
+only the functions whose `fn` line the diff adds, so existing tests pass. It
+takes `--staged` for a commit hook or `--range BASE HEAD` for CI, and finishes
+in well under a second.
 
-To keep one Rust test, put `// ast-grep-ignore: no-rust-query-tests` on the line
-above its `fn`, and say why in the test name or the commit.
+To keep a Rust test, put this on the line above its `fn`:
+
+```rust
+#[test]
+// ast-grep-ignore: unit-test -- checks constant-time token comparison
+fn compares_tokens_in_constant_time() {}
+```
+
+The reason after `--` must be at least ten characters. An opt-in without one is
+rejected. Good reasons name mission-critical logic, such as cryptography, data
+structure invariants, security policy edge cases, exact parser or encoder
+output, and concurrency primitives.
+
+A rejection lists each test as `path/name/start_line`, one per line.
 
 ## Where the gates run
 

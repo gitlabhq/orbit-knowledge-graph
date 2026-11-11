@@ -1,0 +1,26 @@
+id: unit-test
+valid:
+  - |
+    fn helper() { assert!(true); }
+  - |
+    #[cfg(test)]
+    mod tests {
+        fn shared_fixture() -> u32 { 1 }
+    }
+invalid:
+  - |
+    #[test]
+    fn parses_numbers() {}
+  - |
+    #[tokio::test]
+    #[serial]
+    async fn runs_async() {}
+  - |
+    #[test]
+    #[should_panic]
+    fn rejects_empty() {}
+  - |
+    async fn subtest(ctx: &TestContext) {}
+  - |
+    #[rstest]
+    fn table_case() {}

@@ -223,11 +223,12 @@ run = [
 ]
 description = "Run clippy lint checks"
 
-[tasks."lint:query-tests"]
-description = "Reject Rust tests that embed a graph query outside the migration baseline"
+[tasks."lint:unit-tests"]
+description = "Reject Rust test functions added without an opt-in reason"
 run = [
-  "ast-grep test -c scripts/linting/rust-query-tests/sgconfig.yml --skip-snapshot-tests",
-  "ast-grep scan -c scripts/linting/rust-query-tests/sgconfig.yml --off=unused-suppression --error crates",
+  "ast-grep test -c scripts/linting/unit-tests/sgconfig.yml --skip-snapshot-tests",
+  "python3 -m unittest discover -s scripts/linting/unit-tests -p '*_test.py'",
+  "python3 scripts/linting/unit-tests/check.py --range origin/main HEAD",
 ]
 
 [tasks."lint:logs"]
