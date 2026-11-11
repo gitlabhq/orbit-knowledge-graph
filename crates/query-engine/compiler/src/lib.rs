@@ -176,6 +176,26 @@ pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<
         .count_err()
 }
 
+/// Parse a GQL query into its [`Input`] without validating or normalizing it.
+///
+/// The seed planner needs the pattern (aliases, entities, relationships) and the
+/// `WHERE` filters before the `validate` pass rejects a filter on a live search
+/// field, which is why this stops after the frontend lowers the query.
+pub fn parse_gql_input(
+    raw: &str,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+) -> Result<Input> {
+    let mut ctx = config::ParseGqlCtx::new(Arc::clone(data_model));
+    ctx.set_raw(raw.to_string());
+    config::run_parse_gql(&mut ctx)
+        .and_then(|()| {
+            ctx.take_input().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("parse_gql produced no input".into())
+            })
+        })
+        .count_err()
+}
+
 pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Input> {
     let data_model = data_model::clickhouse(Arc::clone(ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;

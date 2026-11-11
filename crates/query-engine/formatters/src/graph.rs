@@ -212,6 +212,8 @@ impl GraphFormatter {
             Some(QueryType::Hydration) | None => {}
         }
 
+        Self::splice_seed(output, &mut node_map, &mut edges, &mut edge_set);
+
         let pagination = output.pagination.as_ref().map(|p| PaginationResponse {
             has_more: p.has_more,
             truncated: p.truncated,
@@ -226,6 +228,52 @@ impl GraphFormatter {
             group_columns,
             rows,
             pagination,
+        }
+    }
+
+    /// Adds the live-search seed nodes and edges to the result graph. A seed node
+    /// never overwrites one the stored query already returned (which carries full
+    /// properties); seed edges dedup against the stored edges.
+    fn splice_seed(
+        output: &PipelineOutput,
+        node_map: &mut IndexMap<(String, i64), GraphNode>,
+        edges: &mut Vec<GraphEdge>,
+        edge_set: &mut HashSet<EdgeKey>,
+    ) {
+        let Some(seed) = &output.seed else {
+            return;
+        };
+        for node in &seed.nodes {
+            node_map
+                .entry((node.entity_type.clone(), node.id))
+                .or_insert_with(|| GraphNode {
+                    entity_type: node.entity_type.clone(),
+                    id: node.id,
+                    properties: node.properties.clone(),
+                });
+        }
+        for edge in &seed.edges {
+            let key = (
+                edge.from_entity.clone(),
+                edge.from_id,
+                edge.to_entity.clone(),
+                edge.to_id,
+                edge.edge_type.clone(),
+                None,
+            );
+            if !edge_set.insert(key) {
+                continue;
+            }
+            edges.push(GraphEdge {
+                from: edge.from_entity.clone(),
+                from_id: edge.from_id,
+                to: edge.to_entity.clone(),
+                to_id: edge.to_id,
+                edge_type: edge.edge_type.clone(),
+                depth: None,
+                path_id: None,
+                step: None,
+            });
         }
     }
 
@@ -665,6 +713,7 @@ mod tests {
             result_context: result_ctx,
             execution_log: vec![],
             pagination: None,
+            seed: None,
         }
     }
 
@@ -718,6 +767,7 @@ mod tests {
             result_context: result_ctx,
             execution_log: vec![],
             pagination: None,
+            seed: None,
         }
     }
 
@@ -909,6 +959,7 @@ mod tests {
             result_context: result_ctx,
             execution_log: vec![],
             pagination: None,
+            seed: None,
         };
 
         let formatter = GraphFormatter;
@@ -1041,6 +1092,7 @@ mod tests {
             result_context: result_ctx,
             execution_log: vec![],
             pagination: None,
+            seed: None,
         };
 
         let response = GraphFormatter.build_response(&output);
@@ -1139,6 +1191,7 @@ mod tests {
             result_context: result_ctx,
             execution_log: vec![],
             pagination: None,
+            seed: None,
         };
 
         let response = GraphFormatter.build_response(&output);

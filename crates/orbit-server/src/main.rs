@@ -194,12 +194,17 @@ async fn attach_live_runtime(server: GrpcServer, config: &AppConfig) -> GrpcServ
     .map(|model| model.packages)
     .unwrap_or_default();
     let catalog = extensions::live::LiveCatalog::from_packages(&packages);
-    if catalog.is_empty() {
+    let search = extensions::search::SearchCatalog::from_packages(&packages);
+    if catalog.is_empty() && search.is_empty() {
         return server;
     }
 
     let providers = extensions::bootstrap::connect_live_providers(&provider_configs).await;
-    let runtime = Arc::new(orbit_server::pipeline::LiveRuntime { catalog, providers });
+    let runtime = Arc::new(orbit_server::pipeline::LiveRuntime {
+        catalog,
+        search,
+        providers,
+    });
     let budget = orbit_server::pipeline::LiveBudget(std::time::Duration::from_millis(
         config.extensions.live_total_budget_ms,
     ));

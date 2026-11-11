@@ -363,13 +363,22 @@ fn format_property(field: &Field) -> String {
     }
 }
 
-/// The ` [search: <match>]` suffix for a field an extension package marked
-/// searchable, or empty for an ordinary field. It tells an agent which live
-/// search predicate the field accepts.
+/// The ` [live]` / ` [search: <match>]` suffix for a field an extension package
+/// marked live and/or searchable, or empty for an ordinary field. It tells an agent
+/// a field is read live (so a `WHERE` on it is not filterable) and which live search
+/// predicate it accepts.
 fn search_marker(field: &Field) -> String {
-    match &field.search_match {
-        Some(search_match) => format!(" [search: {search_match}]"),
-        None => String::new(),
+    let mut tags = Vec::new();
+    if field.live {
+        tags.push("live".to_string());
+    }
+    if let Some(search_match) = &field.search_match {
+        tags.push(format!("search: {search_match}"));
+    }
+    if tags.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", tags.join(", "))
     }
 }
 
@@ -379,6 +388,29 @@ mod tests {
 
     fn load() -> Ontology {
         Ontology::load_embedded().expect("embedded ontology loads")
+    }
+
+    #[test]
+    fn marks_live_and_searchable_fields_in_the_property_text() {
+        let live_searchable = Field {
+            name: "text".into(),
+            live: true,
+            search_match: Some("contains".into()),
+            ..Field::default()
+        };
+        let live_only = Field {
+            name: "title".into(),
+            nullable: true,
+            live: true,
+            ..Field::default()
+        };
+        let plain = Field {
+            name: "id".into(),
+            ..Field::default()
+        };
+        assert!(format_property(&live_searchable).contains("[live, search: contains]"));
+        assert!(format_property(&live_only).contains("[live]"));
+        assert!(!format_property(&plain).contains('['));
     }
 
     #[test]

@@ -5,7 +5,7 @@ mod types;
 
 pub use stages::{CompilationStage, ExtractionStage, OutputStage};
 pub use types::{
-    AuthorizationOutput, DebugQuery, ExecutionOutput, ExtractionOutput, HydrationOutput,
+    AuthorizationOutput, DebugQuery, ExecutionOutput, ExtractionOutput, GraphSeed, HydrationOutput,
     PaginationMeta, PipelineOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
-    RedactionOutput, paginate,
+    RedactionOutput, SeedGraphEdge, SeedGraphNode, paginate,
 };

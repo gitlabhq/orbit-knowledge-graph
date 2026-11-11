@@ -77,6 +77,34 @@ pub struct PipelineOutput {
     pub execution_log: Vec<QueryExecution>,
     /// Pagination metadata; always present (`Option` only spares test fixtures).
     pub pagination: Option<PaginationMeta>,
+    /// Nodes and edges a live search produced before the stored query ran. The
+    /// formatter splices them into the result graph. Source-agnostic: entity types,
+    /// ids, and property values only, carried from the package contract.
+    pub seed: Option<GraphSeed>,
+}
+
+/// The nodes and edges a live search seeded, in a source-agnostic shape the graph
+/// formatter can splice into the result.
+#[derive(Debug, Clone, Default)]
+pub struct GraphSeed {
+    pub nodes: Vec<SeedGraphNode>,
+    pub edges: Vec<SeedGraphEdge>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SeedGraphNode {
+    pub entity_type: String,
+    pub id: i64,
+    pub properties: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SeedGraphEdge {
+    pub from_entity: String,
+    pub from_id: i64,
+    pub to_entity: String,
+    pub to_id: i64,
+    pub edge_type: String,
 }
 
 pub struct PaginationMeta {

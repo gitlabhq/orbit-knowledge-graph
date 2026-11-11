@@ -258,6 +258,7 @@ pub(super) async fn pipeline_output(
         result_context: hydration_output.result_context,
         execution_log: vec![],
         pagination,
+        seed: None,
     }
 }
 

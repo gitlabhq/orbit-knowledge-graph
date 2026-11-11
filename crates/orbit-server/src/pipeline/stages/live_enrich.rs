@@ -36,6 +36,7 @@ pub const DEFAULT_LIVE_BUDGET_MS: u64 = 3000;
 #[derive(Clone)]
 pub struct LiveRuntime {
     pub catalog: LiveCatalog,
+    pub search: extensions::search::SearchCatalog,
     pub providers: HashMap<String, Arc<dyn LiveProvider>>,
 }
 
@@ -372,9 +373,14 @@ mod tests {
     fn runtime() -> LiveRuntime {
         let package = Package::parse(WIDGETS, short_digest(WIDGETS)).expect("parses");
         let catalog = LiveCatalog::from_packages(&[package]);
+        let search = extensions::search::SearchCatalog::default();
         let mut providers: HashMap<String, Arc<dyn LiveProvider>> = HashMap::new();
         providers.insert("example.widgets".into(), Arc::new(StubProvider));
-        LiveRuntime { catalog, providers }
+        LiveRuntime {
+            catalog,
+            search,
+            providers,
+        }
     }
 
     fn row(name: &str) -> HashMap<String, ColumnValue> {

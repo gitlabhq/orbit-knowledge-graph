@@ -11,6 +11,6 @@ pub use helpers::{
 pub use metrics::OTelPipelineObserver;
 pub use service::{QueryPipelineService, QueryServiceOutput, RawQuery};
 pub use stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, LiveBudget, LiveRuntime,
+    AuthorizationStage, ClickHouseExecutor, HydrationStage, LiveBudget, LiveRuntime, LiveSeedStage,
     RedactionStage, RoutingOutput, RoutingStage, SecurityStage,
 };

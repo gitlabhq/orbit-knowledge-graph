@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::types::{HydrationOutput, PipelineOutput, QueryExecutionLog};
+use crate::types::{GraphSeed, HydrationOutput, PipelineOutput, QueryExecutionLog};
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
 #[derive(Clone)]
@@ -45,6 +45,7 @@ impl PipelineStage for OutputStage {
 
         let mut query_result = input.query_result;
         let pagination = Some(crate::types::paginate(&mut query_result, &compiled.input));
+        let seed = ctx.phases.get::<GraphSeed>().cloned();
 
         Ok(PipelineOutput {
             row_count: query_result.authorized_count(),
@@ -56,6 +57,7 @@ impl PipelineStage for OutputStage {
             result_context: input.result_context,
             execution_log,
             pagination,
+            seed,
         })
     }
 }

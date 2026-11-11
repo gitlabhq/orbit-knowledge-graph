@@ -559,6 +559,7 @@ fn live_field_source(field: &LiveField, search_match: Option<SearchMatch>) -> Va
         "type": field.property_type.ontology_type(),
         "nullable": true,
         "filterable": false,
+        "live": true,
         "virtual": {
             "service": LIVE_SERVICE,
             "lookup": field.operation_id,
@@ -991,22 +992,20 @@ live:
             .nodes()
             .find(|n| n.name == "SlackMessage")
             .expect("SlackMessage node");
-        let search_match = |property: &str| {
+        let field = |property: &str| {
             slack
                 .fields
                 .iter()
                 .find(|f| f.name == property)
                 .unwrap_or_else(|| panic!("field {property}"))
-                .search_match
-                .clone()
         };
-        assert_eq!(search_match("text"), Some("contains".to_string()));
-        assert_eq!(search_match("sent_at"), Some("range".to_string()));
-        assert_eq!(
-            search_match("id"),
-            None,
-            "a non-search field stays unmarked"
-        );
+        assert_eq!(field("text").search_match, Some("contains".to_string()));
+        assert!(field("text").live, "text is a live property");
+        assert_eq!(field("sent_at").search_match, Some("range".to_string()));
+        assert!(field("sent_at").live, "sent_at is a live property");
+        let id = field("id");
+        assert_eq!(id.search_match, None, "a non-search field stays unmarked");
+        assert!(!id.live, "a stored property is not marked live");
     }
 
     #[test]

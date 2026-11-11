@@ -617,6 +617,10 @@ pub struct Field {
     /// `equals`, `range`), when an extension package marks it searchable. Surfaced
     /// in the graph schema so an agent can learn which fields a live search accepts.
     pub search_match: Option<String>,
+    /// Whether this is a live property (read per query from a provider, not stored).
+    /// Surfaced in the graph schema so an agent does not `WHERE` on an unfilterable
+    /// live field. Set from the package's live block; generic, not source-specific.
+    pub live: bool,
 }
 
 impl Default for Field {
@@ -641,6 +645,7 @@ impl Default for Field {
             terminal_values: None,
             binary: false,
             search_match: None,
+            live: false,
         }
     }
 }

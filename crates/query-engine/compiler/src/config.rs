@@ -172,6 +172,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
             state: [raw, input]
             phases: [gql_parse, validate, validate_relationships, normalize]
         }
+        parse_gql {
+            model: query_data_model::ClickHouseDataModel
+            env: []
+            state: [raw, input]
+            phases: [gql_parse]
+        }
         validate_normalize {
             model: query_data_model::ClickHouseDataModel
             env: []

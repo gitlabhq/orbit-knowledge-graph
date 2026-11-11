@@ -59,6 +59,7 @@ fn output(
         result_context,
         execution_log: vec![],
         pagination,
+        seed: None,
     }
 }
 

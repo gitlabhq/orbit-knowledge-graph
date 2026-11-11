@@ -210,6 +210,8 @@ struct PropertyYaml {
     binary: bool,
     #[serde(default)]
     search_match: Option<String>,
+    #[serde(default)]
+    live: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -415,6 +417,7 @@ impl NodeYaml {
                     terminal_values: prop_def.terminal_values,
                     binary: prop_def.binary,
                     search_match: prop_def.search_match,
+                    live: prop_def.live,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

@@ -23,7 +23,7 @@ use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, Pipel
 use super::helpers::send_query_result;
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, LiveBudget, LiveRuntime,
+    AuthorizationStage, ClickHouseExecutor, HydrationStage, LiveBudget, LiveRuntime, LiveSeedStage,
     RedactionStage, RoutingOutput, RoutingStage, SecurityStage,
 };
 
@@ -160,6 +160,8 @@ impl QueryPipelineService {
 
             let output = PipelineRunner::start(&mut ctx, &mut obs)
                 .then(&SecurityStage)
+                .await?
+                .then(&LiveSeedStage)
                 .await?
                 .then(&CompilationStage)
                 .await?
