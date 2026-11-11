@@ -33,10 +33,15 @@ pub(crate) struct PathFinding<'p> {
     kinds: Vec<String>,
     scoped: bool,
     limit: u32,
+    anchor_rows: u32,
 }
 
 impl<'p> PathFinding<'p> {
-    pub fn new<B: SqlBackend>(query: Query<'p>, model: &'p Catalog<B>) -> Result<Self> {
+    pub fn new<B: SqlBackend>(
+        query: Query<'p>,
+        model: &'p Catalog<B>,
+        anchor_rows: u32,
+    ) -> Result<Self> {
         let (from, to, relationships, max_depth) = query
             .operations()
             .find_map(|(_, operation)| match operation {
@@ -77,6 +82,7 @@ impl<'p> PathFinding<'p> {
             tables,
             kinds,
             limit: u32::try_from(rows).unwrap_or(u32::MAX),
+            anchor_rows,
         })
     }
 
@@ -146,6 +152,7 @@ fn anchor<B: RelationalBackend>(
     bodies: &mut Bodies,
     node: &Node<'_>,
     force_cte: bool,
+    limit: u32,
 ) -> Built<Anchor> {
     let (alias, table) = (node.alias, node.table.unwrap_or_default());
     if !force_cte && node.is_id_pinned_only() {
@@ -199,7 +206,6 @@ fn anchor<B: RelationalBackend>(
             descending: false,
         };
         let rows = q.order(rows, vec![order])?;
-        let limit = crate::query_limits::MAX_PATH_ANCHOR_LIMIT as u32;
         let rows = q.limit(rows, Some(limit), None)?;
         q.select(rows, outputs)
     })?;
@@ -431,8 +437,8 @@ pub(crate) fn emit<B: RelationalBackend>(
 ) -> Built<Relation> {
     let (start, end) = (&path.start, &path.end);
     let mut bodies = Bodies::default();
-    let start_anchor = anchor(q, &mut bodies, start, path.scoped)?;
-    let end_anchor = anchor(q, &mut bodies, end, path.scoped)?;
+    let start_anchor = anchor(q, &mut bodies, start, path.scoped, path.anchor_rows)?;
+    let end_anchor = anchor(q, &mut bodies, end, path.scoped, path.anchor_rows)?;
     let scope = scope_cte(q, &mut bodies, &start_anchor, &end_anchor)?;
     let (start_entity, end_entity) = (start.entity, end.entity);
     let options = Frontier {

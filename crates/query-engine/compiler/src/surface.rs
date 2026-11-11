@@ -1,13 +1,18 @@
 pub mod gql;
 
+use orbit_server_config::QueryLimits;
 use query_data_model::plan::logical::LogicalCatalog;
 use query_data_model::surface::Statement;
 use query_data_model::{Catalog, StorageBackend};
 
 use crate::Result;
 
-pub fn catalog<B: StorageBackend>(catalog: &Catalog<B>, admin: bool) -> LogicalCatalog<'_> {
-    let logical = catalog.model().logical().on(catalog.connection());
+pub fn catalog<'m, B: StorageBackend>(
+    catalog: &'m Catalog<B>,
+    limits: &'m QueryLimits,
+    admin: bool,
+) -> LogicalCatalog<'m> {
+    let logical = catalog.model().logical(limits).on(catalog.connection());
     match admin {
         true => logical.as_admin(),
         false => logical,

@@ -14,7 +14,7 @@ static MODEL: LazyLock<Catalog<ClickHouse>> =
 
 fn plan(gql: &str) -> LogicalPlan {
     let model = MODEL.model();
-    surface::parse(gql, model.logical().as_admin())
+    surface::parse(gql, model.logical(crate::testkit::limits()).as_admin())
         .unwrap()
         .plan
 }

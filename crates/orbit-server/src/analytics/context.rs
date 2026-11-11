@@ -584,7 +584,7 @@ mod tests {
             query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
         );
         let ctx = query_engine::compiler::uniform_grants(model.model(), false, &["1/22/"]);
-        let compiled = compile(gql, &model, &ctx).unwrap();
+        let compiled = compile(gql, &model, &ctx, query_data_model::testkit::limits()).unwrap();
         ExecMetrics {
             stats: Some(compiled.stats),
             hydration: Some(compiled.hydration),

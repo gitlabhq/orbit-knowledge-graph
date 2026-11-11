@@ -37,7 +37,8 @@ impl<B: RelationalBackend> Reads<'_, '_, B> {
         };
         let rows = self.bound(rows, bound, alias)?;
         let rows = self.filter(rows, predicates)?;
-        self.share(rows, Some(alias), point_lookup(predicates).unwrap_or(false))
+        let lookup = point_lookup(predicates, self.id_range_span).unwrap_or(false);
+        self.share(rows, Some(alias), lookup)
     }
 
     /// A FINAL read in its own block with only sort-key predicates, so no other predicate moves before the merge.
@@ -84,15 +85,16 @@ impl<B: RelationalBackend> Reads<'_, '_, B> {
         predicates: Vec<Predicate>,
         scope: ReadScope,
     ) -> Result<Rel> {
+        let span = self.id_range_span;
         let bounds_scan = |predicate: &Predicate| {
-            predicate.is_selective()
+            predicate.is_selective(span)
                 && (!predicate.is_text_match() || predicate.filters_sort_key(key, true))
         };
         let bounded = self.selective_latest && predicates.iter().any(bounds_scan);
         let read_once = bounded
             && scope.reads_final(&predicates)
             && predicates.iter().any(|predicate| {
-                predicate.is_selective() && !predicate.filters_sort_key(key, true)
+                predicate.is_selective(span) && !predicate.filters_sort_key(key, true)
             });
         if !bounded || read_once {
             let (keyed, rest): (Vec<_>, Vec<_>) = predicates
@@ -101,14 +103,14 @@ impl<B: RelationalBackend> Reads<'_, '_, B> {
             let rows = self.final_rows(table, alias, &keyed)?;
             let rows = self.bound(rows, bound, alias)?;
             let rows = self.filter(rows, &rest)?;
-            let lookup = point_lookup(&rest).or_else(|| point_lookup(&keyed));
+            let lookup = point_lookup(&rest, span).or_else(|| point_lookup(&keyed, span));
             return self.share(rows, Some(alias), lookup.unwrap_or(false));
         }
         let (mut identity, rest): (Vec<_>, Vec<_>) = predicates
             .iter()
             .cloned()
             .partition(|predicate| predicate.filters_sort_key(key, true));
-        if rest.iter().any(Predicate::is_selective) {
+        if rest.iter().any(|predicate| predicate.is_selective(span)) {
             let candidate = self.table(table, alias, false, bound, &predicates)?;
             let outputs: Vec<_> = key
                 .iter()
@@ -132,7 +134,11 @@ impl<B: RelationalBackend> Reads<'_, '_, B> {
         })?;
         let rows = self.q.read(&latest, Some(alias))?;
         let rows = self.filter(rows, &rest)?;
-        self.share(rows, Some(alias), point_lookup(&rest).unwrap_or(false))
+        self.share(
+            rows,
+            Some(alias),
+            point_lookup(&rest, span).unwrap_or(false),
+        )
     }
 }
 

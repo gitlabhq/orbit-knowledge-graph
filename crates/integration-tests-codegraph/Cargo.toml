@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-query-data-model = { path = "../query-data-model" }
+query-data-model = { path = "../query-data-model", features = ["testkit"] }
 code-graph = { path = "../code-graph" }
 code-graph-incremental = { path = "../code-graph-incremental" }
 compiler = { path = "../query-engine/compiler" }

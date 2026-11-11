@@ -291,6 +291,7 @@ mod tests {
         let columns = ["title".to_string()];
         HydrationArm::new(
             MODEL.model(),
+            crate::testkit::limits(),
             "MergeRequest",
             &[orbit_authorization::Key::Int(1)],
             &columns,
@@ -307,7 +308,13 @@ mod tests {
                 path_segment_budget: None,
             },
         };
-        let planned = plan(Request::Hydration(&request), None, &*MODEL).unwrap();
+        let planned = plan(
+            Request::Hydration(&request),
+            None,
+            &*MODEL,
+            crate::testkit::limits(),
+        )
+        .unwrap();
         let rendered = MODEL.render(&planned.plan);
         (rendered.sql, rendered.parameters)
     }

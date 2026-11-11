@@ -4,7 +4,13 @@ use query_engine::compiler::{HydrationPlan, compile};
 fn compile_query(query: &str) -> query_engine::compiler::CompiledQueryContext {
     let data_model = embedded_model();
     let security_ctx = crate::compiler::setup::test_ctx();
-    compile(query, &data_model, &security_ctx).unwrap()
+    compile(
+        query,
+        &data_model,
+        &security_ctx,
+        query_data_model::testkit::limits(),
+    )
+    .unwrap()
 }
 
 #[test]

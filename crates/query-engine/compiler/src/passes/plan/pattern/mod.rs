@@ -156,8 +156,9 @@ impl<'a, B: SqlBackend> Pattern<'a, B> {
         &self,
         q: &mut RelationalBuilder<'_, B>,
         tp_bounds: Option<&crate::tp_bounds::TpBounds>,
+        id_range_span: i64,
     ) -> Result<Matched> {
-        let reads = Reads::new(q, tp_bounds, !stored::<B>());
+        let reads = Reads::new(q, tp_bounds, !stored::<B>(), id_range_span);
         steps::RelationBuilder::new(self, reads).build(|bindings| {
             self.conditions
                 .iter()

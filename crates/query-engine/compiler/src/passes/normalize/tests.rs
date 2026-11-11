@@ -13,8 +13,8 @@ static MODEL: LazyLock<Catalog<ClickHouse>> =
 
 fn normalized(gql: &str) -> Result<LogicalPlan, QueryError> {
     let model = MODEL.model();
-    let statement = surface::parse(gql, model.logical().as_admin())?;
-    super::normalize(statement.plan, model, &*MODEL)
+    let statement = surface::parse(gql, model.logical(crate::testkit::limits()).as_admin())?;
+    super::normalize(statement.plan, model, &*MODEL, crate::testkit::limits())
 }
 
 fn literals(plan: &LogicalPlan) -> Vec<Literal> {

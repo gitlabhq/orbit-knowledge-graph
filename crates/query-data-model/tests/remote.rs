@@ -260,7 +260,7 @@ fn the_gql_surface_lowers_structural_matches_into_columns() {
     let model = model();
     let statement = gql::parse(
         "MATCH (f:File) WHERE f.project_id = 42 AND f.content MATCHES ast('compile($$$ARGS)', 'rust') RETURN f.path, match.line, match.ARGS LIMIT 50",
-        model.logical(),
+        model.logical(query_data_model::testkit::limits()),
     )
     .unwrap();
     let plan = statement.plan;
@@ -281,7 +281,7 @@ fn the_gql_surface_lowers_structural_matches_into_columns() {
 
     let unknown = gql::parse(
         "MATCH (f:File) WHERE f.project_id = 42 AND f.content MATCHES ast('compile($$$ARGS)', 'rust') RETURN match.BODY",
-        model.logical(),
+        model.logical(query_data_model::testkit::limits()),
     );
     assert_eq!(
         unknown.unwrap_err(),

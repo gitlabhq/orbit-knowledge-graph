@@ -129,7 +129,7 @@ struct Compiled {
 
 fn stages(query: &str, ctx: &Grants) -> Result<Compiled, QueryError> {
     let model = model();
-    let plan = remote::parse(query, &model, ctx)?;
+    let plan = remote::parse(query, &model, ctx, query_data_model::testkit::limits())?;
     let (target, planned) = remote::plan(&plan, &model)?;
     let planned_shape = physical(&planned);
     assert!(matches!(
@@ -140,7 +140,13 @@ fn stages(query: &str, ctx: &Grants) -> Result<Compiled, QueryError> {
     remote::check(&emitted)?;
     let request = remote::render(&target, &emitted)?;
     assert_eq!(
-        remote::compile(query, &model, ctx, &seeded_namespaces())?,
+        remote::compile(
+            query,
+            &model,
+            ctx,
+            &seeded_namespaces(),
+            query_data_model::testkit::limits()
+        )?,
         request
     );
     Ok(Compiled {
@@ -379,6 +385,7 @@ fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture() {
         CODE,
         &Arc::new(query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap()),
         &ctx,
+        query_data_model::testkit::limits(),
     );
     assert_eq!(
         relational.err().unwrap().to_string(),
@@ -412,7 +419,8 @@ fn via_chains_resolve_their_scope_keys_on_the_graph_connection() {
         query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&model).unwrap();
     let grants = caller("1/9970/");
     let sql = |query: &str| {
-        let logical = remote::parse(query, &model, &grants).unwrap();
+        let logical =
+            remote::parse(query, &model, &grants, query_data_model::testkit::limits()).unwrap();
         let (target, planned) = remote::plan(&logical, &model).unwrap();
         let lookups = remote::lookups(&target, &planned, &graph, &grants).unwrap();
         let results: Vec<_> = lookups
@@ -451,7 +459,13 @@ fn via_chains_resolve_their_scope_keys_on_the_graph_connection() {
 #[test]
 fn code_rows_go_through_the_read_code_check() {
     let model = model();
-    let logical = remote::parse(CODE, &model, &caller("1/9970/")).unwrap();
+    let logical = remote::parse(
+        CODE,
+        &model,
+        &caller("1/9970/"),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let checks = remote::row_checks(&logical, &model);
     assert_eq!(
         checks,

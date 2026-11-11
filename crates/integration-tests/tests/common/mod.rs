@@ -48,7 +48,13 @@ pub async fn compile_and_execute(
 ) -> (CompiledQueryContext, QueryResult) {
     let data_model = load_data_model();
     let security_ctx = test_security_context();
-    let compiled = compile(query, &data_model, &security_ctx).unwrap();
+    let compiled = compile(
+        query,
+        &data_model,
+        &security_ctx,
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let batches = ctx.query_parameterized(&compiled.base).await;
     let result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
     (compiled, result)
@@ -108,6 +114,7 @@ pub async fn resolve_owners(
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::new(ctx.create_client()));
     server_extensions.insert(load_data_model());
+    server_extensions.insert(*query_data_model::testkit::limits());
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::new(compiled.clone())),

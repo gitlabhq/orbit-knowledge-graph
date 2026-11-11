@@ -7449,6 +7449,7 @@ dependencies = [
  "indexmap 2.14.2",
  "jsonschema",
  "minijinja",
+ "orbit-server-config",
  "orbit-utils",
  "pest",
  "pest_consume",

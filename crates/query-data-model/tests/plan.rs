@@ -28,7 +28,7 @@ fn names(plan: &LogicalPlan, node: NodeId) -> Vec<&str> {
 #[test]
 fn entities_filter_and_follow_build_a_logical_plan() {
     let model = load(&["gitlab"]);
-    let catalog = model.logical();
+    let catalog = model.logical(query_data_model::testkit::limits());
     let requests = catalog.entity("MergeRequest").unwrap();
     let authored = catalog.relationship("AUTHORED").unwrap();
 
@@ -60,7 +60,7 @@ fn entities_filter_and_follow_build_a_logical_plan() {
 #[test]
 fn two_occurrences_of_one_entity_keep_distinct_outputs() {
     let model = load(&["gitlab"]);
-    let catalog = model.logical();
+    let catalog = model.logical(query_data_model::testkit::limits());
     let users = catalog.entity("User").unwrap();
     let notes = catalog.entity("Note").unwrap();
     let authored = catalog.relationship("AUTHORED").unwrap();
@@ -107,7 +107,7 @@ fn two_occurrences_of_one_entity_keep_distinct_outputs() {
 #[test]
 fn an_aggregate_declares_outputs_that_a_filter_can_use() {
     let model = load(&["gitlab"]);
-    let catalog = model.logical();
+    let catalog = model.logical(query_data_model::testkit::limits());
     let requests = catalog.entity("MergeRequest").unwrap();
 
     let plan = catalog
@@ -142,7 +142,7 @@ fn an_aggregate_declares_outputs_that_a_filter_can_use() {
 #[test]
 fn shared_bodies_are_reused_and_scoped() {
     let model = load(&["gitlab"]);
-    let catalog = model.logical();
+    let catalog = model.logical(query_data_model::testkit::limits());
     let requests = catalog.entity("MergeRequest").unwrap();
 
     let plan = catalog
@@ -198,9 +198,12 @@ fn shared_bodies_are_reused_and_scoped() {
 fn handles_from_another_plan_or_snapshot_are_rejected() {
     let model = load(&["gitlab"]);
     let other = load(&["gitlab", "integration.linear"]);
-    let catalog = model.logical();
+    let catalog = model.logical(query_data_model::testkit::limits());
     let requests = catalog.entity("MergeRequest").unwrap();
-    let foreign = other.logical().entity("MergeRequest").unwrap();
+    let foreign = other
+        .logical(query_data_model::testkit::limits())
+        .entity("MergeRequest")
+        .unwrap();
 
     let snapshot = catalog.build(|q| q.entities(foreign));
     assert_eq!(
@@ -225,7 +228,9 @@ fn handles_from_another_plan_or_snapshot_are_rejected() {
         PlanError::Rejected(Rejected::ForeignPlan)
     );
 
-    let rewritten = other.logical().rebuild(first, |q, step| step.keep(q));
+    let rewritten = other
+        .logical(query_data_model::testkit::limits())
+        .rebuild(first, |q, step| step.keep(q));
     assert_eq!(
         rewritten.unwrap_err(),
         PlanError::Rejected(Rejected::ForeignSnapshot)
@@ -235,7 +240,7 @@ fn handles_from_another_plan_or_snapshot_are_rejected() {
 #[test]
 fn an_invalid_follow_names_the_connecting_relationships() {
     let model = load(&["gitlab"]);
-    let catalog = model.logical();
+    let catalog = model.logical(query_data_model::testkit::limits());
     let requests = catalog.entity("MergeRequest").unwrap();
     let users = catalog.entity("User").unwrap();
     let contains = catalog.relationship("CONTAINS").unwrap();
@@ -274,7 +279,7 @@ fn property_policy_and_types_are_checked_at_construction() {
         }
     })
     .unwrap();
-    let catalog = model.logical();
+    let catalog = model.logical(query_data_model::testkit::limits());
     let requests = catalog.entity("MergeRequest").unwrap();
     let users = catalog.entity("User").unwrap();
     let attempt = |entity, property: &str, predicate: fn(Expr) -> _| {
@@ -318,11 +323,15 @@ fn property_policy_and_types_are_checked_at_construction() {
             .to_string()
     };
     assert_eq!(
-        search(model.logical()),
+        search(model.logical(query_data_model::testkit::limits())),
         "User.email is available to administrators only"
     );
     assert_eq!(
-        search(model.logical().as_admin()),
+        search(
+            model
+                .logical(query_data_model::testkit::limits())
+                .as_admin()
+        ),
         "User.email does not support substring matching"
     );
 }
@@ -330,7 +339,7 @@ fn property_policy_and_types_are_checked_at_construction() {
 #[test]
 fn a_failed_step_closes_the_construction_session() {
     let model = load(&["gitlab"]);
-    let catalog = model.logical();
+    let catalog = model.logical(query_data_model::testkit::limits());
     let requests = catalog.entity("MergeRequest").unwrap();
 
     let result = catalog.build(|q| {
@@ -401,7 +410,7 @@ fn consumers_of_scans(plan: &LogicalPlan) -> Vec<&LogicalOperation> {
 #[test]
 fn a_rebuild_guards_every_scan_and_preserves_outputs() {
     let model = load(&["gitlab"]);
-    let catalog = model.logical();
+    let catalog = model.logical(query_data_model::testkit::limits());
     let requests = catalog.entity("MergeRequest").unwrap();
     fn titles<'m>(
         q: &mut LogicalBuilder<'m>,
@@ -450,7 +459,7 @@ fn a_rebuild_guards_every_scan_and_preserves_outputs() {
 #[test]
 fn changed_outputs_need_explicit_reconnection() {
     let model = load(&["gitlab"]);
-    let catalog = model.logical();
+    let catalog = model.logical(query_data_model::testkit::limits());
     let requests = catalog.entity("MergeRequest").unwrap();
     let build = || {
         catalog.build(|q| {

@@ -1,7 +1,6 @@
-use super::limits::MAX_IN_VALUES;
 use super::{
-    Comparison, Conjunct, EdgeField, Expr, Literal, Logical, LogicalOperation, LogicalType,
-    Operand, PlanError, Predicate,
+    Comparison, Conjunct, EdgeField, Expr, Literal, Logical, LogicalCatalog, LogicalOperation,
+    LogicalType, Operand, PlanError, Predicate,
 };
 use crate::plan::tracking::Construction;
 use crate::{Direction, EntityId, Model};
@@ -9,12 +8,13 @@ use crate::{Direction, EntityId, Model};
 const CONSTANT: &str = "every condition must compare a property of a matched node or relationship with a value or another property";
 
 pub(super) fn conditions(
-    model: &Model,
+    catalog: LogicalCatalog<'_>,
     construction: &Construction<Logical>,
     predicate: &Predicate,
 ) -> Result<(), PlanError> {
+    let model = catalog.model();
     for leaf in predicate.leaf_predicates() {
-        constant(leaf)?;
+        constant(leaf, catalog.limits().in_values)?;
         dynamic(construction, leaf)?;
     }
     kinds(model, predicate)?;
@@ -34,11 +34,11 @@ pub(super) fn conditions(
     Ok(())
 }
 
-fn constant(leaf: &Predicate) -> Result<(), PlanError> {
+fn constant(leaf: &Predicate, in_values: usize) -> Result<(), PlanError> {
     let constant = match leaf {
         Predicate::In { values, .. } if values.is_empty() => {
             return Err(PlanError::shape(format!(
-                "IN requires 1-{MAX_IN_VALUES} values"
+                "IN requires 1-{in_values} values"
             )));
         }
         Predicate::Compare {

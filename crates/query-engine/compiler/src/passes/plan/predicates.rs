@@ -67,18 +67,16 @@ pub enum Predicate {
 }
 
 impl Predicate {
-    pub fn is_selective(&self) -> bool {
+    pub fn is_selective(&self, id_range_span: i64) -> bool {
         match self {
             Self::Boolean(expression) => expression.fold(
-                &|predicate| predicate.is_selective(),
+                &|predicate| predicate.is_selective(id_range_span),
                 &|predicates| predicates.into_iter().any(|selective| selective),
                 &|_| false,
             ),
             Self::Filter { filter, .. } => filter.is_selective(),
             Self::Ids { .. } | Self::Membership { .. } => true,
-            Self::IdRange { start, end, .. } => {
-                end.saturating_sub(*start) <= crate::query_limits::MAX_ID_RANGE_SPAN
-            }
+            Self::IdRange { start, end, .. } => end.saturating_sub(*start) <= id_range_span,
             _ => false,
         }
     }

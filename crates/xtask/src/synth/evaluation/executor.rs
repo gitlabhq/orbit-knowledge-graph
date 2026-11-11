@@ -501,15 +501,21 @@ impl QueryExecutor {
 
         builder = builder.substituted_query(serde_json::Value::String(substituted.clone()));
 
-        let config = orbit_server_config::AppConfig::embedded_defaults().authorization;
+        let config = orbit_server_config::AppConfig::embedded_defaults();
         let compiled = orbit_server::authorization::gitlab::session_grants(
-            &config,
+            &config.authorization,
             self.data_model.model(),
             security_ctx.clone(),
         )
         .map_err(|error| error.to_string())
         .and_then(|grants| {
-            compile(&substituted, &self.data_model, &grants).map_err(|error| error.to_string())
+            compile(
+                &substituted,
+                &self.data_model,
+                &grants,
+                &config.query.limits,
+            )
+            .map_err(|error| error.to_string())
         });
         let compiled = match compiled {
             Ok(c) => c,

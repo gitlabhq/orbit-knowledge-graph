@@ -81,6 +81,7 @@ compiler = { path = "../query-engine/compiler" }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 orbit-billing = { path = "../orbit-billing", features = ["testkit"] }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
+query-data-model = { path = "../query-data-model", features = ["testkit"] }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["net"] }

@@ -1,22 +1,23 @@
 mod ast;
+mod ceilings;
 mod errors;
 mod lower;
 mod syntax;
 
+use orbit_server_config::QueryLimits;
 use pest_derive::Parser;
 
 use super::{Statement, SurfaceError};
 use crate::plan::logical::LogicalCatalog;
-use crate::plan::logical::limits::{MAX_IDENTIFIER, MAX_NESTING};
 use errors::{invalid, parse_failure, syntax_error};
+
+pub use ceilings::{admits, ceilings};
 
 #[derive(Parser)]
 #[grammar = "surface/gql/query.pest"]
 struct QueryParser;
 
 pub const GRAMMAR: &str = include_str!("query.pest");
-
-const MAX_QUERY_BYTES: usize = 32 * 1024;
 
 #[derive(Debug)]
 pub enum Routed {
@@ -25,7 +26,7 @@ pub enum Routed {
 }
 
 pub fn route(raw: &str, catalog: LogicalCatalog<'_>) -> Result<Routed, SurfaceError> {
-    match statement(raw)? {
+    match statement(raw, catalog.limits())? {
         ast::Statement::Query(query) => lower::lower(*query, catalog).map(Routed::Query),
         ast::Statement::SchemaCall(node) => Ok(Routed::Schema(node)),
     }
@@ -38,7 +39,7 @@ pub fn parse(raw: &str, catalog: LogicalCatalog<'_>) -> Result<Statement, Surfac
     }
 }
 
-pub fn outline(query: &str) -> Option<Vec<(usize, String)>> {
+pub fn outline(query: &str, limits: &QueryLimits) -> Option<Vec<(usize, String)>> {
     fn visit(
         pairs: pest::iterators::Pairs<'_, Rule>,
         depth: usize,
@@ -49,30 +50,35 @@ pub fn outline(query: &str) -> Option<Vec<(usize, String)>> {
             visit(pair.into_inner(), depth + 1, out);
         }
     }
-    bounds(query).ok()?;
+    bounds(query, limits).ok()?;
     let pairs = <QueryParser as pest::Parser<Rule>>::parse(Rule::Query, query).ok()?;
     let mut outline = Vec::new();
     visit(pairs, 0, &mut outline);
     Some(outline)
 }
 
-fn statement(raw: &str) -> Result<ast::Statement<'_>, SurfaceError> {
-    bounds(raw)?;
-    let statement = <QueryParser as pest_consume::Parser>::parse(Rule::Statement, raw)
-        .map_err(parse_failure)?
-        .single()
-        .map_err(syntax_error)?;
+fn statement<'i>(
+    raw: &'i str,
+    limits: &'i QueryLimits,
+) -> Result<ast::Statement<'i>, SurfaceError> {
+    bounds(raw, limits)?;
+    let statement =
+        <QueryParser as pest_consume::Parser>::parse_with_userdata(Rule::Statement, raw, limits)
+            .map_err(|error| parse_failure(error, limits))?
+            .single()
+            .map_err(syntax_error)?;
     QueryParser::Statement(statement).map_err(syntax_error)
 }
 
-fn bounds(query: &str) -> Result<(), SurfaceError> {
-    if query.len() > MAX_QUERY_BYTES {
+fn bounds(query: &str, limits: &QueryLimits) -> Result<(), SurfaceError> {
+    if query.len() > limits.query_bytes {
         return Err(SurfaceError::Limit(format!(
-            "query must not exceed {MAX_QUERY_BYTES} bytes"
+            "query must not exceed {} bytes",
+            limits.query_bytes
         )));
     }
     let tokens = <QueryParser as pest::Parser<Rule>>::parse(Rule::Nesting, query)
-        .map_err(parse_failure)?
+        .map_err(|error| parse_failure(error, limits))?
         .next()
         .into_iter()
         .flat_map(|pair| pair.into_inner());
@@ -81,7 +87,7 @@ fn bounds(query: &str) -> Result<(), SurfaceError> {
         match token.as_rule() {
             Rule::OpenDelimiter => {
                 depth += 1;
-                if depth > MAX_NESTING {
+                if depth > limits.nesting {
                     return Err(invalid(token.as_span(), "expression nesting is too deep"));
                 }
             }
@@ -92,9 +98,9 @@ fn bounds(query: &str) -> Result<(), SurfaceError> {
     Ok(())
 }
 
-fn identifier(identifier: &str) -> Result<(), String> {
+fn identifier(identifier: &str, max: usize) -> Result<(), String> {
     let mut chars = identifier.chars();
-    let valid = identifier.len() <= MAX_IDENTIFIER
+    let valid = identifier.len() <= max
         && chars
             .next()
             .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')

@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
 use orbit_log_fields::warn;
-use query_engine::compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use query_engine::compiler::{
     HydrationArm, HydrationCompileOptions, HydrationPlan, HydrationRequest, QueryType,
     compile_hydration,
@@ -49,6 +48,7 @@ impl HydrationStage {
             .server_extensions
             .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
             .ok_or_else(|| PipelineError::custom("query data model missing"))?;
+        let limits = ctx.limits()?;
         let scope: Vec<_> = ctx
             .security_context()?
             .traversal_paths
@@ -57,17 +57,18 @@ impl HydrationStage {
             .collect();
         let mut arms = Vec::new();
         for mut lookup in lookups {
-            if lookup.ids.len() > MAX_DYNAMIC_HYDRATION_RESULTS {
+            if lookup.ids.len() > limits.hydration_rows {
                 warn!(
                     safe(ENTITY) = lookup.entity.as_str(),
                     safe(COUNT) = lookup.ids.len(),
-                    safe(LIMIT) = MAX_DYNAMIC_HYDRATION_RESULTS,
+                    safe(LIMIT) = limits.hydration_rows,
                     "key lookup is capped, so nodes past the limit are redacted"
                 );
-                lookup.ids.truncate(MAX_DYNAMIC_HYDRATION_RESULTS);
+                lookup.ids.truncate(limits.hydration_rows);
             }
             arms.push(hydration_helpers::hydration_arm(
                 data_model.model(),
+                limits,
                 &lookup.entity,
                 &lookup.ids,
                 &lookup.properties,
@@ -131,7 +132,7 @@ impl HydrationStage {
                 ctx.compiled()?.query_type,
                 QueryType::Neighbors | QueryType::PathFinding
             ),
-            path_segment_budget: Some(orbit_utils::clickhouse::MAX_BOUND_PATH_SEGMENTS),
+            path_segment_budget: Some(ctx.limits()?.hydration_path_segments),
         };
 
         let data_model = ctx
@@ -142,6 +143,7 @@ impl HydrationStage {
             HydrationRequest { arms, options },
             data_model,
             ctx.grants()?,
+            ctx.limits()?,
         )
         .map_err(|e| PipelineError::Compile {
             client_safe: false,
@@ -236,9 +238,14 @@ impl PipelineStage for HydrationStage {
                     .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
                     .ok_or_else(|| PipelineError::custom("query data model missing"))
                     .inspect_err(|e| obs.record_error(e))?;
-                let arms =
-                    hydration_helpers::hydrate_static(data_model.model(), templates, &query_result)
-                        .inspect_err(|e| obs.record_error(e))?;
+                let limits = ctx.limits().inspect_err(|e| obs.record_error(e))?;
+                let arms = hydration_helpers::hydrate_static(
+                    data_model.model(),
+                    limits,
+                    templates,
+                    &query_result,
+                )
+                .inspect_err(|e| obs.record_error(e))?;
                 let (property_map, debug, executions) =
                     Self::execute_hydration(ctx, arms, "static")
                         .await
@@ -302,8 +309,10 @@ impl PipelineStage for HydrationStage {
                         .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
                         .ok_or_else(|| PipelineError::custom("query data model missing"))
                         .inspect_err(|e| obs.record_error(e))?;
+                    let limits = ctx.limits().inspect_err(|e| obs.record_error(e))?;
                     let arms = hydration_helpers::hydrate_dynamic(
                         data_model.model(),
+                        limits,
                         entity_specs,
                         &refs,
                         &scope,

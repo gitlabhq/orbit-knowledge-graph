@@ -4,13 +4,14 @@
 use std::collections::HashMap;
 
 use arrow::record_batch::RecordBatch;
-use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use compiler::constants::{
     hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
     traversal_path_column,
 };
 use compiler::orbit_authorization::Key;
-use compiler::{DynamicEntityColumns, HydrationArm, HydrationTemplate, Operator, VirtualFilter};
+use compiler::{
+    DynamicEntityColumns, HydrationArm, HydrationTemplate, Operator, QueryLimits, VirtualFilter,
+};
 use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
@@ -124,12 +125,13 @@ fn static_id(row: &QueryResultRow, alias: &str) -> Option<Key> {
 
 pub fn hydration_arm(
     model: &Model,
+    limits: &QueryLimits,
     entity: &str,
     ids: &[Key],
     columns: &[String],
     traversal_paths: Vec<TraversalPath>,
 ) -> Result<HydrationArm, PipelineError> {
-    HydrationArm::new(model, entity, ids, columns, traversal_paths).map_err(|error| {
+    HydrationArm::new(model, limits, entity, ids, columns, traversal_paths).map_err(|error| {
         PipelineError::Compile {
             client_safe: false,
             reason: error.rejection_reason(),
@@ -303,6 +305,7 @@ pub fn strip_injected_columns<'a>(
 
 pub fn hydrate_static(
     model: &Model,
+    limits: &QueryLimits,
     templates: &[HydrationTemplate],
     query_result: &QueryResult,
 ) -> Result<Vec<HydrationArm>, PipelineError> {
@@ -326,6 +329,7 @@ pub fn hydrate_static(
 
         arms.push(hydration_arm(
             model,
+            limits,
             &template.entity_type,
             &ids,
             &template.columns,
@@ -343,6 +347,7 @@ pub fn hydrate_static(
 /// its own rows carry. A neighbor can sit above the center node, so the center path is no fallback.
 pub fn hydrate_dynamic(
     model: &Model,
+    limits: &QueryLimits,
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<Key>>,
     traversal_paths: &[TraversalPath],
@@ -364,11 +369,7 @@ pub fn hydrate_dynamic(
             continue;
         }
 
-        let capped_ids: Vec<Key> = ids
-            .iter()
-            .take(MAX_DYNAMIC_HYDRATION_RESULTS)
-            .cloned()
-            .collect();
+        let capped_ids: Vec<Key> = ids.iter().take(limits.hydration_rows).cloned().collect();
 
         let tps = if spec.has_traversal_path {
             ref_paths
@@ -380,6 +381,7 @@ pub fn hydrate_dynamic(
 
         arms.push(hydration_arm(
             model,
+            limits,
             entity_type,
             &capped_ids,
             &spec.columns,

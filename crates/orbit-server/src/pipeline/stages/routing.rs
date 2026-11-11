@@ -31,6 +31,7 @@ impl RoutingStage {
             data_model,
             claims.admin,
             IntrospectionScope::All,
+            ctx.limits()?,
         )?)
     }
 }

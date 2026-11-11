@@ -23,8 +23,11 @@ pub struct Rel {
 
 /// Rows pinned by unique keys: every selective predicate is a point lookup, which costs less to
 /// repeat at each read than to materialize. `None` when no predicate is selective.
-pub(super) fn point_lookup(predicates: &[Predicate]) -> Option<bool> {
-    let mut selective = predicates.iter().filter(|p| p.is_selective()).peekable();
+pub(super) fn point_lookup(predicates: &[Predicate], id_range_span: i64) -> Option<bool> {
+    let mut selective = predicates
+        .iter()
+        .filter(|p| p.is_selective(id_range_span))
+        .peekable();
     selective.peek()?;
     Some(selective.all(Predicate::is_point_lookup))
 }
@@ -103,6 +106,7 @@ pub(crate) struct Reads<'q, 'c, B: RelationalBackend> {
     pub q: &'q mut RelationalBuilder<'c, B>,
     tp_bounds: Option<&'q TpBounds>,
     pub(super) selective_latest: bool,
+    pub(super) id_range_span: i64,
     pub(super) memo: Vec<(super::current::ReadKey, Rel)>,
 }
 
@@ -111,11 +115,13 @@ impl<'q, 'c, B: RelationalBackend> Reads<'q, 'c, B> {
         q: &'q mut RelationalBuilder<'c, B>,
         tp_bounds: Option<&'q TpBounds>,
         selective_latest: bool,
+        id_range_span: i64,
     ) -> Self {
         Self {
             q,
             tp_bounds,
             selective_latest,
+            id_range_span,
             memo: Vec::new(),
         }
     }
@@ -135,8 +141,9 @@ impl<'q, 'c, B: RelationalBackend> Reads<'q, 'c, B> {
     ) -> Result<Subquery> {
         let mut failure = None;
         let (tp_bounds, selective_latest) = (self.tp_bounds, self.selective_latest);
+        let span = self.id_range_span;
         let body = self.q.subquery(name, |q| {
-            build(&mut Reads::new(q, tp_bounds, selective_latest)).map_err(|error| {
+            build(&mut Reads::new(q, tp_bounds, selective_latest, span)).map_err(|error| {
                 failure = Some(error);
                 RelationalError::Incomplete("a planned subquery")
             })
@@ -199,7 +206,7 @@ impl<'q, 'c, B: RelationalBackend> Reads<'q, 'c, B> {
         }
         let rows = self.read(rel, None)?;
         let rows = self.filter(rows, predicates)?;
-        let lookup = point_lookup(predicates).unwrap_or(rel.lookup);
+        let lookup = point_lookup(predicates, self.id_range_span).unwrap_or(rel.lookup);
         self.share(rows, rel.alias.as_deref(), lookup)
     }
 

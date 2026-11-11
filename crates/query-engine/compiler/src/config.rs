@@ -2,7 +2,7 @@
 //! and pipeline presets. The macro generates the `CompilerCtx` trait,
 //! per-pipeline context structs, and runner functions.
 
-use orbit_server_config::QueryConfig;
+use orbit_server_config::{QueryConfig, QueryLimits};
 
 use crate::error::{QueryError, Result};
 use crate::hydration::HydrationRequest;
@@ -27,6 +27,7 @@ fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
 compiler_pipeline_macros::define_compiler_ctx! {
     env {
         pub grants: Grants,
+        pub limits: QueryLimits,
     }
 
     state {
@@ -45,27 +46,27 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
     phases {
         gql_parse {
-            reads_env: [grants, data_model]
+            reads_env: [grants, data_model, limits]
             mutates: [raw, statement]
         }
         gql_parse_trusted {
-            reads_env: [data_model]
+            reads_env: [data_model, limits]
             mutates: [raw, statement]
         }
         gql_parse_local {
-            reads_env: [data_model]
+            reads_env: [data_model, limits]
             mutates: [raw, statement]
         }
         admit {
-            reads_env: [data_model]
+            reads_env: [data_model, limits]
             reads_state: [statement]
         }
         admit_local {
-            reads_env: [data_model]
+            reads_env: [data_model, limits]
             reads_state: [statement]
         }
         normalize {
-            reads_env: [data_model]
+            reads_env: [data_model, limits]
             mutates: [statement]
         }
         restrict {
@@ -82,7 +83,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [tp_bounds]
         }
         plan {
-            reads_env: [data_model]
+            reads_env: [data_model, limits]
             reads_state: [statement, tp_bounds, hydration]
             mutates: [relational, plan_metadata]
         }
@@ -111,7 +112,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [relational]
         }
         settings {
-            reads_env: [data_model]
+            reads_env: [data_model, limits]
             reads_state: [statement, hydration, plan_metadata]
             mutates: [query_config, relational]
         }
@@ -138,25 +139,25 @@ compiler_pipeline_macros::define_compiler_ctx! {
     pipelines {
         clickhouse_gql {
             backend: query_data_model::ClickHouse
-            env: [grants]
+            env: [grants, limits]
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [gql_parse, normalize, restrict, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         ch_hydration {
             backend: query_data_model::ClickHouse
-            env: [grants]
+            env: [grants, limits]
             state: [tp_bounds, hydration, plan_metadata, query_config, relational, hydration_query]
             phases: [restrict_hydration, plan, settings, security, security_check, render_hydration]
         }
         duckdb_gql {
             backend: query_data_model::DuckDb
-            env: []
+            env: [limits]
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [gql_parse_local, normalize, admit_local, plan, result_contract, paginate, materialize, codegen]
         }
         check_gql {
             backend: query_data_model::ClickHouse
-            env: []
+            env: [limits]
             state: [raw, statement]
             phases: [gql_parse_trusted, normalize, admit]
         }
@@ -165,7 +166,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
 fn parse<C: CompilerCtx>(ctx: &mut C, admin: bool, all_columns: bool) -> Result<()> {
     if let Some(raw) = ctx.take_raw() {
-        let catalog = surface::catalog(ctx.data_model(), admin);
+        let catalog = surface::catalog(ctx.data_model(), ctx.limits(), admin);
         let catalog = match all_columns {
             true => catalog.with_all_columns(),
             false => catalog,
@@ -193,7 +194,7 @@ fn admit_with(ctx: &mut impl CompilerCtx, selectivity: bool) -> Result<()> {
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let model = ctx.data_model();
     let query = crate::logical::Query::new(&statement.plan, model.model());
-    admit::admit(query, model, selectivity)
+    admit::admit(query, model, ctx.limits(), selectivity)
 }
 
 fn admit(ctx: &mut impl CompilerCtx) -> Result<()> {
@@ -207,7 +208,7 @@ fn admit_local(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
     let statement = require(ctx.take_statement(), "statement")?;
     let model = ctx.data_model();
-    let plan = normalize::normalize(statement.plan, model.model(), model)?;
+    let plan = normalize::normalize(statement.plan, model.model(), model, ctx.limits())?;
     ctx.set_statement(Statement { plan, ..statement });
     Ok(())
 }
@@ -242,7 +243,8 @@ fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
             Request::Query(query)
         }
     };
-    let planned = crate::passes::plan::plan(request, ctx.tp_bounds().as_ref(), model)?;
+    let planned =
+        crate::passes::plan::plan(request, ctx.tp_bounds().as_ref(), model, ctx.limits())?;
     ctx.set_relational(planned.plan);
     ctx.set_plan_metadata(planned.metadata);
     Ok(())
@@ -336,6 +338,7 @@ fn settings(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) 
         &plan,
         metadata.edges.len(),
         metadata.point_lookup,
+        ctx.limits(),
     );
     let plan = codegen::configure(plan, ctx.data_model(), &config)?;
     ctx.set_relational(plan);

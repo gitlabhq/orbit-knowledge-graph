@@ -142,7 +142,7 @@ impl<'m> LogicalBuilder<'m> {
             vec![rows],
             |catalog, construction, _| {
                 super::limits::in_values(catalog.model(), &checked, catalog.limits())?;
-                super::conditions::conditions(catalog.model(), construction, &checked)?;
+                super::conditions::conditions(catalog, construction, &checked)?;
                 filter::predicate(catalog.model(), construction, &checked)?;
                 Ok(Outputs::preserve())
             },
@@ -228,7 +228,7 @@ impl<'m> LogicalBuilder<'m> {
             LogicalOperation::Filter(predicate),
             vec![rows],
             |catalog, construction, _| {
-                super::limits::at_most("pinned ids", count, catalog.limits().pins)?;
+                super::limits::at_most("pinned ids", count, catalog.limits().pinned_ids)?;
                 filter::predicate(catalog.model(), construction, &checked)?;
                 Ok(Outputs::preserve())
             },

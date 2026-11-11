@@ -8,7 +8,15 @@ use orbit_utils::traversal_path::TraversalPath;
 #[test]
 fn valid_column_in_order_by() {
     let query = "MATCH (u:User {id: 1}) RETURN u{.username} ORDER BY u.username LIMIT 10";
-    assert!(compile(query, &embedded_model(), &test_ctx()).is_ok());
+    assert!(
+        compile(
+            query,
+            &embedded_model(),
+            &test_ctx(),
+            query_data_model::testkit::limits()
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -17,6 +25,7 @@ fn invalid_column_in_order_by() {
         "MATCH (u:User {id: 1}) RETURN u{.username} ORDER BY u.nonexistent_column LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     assert!(
@@ -28,7 +37,15 @@ fn invalid_column_in_order_by() {
 #[test]
 fn valid_column_in_filter() {
     let query = "MATCH (u:User {username: 'admin'}) RETURN u{.username} LIMIT 10";
-    assert!(compile(query, &embedded_model(), &test_ctx()).is_ok());
+    assert!(
+        compile(
+            query,
+            &embedded_model(),
+            &test_ctx(),
+            query_data_model::testkit::limits()
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -37,6 +54,7 @@ fn invalid_column_in_filter() {
         "MATCH (u:User {nonexistent_column: 'value'}) RETURN u{.username} LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     assert!(err.to_string().contains("nonexistent_column"));
@@ -49,6 +67,7 @@ fn valid_column_in_aggregation() {
             "MATCH (p:Project {id: 1}) RETURN count(p.name) AS name_count LIMIT 10",
             &embedded_model(),
             &test_ctx(),
+            query_data_model::testkit::limits(),
         )
         .is_ok()
     );
@@ -60,6 +79,7 @@ fn invalid_column_in_aggregation() {
         "MATCH (p:Project {id: 1}) RETURN sum(p.invalid_property) AS total LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     assert!(
@@ -74,6 +94,7 @@ fn invalid_entity_type_rejected() {
         "MATCH (n:NonexistentType {id: 1}) RETURN n{.name} LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     let msg = err.to_string();
@@ -90,6 +111,7 @@ fn invalid_filter_key_lists_valid_candidates() {
         "MATCH (u:User {project_full_path: 'x'}) RETURN u{.username} LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     let msg = err.to_string();
@@ -105,6 +127,7 @@ fn invalid_group_by_property_lists_valid_fields() {
         "MATCH (p:Project {id: 1}) RETURN p.reviewer_count, count(p) AS c LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     let msg = err.to_string();
@@ -120,6 +143,7 @@ fn invalid_column_lists_valid_candidates() {
         "MATCH (u:User) RETURN u{.bogus_col} LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     let msg = err.to_string();
@@ -135,6 +159,7 @@ fn invalid_relationship_type_lists_valid_candidates() {
         "MATCH (u:User {id: 1})-[:BOGUS_REL]->(n:Note) RETURN u, n LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     let msg = err.to_string();
@@ -148,7 +173,13 @@ fn invalid_relationship_type_lists_valid_candidates() {
 fn package_built_by_pipeline_traversal() {
     let query = "MATCH (pkg:Package {package_type: 'npm'})-[:BUILT_BY]->(pl:Pipeline) RETURN pkg{.name, .version, .package_type}, pl{.id, .status} LIMIT 25";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_package"));
@@ -163,7 +194,13 @@ fn package_built_by_pipeline_traversal() {
 fn search_with_specific_columns() {
     let query = "MATCH (u:User {id: 1}) RETURN u{.username, .state} LIMIT 10";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -176,7 +213,13 @@ fn search_with_specific_columns() {
 fn search_with_wildcard_columns() {
     let query = "MATCH (u:User {id: 1}) RETURN properties(u) LIMIT 10";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -189,7 +232,13 @@ fn traversal_with_columns() {
     let query =
         "MATCH (u:User {id: 1})-[:CONTAINS]->(p:Project) RETURN u{.username}, p{.name} LIMIT 10";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -202,7 +251,13 @@ fn traversal_with_columns() {
 fn aggregation_includes_mandatory_columns_for_group_by_node() {
     let query = "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username}, count(mr) AS mr_count LIMIT 10";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -217,7 +272,13 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
 fn path_finding_uses_orbit_path_not_node_columns() {
     let query = "MATCH path = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN path";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_path"));
@@ -229,7 +290,13 @@ fn result_context_populated() {
     let query =
         "MATCH (u:User {id: 1})-[:CONTAINS]->(p:Project) RETURN u{.username}, p{.name} LIMIT 10";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert_eq!(result.base.result_context.len(), 2);
@@ -254,7 +321,13 @@ fn result_context_populated() {
 fn single_hop_does_not_generate_recursive_cte() {
     let query = "MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note) RETURN u{.username}, n{.confidential} LIMIT 25";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -267,7 +340,13 @@ fn single_hop_does_not_generate_recursive_cte() {
 fn multi_hop_aggregation() {
     let query = "MATCH (u:User {id: 1})-[:MEMBER_OF*1..2]->(p:Project) RETURN u{.username}, count(p) AS project_count LIMIT 10";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("UNION ALL"));
@@ -279,7 +358,13 @@ fn multi_hop_aggregation() {
 fn definition_uses_project_id_for_redaction() {
     let query = "MATCH (d:Definition {id: 1}) RETURN d{.name, .project_id} LIMIT 10";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_d_id"));
@@ -294,7 +379,13 @@ fn definition_uses_project_id_for_redaction() {
 fn project_still_uses_id_for_redaction() {
     let query = "MATCH (p:Project {id: 1}) RETURN p{.name} LIMIT 10";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_p_id"));
@@ -310,6 +401,7 @@ fn render_traversal_inlines_all_params() {
         "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'opened'}) RETURN mr, u LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap()
     .base
@@ -332,6 +424,7 @@ fn render_in_filter_inlines_array() {
         "MATCH (u:User) WHERE u.user_type IN ['project_bot', 'service_account'] RETURN u LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap()
     .base
@@ -350,6 +443,7 @@ fn render_node_ids_inlines_array() {
         "MATCH (u:User) WHERE u.id IN [100, 200, 300] RETURN u LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap()
     .base
@@ -368,6 +462,7 @@ fn debug_json_round_trip() {
         "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'opened'}) RETURN mr, u LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap();
 
@@ -406,7 +501,15 @@ fn hydration_arm_in(
 ) -> HydrationArm {
     let columns: Vec<String> = columns.iter().map(|column| column.to_string()).collect();
     let ids: Vec<_> = ids.iter().copied().map(Into::into).collect();
-    HydrationArm::new(embedded_model().model(), entity, &ids, &columns, paths).unwrap()
+    HydrationArm::new(
+        embedded_model().model(),
+        query_data_model::testkit::limits(),
+        entity,
+        &ids,
+        &columns,
+        paths,
+    )
+    .unwrap()
 }
 
 fn compile_arms(arms: Vec<HydrationArm>, options: HydrationCompileOptions) -> ParameterizedQuery {
@@ -414,6 +517,7 @@ fn compile_arms(arms: Vec<HydrationArm>, options: HydrationCompileOptions) -> Pa
         HydrationRequest { arms, options },
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap()
 }
@@ -614,6 +718,7 @@ fn like_rejects_short_contains_pattern() {
         "MATCH (u:User) WHERE u.username CONTAINS 'ab' RETURN u LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     assert!(
@@ -628,6 +733,7 @@ fn like_rejects_single_char_starts_with() {
         "MATCH (u:User) WHERE u.username STARTS WITH 'a' RETURN u LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     assert!(
@@ -642,6 +748,7 @@ fn like_rejects_empty_ends_with() {
         "MATCH (u:User) WHERE u.username ENDS WITH '' RETURN u LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     assert!(
@@ -656,6 +763,7 @@ fn like_rejects_contains_on_email() {
         "MATCH (u:User) WHERE u.email CONTAINS 'example' RETURN u LIMIT 10",
         &embedded_model(),
         &admin_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     assert!(
@@ -671,6 +779,7 @@ fn like_rejects_starts_with_on_email() {
         "MATCH (u:User) WHERE u.email STARTS WITH 'alice' RETURN u LIMIT 10",
         &embedded_model(),
         &admin_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     assert!(
@@ -690,6 +799,7 @@ fn like_equality_on_email_compiles_for_admin() {
             "MATCH (u:User {email: 'alice@example.com'}) RETURN u LIMIT 10",
             &embedded_model(),
             &admin_ctx(),
+            query_data_model::testkit::limits(),
         )
         .is_ok()
     );
@@ -701,6 +811,7 @@ fn equality_on_email_rejected_for_non_admin() {
         "MATCH (u:User {email: 'alice@example.com'}) RETURN u LIMIT 10",
         &embedded_model(),
         &test_ctx(),
+        query_data_model::testkit::limits(),
     )
     .unwrap_err();
     let msg = err.to_string();
@@ -713,7 +824,13 @@ fn equality_on_email_rejected_for_non_admin() {
 #[test]
 fn aggregation_count_keeps_final_for_project_anchor() {
     let query = "MATCH (d:Definition {project_id: 278964}) RETURN count(d) AS total";
-    let result = compile(query, &embedded_model(), &admin_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &admin_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -734,7 +851,13 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
     // dedups the full authorized scope (~tens of millions of rows on
     // production data) before the JOIN.
     let query = "MATCH (f:File {id: '12345'})-[:DEFINES]->(d:Definition) RETURN f{.path}, d{.name} LIMIT 50";
-    let result = compile(query, &embedded_model(), &admin_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &admin_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -755,7 +878,13 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
 fn calls_traversal_compiles_against_embedded_ontology() {
     let query = "MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition) RETURN caller{.name}, callee{.name} LIMIT 25";
 
-    let result = compile(query, &embedded_model(), &admin_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &admin_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -770,7 +899,13 @@ fn calls_traversal_compiles_against_embedded_ontology() {
 #[test]
 fn aggregation_count_in_clause_keeps_final_for_project_anchor() {
     let query = "MATCH (d:Definition) WHERE d.project_id IN [69095239, 278964, 74646916] RETURN count(d) AS total";
-    let result = compile(query, &embedded_model(), &admin_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &admin_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -783,7 +918,13 @@ fn aggregation_count_in_clause_keeps_final_for_project_anchor() {
 fn extends_traversal_compiles_against_embedded_ontology() {
     let query = "MATCH (child:Definition {id: 1})-[:EXTENDS]->(parent:Definition) RETURN child{.name}, parent{.name} LIMIT 25";
 
-    let result = compile(query, &embedded_model(), &admin_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &admin_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -799,21 +940,43 @@ fn extends_traversal_compiles_against_embedded_ontology() {
 fn calls_to_imported_symbol_variant_compiles() {
     let query = "MATCH (caller:Definition {id: 1})-[:CALLS]->(sym:ImportedSymbol) RETURN caller{.name}, sym{.identifier_name} LIMIT 10";
 
-    assert!(compile(query, &embedded_model(), &admin_ctx()).is_ok());
+    assert!(
+        compile(
+            query,
+            &embedded_model(),
+            &admin_ctx(),
+            query_data_model::testkit::limits()
+        )
+        .is_ok()
+    );
 }
 
 #[test]
 fn calls_aggregation_compiles() {
     let query = "MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition) RETURN callee, count(caller) AS callers LIMIT 1";
 
-    assert!(compile(query, &embedded_model(), &admin_ctx()).is_ok());
+    assert!(
+        compile(
+            query,
+            &embedded_model(),
+            &admin_ctx(),
+            query_data_model::testkit::limits()
+        )
+        .is_ok()
+    );
 }
 
 #[test]
 fn code_graph_edge_union_routes_to_code_table() {
     let query = "MATCH (a:Definition {id: 1})-[:CALLS|EXTENDS|DEFINES]->(b:Definition) RETURN a, b LIMIT 25";
 
-    let result = compile(query, &embedded_model(), &admin_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &admin_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -853,7 +1016,13 @@ fn agent_session_detail_columns_are_not_queryable() {
     ] {
         let query = format!("MATCH (w:AgentSession) RETURN w{{.{column}}} LIMIT 10");
         assert!(
-            compile(&query, &embedded_model(), &test_ctx()).is_err(),
+            compile(
+                &query,
+                &embedded_model(),
+                &test_ctx(),
+                query_data_model::testkit::limits()
+            )
+            .is_err(),
             "AgentSession.{column} must not be selectable"
         );
     }
@@ -863,7 +1032,13 @@ fn agent_session_detail_columns_are_not_queryable() {
 fn agent_session_created_mr_traversal_compiles() {
     let query = "MATCH (w:AgentSession {flow_type: 'developer'})-[:CREATED_MR]->(mr:MergeRequest) RETURN w{.flow_type}, mr{.title} LIMIT 25";
 
-    let result = compile(query, &embedded_model(), &test_ctx()).unwrap();
+    let result = compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_agent_session"));

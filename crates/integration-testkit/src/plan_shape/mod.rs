@@ -214,9 +214,17 @@ fn check<B: SqlBackend>(
 ) -> Result<(), Vec<String>> {
     let raw = &scenario.query;
     let label = format!("{}: {} [{backend}]", path.display(), scenario.name);
-    let catalog = model.model().logical().as_admin();
+    let catalog = model
+        .model()
+        .logical(query_data_model::testkit::limits())
+        .as_admin();
     let parsed = compiler::surface::parse(raw, catalog).and_then(|statement| {
-        let plan = normalize::normalize(statement.plan, catalog.model(), model)?;
+        let plan = normalize::normalize(
+            statement.plan,
+            catalog.model(),
+            model,
+            query_data_model::testkit::limits(),
+        )?;
         Ok(query_data_model::surface::Statement { plan, ..statement })
     });
     let statement = match parsed {
@@ -247,12 +255,17 @@ fn check<B: SqlBackend>(
         Some(hydration) => plan::Request::Hydration(hydration),
         None => plan::Request::Query(query),
     };
-    let relational = plan::plan(request, tp_bounds.as_ref(), model)
-        .and_then(|planned| {
-            let tree = emitted::tree(&planned.plan, model);
-            Ok((tree, passes(planned, scenario, backend, model, query)?))
-        })
-        .map_err(|error| error.to_string());
+    let relational = plan::plan(
+        request,
+        tp_bounds.as_ref(),
+        model,
+        query_data_model::testkit::limits(),
+    )
+    .and_then(|planned| {
+        let tree = emitted::tree(&planned.plan, model);
+        Ok((tree, passes(planned, scenario, backend, model, query)?))
+    })
+    .map_err(|error| error.to_string());
     let assertions = &scenario.physical[backend];
     if let Some(rejected) = &assertions.rejected {
         return match relational {
@@ -773,7 +786,15 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         let paths = (0..count)
             .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
             .collect();
-        let arm = HydrationArm::new(model.model(), "File", &[1.into()], &[], paths).unwrap();
+        let arm = HydrationArm::new(
+            model.model(),
+            query_data_model::testkit::limits(),
+            "File",
+            &[1.into()],
+            &[],
+            paths,
+        )
+        .unwrap();
         let request = HydrationRequest {
             arms: vec![arm],
             options: HydrationCompileOptions {
@@ -781,7 +802,13 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
                 path_segment_budget: budget,
             },
         };
-        let planned = plan::plan(plan::Request::Hydration(&request), None, &model).unwrap();
+        let planned = plan::plan(
+            plan::Request::Hydration(&request),
+            None,
+            &model,
+            query_data_model::testkit::limits(),
+        )
+        .unwrap();
         let rendered = model.render(&planned.plan);
         assert_eq!(rendered.sql.contains("arrayExists"), set);
         assert_eq!(

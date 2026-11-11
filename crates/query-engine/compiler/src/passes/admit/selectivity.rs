@@ -1,3 +1,4 @@
+use orbit_server_config::QueryLimits;
 use query_data_model::plan::logical::LogicalOperation;
 use query_data_model::plan::tracking::Ref;
 
@@ -6,13 +7,14 @@ use crate::logical::Kind;
 use crate::logical::Leaf;
 use crate::logical::Query;
 use crate::logical::anchors::Anchor;
-use crate::query_limits::{MAX_ID_RANGE_SPAN, MAX_PATH_ANCHOR_RANGE};
 
 pub(super) fn selectivity(
     query: Query<'_>,
     facts: &[Leaf<'_>],
     anchors: &[Anchor<'_>],
+    limits: &QueryLimits,
 ) -> Result<()> {
+    let (span, path_span) = (limits.id_range_span, limits.path_anchor_span);
     let anchor = |binding: Ref| {
         anchors
             .iter()
@@ -26,10 +28,10 @@ pub(super) fn selectivity(
                 _ => None,
             });
             for endpoint in ends.into_iter().flatten() {
-                if anchor(endpoint).is_none_or(|anchor| !anchored(anchor)) {
+                if anchor(endpoint).is_none_or(|anchor| !anchored(anchor, path_span)) {
                     return Err(QueryError::Validation(format!(
                         "path_finding requires node_ids, filters, or id_range \
-                         (max span {MAX_PATH_ANCHOR_RANGE}) on endpoint \"{}\"",
+                         (max span {path_span}) on endpoint \"{}\"",
                         query.name(endpoint)
                     )));
                 }
@@ -40,16 +42,16 @@ pub(super) fn selectivity(
                 LogicalOperation::Neighbors { from, .. } => anchor(*from),
                 _ => None,
             });
-            if center.is_none_or(|center| !selective(center)) {
-                let hint = hint(center.is_some_and(wide));
+            if center.is_none_or(|center| !selective(center, span)) {
+                let hint = hint(center.is_some_and(|center| wide(center, span)), span);
                 return Err(QueryError::Validation(format!(
                     "neighbors requires filters or node_ids on the center node \
                      to avoid scanning all edges{hint}"
                 )));
             }
         }
-        _ if !anchors.iter().any(selective) => {
-            let hint = hint(anchors.iter().any(wide));
+        _ if !anchors.iter().any(|anchor| selective(anchor, span)) => {
+            let hint = hint(anchors.iter().any(|anchor| wide(anchor, span)), span);
             let negation = match facts.iter().any(|fact| fact.negated) {
                 true => " (NOT conditions do not count)",
                 false => "",
@@ -69,25 +71,25 @@ fn span(anchor: &Anchor<'_>) -> Option<i64> {
     anchor.range.map(|(start, end)| end.saturating_sub(start))
 }
 
-fn anchored(anchor: &Anchor<'_>) -> bool {
+fn anchored(anchor: &Anchor<'_>, max: i64) -> bool {
     anchor.pinned.is_some()
         || !anchor.filters.is_empty()
-        || span(anchor).is_some_and(|span| span <= MAX_PATH_ANCHOR_RANGE)
+        || span(anchor).is_some_and(|span| span <= max)
 }
 
-fn selective(anchor: &Anchor<'_>) -> bool {
+fn selective(anchor: &Anchor<'_>, max: i64) -> bool {
     anchor.pinned.is_some()
         || anchor.filters.iter().any(|fact| fact.right().is_none())
-        || span(anchor).is_some_and(|span| span <= MAX_ID_RANGE_SPAN)
+        || span(anchor).is_some_and(|span| span <= max)
 }
 
-fn wide(anchor: &Anchor<'_>) -> bool {
-    span(anchor).is_some_and(|span| span > MAX_ID_RANGE_SPAN)
+fn wide(anchor: &Anchor<'_>, max: i64) -> bool {
+    span(anchor).is_some_and(|span| span > max)
 }
 
-fn hint(wide: bool) -> String {
+fn hint(wide: bool, max: i64) -> String {
     match wide {
-        true => format!(" (an id_range counts only with a span of at most {MAX_ID_RANGE_SPAN})"),
+        true => format!(" (an id_range counts only with a span of at most {max})"),
         false => String::new(),
     }
 }

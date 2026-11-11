@@ -126,9 +126,6 @@ pub(crate) fn union_arm_alias(alias: &str) -> String {
     format!("{alias}_arm")
 }
 
-/// Upper bound on rows fetched per entity type during dynamic hydration.
-pub const MAX_DYNAMIC_HYDRATION_RESULTS: usize = 1000;
-
 pub const EDGE_KIND_SUFFIX: &str = "kind";
 pub const EDGE_SRC_SUFFIX: &str = "src";
 pub const EDGE_SRC_KIND_SUFFIX: &str = "src_kind";

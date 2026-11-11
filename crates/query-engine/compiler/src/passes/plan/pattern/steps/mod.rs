@@ -262,11 +262,12 @@ where
 
     fn node_read(&mut self, node: &NodePlan) -> Result<Rel> {
         let read = self.pattern.node_read(&mut self.reads, node)?;
+        let span = self.reads.id_range_span;
         let selective = self
             .pattern
             .node_conditions(node)
             .iter()
-            .any(Predicate::is_selective);
+            .any(|predicate| predicate.is_selective(span));
         let state = self.nodes.entry(node.alias.clone()).or_default();
         state.read = Some(read.clone());
         if selective {

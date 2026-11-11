@@ -9,6 +9,7 @@ chrono = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 jsonschema = { workspace = true }
 minijinja = { workspace = true }
+orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
 pest = { workspace = true }
 pest_consume = { workspace = true }

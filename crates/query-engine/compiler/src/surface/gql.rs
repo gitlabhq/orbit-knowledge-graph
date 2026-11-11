@@ -11,6 +11,7 @@ use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
 use crate::{CompiledQueryContext, QueryError, Result};
 use orbit_authorization::Grants;
+use orbit_server_config::QueryLimits;
 
 pub use query_data_model::surface::gql::{GRAMMAR, outline};
 
@@ -37,9 +38,10 @@ pub fn prepare(
     data_model: &Arc<Catalog<ClickHouse>>,
     grants: &Grants,
     scope: IntrospectionScope,
+    limits: &QueryLimits,
 ) -> Result<PreparedStatement> {
-    match route(raw, data_model, grants.caller().admin(), scope)? {
-        RoutedStatement::Query(query) => compile_query(*query, data_model, grants)
+    match route(raw, data_model, grants.caller().admin(), scope, limits)? {
+        RoutedStatement::Query(query) => compile_query(*query, data_model, grants, limits)
             .map(|compiled| PreparedStatement::Query(Box::new(compiled))),
         RoutedStatement::Schema(response) => Ok(PreparedStatement::Schema(response)),
     }
@@ -50,8 +52,9 @@ pub fn route(
     data_model: &Catalog<ClickHouse>,
     admin: bool,
     scope: IntrospectionScope,
+    limits: &QueryLimits,
 ) -> Result<RoutedStatement> {
-    let catalog = super::catalog(data_model, admin);
+    let catalog = super::catalog(data_model, limits, admin);
     match gql::route(raw, catalog)
         .map_err(QueryError::from)
         .count_err()?
@@ -67,8 +70,9 @@ pub fn compile_query(
     query: ParsedQuery,
     data_model: &Arc<Catalog<ClickHouse>>,
     grants: &Grants,
+    limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), Arc::clone(data_model));
+    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), *limits, Arc::clone(data_model));
     ctx.set_statement(query.statement);
     crate::finish(&mut ctx, config::run_clickhouse_gql)
 }

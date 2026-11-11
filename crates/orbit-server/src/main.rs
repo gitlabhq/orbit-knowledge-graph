@@ -127,6 +127,9 @@ async fn main() -> anyhow::Result<()> {
             Mode::Webserver => {
                 config.schema.validate()?;
                 config.grpc.validate()?;
+                config.query.limits.validate()?;
+                query_data_model::surface::gql::admits(&config.query.limits)
+                    .map_err(anyhow::Error::msg)?;
                 run_webserver(&config, active_schema, serving, shutdown.clone()).await
             }
         }

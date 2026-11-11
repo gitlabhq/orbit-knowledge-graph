@@ -246,11 +246,13 @@ fn compile_one(
     query: &str,
     data_model: &Arc<Catalog<ClickHouse>>,
     security_ctx: &SecurityContext,
+    limits: &compiler::QueryLimits,
 ) -> Result<compiler::CompiledQueryContext> {
     compiler::compile(
         query,
         data_model,
         &service::grants(data_model, security_ctx)?,
+        limits,
     )
     .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
 }
@@ -281,6 +283,7 @@ fn run_compile_only(
     query_json: &str,
     data_model: &Arc<Catalog<ClickHouse>>,
     security_ctx: &SecurityContext,
+    limits: &compiler::QueryLimits,
     show: &CompileShow,
     cli: &Cli,
 ) -> Result<()> {
@@ -289,7 +292,7 @@ fn run_compile_only(
     if entries.len() > 1 || cli.output.is_some() {
         let mut report = BTreeMap::new();
         for (name, query) in entries {
-            let value = match compile_one(&query, data_model, security_ctx) {
+            let value = match compile_one(&query, data_model, security_ctx, limits) {
                 Ok(compiled) => {
                     let mut value = serde_json::json!({ "query": query });
                     if matches!(show, CompileShow::Base | CompileShow::Both) {
@@ -309,7 +312,7 @@ fn run_compile_only(
     }
 
     for (name, query) in &entries {
-        let compiled = compile_one(query, data_model, security_ctx)?;
+        let compiled = compile_one(query, data_model, security_ctx, limits)?;
         if entries.len() > 1 {
             eprintln!("--- {} ---", name);
         }
@@ -412,6 +415,9 @@ async fn main() -> Result<()> {
     let packages = Packages::read_dir(&cli.model, query_data_model::Tier::Platform)
         .context("failed to read model packages")?;
     let data_model = Arc::new(Catalog::<ClickHouse>::versioned(&packages, &prefix)?);
+    let limits = orbit_server_config::AppConfig::embedded_defaults()
+        .query
+        .limits;
 
     let authorized_paths = cli
         .traversal_paths
@@ -427,7 +433,7 @@ async fn main() -> Result<()> {
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
 
     if let Some(show) = &cli.compile_only {
-        return run_compile_only(&query_json, &data_model, &security_ctx, show, &cli);
+        return run_compile_only(&query_json, &data_model, &security_ctx, &limits, show, &cli);
     }
 
     let custom_settings: std::collections::HashMap<String, String> = cli
@@ -479,7 +485,7 @@ async fn main() -> Result<()> {
         None
     };
 
-    let service = ProfilerPipelineService::new(data_model, Arc::clone(&client));
+    let service = ProfilerPipelineService::new(data_model, Arc::clone(&client), limits);
     let run_ctx = RunContext {
         service: &service,
         client: &client,

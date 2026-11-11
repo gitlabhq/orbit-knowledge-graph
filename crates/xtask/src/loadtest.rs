@@ -883,7 +883,10 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
 fn node_refs(query: &str) -> Result<Vec<(String, Key)>> {
     use query_engine::compiler::logical::Query;
     let model = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()?;
-    let catalog = model.model().logical().as_admin();
+    let limits = orbit_server_config::AppConfig::embedded_defaults()
+        .query
+        .limits;
+    let catalog = model.model().logical(&limits).as_admin();
     let statement = query_engine::compiler::surface::parse(query, catalog)?;
     let query = Query::new(&statement.plan, model.model());
     let mut refs: Vec<(String, Key)> = query

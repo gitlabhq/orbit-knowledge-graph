@@ -1,7 +1,10 @@
 use std::collections::BTreeSet;
 
-use super::limits::{self, MAX_HOPS, MAX_NODES, MAX_PATH_DEPTH, MAX_RELATIONSHIP_TYPES};
-use super::{Binding, Hops, LogicalBuilder, LogicalOperation, LogicalType, PlanError, Rows, Step};
+use super::limits;
+use super::{
+    Binding, Hops, LogicalBuilder, LogicalCatalog, LogicalOperation, LogicalType, PlanError, Rows,
+    Step,
+};
 use crate::catalog::Unresolved;
 use crate::plan::tracking::{Construction, Declare, Declared, Outputs};
 use crate::{Direction, EntityId, Hop, Model, RelationshipId};
@@ -28,13 +31,13 @@ impl<'m> LogicalBuilder<'m> {
                 rows.fresh(name)?;
             }
             let nodes = rows.bound().filter(|binding| binding.entity().is_some());
-            limits::at_most("nodes", nodes.count() + 1, MAX_NODES)?;
-            let relationships = relationships(construction, &step.relationships)?;
+            limits::at_most("nodes", nodes.count() + 1, catalog.limits().nodes)?;
+            let relationships = relationships(catalog, construction, &step.relationships)?;
             let target = step
                 .target
                 .map(|target| construction.declared(target))
                 .transpose()?;
-            range("hops", step.hops, MAX_HOPS)?;
+            range("hops", step.hops, catalog.limits().hops)?;
             let direction = step.direction;
             let (hops, to) = if step.hops.max == 1 {
                 one_hop(model, start, &relationships, target, direction)?
@@ -100,7 +103,7 @@ impl<'m> LogicalBuilder<'m> {
             for name in std::iter::once(&name).chain(&step.edge) {
                 rows.fresh(name)?;
             }
-            let relationships = relationships(construction, &step.relationships)?;
+            let relationships = relationships(catalog, construction, &step.relationships)?;
             catalog
                 .model()
                 .connect(start, &relationships, None, step.direction)?;
@@ -144,8 +147,8 @@ impl<'m> LogicalBuilder<'m> {
             if let Some(name) = end.names().find(|name| start.fresh(name).is_err()) {
                 return Err(PlanError::Duplicate(name.to_string()));
             }
-            let relationships = relationships(construction, &step.relationships)?;
-            range("path depth", step.hops, MAX_PATH_DEPTH)?;
+            let relationships = relationships(catalog, construction, &step.relationships)?;
+            range("path depth", step.hops, catalog.limits().path_depth)?;
             let (source, target) = (Self::bound(from)?, Self::bound(to)?);
             reach(
                 catalog.model(),
@@ -186,10 +189,12 @@ fn labeled(rows: &Rows<'_>) -> Result<(), PlanError> {
 }
 
 fn relationships(
+    catalog: LogicalCatalog<'_>,
     construction: &Construction<super::Logical>,
     declared: &[Declared<RelationshipId>],
 ) -> Result<Vec<RelationshipId>, PlanError> {
-    limits::at_most("relationship types", declared.len(), MAX_RELATIONSHIP_TYPES)?;
+    let max = catalog.limits().relationship_types;
+    limits::at_most("relationship types", declared.len(), max)?;
     Ok(declared
         .iter()
         .map(|relationship| construction.declared(*relationship))

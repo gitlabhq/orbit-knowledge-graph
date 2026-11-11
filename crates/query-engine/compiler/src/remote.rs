@@ -17,6 +17,7 @@ pub use crate::passes::scope_lookup::{Resolves, ScopeLookup, lookups, namespaces
 
 use crate::error::{QueryError, Result};
 use orbit_authorization::Grants;
+use orbit_server_config::QueryLimits;
 use query_data_model::catalog::{Check, Row};
 use query_data_model::plan::logical::LogicalOperation;
 
@@ -93,10 +94,15 @@ pub enum RemoteRequest {
     Live(ExtractionRequest),
 }
 
-pub fn parse(raw: &str, model: &Model, grants: &Grants) -> Result<LogicalPlan> {
+pub fn parse(
+    raw: &str,
+    model: &Model,
+    grants: &Grants,
+    limits: &QueryLimits,
+) -> Result<LogicalPlan> {
     let catalog = match grants.caller().admin() {
-        true => model.logical().as_admin(),
-        false => model.logical(),
+        true => model.logical(limits).as_admin(),
+        false => model.logical(limits),
     };
     Ok(query_data_model::surface::gql::parse(raw, catalog)?.plan)
 }
@@ -116,8 +122,9 @@ pub fn compile(
     model: &Arc<Model>,
     grants: &Grants,
     namespaces: &Namespaces,
+    limits: &QueryLimits,
 ) -> Result<RemoteRequest> {
-    let logical = parse(raw, model, grants)?;
+    let logical = parse(raw, model, grants, limits)?;
     let (target, planned) = plan(&logical, model)?;
     let emitted = secure(&target, planned, grants, namespaces)?;
     check(&emitted)?;

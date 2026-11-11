@@ -1,4 +1,5 @@
-use super::limits::Limits;
+use orbit_server_config::QueryLimits;
+
 use super::{LogicalBuilder, LogicalPlan, PlanError, Rows};
 use crate::catalog::Store;
 use crate::plan::tracking::{self, Declared, Each, Step};
@@ -9,17 +10,17 @@ pub struct LogicalCatalog<'m> {
     model: &'m Model,
     admin: bool,
     connection: Option<&'m str>,
-    limits: Limits,
+    limits: &'m QueryLimits,
     all_columns: bool,
 }
 
 impl Model {
-    pub fn logical(&self) -> LogicalCatalog<'_> {
+    pub fn logical<'m>(&'m self, limits: &'m QueryLimits) -> LogicalCatalog<'m> {
         LogicalCatalog {
             model: self,
             admin: false,
             connection: None,
-            limits: Limits::QUERY,
+            limits,
             all_columns: false,
         }
     }
@@ -58,12 +59,7 @@ impl<'m> LogicalCatalog<'m> {
         }
     }
 
-    #[must_use]
-    pub fn with_limits(self, limits: Limits) -> Self {
-        Self { limits, ..self }
-    }
-
-    pub fn limits(self) -> Limits {
+    pub fn limits(self) -> &'m QueryLimits {
         self.limits
     }
 

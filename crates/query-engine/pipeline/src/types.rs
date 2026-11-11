@@ -2,7 +2,7 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use compiler::CompiledQueryContext;
+use compiler::{CompiledQueryContext, QueryLimits};
 use orbit_authorization::Grants;
 
 use crate::session::SecurityContext;
@@ -74,6 +74,16 @@ impl QueryPipelineContext {
         self.security_context
             .as_ref()
             .ok_or_else(|| PipelineError::Security("security context not yet available".into()))
+    }
+
+    pub fn limits(&self) -> Result<&QueryLimits, PipelineError> {
+        self.server_extensions
+            .get::<QueryLimits>()
+            .ok_or_else(|| PipelineError::Compile {
+                message: "no query limits in the pipeline".into(),
+                client_safe: false,
+                reason: compiler::RejectionReason::Pipeline,
+            })
     }
 
     pub fn grants(&self) -> Result<&Grants, PipelineError> {

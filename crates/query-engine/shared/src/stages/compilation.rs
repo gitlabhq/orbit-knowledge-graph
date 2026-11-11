@@ -18,6 +18,7 @@ impl PipelineStage for CompilationStage {
         let t = Instant::now();
         let parsed = ctx.phases.remove::<compiler::gql::ParsedQuery>();
         let grants = ctx.grants().inspect_err(|e| obs.record_error(e))?;
+        let limits = ctx.limits().inspect_err(|e| obs.record_error(e))?;
 
         let compiled = ctx
             .server_extensions
@@ -26,8 +27,8 @@ impl PipelineStage for CompilationStage {
                 compiler::QueryError::PipelineInvariant("no data model in the pipeline".into())
             })
             .and_then(|data_model| match parsed {
-                Some(query) => compiler::gql::compile_query(query, data_model, grants),
-                None => compiler::compile(&ctx.query_json, data_model, grants),
+                Some(query) => compiler::gql::compile_query(query, data_model, grants, limits),
+                None => compiler::compile(&ctx.query_json, data_model, grants, limits),
             })
             .map_err(PipelineError::from)
             .inspect_err(|e| obs.record_error(e))?;

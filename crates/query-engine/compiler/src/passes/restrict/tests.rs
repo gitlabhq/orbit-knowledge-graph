@@ -24,7 +24,7 @@ const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
 
 fn restrict(gql: &str, ctx: &Grants) -> Result<()> {
     let model = MODEL.model();
-    let statement = surface::parse(gql, model.logical().as_admin())?;
+    let statement = surface::parse(gql, model.logical(crate::testkit::limits()).as_admin())?;
     super::restrict(&statement.plan, model, &*MODEL, ctx)
 }
 
@@ -84,6 +84,7 @@ fn plans_built_in_code_cannot_read_hidden_or_admin_only_fields() {
         arms: vec![
             crate::hydration::HydrationArm::new(
                 model,
+                crate::testkit::limits(),
                 entity,
                 &[orbit_authorization::Key::Int(1)],
                 &[column.into()],

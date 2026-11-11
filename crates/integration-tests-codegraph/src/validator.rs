@@ -130,7 +130,11 @@ fn execute_cypher(
         eprintln!("  ALIASES: {aliases:?}");
         eprintln!("  REWRITTEN: {clean_query}");
     }
-    let compiled = compile_local(&clean_query, data_model)?;
+    let compiled = compile_local(
+        &clean_query,
+        data_model,
+        query_data_model::testkit::limits(),
+    )?;
     let sql = compiled.base.render();
     eprintln!("  SQL: {sql}");
     let batches = client.query_arrow(&sql)?;

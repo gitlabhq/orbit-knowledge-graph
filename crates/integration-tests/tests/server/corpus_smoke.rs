@@ -352,6 +352,7 @@ async fn run_pipeline(
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::new(db.create_client()));
     server_extensions.insert(Arc::clone(data_model));
+    server_extensions.insert(*query_data_model::testkit::limits());
     server_extensions.insert(claims.clone());
     let mut registry = ColumnResolverRegistry::new();
     registry.register("gitaly", Arc::new(MockColumnResolver));

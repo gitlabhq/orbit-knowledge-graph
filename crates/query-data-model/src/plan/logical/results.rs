@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::limits::{self, DEFAULT_ROWS, MAX_GROUPS, MAX_MEASURES, MAX_ROWS, MAX_SKIP};
+use super::limits;
 use super::{
     Columns, Expr, LogicalBuilder, LogicalCatalog, LogicalOperation, LogicalType, Measure, Order,
     PlanError, Projection, Rows, check,
@@ -41,8 +41,9 @@ impl<'m> LogicalBuilder<'m> {
                     ));
                 }
             }
-            limits::at_most("group keys", groups.len(), MAX_GROUPS)?;
-            limits::at_most("aggregates", measures.len(), MAX_MEASURES)?;
+            let max = catalog.limits();
+            limits::at_most("group keys", groups.len(), max.group_keys)?;
+            limits::at_most("aggregates", measures.len(), max.aggregates)?;
             let model = catalog.model();
             let mut types = Vec::new();
             for group in &groups {
@@ -139,20 +140,22 @@ impl<'m> LogicalBuilder<'m> {
         self.slice(rows, Some(count), None)
     }
 
-    /// Keeps `count` rows after skipping `skip`; a query that names no count returns [`DEFAULT_ROWS`].
+    /// Keeps `count` rows after skipping `skip`; a query that names no count returns `query.limits.default_rows`.
     pub fn slice(
         &mut self,
         rows: Rows<'m>,
         count: Option<u64>,
         skip: Option<u64>,
     ) -> Result<Rows<'m>, PlanError> {
-        let count = count.unwrap_or(DEFAULT_ROWS);
+        let max = self.catalog().limits();
+        let count = count.unwrap_or(max.default_rows);
         let operation = LogicalOperation::Limit { rows: count, skip };
         self.connect(operation, vec![rows], |_, _, _| {
-            limits::within("limit", count, 1, MAX_ROWS)?;
-            if skip.unwrap_or_default() > MAX_SKIP {
+            limits::within("limit", count, 1, max.max_rows)?;
+            if skip.unwrap_or_default() > max.max_skip {
                 return Err(PlanError::shape(format!(
-                    "skip must be at most {MAX_SKIP}; to page deeper, ORDER BY a unique key such as id and filter past the last value from the previous page"
+                    "skip must be at most {}; to page deeper, ORDER BY a unique key such as id and filter past the last value from the previous page",
+                    max.max_skip
                 )));
             }
             Ok(Outputs::preserve())
