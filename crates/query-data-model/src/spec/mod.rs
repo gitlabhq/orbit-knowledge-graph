@@ -5,17 +5,16 @@ mod source;
 mod storage;
 
 pub use authorization::{
-    AnchorSpec, AuthorizationFragment, EntityAccessSpec, PropertyAccess, RedactionSpec, ScopeSpec,
+    Anchor, AuthorizationFragment, EntityAccess, PropertyAccess, Redaction, ScopeSpec,
     ScopeVariants,
 };
 pub use graph::{
     Attribute, DefaultValue, Entity, GraphFragment, Property, Relationship, RelationshipVariant,
 };
-pub use service::{LookupSpec, ServiceFragment};
+pub use service::{Lookup, ServiceFragment};
 pub use source::{
-    EdgeSpec, EndpointKindSpec, EndpointSpec, ExtractLookupSpec, GENERATED_QUERY, PathSpec,
-    PipelineSpec, ReindexSpec, RelationshipSourceSpec, SourceDeclaration, SourceFragment,
-    TEMPLATE_EXTENSION,
+    EdgeMapping, Endpoint, EndpointKind, ExtractLookup, GENERATED_QUERY, PathSpec, PipelineSpec,
+    ReindexTrigger, RelationshipSourceSpec, SourceDeclaration, SourceFragment, TEMPLATE_EXTENSION,
 };
 pub use storage::{
     AccessHints, BackendOptions, Binding, ColumnStorage, CopySources, Discriminator, EdgeIndex,
@@ -30,7 +29,7 @@ use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::{Endpoint, EntityId, PropertyId, RelationshipId};
+use crate::{EntityId, PropertyId, RelationshipId};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -188,7 +187,7 @@ impl Naming for Resolved {
     type Type = crate::DataType;
     type Enrich = IndexMap<PropertyId, String>;
     type Key = Key;
-    type Copies = Vec<(Endpoint, PropertyId)>;
+    type Copies = Vec<(crate::Endpoint, PropertyId)>;
     type Loaded<T: Value + Default> = T;
     type Defaulted<T: Value> = T;
     type Members<T: Value, Id: Value> = Vec<Id>;

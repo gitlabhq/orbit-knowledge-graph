@@ -1,15 +1,15 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use super::{is_false, is_true, yes};
-use crate::{EdgeVariantScope, RequiredRole, Scope};
+use super::{Naming, Raw, Resolved, is_false, is_true, yes};
+use crate::{EdgeVariantScope, EntityId, RequiredRole, Scope};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthorizationFragment {
     pub package: String,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub entities: IndexMap<String, EntityAccessSpec>,
+    pub entities: IndexMap<String, EntityAccess<Raw>>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub relationships: IndexMap<String, ScopeSpec>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
@@ -17,34 +17,39 @@ pub struct AuthorizationFragment {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EntityAccessSpec {
+#[serde(deny_unknown_fields, bound = "")]
+pub struct EntityAccess<S: Naming = Resolved> {
     pub scope: Scope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<RequiredRole>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub redaction: Option<RedactionSpec>,
+    pub redaction: Option<Redaction<S>>,
+    /// A foreign key to the namespace entity that holds the row; a filter on it bounds the entity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub anchor: Option<AnchorSpec>,
+    pub anchor: Option<Anchor<S>>,
+    /// The backend applies the caller's own visibility through the caller's sign-in.
     #[serde(default, skip_serializing_if = "is_false")]
     pub delegated: bool,
 }
 
 /// A property that holds the id of the namespace entity a row belongs to.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AnchorSpec {
-    pub property: String,
-    pub entity: String,
+#[serde(deny_unknown_fields, bound = "")]
+pub struct Anchor<S: Naming = Resolved> {
+    pub property: S::Property,
+    pub entity: S::Entity,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RedactionSpec {
+impl Copy for Anchor {}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, bound = "")]
+pub struct Redaction<S: Naming = Resolved> {
     pub resource: String,
     pub ability: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+    pub id: S::Defaulted<S::Property>,
+    #[serde(skip)]
+    pub owner: S::Loaded<Option<EntityId>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -113,8 +113,9 @@ where
                 Some((key.key.property, variant.target))
             });
         let declared = graph.entities().filter_map(|entity| {
-            let (anchor, target) = self.model().access().entity(entity.id)?.anchor?;
-            self.table_of(target).map(|_| (anchor, target))
+            let anchor = self.model().access().entity(entity.id)?.anchor?;
+            self.table_of(anchor.entity)
+                .map(|_| (anchor.property, anchor.entity))
         });
         variants.chain(declared)
     }

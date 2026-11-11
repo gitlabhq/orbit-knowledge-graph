@@ -5,28 +5,9 @@ use crate::{EdgeVariantScope, RequiredRole, Scope};
 
 use super::Diagnostics;
 use super::store::Store;
-pub use crate::spec::PropertyAccess;
+pub use crate::spec::{Anchor, EntityAccess, PropertyAccess, Redaction};
 use crate::spec::{AuthorizationFragment, ScopeSpec, ScopeVariants, parse_variant};
 use crate::{AttributeId, Endpoint, EntityId, GraphCatalog, Hop, PropertyId};
-
-#[derive(Debug, Clone)]
-pub struct Redaction {
-    pub resource: String,
-    pub ability: String,
-    pub id: PropertyId,
-    pub owner: Option<EntityId>,
-}
-
-#[derive(Debug, Clone)]
-pub struct EntityAccess {
-    pub scope: Scope,
-    pub role: Option<RequiredRole>,
-    pub redaction: Option<Redaction>,
-    /// A foreign key to the namespace entity that holds the row; a filter on it bounds the entity.
-    pub anchor: Option<(PropertyId, EntityId)>,
-    /// The backend applies the caller's own visibility through the caller's sign-in.
-    pub delegated: bool,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowFilter {
@@ -142,12 +123,13 @@ impl Access {
             let anchor = spec.anchor.as_ref().and_then(|anchor| {
                 let id = graph.property_id(entity, &anchor.property);
                 let target = graph.entity_id(&anchor.entity);
-                diagnostics.require(id.zip(target), package, || {
+                let (property, entity) = diagnostics.require(id.zip(target), package, || {
                     format!(
                         "{name} anchor {} names no property of {name} or no entity {}",
                         anchor.property, anchor.entity
                     )
-                })
+                })?;
+                Some(Anchor { property, entity })
             });
             if self.entities[entity.index()]
                 .replace(EntityAccess {

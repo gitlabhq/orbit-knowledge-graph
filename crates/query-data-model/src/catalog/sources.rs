@@ -3,13 +3,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use indexmap::IndexMap;
 
 use super::Diagnostics;
+pub use crate::spec::{EdgeMapping, Endpoint, EndpointKind, ExtractLookup, ReindexTrigger};
 use crate::spec::{
-    EdgeSpec, EndpointKindSpec, EndpointSpec, ExtractLookupSpec, GENERATED_QUERY, PathSpec,
-    PipelineSpec, ReindexSpec, SourceFragment, TEMPLATE_EXTENSION, snake_case,
+    GENERATED_QUERY, PipelineSpec, Raw, Short, SourceFragment, TEMPLATE_EXTENSION, snake_case,
 };
-use crate::{EntityId, GraphCatalog, PropertyId, RelationshipId, RelationshipVariantId};
-
-const PATH_COLUMN: &str = "traversal_path";
+use crate::{EntityId, GraphCatalog, PropertyId, RelationshipId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EtlScope {
@@ -33,7 +31,7 @@ pub struct DataSource {
     pub deleted: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Pipeline {
     pub name: String,
     pub source: usize,
@@ -62,16 +60,7 @@ pub enum ExtractQuery {
     Template(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractLookup {
-    pub entity: EntityId,
-    pub id_column: String,
-    pub fields: IndexMap<String, String>,
-    pub table: String,
-    pub namespaced: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Transform {
     DataFusion(Vec<EdgeMapping>),
     Rust(String),
@@ -87,63 +76,9 @@ impl Transform {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EdgeMapping {
-    pub relationship: RelationshipId,
-    pub source: Endpoint,
-    pub target: Endpoint,
-    pub array_field: Option<String>,
-    pub mutable: bool,
-    pub variants: Vec<RelationshipVariantId>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Endpoint {
-    pub field: String,
-    pub kind: EndpointKind,
-    pub properties: IndexMap<PropertyId, String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EndpointKind {
-    Entity(EntityId),
-    Column {
-        column: String,
-        mapping: BTreeMap<String, EntityId>,
-    },
-}
-
-impl EndpointKind {
-    pub fn entity(&self) -> Option<EntityId> {
-        match self {
-            Self::Entity(entity) => Some(*entity),
-            Self::Column { .. } => None,
-        }
-    }
-
-    pub fn matches(&self, entity: EntityId) -> bool {
-        self.entity().is_none_or(|kind| kind == entity)
-    }
-
-    fn entities(&self) -> Vec<EntityId> {
-        match self {
-            Self::Entity(entity) => vec![*entity],
-            Self::Column { mapping, .. } => mapping.values().copied().collect(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Derived {
     pub name: String,
     pub emits: Vec<RelationshipId>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ReindexTrigger {
-    pub table: String,
-    pub target: String,
-    pub traversal_path: PathSpec,
-    pub watermark: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -470,7 +405,7 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn edge_specs(&self, writer: Writer, spec: &PipelineSpec) -> Vec<EdgeSpec> {
+    fn edge_specs(&self, writer: Writer, spec: &PipelineSpec) -> Vec<EdgeMapping<Raw>> {
         let Writer::Relationship(relationship) = writer else {
             return spec.edges.clone().unwrap_or_default();
         };
@@ -478,12 +413,13 @@ impl<'a> Resolver<'a> {
         spec.from
             .clone()
             .zip(spec.to.clone())
-            .map(|(from, to)| EdgeSpec {
-                label: label.clone(),
-                from,
-                to,
-                array_field: spec.array_field.clone(),
-                mutable: spec.mutable.unwrap_or_default(),
+            .map(|(source, target)| EdgeMapping {
+                relationship: label.clone(),
+                source,
+                target,
+                array_field: None,
+                mutable: false,
+                variants: (),
             })
             .into_iter()
             .collect()
@@ -624,15 +560,20 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn edge(&mut self, package: &str, pipeline: &str, spec: &EdgeSpec) -> Option<EdgeMapping> {
-        let label = &spec.label;
+    fn edge(
+        &mut self,
+        package: &str,
+        pipeline: &str,
+        spec: &EdgeMapping<Raw>,
+    ) -> Option<EdgeMapping> {
+        let label = &spec.relationship;
         let relationship =
             self.diagnostics
                 .require(self.graph.relationship_id(label), package, || {
                     format!("pipeline {pipeline} emits unknown relationship {label}")
                 })?;
-        let source = self.endpoint(package, pipeline, &spec.from)?;
-        let target = self.endpoint(package, pipeline, &spec.to)?;
+        let source = self.endpoint(package, pipeline, &spec.source)?;
+        let target = self.endpoint(package, pipeline, &spec.target)?;
         let variants: Vec<_> = self
             .graph
             .relationship(relationship)
@@ -679,20 +620,25 @@ impl<'a> Resolver<'a> {
         })
     }
 
-    fn endpoint(&mut self, package: &str, pipeline: &str, spec: &EndpointSpec) -> Option<Endpoint> {
+    fn endpoint(
+        &mut self,
+        package: &str,
+        pipeline: &str,
+        spec: &Endpoint<Raw>,
+    ) -> Option<Endpoint> {
         let entity = |name: &str, diagnostics: &mut Diagnostics| {
             diagnostics.require(self.graph.entity_id(name), package, || {
                 format!("pipeline {pipeline} names unknown entity {name}")
             })
         };
         let kind = match &spec.kind {
-            EndpointKindSpec::Entity(name) => EndpointKind::Entity(entity(name, self.diagnostics)?),
-            EndpointKindSpec::Derived { derive, mapping } => {
-                if spec.enrich || !spec.properties.is_empty() {
+            EndpointKind::Entity(name) => EndpointKind::Entity(entity(name, self.diagnostics)?),
+            EndpointKind::Column { column, mapping } => {
+                if spec.properties {
                     self.diagnostics.error(
                         package,
                         format!(
-                            "pipeline {pipeline} endpoint {} derives its kind and cannot carry properties",
+                            "pipeline {pipeline} endpoint {} derives its kind and cannot enrich",
                             spec.field
                         ),
                     );
@@ -702,59 +648,44 @@ impl<'a> Resolver<'a> {
                     resolved.insert(raw.clone(), entity(name, self.diagnostics)?);
                 }
                 EndpointKind::Column {
-                    column: derive.clone(),
+                    column: column.clone(),
                     mapping: resolved,
                 }
             }
         };
-        if spec.enrich && !spec.properties.is_empty() {
-            self.diagnostics.error(
-                package,
-                format!(
-                    "pipeline {pipeline} endpoint {} sets both enrich and properties",
-                    spec.field
-                ),
-            );
-        }
-        let mut properties = IndexMap::new();
-        if let EndpointKind::Entity(entity) = kind {
-            for (property, input) in &spec.properties {
-                let found = self.graph.property_id(entity, property);
-                if let Some(property) = self.diagnostics.require(found, package, || {
-                    format!(
-                        "pipeline {pipeline} names unknown property {}.{property}",
-                        self.graph.entity(entity).name
-                    )
-                }) {
-                    properties.insert(property, input.clone());
-                }
-            }
-        }
         Some(Endpoint {
             field: spec.field.clone(),
             kind,
-            properties,
+            properties: IndexMap::new(),
         })
     }
 
-    fn edges(&mut self, package: &str, pipeline: &str, specs: &[EdgeSpec]) -> Vec<EdgeMapping> {
+    fn edges(
+        &mut self,
+        package: &str,
+        pipeline: &str,
+        specs: &[EdgeMapping<Raw>],
+    ) -> Vec<EdgeMapping> {
         let mut edges: Vec<_> = specs
             .iter()
             .filter_map(|spec| Some((self.edge(package, pipeline, spec)?, spec)))
             .collect();
         let mut counts = HashMap::<EntityId, usize>::new();
         for (edge, spec) in &edges {
-            for (endpoint, endpoint_spec) in [(&edge.source, &spec.from), (&edge.target, &spec.to)]
+            for (endpoint, written) in [(&edge.source, &spec.source), (&edge.target, &spec.target)]
             {
-                if let Some(entity) = endpoint.kind.entity().filter(|_| endpoint_spec.enrich) {
+                if let Some(entity) = endpoint.kind.entity().filter(|_| written.properties) {
                     *counts.entry(entity).or_default() += 1;
                 }
             }
         }
         for (edge, spec) in &mut edges {
-            let endpoints = [(&mut edge.source, &spec.from), (&mut edge.target, &spec.to)];
-            for (endpoint, endpoint_spec) in endpoints {
-                if let Some(entity) = endpoint.kind.entity().filter(|_| endpoint_spec.enrich) {
+            let endpoints = [
+                (&mut edge.source, &spec.source),
+                (&mut edge.target, &spec.target),
+            ];
+            for (endpoint, written) in endpoints {
+                if let Some(entity) = endpoint.kind.entity().filter(|_| written.properties) {
                     self.enrich(package, pipeline, endpoint, entity, counts[&entity]);
                 }
             }
@@ -797,7 +728,7 @@ impl<'a> Resolver<'a> {
         &mut self,
         package: &str,
         pipeline: &str,
-        specs: &[ExtractLookupSpec],
+        specs: &[ExtractLookup<Raw>],
     ) -> Vec<ExtractLookup> {
         let mut counts = HashMap::<&str, usize>::new();
         for spec in specs.iter().filter(|spec| spec.fields.is_empty()) {
@@ -837,7 +768,7 @@ impl<'a> Resolver<'a> {
                     );
                 }
                 let prefix =
-                    enrichment_prefix(&spec.entity, &spec.id, counts[spec.entity.as_str()]);
+                    enrichment_prefix(&spec.entity, &spec.id_column, counts[spec.entity.as_str()]);
                 for (_, column) in &columns.enrich {
                     fields.insert(column.clone(), format!("{prefix}{column}"));
                 }
@@ -852,7 +783,7 @@ impl<'a> Resolver<'a> {
             }
             lookups.push(ExtractLookup {
                 entity,
-                id_column: spec.id.clone(),
+                id_column: spec.id_column.clone(),
                 fields,
                 table: columns.table.clone(),
                 namespaced: columns.namespaced,
@@ -861,23 +792,23 @@ impl<'a> Resolver<'a> {
         lookups
     }
 
-    fn reindex(&mut self, package: &str, target: &str, specs: &[ReindexSpec], source: usize) {
-        let watermark = self.sources.sources[source].watermark.clone();
-        for spec in specs {
-            let (table, traversal_path) = match spec {
-                ReindexSpec::Table(table) => (table, PathSpec::Column(PATH_COLUMN.into())),
-                ReindexSpec::Detail {
-                    table,
-                    traversal_path,
-                } => (table, traversal_path.clone()),
-            };
+    fn reindex(
+        &mut self,
+        package: &str,
+        target: &str,
+        specs: &[Short<ReindexTrigger<Raw>>],
+        source: usize,
+    ) {
+        let watermark = &self.sources.sources[source].watermark;
+        for Short(spec) in specs {
             let trigger = ReindexTrigger {
-                table: table.clone(),
+                table: spec.table.clone(),
                 target: target.to_string(),
-                traversal_path,
+                traversal_path: spec.traversal_path.clone(),
                 watermark: watermark.clone(),
             };
             if !self.sources.reindex.insert(trigger) {
+                let table = &spec.table;
                 self.diagnostics
                     .error(package, format!("{target} reindexes on {table} twice"));
             }

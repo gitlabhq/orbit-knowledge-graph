@@ -4,7 +4,9 @@ use indexmap::IndexMap;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::is_false;
+use super::{Naming, Raw, Resolved, Short, ShortForm, is_false};
+use crate::constants::TRAVERSAL_PATH_COLUMN;
+use crate::{EntityId, RelationshipVariantId};
 
 pub const GENERATED_QUERY: &str = "generated";
 pub const TEMPLATE_EXTENSION: &str = ".sql.j2";
@@ -47,7 +49,7 @@ pub struct SourceDeclaration {
 #[serde(deny_unknown_fields)]
 pub struct RelationshipSourceSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reindex: Vec<ReindexSpec>,
+    pub reindex: Vec<Short<ReindexTrigger<Raw>>>,
     #[serde(deserialize_with = "relationship_pipelines")]
     pub pipelines: Pipelines,
 }
@@ -63,9 +65,9 @@ pub struct PipelineSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub lookups: Option<Vec<ExtractLookupSpec>>,
+    pub lookups: Option<Vec<ExtractLookup<Raw>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reindex: Option<Vec<ReindexSpec>>,
+    pub reindex: Option<Vec<Short<ReindexTrigger<Raw>>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub global: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,15 +79,11 @@ pub struct PipelineSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enrich: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub edges: Option<Vec<EdgeSpec>>,
+    pub edges: Option<Vec<EdgeMapping<Raw>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub from: Option<EndpointSpec>,
+    pub from: Option<Endpoint<Raw>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub to: Option<EndpointSpec>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub array_field: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mutable: Option<bool>,
+    pub to: Option<Endpoint<Raw>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub emits: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,15 +115,7 @@ const ENTITIES: Section = Section {
 
 const RELATIONSHIPS: Section = Section {
     name: "relationships",
-    allows: &[
-        "fields",
-        "filter",
-        "lookups",
-        "from",
-        "to",
-        "array_field",
-        "mutable",
-    ],
+    allows: &["fields", "filter", "lookups", "from", "to"],
     requires: &["from", "to"],
 };
 
@@ -150,8 +140,6 @@ impl PipelineSpec {
             ("edges", self.edges.is_some()),
             ("from", self.from.is_some()),
             ("to", self.to.is_some()),
-            ("array_field", self.array_field.is_some()),
-            ("mutable", self.mutable.is_some()),
             ("emits", self.emits.is_some()),
             ("transform", self.transform.is_some()),
         ];
@@ -196,56 +184,116 @@ fn relationship_pipelines<'de, D: Deserializer<'de>>(
 fn derived<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Pipelines, D::Error> {
     pipelines(deserializer, &DERIVED)
 }
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExtractLookupSpec {
-    pub entity: String,
-    pub id: String,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, bound = "")]
+pub struct ExtractLookup<S: Naming = Resolved> {
+    pub entity: S::Entity,
+    #[serde(rename = "id")]
+    pub id_column: String,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub fields: IndexMap<String, String>,
+    #[serde(skip)]
+    pub table: S::Loaded<String>,
+    #[serde(skip)]
+    pub namespaced: S::Loaded<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EdgeSpec {
-    pub label: String,
-    pub from: EndpointSpec,
-    pub to: EndpointSpec,
+#[serde(deny_unknown_fields, bound = "")]
+pub struct EdgeMapping<S: Naming = Resolved> {
+    #[serde(rename = "label")]
+    pub relationship: S::Relationship,
+    #[serde(rename = "from")]
+    pub source: Endpoint<S>,
+    #[serde(rename = "to")]
+    pub target: Endpoint<S>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub array_field: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub mutable: bool,
+    #[serde(skip)]
+    pub variants: S::Loaded<Vec<RelationshipVariantId>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EndpointSpec {
+#[serde(deny_unknown_fields, bound = "")]
+pub struct Endpoint<S: Naming = Resolved> {
     pub field: String,
-    pub kind: EndpointKindSpec,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub properties: IndexMap<String, String>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub enrich: bool,
+    pub kind: EndpointKind<S>,
+    #[serde(default, rename = "enrich")]
+    pub properties: S::Enrich,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum EndpointKindSpec {
-    Entity(String),
-    Derived {
-        derive: String,
-        mapping: BTreeMap<String, String>,
+#[serde(untagged, bound = "")]
+pub enum EndpointKind<S: Naming = Resolved> {
+    Entity(S::Entity),
+    Column {
+        #[serde(rename = "derive")]
+        column: String,
+        mapping: BTreeMap<String, S::Entity>,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ReindexSpec {
-    Table(String),
-    Detail {
-        table: String,
-        traversal_path: PathSpec,
-    },
+#[serde(deny_unknown_fields, bound = "")]
+pub struct ReindexTrigger<S: Naming = Resolved> {
+    pub table: String,
+    #[serde(skip)]
+    pub target: S::Loaded<String>,
+    #[serde(default = "PathSpec::traversal_path")]
+    pub traversal_path: PathSpec,
+    #[serde(skip)]
+    pub watermark: S::Loaded<String>,
+}
+
+impl<S: Naming> ShortForm for ReindexTrigger<S> {
+    const KEY: &'static str = "table";
+}
+
+impl Eq for ReindexTrigger {}
+
+impl PartialOrd for ReindexTrigger {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ReindexTrigger {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (
+            &self.table,
+            &self.target,
+            &self.traversal_path,
+            &self.watermark,
+        )
+            .cmp(&(
+                &other.table,
+                &other.target,
+                &other.traversal_path,
+                &other.watermark,
+            ))
+    }
+}
+
+impl EndpointKind {
+    pub fn entity(&self) -> Option<EntityId> {
+        match self {
+            Self::Entity(entity) => Some(*entity),
+            Self::Column { .. } => None,
+        }
+    }
+
+    pub fn matches(&self, entity: EntityId) -> bool {
+        self.entity().is_none_or(|kind| kind == entity)
+    }
+
+    pub(crate) fn entities(&self) -> Vec<EntityId> {
+        match self {
+            Self::Entity(entity) => vec![*entity],
+            Self::Column { mapping, .. } => mapping.values().copied().collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -256,6 +304,12 @@ pub enum PathSpec {
         dictionary: String,
         key_column: String,
     },
+}
+
+impl PathSpec {
+    fn traversal_path() -> Self {
+        Self::Column(TRAVERSAL_PATH_COLUMN.into())
+    }
 }
 
 mod column_path {

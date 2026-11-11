@@ -1,18 +1,7 @@
 use super::Diagnostics;
+pub use crate::spec::Lookup;
 use crate::spec::ServiceFragment;
-use crate::{EntityId, GraphCatalog, PropertyId};
-
-#[derive(Debug, Clone)]
-pub struct Lookup {
-    pub service: String,
-    pub name: String,
-    pub operation: String,
-    pub entity: EntityId,
-    pub provides: Vec<PropertyId>,
-    pub keys: Vec<PropertyId>,
-    pub operators: Vec<String>,
-    pub disabled: bool,
-}
+use crate::{GraphCatalog, PropertyId};
 
 #[derive(Debug, Default)]
 pub struct Lookups {
