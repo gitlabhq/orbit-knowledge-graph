@@ -783,9 +783,11 @@ var VALUE_FLAGS = new Set([
   "--budget",
   "--timeout"
 ]);
+var SQL_VALUE_FLAGS = new Set(["-f", "-F", "--format"]);
 var VALUE_FLAGS_BY_KEY = {
   grep: new Set(["-A", "--after-context", "-B", "--before-context", "-C", "--context", "-m", "--max-count", "-g", "--glob", "--include", "--exclude", "--exclude-dir", "-t", "--type", "-T", "--type-not", "-M", "--max-columns"]),
-  "workspace sql": new Set(["-f", "-F", "--format"])
+  "workspace sql": SQL_VALUE_FLAGS,
+  sql: SQL_VALUE_FLAGS
 };
 var SHOWS_ARGUMENT = new Set(["grep", "context", "workspace sql", "sql", "schema", "ontology", "graph-status", "skills", "skill"]);
 function labelFor(table, key) {
