@@ -6,8 +6,9 @@ entities:
   ContainerRepository:
     style: {size: 30, color: "#22D3EE"}
     description: A container image repository in a project's container registry
+    identity: id
     label: name
-    defaults: [id, name, status]
+    default_columns: [id, name, status]
     properties:
       id: {type: int64, description: Unique ID.}
       name: {type: string, description: Repository name (path within the project)., default: ''}

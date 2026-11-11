@@ -3,32 +3,36 @@ package: gitlab
 domain: core
 entities:
   Group:
+    identity: id
     label: full_path
-    defaults: [id, name, full_path]
+    default_columns: [id, name, full_path]
     properties:
       id: int64
       name: string
       full_path: { type: string, unique: true }
       traversal_path: string
   Project:
+    identity: id
     label: full_path
-    defaults: [id, name, full_path]
+    default_columns: [id, name, full_path]
     properties:
       id: int64
       name: string
       full_path: { type: string, unique: true }
       traversal_path: string
   User:
+    identity: id
     label: username
-    defaults: [id, username]
+    default_columns: [id, username]
     properties:
       id: int64
       username: { type: string, unique: true }
       email: string?
   MergeRequest:
     description: A merge request for code review.
+    identity: id
     label: title
-    defaults: [id, iid, title, state]
+    default_columns: [id, iid, title, state]
     properties:
       id: int64
       iid: int64
@@ -42,8 +46,9 @@ entities:
       diff: string?
       traversal_path: string
   Note:
+    identity: id
     label: body
-    defaults: [id, body]
+    default_columns: [id, body]
     properties:
       id: int64
       body: string

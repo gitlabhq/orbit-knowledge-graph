@@ -4,8 +4,9 @@ domain: agents
 entities:
   AgentMemory:
     description: A fact an agent saved while it worked in a project.
+    identity: id
     label: summary
-    defaults: [id, summary, created_at]
+    default_columns: [id, summary, created_at]
     properties:
       id: int64
       summary: string

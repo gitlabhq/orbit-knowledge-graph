@@ -3,6 +3,7 @@ package: acme.messages
 store: acme
 entities:
   Message:
+    complete: true
     table: acme_message
     columns:
       id: {immutable: true, backend: {type: String}}

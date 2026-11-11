@@ -6,9 +6,7 @@ use serde::Deserialize;
 use super::{Naming, Raw, Resolved, Short, ShortForm};
 use crate::generic::{AttributeId, Style};
 use crate::types::Cardinality;
-use crate::{
-    EntityId, EnumType, FieldSelectivity, PropertyId, RelationshipId, RelationshipVariantId,
-};
+use crate::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,9 +35,10 @@ pub struct Entity<S: Naming = Resolved> {
     pub domain: S::Loaded<Option<String>>,
     #[serde(default)]
     pub description: Option<String>,
+    /// The property, or properties in order, whose values identify a row.
+    pub identity: S::Required<S::Identity>,
     pub label: String,
-    #[serde(default)]
-    pub defaults: Vec<S::Property>,
+    pub default_columns: S::Required<Vec<S::Property>>,
     #[serde(default)]
     pub style: Style,
     pub properties: S::Members<Short<Property<S>>, PropertyId>,
@@ -64,15 +63,8 @@ pub struct Property<S: Naming = Resolved> {
     pub unique: bool,
     #[serde(default, rename = "values")]
     pub enum_values: Option<BTreeMap<i64, String>>,
-    #[serde(
-        default,
-        rename = "stored_as_text",
-        deserialize_with = "stored_as_text"
-    )]
-    pub enum_type: EnumType,
     #[serde(default, rename = "terminal")]
     pub terminal_values: Vec<String>,
-    pub selectivity: S::Defaulted<FieldSelectivity>,
     #[serde(default)]
     pub default: Option<DefaultValue>,
 }
@@ -159,11 +151,4 @@ impl DefaultValue {
             Self::String(value) => format!("'{}'", value.replace('\'', "''")),
         }
     }
-}
-
-fn stored_as_text<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<EnumType, D::Error> {
-    Ok(match bool::deserialize(deserializer)? {
-        true => EnumType::String,
-        false => EnumType::Int,
-    })
 }

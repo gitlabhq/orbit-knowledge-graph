@@ -87,11 +87,17 @@ impl<'m> LogicalCatalog<'m> {
         if self.connection.is_none() {
             return true;
         }
-        let Some(home) = self.stores().find(|store| store.source(entity).is_some()) else {
+        let mut holders = self.stores().filter(|store| store.source(entity).is_some());
+        let Some(first) = holders.next() else {
             return true;
         };
+        let home = std::iter::once(first)
+            .chain(holders)
+            .find(|store| store.complete(entity))
+            .unwrap_or(first);
         !home.excludes(property)
-            && (self.model.lookup(property).is_some() || home.column(property).is_some())
+            && (home.complete(entity) && self.model.lookup(property).is_some()
+                || home.column(property).is_some())
     }
 
     /// Every variant keeps its rows in an edge table, which the loader checks holds each

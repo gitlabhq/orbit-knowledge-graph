@@ -192,8 +192,8 @@ fn comparable(model: &Model, left: &Typed<'_>, right: &Typed<'_>) -> Result<(), 
     let same =
         left.data_type == right.data_type || temporal(left.data_type) && temporal(right.data_type);
     let enums = left.data_type == DataType::Enum
-        && left.property.map(|p| (p.enum_type, &p.enum_values))
-            != right.property.map(|p| (p.enum_type, &p.enum_values));
+        && left.property.map(|p| (left.enum_type, &p.enum_values))
+            != right.property.map(|p| (right.enum_type, &p.enum_values));
     if same && enums {
         return Err(PlanError::Invalid {
             expr: format!("{} and {}", left.name, right.name),
@@ -266,7 +266,7 @@ fn enum_value(typed: &Typed<'_>, literal: &Literal) -> Result<(), PlanError> {
     let declared = match literal {
         Literal::String(text) => labels.clone().any(|(_, label)| label == text),
         Literal::Int(key) => {
-            property.enum_type == crate::EnumType::Int
+            typed.enum_type == Some(crate::EnumType::Int)
                 && labels.clone().any(|(known, _)| known == key)
         }
         _ => false,
@@ -290,8 +290,8 @@ fn allowed(typed: &Typed<'_>) -> Vec<String> {
         .enum_values
         .iter()
         .flatten()
-        .map(|(key, label)| match property.enum_type {
-            crate::EnumType::Int => format!("{key} ({label})"),
+        .map(|(key, label)| match typed.enum_type {
+            Some(crate::EnumType::Int) => format!("{key} ({label})"),
             _ => label.clone(),
         })
         .collect()

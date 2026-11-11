@@ -4,15 +4,15 @@ domain: planning
 entities:
   LinearIssue:
     description: A Linear ticket linked to GitLab work.
+    identity: id
     label: title
-    defaults: [id, title, state]
+    default_columns: [id, title, state]
     properties:
       id: int64
       title: string
       body: string
       state:
         type: enum
-        stored_as_text: true
         values: { 0: backlog, 1: todo, 2: in_progress, 3: done, 4: canceled }
       merge_request_id: int64?
       traversal_path: string

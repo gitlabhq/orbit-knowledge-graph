@@ -2,14 +2,18 @@ kind: graph
 package: acme
 entities:
   Folder:
+    identity: id
     label: name
+    default_columns: [id, name, team_key]
     properties:
       id: int64
       name: string
       team_key: string
 
   Person:
+    identity: id
     label: name
+    default_columns: [id, name]
     properties:
       id: int64
       name: string

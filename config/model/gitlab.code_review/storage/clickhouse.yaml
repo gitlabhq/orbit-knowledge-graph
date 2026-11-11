@@ -3,6 +3,7 @@ package: gitlab.code_review
 store: graph
 entities:
   MergeRequest:
+    complete: true
     table: gl_merge_request
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -12,7 +13,7 @@ entities:
       source_branch: {backend: {type: String, codec: [ZSTD(1)]}}
       target_branch: {backend: {type: String, codec: [ZSTD(1)]}}
       state: {backend: {type: LowCardinality(String), codec: [LZ4]}}
-      merge_status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      merge_status: {selectivity: low, backend: {type: LowCardinality(String), codec: [LZ4]}}
       draft: {backend: {type: Bool}}
       squash: {backend: {type: Bool}}
       created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
@@ -96,11 +97,12 @@ entities:
       path_lookups: {id: {table: gl_merge_request, key: id}}
 
   MergeRequestDiff:
+    complete: true
     table: gl_merge_request_diff
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
       merge_request_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
-      state: {backend: {type: String, codec: [ZSTD(1)]}}
+      state: {selectivity: low, backend: {type: String, codec: [ZSTD(1)]}}
       base_commit_sha: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
       head_commit_sha: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
       start_commit_sha: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
@@ -128,6 +130,7 @@ entities:
       path_lookups: {id: {table: gl_merge_request_diff, key: id}}
 
   MergeRequestDiffFile:
+    complete: true
     table: gl_merge_request_diff_file
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -142,8 +145,8 @@ entities:
       deleted_file: {immutable: true, backend: {type: Bool}}
       binary: {immutable: true, backend: {type: Nullable(Bool)}}
       generated: {backend: {type: Nullable(Bool)}}
-      a_mode: {backend: {type: String, codec: [ZSTD(1)]}}
-      b_mode: {backend: {type: String, codec: [ZSTD(1)]}}
+      a_mode: {selectivity: low, backend: {type: String, codec: [ZSTD(1)]}}
+      b_mode: {selectivity: low, backend: {type: String, codec: [ZSTD(1)]}}
       traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
     access: {filter: [too_large, new_file, renamed_file, deleted_file, binary, id, merge_request_id, merge_request_diff_id, project_id], text: [new_path, old_path], order: [id]}
     backend:

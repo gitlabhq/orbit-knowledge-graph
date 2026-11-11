@@ -6,8 +6,9 @@ entities:
   Finding:
     style: {size: 26, color: "#F87171"}
     description: A security scan finding (occurrence) that may be linked to a vulnerability
+    identity: id
     label: uuid
-    defaults: [id, uuid, name, severity]
+    default_columns: [id, uuid, name, severity]
     properties:
       id: {type: int64, description: Unique ID.}
       uuid: {type: uuid, description: Unique UUID., default: ''}
@@ -35,8 +36,9 @@ entities:
   SecurityScan:
     style: {size: 26, color: "#B91C1C"}
     description: A security scan execution that produces findings within a CI/CD pipeline
+    identity: id
     label: id
-    defaults: [id, scan_type, status]
+    default_columns: [id, scan_type, status]
     properties:
       id: {type: int64, description: Unique ID.}
       scan_type:
@@ -88,8 +90,9 @@ entities:
     description: >-
       A security vulnerability identified in a project, representing a confirmed or
       potential security issue
+    identity: id
     label: title
-    defaults: [id, title, state, severity, report_type]
+    default_columns: [id, title, state, severity, report_type]
     properties:
       id: {type: int64, description: Unique ID.}
       title: {type: string, description: Summary title., default: ''}
@@ -143,14 +146,14 @@ entities:
   VulnerabilityIdentifier:
     style: {size: 22, color: "#7F1D1D"}
     description: A vulnerability identifier such as a CVE, CWE, or other external reference
+    identity: id
     label: name
-    defaults: [id, name, external_type, external_id]
+    default_columns: [id, name, external_type, external_id]
     properties:
       id: {type: int64, description: Unique ID.}
       external_type:
         type: string
         description: Identifier type (e.g. cve, cwe, gemnasium).
-        selectivity: low
         default: ''
       external_id:
         type: string
@@ -168,8 +171,9 @@ entities:
   VulnerabilityOccurrence:
     style: {size: 28, color: "#EF4444"}
     description: A specific occurrence of a vulnerability detected in a project
+    identity: id
     label: uuid
-    defaults: [id, uuid, name, severity, report_type]
+    default_columns: [id, uuid, name, severity, report_type]
     properties:
       id: {type: int64, description: Unique ID.}
       uuid: {type: uuid, description: Unique UUID., default: ''}
@@ -238,8 +242,9 @@ entities:
   VulnerabilityScanner:
     style: {size: 24, color: "#FCA5A5"}
     description: A security scanner that detects vulnerabilities in projects
+    identity: id
     label: name
-    defaults: [id, name, vendor]
+    default_columns: [id, name, vendor]
     properties:
       id: {type: int64, description: Unique ID.}
       external_id:
@@ -247,7 +252,7 @@ entities:
         description: External ID (e.g. gemnasium, bandit).
         default: ''
       name: {type: string, description: Display name., default: ''}
-      vendor: {type: string, description: "Scanner vendor (default: GitLab).", selectivity: low, default: GitLab}
+      vendor: {type: string, description: "Scanner vendor (default: GitLab).", default: GitLab}
       created_at: {type: timestamp, description: Creation timestamp.}
       updated_at: {type: timestamp, description: Last update timestamp.}
       project_id:

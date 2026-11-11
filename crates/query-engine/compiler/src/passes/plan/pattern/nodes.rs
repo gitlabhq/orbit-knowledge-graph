@@ -186,7 +186,7 @@ fn aggregation_row_nodes<'p>(
         .filter(|group| match group {
             Expr::Node(_) => true,
             Expr::Property { property, .. } | Expr::Truncate { property, .. } => {
-                free_text(model.graph(), *property)
+                free_text(model, *property)
             }
             _ => false,
         })

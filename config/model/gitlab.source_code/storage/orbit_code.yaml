@@ -14,9 +14,9 @@ entities:
       commit_sha: {}
       path: {immutable: true}
       name: {immutable: true}
-      extension: {immutable: true}
-      language: {immutable: true}
+      extension: {immutable: true, selectivity: low}
+      language: {immutable: true, selectivity: low}
       size_bytes: {}
-      reason: {}
+      reason: {selectivity: low}
     backend:
       search: {content: [trigram, structural], path: [trigram]}

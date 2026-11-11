@@ -9,6 +9,7 @@ engine:
     deleted_column: _deleted
 entities:
   Folder:
+    complete: true
     table: acme_folder
     columns:
       id: {immutable: true, backend: {type: Int64}}
@@ -16,6 +17,7 @@ entities:
       team_key: {backend: {type: String}}
     access: {order: [id]}
   Person:
+    complete: true
     table: acme_person
     columns:
       id: {immutable: true, backend: {type: Int64}}

@@ -483,7 +483,7 @@ fn aggregation_row_nodes<'p>(
             Logical::Property { binding, property }
             | Logical::Truncate {
                 binding, property, ..
-            } if free_text(model.graph(), *property) => Some(query.name(*binding)),
+            } if free_text(model, *property) => Some(query.name(*binding)),
             _ => None,
         })
         .collect()

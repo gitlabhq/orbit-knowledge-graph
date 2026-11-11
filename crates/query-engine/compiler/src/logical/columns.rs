@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use query_data_model::plan::logical::{Columns, Expr, LogicalOperation, Projection};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::{DataType, FieldSelectivity};
-use query_data_model::{Entity, EntityId, GraphCatalog, PropertyId};
+use query_data_model::{Entity, EntityId, PropertyId};
 
 use super::Query;
 
@@ -39,7 +39,7 @@ pub fn defaults(entity: &Entity) -> impl Iterator<Item = PropertyId> + '_ {
         .properties
         .iter()
         .copied()
-        .filter(|property| entity.defaults.contains(property))
+        .filter(|property| entity.default_columns.contains(property))
 }
 
 /// The properties a binding returns: the listed ones, else the defaults or every readable property.
@@ -53,7 +53,7 @@ where
         selection => {
             let entity = graph.entity(entity);
             let defaulted = matches!(selection, None | Some(Columns::Default));
-            let properties: Vec<PropertyId> = match defaulted && !entity.defaults.is_empty() {
+            let properties: Vec<PropertyId> = match defaulted {
                 true => defaults(entity).collect(),
                 false => entity.properties.clone(),
             };
@@ -83,12 +83,11 @@ pub fn redaction_column(model: &Catalog<impl SqlBackend>, entity: EntityId) -> O
     })
 }
 
-/// Free text: a uuid, or a string not declared low selectivity.
-pub fn free_text(graph: &GraphCatalog, property: PropertyId) -> bool {
-    let property = graph.property(property);
-    match property.data_type {
+/// Free text: a uuid, or a string its store does not declare low selectivity.
+pub fn free_text(model: &Catalog<impl SqlBackend>, property: PropertyId) -> bool {
+    match model.graph().property(property).data_type {
         DataType::Uuid => true,
-        DataType::String => property.selectivity != FieldSelectivity::Low,
+        DataType::String => model.selectivity(property) != Some(FieldSelectivity::Low),
         _ => false,
     }
 }

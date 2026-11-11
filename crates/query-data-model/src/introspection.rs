@@ -40,9 +40,7 @@ impl IntrospectionScope {
             .iter()
             .filter(|property| match (self, local) {
                 (Self::All, _) => !model.access().property(**property).hidden,
-                (Self::Local, Some(store)) => {
-                    !store.excludes(**property) && model.lookup(**property).is_none()
-                }
+                (Self::Local, Some(store)) => store.column(**property).is_some(),
                 (Self::Local, None) => false,
             })
             .map(|property| model.graph().property(*property))
@@ -351,13 +349,17 @@ package: test
 domain: core
 entities:
   Project:
+    identity: id
     label: name
+    default_columns: [id, name]
     properties:
       id: {type: int64, description: Unique ID.}
       name: string
       traversal_path: string
   MergeRequest:
+    identity: id
     label: title
+    default_columns: [id, state, title]
     properties:
       id: {type: int64, description: Unique ID.}
       state: {type: enum, values: {1: opened, 2: merged}}
@@ -407,9 +409,13 @@ engine:
     version_column: _version
     deleted_column: _deleted
     edge_tables:
-      gl_edge: {shared: true, sort_key: [traversal_path, source_id, relationship_kind, target_id]}
+      gl_edge:
+        shared: true
+        sort_key: [traversal_path, source_id, relationship_kind, target_id]
+        columns: {source_id: {type: Int64}, target_id: {type: Int64}}
 entities:
   Project:
+    complete: true
     table: gl_project
     columns:
       id: {immutable: true, backend: {type: Int64}}
@@ -417,6 +423,7 @@ entities:
       traversal_path: {backend: {type: String}}
     access: {order: [id]}
   MergeRequest:
+    complete: true
     table: gl_merge_request
     columns:
       id: {immutable: true, backend: {type: Int64}}
@@ -464,7 +471,6 @@ entities:
       title: {backend: {type: VARCHAR}}
       project_id: {backend: {type: BIGINT}}
       traversal_path: {backend: {type: VARCHAR}}
-    exclude: [body]
     access: {order: [id]}
 relationships:
   RELATES_TO:

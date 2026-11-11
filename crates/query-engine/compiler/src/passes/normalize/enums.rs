@@ -36,8 +36,9 @@ fn label(left: Expr, literal: Literal, model: &Model) -> Literal {
     let (Expr::Property { property, .. }, Literal::Int(code)) = (left, &literal) else {
         return literal;
     };
+    let enum_type = model.enum_type(property);
     let property = model.graph().property(property);
-    match (&property.enum_type, &property.enum_values) {
+    match (&enum_type, &property.enum_values) {
         (EnumType::Int, Some(values)) => values
             .get(code)
             .map_or(literal, |label| Literal::String(label.clone())),

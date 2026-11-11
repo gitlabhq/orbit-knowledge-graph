@@ -324,6 +324,8 @@ mod tests {
                                 ColumnStorage {
                                     immutable: false,
                                     column: None,
+                                    selectivity: None,
+                                    stored_as_text: false,
                                     backend: Box::new(Some(column)),
                                 },
                             );

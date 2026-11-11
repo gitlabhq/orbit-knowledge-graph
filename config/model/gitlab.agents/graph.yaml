@@ -8,8 +8,9 @@ entities:
     description: >-
       An AI agent session in a project, recorded in the AI governance sessions table.
       Existence, source and flow type only, never its content
+    identity: id
     label: flow_type
-    defaults: [id, source, flow_type, session_started_at]
+    default_columns: [id, source, flow_type, session_started_at]
     properties:
       id: {type: int64, description: Governance session ID.}
       flow_type:
@@ -55,7 +56,6 @@ entities:
           33: ambient
           34: issue_to_merge_request
           35: convert_to_gitlab_ci
-        stored_as_text: true
         default: other
       source:
         type: enum

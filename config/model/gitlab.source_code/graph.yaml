@@ -6,8 +6,9 @@ entities:
   Branch:
     style: {size: 28, color: "#14B8A6"}
     description: A Git branch in a repository
+    identity: id
     label: name
-    defaults: [id, name, is_default]
+    default_columns: [id, name, is_default]
     properties:
       id:
         type: int64
@@ -24,8 +25,9 @@ entities:
   Commit:
     style: {size: 24, color: "#8B5CF6"}
     description: A Git commit, shared target for commit-related edges
+    identity: id
     label: sha
-    defaults: [id, sha, project_id]
+    default_columns: [id, sha, project_id]
     properties:
       id:
         type: int64
@@ -39,8 +41,9 @@ entities:
   Definition:
     style: {size: 26, color: "#2DD4BF"}
     description: A code definition such as a class, function, method, or module
+    identity: id
     label: name
-    defaults: [id, name, fqn, definition_type, file_path, commit_sha, start_line, end_line]
+    default_columns: [id, name, fqn, definition_type, file_path, commit_sha, start_line, end_line]
     properties:
       id: {type: int64, description: Unique ID.}
       traversal_path: {type: string, description: Namespace path for authz.}
@@ -57,7 +60,6 @@ entities:
         description: >-
           Definition kind (e.g., Class, Module, Method, Function, Struct, Enum, Trait,
           Lambda).
-        selectivity: low
       start_line: {type: int64, description: Start line.}
       end_line: {type: int64, description: End line.}
       start_byte: {type: int64, description: Start byte offset.}
@@ -71,8 +73,9 @@ entities:
   Directory:
     style: {size: 26, color: "#06B6D4"}
     description: A directory within a repository's file structure
+    identity: id
     label: path
-    defaults: [id, path, name, commit_sha]
+    default_columns: [id, path, name, commit_sha]
     properties:
       id: {type: int64, description: Unique ID.}
       traversal_path: {type: string, description: Namespace path for authz.}
@@ -85,8 +88,9 @@ entities:
   File:
     style: {size: 24, color: "#22D3EE"}
     description: A source code file within a repository
+    identity: id
     label: path
-    defaults: [id, path, name, language, commit_sha]
+    default_columns: [id, path, name, language, commit_sha]
     properties:
       id: {type: int64, description: Unique ID.}
       traversal_path: {type: string, description: Namespace path for authz.}
@@ -98,11 +102,9 @@ entities:
       extension:
         type: string
         description: Extension (e.g., rb, py, java).
-        selectivity: low
       language:
         type: string
         description: Programming language (e.g., ruby, python, java).
-        selectivity: low
       size_bytes:
         type: int64
         description: Uncompressed file size in bytes, measured at index time.
@@ -113,15 +115,15 @@ entities:
         description: >-
           Why the file was skipped or failed to index (e.g. oversize, timeout_parse,
           invalid_utf8). Empty for files indexed successfully.
-        selectivity: low
 
         default: ''
 
   ImportedSymbol:
     style: {size: 22, color: "#5EEAD4"}
     description: An imported symbol or module reference within a source file
+    identity: id
     label: identifier_name
-    defaults:
+    default_columns:
     - id
     - identifier_name
     - import_path
@@ -140,7 +142,6 @@ entities:
       import_type:
         type: string
         description: Import kind (e.g., module, symbol, wildcard).
-        selectivity: low
       import_path:
         type: string
         description: Source module or path of the import.

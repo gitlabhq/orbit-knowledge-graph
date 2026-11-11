@@ -61,10 +61,12 @@ where
         store.column(property)
     }
 
-    /// The lookup that serves a property its entity's store holds.
+    /// The lookup that serves a property of an entity whose complete store is on this connection;
+    /// a partial store holds only the columns it lists.
     pub fn lookup(&self, property: PropertyId) -> Option<&Lookup> {
-        let (store, _) = self.home(self.graph().property(property).entity)?;
-        if store.excludes(property) {
+        let entity = self.graph().property(property).entity;
+        let (store, _) = self.home(entity)?;
+        if store.excludes(property) || !store.complete(entity) {
             return None;
         }
         self.model().lookup(property)

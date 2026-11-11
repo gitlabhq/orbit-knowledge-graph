@@ -3,6 +3,7 @@ package: tenant.agent_memory
 store: graph
 entities:
   AgentMemory:
+    complete: true
     table: tenant_agent_memory
     columns:
       id: { immutable: true, backend: { type: Int64 } }

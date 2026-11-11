@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::{RelationalFacts, Table};
 use crate::catalog::{Diagnostics, Source, SourceInput, StorageBackend, StoreInput};
+use crate::constants::{SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use crate::{
     DenormalizedCatalog, EntityId, MaterializedJoin, RelationshipVariantId, TraversalPathKind,
     TraversalPathLookup,
@@ -121,8 +122,9 @@ impl RelationalStore {
         }
     }
 
-    /// Every attribute of a variant's relationship is a column of the variant's edge table.
-    pub fn check_attribute_columns<B: StorageBackend>(
+    /// Every attribute of a variant's relationship is a column of the variant's edge table, and
+    /// the table's ID columns have the types of both endpoint identities.
+    pub fn check_edge_columns<B: StorageBackend>(
         &self,
         input: &StoreInput<'_, B>,
         diagnostics: &mut Diagnostics,
@@ -141,11 +143,38 @@ impl RelationalStore {
                     store.name, relationship.name
                 )
             };
+            let table = self
+                .edge_table(variant.id)
+                .and_then(|name| self.table(name));
+            if let Some(table) = table {
+                for (column, endpoint) in [
+                    (SOURCE_ID_COLUMN, variant.source),
+                    (TARGET_ID_COLUMN, variant.target),
+                ] {
+                    let entity = graph.entity(endpoint);
+                    let identity = match entity.identity.as_slice() {
+                        [identity] => Some(graph.property(*identity).data_type),
+                        _ => None,
+                    };
+                    let found = table.column(column).and_then(|column| column.data_type);
+                    if found.is_none() || found != identity {
+                        let found = found.map_or("untyped".to_string(), |t| format!("{t:?}"));
+                        let identity =
+                            identity.map_or("composite".to_string(), |t| format!("{t:?}"));
+                        diagnostics.error(
+                            package,
+                            format!(
+                                "{} binds edge table {} whose {column} is {found}, but {}'s identity is {identity}; keys are never cast",
+                                label(),
+                                table.name,
+                                entity.name
+                            ),
+                        );
+                    }
+                }
+            }
             for attribute in &relationship.attributes {
                 let attribute = graph.attribute(*attribute);
-                let table = self
-                    .edge_table(variant.id)
-                    .and_then(|name| self.table(name));
                 let found = table.and_then(|table| table.column(&attribute.name));
                 match found.and_then(|column| column.data_type) {
                     Some(found) if found == attribute.data_type => {}

@@ -32,7 +32,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::packages::{Tier, directory};
 use crate::spec::{Fragment, Fragments};
-use crate::{DataModelError, GraphCatalog, PropertyId};
+use crate::{DataModelError, EntityId, GraphCatalog, PropertyId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModelId([u8; 32]);
@@ -144,6 +144,23 @@ impl Model {
                     .is_some_and(|key| key.foreign_key.property == property)
             })
         })
+    }
+
+    /// The one store that holds or excludes every property of the entity.
+    pub fn complete_store(&self, entity: EntityId) -> Option<&Store> {
+        self.stores.iter().find(|store| store.complete(entity))
+    }
+
+    /// How the entity's complete store keeps an enum property: as labels or as integer codes.
+    pub fn enum_type(&self, property: PropertyId) -> crate::EnumType {
+        let entity = self.graph.property(property).entity;
+        match self
+            .complete_store(entity)
+            .is_some_and(|store| store.stored_as_text(property))
+        {
+            true => crate::EnumType::String,
+            false => crate::EnumType::Int,
+        }
     }
 
     /// Whether every store that holds the property marks it immutable.

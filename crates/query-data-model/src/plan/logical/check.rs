@@ -11,6 +11,8 @@ use crate::{Model, Property, RelationshipId, RelationshipVariantId};
 pub(super) struct Typed<'m> {
     pub(super) data_type: DataType,
     pub(super) property: Option<&'m Property>,
+    /// How the property's complete store keeps it, when it is an enum property.
+    pub(super) enum_type: Option<crate::EnumType>,
     pub(super) access: PropertyAccess,
     pub(super) name: String,
 }
@@ -157,6 +159,7 @@ pub(super) fn scalar<'m>(
                     }
                 },
                 property: None,
+                enum_type: None,
                 access: PropertyAccess {
                     like: false,
                     ..PropertyAccess::COMPUTED
@@ -172,6 +175,7 @@ pub(super) fn scalar<'m>(
             Ok(Typed {
                 data_type: declared.data_type,
                 property: None,
+                enum_type: None,
                 access: PropertyAccess {
                     like: false,
                     ..resolved.access
@@ -187,6 +191,7 @@ pub(super) fn scalar<'m>(
             (name, LogicalType::Scalar(data_type)) => Ok(Typed {
                 data_type: *data_type,
                 property: None,
+                enum_type: None,
                 access: PropertyAccess::COMPUTED,
                 name: name.unwrap_or("output").to_string(),
             }),
@@ -208,6 +213,7 @@ fn property_of<'m>(
         (_, LogicalType::Entity(bound)) if *bound == property.entity => Ok(Typed {
             data_type: property.data_type,
             property: Some(property),
+            enum_type: Some(model.enum_type(property.id)),
             access: model.access().property(property.id),
             name,
         }),

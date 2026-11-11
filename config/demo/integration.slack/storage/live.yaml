@@ -6,6 +6,7 @@ engine:
   connection: data_extraction
 entities:
   SlackMessage:
+    complete: true
     columns:
       id: {immutable: true}
       workspace: {immutable: true}

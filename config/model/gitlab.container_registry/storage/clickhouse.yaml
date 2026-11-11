@@ -3,6 +3,7 @@ package: gitlab.container_registry
 store: graph
 entities:
   ContainerRepository:
+    complete: true
     table: gl_container_repository
     columns:
       id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}

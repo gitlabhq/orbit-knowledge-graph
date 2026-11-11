@@ -6,8 +6,9 @@ entities:
   Label:
     style: {size: 22, color: "#A855F7"}
     description: A label for categorizing and filtering work items
+    identity: id
     label: title
-    defaults: [id, title, color]
+    default_columns: [id, title, color]
     properties:
       id: {type: int64, description: Unique ID.}
       title: {type: string, description: Label title., default: ''}
@@ -26,14 +27,15 @@ entities:
   Milestone:
     style: {size: 30, color: "#D946EF"}
     description: A milestone for tracking progress toward a goal within a project or group
+    identity: id
     label: title
-    defaults: [id, iid, title, state, due_date, start_date]
+    default_columns: [id, iid, title, state, due_date, start_date]
     properties:
       id: {type: int64, description: Unique ID.}
       iid: {type: int64?, description: Scoped milestone number.}
       title: {type: string, description: Title., default: ''}
       description: {type: string, description: Description text., default: ''}
-      state: {type: string, description: "State (active, closed).", selectivity: low, default: ''}
+      state: {type: string, description: "State (active, closed).", default: ''}
       due_date: {type: date?, description: Due date.}
       start_date: {type: date?, description: Start date.}
       created_at: {type: timestamp?, description: Creation timestamp.}
@@ -51,8 +53,9 @@ entities:
     description: >-
       A work item representing an issue, epic, task, incident, or other trackable
       unit of work
+    identity: id
     label: title
-    defaults: [id, iid, title, state, work_item_type]
+    default_columns: [id, iid, title, state, work_item_type]
     properties:
       id: {type: int64, description: Unique ID.}
       iid: {type: int64, description: Scoped work item number.}

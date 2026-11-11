@@ -301,6 +301,10 @@ pub trait Naming: Debug + Clone + Copy + PartialEq {
     type Loaded<T: Value + Default>: Value + Default;
     /// A field the written form may omit and the loader defaults.
     type Defaulted<T: Value>: Value;
+    /// A field the loader requires, so that its absence is one diagnostic among the rest.
+    type Required<T: Value>: Value;
+    /// One identity property, or several in order.
+    type Identity: Value;
     /// Members written as a map by name, resolved to ids in declaration order.
     type Members<T: Value, Id: Value>: Value + Default;
 }
@@ -321,6 +325,8 @@ impl Naming for Raw {
     type Copies = CopySources;
     type Loaded<T: Value + Default> = ();
     type Defaulted<T: Value> = Option<T>;
+    type Required<T: Value> = Option<T>;
+    type Identity = OneOrMany;
     type Members<T: Value, Id: Value> = IndexMap<String, T>;
 }
 
@@ -334,6 +340,8 @@ impl Naming for Resolved {
     type Copies = Vec<(crate::Endpoint, PropertyId)>;
     type Loaded<T: Value + Default> = T;
     type Defaulted<T: Value> = T;
+    type Required<T: Value> = T;
+    type Identity = Vec<PropertyId>;
     type Members<T: Value, Id: Value> = Vec<Id>;
 }
 

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
-use query_data_model::{Catalog, DuckDb, PropertyId};
+use query_data_model::{Catalog, DataType, DuckDb, PropertyId};
 use serde_json::{Map, Value};
 
 use crate::{DuckDbClient, i64_column, sql_lit, string_column};
@@ -20,6 +20,7 @@ pub struct NodeValue {
 pub struct NodeHydrator {
     entity_type: String,
     table: String,
+    identity: String,
     columns: HashMap<String, String>,
     properties: Vec<String>,
 }
@@ -39,30 +40,29 @@ impl NodeHydrator {
             .iter()
             .filter_map(|property| Some((name(property), catalog.column(*property)?.to_string())))
             .collect();
-        let properties = if entity.defaults.is_empty() {
-            columns
-                .keys()
-                .filter(|name| *name != "id")
-                .cloned()
-                .collect()
-        } else {
-            entity
-                .defaults
-                .iter()
-                .map(name)
-                .filter(|name| name != "id" && columns.contains_key(name))
-                .collect()
+        let identity = match entity.identity.as_slice() {
+            [identity] if graph.property(*identity).data_type == DataType::Int => *identity,
+            _ => anyhow::bail!(
+                "entity {entity_type:?} has no integer identity; local hydration reads integer ids"
+            ),
         };
-        anyhow::ensure!(
-            columns.contains_key("id"),
-            "entity {entity_type:?} has no stored id property"
-        );
+        let identity = catalog
+            .column(identity)
+            .with_context(|| format!("entity {entity_type:?} does not store its identity"))?
+            .to_string();
+        let properties = entity
+            .default_columns
+            .iter()
+            .filter(|property| catalog.column(**property).is_some_and(|c| c != identity))
+            .map(name)
+            .collect();
         Ok(Self {
             entity_type: entity.name.clone(),
             table: source
                 .table
                 .clone()
                 .context("the local store holds the entity without a table")?,
+            identity,
             columns,
             properties,
         })
@@ -98,7 +98,7 @@ impl NodeHydrator {
             .join(", ");
         format!(
             "n.{} AS id, to_json(struct_pack({properties})) AS properties",
-            self.columns["id"]
+            self.identity
         )
     }
 
@@ -120,7 +120,7 @@ impl NodeHydrator {
             })
             .collect::<Result<_>>()?;
         if let Some(ids) = ids {
-            predicates.push(format!("n.{} IN ({})", self.columns["id"], id_list(ids)));
+            predicates.push(format!("n.{} IN ({})", self.identity, id_list(ids)));
         }
         let where_clause = if predicates.is_empty() {
             String::new()

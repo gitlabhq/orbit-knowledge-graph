@@ -363,7 +363,7 @@ async fn test_expand_all_wildcard() {
 }
 
 fn custom_node_model() -> Arc<Catalog<ClickHouse>> {
-    let graph = "kind: graph\npackage: test\nentities:\n  CustomNode:\n    label: id\n    properties: {id: int64}\n";
+    let graph = "kind: graph\npackage: test\nentities:\n  CustomNode:\n    identity: id\n    label: id\n    default_columns: [id]\n    properties: {id: int64}\n";
     let authorization = "kind: authorization\npackage: test\npermissions: [read]\nscopes: {global: {kind: global, provider: gitlab_session}}\nentities:\n  CustomNode: {scope: global, permission: read, properties: {open: [id]}}\n";
     let storage = "kind: storage
 package: test
@@ -378,6 +378,7 @@ engine:
       gl_edge: {shared: true, sort_key: [source_id, relationship_kind, target_id]}
 entities:
   CustomNode:
+    complete: true
     table: gl_custom_node
     columns: {id: {immutable: true, backend: {type: Int64}}}
     access: {order: [id]}

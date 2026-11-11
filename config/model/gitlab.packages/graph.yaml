@@ -8,8 +8,9 @@ entities:
     description: >-
       A dependency declared by a package in the GitLab package registry (name and
       version pattern)
+    identity: id
     label: name
-    defaults: [id, name, version_pattern]
+    default_columns: [id, name, version_pattern]
     properties:
       id: {type: int64, description: Unique ID.}
       name: {type: string, description: Dependency name., default: ''}
@@ -25,8 +26,9 @@ entities:
     description: >-
       A package published to the GitLab package registry (npm, Maven, PyPI, NuGet,
       and other formats)
+    identity: id
     label: name
-    defaults: [id, name, version, package_type, status]
+    default_columns: [id, name, version, package_type, status]
     properties:
       id: {type: int64, description: Unique ID.}
       name: {type: string, description: Package name., default: ''}
@@ -72,8 +74,9 @@ entities:
     description: >-
       A file belonging to a package in the GitLab package registry (the stored
       artifact, for example a .whl, .jar, or .tgz)
+    identity: id
     label: file_name
-    defaults: [id, file_name, size, file_sha256, status]
+    default_columns: [id, file_name, size, file_sha256, status]
     properties:
       id: {type: int64, description: Unique ID.}
       file_name: {type: string, description: File name., default: ''}
