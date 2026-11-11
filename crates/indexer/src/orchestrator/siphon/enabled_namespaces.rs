@@ -18,11 +18,14 @@ use crate::orchestrator::siphon::decoder::ColumnExtractor;
 use crate::orchestrator::siphon::route::{CdcContext, Route, RouteOutcome};
 use crate::orchestrator::siphon::subjects;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::DataModelError;
+use query_data_model::catalog::sources::DataSource;
 
 pub struct EnabledNamespacesRoute {
     namespace_indexing: NamespaceIndexingDispatch,
     code_backfill: Arc<CodeBackfill>,
     datalake: ArrowClickHouseClient,
+    paths_sql: String,
 }
 
 impl EnabledNamespacesRoute {
@@ -30,12 +33,14 @@ impl EnabledNamespacesRoute {
         namespace_indexing: NamespaceIndexingDispatch,
         code_backfill: Arc<CodeBackfill>,
         datalake: ArrowClickHouseClient,
-    ) -> Self {
-        Self {
+        source: &DataSource,
+    ) -> Result<Self, DataModelError> {
+        Ok(Self {
             namespace_indexing,
             code_backfill,
             datalake,
-        }
+            paths_sql: resolved_paths_for_namespace_ids_sql(source)?,
+        })
     }
 }
 
@@ -51,7 +56,7 @@ impl Route for EnabledNamespacesRoute {
         events: &[LogicalReplicationEvents],
     ) -> Result<RouteOutcome, TaskError> {
         let ids = enabled_namespace_ids(events);
-        let enabled = lookup_paths(&self.datalake, &ids).await?;
+        let enabled = lookup_paths(&self.datalake, &self.paths_sql, &ids).await?;
 
         let sdlc_requests: Vec<NamespaceDispatchRequest> = enabled
             .iter()
@@ -102,6 +107,7 @@ fn enabled_namespace_ids(events: &[LogicalReplicationEvents]) -> Vec<i64> {
 
 async fn lookup_paths(
     datalake: &ArrowClickHouseClient,
+    paths_sql: &str,
     namespace_ids: &[i64],
 ) -> Result<Vec<(i64, TraversalPath)>, TaskError> {
     if namespace_ids.is_empty() {
@@ -109,7 +115,7 @@ async fn lookup_paths(
     }
 
     let batches = datalake
-        .query(resolved_paths_for_namespace_ids_sql())
+        .query(paths_sql)
         .param("ids", namespace_ids.to_vec())
         .fetch_arrow()
         .await

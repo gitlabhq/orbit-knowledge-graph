@@ -363,7 +363,7 @@ pub async fn run_dispatcher(
         config.schedule.tasks.code_backfill.publish_window,
         &siphon,
         &code_tables,
-    ));
+    )?);
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
@@ -384,7 +384,7 @@ pub async fn run_dispatcher(
             campaign.clone(),
             candidate.model().sources(),
             &siphon,
-        )),
+        )?),
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),
             CodeStaleSweep::new(
@@ -449,7 +449,8 @@ pub async fn run_dispatcher(
             NamespaceIndexingDispatch::new(services.nats.clone()),
             backfill.clone(),
             clients.datalake.clone(),
-        )),
+            &siphon,
+        )?),
     ];
 
     let scheduled = Scheduled::new(tasks, lock_service);

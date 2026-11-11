@@ -374,7 +374,8 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
             .publish_window,
         &indexer::testkit::siphon_source(),
         &indexer::testkit::code_tables(),
-    );
+    )
+    .unwrap();
 
     backfill
         .dispatch_enabled(uuid::Uuid::new_v4())
@@ -452,7 +453,8 @@ async fn backfill_dispatches_only_projects_that_are_due() {
             .publish_window,
         &indexer::testkit::siphon_source(),
         &indexer::testkit::code_tables(),
-    );
+    )
+    .unwrap();
 
     backfill
         .dispatch_enabled(uuid::Uuid::new_v4())

@@ -12,9 +12,9 @@ use orbit_migrations::version::read_active_version;
 use orbit_observability::indexer::sdlc;
 use orbit_server_config::{NamespaceFreshnessConfig, ScheduleConfiguration};
 use parking_lot::Mutex;
-use query_data_model::Model;
 use query_data_model::catalog::sources::{DataSource, EtlScope, PipelineDescriptor};
 use query_data_model::implementations::clickhouse::schema::Schema;
+use query_data_model::{DataModelError, Model};
 
 use super::datalake::render_change_query;
 use crate::checkpoint::{
@@ -23,7 +23,7 @@ use crate::checkpoint::{
 };
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::orchestrator::dispatch::enabled_namespaces::{
-    ENABLED_NAMESPACE_TABLE, resolved_enabled_namespaces_sql,
+    enabled_namespaces_table, resolved_enabled_namespaces_sql,
 };
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 
@@ -35,15 +35,16 @@ FROM changed
 WHERE root_path IN (SELECT traversal_path FROM enabled)
 GROUP BY root_path, target"#;
 
-fn enabled_roots_sql(siphon: &DataSource) -> String {
-    format!(
+fn enabled_roots_sql(siphon: &DataSource) -> Result<String, DataModelError> {
+    Ok(format!(
         "SELECT enabled.root_namespace_id, enabled.traversal_path, enrolled.enabled_at \
 FROM ({}) AS enabled \
 INNER JOIN (SELECT root_namespace_id, max(created_at) AS enabled_at \
-FROM {ENABLED_NAMESPACE_TABLE} GROUP BY root_namespace_id) AS enrolled \
+FROM {} GROUP BY root_namespace_id) AS enrolled \
 ON enabled.root_namespace_id = enrolled.root_namespace_id",
-        resolved_enabled_namespaces_sql(siphon)
-    )
+        resolved_enabled_namespaces_sql(siphon)?,
+        enabled_namespaces_table(siphon)?,
+    ))
 }
 
 pub struct NamespaceFreshness {
@@ -113,7 +114,7 @@ impl NamespaceFreshness {
     async fn enabled_roots(&self, siphon: &DataSource) -> Result<Vec<Root>, TaskError> {
         let batches = self
             .datalake
-            .query(&enabled_roots_sql(siphon))
+            .query(&enabled_roots_sql(siphon).map_err(TaskError::new)?)
             .fetch_arrow()
             .await
             .map_err(TaskError::new)?;
@@ -145,7 +146,7 @@ impl NamespaceFreshness {
             .query(&render_change_query(
                 FRESHNESS_QUERY_SQL,
                 model.sources().reindex_triggers(),
-                siphon,
+                &resolved_enabled_namespaces_sql(siphon).map_err(TaskError::new)?,
             ))
             .param("lower", from.format(TIMESTAMP_FORMAT).to_string())
             .param("upper", to.format(TIMESTAMP_FORMAT).to_string())

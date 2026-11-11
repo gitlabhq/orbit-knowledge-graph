@@ -14,6 +14,7 @@ use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::durability::WriteDurability;
 use crate::nats::NatsServices;
+use crate::orchestrator::dispatch::enabled_namespaces::resolved_enabled_namespaces_sql;
 use crate::orchestrator::dispatch::{NamespaceDispatchRequest, NamespaceIndexingDispatch};
 use crate::orchestrator::scheduled::ScheduledTaskMetrics;
 use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
@@ -61,21 +62,22 @@ impl NamespaceDispatcher {
         campaign: Arc<CampaignState>,
         sources: &query_data_model::catalog::Sources,
         siphon: &query_data_model::catalog::sources::DataSource,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, query_data_model::DataModelError> {
+        let enabled = resolved_enabled_namespaces_sql(siphon)?;
+        Ok(Self {
             detector: Arc::new(DatalakeChangeDetector::new(
                 datalake.clone(),
                 sources,
-                siphon,
+                &enabled,
                 metrics.clone(),
             )),
-            reader: Arc::new(DatalakeEnabledNamespaceReader::new(datalake, siphon)),
+            reader: Arc::new(DatalakeEnabledNamespaceReader::new(datalake, enabled)),
             publisher: NamespaceIndexingDispatch::new(nats),
             campaign,
             checkpoint_store,
             metrics,
             config,
-        }
+        })
     }
 
     #[cfg(test)]

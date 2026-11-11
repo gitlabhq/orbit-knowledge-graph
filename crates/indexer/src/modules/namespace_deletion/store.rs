@@ -21,6 +21,7 @@ use query_data_model::{Catalog, ClickHouse, DataModelError};
 use super::lower::{self, DeletionStatement, ReconcileStatement};
 use crate::checkpoint::namespace_position_key;
 use crate::lifetime::Lifetime;
+use crate::orchestrator::dispatch::enabled_namespaces::enabled_namespaces_table;
 
 fn current_routes_under_root(project_paths: &str, namespace_paths: &str) -> String {
     format!(
@@ -41,17 +42,18 @@ struct SiphonQueries {
 }
 
 impl SiphonQueries {
-    fn new(source: &DataSource) -> Self {
+    fn new(source: &DataSource) -> Result<Self, DataModelError> {
         let (version, watermark, del) = (&source.version, &source.watermark, &source.deleted);
-        Self {
+        let enabled = enabled_namespaces_table(source)?;
+        Ok(Self {
             still_deleted: format!(
                 "SELECT argMax({del}, {version}) AS is_deleted \
-                 FROM siphon_knowledge_graph_enabled_namespaces \
+                 FROM {enabled} \
                  WHERE root_namespace_id = {{namespace_id:Int64}}"
             ),
             enabled_roots: format!(
                 "SELECT argMax(traversal_path, {version}) AS traversal_path \
-                 FROM siphon_knowledge_graph_enabled_namespaces \
+                 FROM {enabled} \
                  GROUP BY root_namespace_id, id \
                  HAVING argMax({del}, {version}) = false AND traversal_path != ''"
             ),
@@ -61,7 +63,7 @@ SELECT
     namespaces.root_namespace_id AS namespace_id,
     argMax(namespaces.traversal_path, namespaces.{version}) AS traversal_path,
     toString(max(namespaces.{version})) AS deleted_at
-FROM siphon_knowledge_graph_enabled_namespaces AS namespaces
+FROM {enabled} AS namespaces
 WHERE namespaces.{watermark} > {{last_watermark:String}}
   AND namespaces.{watermark} <= {{watermark:String}}
 GROUP BY namespaces.root_namespace_id, namespaces.id
@@ -69,7 +71,7 @@ HAVING argMax(namespaces.{del}, namespaces.{version}) = true
    AND argMax(namespaces.traversal_path, namespaces.{version}) != ''
 "#
             ),
-        }
+        })
     }
 }
 
@@ -304,7 +306,7 @@ impl ClickHouseNamespaceDeletionStore {
                 siphon.table("project_paths")?,
                 siphon.table("namespace_paths")?,
             ),
-            siphon: SiphonQueries::new(siphon),
+            siphon: SiphonQueries::new(siphon)?,
             engine: EngineQueries::new(catalog.schema()?)?,
         })
     }
@@ -604,7 +606,7 @@ mod sql_tests {
 
     #[test]
     fn siphon_state_uses_version_and_windows_use_watermark() {
-        let queries = SiphonQueries::new(&crate::testkit::siphon_source());
+        let queries = SiphonQueries::new(&crate::testkit::siphon_source()).unwrap();
         let (still_deleted, deleted) = (&queries.still_deleted, &queries.deleted_namespaces);
         assert!(still_deleted.contains("argMax(_siphon_deleted, _siphon_replicated_at)"));
         assert!(deleted.contains(

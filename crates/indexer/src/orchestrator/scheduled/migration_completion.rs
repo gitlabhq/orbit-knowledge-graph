@@ -12,6 +12,7 @@ use orbit_migrations::version::{
 };
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
+use query_data_model::DataModelError;
 use query_data_model::catalog::sources::DataSource;
 use query_data_model::implementations::clickhouse::spec::TableRole;
 use query_data_model::{Catalog, ClickHouse};
@@ -25,17 +26,21 @@ use crate::schema::metrics::CompletionMetrics;
 const MIGRATION_LOCK_KEY: &str = "schema_migration";
 const LOCK_TTL: std::time::Duration = std::time::Duration::from_secs(120);
 
-fn count_code_eligible_projects_sql(source: &DataSource) -> String {
+fn count_code_eligible_projects_sql(
+    source: &DataSource,
+    enabled: &str,
+) -> Result<String, DataModelError> {
     let del = &source.deleted;
     let top = orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
-    format!(
+    let projects = source.table("project_paths")?;
+    Ok(format!(
         "SELECT count(DISTINCT p.id) AS ns_count \
-         FROM project_namespace_traversal_paths AS p \
+         FROM {projects} AS p \
          WHERE p.deleted = false \
            AND extract(p.traversal_path, '{top}') IN (\
-               SELECT traversal_path FROM siphon_knowledge_graph_enabled_namespaces \
+               SELECT traversal_path FROM {enabled} \
                WHERE {del} = false AND match(traversal_path, '{top}$'))"
-    )
+    ))
 }
 
 static COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: LazyLock<String> = LazyLock::new(|| {
@@ -390,11 +395,14 @@ impl MigrationCompletionChecker {
     }
 
     fn siphon(&self) -> Result<&DataSource, String> {
+        self.enabled_namespaces().map(|(source, _)| source)
+    }
+
+    fn enabled_namespaces(&self) -> Result<(&DataSource, &str), String> {
         self.data_model
             .model()
             .sources()
             .enabled_namespaces()
-            .map(|(source, _)| source)
             .ok_or_else(|| "no source lists the enabled namespaces".to_string())
     }
 
@@ -408,9 +416,12 @@ impl MigrationCompletionChecker {
     }
 
     async fn count_eligible_projects(&self) -> Result<u64, String> {
+        let (source, enabled) = self.enabled_namespaces()?;
+        let sql =
+            count_code_eligible_projects_sql(source, enabled).map_err(|error| error.to_string())?;
         let batches = self
             .datalake
-            .query(&count_code_eligible_projects_sql(self.siphon()?))
+            .query(&sql)
             .fetch_arrow()
             .await
             .map_err(|e| e.to_string())?;

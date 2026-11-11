@@ -85,7 +85,8 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
         Arc::new(indexer::campaign::CampaignState::new()),
         model.sources(),
         &indexer::testkit::siphon_source(),
-    );
+    )
+    .unwrap();
 
     dispatcher.run().await.unwrap();
 
@@ -119,25 +120,30 @@ async fn dispatch_enabled_namespace_cdc(
     let services = indexer::orchestrator::scheduled::connect(&nats_config(nats_url))
         .await
         .unwrap();
-    let backfill = Arc::new(CodeBackfill::new(
-        services.nats.clone(),
-        ctx.config.build_client("graph"),
-        ctx.config.build_client("graph"),
-        ScheduledTaskMetrics::new(),
-        Arc::new(CampaignState::new()),
-        orbit_server_config::AppConfig::embedded_defaults()
-            .schedule
-            .tasks
-            .code_backfill
-            .publish_window,
-        &indexer::testkit::siphon_source(),
-        &indexer::testkit::code_tables(),
-    ));
+    let backfill = Arc::new(
+        CodeBackfill::new(
+            services.nats.clone(),
+            ctx.config.build_client("graph"),
+            ctx.config.build_client("graph"),
+            ScheduledTaskMetrics::new(),
+            Arc::new(CampaignState::new()),
+            orbit_server_config::AppConfig::embedded_defaults()
+                .schedule
+                .tasks
+                .code_backfill
+                .publish_window,
+            &indexer::testkit::siphon_source(),
+            &indexer::testkit::code_tables(),
+        )
+        .unwrap(),
+    );
     let route = EnabledNamespacesRoute::new(
         NamespaceIndexingDispatch::new(services.nats),
         backfill,
         ctx.config.build_client("graph"),
-    );
+        &indexer::testkit::siphon_source(),
+    )
+    .unwrap();
     let events: Vec<LogicalReplicationEvents> = cdc.iter().map(replication_event).collect();
 
     route

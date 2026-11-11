@@ -23,6 +23,7 @@ use crate::topic::CodeIndexingTaskRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::DataModelError;
 use query_data_model::catalog::sources::DataSource;
 
 pub const METRIC_NAME: &str = "dispatch.code_backfill";
@@ -41,12 +42,12 @@ WHERE _deleted = false
        OR _version > now64(6) - toIntervalSecond({retry_after_secs:UInt64}))
 "#;
 
-const NAMESPACE_PROJECTS_QUERY: &str = r#"
-SELECT id AS project_id, traversal_path
-FROM project_namespace_traversal_paths
-WHERE deleted = false
-  AND startsWith(traversal_path, {traversal_path:String})
-"#;
+fn namespace_projects_sql(project_paths: &str) -> String {
+    format!(
+        "SELECT id AS project_id, traversal_path FROM {project_paths} \
+         WHERE deleted = false AND startsWith(traversal_path, {{traversal_path:String}})"
+    )
+}
 
 pub struct PendingProject {
     pub project_id: i64,
@@ -62,13 +63,14 @@ pub struct CodeBackfill {
     publish_window: usize,
     namespaces_with_pending: AtomicUsize,
     enabled_namespaces_sql: String,
+    namespace_projects_sql: String,
     checkpoints: String,
 }
 
 impl CodeBackfill {
     #[allow(
         clippy::too_many_arguments,
-        reason = "the backfill wires its clients, lake source and code tables explicitly"
+        reason = "the backfill takes each collaborator explicitly"
     )]
     pub fn new(
         nats: Arc<dyn crate::nats::NatsServices>,
@@ -79,8 +81,8 @@ impl CodeBackfill {
         publish_window: usize,
         source: &DataSource,
         code_tables: &CodeTableNames,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, DataModelError> {
+        Ok(Self {
             nats,
             graph,
             datalake,
@@ -88,9 +90,10 @@ impl CodeBackfill {
             campaign,
             publish_window,
             namespaces_with_pending: AtomicUsize::new(0),
-            enabled_namespaces_sql: resolved_enabled_namespaces_sql(source),
+            enabled_namespaces_sql: resolved_enabled_namespaces_sql(source)?,
+            namespace_projects_sql: namespace_projects_sql(source.table("project_paths")?),
             checkpoints: code_tables.checkpoints.clone(),
-        }
+        })
     }
 
     /// Uncapped, a namespace larger than the window holds the work queue until it drains.
@@ -302,7 +305,7 @@ impl CodeBackfill {
         let query_start = Instant::now();
         let mut batches = self
             .datalake
-            .query(NAMESPACE_PROJECTS_QUERY)
+            .query(&self.namespace_projects_sql)
             .param("traversal_path", traversal_path.as_str())
             .fetch_arrow_streamed(None)
             .await
@@ -400,6 +403,7 @@ mod tests {
             &crate::testkit::siphon_source(),
             &crate::testkit::code_tables(),
         )
+        .unwrap()
     }
 
     const TEST_PUBLISH_WINDOW: usize = 50_000;
