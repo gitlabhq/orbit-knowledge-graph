@@ -43,6 +43,9 @@ pre-commit:
     - name: log-safety
       run: mise run lint:logs
       glob: "crates/**/*.rs"
+    - name: unit-tests
+      run: mise exec -- python3 scripts/linting/unit-tests/check.py --staged
+      glob: "crates/**/*.rs"
     - name: prose
       run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files}
       glob:

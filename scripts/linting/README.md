@@ -159,11 +159,12 @@ A rejection lists each test as `path/name/start_line`, one per line.
 
 - **lefthook** `pre-commit` job `narration` (advisory; prints warnings, does not
   block — `|| true` in `lefthook.yml`), `comments`, `prose`, and `yaml-suites`
-  (these three block the commit).
+  (these three block the commit), and `unit-tests` (blocks a staged Rust test
+  that has no opt-in reason).
 - **CI** jobs `lint:narration`, `lint:comments`, `lint:mr-description`,
-  `lint:prose`, and `lint:yaml`, defined in
+  `lint:prose`, `lint:yaml`, and `unit-test-opt-in`, defined in
   [`.gitlab/ci/linting.yml`](../../.gitlab/ci/linting.yml). The first three use
-  `allow_failure: true` (yellow/advisory); `lint:prose` and `lint:yaml` block. In merge-request
+  `allow_failure: true` (yellow/advisory); `lint:prose`, `lint:yaml`, and `unit-test-opt-in` block. In merge-request
   pipelines the narration and prose jobs scope to files the MR changed
   (`--diff-base`).
 

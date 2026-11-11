@@ -88,7 +88,7 @@ def diff(args: list[str]) -> str:
     if args == ["--staged"]:
         command = ["git", "diff", "--cached"]
     elif len(args) == 3 and args[0] == "--range":
-        command = ["git", "diff", f"{args[1]}...{args[2]}"]
+        command = ["git", "diff", args[1], args[2]]
     else:
         sys.exit(__doc__)
     return subprocess.run(
