@@ -58,9 +58,23 @@ entities:
       clickhouse: {scope_key: traversal_path}
     checks:
       - {provider: rails, permission: read_merge_request}
+    properties:
+      open: [id, iid, title, state, author_id]
+      hidden: [traversal_path]
+relationships:
+  AUTHORED:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  APPROVED:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
 ```
 
 The ClickHouse policy filters every `MergeRequest` read on the paths where the caller holds `read`. The `rails` check asks GitLab, in one batch, whether the caller can read each returned merge request, and it fails closed. Policies name graph properties and relationships, never columns.
+
+`properties` puts every property in one access class. `open` properties are read and filtered freely, and `hidden` ones are never exposed. Each relationship declares its own scope and permission. `of: target` means the caller must hold the merge request's scope, wherever the user sits.
 
 The platform package declares the permissions and scope kinds that every package uses:
 
@@ -78,6 +92,8 @@ entities:
     permission: read
     checks:
       - {provider: rails, permission: read_user}
+    properties:
+      open: [id, username, name]
 ```
 
 An entity without its own scope key reaches one through a relationship. A `Commit` takes its project's path:
@@ -90,7 +106,11 @@ An entity without its own scope key reaches one through a relationship. A `Commi
       clickhouse: {scope_key: {via: IN_PROJECT}}
     checks:
       - {provider: rails, permission: read_code, object: Project, id: project_id}
+    properties:
+      open: [id, sha, message, project_id]
 ```
+
+`IN_PROJECT` declares `of: holder`: the project is the scope entity that holds the commit.
 
 The storage fragment lays it out in a store, and nothing in it is inferred. It names the table and lists every stored property as a column, with its storage type and whether it is immutable. Shared fields work on every backend. A `backend` block holds what only that backend understands, and that backend validates it.
 
@@ -260,6 +280,26 @@ entities:
       live: {scope_key: {via: [IN_WORKSPACE, INSTALLED_IN]}}
     checks:
       - {provider: slack, kind: delegated}
+    properties:
+      open: [id, channel, author, text, sent_at]
+      exact: [workspace]
+  SlackWorkspace:
+    scope: namespace
+    permission: read
+    enforce:
+      clickhouse: {scope_key: {via: INSTALLED_IN}}
+    properties:
+      open: [id, name]
+      hidden: [namespace_id]
+relationships:
+  IN_WORKSPACE:
+    scope: namespace
+    permission: read
+    enforce: {live: {scope_key: {via: INSTALLED_IN}, of: holder}}
+  INSTALLED_IN:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: holder}}
 ```
 
 ```yaml
@@ -452,10 +492,15 @@ entities:
     permission: read
     enforce:
       clickhouse: {scope_key: traversal_path}
+    properties:
+      open: [id, summary]
+      hidden: [traversal_path]
 relationships:
   ABOUT:
+    scope: namespace
+    permission: read
     enforce:
-      clickhouse: {scope_key: traversal_path}
+      clickhouse: {scope_key: traversal_path, of: own}
 ```
 
 ```yaml
@@ -509,13 +554,17 @@ entities:
     permission: read
     enforce:
       clickhouse: {owner: OWNS}
+    properties:
+      open: [id, title, state]
 relationships:
   OWNS:
+    scope: user
+    permission: read
     enforce:
-      clickhouse: {scope_key: traversal_path}
+      clickhouse: {of: target}
 ```
 
-The graph must give `OWNS` one owner per todo. Storage decides whether the owner check reads a column or an edge.
+The graph must give `OWNS` one owner per todo. Storage decides whether the owner check reads a column or an edge. `OWNS` itself takes `of: target`: a caller sees the edge only when they may see the todo.
 
 Its entities appear only in that tenant's catalogs, and that tenant's plans and caches carry their own model ID.
 
@@ -621,6 +670,8 @@ The loader collects every error, names its package, and fails once. A missing de
 - An entity with no `id`, or no authorization entry.
 - A property that its home store neither stores nor excludes. In a relational store, a column without a storage type or an entity without a table. Nothing is inferred.
 - An entity without `default_columns`.
+- A property or relationship attribute with no access class, or with two.
+- A relationship without a scope, a permission, or an `of:` on each variant's policy.
 - A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none`, or checks by any provider. An integration package may declare only `Credentials` checks. A tenant overlay declares no checks, and its entities must be namespace- or user-scoped.
 - A backend that stores a non-global entity or a relationship but has no `enforce` entry for it.
 - A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.

@@ -301,6 +301,33 @@ An entity names its scope, the permission a read needs, and one `enforce` policy
 | `none`, only with a check | a check-only entity |
 
 `checks` name a provider and a permission, and run on the returned rows. A row comes back only if every check allows it.
+Each check derives its own key from the row, through the object and ID property it declares, so a Rails check on a commit's project and a Cedar check on the commit itself can sit on one entity.
+
+Every property of an entity, and every attribute of a relationship, sits in exactly one access class:
+
+| Class | Read | Filter | Pattern match | Who |
+|---|---|---|---|---|
+| `open` | yes | yes | yes | everyone |
+| `exact` | yes | equality and ranges only | no | everyone |
+| `unfiltered` | yes | no | no | everyone |
+| `hidden` | no | no | no | nobody |
+| `admin` | yes | yes | yes | administrators |
+| `admin_exact` | yes | equality and ranges only | no | administrators |
+
+A property with no class, or two, fails the load. The security phase enforces the classes on every plan, including plans that a phase builds directly.
+
+A relationship declares its own scope and permission, and each variant states which key decides whether the caller may see the edge:
+
+| `of:` | The caller must hold the scope of | Example |
+|---|---|---|
+| `target` | the target; the source may sit elsewhere | `User -> MergeRequest` `AUTHORED` |
+| `source` | the source; the target may sit elsewhere | a link from a work item to a global entity |
+| `both` | the target, which the source shares | `Job -> Pipeline` `AUTO_CANCELED_BY` |
+| `nested` | the target, which lies inside the source's scope | `Group -> Project` `CONTAINS` |
+| `holder` | the source; the target is the scope entity that holds it | `File -> Project` `IN_PROJECT` |
+| `own` | the edge's own key, which neither endpoint is known to share | `WorkItem -> WorkItem` links across projects |
+
+The planner reads `of:` for the security filter on an edge read and for the path bounds it pushes onto that read.
 
 ### 3. A new version goes live after its backfill
 
