@@ -127,7 +127,7 @@ build() {
 # CI image lacks; macOS has no /proc, so ps answers there.
 process_command() { # pid
   if [[ -r "/proc/$1/cmdline" ]]; then
-    tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null
+    tr '\0' ' ' 2>/dev/null <"/proc/$1/cmdline"
   else
     ps -o command= -p "$1" 2>/dev/null
   fi
