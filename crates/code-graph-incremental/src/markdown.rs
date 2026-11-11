@@ -1,9 +1,3 @@
-//! Markdown parses with comrak through `orbit_utils::markdown`, the extractor
-//! code-graph uses too, so both engines agree on sections, names and FQN
-//! segments. The result is a small tree for `langs/markdown.yaml`:
-//! `document` holds nested `section`s, each led by a `heading` (the name) and
-//! a `section_key` (the FQN segment).
-
 use orbit_utils::markdown::{LineIndex, sections};
 
 use crate::intern::Lang;

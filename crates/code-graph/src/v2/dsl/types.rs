@@ -767,11 +767,8 @@ pub type CustomParseFn = fn(
     Vec<crate::v2::types::CanonicalImport>,
 );
 
-/// How a language turns source into definitions and imports. Most languages
-/// parse with tree-sitter and walk the CST through the rule tables; `Custom`
-/// replaces that wholesale with `(source, file_path) -> (definitions,
-/// imports)`. Per-phase CPU budgets cannot interrupt a custom parser, so it
-/// must be robust to pathological input on its own.
+/// `Custom` replaces tree-sitter parsing wholesale. Per-phase CPU budgets cannot
+/// interrupt it, so it must be robust to pathological input on its own.
 #[derive(Clone, Copy, Default)]
 pub enum LanguageParser {
     #[default]

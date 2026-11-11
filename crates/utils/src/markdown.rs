@@ -1,6 +1,3 @@
-//! Markdown document structure shared by both code-graph engines, so the same
-//! file yields the same sections, names, FQN segments and byte ranges in each.
-
 use comrak::nodes::{AstNode, LineColumn, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -19,19 +16,15 @@ pub struct Section {
     /// sibling already uses it.
     pub segment: String,
     pub parent: Option<usize>,
-    /// Byte offset of the heading's first character, after any indentation.
     pub start: usize,
     /// Byte offset of the line after the heading (setext underline included).
     pub heading_end: usize,
-    /// Byte offset where the next heading of the same or a higher level
-    /// starts, or the end of the file.
     pub end: usize,
 }
 
 /// The sections of a Markdown document. Only headings at the top level of the
 /// document count: a heading inside a block quote or list item is quoted
-/// content, not document structure. A leading `---` front matter block is
-/// skipped, and headings with no text produce no section.
+/// content, not document structure.
 pub fn sections(source: &str) -> Vec<Section> {
     let arena = Arena::new();
     let mut options = Options::default();
