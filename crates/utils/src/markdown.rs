@@ -3,7 +3,7 @@
 
 use comrak::nodes::{AstNode, LineColumn, NodeValue};
 use comrak::{Arena, Options, parse_document};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Separator between FQN segments. A `#` or `\` inside heading text is
 /// escaped with `\` in the segment, so the FQN splits unambiguously.
@@ -40,8 +40,8 @@ pub fn sections(source: &str) -> Vec<Section> {
 
     let mut sections: Vec<Section> = Vec::new();
     let mut open: Vec<(u8, usize)> = Vec::new();
-    let mut child_segments: Vec<FxHashSet<String>> = Vec::new();
-    let mut root_segments = FxHashSet::default();
+    let mut child_segments: Vec<SiblingSegments> = Vec::new();
+    let mut root_segments = SiblingSegments::default();
 
     for node in root.children() {
         let data = node.data.borrow();
@@ -64,9 +64,9 @@ pub fn sections(source: &str) -> Vec<Section> {
         }
         let parent = open.last().map(|&(_, index)| index);
         let siblings = parent.map_or(&mut root_segments, |index| &mut child_segments[index]);
-        let segment = unique_segment(siblings, &escape_segment(&name));
+        let segment = siblings.claim(escape_segment(&name));
         open.push((heading.level, sections.len()));
-        child_segments.push(FxHashSet::default());
+        child_segments.push(SiblingSegments::default());
         sections.push(Section {
             name,
             segment,
@@ -94,14 +94,26 @@ fn escape_segment(name: &str) -> String {
     name.replace('\\', "\\\\").replace('#', "\\#")
 }
 
-fn unique_segment(used: &mut FxHashSet<String>, segment: &str) -> String {
-    let mut candidate = segment.to_string();
-    let mut n = 1;
-    while !used.insert(candidate.clone()) {
-        candidate = format!("{segment}-{n}");
-        n += 1;
+#[derive(Default)]
+struct SiblingSegments {
+    used: FxHashSet<String>,
+    next_suffix: FxHashMap<String, usize>,
+}
+
+impl SiblingSegments {
+    fn claim(&mut self, segment: String) -> String {
+        if self.used.insert(segment.clone()) {
+            return segment;
+        }
+        let next = self.next_suffix.entry(segment.clone()).or_insert(1);
+        loop {
+            let candidate = format!("{segment}-{next}");
+            *next += 1;
+            if self.used.insert(candidate.clone()) {
+                return candidate;
+            }
+        }
     }
-    candidate
 }
 
 fn inline_text<'a>(node: &'a AstNode<'a>) -> String {
@@ -208,6 +220,14 @@ mod tests {
         let source = "# A\n\n## X\n\n## X\n\n# A\n\n## X\n";
         assert_eq!(fqns(source), vec!["A", "A#X", "A#X-1", "A-1", "A-1#X"]);
         assert_eq!(names(source), vec!["A", "X", "X", "A", "X"]);
+    }
+
+    #[test]
+    fn ten_thousand_duplicate_siblings_get_sequential_suffixes() {
+        let parsed = sections(&"## X\n".repeat(MAX_SECTIONS_PER_FILE));
+        assert_eq!(parsed.len(), MAX_SECTIONS_PER_FILE);
+        assert_eq!(parsed[0].segment, "X");
+        assert_eq!(parsed[MAX_SECTIONS_PER_FILE - 1].segment, "X-9999");
     }
 
     #[test]
