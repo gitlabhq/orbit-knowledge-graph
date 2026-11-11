@@ -2,6 +2,7 @@ kind: graph
 package: gitlab.code_review
 domain: code_review
 domain_description: Entities related to code review and merge requests.
+domain_overview: true
 entities:
   MergeRequest:
     style: {size: 28, color: "#F59E0B"}

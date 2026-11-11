@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Naming, Raw, Resolved, is_false};
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceFragment {
     pub package: String,

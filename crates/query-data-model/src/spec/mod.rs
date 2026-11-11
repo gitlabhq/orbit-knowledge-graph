@@ -143,7 +143,7 @@ pub trait Value: Debug + Clone + PartialEq + Serialize + DeserializeOwned {}
 impl<T: Debug + Clone + PartialEq + Serialize + DeserializeOwned> Value for T {}
 
 /// How specs name graph elements: by written name before the loader resolves them, by id after.
-pub trait Naming: Value + Copy + Default {
+pub trait Naming: Value + Copy {
     type Entity: Value;
     type Property: Value;
     type Relationship: Value;
@@ -161,10 +161,10 @@ pub trait Naming: Value + Copy + Default {
     type Members<T: Value, Id: Value>: Value + Default;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Raw;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Resolved;
 
 impl Naming for Raw {

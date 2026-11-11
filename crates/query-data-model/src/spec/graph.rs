@@ -10,7 +10,7 @@ use crate::{
     EntityId, EnumType, FieldSelectivity, PropertyId, RelationshipId, RelationshipVariantId,
 };
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GraphFragment {
     pub package: String,
@@ -18,6 +18,9 @@ pub struct GraphFragment {
     pub domain: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub domain_description: Option<String>,
+    /// Whether the compact schema overview lists the domain's properties inline.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub domain_overview: bool,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub entities: IndexMap<String, Entity<Raw>>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]

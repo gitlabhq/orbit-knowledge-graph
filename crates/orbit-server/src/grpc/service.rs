@@ -1027,7 +1027,7 @@ mod tests {
 
         let schema = query_data_model::introspection::build_schema_response(
             test_model().model(),
-            Default::default(),
+            query_data_model::introspection::IntrospectionScope::All,
             &[],
         )
         .unwrap();

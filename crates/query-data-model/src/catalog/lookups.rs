@@ -3,7 +3,7 @@ pub use crate::spec::Lookup;
 use crate::spec::ServiceFragment;
 use crate::{GraphCatalog, PropertyId};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Lookups {
     lookups: Vec<Lookup>,
     by_property: Vec<Option<usize>>,

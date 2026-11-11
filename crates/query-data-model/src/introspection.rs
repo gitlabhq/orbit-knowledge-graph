@@ -8,9 +8,8 @@ use serde::Serialize;
 use crate::catalog::Store;
 use crate::{Catalog, DuckDb, Entity, EntityId, Model, Property, RelationshipVariant};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntrospectionScope {
-    #[default]
     All,
     /// Entities stored in the local DuckDB graph.
     Local,
@@ -160,8 +159,6 @@ pub fn build_relationship_patterns(model: &Model, scope: IntrospectionScope) -> 
         .collect()
 }
 
-const OVERVIEW_DOMAINS: [&str; 3] = ["core", "code_review", "plan"];
-
 fn entities(model: &Model, scope: IntrospectionScope) -> impl Iterator<Item = &Entity> {
     model
         .graph()
@@ -178,8 +175,14 @@ fn domain_name(entity: &Entity) -> String {
 
 fn build_overview_domains(model: &Model, scope: IntrospectionScope) -> Vec<SchemaDomain> {
     let mut domains = build_domains(model, scope, &[], None, format_compact_property);
+    let overview: Vec<&str> = model
+        .graph()
+        .domains()
+        .filter(|domain| domain.overview)
+        .map(|domain| domain.name.as_str())
+        .collect();
     for domain in &mut domains {
-        if !OVERVIEW_DOMAINS.contains(&domain.name.as_str()) {
+        if !overview.contains(&domain.name.as_str()) {
             continue;
         }
         for node in &mut domain.nodes {
@@ -349,6 +352,7 @@ mod tests {
 kind: graph
 package: test
 domain: core
+domain_overview: true
 entities:
   Project:
     label: name

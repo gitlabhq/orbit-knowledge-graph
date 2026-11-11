@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use super::{Naming, Raw, Resolved, is_false, is_true, yes};
 use crate::{EdgeVariantScope, EntityId, RequiredRole, Scope};
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthorizationFragment {
     pub package: String,

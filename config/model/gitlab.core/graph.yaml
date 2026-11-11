@@ -2,6 +2,7 @@ kind: graph
 package: gitlab.core
 domain: core
 domain_description: Entities which represent the structure of a GitLab instance.
+domain_overview: true
 entities:
   Group:
     style: {size: 45, color: "#8B5CF6"}

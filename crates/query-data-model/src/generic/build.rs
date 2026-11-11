@@ -22,12 +22,7 @@ impl GraphCatalog {
         let mut relationships = Vec::new();
         for fragment in fragments {
             if let Some(domain) = &fragment.domain {
-                graph.declare_domain(
-                    &fragment.package,
-                    domain,
-                    fragment.domain_description.clone(),
-                    diagnostics,
-                );
+                graph.declare_domain(&fragment, domain, diagnostics);
             }
             for (name, spec) in fragment.entities {
                 entities.push((
@@ -52,19 +47,21 @@ impl GraphCatalog {
 
     fn declare_domain(
         &mut self,
-        package: &str,
+        fragment: &GraphFragment,
         name: &str,
-        description: Option<String>,
         diagnostics: &mut Diagnostics,
     ) {
+        let package = &fragment.package;
         let domain = self
             .domains
             .entry(name.to_string())
             .or_insert_with(|| Domain {
                 name: name.to_string(),
                 description: None,
+                overview: false,
             });
-        let Some(description) = description else {
+        domain.overview |= fragment.domain_overview;
+        let Some(description) = fragment.domain_description.clone() else {
             return;
         };
         if domain

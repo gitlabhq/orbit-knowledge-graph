@@ -11,7 +11,7 @@ use crate::{EntityId, RelationshipVariantId};
 pub const GENERATED_QUERY: &str = "generated";
 pub const TEMPLATE_EXTENSION: &str = ".sql.j2";
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceFragment {
     pub package: String,
@@ -36,7 +36,7 @@ pub struct SourceFragment {
     pub templates: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceDeclaration {
     pub connection: String,
@@ -45,7 +45,7 @@ pub struct SourceDeclaration {
     pub deleted: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelationshipSourceSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -54,7 +54,7 @@ pub struct RelationshipSourceSpec {
     pub pipelines: Pipelines,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PipelineSpec {
     pub tables: Vec<String>,

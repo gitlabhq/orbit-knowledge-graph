@@ -36,7 +36,7 @@ pub struct Guard {
     pub redacted: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Access {
     entities: Vec<Option<EntityAccess>>,
     properties: Vec<Option<PropertyAccess>>,

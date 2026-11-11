@@ -2,6 +2,7 @@ kind: graph
 package: gitlab.plan
 domain: plan
 domain_description: Entities related to planning, tracking, and organizing work.
+domain_overview: true
 entities:
   Label:
     style: {size: 22, color: "#A855F7"}
