@@ -53,5 +53,3 @@ physical:
             - "hasToken(lower(p.name), lower('graph'))"
             - "hasAllTokens(lower(p.name), lower('graph query'))"
             - "hasAnyTokens(lower(p.name), lower('code data'))"
-        indexes:
-          - { table: gl_project, name: idx_name_ngram }

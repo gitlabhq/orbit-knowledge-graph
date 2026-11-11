@@ -1,3 +1,4 @@
+mod clickhouse;
 mod explain;
 mod operator;
 mod pattern;
@@ -122,6 +123,7 @@ impl TryFrom<BTreeMap<String, serde_json::Value>> for PlanAssertions {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct SettingsAssertions {
+    exact: Option<BTreeMap<String, String>>,
     equals: BTreeMap<String, String>,
     absent: Vec<String>,
 }
@@ -645,8 +647,16 @@ impl Expectations<'_> {
 
 impl SettingsAssertions {
     fn check(&self, settings: &[(String, String)], label: &str) -> Result<(), String> {
-        if self.equals.is_empty() && self.absent.is_empty() {
-            return Err(format!("{label}: needs equals or absent"));
+        if self.exact.is_none() && self.equals.is_empty() && self.absent.is_empty() {
+            return Err(format!("{label}: needs exact, equals, or absent"));
+        }
+        if let Some(exact) = &self.exact {
+            let actual: BTreeMap<String, String> = settings.iter().cloned().collect();
+            if &actual != exact {
+                return Err(format!(
+                    "{label}: settings differ\nexpected: {exact:?}\nactual:   {actual:?}"
+                ));
+            }
         }
         let value = |name: &str| {
             settings
@@ -671,6 +681,8 @@ impl SettingsAssertions {
     }
 }
 
+pub use clickhouse::run_index_explains;
+
 pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     if let Err(failures) = check_dir(directory, ontology) {
         panic!(
@@ -681,20 +693,28 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     }
 }
 
-fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
-    let models = Models::derive(ontology);
+fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
     let mut paths = Vec::new();
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
     assert!(!paths.is_empty());
+    paths
+        .into_iter()
+        .flat_map(|path| {
+            crate::scenario::read_cases::<Scenario>(&path)
+                .into_iter()
+                .map(move |(_, scenario)| (path.clone(), scenario))
+        })
+        .collect()
+}
+
+fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
+    let models = Models::derive(ontology);
     let mut cases = 0;
     let mut passed = 0;
     let mut failures = Vec::new();
-    for (path, scenario) in paths.iter().flat_map(|path| {
-        crate::scenario::read_cases::<Scenario>(path)
-            .into_iter()
-            .map(move |(_, scenario)| (path, scenario))
-    }) {
+    for (path, scenario) in read_fixtures(directory) {
+        let path = path.as_path();
         cases += 1;
         if scenario.physical.is_empty() || scenario.query.is_empty() {
             failures.push(format!(

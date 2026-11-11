@@ -37,9 +37,14 @@ contract:
 | `input` | Patterns on the logical tree |
 | `query_plan` | Patterns on the planned tree, and `point_lookup` |
 | `node` | Patterns on the SQL AST |
-| `query_config` | `equals` and `absent` on the ClickHouse settings |
+| `query_config` | `exact`, `equals`, and `absent` on the resolved ClickHouse settings |
 | `hydration_plan` | `none`, `static`, or `dynamic` |
-| `output` | `sql` text checks, and `indexes` that the layout declares and the SQL reads |
+| `output` | `sql` text checks, and `indexes` that the layout declares and the final query scans |
+
+The plan-shape binary loads the embedded query config, so `settings` sees the
+production settings, such as the query cache. The container suite runs EXPLAIN
+on the seeded ClickHouse for every fixture with `indexes`. Each skip index must
+apply to a read of its table. Other fixtures need no ClickHouse.
 
 After `paginate`, `Limit` shows the fetched rows (the page plus one probe row)
 and `Offset` shows the lowered SKIP. In `input`, `Limit` and `Offset` show the
