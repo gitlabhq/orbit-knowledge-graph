@@ -45,7 +45,7 @@ fn parse_markdown(
                 definition_type: "Section",
                 kind: DefKind::Module,
                 name: section.name.clone(),
-                fqn: Fqn::from_parts(&parts, FQN_SEPARATOR),
+                fqn: Fqn::from_segments(&parts, FQN_SEPARATOR),
                 range: Range::new(
                     position(lines.position(section.start)),
                     position(lines.end_position(source, section.end)),
