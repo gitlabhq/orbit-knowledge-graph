@@ -49,12 +49,7 @@ impl HydrationStage {
             .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
             .ok_or_else(|| PipelineError::custom("query data model missing"))?;
         let limits = ctx.limits()?;
-        let scope: Vec<_> = ctx
-            .security_context()?
-            .traversal_paths
-            .iter()
-            .map(|tp| tp.path.clone())
-            .collect();
+        let grants = ctx.grants()?;
         let mut arms = Vec::new();
         for mut lookup in lookups {
             if lookup.ids.len() > limits.hydration_rows {
@@ -66,13 +61,15 @@ impl HydrationStage {
                 );
                 lookup.ids.truncate(limits.hydration_rows);
             }
+            let scope =
+                hydration_helpers::granted_paths(grants, data_model.model(), &lookup.entity)?;
             arms.push(hydration_helpers::hydration_arm(
                 data_model.model(),
                 limits,
                 &lookup.entity,
                 &lookup.ids,
                 &lookup.properties,
-                scope.clone(),
+                scope,
             )?);
         }
 
@@ -293,15 +290,7 @@ impl PipelineStage for HydrationStage {
                 let static_nodes: Vec<_> = result_context.nodes().cloned().collect();
                 let refs = hydration_helpers::extract_dynamic_refs(&query_result, &static_nodes);
                 if !refs.is_empty() {
-                    let scope: Vec<_> = ctx
-                        .security_context()
-                        .map(|sec| {
-                            sec.traversal_paths
-                                .iter()
-                                .map(|tp| tp.path.clone())
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let grants = ctx.grants().inspect_err(|e| obs.record_error(e))?;
                     let ref_paths =
                         hydration_helpers::collect_dynamic_ref_paths(&query_result, &static_nodes);
                     let data_model = ctx
@@ -315,7 +304,7 @@ impl PipelineStage for HydrationStage {
                         limits,
                         entity_specs,
                         &refs,
-                        &scope,
+                        grants,
                         &ref_paths,
                     )
                     .inspect_err(|e| obs.record_error(e))?;

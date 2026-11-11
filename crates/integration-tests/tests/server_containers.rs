@@ -23,6 +23,7 @@ mod server {
     pub mod redaction;
     pub mod schema_readiness;
     pub mod status;
+    pub mod string_identity;
     pub mod telemetry;
     pub mod tls_fixtures;
     pub mod toon_formatter;

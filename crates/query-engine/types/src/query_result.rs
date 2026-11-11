@@ -681,6 +681,70 @@ mod tests {
         ]
     }
 
+    mod string_identity_tests {
+        use super::*;
+        use arrow::array::{ListArray, StructArray};
+        use arrow::buffer::OffsetBuffer;
+        use arrow::datatypes::{DataType, Fields};
+
+        #[test]
+        fn neighbor_ids_decode_in_their_column_type() {
+            let batch = make_batch(vec![
+                (
+                    neighbor_id_column(),
+                    Arc::new(StringArray::from(vec!["T1", "T2"])),
+                ),
+                (
+                    neighbor_type_column(),
+                    Arc::new(StringArray::from(vec!["SlackWorkspace"; 2])),
+                ),
+            ]);
+            let ctx = ResultContext::new().with_query_type(QueryType::Neighbors);
+            let result = QueryResult::from_batches(&[batch], &ctx).unwrap();
+            let ids: Vec<&Key> = result
+                .rows()
+                .iter()
+                .filter_map(|row| row.neighbor_node().map(|node| &node.id))
+                .collect();
+            assert_eq!(ids, [&Key::Text("T1".into()), &Key::Text("T2".into())]);
+        }
+
+        #[test]
+        fn path_nodes_keep_text_ids_and_a_null_id_fails_closed() {
+            let fields = Fields::from(vec![
+                Field::new("id", DataType::Utf8, true),
+                Field::new("kind", DataType::Utf8, false),
+            ]);
+            let path = |ids: Vec<Option<&str>>| {
+                let len = ids.len() as i32;
+                let nodes = StructArray::new(
+                    fields.clone(),
+                    vec![
+                        Arc::new(StringArray::from(ids)) as Arc<dyn Array>,
+                        Arc::new(StringArray::from(vec!["Thread"; len as usize])),
+                    ],
+                    None,
+                );
+                let item = Arc::new(Field::new("item", DataType::Struct(fields.clone()), false));
+                let offsets = OffsetBuffer::new(vec![0, len].into());
+                make_batch(vec![(
+                    path_column(),
+                    Arc::new(ListArray::new(item, offsets, Arc::new(nodes), None)),
+                )])
+            };
+            let ctx = ResultContext::new().with_query_type(QueryType::PathFinding);
+            let result =
+                QueryResult::from_batches(&[path(vec![Some("a"), Some("b")])], &ctx).unwrap();
+            let ids: Vec<&Key> = result.rows()[0]
+                .path_nodes()
+                .iter()
+                .map(|node| &node.id)
+                .collect();
+            assert_eq!(ids, [&Key::Text("a".into()), &Key::Text("b".into())]);
+            assert!(QueryResult::from_batches(&[path(vec![Some("a"), None])], &ctx).is_err());
+        }
+    }
+
     mod node_ref_tests {
         use super::*;
 

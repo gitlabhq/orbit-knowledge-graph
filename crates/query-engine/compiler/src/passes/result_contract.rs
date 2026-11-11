@@ -90,7 +90,7 @@ pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, Vec<Enti
                     } => {
                         let key = graph.property(*id);
                         let key_source = match key.name.as_str() {
-                            DEFAULT_PRIMARY_KEY => KeySource::Identity,
+                            _ if entity.identity == [*id] => KeySource::Identity,
                             name if Some(name) == redaction => KeySource::Redaction,
                             _ => KeySource::Lookup,
                         };

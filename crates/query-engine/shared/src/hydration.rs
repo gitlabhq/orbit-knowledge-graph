@@ -8,7 +8,7 @@ use compiler::constants::{
     hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
     traversal_path_column,
 };
-use compiler::orbit_authorization::Key;
+use compiler::orbit_authorization::{Grants, Key, ScopeSet};
 use compiler::{
     DynamicEntityColumns, HydrationArm, HydrationTemplate, Operator, QueryLimits, VirtualFilter,
 };
@@ -121,6 +121,33 @@ fn static_id(row: &QueryResultRow, alias: &str) -> Option<Key> {
     row.get(&primary_key_column(alias))
         .and_then(identity)
         .or_else(|| row.get(&redaction_id_column(alias)).and_then(identity))
+}
+
+/// The subtrees in which the caller holds the entity's permission, which bound its hydration
+/// read; a scope answered with keys or with `All` bounds no path, and security still scopes the read.
+pub fn granted_paths(
+    grants: &Grants,
+    model: &Model,
+    entity: &str,
+) -> Result<Vec<TraversalPath>, PipelineError> {
+    let entity = model
+        .entity(entity)
+        .map_err(|error| PipelineError::custom(error.to_string()))?;
+    let access = model.access();
+    let declared = access.entity(entity);
+    let set = grants
+        .scope_set(
+            &access.scope(declared.scope).name,
+            &access.permission(declared.permission).name,
+        )
+        .map_err(|error| PipelineError::Authorization(error.to_string()))?;
+    Ok(match set {
+        ScopeSet::Subtrees(roots) => roots
+            .iter()
+            .map(|root| TraversalPath::new_unchecked(root.clone()))
+            .collect(),
+        ScopeSet::All | ScopeSet::Keys(_) => Vec::new(),
+    })
 }
 
 pub fn hydration_arm(
@@ -350,7 +377,7 @@ pub fn hydrate_dynamic(
     limits: &QueryLimits,
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<Key>>,
-    traversal_paths: &[TraversalPath],
+    grants: &Grants,
     ref_paths: &HashMap<String, Vec<TraversalPath>>,
 ) -> Result<Vec<HydrationArm>, PipelineError> {
     let mut arms = Vec::new();
@@ -371,12 +398,10 @@ pub fn hydrate_dynamic(
 
         let capped_ids: Vec<Key> = ids.iter().take(limits.hydration_rows).cloned().collect();
 
-        let tps = if spec.has_traversal_path {
-            ref_paths
-                .get(entity_type)
-                .map_or_else(|| traversal_paths.to_vec(), Clone::clone)
-        } else {
-            Vec::new()
+        let tps = match (spec.has_traversal_path, ref_paths.get(entity_type)) {
+            (false, _) => Vec::new(),
+            (true, Some(paths)) => paths.clone(),
+            (true, None) => granted_paths(grants, model, entity_type)?,
         };
 
         arms.push(hydration_arm(
@@ -457,5 +482,30 @@ pub fn strip_filter_injected_static(result: &mut QueryResult, templates: &[Hydra
         for key in &col_keys {
             row.remove_column(key);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use compiler::orbit_authorization::{Caller, Grants, ScopeSet};
+    use query_data_model::Packages;
+
+    use super::{TraversalPath, granted_paths};
+
+    #[test]
+    fn lookups_read_within_the_subtrees_the_caller_holds_the_permission_in() {
+        let model = Packages::embedded().load().unwrap();
+        let grants = Grants::new(Caller::new("user:1", false, ())).with(
+            "namespace",
+            "read",
+            ScopeSet::Subtrees(vec!["1/9970/".into()]),
+        );
+        let paths = granted_paths(&grants, &model, "MergeRequest").unwrap();
+        assert_eq!(paths, [TraversalPath::new_unchecked("1/9970/".to_string())]);
+        let unanswered = granted_paths(&grants, &model, "Vulnerability").unwrap_err();
+        assert!(
+            unanswered.to_string().contains("no scope answer"),
+            "{unanswered}"
+        );
     }
 }

@@ -76,8 +76,8 @@ where
 pub fn redaction_column(model: &Catalog<impl SqlBackend>, entity: EntityId) -> Option<&str> {
     model.checks(entity).iter().find_map(|check| match check {
         query_data_model::catalog::Check::Rows { id, .. } => {
-            Some(model.graph().property(*id).name.as_str())
-                .filter(|name| *name != query_data_model::constants::DEFAULT_PRIMARY_KEY)
+            let graph = model.graph();
+            (graph.entity(entity).identity != [*id]).then(|| graph.property(*id).name.as_str())
         }
         query_data_model::catalog::Check::Delegated { .. } => None,
     })
