@@ -138,8 +138,13 @@ pub struct LineIndex {
 
 impl LineIndex {
     pub fn new(source: &str) -> Self {
+        let bytes = source.as_bytes();
         let mut starts = vec![0];
-        starts.extend(memchr::memchr_iter(b'\n', source.as_bytes()).map(|i| i + 1));
+        starts.extend(
+            memchr::memchr2_iter(b'\n', b'\r', bytes)
+                .filter(|&i| bytes[i] == b'\n' || bytes.get(i + 1) != Some(&b'\n'))
+                .map(|i| i + 1),
+        );
         Self {
             starts,
             len: source.len(),
@@ -243,6 +248,9 @@ mod tests {
             "Setext \u{e9}\n===\n\ntext\n",
             "# No trailing newline",
             "  ## Indented \u{4f60}\u{597d}\r\nbody\r\n",
+            "a\rb\r# H\n",
+            "x\r   # H\n\u{e9}\u{e9}\n",
+            "x\r# A\n   ## B\n\u{e9}\u{e9}\n",
         ] {
             for section in sections(source) {
                 for offset in [section.start, section.heading_end, section.end] {
@@ -251,6 +259,14 @@ mod tests {
                 assert!(section.start <= section.heading_end && section.heading_end <= section.end);
             }
         }
+    }
+
+    #[test]
+    fn lone_carriage_returns_end_lines() {
+        let source = "intro\r\r# One\n\n## Two\n";
+        let parsed = sections(source);
+        assert_eq!(parsed[0].start, source.find("# One").unwrap());
+        assert_eq!(parsed[1].start, source.find("## Two").unwrap());
     }
 
     #[test]
