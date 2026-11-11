@@ -40,8 +40,6 @@ pub fn sections(source: &str) -> Vec<Section> {
 
     let mut sections: Vec<Section> = Vec::new();
     let mut open: Vec<(u8, usize)> = Vec::new();
-    let mut child_segments: Vec<SiblingSegments> = Vec::new();
-    let mut root_segments = SiblingSegments::default();
 
     for node in root.children() {
         let data = node.data.borrow();
@@ -63,19 +61,17 @@ pub fn sections(source: &str) -> Vec<Section> {
             open.pop();
         }
         let parent = open.last().map(|&(_, index)| index);
-        let siblings = parent.map_or(&mut root_segments, |index| &mut child_segments[index]);
-        let segment = siblings.claim(escape_segment(&name));
         open.push((heading.level, sections.len()));
-        child_segments.push(SiblingSegments::default());
         sections.push(Section {
+            segment: escape_segment(&name),
             name,
-            segment,
             parent,
             start,
             heading_end: lines.next_line_start(data.sourcepos.end.line),
             end: source.len(),
         });
     }
+    assign_unique_segments(&mut sections);
     sections
 }
 
@@ -94,6 +90,21 @@ fn escape_segment(name: &str) -> String {
     name.replace('\\', "\\\\").replace('#', "\\#")
 }
 
+fn assign_unique_segments(sections: &mut [Section]) {
+    let mut siblings: FxHashMap<Option<usize>, SiblingSegments> = FxHashMap::default();
+    for section in sections.iter() {
+        siblings
+            .entry(section.parent)
+            .or_default()
+            .used
+            .insert(section.segment.clone());
+    }
+    for section in sections.iter_mut() {
+        let segment = std::mem::take(&mut section.segment);
+        section.segment = siblings.entry(section.parent).or_default().claim(segment);
+    }
+}
+
 #[derive(Default)]
 struct SiblingSegments {
     used: FxHashSet<String>,
@@ -102,10 +113,10 @@ struct SiblingSegments {
 
 impl SiblingSegments {
     fn claim(&mut self, segment: String) -> String {
-        if self.used.insert(segment.clone()) {
+        let Some(next) = self.next_suffix.get_mut(&segment) else {
+            self.next_suffix.insert(segment.clone(), 1);
             return segment;
-        }
-        let next = self.next_suffix.entry(segment.clone()).or_insert(1);
+        };
         loop {
             let candidate = format!("{segment}-{next}");
             *next += 1;
@@ -225,6 +236,11 @@ mod tests {
         let source = "# A\n\n## X\n\n## X\n\n# A\n\n## X\n";
         assert_eq!(fqns(source), vec!["A", "A#X", "A#X-1", "A-1", "A-1#X"]);
         assert_eq!(names(source), vec!["A", "X", "X", "A", "X"]);
+    }
+
+    #[test]
+    fn generated_suffixes_skip_real_segments_that_come_later() {
+        assert_eq!(fqns("# X\n\n# X\n\n# X-1\n"), vec!["X", "X-2", "X-1"]);
     }
 
     #[test]
