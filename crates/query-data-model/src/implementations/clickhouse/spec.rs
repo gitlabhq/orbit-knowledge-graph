@@ -8,33 +8,20 @@ use crate::{DenormalizedDirection, TraversalPathKind};
 pub type Settings = IndexMap<String, String>;
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct ClickHouseOptions {
-    #[serde(default)]
     pub version_column: Option<String>,
-    #[serde(default)]
     pub deleted_column: Option<String>,
-    #[serde(default)]
     pub engine: Option<String>,
-    #[serde(default)]
     pub columns: IndexMap<String, ColumnSpec>,
-    #[serde(default)]
     pub settings: Settings,
-    #[serde(default)]
     pub edge_tables: IndexMap<String, EdgeTable>,
-    #[serde(default)]
     pub denormalized: Vec<DenormalizedSpec>,
-    #[serde(default)]
     pub copies: IndexMap<String, CopySpec>,
-    #[serde(default)]
     pub joins: IndexMap<String, JoinSpec>,
-    #[serde(default)]
     pub tables: IndexMap<String, TableSpec>,
-    #[serde(default)]
     pub dictionaries: IndexMap<String, DictionarySpec>,
-    #[serde(default)]
     pub views: IndexMap<String, ViewSpec>,
-    #[serde(default)]
     pub refreshable_views: IndexMap<String, RefreshableViewSpec>,
 }
 
@@ -43,7 +30,6 @@ pub struct ClickHouseOptions {
 pub struct ColumnSpec {
     #[serde(rename = "type")]
     pub storage_type: String,
-    #[serde(default)]
     pub default: Option<String>,
     #[serde(default)]
     pub codec: Vec<String>,
@@ -63,7 +49,6 @@ pub struct IndexDetail {
     pub kind: String,
     #[serde(default = "unit_granularity")]
     pub granularity: u32,
-    #[serde(default)]
     pub name: Option<String>,
 }
 
@@ -133,46 +118,29 @@ pub struct AggregateProjection {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct ClickHouseSource {
-    #[serde(default)]
     pub sort_key: Vec<String>,
-    #[serde(default)]
     pub primary_key: Option<Vec<String>>,
-    #[serde(default)]
     pub engine: Option<String>,
-    #[serde(default)]
     pub indexes: Option<IndexMap<String, IndexSpecs>>,
-    #[serde(default)]
     pub projections: IndexMap<String, ProjectionSpec>,
-    #[serde(default)]
     pub settings: Settings,
-    #[serde(default)]
     pub high_fan_out: Vec<String>,
-    #[serde(default)]
     pub epoch_nulls: Vec<String>,
-    #[serde(default)]
     pub path_lookups: IndexMap<TraversalPathKind, PathLookupSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct EdgeTable {
-    #[serde(default)]
     pub shared: bool,
-    #[serde(default)]
     pub sort_key: Vec<String>,
-    #[serde(default)]
     pub primary_key: Option<Vec<String>>,
-    #[serde(default)]
     pub engine: Option<String>,
-    #[serde(default)]
     pub columns: IndexMap<String, ColumnSpec>,
-    #[serde(default)]
     pub indexes: IndexMap<String, IndexSpecs>,
-    #[serde(default)]
     pub projections: IndexMap<String, ProjectionSpec>,
-    #[serde(default)]
     pub settings: Settings,
 }
 
@@ -185,7 +153,6 @@ pub struct TableSpec {
     pub columns: IndexMap<String, ColumnSpec>,
     #[serde(default)]
     pub sort_key: Vec<String>,
-    #[serde(default)]
     pub primary_key: Option<Vec<String>>,
     #[serde(default)]
     pub indexes: IndexMap<String, IndexSpecs>,
@@ -193,7 +160,6 @@ pub struct TableSpec {
     pub projections: IndexMap<String, ProjectionSpec>,
     #[serde(default)]
     pub settings: Settings,
-    #[serde(default)]
     pub ttl: Option<String>,
 }
 
@@ -204,7 +170,6 @@ pub struct DictionarySpec {
     pub key: String,
     pub attributes: IndexMap<String, String>,
     pub layout: String,
-    #[serde(default)]
     pub size_in_cells: Option<u64>,
     pub lifetime: LifetimeSpec,
 }
@@ -221,10 +186,8 @@ pub struct LifetimeSpec {
 pub struct ViewSpec {
     #[serde(default = "yes")]
     pub versioned: bool,
-    #[serde(default)]
     pub to: Option<String>,
     pub select: String,
-    #[serde(default)]
     pub engine: Option<String>,
     #[serde(default)]
     pub order_by: Vec<String>,
@@ -280,10 +243,8 @@ pub struct JoinSpec {
 #[serde(deny_unknown_fields)]
 pub struct JoinSourceSpec {
     pub table: String,
-    #[serde(default)]
     pub path_column: Option<String>,
     pub columns: BTreeMap<String, String>,
-    #[serde(default)]
     pub on: Option<JoinOnSpec>,
     #[serde(default)]
     pub filter: IndexMap<String, String>,
@@ -310,7 +271,6 @@ pub struct JoinRelationshipSpec {
     pub relationship: String,
     pub source: usize,
     pub target: usize,
-    #[serde(default)]
     pub edge: Option<usize>,
 }
 

@@ -31,10 +31,12 @@ use serde::Deserialize;
 
 use crate::catalog::{Diagnostics, ModelId, registered};
 
-#[derive(Debug)]
-pub enum Fragment {
+/// One package file. Its storage blocks parse only once the store's engine kind is known.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Fragment<S = Box<StorageFragment>> {
     Graph(GraphFragment),
-    Storage(Box<StorageFragment>),
+    Storage(S),
     Authorization(AuthorizationFragment),
     Service(ServiceFragment),
     Source(Box<SourceFragment>),
@@ -51,16 +53,6 @@ struct StorageHeader {
 #[derive(Deserialize)]
 struct EngineKind {
     kind: String,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum Parsed {
-    Graph(GraphFragment),
-    Storage(StorageHeader),
-    Authorization(AuthorizationFragment),
-    Service(ServiceFragment),
-    Source(Box<SourceFragment>),
 }
 
 /// The fragments of a set of packages, identified by the bytes they were parsed from.
@@ -92,14 +84,14 @@ impl Fragments {
                     .insert(file.to_string(), text.to_string());
                 continue;
             }
-            match orbit_utils::yaml::from_str::<Parsed>(text) {
+            match orbit_utils::yaml::from_str::<Fragment<StorageHeader>>(text) {
                 Ok(fragment) => parsed.push((*name, directory, *text, fragment)),
                 Err(error) => diagnostics.error(name, error.to_string()),
             }
         }
         let mut kinds = HashMap::new();
         for (_, _, _, fragment) in &parsed {
-            if let Parsed::Storage(StorageHeader {
+            if let Fragment::Storage(StorageHeader {
                 store,
                 engine: Some(engine),
                 ..
@@ -113,7 +105,7 @@ impl Fragments {
         let mut fragments = Vec::with_capacity(parsed.len());
         for (name, directory, text, fragment) in parsed {
             fragments.push(match fragment {
-                Parsed::Storage(header) => {
+                Fragment::Storage(header) => {
                     let (package, store) = (&header.package, &header.store);
                     let Some(kind) = kinds.get(store) else {
                         diagnostics.error(package, format!("store {store} declares no engine"));
@@ -134,10 +126,10 @@ impl Fragments {
                         }
                     }
                 }
-                Parsed::Graph(graph) => Fragment::Graph(graph),
-                Parsed::Authorization(access) => Fragment::Authorization(access),
-                Parsed::Service(service) => Fragment::Service(service),
-                Parsed::Source(mut source) => {
+                Fragment::Graph(graph) => Fragment::Graph(graph),
+                Fragment::Authorization(access) => Fragment::Authorization(access),
+                Fragment::Service(service) => Fragment::Service(service),
+                Fragment::Source(mut source) => {
                     source.templates = templates.get(directory).cloned().unwrap_or_default();
                     Fragment::Source(source)
                 }

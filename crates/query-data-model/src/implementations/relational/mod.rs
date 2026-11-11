@@ -17,24 +17,18 @@ pub use store::{ReadPaths, RelationalStore, Versioning, entity_layout};
 pub use tables::{Column, Engine, Index, PathColumn, Projection, Table};
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct RelationalOptions {
-    #[serde(default)]
     pub version_column: Option<String>,
-    #[serde(default)]
     pub deleted_column: Option<String>,
-    #[serde(default)]
     pub edge_tables: IndexMap<String, EdgeTableSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct EdgeTableSpec {
-    #[serde(default)]
     pub shared: bool,
-    #[serde(default)]
     pub sort_key: Vec<String>,
-    #[serde(default)]
     pub columns: IndexMap<String, String>,
 }
 

@@ -23,7 +23,6 @@ pub struct LiveSource {
     pub operation: String,
     #[serde(default)]
     pub filters: Vec<String>,
-    #[serde(default)]
     pub text: Option<String>,
 }
 

@@ -72,7 +72,6 @@ impl Blocks for Erased {
 pub struct StorageFragment<K: Blocks = Erased> {
     pub package: String,
     pub store: String,
-    #[serde(default)]
     pub engine: Option<EngineSpec<K>>,
     #[serde(default)]
     pub entities: IndexMap<String, EntityStorage<K>>,
@@ -87,7 +86,6 @@ pub struct EngineSpec<K: Blocks = Erased> {
     pub connection: String,
     #[serde(default)]
     pub trusted: bool,
-    #[serde(default)]
     pub path_column: Option<String>,
     #[serde(default)]
     pub backend: K::Engine,
@@ -96,7 +94,6 @@ pub struct EngineSpec<K: Blocks = Erased> {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, bound = "K: Typed")]
 pub struct EntityStorage<K: Blocks = Erased> {
-    #[serde(default)]
     pub table: Option<String>,
     #[serde(default, deserialize_with = "explicit_null")]
     pub path_column: Option<Option<String>>,
@@ -115,7 +112,6 @@ pub struct EntityStorage<K: Blocks = Erased> {
 pub struct ColumnStorage<K: Blocks = Erased> {
     #[serde(default)]
     pub immutable: bool,
-    #[serde(default)]
     pub column: Option<String>,
     #[serde(default)]
     pub backend: K::Column,
@@ -186,15 +182,13 @@ impl<K: Typed> StorageFragment<K> {
 /// How queries read an entity, in terms every backend turns into its own indexes and order.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(
+    default,
     deny_unknown_fields,
     bound(deserialize = "S::Property: Deserialize<'de>")
 )]
 pub struct AccessHints<S: Naming> {
-    #[serde(default)]
     pub filter: Vec<S::Property>,
-    #[serde(default)]
     pub text: Vec<S::Property>,
-    #[serde(default)]
     pub order: Vec<S::Property>,
 }
 
@@ -215,11 +209,8 @@ impl<S: Naming> Default for AccessHints<S> {
     bound(deserialize = "S::Key: Deserialize<'de>, S::Copies: Deserialize<'de>")
 )]
 pub struct Binding<S: Naming> {
-    #[serde(default)]
     pub fk: Option<S::Key>,
-    #[serde(default)]
     pub edge_table: Option<String>,
-    #[serde(default)]
     pub index: Option<EdgeIndex>,
     #[serde(default)]
     pub copies: IndexMap<String, S::Copies>,
@@ -237,9 +228,7 @@ pub struct EdgeIndex {
 pub struct KeySpec {
     pub on: Endpoint,
     pub column: String,
-    #[serde(default)]
     pub type_column: Option<String>,
-    #[serde(default)]
     pub type_value: Option<OneOrMany>,
 }
 
