@@ -3,7 +3,8 @@ mod observer;
 
 pub(crate) use observer::AnalyticsObserver;
 pub use orbit_analytics::{
-    AnalyticsTracker, ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker,
+    AnalyticsTracker, ComposedAnalyticsTracker, ConsentGate, GitlabInstanceWatch,
+    SnowplowAnalyticsTracker,
 };
 
 #[cfg(any(test, feature = "testkit"))]

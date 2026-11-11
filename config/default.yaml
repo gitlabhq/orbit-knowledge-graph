@@ -229,6 +229,7 @@ schema:
 analytics:
   enabled: null                          # true | false; null follows the GitLab product usage data setting
   collector_url: ""                      # e.g. "https://snowplowprd.trx.gitlab.net" (no path; tracker appends /com.snowplowanalytics.snowplow/tp2)
+  local_collector_url: ""                # self-managed only: the local Data Insights Platform; gets every event whatever `enabled` says
   deployment:
     type: self_managed        # com | dedicated | self_managed
     environment: development  # development | staging | production
