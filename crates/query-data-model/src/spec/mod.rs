@@ -176,10 +176,6 @@ pub(crate) fn parse_word<'a, T: Deserialize<'a>>(word: &'a str) -> Option<T> {
     .ok()
 }
 
-pub(crate) fn format_variant(source: &str, target: &str) -> String {
-    format!("{source} -> {target}")
-}
-
 pub(crate) fn snake_case(name: &str) -> String {
     let mut snake = String::with_capacity(name.len() + 4);
     for (index, character) in name.char_indices() {
