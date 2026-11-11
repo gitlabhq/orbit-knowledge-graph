@@ -98,7 +98,6 @@ impl TryFrom<BTreeMap<String, serde_json::Value>> for PlanAssertions {
     type Error = String;
 
     fn try_from(mut fields: BTreeMap<String, serde_json::Value>) -> Result<Self, String> {
-        fields.retain(|_, value| !value.is_null());
         let point_lookup = fields
             .remove("point_lookup")
             .map(serde_json::from_value)
@@ -110,6 +109,9 @@ impl TryFrom<BTreeMap<String, serde_json::Value>> for PlanAssertions {
             serde_json::from_value(serde_json::Value::Object(fields.into_iter().collect()))
                 .map_err(|error| error.to_string())?
         };
+        if shape.is_empty() && point_lookup.is_none() {
+            return Err("query_plan needs patterns or point_lookup".into());
+        }
         Ok(Self {
             shape,
             point_lookup,
@@ -133,6 +135,9 @@ struct OutputAssertions {
 
 impl SqlAssertions {
     fn check(&self, sql: &str, label: &str) -> Vec<String> {
+        if self.contains.is_empty() && self.not_contains.is_empty() {
+            return vec![format!("{label}: needs contains or not_contains")];
+        }
         let missing = self
             .contains
             .iter()
@@ -330,6 +335,13 @@ impl Assertions {
     }
 }
 
+type PhaseTable = [(&'static str, &'static [&'static str])];
+
+struct Models {
+    remote: Arc<ClickHouseDataModel>,
+    local: Arc<DuckDbDataModel>,
+}
+
 impl Models {
     fn derive(ontology: Arc<ontology::Ontology>) -> Self {
         Self {
@@ -337,13 +349,6 @@ impl Models {
             local: Arc::new(DuckDbDataModel::derive(ontology).unwrap()),
         }
     }
-}
-
-type PhaseTable = [(&'static str, &'static [&'static str])];
-
-struct Models {
-    remote: Arc<ClickHouseDataModel>,
-    local: Arc<DuckDbDataModel>,
 }
 
 fn check(scenario: &Scenario, models: &Models, path: &Path) -> Vec<String> {
@@ -355,8 +360,10 @@ fn check(scenario: &Scenario, models: &Models, path: &Path) -> Vec<String> {
                 path.display(),
                 scenario.name.as_deref().unwrap_or("unnamed")
             );
-            if phases.values().all(|slots| slots.slots().next().is_none()) {
-                failures.push(format!("{label}: missing assertion targets"));
+            if phases.is_empty() || phases.values().any(|slots| slots.slots().next().is_none()) {
+                failures.push(format!(
+                    "{label}: every phase needs at least one slot assertion"
+                ));
                 continue;
             }
             failures.extend(check_pipeline(
@@ -525,7 +532,9 @@ impl Expectations<'_> {
         let mut failures = Vec::new();
         let mut check = |slot: &str, result: Option<Result<(), String>>| match result {
             Some(Err(error)) => failures.push(error),
-            None => failures.push(format!("{label}.{slot}: empty after the phase")),
+            None => failures.push(format!(
+                "{label}.{slot}: empty after the phase; assert it before the phase that consumes it"
+            )),
             Some(Ok(())) => {}
         };
         if let Some(assertions) = &slots.input {
@@ -574,12 +583,13 @@ impl Expectations<'_> {
             check(
                 "hydration_plan",
                 ctx.hydration_plan().as_ref().map(|plan| {
-                    (plan.kind() == expected).then_some(()).ok_or_else(|| {
-                        format!(
-                            "{label}.hydration_plan: {:?}, expected {expected:?}",
-                            plan.kind()
-                        )
-                    })
+                    if plan.kind() == expected {
+                        return Ok(());
+                    }
+                    Err(format!(
+                        "{label}.hydration_plan: {:?}, expected {expected:?}",
+                        plan.kind()
+                    ))
                 }),
             );
         }
@@ -604,6 +614,9 @@ impl Expectations<'_> {
         sql: &str,
         label: &str,
     ) -> Result<(), String> {
+        if assertions.sql.is_none() && assertions.indexes.is_empty() {
+            return Err(format!("{label}: needs sql or indexes"));
+        }
         let mut failures = assertions
             .sql
             .as_ref()
@@ -632,6 +645,9 @@ impl Expectations<'_> {
 
 impl SettingsAssertions {
     fn check(&self, settings: &[(String, String)], label: &str) -> Result<(), String> {
+        if self.equals.is_empty() && self.absent.is_empty() {
+            return Err(format!("{label}: needs equals or absent"));
+        }
         let value = |name: &str| {
             settings
                 .iter()
@@ -837,6 +853,21 @@ cases:
             "[{frontend}/clickhouse].normalize: phase normalize does not write output"
         ))));
     }
+}
+
+#[test]
+fn empty_slot_contracts_are_rejected() {
+    assert!(orbit_utils::yaml::from_str::<SlotAssertions>("query_plan: {}").is_err());
+    assert!(orbit_utils::yaml::from_str::<SlotAssertions>("query_plan: {expct: []}").is_err());
+    assert!(
+        orbit_utils::yaml::from_str::<SlotAssertions>("query_plan: {point_lookup: true}").is_ok()
+    );
+    assert!(!SqlAssertions::default().check("SELECT 1", "sql").is_empty());
+    assert!(
+        SettingsAssertions::default()
+            .check(&[], "settings")
+            .is_err()
+    );
 }
 
 #[test]

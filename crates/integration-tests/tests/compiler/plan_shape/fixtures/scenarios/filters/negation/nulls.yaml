@@ -12,12 +12,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains:
-                - transform_null_in = 0
-              not_contains: []
+        settings:
+          query_config:
+            equals:
+              transform_null_in: "0"
 
   - name: transform_null_in_absent_without_not
     query:
@@ -32,12 +30,10 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains: []
-              not_contains:
-                - transform_null_in
+        settings:
+          query_config:
+            absent:
+              - transform_null_in
 
   - name: transform_null_in_absent_when_not_folds
     query:
@@ -52,9 +48,7 @@ cases:
         - 1/
     physical:
       clickhouse:
-        codegen:
-          output:
-            sql:
-              contains: []
-              not_contains:
-                - transform_null_in
+        settings:
+          query_config:
+            absent:
+              - transform_null_in
