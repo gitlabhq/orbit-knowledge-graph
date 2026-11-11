@@ -51,15 +51,15 @@ pub fn sections(source: &str) -> Vec<Section> {
         if name.is_empty() {
             continue;
         }
-        if sections.len() == MAX_SECTIONS_PER_FILE {
-            break;
-        }
         let start = lines.byte(data.sourcepos.start);
         while let Some(&(level, index)) = open.last()
             && level >= heading.level
         {
             sections[index].end = start;
             open.pop();
+        }
+        if sections.len() == MAX_SECTIONS_PER_FILE {
+            continue;
         }
         let parent = open.last().map(|&(_, index)| index);
         open.push((heading.level, sections.len()));
@@ -261,6 +261,15 @@ mod tests {
         assert_eq!(parsed.len(), MAX_SECTIONS_PER_FILE);
         assert_eq!(parsed[0].segment, "X");
         assert_eq!(parsed[MAX_SECTIONS_PER_FILE - 1].segment, "X-9999");
+    }
+
+    #[test]
+    fn headings_past_the_cap_still_end_the_sections_before_them() {
+        let capped = "## X\n".repeat(MAX_SECTIONS_PER_FILE);
+        let source = format!("# Top\n{capped}# Past\n");
+        let parsed = sections(&source);
+        assert_eq!(parsed.len(), MAX_SECTIONS_PER_FILE);
+        assert_eq!(parsed[0].end, source.find("# Past").unwrap());
     }
 
     #[test]
