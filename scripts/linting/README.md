@@ -144,8 +144,8 @@ To keep a Rust test, put this on the line above its `fn`:
 
 ```rust
 #[test]
-// ast-grep-ignore: unit-test -- checks constant-time token comparison
-fn compares_tokens_in_constant_time() {}
+// ast-grep-ignore: unit-test -- timing guarantee of a crypto primitive; no query or scenario reaches it
+fn token_mismatch_takes_the_same_time_at_any_byte() {}
 ```
 
 The reason after `--` must be at least ten characters. An opt-in without one is
