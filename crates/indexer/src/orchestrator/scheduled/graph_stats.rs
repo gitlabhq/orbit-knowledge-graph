@@ -84,20 +84,9 @@ impl GraphStatsSnapshot {
     }
 
     async fn snapshot(&self) -> Result<Option<GraphStats>, TaskError> {
-        // Snapshot what users query: the active version, read with its own ontology.
-        let Some(version) = read_active_version(&self.graph)
-            .await
-            .map_err(TaskError::new)?
-        else {
+        let Some((version, ontology)) = self.served_ontology().await? else {
             return Ok(None);
         };
-        let ontology = self
-            .catalog
-            .load(version)
-            .await
-            .map_err(TaskError::new)?
-            .load_ontology()
-            .map_err(TaskError::new)?;
         let tables = StatsTables::from_ontology(&ontology, version)?;
 
         let paths = self.enabled_paths().await?;
@@ -114,6 +103,24 @@ impl GraphStatsSnapshot {
             projects_eligible,
             snapshot_at: Utc::now(),
         }))
+    }
+
+    /// The active schema version and the ontology it was built from.
+    async fn served_ontology(&self) -> Result<Option<(u32, ontology::Ontology)>, TaskError> {
+        let Some(version) = read_active_version(&self.graph)
+            .await
+            .map_err(TaskError::new)?
+        else {
+            return Ok(None);
+        };
+        let ontology = self
+            .catalog
+            .load(version)
+            .await
+            .map_err(TaskError::new)?
+            .load_ontology()
+            .map_err(TaskError::new)?;
+        Ok(Some((version, ontology)))
     }
 
     async fn graph_bytes(&self, tables: &[String]) -> Result<u64, TaskError> {

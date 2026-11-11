@@ -28,7 +28,7 @@ syn = { workspace = true }
 typify = { workspace = true }
 
 [package.metadata.cargo-shear]
-ignored = ["serde", "regress", "chrono"] # used by build.rs-generated code (serde derives, schema `pattern` checks, `date-time` fields)
+ignored = ["serde", "regress", "chrono"] # used by build.rs-generated code (serde derives, schema `pattern` checks)
 
 [lints]
 workspace = true
