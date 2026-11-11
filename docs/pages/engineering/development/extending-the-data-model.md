@@ -121,7 +121,7 @@ package: gitlab.code_review
 store: graph
 entities:
   MergeRequest:
-    home: true
+    complete: true
     table: gl_merge_request
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -162,7 +162,7 @@ A variant binds to an edge table only when both endpoint identities match its ID
 
 `access` says how the columns are queried, in terms every backend understands. ClickHouse turns it into its skip indexes and sort key, so no package writes index or sort-key details. Column storage types stay explicit. The `backend` block overrides the derived indexes only where a platform package needs to.
 
-Every stored entity marks exactly one store `home: true`, even when it has only one. Its home store must list every property of the graph, or exclude it by name with `exclude: [...]`. Another store lists exactly the properties it holds. The loader rejects a property that its home store neither stores nor excludes. A relational store must also name its table and type every column. A live or code store holds no table: it lists the properties it serves, and its backend checks its own fields. A forgotten column fails at load, not at query time.
+Every stored entity marks exactly one store `complete: true`, even when it has only one. That store must list every property of the graph, or exclude it by name with `exclude: [...]`, and the planner reads the entity there by default. Another store is partial and lists exactly the properties it holds. The loader rejects a property that the complete store neither stores nor excludes. A relational store must also name its table and type every column. A live or code store holds no table: it lists the properties it serves, and its backend checks its own fields. A forgotten column fails at load, not at query time.
 
 The source fragment says where the indexer reads it from:
 
@@ -313,7 +313,7 @@ engine:
   connection: data_extraction
 entities:
   SlackMessage:
-    home: true
+    complete: true
     columns:
       id: {immutable: true}
       workspace: {}
@@ -338,7 +338,7 @@ package: integration.slack
 store: graph
 entities:
   SlackWorkspace:
-    home: true
+    complete: true
     table: slack_workspace
     columns:
       id: {immutable: true, backend: {type: String}}
@@ -535,7 +535,7 @@ engine:
         traversal_path: {backend: {type: String}}
 entities:
   Memory:
-    home: true
+    complete: true
     table: gl_memory
     columns:
       id: {immutable: true, backend: {type: String}}
@@ -685,7 +685,7 @@ The loader collects every error, names its package, and fails once. A missing de
 - An unknown entity, property, relationship, variant, permission, scope, provider, field or template.
 - An entity or variant declared twice, or a second authorization entry.
 - An entity with no `id`, or no authorization entry.
-- A property that its home store neither stores nor excludes. In a relational store, a column without a storage type or an entity without a table. Nothing is inferred.
+- A property that its complete store neither stores nor excludes. In a relational store, a column without a storage type or an entity without a table. Nothing is inferred.
 - An entity without `default_columns`.
 - A property or relationship attribute with no access class, or with two.
 - A relationship without a scope, a permission, or an `of:` on each variant's policy.
@@ -696,7 +696,7 @@ The loader collects every error, names its package, and fails once. A missing de
 - An `enforce` entry of `none` with no `checks`, or an entity whose scope answer is not exact and that has no check.
 - A provider name the deployment does not bind, or one bound to a module that does not answer the query the check needs.
 - A user-scoped entity whose owner relationship does not reach `User`, or allows more than one owner per row.
-- A stored entity with no `home: true`, or with two.
+- A stored entity with no `complete: true`, or with two.
 - A relationship variant with no binding, or with two. A foreign key is bound in the store whose table holds the column, and an edge table in the store that declares it.
 - An entity without a declared `identity`, or an identity property that does not exist.
 - A foreign key column, `via` step or edge-table ID column whose type differs from the identity it points to. Nothing is cast.

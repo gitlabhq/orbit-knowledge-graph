@@ -215,7 +215,7 @@ Each layer names only the layers inside it, and the loader checks them from the 
 | package | `package.yaml` | other packages | name, `requires` |
 
 Nothing is inferred: a forgotten column, an unbound variant or a backend without a policy fails the load.
-Every stored entity marks exactly one store `home: true`, even when it has only one. Its home store lists or excludes every graph property, and every other store lists only the properties it holds. A variant is bound once, in the store that holds its rows: a foreign key in the store whose table holds the column, an edge table in the store that declares it. That store can differ from the other endpoint's, as `IN_WORKSPACE` does from a live message to an indexed workspace.
+Every stored entity marks exactly one store `complete: true`, even when it has only one. That store lists or excludes every graph property, and the planner reads the entity there unless a query needs another store. Every other store is partial and lists only the properties it holds. A variant is bound once, in the store that holds its rows: a foreign key in the store whose table holds the column, an edge table in the store that declares it. That store can differ from the other endpoint's, as `IN_WORKSPACE` does from a live message to an indexed workspace.
 Storage access hints are backend-neutral, and each backend turns them into its own indexes and sort keys. A `backend` block overrides that only where a platform package needs to.
 An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
 
