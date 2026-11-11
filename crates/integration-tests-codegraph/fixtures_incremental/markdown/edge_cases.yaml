@@ -32,7 +32,7 @@ fixtures:
       # Last
 
 tests:
-  - name: "every top-level heading is a Section"
+  - name: "every heading is a Section"
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Section'

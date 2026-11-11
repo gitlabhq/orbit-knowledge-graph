@@ -19,6 +19,7 @@ pub struct Section {
     /// sibling already uses it.
     pub segment: String,
     pub parent: Option<usize>,
+    /// Byte offset of the heading's first character, after any indentation.
     pub start: usize,
     /// Byte offset of the line after the heading (setext underline included).
     pub heading_end: usize,
