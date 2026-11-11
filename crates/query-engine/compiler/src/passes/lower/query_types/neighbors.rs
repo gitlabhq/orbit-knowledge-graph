@@ -104,7 +104,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         if !center_uses_default_pk {
             select.push(SelectExpr::col(&center_id, &center_redaction_col));
         }
-        dedup_subquery(&center_id, &center_table, select, scan_where)
+        dedup_subquery(&center_id, &center_table, select, scan_where).0
     });
 
     let order_by = match &input.order_by {
@@ -218,7 +218,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         let (mut from, outer_pushed) = edge_table_scan_filtered(arm_tables, edge_alias, arm_where);
         where_parts.extend(outer_pushed);
 
-        if let Some((center_subq, deleted_filter)) = &center_join {
+        if let Some(center_subq) = &center_join {
             from = TableRef::join(
                 JoinType::Inner,
                 from,
@@ -228,7 +228,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
                     Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
                 ),
             );
-            where_parts.push(deleted_filter.clone());
+            where_parts.push(deleted_false(&center_id));
         }
 
         if center_uses_default_pk {

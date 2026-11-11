@@ -24,6 +24,9 @@ physical:
     emitted:
       expect:
         - (Scan Table(gl_code_edge) ...)
+      occurrences:
+        - pattern: (Filter d.id = 1 (Deduplicate Final (Scan Table(gl_definition) AS d)))
+          count: 2
   duckdb:
     planned:
       expect:

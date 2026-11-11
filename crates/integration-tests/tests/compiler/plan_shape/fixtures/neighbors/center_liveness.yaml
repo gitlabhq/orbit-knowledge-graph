@@ -100,3 +100,19 @@ cases:
           reject: ["(Scan Table(gl_merge_request) ...)"]
           ctes:
             absent: true
+
+  - name: An unpinned center with a non-default key and covered filters keeps its FINAL center join
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"d","entity":"Definition","filters":{"definition_type":"function"}}],"neighbors":{"direction":"outgoing","rel_types":["CALLS"]}}
+      gql: |
+        MATCH (d:Definition)-[:CALLS]->(n) WHERE d.definition_type = 'function' RETURN d, n
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=d direction=outgoing directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_join=false ... (_))"]
+        emitted:
+          expect:
+            - (Join ON _orbit_neighbor_edge.source_id = d.id (_) (Deduplicate Final (Scan Table(gl_definition) AS d)))
+          ctes:
+            absent: true
