@@ -2,119 +2,36 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-/// `alias` under `physical.<pipeline>` stands for `<phase>.<path>`; `logical` is top level.
-struct Alias {
-    name: &'static str,
-    pipeline: &'static str,
-    phase: &'static str,
-    path: &'static [&'static str],
-}
-
-const ALIASES: &[Alias] = &[
-    Alias {
-        name: "logical",
-        pipeline: "clickhouse",
-        phase: "normalize",
-        path: &["input"],
-    },
-    Alias {
-        name: "logical",
-        pipeline: "clickhouse_hydration",
-        phase: "plan_clickhouse",
-        path: &["input"],
-    },
-    Alias {
-        name: "logical",
-        pipeline: "duckdb",
-        phase: "normalize",
-        path: &["input"],
-    },
-    Alias {
-        name: "planned",
-        pipeline: "clickhouse",
-        phase: "plan_clickhouse",
-        path: &["query_plan"],
-    },
-    Alias {
-        name: "planned",
-        pipeline: "duckdb",
-        phase: "plan_duckdb",
-        path: &["query_plan"],
-    },
-    Alias {
-        name: "point_lookup",
-        pipeline: "clickhouse",
-        phase: "plan_clickhouse",
-        path: &["query_plan", "point_lookup"],
-    },
-    Alias {
-        name: "point_lookup",
-        pipeline: "duckdb",
-        phase: "plan_duckdb",
-        path: &["query_plan", "point_lookup"],
-    },
-    Alias {
-        name: "emitted",
-        pipeline: "clickhouse",
-        phase: "response_policy",
-        path: &["node"],
-    },
-    Alias {
-        name: "emitted",
-        pipeline: "duckdb",
-        phase: "paginate",
-        path: &["node"],
-    },
-    Alias {
-        name: "final_ast",
-        pipeline: "clickhouse",
-        phase: "security",
-        path: &["node"],
-    },
-    Alias {
-        name: "hydration",
-        pipeline: "clickhouse",
-        phase: "hydrate_plan",
-        path: &["hydration_plan"],
-    },
-    Alias {
-        name: "settings",
-        pipeline: "clickhouse",
-        phase: "settings",
-        path: &["query_config"],
-    },
-    Alias {
-        name: "sql",
-        pipeline: "clickhouse",
-        phase: "codegen",
-        path: &["output", "sql"],
-    },
-    Alias {
-        name: "indexes",
-        pipeline: "clickhouse",
-        phase: "codegen",
-        path: &["output", "indexes"],
-    },
+/// (alias, pipeline, phase, slot path): `alias` under `physical.<pipeline>` means `<phase>.<path>`.
+#[rustfmt::skip]
+const ALIASES: &[(&str, &str, &str, &str)] = &[
+    ("logical",      "clickhouse",           "normalize",       "input"),
+    ("logical",      "clickhouse_hydration", "plan_clickhouse", "input"),
+    ("logical",      "duckdb",               "normalize",       "input"),
+    ("planned",      "clickhouse",           "plan_clickhouse", "query_plan"),
+    ("planned",      "duckdb",               "plan_duckdb",     "query_plan"),
+    ("point_lookup", "clickhouse",           "plan_clickhouse", "query_plan.point_lookup"),
+    ("point_lookup", "duckdb",               "plan_duckdb",     "query_plan.point_lookup"),
+    ("emitted",      "clickhouse",           "response_policy", "node"),
+    ("emitted",      "duckdb",               "paginate",        "node"),
+    ("final_ast",    "clickhouse",           "security",        "node"),
+    ("hydration",    "clickhouse",           "hydrate_plan",    "hydration_plan"),
+    ("settings",     "clickhouse",           "settings",        "query_config"),
+    ("sql",          "clickhouse",           "codegen",         "output.sql"),
+    ("indexes",      "clickhouse",           "codegen",         "output.indexes"),
 ];
 
-fn find(name: &str, backend: &str, hydration: bool) -> Option<&'static Alias> {
-    let pipeline = if hydration {
-        "clickhouse_hydration"
-    } else {
-        backend
+fn find(name: &str, backend: &str, hydration: bool) -> Option<(&'static str, &'static str)> {
+    let target = |pipeline: &str| {
+        ALIASES
+            .iter()
+            .find(|(alias, on, _, _)| *alias == name && *on == pipeline)
+            .map(|(_, _, phase, path)| (*phase, *path))
     };
-    ALIASES
-        .iter()
-        .find(|alias| alias.name == name && alias.pipeline == pipeline)
-        .or_else(|| {
-            ALIASES
-                .iter()
-                .find(|alias| alias.name == name && alias.pipeline == backend)
-        })
-}
-
-pub(super) fn is_alias(name: &str) -> bool {
-    ALIASES.iter().any(|alias| alias.name == name)
+    hydration
+        .then(|| target("clickhouse_hydration"))
+        .flatten()
+        .or_else(|| target(backend))
 }
 
 pub(super) fn resolve(
@@ -124,50 +41,45 @@ pub(super) fn resolve(
     entries: BTreeMap<String, Value>,
 ) -> Result<BTreeMap<String, Value>, String> {
     let mut phases: BTreeMap<String, Value> = BTreeMap::new();
-    let mut put = |phase: &str, path: &[&str], value: Value, source: &str| -> Result<(), String> {
+    let mut put = |phase: &str, path: &str, value: Value, source: &str| -> Result<(), String> {
+        let (parents, slot) = path.rsplit_once('.').unwrap_or(("", path));
         let mut target = phases
             .entry(phase.to_string())
             .or_insert_with(|| Value::Object(Map::new()));
-        for key in &path[..path.len() - 1] {
+        for key in parents.split('.').filter(|key| !key.is_empty()) {
             target = target
                 .as_object_mut()
                 .ok_or_else(|| format!("{backend}.{phase}: {key} is not a mapping"))?
-                .entry(key.to_string())
+                .entry(key)
                 .or_insert_with(|| Value::Object(Map::new()));
         }
-        let last = path[path.len() - 1];
-        let slot = target
+        let slots = target
             .as_object_mut()
             .ok_or_else(|| format!("{backend}.{phase}: expected a mapping"))?;
-        if slot.insert(last.to_string(), value).is_some() {
-            return Err(format!(
-                "{backend}: {source} sets {phase}.{} twice",
-                path.join(".")
-            ));
+        match slots.insert(slot.to_string(), value) {
+            Some(_) => Err(format!("{backend}: {source} sets {phase}.{path} twice")),
+            None => Ok(()),
         }
-        Ok(())
     };
     if let Some(logical) = logical {
-        let alias = find("logical", backend, hydration)
+        let (phase, path) = find("logical", backend, hydration)
             .ok_or_else(|| format!("logical has no target on {backend}"))?;
-        put(alias.phase, alias.path, logical.clone(), "logical")?;
+        put(phase, path, logical.clone(), "logical")?;
     }
     for (key, value) in entries {
         if key == "logical" {
             return Err(format!("{backend}: logical belongs at the top level"));
         }
-        match find(&key, backend, hydration) {
-            Some(alias) => put(alias.phase, alias.path, value, &key)?,
-            None if is_alias(&key) => {
-                return Err(format!("{backend}: {key} has no target on this backend"));
-            }
-            None => {
-                let Value::Object(slots) = value else {
-                    return Err(format!("{backend}.{key}: expected slot assertions"));
-                };
-                for (slot, assertions) in slots {
-                    put(&key, &[slot.as_str()], assertions, &key)?;
-                }
+        if let Some((phase, path)) = find(&key, backend, hydration) {
+            put(phase, path, value, &key)?;
+        } else if ALIASES.iter().any(|(alias, ..)| *alias == key) {
+            return Err(format!("{backend}: {key} has no target on this backend"));
+        } else {
+            let Value::Object(slots) = value else {
+                return Err(format!("{backend}.{key}: expected slot assertions"));
+            };
+            for (slot, assertions) in slots {
+                put(&key, &slot, assertions, &key)?;
             }
         }
     }
