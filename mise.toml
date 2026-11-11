@@ -227,8 +227,8 @@ description = "Run clippy lint checks"
 description = "Reject Rust test functions added without an opt-in reason"
 run = [
   "ast-grep test -c scripts/linting/unit-tests/sgconfig.yml --skip-snapshot-tests",
-  "python3 -m unittest discover -s scripts/linting/unit-tests -p '*_test.py'",
-  "python3 scripts/linting/unit-tests/check.py --range $(git merge-base origin/main HEAD) HEAD",
+  "uv run --quiet python -m unittest discover -s scripts/linting/unit-tests -p '*_test.py'",
+  "uv run --quiet scripts/linting/unit-tests/check.py --range ${UNIT_TESTS_BASE:-$(git merge-base origin/main HEAD)} HEAD",
 ]
 
 [tasks."lint:logs"]

@@ -113,18 +113,13 @@ lint:yaml:
 
 unit-test-opt-in:
   stage: lint
-  image: python:3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
   extends:
+    - .job-template
     - .mr-only-rules
+    - .no-cargo-home-cache
   needs: []
   script:
-    - apk add --no-cache git
-    - pip install --quiet --root-user-action=ignore "ast-grep-cli==0.51.0"
-    - ast-grep test -c scripts/linting/unit-tests/sgconfig.yml --skip-snapshot-tests
-    - python3 -m unittest discover -s scripts/linting/unit-tests -p '*_test.py'
     - |
-      BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
-      git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch origin "$BASE" --depth=1
-      python3 scripts/linting/unit-tests/check.py --range "$BASE" HEAD
+      export UNIT_TESTS_BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+      git cat-file -e "${UNIT_TESTS_BASE}^{commit}" 2>/dev/null || git fetch origin "$UNIT_TESTS_BASE" --depth=1
+      mise run lint:unit-tests
