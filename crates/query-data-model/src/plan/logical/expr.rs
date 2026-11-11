@@ -1,6 +1,7 @@
 use super::{Comparison, Matching, Predicate};
+use crate::PropertyId;
+use crate::generic::AttributeId;
 use crate::plan::tracking::{Named, Ref};
-use crate::{AttributeId, PropertyId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Expr {

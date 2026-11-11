@@ -5,9 +5,10 @@ use crate::{EdgeVariantScope, RequiredRole, Scope};
 
 use super::Diagnostics;
 use super::store::Store;
+use crate::generic::AttributeId;
 pub use crate::spec::{Anchor, EntityAccess, PropertyAccess, Redaction};
 use crate::spec::{AuthorizationFragment, ScopeSpec, ScopeVariants, parse_variant};
-use crate::{AttributeId, Endpoint, EntityId, GraphCatalog, Hop, PropertyId};
+use crate::{Endpoint, EntityId, GraphCatalog, Hop, PropertyId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowFilter {
@@ -137,7 +138,6 @@ impl Access {
                     role: spec.role,
                     redaction,
                     anchor,
-                    delegated: spec.delegated,
                 })
                 .is_some()
             {

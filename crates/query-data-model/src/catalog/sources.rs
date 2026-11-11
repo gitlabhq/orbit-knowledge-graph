@@ -98,10 +98,6 @@ pub struct Sources {
 }
 
 impl Sources {
-    pub fn data_sources(&self) -> &[DataSource] {
-        &self.sources
-    }
-
     pub fn data_source(&self, pipeline: &Pipeline) -> &DataSource {
         &self.sources[pipeline.source]
     }

@@ -43,10 +43,6 @@ pub struct GraphCatalog {
 }
 
 impl GraphCatalog {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Domains in name order.
     pub fn domains(&self) -> impl Iterator<Item = &Domain> {
         self.domains.values()

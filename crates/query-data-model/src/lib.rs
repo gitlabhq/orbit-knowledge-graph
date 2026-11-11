@@ -17,9 +17,8 @@ pub use catalog::{Catalog, Model, StorageBackend};
 pub use constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 pub use error::DataModelError;
 pub use generic::{
-    Attribute, AttributeId, Direction, Domain, Endpoint, Entity, EntityId, ForeignKey,
-    GraphCatalog, Hop, Property, PropertyId, Reach, Relationship, RelationshipId,
-    RelationshipVariant, RelationshipVariantId, Style, Walk,
+    Attribute, Direction, Domain, Endpoint, Entity, EntityId, ForeignKey, GraphCatalog, Hop,
+    Property, PropertyId, Relationship, RelationshipId, RelationshipVariant, RelationshipVariantId,
 };
 pub use implementations::clickhouse::ClickHouse;
 pub use implementations::clickhouse::facts::{
@@ -27,10 +26,8 @@ pub use implementations::clickhouse::facts::{
     MaterializedJoin, MaterializedNode, MaterializedRelationship, TraversalPathLookup,
 };
 pub use implementations::duckdb::DuckDb;
-pub use implementations::relational::PathColumn;
 pub use implementations::relational::RelationshipRoute;
 pub use packages::Packages;
 pub use types::{
-    Cardinality, DataType, EdgeVariantScope, EnumType, FieldSelectivity, RequiredRole, Scope,
-    TraversalPathKind,
+    DataType, EdgeVariantScope, EnumType, FieldSelectivity, RequiredRole, Scope, TraversalPathKind,
 };

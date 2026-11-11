@@ -4,8 +4,9 @@ use crate::DataType;
 
 use super::{EdgeField, Expr, Logical, LogicalOperation, LogicalType, Measure, PlanError};
 use crate::catalog::PropertyAccess;
+use crate::generic::AttributeId;
 use crate::plan::tracking::{Construction, Ref};
-use crate::{AttributeId, Model, Property, RelationshipId, RelationshipVariantId};
+use crate::{Model, Property, RelationshipId, RelationshipVariantId};
 
 pub(super) struct Typed<'m> {
     pub(super) data_type: DataType,

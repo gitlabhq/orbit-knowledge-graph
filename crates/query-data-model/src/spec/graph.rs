@@ -4,9 +4,10 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use super::{Naming, Raw, Resolved, Short, ShortForm, is_false};
+use crate::generic::{AttributeId, Style};
+use crate::types::Cardinality;
 use crate::{
-    AttributeId, Cardinality, EntityId, EnumType, FieldSelectivity, PropertyId, RelationshipId,
-    RelationshipVariantId, Style,
+    EntityId, EnumType, FieldSelectivity, PropertyId, RelationshipId, RelationshipVariantId,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

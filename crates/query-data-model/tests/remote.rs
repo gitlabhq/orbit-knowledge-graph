@@ -33,7 +33,6 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
 
     let model = model();
     let message = model.entity("SlackMessage").unwrap();
-    assert!(model.access().entity(message).unwrap().delegated);
     let live = model.physical::<Live>("data_extraction").unwrap();
     let guard = live.store("slack").unwrap().guard(message).unwrap();
     assert_eq!(

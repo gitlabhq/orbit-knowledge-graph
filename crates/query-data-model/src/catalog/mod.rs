@@ -2,9 +2,9 @@ mod access;
 mod backend;
 mod bindings;
 mod diagnostics;
-mod frontend;
 mod layout;
 mod lookups;
+mod names;
 pub mod sources;
 mod store;
 
@@ -15,8 +15,8 @@ pub use backend::{
     check_unrelational,
 };
 pub use diagnostics::{Diagnostics, SpecError};
-pub use frontend::{Reversed, Unresolved};
 pub use lookups::{Lookup, Lookups};
+pub use names::{Reversed, Unresolved};
 pub use sources::Sources;
 pub use store::{Source, Store, StoredColumn};
 
@@ -93,10 +93,6 @@ impl Model {
 
     pub fn access(&self) -> &Access {
         &self.access
-    }
-
-    pub fn lookups(&self) -> &Lookups {
-        &self.lookups
     }
 
     pub fn lookup(&self, property: PropertyId) -> Option<&Lookup> {

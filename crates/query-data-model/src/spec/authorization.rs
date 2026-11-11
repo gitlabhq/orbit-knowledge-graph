@@ -27,9 +27,6 @@ pub struct EntityAccess<S: Naming = Resolved> {
     /// A foreign key to the namespace entity that holds the row; a filter on it bounds the entity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<Anchor<S>>,
-    /// The backend applies the caller's own visibility through the caller's sign-in.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub delegated: bool,
 }
 
 /// A property that holds the id of the namespace entity a row belongs to.
