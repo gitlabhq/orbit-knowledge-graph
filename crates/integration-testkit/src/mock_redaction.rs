@@ -58,6 +58,7 @@ impl MockRedactionService {
                     .collect();
 
                 ResourceAuthorization {
+                    provider: check.provider.clone(),
                     resource_type: check.resource_type.clone(),
                     authorized,
                 }

@@ -99,6 +99,7 @@ async fn check(
             })?;
         for (request, allowed) in requests.into_iter().zip(allowed) {
             authorizations.push(ResourceAuthorization {
+                provider: provider.clone(),
                 resource_type: request.resource,
                 authorized: request
                     .ids

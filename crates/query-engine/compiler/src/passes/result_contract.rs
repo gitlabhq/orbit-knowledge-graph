@@ -36,17 +36,18 @@ pub struct EntityAuthConfig {
     pub owner_entity: Option<String>,
 }
 
-/// The row check each checked entity's returned rows go through, by entity name.
-pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, EntityAuthConfig> {
+/// The row checks each checked entity's returned rows go through, by entity name; a row comes
+/// back only if every one allows it.
+pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, Vec<EntityAuthConfig>> {
     let graph = model.graph();
     let access = model.model().access();
     graph
         .entities()
         .filter_map(|entity| {
-            let check = model
+            let checks: Vec<EntityAuthConfig> = model
                 .checks(entity.id)
                 .iter()
-                .find_map(|check| match check {
+                .filter_map(|check| match check {
                     Check::Rows {
                         provider,
                         permission,
@@ -61,8 +62,9 @@ pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, EntityAu
                         owner_entity: object.map(|owner| graph.entity(owner).name.clone()),
                     }),
                     Check::Delegated { .. } => None,
-                })?;
-            Some((entity.name.clone(), check))
+                })
+                .collect();
+            (!checks.is_empty()).then(|| (entity.name.clone(), checks))
         })
         .collect()
 }
@@ -95,7 +97,7 @@ pub struct EdgeMeta {
 pub struct ResultContext {
     pub query_type: Option<QueryType>,
     nodes: HashMap<String, RedactionNode>,
-    entity_auth: HashMap<String, EntityAuthConfig>,
+    entity_auth: HashMap<String, Vec<EntityAuthConfig>>,
     edges: Vec<EdgeMeta>,
     neighbors_center: Option<(String, i64)>,
     labels: HashMap<String, String>,
@@ -125,15 +127,27 @@ impl ResultContext {
     }
 
     pub fn add_entity_auth(&mut self, entity_type: impl Into<String>, config: EntityAuthConfig) {
-        self.entity_auth.insert(entity_type.into(), config);
+        self.entity_auth
+            .entry(entity_type.into())
+            .or_default()
+            .push(config);
     }
 
+    /// The key every row check of the entity identifies its rows by; the loader makes all of an
+    /// entity's checks share it.
     pub fn get_entity_auth(&self, entity_type: &str) -> Option<&EntityAuthConfig> {
-        self.entity_auth.get(entity_type)
+        self.entity_auth.get(entity_type)?.first()
+    }
+
+    /// Every row check of the entity.
+    pub fn entity_checks(&self, entity_type: &str) -> &[EntityAuthConfig] {
+        self.entity_auth.get(entity_type).map_or(&[], Vec::as_slice)
     }
 
     pub fn entity_auth(&self) -> impl Iterator<Item = (&str, &EntityAuthConfig)> {
-        self.entity_auth.iter().map(|(k, v)| (k.as_str(), v))
+        self.entity_auth
+            .iter()
+            .flat_map(|(entity, checks)| checks.iter().map(move |check| (entity.as_str(), check)))
     }
 
     pub fn nodes(&self) -> impl Iterator<Item = &RedactionNode> {

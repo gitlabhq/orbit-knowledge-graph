@@ -279,6 +279,39 @@ fn a_via_step_needs_one_target() {
 }
 
 #[test]
+fn every_row_check_of_an_entity_keys_its_rows_alike() {
+    let checks = |second: &str| {
+        let second = second.to_string();
+        load_with(&["gitlab"], move |name, yaml| {
+            match name {
+            "gitlab/authorization.yaml" => yaml.replace(
+                "    checks: [{provider: rails, permission: read_note, resource: note}]",
+                &format!("    checks: [{{provider: rails, permission: read_note, resource: note}}, {second}]"),
+            ),
+            _ => yaml,
+        }
+        })
+    };
+    let model = checks("{provider: cedar, permission: read, resource: note}").unwrap();
+    assert_eq!(
+        model
+            .access()
+            .entity(model.entity("Note").unwrap())
+            .checks
+            .len(),
+        2
+    );
+    assert_eq!(
+        spec_errors(checks(
+            "{provider: rails, permission: read_project, resource: project, object: Project, id: project_id}"
+        )),
+        [
+            "gitlab: Note's row checks key its rows by different properties; they share one id and object"
+        ]
+    );
+}
+
+#[test]
 fn a_checked_entity_needs_its_checks() {
     let checked = |checks: &str| {
         let checks = checks.to_string();

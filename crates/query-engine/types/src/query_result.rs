@@ -330,37 +330,35 @@ impl QueryResult {
                 let Some(node_ref) = row.node_ref(redaction_node) else {
                     continue;
                 };
-                let Some(auth) = self.ctx.get_entity_auth(&node_ref.entity_type) else {
-                    continue;
-                };
-                ids.entry((
-                    auth.provider.as_str(),
-                    auth.resource_type.as_str(),
-                    auth.ability.as_str(),
-                ))
-                .or_default()
-                .insert(node_ref.id);
+                for auth in self.ctx.entity_checks(&node_ref.entity_type) {
+                    ids.entry((
+                        auth.provider.as_str(),
+                        auth.resource_type.as_str(),
+                        auth.ability.as_str(),
+                    ))
+                    .or_default()
+                    .insert(node_ref.id);
+                }
             }
 
             for node_ref in &row.dynamic_nodes {
-                let Some(auth) = self.ctx.get_entity_auth(&node_ref.entity_type) else {
-                    continue;
-                };
-                let auth_id = if auth.owner_entity.is_some() {
-                    let Some(id) = node_ref.owner_id else {
-                        continue;
+                for auth in self.ctx.entity_checks(&node_ref.entity_type) {
+                    let auth_id = if auth.owner_entity.is_some() {
+                        let Some(id) = node_ref.owner_id else {
+                            continue;
+                        };
+                        id
+                    } else {
+                        node_ref.id
                     };
-                    id
-                } else {
-                    node_ref.id
-                };
-                ids.entry((
-                    auth.provider.as_str(),
-                    auth.resource_type.as_str(),
-                    auth.ability.as_str(),
-                ))
-                .or_default()
-                .insert(auth_id);
+                    ids.entry((
+                        auth.provider.as_str(),
+                        auth.resource_type.as_str(),
+                        auth.ability.as_str(),
+                    ))
+                    .or_default()
+                    .insert(auth_id);
+                }
             }
         }
 
@@ -470,16 +468,15 @@ fn is_authorized(
     authorizations: &[ResourceAuthorization],
     ctx: &ResultContext,
 ) -> bool {
-    let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
-        return false;
-    };
-    let Some(auth) = authorizations
-        .iter()
-        .find(|a| a.resource_type == auth_config.resource_type)
-    else {
-        return false;
-    };
-    auth.authorized.get(&node_ref.id).copied().unwrap_or(false)
+    let checks = ctx.entity_checks(&node_ref.entity_type);
+    !checks.is_empty()
+        && checks.iter().all(|check| {
+            authorizations
+                .iter()
+                .find(|a| a.provider == check.provider && a.resource_type == check.resource_type)
+                .and_then(|answer| answer.authorized.get(&node_ref.id).copied())
+                == Some(true)
+        })
 }
 
 fn resolve_dynamic_auth_id(node_ref: &mut NodeRef, ctx: &ResultContext) -> bool {
@@ -565,10 +562,12 @@ mod tests {
     fn full_auth() -> Vec<ResourceAuthorization> {
         vec![
             ResourceAuthorization {
+                provider: "rails".to_string(),
                 resource_type: "user".to_string(),
                 authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
             },
             ResourceAuthorization {
+                provider: "rails".to_string(),
                 resource_type: "project".to_string(),
                 authorized: [(100, true), (200, true), (300, true)]
                     .into_iter()
@@ -867,10 +866,12 @@ mod tests {
 
             let authorizations = vec![
                 ResourceAuthorization {
+                    provider: "rails".to_string(),
                     resource_type: "user".to_string(),
                     authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
+                    provider: "rails".to_string(),
                     resource_type: "project".to_string(),
                     authorized: [(100, true), (200, false), (300, true)]
                         .into_iter()
@@ -893,10 +894,12 @@ mod tests {
 
             let authorizations = vec![
                 ResourceAuthorization {
+                    provider: "rails".to_string(),
                     resource_type: "user".to_string(),
                     authorized: [(1, false), (2, true), (3, false)].into_iter().collect(),
                 },
                 ResourceAuthorization {
+                    provider: "rails".to_string(),
                     resource_type: "project".to_string(),
                     authorized: [(100, true), (200, true), (300, true)]
                         .into_iter()
@@ -925,6 +928,36 @@ mod tests {
         }
 
         #[test]
+        fn every_check_of_an_entity_must_allow_its_row() {
+            let mut ctx = test_ctx();
+            ctx.add_entity_auth(
+                "Project",
+                EntityAuthConfig {
+                    resource_type: "project".to_string(),
+                    ability: "view".to_string(),
+                    auth_id_column: "id".to_string(),
+                    owner_entity: None,
+                    provider: "cedar".to_string(),
+                },
+            );
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &ctx).unwrap();
+            let checks = result.resource_checks();
+            let providers: HashSet<&str> = checks.iter().map(|c| c.provider.as_str()).collect();
+            assert_eq!(providers, HashSet::from(["rails", "cedar"]));
+            let mut authorizations = full_auth();
+            authorizations.push(ResourceAuthorization {
+                provider: "cedar".to_string(),
+                resource_type: "project".to_string(),
+                authorized: [(100, true), (200, false)].into_iter().collect(),
+            });
+
+            let redacted = result.apply_authorizations(&authorizations);
+
+            assert_eq!(redacted, 2);
+            assert_eq!(result.authorized_count(), 1);
+        }
+
+        #[test]
         fn fail_closed_missing_resource_authorization() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let redacted = result.apply_authorizations(&[]);
@@ -937,6 +970,7 @@ mod tests {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
 
             let authorizations = vec![ResourceAuthorization {
+                provider: "rails".to_string(),
                 resource_type: "user".to_string(),
                 authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
             }];
@@ -953,10 +987,12 @@ mod tests {
 
             let authorizations = vec![
                 ResourceAuthorization {
+                    provider: "rails".to_string(),
                     resource_type: "user".to_string(),
                     authorized: [(1, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
+                    provider: "rails".to_string(),
                     resource_type: "project".to_string(),
                     authorized: [(100, true), (200, true), (300, true)]
                         .into_iter()
@@ -1015,10 +1051,12 @@ mod tests {
 
             let authorizations = vec![
                 ResourceAuthorization {
+                    provider: "rails".to_string(),
                     resource_type: "user".to_string(),
                     authorized: [(1, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
+                    provider: "rails".to_string(),
                     resource_type: "project".to_string(),
                     authorized: [(1000, true)].into_iter().collect(),
                 },
@@ -1072,6 +1110,7 @@ mod tests {
 
         fn project_auth() -> Vec<ResourceAuthorization> {
             vec![ResourceAuthorization {
+                provider: "rails".to_string(),
                 resource_type: "project".to_string(),
                 authorized: [(1000, true), (1001, false)].into_iter().collect(),
             }]

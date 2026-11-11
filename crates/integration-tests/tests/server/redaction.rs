@@ -807,8 +807,10 @@ fn fail_closed_null_id_denies_row() {
     let mut ctx = ResultContext::new();
     ctx.add_node("u", "User");
     ctx.add_node("p", "Project");
-    for (entity, config) in compiler::entity_auth(&*data_model) {
-        ctx.add_entity_auth(entity, config);
+    for (entity, checks) in compiler::entity_auth(&*data_model) {
+        for check in checks {
+            ctx.add_entity_auth(entity.clone(), check);
+        }
     }
 
     let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
@@ -1559,8 +1561,10 @@ fn fail_closed_null_type_denies_row() {
 
     let mut ctx = ResultContext::new();
     ctx.add_node("u", "User");
-    for (entity, config) in compiler::entity_auth(&*data_model) {
-        ctx.add_entity_auth(entity, config);
+    for (entity, checks) in compiler::entity_auth(&*data_model) {
+        for check in checks {
+            ctx.add_entity_auth(entity.clone(), check);
+        }
     }
 
     let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
