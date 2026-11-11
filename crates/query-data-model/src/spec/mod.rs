@@ -14,8 +14,9 @@ pub use graph::{
 };
 pub use service::{Lookup, ServiceFragment};
 pub use source::{
-    EdgeMapping, Endpoint, EndpointKind, ExtractLookup, GENERATED_QUERY, PathSpec, PipelineSpec,
-    ReindexTrigger, RelationshipSourceSpec, SourceDeclaration, SourceFragment, TEMPLATE_EXTENSION,
+    CODE_INDEXER_SOURCE, EdgeMapping, Endpoint, EndpointKind, ExtractLookup, GENERATED_QUERY,
+    PathSpec, PipelineSpec, ReindexTrigger, RelationshipSourceSpec, SourceDeclaration,
+    SourceFragment, TEMPLATE_EXTENSION, Writes,
 };
 pub use storage::{
     AccessHints, Binding, Block, Blocks, ColumnStorage, CopySources, Discriminator, EdgeIndex,

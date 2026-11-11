@@ -16,7 +16,7 @@
 include!(concat!(env!("OUT_DIR"), "/icon_types_generated.rs"));
 
 /// Subset of `ICON_TYPES` the parser dispatcher knows how to handle as
-/// cross-reference / lifecycle actions. Asserted to be a subset of
+/// cross-reference actions. Asserted to be a subset of
 /// `ICON_TYPES` by the unit test below; future actions Rails adds default to
 /// "log and drop" until added here explicitly.
 #[cfg(test)]
@@ -35,15 +35,6 @@ pub const HANDLED_CROSS_REFERENCE_ACTIONS: &[&str] = &[
     "merge",
 ];
 
-/// Lifecycle actions whose body is a fixed verb and which the parser emits
-/// `User → Noteable` edges for directly.
-///
-/// `reopened` is intentionally absent: reopen is never a system-note action.
-/// It is a `resource_state_events` row (state = 5), and REOPENED edges are
-/// emitted by the standalone `reopened.yaml` ETL. See ADR 013.
-#[cfg(test)]
-pub const HANDLED_LIFECYCLE_ACTIONS: &[&str] = &["closed", "merged", "opened"];
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,16 +45,6 @@ mod tests {
             assert!(
                 ICON_TYPES.contains(action),
                 "handled cross-ref action `{action}` is not in vendored ICON_TYPES"
-            );
-        }
-    }
-
-    #[test]
-    fn handled_lifecycle_actions_are_subset_of_icon_types() {
-        for action in HANDLED_LIFECYCLE_ACTIONS {
-            assert!(
-                ICON_TYPES.contains(action),
-                "handled lifecycle action `{action}` is not in vendored ICON_TYPES"
             );
         }
     }

@@ -10,6 +10,89 @@ fn load(packages: &[&str]) -> Result<std::sync::Arc<Model>, DataModelError> {
     load_with(packages, |_, yaml| yaml)
 }
 
+/// The gitlab fixture with `drop` removed from its siphon source, and `writer` added as a
+/// source that lists the rows it writes.
+fn with_writers(drop: &[&str], writer: &str) -> Result<std::sync::Arc<Model>, DataModelError> {
+    let mut sources = support::packages(&["gitlab"], |name, yaml| match name {
+        "gitlab/sources/siphon.yaml" => drop
+            .iter()
+            .fold(yaml, |yaml, line| yaml.replace(&format!("{line}\n"), "")),
+        _ => yaml,
+    })
+    .sources()
+    .clone();
+    if !writer.is_empty() {
+        let fragment = format!("kind: source\npackage: gitlab\n{writer}");
+        sources.insert("gitlab/sources/writer.yaml".into(), fragment);
+    }
+    Packages::new(query_data_model::Tier::Platform, sources).load()
+}
+
+const USER_PIPELINE: &str = "  User: {tables: [users], order_by: [id], query: generated}";
+const NOTE_IN_PROJECT: &str = "    - {label: IN_PROJECT, from: {field: id, kind: Note}, to: {field: project_id, kind: Project}}";
+const NOTE_HAS_NOTE: &str = "    - {label: HAS_NOTE, from: {field: noteable_id, kind: MergeRequest}, to: {field: id, kind: Note}}";
+
+#[test]
+fn every_stored_entity_and_edge_table_variant_needs_a_writer() {
+    let errors = spec_errors(with_writers(
+        &[USER_PIPELINE, NOTE_IN_PROJECT, NOTE_HAS_NOTE],
+        "",
+    ));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: stored entity User has no writer",
+            "gitlab: IN_PROJECT(Note -> Project) in edge table gl_edge has no writer",
+            "gitlab: HAS_NOTE(MergeRequest -> Note) in edge table gl_edge has no writer",
+        ]
+    );
+}
+
+#[test]
+fn an_entity_or_edge_table_variant_has_at_most_one_writer() {
+    let errors = spec_errors(with_writers(
+        &[],
+        "source: indexer\nentities: [User]\nrelationships:\n  HAS_NOTE: [MergeRequest -> Note]\n",
+    ));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: entity User has two writers: User and indexer",
+            "gitlab: HAS_NOTE(MergeRequest -> Note) has two writers: Note and indexer",
+        ]
+    );
+}
+
+#[test]
+fn a_foreign_key_variant_is_written_by_the_writer_of_its_node() {
+    let errors = spec_errors(with_writers(
+        &[NOTE_IN_PROJECT],
+        "source: indexer\nrelationships:\n  IN_PROJECT: [Note -> Project]\n",
+    ));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: foreign-key variant IN_PROJECT(Note -> Project) is written by indexer, not by the writer of Note"
+        ]
+    );
+}
+
+#[test]
+fn a_source_that_lists_its_rows_declares_no_pipelines() {
+    let errors = spec_errors(with_writers(
+        &[],
+        "source: siphon\nentities: [Wiki]\nrelationships:\n  CONTAINS: [Group -> Wiki]\n",
+    ));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: source siphon lists the rows it writes, so it declares no pipelines",
+            "gitlab: source siphon writes unknown entity Wiki",
+            "gitlab: source siphon writes unknown variant CONTAINS(Group -> Wiki)",
+        ]
+    );
+}
+
 fn spec_errors<T: std::fmt::Debug>(result: Result<T, DataModelError>) -> Vec<String> {
     match result {
         Err(DataModelError::Spec(errors)) => errors.iter().map(ToString::to_string).collect(),
@@ -507,6 +590,8 @@ fn every_bad_reference_is_reported_in_one_load() {
             "gitlab: store graph names unknown property User.usernam",
             "gitlab: store graph binds unknown variant AUTHORED(User -> Note)",
             "gitlab: User.username is neither stored nor excluded by any store",
+            "gitlab: pipeline Note emits unknown variant User -[AUTHORED]-> Note",
+            "gitlab: pipeline Note emits no declared AUTHORED variant",
         ]
     );
 }

@@ -103,4 +103,7 @@ entities:
     - label: SCANS
       from: {field: id, kind: VulnerabilityScanner}
       to: {field: project_id, kind: Project}
+    - label: IN_PROJECT
+      from: {field: id, kind: VulnerabilityScanner}
+      to: {field: project_id, kind: Project}
     reindex: [siphon_vulnerability_scanners]

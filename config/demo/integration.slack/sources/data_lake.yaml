@@ -1,0 +1,14 @@
+kind: source
+package: integration.slack
+source: data_lake
+declare:
+  connection: datalake
+  version: _version
+  watermark: _watermark
+  deleted: _deleted
+entities:
+  SlackWorkspace:
+    tables: [slack_installations]
+    order_by: [traversal_path, id]
+    query: generated
+    columns: {id: workspace_id, name: workspace_name, group_id: namespace_id}

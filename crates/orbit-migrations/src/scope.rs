@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::Schema;
-use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor, Writer};
-use query_data_model::{Catalog, ClickHouse, RelationshipId};
+use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor, RowWriter, Writer};
+use query_data_model::spec::CODE_INDEXER_SOURCE;
+use query_data_model::{Catalog, ClickHouse, EntityId, RelationshipId};
 use serde::{Deserialize, Serialize};
 
 pub const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
@@ -186,13 +187,10 @@ pub fn sdlc_entity_names(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
 
 #[must_use]
 pub fn code_entity_names(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
-    let sources = catalog.model().sources();
     let graph = catalog.graph();
     let code_tables = code_domain_tables(catalog);
-    let mut names: BTreeSet<String> = graph
-        .entities()
-        .filter(|entity| sources.entity_pipelines(entity.id).next().is_none())
-        .map(|entity| entity.name.clone())
+    let mut names: BTreeSet<String> = code_indexer_entities(catalog)
+        .map(|entity| graph.entity(entity).name.clone())
         .collect();
     for relationship in graph.relationships() {
         let tables = relationship_tables(catalog, relationship.id);
@@ -222,15 +220,36 @@ pub(crate) fn relationship_tables(
         .collect()
 }
 
+fn code_indexer_entities(catalog: &Catalog<ClickHouse>) -> impl Iterator<Item = EntityId> + '_ {
+    let sources = catalog.model().sources();
+    sources
+        .direct_source(CODE_INDEXER_SOURCE)
+        .into_iter()
+        .flat_map(|writes| writes.entities.iter().copied())
+}
+
+/// The tables only the code indexer writes: its entities' tables, and the edge tables every
+/// one of whose bound variants it writes.
 pub(crate) fn code_domain_tables(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
     let sources = catalog.model().sources();
-    catalog
-        .graph()
-        .entities()
-        .filter(|entity| sources.entity_pipelines(entity.id).next().is_none())
-        .filter_map(|entity| catalog.table_of(entity.id))
+    let code = |writer: Option<RowWriter>| {
+        writer.is_some_and(|writer| sources.row_writer_name(writer) == CODE_INDEXER_SOURCE)
+    };
+    let mut edge_tables = BTreeMap::<&str, bool>::new();
+    for variant in catalog.graph().variants() {
+        if let Some(table) = catalog.edge_table(variant.id) {
+            let only_code = edge_tables.entry(table).or_insert(true);
+            *only_code &= code(sources.variant_writer(variant.id));
+        }
+    }
+    code_indexer_entities(catalog)
+        .filter_map(|entity| catalog.table_of(entity))
+        .chain(
+            edge_tables
+                .into_iter()
+                .filter_map(|(table, only_code)| only_code.then_some(table)),
+        )
         .map(str::to_string)
-        .chain(std::iter::once("gl_code_edge".to_string()))
         .collect()
 }
 

@@ -2840,7 +2840,6 @@ relationships:
   CONTAINS:
     Group -> Group: {edge_table: gl_edge}
     Group -> Project: {edge_table: gl_edge}
-    User -> Project: {edge_table: gl_edge}
     Project -> Branch: {edge_table: gl_code_edge, copies: {project_id: target.project_id}}
     WorkItem -> WorkItem: {edge_table: gl_edge}
     Branch -> Directory: {edge_table: gl_code_edge, copies: {project_id: [source.project_id, target.project_id], branch: target.branch}}
@@ -2897,7 +2896,6 @@ relationships:
     MergeRequest -> Pipeline: {fk: {on: source, column: head_pipeline_id}, edge_table: gl_ci_edge}
 
   HAS_IDENTIFIER:
-    Finding -> VulnerabilityIdentifier: {edge_table: gl_sec_edge}
     VulnerabilityOccurrence -> VulnerabilityIdentifier: {fk: {on: source, column: primary_identifier_id}, edge_table: gl_sec_edge}
 
   HAS_JOB:

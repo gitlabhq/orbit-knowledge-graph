@@ -142,18 +142,6 @@ relationships:
         from: {field: merge_request_id, kind: MergeRequest, enrich: true}
         to: {field: vulnerability_id, kind: Vulnerability, enrich: true}
 
-  HAS_IDENTIFIER:
-    reindex: [siphon_vulnerability_occurrence_identifiers]
-    pipelines:
-      HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier:
-        tables: [siphon_vulnerability_occurrence_identifiers]
-        fields: [occurrence_id, identifier_id]
-        order_by: [traversal_path, id]
-        query: generated
-        lookups: [{entity: VulnerabilityOccurrence, id: occurrence_id}]
-        from: {field: occurrence_id, kind: VulnerabilityOccurrence, enrich: true}
-        to: {field: identifier_id, kind: VulnerabilityIdentifier}
-
   HAS_LABEL:
     reindex: [siphon_label_links]
     pipelines:

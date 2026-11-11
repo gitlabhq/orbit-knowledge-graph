@@ -11,21 +11,122 @@ use crate::{EntityId, RelationshipVariantId};
 pub const GENERATED_QUERY: &str = "generated";
 pub const TEMPLATE_EXTENSION: &str = ".sql.j2";
 
+/// The source whose rows the code indexer writes itself, with no pipelines.
+pub const CODE_INDEXER_SOURCE: &str = "code_indexer";
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "WrittenFragment")]
 pub struct SourceFragment {
     pub package: String,
     pub source: String,
-    #[serde(default)]
     pub declare: Option<SourceDeclaration>,
-    #[serde(default, deserialize_with = "entities")]
     pub entities: Pipelines,
-    #[serde(default)]
     pub relationships: IndexMap<String, RelationshipSourceSpec>,
-    #[serde(default, deserialize_with = "derived")]
     pub derived: Pipelines,
-    #[serde(skip)]
+    /// What the source writes itself, listed by name instead of by pipeline.
+    pub writes: Writes,
     pub templates: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Writes {
+    pub entities: Vec<String>,
+    /// Each relationship's written variants, as `Source -> Target`.
+    pub relationships: IndexMap<String, Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WrittenFragment {
+    package: String,
+    source: String,
+    #[serde(default)]
+    declare: Option<SourceDeclaration>,
+    #[serde(default)]
+    entities: Option<Listed<Pipelines>>,
+    #[serde(default)]
+    relationships: IndexMap<String, Listed<RelationshipSourceSpec>>,
+    #[serde(default, deserialize_with = "derived")]
+    derived: Pipelines,
+}
+
+impl TryFrom<WrittenFragment> for SourceFragment {
+    type Error = String;
+
+    fn try_from(written: WrittenFragment) -> Result<Self, String> {
+        let mut writes = Writes::default();
+        let entities = match written.entities {
+            None => Pipelines::new(),
+            Some(Listed::Names(names)) => {
+                writes.entities = names;
+                Pipelines::new()
+            }
+            Some(Listed::Specs(pipelines)) => {
+                for (name, spec) in &pipelines {
+                    spec.check(name, "entities")?;
+                }
+                pipelines
+            }
+        };
+        let mut relationships = IndexMap::new();
+        for (name, section) in written.relationships {
+            match section {
+                Listed::Names(variants) => {
+                    writes.relationships.insert(name, variants);
+                }
+                Listed::Specs(spec) => {
+                    relationships.insert(name, spec);
+                }
+            }
+        }
+        Ok(Self {
+            package: written.package,
+            source: written.source,
+            declare: written.declare,
+            entities,
+            relationships,
+            derived: written.derived,
+            writes,
+            templates: BTreeMap::new(),
+        })
+    }
+}
+
+/// A section written as a list of names, or as a map of specs.
+enum Listed<T> {
+    Names(Vec<String>),
+    Specs(T),
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Listed<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visit<T>(std::marker::PhantomData<T>);
+
+        impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Visit<T> {
+            type Value = Listed<T>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a list of names or a map of specs")
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                Vec::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))
+                    .map(Listed::Names)
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> Result<Self::Value, A::Error> {
+                T::deserialize(serde::de::value::MapAccessDeserializer::new(map)).map(Listed::Specs)
+            }
+        }
+
+        deserializer.deserialize_any(Visit(std::marker::PhantomData))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -137,10 +238,6 @@ fn pipelines<'de, D: Deserializer<'de>>(
     Ok(pipelines)
 }
 
-fn entities<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Pipelines, D::Error> {
-    pipelines(deserializer, "entities")
-}
-
 fn relationship_pipelines<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Pipelines, D::Error> {
@@ -174,8 +271,6 @@ pub struct EdgeMapping<S: Naming = Resolved> {
     pub source: Endpoint<S>,
     #[serde(rename = "to")]
     pub target: Endpoint<S>,
-    #[serde(default)]
-    pub array_field: Option<String>,
     #[serde(default)]
     pub mutable: bool,
     #[serde(skip)]

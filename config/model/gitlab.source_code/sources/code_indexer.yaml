@@ -1,0 +1,12 @@
+kind: source
+package: gitlab.source_code
+source: code_indexer
+entities: [Branch, Directory, File, Definition, ImportedSymbol]
+relationships:
+  CALLS: [Definition -> Definition, File -> Definition, Definition -> ImportedSymbol, File -> ImportedSymbol]
+  CONTAINS: [Project -> Branch, Branch -> Directory, Branch -> File, Directory -> Directory, Directory -> File]
+  DEFINES: [File -> Definition, Definition -> Definition]
+  EXTENDS: [Definition -> Definition]
+  IMPORTS: [File -> ImportedSymbol, ImportedSymbol -> Definition]
+  IN_PROJECT: [Branch -> Project]
+  ON_BRANCH: [Directory -> Branch, File -> Branch]

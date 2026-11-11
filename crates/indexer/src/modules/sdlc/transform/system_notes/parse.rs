@@ -55,9 +55,6 @@ pub enum Action {
     Duplicate,
     Commit,
     Merge,
-    Closed,
-    Merged,
-    Opened,
 }
 
 impl Action {
@@ -75,48 +72,8 @@ impl Action {
             "duplicate" => Self::Duplicate,
             "commit" => Self::Commit,
             "merge" => Self::Merge,
-            "closed" => Self::Closed,
-            "merged" => Self::Merged,
-            "opened" => Self::Opened,
             _ => return None,
         })
-    }
-
-    /// Inverse of [`Action::parse`]: the canonical action→string mapping.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::CrossReference => "cross_reference",
-            Self::Relate => "relate",
-            Self::Unrelate => "unrelate",
-            Self::RelateToParent => "relate_to_parent",
-            Self::RelateToChild => "relate_to_child",
-            Self::UnrelateFromParent => "unrelate_from_parent",
-            Self::UnrelateFromChild => "unrelate_from_child",
-            Self::Moved => "moved",
-            Self::Cloned => "cloned",
-            Self::Duplicate => "duplicate",
-            Self::Commit => "commit",
-            Self::Merge => "merge",
-            Self::Closed => "closed",
-            Self::Merged => "merged",
-            Self::Opened => "opened",
-        }
-    }
-
-    /// Lifecycle actions whose body is a fixed verb (`"closed"`, `"merged"`,
-    /// `"opened"`) and which do not need text parsing. The resolved edge is
-    /// `User --ACTION--> Noteable` from the note row alone.
-    ///
-    /// `reopened` is intentionally absent: reopen is a `resource_state_events`
-    /// row (state = 5), never a system-note action, and REOPENED edges are
-    /// emitted by the standalone `reopened.yaml` ETL instead. See ADR 013.
-    ///
-    /// Test-only: `emit::build_edges` matches on the concrete `Action`
-    /// variants directly, so this predicate is documentation/assertion sugar
-    /// rather than a production branch.
-    #[cfg(test)]
-    pub fn is_lifecycle(self) -> bool {
-        matches!(self, Self::Closed | Self::Merged | Self::Opened)
     }
 }
 
@@ -187,9 +144,6 @@ static COMMIT_REF: LazyLock<Regex> = LazyLock::new(|| {
 /// `"mentioned in {ref}"`), so we take the first match.
 pub fn extract(action: Action, body: &str) -> Vec<Reference> {
     match action {
-        // Lifecycle: body is the bare verb, no cross-entity ref.
-        Action::Closed | Action::Merged | Action::Opened => Vec::new(),
-
         // Body: "mentioned in <ref>".
         Action::CrossReference => first_ref_any(body).into_iter().collect(),
 
@@ -226,7 +180,6 @@ pub fn extract(action: Action, body: &str) -> Vec<Reference> {
 
         // Body: variants
         //   "enabled an automatic merge when all merge checks for <sha> pass"
-        //   "merged"  (lifecycle — handled above by Action::Merged)
         //   "canceled the automatic merge"
         //   "created merge request <ref> to address this issue"
         //
@@ -389,12 +342,8 @@ mod tests {
             "duplicate",
             "commit",
             "merge",
-            "closed",
-            "merged",
-            "opened",
         ] {
-            let a = Action::parse(s).unwrap_or_else(|| panic!("action {s} should parse"));
-            assert_eq!(a.as_str(), s);
+            assert!(Action::parse(s).is_some(), "action {s} should parse");
         }
     }
 
@@ -410,6 +359,9 @@ mod tests {
             "milestone",
             "branch",
             "designs_added",
+            "closed",
+            "merged",
+            "opened",
             "duo_agent_started",
             // Containment actions are intentionally unrouted: the FK path
             // (siphon_work_item_parent_links -> contains.yaml) is the
@@ -421,15 +373,6 @@ mod tests {
         ] {
             assert!(Action::parse(s).is_none(), "{s} should not parse");
         }
-    }
-
-    #[test]
-    fn action_lifecycle_classification() {
-        assert!(Action::Closed.is_lifecycle());
-        assert!(Action::Merged.is_lifecycle());
-        assert!(Action::Opened.is_lifecycle());
-        assert!(!Action::CrossReference.is_lifecycle());
-        assert!(!Action::Merge.is_lifecycle());
     }
 
     #[test]
@@ -639,16 +582,6 @@ mod tests {
             "created merge request !123 to address this issue",
         );
         assert_eq!(refs, vec![mr_ref(None, 123)]);
-    }
-
-    #[test]
-    fn lifecycle_actions_extract_nothing() {
-        for action in [Action::Closed, Action::Merged, Action::Opened] {
-            assert!(extract(action, "closed").is_empty());
-            assert!(extract(action, "merged").is_empty());
-            // The action discriminator wins even when the body looks like a ref.
-            assert!(extract(action, "mentioned in !1").is_empty());
-        }
     }
 
     #[test]

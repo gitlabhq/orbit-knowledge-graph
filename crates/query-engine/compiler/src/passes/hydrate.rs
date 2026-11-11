@@ -394,10 +394,15 @@ entities:
   {entity}
 "#
         );
+        let writer = format!(
+            "kind: source\npackage: test\nsource: writer\nentities: [{}]\n",
+            entity.split(':').next().unwrap_or_default()
+        );
         let sources = [
             ("test/package.yaml", "kind: package\nname: test\n"),
             ("test/graph.yaml", graph),
             ("test/storage/clickhouse.yaml", storage.as_str()),
+            ("test/sources/writer.yaml", writer.as_str()),
         ]
         .into_iter()
         .chain(

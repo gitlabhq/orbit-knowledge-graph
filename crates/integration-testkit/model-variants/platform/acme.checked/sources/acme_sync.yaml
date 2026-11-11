@@ -1,0 +1,4 @@
+kind: source
+package: acme.checked
+source: acme_sync
+entities: [Binder, Document]

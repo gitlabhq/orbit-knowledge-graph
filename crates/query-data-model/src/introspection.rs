@@ -471,6 +471,16 @@ relationships:
     MergeRequest -> MergeRequest: {edge_table: gl_edge}
 ";
 
+    const SOURCE: &str = "
+kind: source
+package: test
+source: test_writer
+entities: [Project, MergeRequest]
+relationships:
+  IN_PROJECT: [MergeRequest -> Project]
+  RELATES_TO: [MergeRequest -> MergeRequest, MergeRequest -> Project]
+";
+
     fn model() -> Model {
         Model::from_yaml(
             crate::Tier::Platform,
@@ -480,6 +490,7 @@ relationships:
                 ("test/authorization.yaml", AUTHORIZATION),
                 ("test/storage/clickhouse.yaml", GRAPH_STORE),
                 ("test/storage/duckdb.yaml", LOCAL_STORE),
+                ("test/sources/test_writer.yaml", SOURCE),
             ],
         )
         .unwrap()

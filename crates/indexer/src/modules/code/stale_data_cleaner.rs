@@ -59,13 +59,11 @@ impl ClickHouseStaleDataCleaner {
         let edge_queries = table_names
             .edge_table_names()
             .iter()
-            .filter_map(|table| {
-                let query = Self::build_edge_delete_query(table, &node_tables);
-                if query.is_empty() {
-                    None
-                } else {
-                    Some((table.to_string(), query))
-                }
+            .map(|table| {
+                (
+                    table.to_string(),
+                    Self::build_edge_delete_query(table, table_names),
+                )
             })
             .collect();
 
@@ -99,10 +97,9 @@ impl ClickHouseStaleDataCleaner {
         )
     }
 
-    fn build_edge_delete_query(edge_table: &str, node_tables: &[&str]) -> String {
-        // gl_code_edge has project_id + branch columns, so we can
-        // filter directly without a subquery join.
-        if edge_table.contains("code_edge") {
+    fn build_edge_delete_query(edge_table: &str, table_names: &CodeTableNames) -> String {
+        let written = table_names.written_variants_sql(edge_table);
+        if table_names.branch_scoped(edge_table) {
             return format!(
                 r#"
                 SELECT
@@ -120,21 +117,17 @@ impl ClickHouseStaleDataCleaner {
                 WHERE traversal_path = {{traversal_path:String}}
                   AND project_id = {{project_id:Int64}}
                   AND branch = {{branch:String}}
+                  AND {written}
                   AND s._version < {{watermark_time:DateTime64(6, 'UTC')}}
                 "#,
             );
         }
 
-        if node_tables.is_empty() {
-            return String::new();
-        }
-
-        // gl_edge has no project_id/branch, so scope by code source_kind: a flat
+        // A table without project_id/branch is scoped by the code indexer's variants: a flat
         // literal needs no source-id subquery (a UNION wedges mutation replay,
         // #1221) and survives the source node being tombstoned first. Correct only
-        // because the indexer writes one branch per project into gl_edge; a
+        // because the indexer writes one branch per project into such a table; a
         // second branch would tombstone the first's edges below the watermark.
-        let code_source_kinds = CodeTableNames::node_kinds_sql_list();
         format!(
             r#"
             SELECT
@@ -148,7 +141,7 @@ impl ClickHouseStaleDataCleaner {
                 true AS _deleted
             FROM {edge_table} AS s FINAL
             WHERE traversal_path = {{traversal_path:String}}
-              AND source_kind IN ({code_source_kinds})
+              AND {written}
               AND s._version < {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1)
             "#
         )

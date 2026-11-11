@@ -1,0 +1,4 @@
+kind: source
+package: acme.messages
+source: acme_sync
+entities: [Message]

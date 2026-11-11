@@ -60,7 +60,6 @@ relationships:
     variants:
       Group -> Group: {cardinality: many_to_many}
       Group -> Project: {cardinality: many_to_many}
-      User -> Project: {cardinality: many_to_many}
       Project -> Branch: {cardinality: many_to_many}
       WorkItem -> WorkItem: {cardinality: many_to_many}
       Branch -> Directory: {cardinality: many_to_many}
@@ -135,7 +134,6 @@ relationships:
   HAS_IDENTIFIER:
     description: Entity has associated vulnerability identifier (CVE, CWE, etc.)
     variants:
-      Finding -> VulnerabilityIdentifier: {cardinality: many_to_many}
       VulnerabilityOccurrence -> VulnerabilityIdentifier: {cardinality: many_to_one}
 
   HAS_JOB:

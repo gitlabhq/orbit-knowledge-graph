@@ -3,8 +3,6 @@
 //! `BatchWriter` plumbing carries these rows through to ClickHouse without
 //! a new code path.
 
-use orbit_log_fields::warn;
-
 use super::parse::{Action, RefKind, Reference};
 use super::resolve::ResolvedTarget;
 
@@ -50,8 +48,6 @@ impl From<RefKind> for NoteableKind {
 /// Values must mirror relationship names in the model's `graph` fragments.
 pub mod edge_kinds {
     pub const MENTIONS: &str = "MENTIONS";
-    pub const CLOSED: &str = "CLOSED";
-    pub const MERGED: &str = "MERGED";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,22 +71,10 @@ pub struct NoteRow<'a, 'p> {
     /// owning project is unknown — the resolver then declines to resolve
     /// unqualified references on this row.
     pub default_project: &'p str,
-    pub author_id: Option<i64>,
     pub noteable_id: i64,
     pub noteable_kind: NoteableKind,
     pub action: Action,
     pub references: Vec<Reference>,
-}
-
-/// Returns `None` for any non-lifecycle action so the caller can log-and-skip
-/// rather than `unreachable!`-panic if the outer match arm and this mapping
-/// ever drift.
-fn lifecycle_edge_kind(action: Action) -> Option<&'static str> {
-    match action {
-        Action::Closed => Some(edge_kinds::CLOSED),
-        Action::Merged => Some(edge_kinds::MERGED),
-        _ => None,
-    }
 }
 
 /// The resolver returns `None` for any unresolvable `(project_path, iid)` or
@@ -102,48 +86,6 @@ where
     let mut edges = Vec::new();
     for row in rows {
         match row.action {
-            Action::Closed | Action::Merged => {
-                let Some(author_id) = row.author_id else {
-                    continue;
-                };
-                // Edge YAML declares `merged` only on MergeRequest, `closed`
-                // on MR or WorkItem; drop anything else.
-                let declared_target = match row.action {
-                    Action::Merged => row.noteable_kind == NoteableKind::MergeRequest,
-                    _ => matches!(
-                        row.noteable_kind,
-                        NoteableKind::MergeRequest | NoteableKind::WorkItem
-                    ),
-                };
-                if !declared_target {
-                    continue;
-                }
-                // Skip (don't `unreachable!`) on an unexpected action: a
-                // panic here would crash-loop the worker on one bad row.
-                // See "no panics in the indexer data path" in AGENTS.md.
-                let Some(kind) = lifecycle_edge_kind(row.action) else {
-                    warn!(
-                        safe(KIND) = row.action.as_str(),
-                        safe(NOTEABLE_ID) = row.noteable_id,
-                        "system_notes: unexpected action in lifecycle arm, skipping row"
-                    );
-                    continue;
-                };
-                edges.push(EmittedEdge {
-                    traversal_path: row.traversal_path,
-                    relationship_kind: kind,
-                    source_id: author_id,
-                    source_kind: "User",
-                    target_id: row.noteable_id,
-                    target_kind: row.noteable_kind.as_str(),
-                });
-            }
-
-            // `opened` produces no edge: there is no source-of-truth FK for
-            // who opened, and the entity's `created_at` already covers the
-            // lifecycle point. ADR 013: out of scope.
-            Action::Opened => {}
-
             // Edge points from the parsed ref (source) to the noteable
             // (target), matching the ontology's directional mentioner →
             // mentioned. It lands in the noteable's namespace partition
@@ -202,7 +144,6 @@ mod tests {
         NoteRow {
             traversal_path: "1/2/",
             default_project: "src/proj",
-            author_id: Some(7),
             noteable_id,
             noteable_kind,
             action,
@@ -259,64 +200,6 @@ mod tests {
         assert_eq!(edges[0].source_kind, "WorkItem");
         assert_eq!(edges[0].target_id, 100);
         assert_eq!(edges[0].target_kind, "MergeRequest");
-    }
-
-    #[test]
-    fn closed_lifecycle_emits_user_to_noteable_edge() {
-        let row = row_for(Action::Closed, "closed", NoteableKind::WorkItem, 555);
-        let edges = build_edges(&[row], always_resolve(0, "1/2/"));
-        assert_eq!(edges.len(), 1);
-        let e = &edges[0];
-        assert_eq!(e.relationship_kind, "CLOSED");
-        assert_eq!(e.source_id, 7);
-        assert_eq!(e.source_kind, "User");
-        assert_eq!(e.target_id, 555);
-        assert_eq!(e.target_kind, "WorkItem");
-    }
-
-    #[test]
-    fn lifecycle_edge_kind_maps_actions_and_skips_non_lifecycle() {
-        assert_eq!(
-            lifecycle_edge_kind(Action::Closed),
-            Some(edge_kinds::CLOSED)
-        );
-        assert_eq!(
-            lifecycle_edge_kind(Action::Merged),
-            Some(edge_kinds::MERGED)
-        );
-        assert_eq!(lifecycle_edge_kind(Action::CrossReference), None);
-    }
-
-    #[test]
-    fn merged_on_non_mr_noteable_is_dropped() {
-        // `merged.yaml` only declares User → MergeRequest, so a WorkItem
-        // noteable must drop.
-        let row = row_for(Action::Merged, "merged", NoteableKind::WorkItem, 42);
-        let edges = build_edges(&[row], always_resolve(0, "1/2/"));
-        assert!(edges.is_empty());
-    }
-
-    #[test]
-    fn closed_on_commit_noteable_is_dropped() {
-        // `closed.yaml` declares no `Commit` target (no `Commit` node yet).
-        let row = row_for(Action::Closed, "closed", NoteableKind::Commit, 5);
-        let edges = build_edges(&[row], always_resolve(0, "1/2/"));
-        assert!(edges.is_empty());
-    }
-
-    #[test]
-    fn opened_lifecycle_emits_nothing() {
-        let row = row_for(Action::Opened, "opened", NoteableKind::WorkItem, 1);
-        let edges = build_edges(&[row], always_resolve(0, "1/"));
-        assert!(edges.is_empty());
-    }
-
-    #[test]
-    fn lifecycle_without_author_id_drops_edge() {
-        let mut row = row_for(Action::Closed, "closed", NoteableKind::WorkItem, 555);
-        row.author_id = None;
-        let edges = build_edges(&[row], always_resolve(0, "1/"));
-        assert!(edges.is_empty());
     }
 
     #[test]

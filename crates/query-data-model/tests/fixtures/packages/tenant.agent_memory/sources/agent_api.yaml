@@ -1,0 +1,7 @@
+kind: source
+package: tenant.agent_memory
+source: agent_api
+entities: [AgentMemory]
+relationships:
+  IN_PROJECT: [AgentMemory -> Project]
+  REMEMBERS: [AgentMemory -> MergeRequest, AgentMemory -> Note]

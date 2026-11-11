@@ -389,6 +389,10 @@ entities:
             ("test/graph.yaml", graph),
             ("test/authorization.yaml", authorization),
             ("test/storage/clickhouse.yaml", storage),
+            (
+                "test/sources/writer.yaml",
+                "kind: source\npackage: test\nsource: writer\nentities: [CustomNode]\n",
+            ),
         ],
     )
     .expect("custom model loads");

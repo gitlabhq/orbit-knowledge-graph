@@ -1,0 +1,44 @@
+kind: source
+package: gitlab
+source: siphon
+declare:
+  connection: datalake
+  version: _siphon_replicated_at
+  watermark: _siphon_watermark
+  deleted: _siphon_deleted
+entities:
+  Group: {tables: [namespaces], order_by: [traversal_path, id], query: generated}
+  Project: {tables: [projects], order_by: [traversal_path, id], query: generated}
+  User: {tables: [users], order_by: [id], query: generated}
+  MergeRequest:
+    tables: [merge_requests]
+    order_by: [traversal_path, id]
+    query: generated
+    edges:
+    - {label: IN_PROJECT, from: {field: id, kind: MergeRequest}, to: {field: project_id, kind: Project}}
+    - {label: AUTHORED, from: {field: author_id, kind: User}, to: {field: id, kind: MergeRequest}}
+  Note:
+    tables: [notes]
+    order_by: [traversal_path, id]
+    query: generated
+    edges:
+    - {label: IN_PROJECT, from: {field: id, kind: Note}, to: {field: project_id, kind: Project}}
+    - {label: AUTHORED, from: {field: author_id, kind: User}, to: {field: id, kind: Note}}
+    - {label: HAS_NOTE, from: {field: noteable_id, kind: MergeRequest}, to: {field: id, kind: Note}}
+relationships:
+  CONTAINS:
+    pipelines:
+      CONTAINS_projects:
+        tables: [projects]
+        fields: [namespace_id, id]
+        order_by: [traversal_path, id]
+        query: generated
+        from: {field: namespace_id, kind: Group}
+        to: {field: id, kind: Project}
+      CONTAINS_namespaces:
+        tables: [namespaces]
+        fields: [parent_id, id]
+        order_by: [traversal_path, id]
+        query: generated
+        from: {field: parent_id, kind: Group}
+        to: {field: id, kind: Group}

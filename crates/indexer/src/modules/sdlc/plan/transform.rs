@@ -78,11 +78,6 @@ enum NodeColumn {
     },
 }
 
-enum EdgeId {
-    Column(String),
-    ArrayElement { column: String, field: String },
-}
-
 enum EdgeKind {
     Literal(String),
     Column {
@@ -94,7 +89,6 @@ enum EdgeKind {
 #[derive(Clone)]
 enum EdgeFilter {
     IsNotNull(String),
-    ArrayNotEmpty(String),
     TypeIn {
         column: String,
         types: Vec<String>,
@@ -195,11 +189,7 @@ fn fk_edge_transform(
         if endpoint.field == DEFAULT_PRIMARY_KEY {
             continue;
         }
-        filters.push(if mapping.array_field.is_some() {
-            EdgeFilter::ArrayNotEmpty(endpoint.field.clone())
-        } else {
-            EdgeFilter::IsNotNull(endpoint.field.clone())
-        });
+        filters.push(EdgeFilter::IsNotNull(endpoint.field.clone()));
     }
     let denormalized = fk_denormalized_columns(mapping, node, catalog);
     edge_transformations(mapping, namespaced, filters, denormalized, catalog)
@@ -274,16 +264,10 @@ fn edge_transformations(
             let schema = schema_table(catalog, table);
             Ok(Transformation {
                 sql: build_edge_transform_sql(
-                    &edge_id_sql(&resolve_edge_id(
-                        &mapping.source,
-                        mapping.array_field.as_deref(),
-                    )),
+                    &mapping.source.field,
                     &source_kind_sql,
                     relationship_kind,
-                    &edge_id_sql(&resolve_edge_id(
-                        &mapping.target,
-                        mapping.array_field.as_deref(),
-                    )),
+                    &mapping.target.field,
                     &target_kind_sql,
                     namespaced,
                     &denormalized,
@@ -401,18 +385,6 @@ fn node_ref_direction(mapping: &EdgeMapping, entity: EntityId) -> Option<Denorma
     }
 }
 
-fn resolve_edge_id(endpoint: &Endpoint, array_field: Option<&str>) -> EdgeId {
-    if let Some(field) = array_field
-        && endpoint.field != DEFAULT_PRIMARY_KEY
-    {
-        return EdgeId::ArrayElement {
-            column: endpoint.field.clone(),
-            field: field.to_string(),
-        };
-    }
-    EdgeId::Column(endpoint.field.clone())
-}
-
 fn resolve_node_ref_kind(
     endpoint: &Endpoint,
     catalog: &Catalog<ClickHouse>,
@@ -526,13 +498,6 @@ fn low_cardinality_columns(table: Option<&Table>) -> HashSet<String> {
         .collect()
 }
 
-fn edge_id_sql(id: &EdgeId) -> String {
-    match id {
-        EdgeId::Column(column) => column.clone(),
-        EdgeId::ArrayElement { column, field } => format!("unnest({column})['{field}']"),
-    }
-}
-
 fn edge_kind_sql(kind: &EdgeKind) -> String {
     match kind {
         EdgeKind::Literal(value) => format!("'{value}'"),
@@ -550,7 +515,6 @@ fn edge_kind_sql(kind: &EdgeKind) -> String {
 fn edge_filter_sql(filter: &EdgeFilter) -> String {
     match filter {
         EdgeFilter::IsNotNull(column) => format!("({column} IS NOT NULL)"),
-        EdgeFilter::ArrayNotEmpty(column) => format!("(cardinality({column}) > 0)"),
         EdgeFilter::TypeIn { column, types } => {
             let types_list = types
                 .iter()
@@ -735,7 +699,6 @@ mod tests {
         label: &str,
         source: (&str, EndpointKind),
         target: (&str, EndpointKind),
-        array_field: Option<&str>,
     ) -> EdgeMapping {
         let graph = catalog.graph();
         let relationship = graph.relationship_id(label).expect("relationship");
@@ -758,7 +721,6 @@ mod tests {
             relationship,
             source: endpoint(source),
             target: endpoint(target),
-            array_field: array_field.map(str::to_string),
             mutable: false,
             variants,
         }
@@ -889,7 +851,6 @@ mod tests {
             "OWNER",
             ("owner_id", entity(&catalog, "User")),
             ("id", entity(&catalog, "Group")),
-            None,
         );
         let sql = fk_edge_transform(&edge, &node(&catalog, "Group"), true, &catalog)
             .unwrap()
@@ -920,7 +881,6 @@ mod tests {
             "HAS_NOTE",
             ("noteable_id", kind),
             ("id", entity(&catalog, "Note")),
-            None,
         );
 
         let sql = fk_edge_transform(&edge, &node(&catalog, "Note"), true, &catalog)
@@ -933,24 +893,5 @@ mod tests {
             "sql: {sql}"
         );
         assert!(sql.contains("ELSE noteable_type END"), "sql: {sql}");
-    }
-
-    #[test]
-    fn fk_edge_transform_array_element() {
-        let catalog = catalog();
-        let edge = mapping(
-            &catalog,
-            "ASSIGNED",
-            ("assignees", entity(&catalog, "User")),
-            ("id", entity(&catalog, "MergeRequest")),
-            Some("user_id"),
-        );
-        let sql = fk_edge_transform(&edge, &node(&catalog, "MergeRequest"), true, &catalog)
-            .unwrap()
-            .pop()
-            .unwrap()
-            .sql;
-        assert!(sql.contains("unnest(assignees)['user_id']"), "sql: {sql}");
-        assert!(sql.contains("(cardinality(assignees) > 0)"), "sql: {sql}");
     }
 }

@@ -6,8 +6,6 @@ entities:
     tables:
     - merge_requests
     - siphon_merge_request_metrics
-    - siphon_merge_request_reviewers
-    - siphon_approvals
     order_by: [traversal_path, id]
     query: merge_request.sql.j2
     columns:
@@ -69,22 +67,12 @@ entities:
       from: {field: id, kind: MergeRequest}
       to: {field: milestone_id, kind: Milestone}
       mutable: true
-    - label: REVIEWER
-      from: {field: reviewers, kind: User}
-      to: {field: id, kind: MergeRequest}
-      array_field: user_id
-    - label: APPROVED
-      from: {field: approvals, kind: User}
-      to: {field: id, kind: MergeRequest}
-      array_field: user_id
     - label: MERGED_AT_COMMIT
       from: {field: id, kind: MergeRequest}
       to: {field: merged_commit_id, kind: Commit}
     reindex:
     - merge_requests
-    - siphon_approvals
     - siphon_merge_request_metrics
-    - siphon_merge_request_reviewers
 
   MergeRequestDiff:
     tables: [siphon_merge_request_diffs]
@@ -107,4 +95,7 @@ entities:
     - label: HAS_FILE
       from: {field: merge_request_diff_id, kind: MergeRequestDiff}
       to: {field: id, kind: MergeRequestDiffFile}
+    - label: IN_PROJECT
+      from: {field: id, kind: MergeRequestDiffFile}
+      to: {field: project_id, kind: Project}
     reindex: [siphon_merge_request_diff_files]

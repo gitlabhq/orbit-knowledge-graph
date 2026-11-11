@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use query_data_model::catalog::sources::PipelineDescriptor;
+use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, Entity, GraphCatalog};
 
 use super::phase::{Phase, combine_phases};
@@ -27,7 +28,7 @@ pub fn get_domain_statuses(
 ) -> Vec<DomainStatus> {
     let graph = catalog.graph();
     let sources = catalog.model().sources();
-    let indexed_by_code = |entity: &Entity| sources.entity_pipelines(entity.id).next().is_none();
+    let indexed_by_code = |entity: &Entity| sources.writes(CODE_INDEXER_SOURCE, entity.id);
     let mut domains = BTreeMap::<&str, Vec<&Entity>>::new();
     for entity in graph.entities() {
         if let Some(domain) = &entity.domain {

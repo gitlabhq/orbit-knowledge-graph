@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
+use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, DataModelError};
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
-pub(super) const CODE_DOMAIN: &str = "source_code";
+const PROJECT_COLUMN: &str = "project_id";
+const BRANCH_COLUMN: &str = "branch";
 
 pub struct CodeTableNames {
     pub branch: String,
@@ -13,25 +15,34 @@ pub struct CodeTableNames {
     pub definition: String,
     pub imported_symbol: String,
     edge_tables: HashMap<String, Vec<(String, String, String)>>,
+    branch_scoped: HashSet<String>,
     node_columns: HashMap<String, Vec<String>>,
 }
 
 impl CodeTableNames {
+    /// The tables of the entities and variants the model's code indexer source writes.
     pub fn from_catalog(catalog: &Catalog<ClickHouse>) -> Result<Self, DataModelError> {
         let graph = catalog.graph();
         let schema = catalog.schema()?;
-        let code_entities: Vec<_> = graph
-            .entities()
-            .filter(|entity| entity.domain.as_deref() == Some(CODE_DOMAIN))
-            .collect();
-        let code_ids: HashSet<_> = code_entities.iter().map(|entity| entity.id).collect();
+        let writes = catalog
+            .model()
+            .sources()
+            .direct_source(CODE_INDEXER_SOURCE)
+            .ok_or_else(|| {
+                DataModelError::Invalid(format!(
+                    "the model declares no {CODE_INDEXER_SOURCE} source"
+                ))
+            })?;
 
         let mut node_columns = HashMap::new();
-        for entity in &code_entities {
-            let Some(table) = catalog.table_of(entity.id) else {
-                continue;
-            };
-            let sort_key = schema.table(table).map_or(&[][..], |table| &table.sort_key);
+        for entity in writes.entities.iter().map(|entity| graph.entity(*entity)) {
+            let table = catalog.table_of(entity.id).ok_or_else(|| {
+                DataModelError::Invalid(format!("{} has no graph table", entity.name))
+            })?;
+            let sort_key = &schema
+                .table(table)
+                .ok_or_else(|| DataModelError::Invalid(format!("{table} has no schema")))?
+                .sort_key;
             let carried = entity
                 .properties
                 .iter()
@@ -46,21 +57,31 @@ impl CodeTableNames {
         }
 
         let mut edge_tables: HashMap<String, Vec<(String, String, String)>> = HashMap::new();
-        for variant in graph.variants() {
-            if !code_ids.contains(&variant.source) && !code_ids.contains(&variant.target) {
-                continue;
+        let mut branch_scoped = HashSet::new();
+        for variant in writes
+            .variants
+            .iter()
+            .map(|variant| graph.variant(*variant))
+        {
+            let relationship = &graph.relationship(variant.relationship).name;
+            let table = catalog.edge_table(variant.id).ok_or_else(|| {
+                DataModelError::Invalid(format!(
+                    "{relationship} written by the code indexer has no edge table"
+                ))
+            })?;
+            let columns = &schema
+                .table(table)
+                .ok_or_else(|| DataModelError::Invalid(format!("{table} has no schema")))?
+                .columns;
+            let has = |name: &str| columns.iter().any(|column| column.name == name);
+            if has(PROJECT_COLUMN) && has(BRANCH_COLUMN) {
+                branch_scoped.insert(prefixed_table_name(table, *SCHEMA_VERSION));
             }
-            let Some(table) = catalog.edge_table(variant.id) else {
-                continue;
-            };
-            edge_tables
-                .entry(graph.relationship(variant.relationship).name.clone())
-                .or_default()
-                .push((
-                    graph.entity(variant.source).name.clone(),
-                    graph.entity(variant.target).name.clone(),
-                    prefixed_table_name(table, *SCHEMA_VERSION),
-                ));
+            edge_tables.entry(relationship.clone()).or_default().push((
+                graph.entity(variant.source).name.clone(),
+                graph.entity(variant.target).name.clone(),
+                prefixed_table_name(table, *SCHEMA_VERSION),
+            ));
         }
 
         let table = |name: &str| -> Result<String, DataModelError> {
@@ -77,6 +98,7 @@ impl CodeTableNames {
             definition: table("Definition")?,
             imported_symbol: table("ImportedSymbol")?,
             edge_tables,
+            branch_scoped,
             node_columns,
         })
     }
@@ -131,18 +153,29 @@ impl CodeTableNames {
         ]
     }
 
-    /// Code-origin source kinds used to clean shared edge tables.
-    pub const NODE_KINDS: [&'static str; 5] = [
-        "Branch",
-        "Directory",
-        "File",
-        "Definition",
-        "ImportedSymbol",
-    ];
+    /// Whether `table` carries the project and branch columns that scope one code push.
+    pub fn branch_scoped(&self, table: &str) -> bool {
+        self.branch_scoped.contains(table)
+    }
 
-    /// `NODE_KINDS` as a quoted SQL list for a `source_kind IN (...)` predicate.
-    pub fn node_kinds_sql_list() -> String {
-        Self::NODE_KINDS.map(|kind| format!("'{kind}'")).join(", ")
+    /// The predicate on `s` that keeps the rows of `table` whose variant the code indexer writes.
+    pub fn written_variants_sql(&self, table: &str) -> String {
+        let mut variants: Vec<String> = self
+            .edge_tables
+            .iter()
+            .flat_map(|(relationship, routes)| {
+                routes.iter().filter(|(_, _, routed)| routed == table).map(
+                    move |(source, target, _)| {
+                        format!("('{relationship}', '{source}', '{target}')")
+                    },
+                )
+            })
+            .collect();
+        variants.sort();
+        format!(
+            "(s.relationship_kind, s.source_kind, s.target_kind) IN ({})",
+            variants.join(", ")
+        )
     }
 }
 
@@ -169,26 +202,11 @@ mod tests {
     }
 
     #[test]
-    fn edge_tables_only_contain_code_relevant_tables() {
+    fn edge_tables_are_the_tables_of_the_variants_the_code_indexer_writes() {
         let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
         let names = CodeTableNames::from_catalog(&catalog).expect("code tables must resolve");
-
-        let edge_tables: HashSet<&str> = names.edge_table_names().into_iter().collect();
-        let gl_edge = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
         let gl_code_edge = prefixed_table_name("gl_code_edge", *SCHEMA_VERSION);
-
-        assert!(
-            edge_tables.contains(gl_edge.as_str()),
-            "should include gl_edge"
-        );
-        assert!(
-            edge_tables.contains(gl_code_edge.as_str()),
-            "should include gl_code_edge"
-        );
-        assert_eq!(
-            edge_tables.len(),
-            2,
-            "should only contain gl_edge and gl_code_edge, got {edge_tables:?}"
-        );
+        assert_eq!(names.edge_table_names(), [gl_code_edge.as_str()]);
+        assert!(names.branch_scoped(&gl_code_edge));
     }
 }

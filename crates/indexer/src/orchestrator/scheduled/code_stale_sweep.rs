@@ -52,12 +52,12 @@ impl CodeStaleSweep {
                 )
             })
             .collect();
-        statements.extend(
-            table_names
-                .edge_table_names()
-                .iter()
-                .map(|table| (table.to_string(), edge_sweep(table, &checkpoint_table))),
-        );
+        statements.extend(table_names.edge_table_names().iter().map(|table| {
+            (
+                table.to_string(),
+                edge_sweep(table, &checkpoint_table, table_names),
+            )
+        }));
 
         Self {
             graph,
@@ -187,8 +187,9 @@ fn node_sweep(table: &str, checkpoint_table: &str, carried_columns: &[String]) -
     )
 }
 
-fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
-    if edge_table.contains("code_edge") {
+fn edge_sweep(edge_table: &str, checkpoint_table: &str, table_names: &CodeTableNames) -> String {
+    let written = table_names.written_variants_sql(edge_table);
+    if table_names.branch_scoped(edge_table) {
         return format!(
             r#"
             INSERT INTO {edge_table}
@@ -212,14 +213,11 @@ fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
             WHERE startsWith(s.traversal_path, {{path:String}})
               AND s._deleted = false
               AND cp._deleted = false
+              AND {written}
               AND s._version < cp.indexed_at
             "#
         );
     }
-
-    let code_source_kinds = CodeTableNames::NODE_KINDS
-        .map(|kind| format!("'{kind}'"))
-        .join(", ");
 
     format!(
         r#"
@@ -243,7 +241,7 @@ fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
         ) AS w ON w.traversal_path = s.traversal_path
         WHERE startsWith(s.traversal_path, {{path:String}})
           AND s._deleted = false
-          AND s.source_kind IN ({code_source_kinds})
+          AND {written}
           AND s._version < w.watermark
         "#
     )
@@ -289,12 +287,21 @@ mod tests {
         }
     }
 
+    /// Code tables with CALLS File -> Definition and File -> ImportedSymbol routed to gl_edge.
+    fn split_names() -> (CodeTableNames, String, String) {
+        let names = CodeTableNames::from_catalog(&crate::testkit::variant_routes_catalog())
+            .expect("code tables must resolve");
+        let table = |name| prefixed_table_name(name, *SCHEMA_VERSION);
+        (names, table("gl_code_edge"), table("gl_edge"))
+    }
+
     #[test]
     fn sweeps_scope_to_the_namespace_path_for_pk_pruning() {
+        let (names, code_edge, edge) = split_names();
         for sql in [
             node_sweep("v9_gl_file", "v9_cp", &[]),
-            edge_sweep("v9_gl_code_edge", "v9_cp"),
-            edge_sweep("v9_gl_edge", "v9_cp"),
+            edge_sweep(&code_edge, "v9_cp", &names),
+            edge_sweep(&edge, "v9_cp", &names),
         ] {
             assert!(
                 sql.contains("startsWith(s.traversal_path, {path:String})"),
@@ -304,18 +311,24 @@ mod tests {
     }
 
     #[test]
-    fn code_edge_sweep_joins_checkpoint_directly() {
-        let sql = edge_sweep("v9_gl_code_edge", "v9_cp");
+    fn branch_scoped_edge_sweep_joins_checkpoint_directly() {
+        let (names, code_edge, _) = split_names();
+        let sql = edge_sweep(&code_edge, "v9_cp", &names);
         assert!(sql.contains("cp.project_id = s.project_id"), "{sql}");
-        assert!(!sql.contains("source_kind IN"), "{sql}");
+        assert!(
+            sql.contains("('CALLS', 'Definition', 'Definition')"),
+            "{sql}"
+        );
+        assert!(!sql.contains("('CALLS', 'File', 'Definition')"), "{sql}");
     }
 
     #[test]
-    fn plain_edge_sweep_scopes_by_source_kind_and_min_watermark() {
-        let sql = edge_sweep("v9_gl_edge", "v9_cp");
+    fn plain_edge_sweep_keeps_the_code_indexer_variants_and_min_watermark() {
+        let (names, _, edge) = split_names();
+        let sql = edge_sweep(&edge, "v9_cp", &names);
         assert!(
             sql.contains(
-                "s.source_kind IN ('Branch', 'Directory', 'File', 'Definition', 'ImportedSymbol')"
+                "(s.relationship_kind, s.source_kind, s.target_kind) IN (('CALLS', 'File', 'Definition'), ('CALLS', 'File', 'ImportedSymbol'))"
             ),
             "{sql}"
         );

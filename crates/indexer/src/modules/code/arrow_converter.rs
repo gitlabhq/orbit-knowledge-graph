@@ -7,6 +7,7 @@ use code_graph_incremental::export::ExportTables;
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::implementations::clickhouse::schema::{Table, data_type};
+use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, DataModelError, DataType, DuckDb};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -200,15 +201,22 @@ fn column_type_for(name: &str, data_type: DataType, dict_fields: &HashSet<&str>)
     }
 }
 
-/// The columns of every edge table code entities write, in DDL order. One batch
+/// The columns of every edge table the code indexer writes, in DDL order. One batch
 /// holds them all; routing drops the columns a narrower table lacks.
 fn edge_specs(catalog: &Catalog<ClickHouse>) -> Result<Vec<ColumnSpec>, DataModelError> {
-    let graph = catalog.graph();
-    let code = |entity| graph.entity(entity).domain.as_deref() == Some(super::config::CODE_DOMAIN);
-    let tables: BTreeSet<&str> = graph
-        .variants()
-        .filter(|variant| code(variant.source) || code(variant.target))
-        .filter_map(|variant| catalog.edge_table(variant.id))
+    let writes = catalog
+        .model()
+        .sources()
+        .direct_source(CODE_INDEXER_SOURCE)
+        .ok_or_else(|| {
+            DataModelError::Invalid(format!(
+                "the model declares no {CODE_INDEXER_SOURCE} source"
+            ))
+        })?;
+    let tables: BTreeSet<&str> = writes
+        .variants
+        .iter()
+        .filter_map(|variant| catalog.edge_table(*variant))
         .collect();
 
     let mut seen = HashSet::new();

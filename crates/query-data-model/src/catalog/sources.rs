@@ -3,11 +3,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use indexmap::IndexMap;
 
 use super::Diagnostics;
+use super::store::Store;
 pub use crate::spec::{EdgeMapping, Endpoint, EndpointKind, ExtractLookup, ReindexTrigger};
 use crate::spec::{
-    GENERATED_QUERY, PipelineSpec, Raw, Short, SourceFragment, TEMPLATE_EXTENSION, snake_case,
+    GENERATED_QUERY, PipelineSpec, Raw, Short, SourceFragment, TEMPLATE_EXTENSION, Writes,
+    parse_variant, snake_case,
 };
-use crate::{EntityId, GraphCatalog, PropertyId, RelationshipId};
+use crate::{EntityId, GraphCatalog, PropertyId, RelationshipId, RelationshipVariantId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EtlScope {
@@ -89,12 +91,38 @@ pub struct PipelineDescriptor {
     pub reindex_targets: BTreeSet<String>,
 }
 
+/// Who writes a stored entity's rows or an edge-table variant's rows: a pipeline, or a
+/// source that writes its own rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RowWriter {
+    Pipeline(usize),
+    Direct(usize),
+}
+
 #[derive(Debug, Default)]
 pub struct Sources {
     sources: Vec<DataSource>,
     pipelines: Vec<Pipeline>,
     derived: Vec<Derived>,
     reindex: BTreeSet<ReindexTrigger>,
+    direct: Vec<DirectSource>,
+    pub(super) writers: Writers,
+}
+
+/// A source that writes its own rows, such as the code indexer, and lists them.
+#[derive(Debug)]
+pub struct DirectSource {
+    pub name: String,
+    pub package: String,
+    pub entities: Vec<EntityId>,
+    pub variants: Vec<RelationshipVariantId>,
+}
+
+/// The one writer of every stored entity and edge-table variant, set by the load check.
+#[derive(Debug, Default)]
+pub(super) struct Writers {
+    pub entities: HashMap<EntityId, RowWriter>,
+    pub variants: HashMap<RelationshipVariantId, RowWriter>,
 }
 
 impl Sources {
@@ -126,6 +154,36 @@ impl Sources {
 
     pub fn reindex_triggers(&self) -> &BTreeSet<ReindexTrigger> {
         &self.reindex
+    }
+
+    pub fn entity_writer(&self, entity: EntityId) -> Option<RowWriter> {
+        self.writers.entities.get(&entity).copied()
+    }
+
+    pub fn variant_writer(&self, variant: RelationshipVariantId) -> Option<RowWriter> {
+        self.writers.variants.get(&variant).copied()
+    }
+
+    pub fn direct_sources(&self) -> &[DirectSource] {
+        &self.direct
+    }
+
+    pub fn direct_source(&self, name: &str) -> Option<&DirectSource> {
+        self.direct.iter().find(|source| source.name == name)
+    }
+
+    /// Whether the source named `name` writes the entity's rows.
+    pub fn writes(&self, name: &str, entity: EntityId) -> bool {
+        self.entity_writer(entity).is_some_and(
+            |writer| matches!(writer, RowWriter::Direct(index) if self.direct[index].name == name),
+        )
+    }
+
+    pub fn row_writer_name(&self, writer: RowWriter) -> &str {
+        match writer {
+            RowWriter::Pipeline(index) => &self.pipelines[index].name,
+            RowWriter::Direct(index) => &self.direct[index].name,
+        }
     }
 
     pub fn writer_name<'a>(&'a self, graph: &'a GraphCatalog, writer: Writer) -> &'a str {
@@ -177,6 +235,7 @@ impl Sources {
         global: &dyn Fn(EntityId) -> bool,
         fragments: &[&SourceFragment],
         served: &HashSet<PropertyId>,
+        stores: &[Store],
         diagnostics: &mut Diagnostics,
     ) -> Self {
         let mut resolver = Resolver {
@@ -188,8 +247,10 @@ impl Sources {
             entity_columns: HashMap::new(),
         };
         resolver.declare_sources(fragments);
-        resolver.resolve(fragments);
-        resolver.sources
+        let packages = resolver.resolve(fragments);
+        let mut sources = resolver.sources;
+        super::writers::assign(graph, stores, &mut sources, &packages, diagnostics);
+        sources
     }
 }
 
@@ -254,9 +315,13 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn resolve(&mut self, fragments: &[&'a SourceFragment]) {
+    fn resolve(&mut self, fragments: &[&'a SourceFragment]) -> Vec<String> {
         let mut pending = Vec::new();
         for fragment in fragments {
+            if fragment.writes != Writes::default() {
+                self.direct(fragment);
+                continue;
+            }
             let found = self
                 .sources
                 .sources
@@ -340,6 +405,10 @@ impl<'a> Resolver<'a> {
             });
             work.push((Writer::Derived(index), name, spec, item));
         }
+        let packages = work
+            .iter()
+            .map(|(.., item)| item.fragment.package.clone())
+            .collect();
         let pipelines: Vec<_> = work
             .into_iter()
             .map(|(writer, name, spec, item)| self.pipeline(writer, name, spec, item))
@@ -354,6 +423,58 @@ impl<'a> Resolver<'a> {
             }
         }
         self.sources.pipelines = pipelines;
+        packages
+    }
+
+    /// A source that lists the rows it writes, one fragment per package.
+    fn direct(&mut self, fragment: &SourceFragment) {
+        let (package, name) = (fragment.package.as_str(), fragment.source.as_str());
+        let pipelines = !fragment.entities.is_empty()
+            || !fragment.relationships.is_empty()
+            || !fragment.derived.is_empty();
+        let declared = self.sources.source_named(name).is_some();
+        if fragment.declare.is_some() || pipelines || declared {
+            self.diagnostics.error(
+                package,
+                format!("source {name} lists the rows it writes, so it declares no pipelines"),
+            );
+        }
+        if self
+            .sources
+            .direct
+            .iter()
+            .any(|direct| direct.name == name && direct.package == package)
+        {
+            self.diagnostics
+                .error(package, format!("source {name} is listed twice"));
+        }
+        let mut direct = DirectSource {
+            name: name.to_string(),
+            package: package.to_string(),
+            entities: Vec::new(),
+            variants: Vec::new(),
+        };
+        for entity in &fragment.writes.entities {
+            let found = self.graph.entity_id(entity);
+            if let Some(entity) = self.diagnostics.require(found, package, || {
+                format!("source {name} writes unknown entity {entity}")
+            }) {
+                direct.entities.push(entity);
+            }
+        }
+        for (relationship, variants) in &fragment.writes.relationships {
+            for written in variants {
+                let found = parse_variant(written).and_then(|(source, target)| {
+                    self.graph.variant_named(relationship, source, target)
+                });
+                if let Some(variant) = self.diagnostics.require(found, package, || {
+                    format!("source {name} writes unknown variant {relationship}({written})")
+                }) {
+                    direct.variants.push(variant.id);
+                }
+            }
+        }
+        self.sources.direct.push(direct);
     }
 
     fn pipeline(
@@ -418,7 +539,6 @@ impl<'a> Resolver<'a> {
                 relationship: label.clone(),
                 source,
                 target,
-                array_field: None,
                 mutable: false,
                 variants: (),
             })
@@ -615,7 +735,6 @@ impl<'a> Resolver<'a> {
             relationship,
             source,
             target,
-            array_field: spec.array_field.clone(),
             mutable: spec.mutable,
             variants,
         })

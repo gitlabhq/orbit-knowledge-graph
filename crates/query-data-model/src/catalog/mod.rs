@@ -9,6 +9,7 @@ mod lookups;
 mod names;
 pub mod sources;
 mod store;
+mod writers;
 
 pub use access::{
     Access, Check, EdgeScope, EntityAccess, Permission, PermissionId, Policy, PropertyAccess,
@@ -87,7 +88,14 @@ impl Model {
             guards::resolve(&graph, &access, &mut stores, &mut diagnostics);
         }
         let global = |entity| complete && access.is_global(entity);
-        let sources = Sources::resolve(&graph, &global, &sources, &served, &mut diagnostics);
+        let sources = Sources::resolve(
+            &graph,
+            &global,
+            &sources,
+            &served,
+            &stores,
+            &mut diagnostics,
+        );
         diagnostics.finish()?;
         let mut model = Self {
             id: fragments.id(),

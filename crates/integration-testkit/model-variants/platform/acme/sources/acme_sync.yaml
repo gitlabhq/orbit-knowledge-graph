@@ -1,0 +1,4 @@
+kind: source
+package: acme
+source: acme_sync
+entities: [Folder, Person]

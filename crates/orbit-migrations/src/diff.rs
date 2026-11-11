@@ -349,11 +349,10 @@ impl Contents<'_> {
             .map(|variant| self.variant(*variant))
             .collect();
         format!(
-            "{} [{}] [{}] array={:?} mutable={} variants={variants:?}",
+            "{} [{}] [{}] mutable={} variants={variants:?}",
             self.relationship(edge.relationship),
             self.endpoint(&edge.source),
             self.endpoint(&edge.target),
-            edge.array_field,
             edge.mutable,
         )
     }

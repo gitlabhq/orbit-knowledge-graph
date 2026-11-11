@@ -233,10 +233,7 @@ malformed or unexpected row takes down every row behind it. Prefer **log-and-ski
 Use `tracing::warn!` with enough context to debug, then `continue`. Include the unexpected value
 plus the relevant ids. Compute branch-dependent values in one fallible step that returns
 `Option`/`Result`. Skip on the unexpected case. Do not mirror a match in two places, which needs an
-`unreachable!()` fallthrough in each. The `lifecycle_edge_kind` helper in
-`modules/sdlc/transform/system_notes/emit.rs` shows the pattern. It returns `None` for any
-non-lifecycle action. So the caller can log-and-skip if the outer match drifts, instead of
-`unreachable!`-panicking.
+`unreachable!()` fallthrough in each.
 Panicking is only acceptable on a genuine programmer invariant that no production data can reach.
 Clippy enforces this: `unwrap_used`, `expect_used`, `panic` and `unreachable` are denied for this crate. `clippy.toml` exempts tests from `unwrap`, `expect` and `panic`; `unreachable` has no test exemption, so use `panic!` in tests. Annotate a real invariant with `#[expect(clippy::…, reason = "…")]`.
 

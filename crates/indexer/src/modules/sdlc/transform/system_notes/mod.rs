@@ -59,7 +59,6 @@ struct ExtractedNote<'a> {
     note: &'a str,
     noteable_id: i64,
     noteable_type: &'a str,
-    author_id: Option<i64>,
     project_id: Option<i64>,
     traversal_path: &'a str,
     action: &'a str,
@@ -196,7 +195,6 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote<'_>>, Handler
     let note_col = col::<StringArray>(block, "note")?;
     let noteable_id_col = col::<Int64Array>(block, "noteable_id")?;
     let noteable_type_col = col::<StringArray>(block, "noteable_type")?;
-    let author_id_col = col::<Int64Array>(block, "author_id")?;
     let project_id_col = col::<Int64Array>(block, "project_id")?;
     let traversal_path_col = col::<StringArray>(block, "traversal_path")?;
     let action_col = col::<StringArray>(block, "action")?;
@@ -207,11 +205,6 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote<'_>>, Handler
             note: note_col.value(i),
             noteable_id: noteable_id_col.value(i),
             noteable_type: noteable_type_col.value(i),
-            author_id: if author_id_col.is_null(i) {
-                None
-            } else {
-                Some(author_id_col.value(i))
-            },
             project_id: if project_id_col.is_null(i) {
                 None
             } else {
@@ -272,7 +265,6 @@ where
         rows.push(NoteRow {
             traversal_path: n.traversal_path,
             default_project,
-            author_id: n.author_id,
             noteable_id: n.noteable_id,
             noteable_kind,
             action,
@@ -574,7 +566,6 @@ mod tests {
             note: body,
             noteable_id,
             noteable_type,
-            author_id: Some(7),
             project_id: Some(100),
             traversal_path: "1/100/",
             action,
@@ -755,16 +746,6 @@ mod tests {
     }
 
     #[test]
-    fn process_batch_emits_user_closed_edge_for_lifecycle_action() {
-        let notes = vec![make_note("closed", "closed", "Issue", 999)];
-        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].relationship_kind, "CLOSED");
-        assert_eq!(edges[0].target_kind, "WorkItem");
-        assert_eq!(edges[0].source_id, 7);
-    }
-
-    #[test]
     fn process_batch_drops_unknown_action_silently() {
         let notes = vec![make_note("designs_added", "", "MergeRequest", 1)];
         let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
@@ -773,7 +754,12 @@ mod tests {
 
     #[test]
     fn process_batch_drops_unsupported_noteable_type_silently() {
-        let notes = vec![make_note("closed", "closed", "Snippet", 1)];
+        let notes = vec![make_note(
+            "cross_reference",
+            "mentioned in !1",
+            "Snippet",
+            1,
+        )];
         let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
         assert!(edges.is_empty());
     }

@@ -442,7 +442,6 @@ mod tests {
                 ),
                 properties: Default::default(),
             },
-            array_field: None,
             mutable: true,
             variants: Vec::new(),
         };

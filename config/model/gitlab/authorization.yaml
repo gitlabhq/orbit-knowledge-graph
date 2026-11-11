@@ -52,7 +52,6 @@ relationships:
     variants:
       Group -> Group: {clickhouse: {scope_key: traversal_path, of: nested}}
       Group -> Project: {clickhouse: {scope_key: traversal_path, of: nested}}
-      User -> Project: {clickhouse: {scope_key: traversal_path, of: target}}
       WorkItem -> WorkItem: {clickhouse: {scope_key: traversal_path, of: own}}
   CREATED_FOR_MR:
     scope: namespace
