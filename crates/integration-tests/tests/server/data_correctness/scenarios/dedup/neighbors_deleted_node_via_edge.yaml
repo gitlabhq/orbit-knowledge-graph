@@ -1,7 +1,7 @@
 description: >
   Deleted neighbor visible via a live edge; neighbor queries do not read
-  neighbor node rows, and an edge can outlive its endpoint because edge
-  tombstones come from the edge's own source row
+  neighbor node rows, and node deletion does not tombstone edges from other
+  tables
 
 config:
   unmerged_seed: true

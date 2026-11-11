@@ -249,7 +249,7 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         center: center.alias.clone(),
         direction,
         edge,
-        joins_center: has_non_denorm || !center.uses_default_pk(),
+        joins_center: has_non_denorm || (!center.uses_default_pk() && !center.node_ids.is_empty()),
         fused_table,
         outgoing_kinds: arm_kinds(true),
         incoming_kinds: arm_kinds(false),

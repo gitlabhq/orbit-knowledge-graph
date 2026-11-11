@@ -68,6 +68,20 @@ cases:
         MEMBER_OF: [[99540, 99541]]
         CONTAINS: [[99541, 99544]]
 
+  - name: both_tombstoned_center_filtered_sharing_a_path
+    description: Pinned centers with a filter the edges cannot answer skip the tombstoned center on the scope-carrying arm through the center join
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:RELATED_TO|`CONTAINS`]->(n) WHERE w.id IN [99550, 99552] AND w.title IN ['Live Center Item', 'Deleted Center Item'] RETURN w, n
+    expect:
+      skip_requirements: ["filter:title"]
+      node_count: 3
+      nodes:
+        WorkItem: { ids: [99550, 99551, 99555] }
+      edges:
+        RELATED_TO: [[99550, 99551]]
+        CONTAINS: [[99550, 99555]]
+
   - name: both_tombstoned_center_across_edge_tables
     description: Neighbors of a pinned project whose latest row is a tombstone return nothing from any edge table its relationship routes to
     query:

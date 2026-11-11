@@ -67,6 +67,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         center_sort_key,
     } = &plan.operation;
     let direction = *direction;
+    let joins_center = *joins_center;
     let cnp = &plan.nodes[center_alias];
     let center_id = center_alias.to_string();
     let center_entity = cnp.entity.clone().unwrap_or_default();
@@ -77,7 +78,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     let center_node_ids = cnp.node_ids.clone();
     let center_filters = cnp.filters.clone();
     let center_id_range = cnp.id_range.clone();
-    let checks_center_rows = checks_center_rows(plan);
+    let checks_center_rows = !center_node_ids.is_empty() && !joins_center;
     let edge_alias = neighbor_edge_alias();
     let center_rows = center_rows_cte();
 
@@ -102,6 +103,9 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         ];
         if !center_uses_default_pk {
             select.push(SelectExpr::col(&center_id, &center_redaction_col));
+        }
+        if let Some(ob) = input.order_by.as_ref().filter(|ob| ob.node == center_id) {
+            select.push(SelectExpr::col(&center_id, &ob.property));
         }
         dedup_subquery(&center_id, &center_table, select, scan_where)
     });
@@ -236,6 +240,18 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
                 redaction_id_column(&center_id),
             ));
         } else {
+            if !joins_center {
+                from = TableRef::join(
+                    JoinType::Inner,
+                    from,
+                    TableRef::scan_final(&center_table, &center_id),
+                    Expr::eq(
+                        Expr::col(edge_alias, center_edge_col),
+                        Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
+                    ),
+                );
+                where_parts.push(deleted_false(&center_id));
+            }
             select.push(SelectExpr::new(
                 Expr::col(&center_id, &center_redaction_col),
                 redaction_id_column(&center_id),
@@ -287,7 +303,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     let reads_center_paths =
         fused_table.is_none() && directions.iter().any(|dir| path_bounded(*dir));
     let mut query = if let Some(table) = fused_table {
-        let mut q = build_fused_both_arm(plan, table);
+        let mut q = build_fused_both_arm(plan, table, checks_center_rows);
         q.order_by = order_by;
         q.limit = Some(input.limit);
         q
@@ -342,10 +358,6 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     Ok((Node::Query(Box::new(query)), NodeBinding::Projected))
 }
 
-fn checks_center_rows(plan: &Plan<Neighbors>) -> bool {
-    !plan.nodes[&plan.operation.center].node_ids.is_empty() && !plan.operation.joins_center
-}
-
 fn center_rows_lookup(edge_alias: &str, edge_column: &str, center_column: &str) -> Expr {
     let center_rows = center_rows_cte();
     Expr::InSelect {
@@ -386,14 +398,17 @@ fn neighbor_path(edge_alias: &str, neighbor_type: &str, owned: &[(String, String
 /// row yields one entry per matched arm. Outer query: project the `_orbit_*`
 /// columns out of the tuple. `arrayFilter` (not `multiIf`) keeps self-loop
 /// semantics: when both arms match the same edge, both rows are emitted.
-fn build_fused_both_arm(plan: &Plan<Neighbors>, edge_table: &str) -> Query {
+fn build_fused_both_arm(
+    plan: &Plan<Neighbors>,
+    edge_table: &str,
+    checks_center_rows: bool,
+) -> Query {
     let center_id = plan.operation.center.as_str();
     let center = &plan.nodes[center_id];
     let center_entity = center.entity.as_deref().unwrap_or_default();
     let center_has_tp = center.has_traversal_path;
     let center_node_ids = &center.node_ids;
     let center_filters = &center.filters;
-    let checks_center_rows = checks_center_rows(plan);
     let edge = &plan.operation.edge;
     let edge_alias = neighbor_edge_alias();
     let arm_predicate = |kind_col: &str,
