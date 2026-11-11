@@ -36,6 +36,29 @@ fn setup_outside_a_repository_succeeds_and_suggests_indexing_by_path() {
 }
 
 #[test]
+fn orbit_no_gitlab_writes_a_local_duo_hook() {
+    let folder = tempfile::tempdir().unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
+        .args(["setup", "duo", "--yes", "--no-index"])
+        .current_dir(folder.path())
+        .env("HOME", folder.path())
+        .env("GIT_CEILING_DIRECTORIES", folder.path().parent().unwrap())
+        .env("ORBIT_NO_GITLAB", "1")
+        .output()
+        .unwrap();
+
+    let printed = all_output(&output);
+    assert!(output.status.success(), "{printed}");
+    assert!(printed.contains("GitLab search is off"), "{printed}");
+    let hooks = std::fs::read_to_string(folder.path().join(".gitlab/duo/hooks.json")).unwrap();
+    assert!(
+        hooks.contains("hook-guard instructions --no-gitlab\""),
+        "{hooks}"
+    );
+}
+
+#[test]
 fn index_outside_a_repository_names_the_resolved_folder_for_scripts() {
     let folder = tempfile::tempdir().unwrap();
     let resolved = dunce::canonicalize(folder.path()).unwrap();

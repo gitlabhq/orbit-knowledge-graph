@@ -147,7 +147,13 @@ pub(crate) async fn install(
         "Configured",
         summary::format_configured_per_agent(&plan, &report),
     )?;
-    if !spec::reaches_gitlab() {
+    if spec::keeps_local() {
+        tui::card(
+            "GitLab",
+            "GitLab search is off for this setup (`--no-gitlab`), so agent instructions cover \
+             local code only.",
+        )?;
+    } else if !spec::reaches_gitlab() {
         tui::card(
             "GitLab",
             format!(
