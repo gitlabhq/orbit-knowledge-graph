@@ -7,12 +7,12 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::LazyLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use chrono::Utc;
 use clickhouse_client::FromArrowColumn;
-use orbit_log_fields::info;
+use orbit_log_fields::{info, warn};
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::scope::CODE_INDEXING_CHECKPOINT_TABLE;
 use orbit_migrations::version::{prefixed_table_name, read_active_version};
@@ -25,7 +25,9 @@ use crate::orchestrator::dispatch::enabled_namespaces::resolved_enabled_namespac
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 
 const TASK_NAME: &str = "analytics.graph_stats";
-const METRIC_NAME: &str = "analytics_graph_stats";
+/// A failed attempt is retried inside the run, because the cadence lock holds the day's slot.
+const ATTEMPTS: u32 = 3;
+const RETRY_DELAY: Duration = Duration::from_secs(60);
 
 const GRAPH_BYTES_SQL: &str = "\
 SELECT toInt64(sum(bytes_on_disk)) AS bytes \
@@ -203,7 +205,7 @@ impl GraphStatsSnapshot {
     }
 
     fn query_error(&self, error: impl std::fmt::Display) -> TaskError {
-        self.metrics.record_error(METRIC_NAME, "query");
+        self.metrics.record_error(TASK_NAME, "query");
         TaskError::new(error)
     }
 }
@@ -223,14 +225,31 @@ impl ScheduledTask for GraphStatsSnapshot {
         let result = self.snapshot_and_report().await;
         let outcome = if result.is_ok() { "success" } else { "error" };
         self.metrics
-            .record_run(METRIC_NAME, outcome, started.elapsed().as_secs_f64());
+            .record_run(TASK_NAME, outcome, started.elapsed().as_secs_f64());
         result
     }
 }
 
 impl GraphStatsSnapshot {
     async fn snapshot_and_report(&self) -> Result<(), TaskError> {
-        let Some(stats) = self.snapshot().await? else {
+        let mut attempt = 1;
+        let stats = loop {
+            match self.snapshot().await {
+                Ok(stats) => break stats,
+                Err(error) if attempt < ATTEMPTS => {
+                    warn!(
+                        safe(ATTEMPT) = attempt,
+                        safe(ERROR_TYPE) = "graph_stats_snapshot",
+                        expanded(ERROR_MESSAGE) = %error,
+                        "graph stats snapshot failed, retrying"
+                    );
+                    attempt += 1;
+                    tokio::time::sleep(RETRY_DELAY).await;
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        let Some(stats) = stats else {
             info!("no active schema version, skipping the graph stats snapshot");
             return Ok(());
         };

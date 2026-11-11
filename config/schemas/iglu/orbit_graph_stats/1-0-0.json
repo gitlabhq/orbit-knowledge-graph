@@ -9,7 +9,13 @@
   },
   "type": "object",
   "additionalProperties": false,
-  "required": ["graph_bytes", "entity_counts", "projects_indexed", "projects_eligible", "snapshot_at"],
+  "required": [
+    "graph_bytes",
+    "entity_counts",
+    "projects_indexed",
+    "projects_eligible",
+    "snapshot_at"
+  ],
   "properties": {
     "graph_bytes": {
       "description": "Bytes on disk of the active parts of the graph node and edge tables, for the active schema version.",
@@ -21,14 +27,15 @@
       "description": "Live rows per ontology node type, without soft-deleted rows. Keys are ontology node type names, such as `Project`.",
       "type": "object",
       "maxProperties": 256,
-      "propertyNames": {
-        "pattern": "^[A-Z][A-Za-z0-9]{0,63}$"
+      "patternProperties": {
+        "^[A-Z][A-Za-z0-9]{0,63}$": {
+          "description": "Live rows of one node type",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
       },
-      "additionalProperties": {
-        "type": "integer",
-        "minimum": 0,
-        "maximum": 9223372036854775807
-      }
+      "additionalProperties": false
     },
     "projects_indexed": {
       "description": "Eligible projects whose default branch has a completed code index.",

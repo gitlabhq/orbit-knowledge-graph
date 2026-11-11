@@ -144,6 +144,13 @@ mod tests {
 
         let validator = jsonschema::validator_for(&load_schema_json("orbit_graph_stats")).unwrap();
         assert!(validator.is_valid(&data), "{data}");
+
+        let mut free_text_key = data.clone();
+        free_text_key["entity_counts"]["v118_gl_project"] = 1.into();
+        assert!(
+            !validator.is_valid(&free_text_key),
+            "the schema accepts only node type names as keys"
+        );
     }
 
     #[test]
