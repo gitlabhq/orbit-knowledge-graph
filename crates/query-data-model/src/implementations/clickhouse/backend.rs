@@ -56,11 +56,11 @@ impl StorageBackend for ClickHouse {
     const KIND: &'static str = "clickhouse";
     type Options = ClickHouseOptions;
     type SourceOptions = ClickHouseSource;
-    type ColumnOptions = ColumnSpec;
+    type ColumnOptions = Option<ColumnSpec>;
     type Store = ClickHouseStore;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> ClickHouseStore {
-        let options = &input.options;
+        let options = input.options;
         let edge_tables: Vec<(&str, bool)> = options
             .edge_tables
             .iter()
@@ -100,20 +100,22 @@ fn annotate_sources(
                 format!("store {} does not store {name}.{property}", store.name)
             })
         };
-        let options = &source.options;
+        let options = source.options;
         let shared = &input.options.columns;
-        schema::check_indexes(
-            source.package,
-            &format!("store {} {name}", store.name),
-            options.indexes.as_ref().unwrap_or(&Default::default()),
-            |target| {
-                shared.contains_key(target)
-                    || graph
-                        .property_id(entity, target)
-                        .is_some_and(|id| store.column(id).is_some())
-            },
-            diagnostics,
-        );
+        if let Some(indexes) = &options.indexes {
+            schema::check_indexes(
+                source.package,
+                &format!("store {} {name}", store.name),
+                indexes,
+                |target| {
+                    shared.contains_key(target)
+                        || graph
+                            .property_id(entity, target)
+                            .is_some_and(|id| store.column(id).is_some())
+                },
+                diagnostics,
+            );
+        }
         for property in &options.epoch_nulls {
             stored(property, diagnostics);
         }

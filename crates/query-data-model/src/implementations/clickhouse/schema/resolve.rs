@@ -23,15 +23,8 @@ pub(in crate::implementations::clickhouse) fn resolve(
     let package = input.store.package.as_str();
     let context = format!("store {}", input.store.name);
     let declared = input.options.engine.as_deref();
-    let columns = declared_columns(
-        package,
-        &context,
-        &input.options.columns,
-        declared.is_some(),
-        diagnostics,
-    );
     let layout = Layout {
-        columns,
+        columns: declared_columns(&input.options.columns),
         settings: merge(&[], &input.options.settings),
         engine: declared.and_then(|text| parse_engine(package, &context, text, diagnostics)),
         versioning: relational

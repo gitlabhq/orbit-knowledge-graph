@@ -19,17 +19,19 @@ pub use source::{
     TEMPLATE_EXTENSION,
 };
 pub use storage::{
-    AccessHints, BackendOptions, Binding, ColumnStorage, CopySources, Discriminator, EdgeIndex,
-    EngineSpec, EntityStorage, Key, KeySpec, Naming, OneOrMany, OptionValue, Raw, Resolved,
-    StorageFragment, decode_options, encode_options,
+    AccessHints, Binding, Block, Blocks, ColumnStorage, CopySources, Discriminator, EdgeIndex,
+    EngineSpec, EntityStorage, Erased, Key, KeySpec, Naming, OneOrMany, Raw, Resolved,
+    StorageFragment, Typed,
 };
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::ops::{Deref, DerefMut};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+use crate::catalog::{Diagnostics, ModelId, registered};
+
+#[derive(Debug)]
 pub enum Fragment {
     Graph(GraphFragment),
     Storage(Box<StorageFragment>),
@@ -38,18 +40,50 @@ pub enum Fragment {
     Source(Box<SourceFragment>),
 }
 
-impl Fragment {
-    pub fn parse(yaml: &str) -> Result<Self, orbit_utils::yaml::Error> {
-        orbit_utils::yaml::from_str(yaml)
-    }
+/// A storage fragment's store and engine kind, which choose the backend that parses its blocks.
+#[derive(Deserialize)]
+struct StorageHeader {
+    package: String,
+    store: String,
+    engine: Option<EngineKind>,
+}
 
-    pub fn parse_all<'a>(
+#[derive(Deserialize)]
+struct EngineKind {
+    kind: String,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum Parsed {
+    Graph(GraphFragment),
+    Storage(StorageHeader),
+    Authorization(AuthorizationFragment),
+    Service(ServiceFragment),
+    Source(Box<SourceFragment>),
+}
+
+/// The fragments of a set of packages, identified by the bytes they were parsed from.
+#[derive(Debug)]
+pub struct Fragments {
+    fragments: Vec<Fragment>,
+    id: ModelId,
+}
+
+impl Fragments {
+    pub fn parse<'a>(
         sources: impl IntoIterator<Item = (&'a str, &'a str)>,
-    ) -> Result<Vec<Self>, crate::DataModelError> {
-        let mut diagnostics = crate::catalog::Diagnostics::default();
+    ) -> Result<Self, crate::DataModelError> {
+        let sources: Vec<(&str, &str)> = sources.into_iter().collect();
+        let id = ModelId::digest(
+            sources
+                .iter()
+                .flat_map(|(name, text)| [name.as_bytes(), text.as_bytes()]),
+        );
+        let mut diagnostics = Diagnostics::default();
         let mut templates = BTreeMap::<&str, BTreeMap<String, String>>::new();
-        let mut fragments = Vec::new();
-        for (name, text) in sources {
+        let mut parsed = Vec::new();
+        for (name, text) in &sources {
             let (directory, file) = name.rsplit_once('/').unwrap_or(("", name));
             if file.ends_with(TEMPLATE_EXTENSION) {
                 templates
@@ -58,31 +92,82 @@ impl Fragment {
                     .insert(file.to_string(), text.to_string());
                 continue;
             }
-            match Self::parse(text) {
-                Ok(fragment) => fragments.push((directory, fragment)),
+            match orbit_utils::yaml::from_str::<Parsed>(text) {
+                Ok(fragment) => parsed.push((*name, directory, *text, fragment)),
                 Err(error) => diagnostics.error(name, error.to_string()),
             }
         }
-        diagnostics.finish()?;
-        Ok(fragments
-            .into_iter()
-            .map(|(directory, mut fragment)| {
-                if let Self::Source(source) = &mut fragment {
-                    source.templates = templates.get(directory).cloned().unwrap_or_default();
+        let mut kinds = HashMap::new();
+        for (_, _, _, fragment) in &parsed {
+            if let Parsed::Storage(StorageHeader {
+                store,
+                engine: Some(engine),
+                ..
+            }) = fragment
+            {
+                kinds
+                    .entry(store.clone())
+                    .or_insert_with(|| engine.kind.clone());
+            }
+        }
+        let mut fragments = Vec::with_capacity(parsed.len());
+        for (name, directory, text, fragment) in parsed {
+            fragments.push(match fragment {
+                Parsed::Storage(header) => {
+                    let (package, store) = (&header.package, &header.store);
+                    let Some(kind) = kinds.get(store) else {
+                        diagnostics.error(package, format!("store {store} declares no engine"));
+                        continue;
+                    };
+                    let Some(backend) = registered(kind) else {
+                        diagnostics.error(
+                            package,
+                            format!("store {store} has unknown engine kind {kind}"),
+                        );
+                        continue;
+                    };
+                    match backend.parse(text) {
+                        Ok(storage) => Fragment::Storage(Box::new(storage)),
+                        Err(error) => {
+                            diagnostics.error(name, error.to_string());
+                            continue;
+                        }
+                    }
                 }
-                fragment
-            })
-            .collect())
+                Parsed::Graph(graph) => Fragment::Graph(graph),
+                Parsed::Authorization(access) => Fragment::Authorization(access),
+                Parsed::Service(service) => Fragment::Service(service),
+                Parsed::Source(mut source) => {
+                    source.templates = templates.get(directory).cloned().unwrap_or_default();
+                    Fragment::Source(source)
+                }
+            });
+        }
+        diagnostics.finish()?;
+        Ok(Self { fragments, id })
     }
 
-    pub fn package(&self) -> &str {
-        match self {
-            Self::Graph(fragment) => &fragment.package,
-            Self::Storage(fragment) => &fragment.package,
-            Self::Authorization(fragment) => &fragment.package,
-            Self::Service(fragment) => &fragment.package,
-            Self::Source(fragment) => &fragment.package,
-        }
+    pub fn id(&self) -> ModelId {
+        self.id
+    }
+
+    /// Marks fragments rewritten under `tag`, so their model differs from the untagged one.
+    pub(crate) fn tag(&mut self, tag: &str) {
+        self.id = self.id.tagged(tag);
+    }
+}
+
+impl Deref for Fragments {
+    type Target = Vec<Fragment>;
+
+    fn deref(&self) -> &Vec<Fragment> {
+        &self.fragments
+    }
+}
+
+impl DerefMut for Fragments {
+    fn deref_mut(&mut self) -> &mut Vec<Fragment> {
+        &mut self.fragments
     }
 }
 

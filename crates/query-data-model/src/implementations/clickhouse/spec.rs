@@ -1,73 +1,73 @@
 use std::collections::BTreeMap;
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::TraversalPathKind;
 
 pub type Settings = IndexMap<String, String>;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClickHouseOptions {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub version_column: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub deleted_column: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub engine: Option<String>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub columns: IndexMap<String, ColumnSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub settings: Settings,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub edge_tables: IndexMap<String, EdgeTable>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub denormalized: Vec<DenormalizedSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub copies: IndexMap<String, CopySpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub joins: IndexMap<String, JoinSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub tables: IndexMap<String, TableSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub dictionaries: IndexMap<String, DictionarySpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub views: IndexMap<String, ViewSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub refreshable_views: IndexMap<String, RefreshableViewSpec>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ColumnSpec {
-    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
-    pub storage_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
+    pub storage_type: String,
+    #[serde(default)]
     pub default: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub codec: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum IndexSpec {
     Kind(String),
     Detail(IndexDetail),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IndexDetail {
     #[serde(rename = "type")]
     pub kind: String,
-    #[serde(default = "unit_granularity", skip_serializing_if = "is_unit")]
+    #[serde(default = "unit_granularity")]
     pub granularity: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum IndexSpecs {
     One(IndexSpec),
@@ -110,136 +110,132 @@ fn unit_granularity() -> u32 {
     1
 }
 
-fn is_unit(granularity: &u32) -> bool {
-    *granularity == 1
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum ProjectionSpec {
     Ordered(OrderedProjection),
     Aggregate(AggregateProjection),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OrderedProjection {
     pub order_by: Vec<String>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub lightweight: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AggregateProjection {
     pub select: Vec<String>,
     pub group_by: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClickHouseSource {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub sort_key: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub primary_key: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub engine: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub indexes: Option<IndexMap<String, IndexSpecs>>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub projections: IndexMap<String, ProjectionSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub settings: Settings,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub high_fan_out: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub epoch_nulls: Vec<String>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub path_lookups: IndexMap<TraversalPathKind, PathLookupSpec>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EdgeTable {
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub shared: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub sort_key: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub primary_key: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub engine: Option<String>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub columns: IndexMap<String, ColumnSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub indexes: IndexMap<String, IndexSpecs>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub projections: IndexMap<String, ProjectionSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub settings: Settings,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TableSpec {
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    #[serde(default = "yes")]
     pub versioned: bool,
     pub engine: String,
     pub columns: IndexMap<String, ColumnSpec>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub sort_key: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub primary_key: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub indexes: IndexMap<String, IndexSpecs>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub projections: IndexMap<String, ProjectionSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub settings: Settings,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub ttl: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DictionarySpec {
     pub source: String,
     pub key: String,
     pub attributes: IndexMap<String, String>,
     pub layout: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub size_in_cells: Option<u64>,
     pub lifetime: LifetimeSpec,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LifetimeSpec {
     pub min: u32,
     pub max: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSpec {
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    #[serde(default = "yes")]
     pub versioned: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub to: Option<String>,
     pub select: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub engine: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub order_by: Vec<String>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub populate: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RefreshableViewSpec {
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    #[serde(default = "yes")]
     pub versioned: bool,
     pub append_to: String,
     pub refresh: String,
@@ -250,11 +246,7 @@ fn yes() -> bool {
     true
 }
 
-fn is_yes(value: &bool) -> bool {
-    *value
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DenormalizedSpec {
     pub entity: String,
@@ -263,48 +255,48 @@ pub struct DenormalizedSpec {
     pub side: String,
     pub column: String,
     pub tag: String,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub nullable: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CopySpec {
     pub source: String,
     pub sort_key: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JoinSpec {
     pub sort_key: Vec<String>,
     pub sources: Vec<JoinSourceSpec>,
     pub nodes: Vec<JoinNodeSpec>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub relationships: Vec<JoinRelationshipSpec>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JoinSourceSpec {
     pub table: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub path_column: Option<String>,
     pub columns: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub on: Option<JoinOnSpec>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub filter: IndexMap<String, String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JoinOnSpec {
     pub previous: String,
     pub column: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JoinNodeSpec {
     pub entity: String,
@@ -312,17 +304,17 @@ pub struct JoinNodeSpec {
     pub key: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JoinRelationshipSpec {
     pub relationship: String,
     pub source: usize,
     pub target: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub edge: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PathLookupSpec {
     pub table: String,

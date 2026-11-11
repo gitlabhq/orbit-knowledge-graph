@@ -3,7 +3,7 @@ use integration_testkit::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_data_model, load_fragments, load_seed,
 };
 use query_data_model::implementations::clickhouse::spec::{ClickHouseOptions, JoinSpec};
-use query_data_model::spec::{Fragment, decode_options};
+use query_data_model::spec::Fragment;
 use query_data_model::{ClickHouse, StorageBackend};
 
 #[tokio::test]
@@ -62,16 +62,15 @@ async fn count(ctx: &TestContext, from: &str) -> i64 {
 
 fn joins() -> Vec<(String, JoinSpec)> {
     load_fragments()
-        .into_iter()
+        .iter()
         .filter_map(|fragment| match fragment {
-            Fragment::Storage(storage) => storage.engine,
+            Fragment::Storage(storage) => storage.engine.as_ref(),
             _ => None,
         })
         .filter(|engine| engine.kind == ClickHouse::KIND)
         .flat_map(|engine| {
-            decode_options::<ClickHouseOptions>(&engine.backend)
-                .unwrap()
-                .joins
+            let options: &ClickHouseOptions = engine.backend.downcast_ref().unwrap();
+            options.joins.clone()
         })
         .collect()
 }

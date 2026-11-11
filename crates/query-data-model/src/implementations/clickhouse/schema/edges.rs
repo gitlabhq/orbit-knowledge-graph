@@ -82,8 +82,7 @@ impl Resolver<'_, '_> {
         let mut writers = writers(input, self.diagnostics);
         for (name, spec) in &input.options.edge_tables {
             let context = format!("{} edge table {name}", self.context());
-            let mut columns =
-                declared_columns(&package, &context, &spec.columns, creates, self.diagnostics);
+            let mut columns = declared_columns(&spec.columns);
             if !creates {
                 for denormalized in &input.options.denormalized {
                     if !columns

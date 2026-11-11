@@ -10,18 +10,28 @@ use crate::implementations::{
     clickhouse::ClickHouse, duckdb::DuckDb, live::Live, orbit_code::OrbitCode,
 };
 use crate::plan::tracking::{Language, Plan};
-use crate::spec::{BackendOptions, decode_options};
+use crate::spec::{Block, Blocks, StorageFragment, Typed};
 use crate::{DataModelError, EntityId, GraphCatalog, PropertyId};
 
+/// A storage backend: the blocks its stores' fragments write, and the facts it resolves them
+/// into. A block the YAML omits reads as its type's default.
 pub trait StorageBackend: Sized + 'static {
     const KIND: &'static str;
-    type Options: DeserializeOwned + Default;
-    type SourceOptions: DeserializeOwned + Default;
-    type ColumnOptions: DeserializeOwned + Default;
+    type Options: Block + DeserializeOwned + Default;
+    type SourceOptions: Block + DeserializeOwned + Default;
+    type ColumnOptions: Block + DeserializeOwned + Default;
     type Store: Debug + Send + Sync + std::panic::RefUnwindSafe + 'static;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
 }
+
+impl<B: StorageBackend> Blocks for B {
+    type Engine = B::Options;
+    type Entity = B::SourceOptions;
+    type Column = B::ColumnOptions;
+}
+
+impl<B: StorageBackend> Typed for B {}
 
 /// The options of a backend block that takes none.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -65,12 +75,32 @@ pub trait Render {
     fn render(&self, plan: &Plan<Self::Language>) -> Result<Self::Request, Self::Error>;
 }
 
-/// One entity a store holds, with its backend blocks parsed.
+/// One store's backend blocks, as its fragments wrote them.
+pub(crate) struct StoreBlocks<'a> {
+    pub options: &'a dyn Block,
+    pub entities: Vec<EntityBlocks<'a>>,
+}
+
+pub(crate) struct EntityBlocks<'a> {
+    pub entity: EntityId,
+    pub package: &'a str,
+    pub options: &'a dyn Block,
+    pub columns: Vec<(PropertyId, &'a str, &'a dyn Block)>,
+}
+
+/// One entity a store holds, with its backend blocks.
 pub struct SourceInput<'a, B: StorageBackend> {
     pub entity: EntityId,
     pub package: &'a str,
-    pub options: B::SourceOptions,
-    pub columns: Vec<(PropertyId, B::ColumnOptions)>,
+    pub options: &'a B::SourceOptions,
+    pub columns: Vec<ColumnInput<'a, B>>,
+}
+
+/// One stored property, with its column name and backend block.
+pub struct ColumnInput<'a, B: StorageBackend> {
+    pub property: PropertyId,
+    pub name: &'a str,
+    pub options: &'a B::ColumnOptions,
 }
 
 pub struct StoreInput<'a, B: StorageBackend> {
@@ -79,7 +109,7 @@ pub struct StoreInput<'a, B: StorageBackend> {
     pub sources: &'a Sources,
     pub store: &'a Store,
     pub connection: Vec<&'a Store>,
-    pub options: B::Options,
+    pub options: &'a B::Options,
     pub entities: Vec<SourceInput<'a, B>>,
 }
 
@@ -173,25 +203,25 @@ impl Model {
         })
     }
 
-    /// Parses every store's backend blocks and resolves its backend facts, once per model.
-    pub(super) fn resolve_backends(&mut self, diagnostics: &mut Diagnostics) {
-        let backends: [&dyn Resolve; 4] = [
-            &Backend::<ClickHouse>(PhantomData),
-            &Backend::<DuckDb>(PhantomData),
-            &Backend::<OrbitCode>(PhantomData),
-            &Backend::<Live>(PhantomData),
-        ];
-        let facts: Vec<_> = (0..self.stores.len())
-            .map(|index| {
+    /// Resolves every store's backend facts from its blocks, once per model.
+    pub(super) fn resolve_backends(
+        &mut self,
+        blocks: &[StoreBlocks<'_>],
+        diagnostics: &mut Diagnostics,
+    ) {
+        let facts: Vec<_> = blocks
+            .iter()
+            .enumerate()
+            .map(|(index, blocks)| {
                 let store = &self.stores[index];
-                let backend = backends.iter().find(|backend| backend.kind() == store.kind);
-                let backend = diagnostics.require(backend, &store.package, || {
-                    format!(
-                        "store {} has unknown engine kind {}",
-                        store.name, store.kind
-                    )
-                })?;
-                backend.resolve(self, index, diagnostics)
+                let backend =
+                    diagnostics.require(registered(&store.kind), &store.package, || {
+                        format!(
+                            "store {} has unknown engine kind {}",
+                            store.name, store.kind
+                        )
+                    })?;
+                backend.resolve(self, index, blocks, diagnostics)
             })
             .collect();
         for (store, facts) in self.stores.iter_mut().zip(facts) {
@@ -200,53 +230,83 @@ impl Model {
     }
 }
 
-trait Resolve {
+/// A backend of the registry, which parses its stores' fragments and resolves their facts.
+pub(crate) trait Registered {
     fn kind(&self) -> &'static str;
-    fn resolve(&self, model: &Model, store: usize, diagnostics: &mut Diagnostics) -> Option<Facts>;
+
+    fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error>;
+
+    fn resolve(
+        &self,
+        model: &Model,
+        store: usize,
+        blocks: &StoreBlocks<'_>,
+        diagnostics: &mut Diagnostics,
+    ) -> Option<Facts>;
 }
 
-struct Backend<B>(PhantomData<fn() -> B>);
+struct Entry<B>(PhantomData<fn() -> B>);
 
-impl<B: StorageBackend> Resolve for Backend<B> {
+const REGISTRY: [&dyn Registered; 4] = [
+    &Entry::<ClickHouse>(PhantomData),
+    &Entry::<DuckDb>(PhantomData),
+    &Entry::<OrbitCode>(PhantomData),
+    &Entry::<Live>(PhantomData),
+];
+
+pub(crate) fn registered(kind: &str) -> Option<&'static dyn Registered> {
+    REGISTRY.into_iter().find(|backend| backend.kind() == kind)
+}
+
+impl<B: StorageBackend> Registered for Entry<B> {
     fn kind(&self) -> &'static str {
         B::KIND
     }
 
-    fn resolve(&self, model: &Model, index: usize, diagnostics: &mut Diagnostics) -> Option<Facts> {
+    fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error> {
+        StorageFragment::<B>::parse(yaml)
+    }
+
+    fn resolve(
+        &self,
+        model: &Model,
+        index: usize,
+        blocks: &StoreBlocks<'_>,
+        diagnostics: &mut Diagnostics,
+    ) -> Option<Facts> {
         let store = &model.stores[index];
-        let errors = diagnostics.len();
-        let graph = &model.graph;
-        let context = format!("store {}", store.name);
-        let entities = store
-            .entity_options
+        let entities = blocks
+            .entities
             .iter()
             .map(|entity| {
-                let name = &graph.entity(entity.entity).name;
-                let package = entity.package.as_str();
-                let columns = entity
-                    .columns
-                    .iter()
-                    .map(|(property, options)| {
-                        let label =
-                            format!("{context} column {name}.{}", graph.property(*property).name);
-                        (*property, parse(package, &label, options, diagnostics))
+                let columns = entity.columns.iter().map(|(property, name, options)| {
+                    Some(ColumnInput {
+                        property: *property,
+                        name,
+                        options: options.downcast_ref()?,
                     })
-                    .collect();
-                SourceInput {
+                });
+                Some(SourceInput {
                     entity: entity.entity,
-                    package,
-                    options: parse(
-                        package,
-                        &format!("{context} {name}"),
-                        &entity.options,
-                        diagnostics,
-                    ),
-                    columns,
-                }
+                    package: entity.package,
+                    options: entity.options.downcast_ref()?,
+                    columns: columns.collect::<Option<_>>()?,
+                })
             })
-            .collect();
+            .collect::<Option<_>>();
+        let (Some(options), Some(entities)) = (blocks.options.downcast_ref(), entities) else {
+            diagnostics.error(
+                &store.package,
+                format!(
+                    "store {} holds blocks of a backend other than {}",
+                    store.name,
+                    B::KIND
+                ),
+            );
+            return None;
+        };
         let input = StoreInput::<B> {
-            graph,
+            graph: &model.graph,
             access: &model.access,
             sources: &model.sources,
             store,
@@ -255,24 +315,9 @@ impl<B: StorageBackend> Resolve for Backend<B> {
                 .iter()
                 .filter(|other| other.connection == store.connection)
                 .collect(),
-            options: parse(&store.package, &context, &store.options, diagnostics),
+            options,
             entities,
         };
-        if diagnostics.len() > errors {
-            return None;
-        }
         Some(Box::new(B::resolve(input, diagnostics)))
     }
-}
-
-fn parse<T: DeserializeOwned + Default>(
-    package: &str,
-    context: &str,
-    options: &BackendOptions,
-    diagnostics: &mut Diagnostics,
-) -> T {
-    decode_options(options).unwrap_or_else(|error| {
-        diagnostics.error(package, format!("{context}: {error}"));
-        T::default()
-    })
 }

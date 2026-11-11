@@ -136,7 +136,7 @@ mod tests {
         RelationalError, UnaryOp,
     };
     use query_data_model::plan::tracking::Declare;
-    use query_data_model::spec::{Fragment, decode_options, encode_options};
+    use query_data_model::spec::Fragment;
     use query_data_model::{Catalog, Model, Packages, TRAVERSAL_PATH_COLUMN};
 
     type Built<T> = std::result::Result<T, RelationalError>;
@@ -186,7 +186,7 @@ relationships:
     /// The embedded model with security-manager merge requests and a reviewer-to-project join.
     fn reviewer_project_model() -> Catalog<ClickHouse> {
         let mut fragments = Packages::embedded().fragments().unwrap();
-        for fragment in &mut fragments {
+        for fragment in fragments.iter_mut() {
             match fragment {
                 Fragment::Authorization(access) => {
                     if let Some(merge_request) = access.entities.get_mut("MergeRequest") {
@@ -197,12 +197,11 @@ relationships:
                     let Some(engine) = &mut storage.engine else {
                         continue;
                     };
-                    let mut options: ClickHouseOptions = decode_options(&engine.backend).unwrap();
+                    let options: &mut ClickHouseOptions = engine.backend.downcast_mut().unwrap();
                     options.joins.insert(
                         "gl_denorm_reviewer_project".into(),
                         orbit_utils::yaml::from_str(REVIEWER_PROJECT).unwrap(),
                     );
-                    engine.backend = encode_options(options).unwrap();
                 }
                 _ => {}
             }

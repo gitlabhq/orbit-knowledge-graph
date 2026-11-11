@@ -18,10 +18,6 @@ pub trait CodeSearch {
     fn search(&self, request: &StructuralSearchRequest) -> Result<Vec<Row>, ExecuteError>;
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CodeOptions {}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchMode {
@@ -65,7 +61,7 @@ impl CodeStore {
 
 impl StorageBackend for OrbitCode {
     const KIND: &'static str = "orbit_code";
-    type Options = CodeOptions;
+    type Options = NoOptions;
     type SourceOptions = CodeSource;
     type ColumnOptions = NoOptions;
     type Store = CodeStore;
@@ -75,15 +71,15 @@ impl StorageBackend for OrbitCode {
         let store_name = &input.store.name;
         let mut store = CodeStore::default();
         check_unrelational(&input, diagnostics);
-        for source in input.entities {
+        for source in &input.entities {
             let name = &graph.entity(source.entity).name;
             let mut properties = Vec::new();
-            for (property, modes) in source.options.search {
-                let id = graph.property_id(source.entity, &property);
+            for (property, modes) in &source.options.search {
+                let id = graph.property_id(source.entity, property);
                 if let Some(id) = diagnostics.require(id, source.package, || {
                     format!("store {store_name} searches unknown property {name}.{property}")
                 }) {
-                    properties.push((id, modes));
+                    properties.push((id, modes.clone()));
                 }
             }
             let structural = properties

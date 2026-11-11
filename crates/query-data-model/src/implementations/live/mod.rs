@@ -17,11 +17,7 @@ pub trait DataExtraction {
     fn extract(&self, user: &str, request: &ExtractionRequest) -> Result<Vec<Row>, ExecuteError>;
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LiveOptions {}
-
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LiveSource {
     pub operation: String,
@@ -55,8 +51,8 @@ impl LiveStore {
 
 impl StorageBackend for Live {
     const KIND: &'static str = "live";
-    type Options = LiveOptions;
-    type SourceOptions = LiveSource;
+    type Options = NoOptions;
+    type SourceOptions = Option<LiveSource>;
     type ColumnOptions = NoOptions;
     type Store = LiveStore;
 
@@ -65,14 +61,15 @@ impl StorageBackend for Live {
         let store = &input.store.name;
         let mut endpoints = Vec::new();
         check_unrelational(&input, diagnostics);
-        for source in input.entities {
+        for source in &input.entities {
             let name = &graph.entity(source.entity).name;
-            if source.options.operation.is_empty() {
-                diagnostics.error(
-                    source.package,
-                    format!("store {store} names no operation for {name}"),
-                );
-            }
+            let Some(options) =
+                diagnostics.require(source.options.as_ref(), source.package, || {
+                    format!("store {store} names no operation for {name}")
+                })
+            else {
+                continue;
+            };
             let mut resolve = |property: &str| {
                 let id = graph
                     .property_id(source.entity, property)
@@ -81,16 +78,15 @@ impl StorageBackend for Live {
                     format!("store {store} pushes down unknown property {name}.{property}")
                 })
             };
-            let filters = source
-                .options
+            let filters = options
                 .filters
                 .iter()
                 .filter_map(|property| resolve(property))
                 .collect();
-            let text = source.options.text.as_deref().and_then(&mut resolve);
+            let text = options.text.as_deref().and_then(&mut resolve);
             endpoints.push(Endpoint {
                 entity: source.entity,
-                operation: source.options.operation,
+                operation: options.operation.clone(),
                 filters,
                 text,
             });

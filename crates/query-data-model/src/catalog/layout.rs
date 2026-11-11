@@ -3,50 +3,53 @@ use std::collections::HashSet;
 use indexmap::IndexMap;
 
 use super::Diagnostics;
-use super::store::{EntityOptions, Source, Store, StoredColumn};
+use super::backend::{EntityBlocks, StoreBlocks};
+use super::store::{Source, Store, StoredColumn};
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::spec::{AccessHints, EngineSpec, EntityStorage, Resolved, StorageFragment};
 use crate::{EntityId, GraphCatalog, PropertyId};
 
 /// Resolves every storage fragment into one store per store name, each holding its entities and
-/// variant bindings.
-pub(super) fn resolve(
+/// variant bindings, with the backend blocks its fragments wrote.
+pub(super) fn resolve<'a>(
     graph: &GraphCatalog,
-    fragments: &[&StorageFragment],
+    fragments: &[&'a StorageFragment],
     served: &HashSet<PropertyId>,
     diagnostics: &mut Diagnostics,
-) -> Vec<Store> {
-    let mut grouped = IndexMap::<&str, Vec<&StorageFragment>>::new();
+) -> (Vec<Store>, Vec<StoreBlocks<'a>>) {
+    let mut grouped = IndexMap::<&str, Vec<&'a StorageFragment>>::new();
     for fragment in fragments {
         grouped.entry(&fragment.store).or_default().push(fragment);
     }
-    let stores: Vec<Store> = grouped
+    let (stores, blocks): (Vec<Store>, Vec<StoreBlocks>) = grouped
         .into_iter()
         .filter_map(|(name, fragments)| {
             let (package, engine) = declare_engine(name, &fragments, diagnostics)?;
             let mut store = Store::new(name, package, engine, graph);
+            let mut entities = Vec::new();
             for fragment in &fragments {
                 for (entity, spec) in &fragment.entities {
-                    store.declare_entity(
+                    entities.extend(store.declare_entity(
                         &fragment.package,
                         entity,
                         spec,
                         served,
                         graph,
                         diagnostics,
-                    );
+                    ));
                 }
             }
-            store.entity_options.sort_by_key(|options| options.entity);
+            entities.sort_by_key(|blocks| blocks.entity);
             for fragment in &fragments {
                 store.declare_bindings(fragment, graph, diagnostics);
             }
-            Some(store)
+            let options = engine.backend.as_ref();
+            Some((store, StoreBlocks { options, entities }))
         })
-        .collect();
+        .unzip();
     check_connections(&stores, diagnostics);
     super::bindings::check(graph, &stores, served, diagnostics);
-    stores
+    (stores, blocks)
 }
 
 fn check_connections(stores: &[Store], diagnostics: &mut Diagnostics) {
@@ -103,16 +106,11 @@ impl Store {
     fn new(name: &str, package: &str, engine: &EngineSpec, graph: &GraphCatalog) -> Self {
         Self {
             name: name.to_string(),
-            connection: engine
-                .connection
-                .clone()
-                .unwrap_or_else(|| engine.kind.clone()),
+            connection: engine.connection.clone(),
             kind: engine.kind.clone(),
             trusted: engine.trusted,
             path_column: engine.path_column.clone(),
             package: package.to_string(),
-            options: engine.backend.clone(),
-            entity_options: Vec::new(),
             sources: (0..graph.entities().count()).map(|_| None).collect(),
             columns: vec![None; graph.properties().count()],
             excluded: HashSet::new(),
@@ -123,23 +121,21 @@ impl Store {
         }
     }
 
-    fn declare_entity(
+    fn declare_entity<'a>(
         &mut self,
-        package: &str,
+        package: &'a str,
         name: &str,
-        spec: &EntityStorage,
+        spec: &'a EntityStorage,
         served: &HashSet<PropertyId>,
         graph: &GraphCatalog,
         diagnostics: &mut Diagnostics,
-    ) {
-        let Some(entity) = diagnostics.require(graph.entity_id(name), package, || {
+    ) -> Option<EntityBlocks<'a>> {
+        let entity = diagnostics.require(graph.entity_id(name), package, || {
             format!("store {} binds unknown entity {name}", self.name)
-        }) else {
-            return;
-        };
+        })?;
         if self.sources[entity.index()].is_some() {
             diagnostics.error(package, format!("store {} binds {name} twice", self.name));
-            return;
+            return None;
         }
         let property = |property: &str, diagnostics: &mut Diagnostics| {
             diagnostics.require(graph.property_id(entity, property), package, || {
@@ -164,11 +160,12 @@ impl Store {
                 );
                 continue;
             }
+            let stored = column.column.as_deref().unwrap_or(written);
             self.columns[id.index()] = Some(StoredColumn {
-                name: column.column.clone().unwrap_or_else(|| written.clone()),
+                name: stored.to_string(),
                 immutable: column.immutable,
             });
-            columns.push((id, column.backend.clone()));
+            columns.push((id, stored, column.backend.as_ref()));
         }
         for written in &spec.exclude {
             if let Some(id) = property(written, diagnostics) {
@@ -180,11 +177,9 @@ impl Store {
             .property_id(entity, DEFAULT_PRIMARY_KEY)
             .and_then(|id| self.column(id))
             .map(str::to_string);
-        let Some(key) = diagnostics.require(key, package, || {
+        let key = diagnostics.require(key, package, || {
             format!("store {} does not store the id of {name}", self.name)
-        }) else {
-            return;
-        };
+        })?;
         self.sources[entity.index()] = Some(Source {
             entity,
             package: package.to_string(),
@@ -196,12 +191,12 @@ impl Store {
                 .unwrap_or_else(|| self.path_column.clone()),
             access,
         });
-        self.entity_options.push(EntityOptions {
+        Some(EntityBlocks {
             entity,
-            package: package.to_string(),
-            options: spec.backend.clone(),
+            package,
+            options: spec.backend.as_ref(),
             columns,
-        });
+        })
     }
 
     fn access(
