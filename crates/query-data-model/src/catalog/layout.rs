@@ -180,15 +180,27 @@ impl Store {
         let key = diagnostics.require(key, package, || {
             format!("store {} does not store the id of {name}", self.name)
         })?;
+        let path_column = spec
+            .path_column
+            .clone()
+            .unwrap_or_else(|| self.path_column.clone());
+        if let Some(path) = &path_column
+            && !columns.iter().any(|(_, stored, _)| stored == path)
+        {
+            diagnostics.error(
+                package,
+                format!(
+                    "store {} reads {name} paths from {path}, which it does not store",
+                    self.name
+                ),
+            );
+        }
         self.sources[entity.index()] = Some(Source {
             entity,
             package: package.to_string(),
             table: spec.table.clone(),
             key,
-            path_column: spec
-                .path_column
-                .clone()
-                .unwrap_or_else(|| self.path_column.clone()),
+            path_column,
             access,
         });
         Some(EntityBlocks {

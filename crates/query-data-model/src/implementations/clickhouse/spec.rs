@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-use crate::TraversalPathKind;
+use crate::{DenormalizedDirection, TraversalPathKind};
 
 pub type Settings = IndexMap<String, String>;
 
@@ -252,7 +252,7 @@ pub struct DenormalizedSpec {
     pub entity: String,
     pub property: String,
     pub relationship: String,
-    pub side: String,
+    pub side: DenormalizedDirection,
     pub column: String,
     pub tag: String,
     #[serde(default)]

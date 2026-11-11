@@ -137,6 +137,17 @@ fn check_links(
                 );
             }
         }
+        for (column, value) in &source.filter {
+            if !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                diagnostics.error(
+                    package,
+                    format!(
+                        "{context} filters {}.{column} on `{value}`, which is not a plain word",
+                        table.name
+                    ),
+                );
+            }
+        }
         match (occurrence, &source.on) {
             (0, Some(_)) => diagnostics.error(
                 package,

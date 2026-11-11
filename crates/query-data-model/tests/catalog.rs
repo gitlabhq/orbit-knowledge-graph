@@ -852,6 +852,31 @@ fn a_managed_store_rejects_unknown_physical_references() {
 }
 
 #[test]
+fn join_filters_reject_values_that_are_not_plain_words() {
+    let errors = spec_errors(load_with(
+        &["gitlab"],
+        managed(
+            r#"    joins:
+      gl_named_project:
+        sort_key: [t0_id]
+        sources:
+        - table: gl_project
+          columns: { id: t0_id }
+          filter: { name: "x' OR 1 = 1 --" }
+        nodes:
+        - { entity: Project, source: 0, key: t0_id }
+"#,
+        ),
+    ));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph join gl_named_project filters gl_project.name on `x' OR 1 = 1 --`, which is not a plain word"
+        ]
+    );
+}
+
+#[test]
 fn every_untrusted_guard_carries_the_declared_role() {
     use query_data_model::{Packages, RequiredRole, testkit};
 

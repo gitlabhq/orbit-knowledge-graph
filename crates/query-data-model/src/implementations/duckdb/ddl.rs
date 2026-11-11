@@ -25,19 +25,10 @@ fn column(column: &Column) -> String {
     if !column.nullable {
         parts.push("NOT NULL".into());
     }
-    if let Some(default) = column.default.as_deref().filter(|default| literal(default)) {
+    if let Some(default) = &column.default {
         parts.push(format!("DEFAULT {default}"));
     }
     parts.join(" ")
-}
-
-/// Defaults written for ClickHouse may be function calls such as `now64(6)`; DuckDB keeps literals.
-fn literal(default: &str) -> bool {
-    let default = default.trim();
-    default.eq_ignore_ascii_case("false")
-        || default.eq_ignore_ascii_case("true")
-        || (default.starts_with('\'') && default.ends_with('\''))
-        || default.parse::<f64>().is_ok()
 }
 
 #[cfg(test)]
@@ -55,20 +46,19 @@ mod tests {
     }
 
     #[test]
-    fn renders_not_null_and_only_literal_defaults() {
+    fn renders_not_null_and_defaults() {
         let table = Table::new(
             "test",
             vec![
                 column("id", "BIGINT", false, None),
                 column("alias", "VARCHAR", true, None),
-                column("v", "BIGINT", false, Some("now64(6)")),
                 column("s", "VARCHAR", false, Some("''")),
                 column("b", "BOOLEAN", false, Some("false")),
             ],
         );
         assert_eq!(
             create_table(&table),
-            "CREATE TABLE IF NOT EXISTS test (\n    id BIGINT NOT NULL,\n    alias VARCHAR,\n    v BIGINT NOT NULL,\n    s VARCHAR NOT NULL DEFAULT '',\n    b BOOLEAN NOT NULL DEFAULT false\n)"
+            "CREATE TABLE IF NOT EXISTS test (\n    id BIGINT NOT NULL,\n    alias VARCHAR,\n    s VARCHAR NOT NULL DEFAULT '',\n    b BOOLEAN NOT NULL DEFAULT false\n)"
         );
     }
 }

@@ -42,17 +42,13 @@ impl Resolver<'_, '_> {
             let indexes = build_indexes(&declared, column_of);
             let engine = self.engine(source.package, &context, options.engine.as_deref());
             if self.creates() {
-                let has_path_column = bound
-                    .path_column
-                    .as_ref()
-                    .is_some_and(|path| columns.iter().any(|column| &column.name == path));
                 self.schema.graph_tables.push(GraphTable {
                     name: table.to_string(),
                     global: input
                         .access
                         .entity(entity)
                         .is_some_and(|access| access.scope == Scope::Global),
-                    has_path_column,
+                    has_path_column: bound.path_column.is_some(),
                 });
                 self.schema
                     .writers

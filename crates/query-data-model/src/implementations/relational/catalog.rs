@@ -219,20 +219,14 @@ where
             .collect()
     }
 
-    pub fn joins(&self) -> &[MaterializedJoin] {
+    pub fn joins(&self) -> impl Iterator<Item = &MaterializedJoin> {
         self.stores()
-            .map(|(_, facts)| facts.relational().joins.as_slice())
-            .find(|joins| !joins.is_empty())
-            .unwrap_or_default()
+            .flat_map(|(_, facts)| &facts.relational().joins)
     }
 
     pub fn denormalized(&self, key: DenormalizedKey) -> Option<&DenormalizedProperty> {
         self.stores()
-            .next()?
-            .1
-            .relational()
-            .denormalized
-            .property(key)
+            .find_map(|(_, facts)| facts.relational().denormalized.property(key))
     }
 
     /// The home table of a property's entity and the column there that stores it.

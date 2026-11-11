@@ -78,7 +78,6 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
     let model = Catalog::<ClickHouse>::from_model(&overlay_model("denorm_approved")).unwrap();
     let approved = model
         .joins()
-        .iter()
         .find(|binding| binding.table == "gl_denorm_approved")
         .unwrap();
     assert_eq!(approved.nodes.len(), 2);
@@ -89,7 +88,6 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
         Catalog::<ClickHouse>::from_model(&overlay_model("denorm_approved_project")).unwrap();
     let approved_project = approved_project_model
         .joins()
-        .iter()
         .find(|binding| binding.table == "gl_denorm_approved_project")
         .unwrap();
     assert_eq!(approved_project.nodes.len(), 3);

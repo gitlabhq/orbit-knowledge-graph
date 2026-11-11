@@ -26,7 +26,6 @@ async fn denormalized_tables_match_their_source_join() {
         );
         let binding = model
             .joins()
-            .iter()
             .find(|binding| binding.table == table)
             .unwrap();
         let stored_ids = binding
