@@ -430,8 +430,10 @@ pub fn parse_with_sentinel(
             stopped = Some(stop);
             ControlFlow::Break(())
         };
+        let prepared = preprocess(support_lang, source);
+        let parsed = prepared.as_deref().unwrap_or(source);
         let mut input =
-            |offset: usize, _: tree_sitter::Point| source.as_bytes().get(offset..).unwrap_or(&[]);
+            |offset: usize, _: tree_sitter::Point| parsed.as_bytes().get(offset..).unwrap_or(&[]);
         let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
         let ts_tree = c
             .parser
@@ -447,6 +449,84 @@ pub fn parse_with_sentinel(
         let cut = truncated.then(|| Killed::limit("depth", label, depth_of(&ts_tree), max_depth));
         Ok((tree, cut))
     })
+}
+
+/// tree-sitter-c parses every branch of an `#if` as code, so a conditional between two
+/// `else if` arms, or a lone statement macro such as `DIAG_OFF_ASSIGN_ENUM`, makes it give up
+/// on the rest of the file and wrap it in one ERROR node, where no function_definition is
+/// left to match. Parsing only the first branch of each conditional, with directive lines and
+/// statement macros blanked, keeps every byte offset and row the same.
+fn preprocess(support_lang: SupportLang, source: &str) -> Option<String> {
+    if !matches!(support_lang, SupportLang::C | SupportLang::Cpp) || !source.contains('#') {
+        return None;
+    }
+    let mut out = String::with_capacity(source.len());
+    let mut skipping: Vec<bool> = Vec::new();
+    let mut continued = false;
+    let mut changed = false;
+    for line in source.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\n', '\r']);
+        let blank = if continued {
+            continued = content.ends_with('\\');
+            true
+        } else if let Some(directive) = conditional(content) {
+            match directive {
+                Conditional::Open => skipping.push(false),
+                Conditional::Alternative => {
+                    if let Some(skip) = skipping.last_mut() {
+                        *skip = true;
+                    }
+                }
+                Conditional::Close => {
+                    skipping.pop();
+                }
+            }
+            continued = content.ends_with('\\');
+            true
+        } else {
+            skipping.iter().any(|&skip| skip) || statement_macro(content)
+        };
+        if blank {
+            changed = true;
+            out.extend(line.chars().map(|c| match c {
+                '\n' | '\r' => c,
+                c if c.is_ascii() => ' ',
+                c => c,
+            }));
+        } else {
+            out.push_str(line);
+        }
+    }
+    changed.then_some(out)
+}
+
+enum Conditional {
+    Open,
+    Alternative,
+    Close,
+}
+
+fn conditional(line: &str) -> Option<Conditional> {
+    let rest = line.trim_start().strip_prefix('#')?.trim_start();
+    let word_end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(rest.len());
+    match &rest[..word_end] {
+        "if" | "ifdef" | "ifndef" => Some(Conditional::Open),
+        "elif" | "elifdef" | "elifndef" | "else" => Some(Conditional::Alternative),
+        "endif" => Some(Conditional::Close),
+        _ => None,
+    }
+}
+
+/// A line that is only an all-caps identifier, such as `DIAG_OFF_DEPRECATION`, expands to a
+/// pragma or nothing; as code it is an identifier with no `;` that swallows the next line.
+fn statement_macro(line: &str) -> bool {
+    let word = line.trim();
+    word.len() > 2
+        && word.as_bytes()[0].is_ascii_uppercase()
+        && word.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        && word.contains('_')
 }
 
 const MAX_STALL: usize = 100_000;
@@ -506,6 +586,37 @@ fn parse_guard() -> impl FnMut(usize) -> ControlFlow<(&'static str, Stop)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preprocessing_keeps_the_first_branch_and_every_offset() {
+        let source = "int a;\n#ifdef X\nint b;\n#else\nint c;\n#endif\nDIAG_OFF_X\nint d;\n";
+        let out = preprocess(SupportLang::C, source).unwrap();
+        assert_eq!(out.len(), source.len());
+        assert_eq!(out.lines().count(), source.lines().count());
+        assert!(out.contains("int a;") && out.contains("int b;") && out.contains("int d;"));
+        assert!(!out.contains("int c;") && !out.contains("#") && !out.contains("DIAG"));
+        assert!(preprocess(SupportLang::Rust, source).is_none());
+        assert!(preprocess(SupportLang::C, "int a;\n").is_none());
+    }
+
+    #[test]
+    fn preprocessing_follows_nesting_and_continued_directives() {
+        let source = "#if A \\\n  || B\nint x;\n#if C\nint y;\n#elif D\nint z;\n#endif\n#else\nint w;\n#endif\n";
+        let out = preprocess(SupportLang::C, source).unwrap();
+        assert!(out.contains("int x;") && out.contains("int y;"));
+        assert!(!out.contains("int z;") && !out.contains("int w;") && !out.contains("|| B"));
+    }
+
+    #[test]
+    fn a_conditional_between_else_if_arms_keeps_the_function_a_definition() {
+        let source = "void f(int p)\n{\n\tif (p == 1)\n\t\tg();\n#ifdef S\n\telse if (p == 2)\n\t\tg();\n#endif\n\telse if (p == 3)\n\t\tg();\n}\n";
+        let lang = Lang::default();
+        let tree = parse(source, SupportLang::C, &lang, "f.c").unwrap();
+        let definition = lang.kinds.lookup("function_definition") as u16;
+        let error = lang.kinds.lookup("ERROR") as u16;
+        let kinds: Vec<u16> = tree.root().children().map(|c| c.kind()).collect();
+        assert_eq!(kinds, vec![definition], "error kind is {error}");
+    }
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},

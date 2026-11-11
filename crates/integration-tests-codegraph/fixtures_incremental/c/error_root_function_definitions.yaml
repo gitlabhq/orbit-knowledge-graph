@@ -1,0 +1,85 @@
+name: "C: functions in a file whose parse ends in an error root are still definitions"
+
+# tree-sitter-c parses every branch of an `#if` as code, so an `#ifdef` between two
+# `else if` arms, or a statement macro on a line of its own (`DIAG_OFF_ASSIGN_ENUM`), makes
+# it give up on the rest of the file: the type, the function_declarator, and the `{ ... }`
+# body end up as siblings under one ERROR node, and no function_definition is left for the
+# function rules to match. tcpdump.c and print-udp.c parse this way.
+
+fixtures:
+  - path: tool.c
+    content: |
+      #ifndef lint
+      static const char copyright[] =
+          "@(#) Copyright (c) 1988, 1989\n\
+      The Regents of the University of California.\n";
+      #endif
+
+      static int
+      count_flags(int x)
+      {
+      	return x + 1;
+      }
+
+      static void
+      drop(void)
+      {
+      #ifdef HAVE_CAPS
+      DIAG_OFF_ASSIGN_ENUM
+      	count_flags(1);
+      DIAG_ON_ASSIGN_ENUM
+      #endif
+      }
+
+      void
+      dispatch(int port, int length)
+      {
+      	if (port == 1)
+      		count_flags(length);
+      #ifdef ENABLE_SMB
+      	else if (port == 2)
+      		count_flags(length);
+      #endif
+      	else if (port == 3)
+      		count_flags(length);
+      }
+
+      int
+      main(int argc, char **argv)
+      {
+      	int cnt, op, i;
+      	dispatch(argc, cnt);
+      	return 0;
+      }
+
+tests:
+  - name: "each function in the error root is a definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.kind = 'Function'
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 4 }
+      - { row: { name: count_flags } }
+      - { row: { name: dispatch } }
+      - { row: { name: drop } }
+      - { row: { name: main } }
+
+  - name: "their calls are edges"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      RETURN a.name AS caller, b.name AS callee
+      ORDER BY caller
+    assert:
+      - { row: { caller: dispatch, callee: count_flags } }
+      - { row: { caller: drop, callee: count_flags } }
+      - { row: { caller: main, callee: dispatch } }
+
+  - name: "a recovered function keeps its signature"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'main'
+      RETURN d.signature AS signature, d.start_line AS start_line
+    assert:
+      - { row: { signature: "int main(int argc, char **argv)" } }
