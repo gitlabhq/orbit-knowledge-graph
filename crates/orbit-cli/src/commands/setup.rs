@@ -134,7 +134,10 @@ pub(crate) async fn install(
     if selection.components.contains(&Component::Skill)
         && needs_instance_skill(&selection.skill, &selection.agents, &target)
     {
-        selection.skill.full_tree = Some(crate::skill::full_tree().await?);
+        selection.skill.full_tree = Some(match spec::keeps_local() {
+            true => crate::skill::embedded_full_tree()?,
+            false => crate::skill::full_tree().await?,
+        });
     }
 
     let report = apply_and_report(&options, |report| {
@@ -147,7 +150,13 @@ pub(crate) async fn install(
         "Configured",
         summary::format_configured_per_agent(&plan, &report),
     )?;
-    if !spec::reaches_gitlab() {
+    if spec::keeps_local() {
+        tui::card(
+            "GitLab",
+            "GitLab search is off for this setup, so GitLab Duo and Claude Code instructions \
+             cover local code only.",
+        )?;
+    } else if !spec::reaches_gitlab() {
         tui::card(
             "GitLab",
             format!(
