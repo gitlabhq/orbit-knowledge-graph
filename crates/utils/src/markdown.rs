@@ -180,6 +180,17 @@ impl LineIndex {
             .saturating_sub(1);
         (line, offset - self.starts[line])
     }
+
+    /// The position just past the last character of `source[..end]`, before
+    /// its trailing line ending, so a range ends on its own last line.
+    pub fn end_position(&self, source: &str, end: usize) -> (usize, usize) {
+        let content = &source[..end];
+        let content = content
+            .strip_suffix("\r\n")
+            .or_else(|| content.strip_suffix(['\n', '\r']))
+            .unwrap_or(content);
+        self.position(content.len())
+    }
 }
 
 #[cfg(test)]
@@ -291,5 +302,16 @@ mod tests {
         assert_eq!(lines.position(0), (0, 0));
         assert_eq!(lines.position(3), (1, 0));
         assert_eq!(lines.position(5), (1, 2));
+    }
+
+    #[test]
+    fn end_positions_stay_on_the_last_line_of_the_range() {
+        let source = "# A\r\nbody\r\n# B\nend";
+        let lines = LineIndex::new(source);
+        assert_eq!(
+            lines.end_position(source, source.find("# B").unwrap()),
+            (1, 4)
+        );
+        assert_eq!(lines.end_position(source, source.len()), (3, 3));
     }
 }

@@ -32,10 +32,7 @@ fn parse_markdown(
         .and_then(|s| s.to_str())
         .unwrap_or(file_path);
     let lines = LineIndex::new(source);
-    let position = |offset| {
-        let (line, column) = lines.position(offset);
-        Position::new(line, column)
-    };
+    let position = |(line, column)| Position::new(line, column);
     let sections = sections(source);
     let definitions = sections
         .iter()
@@ -50,8 +47,8 @@ fn parse_markdown(
                 name: section.name.clone(),
                 fqn: Fqn::from_parts(&parts, FQN_SEPARATOR),
                 range: Range::new(
-                    position(section.start),
-                    position(section.end),
+                    position(lines.position(section.start)),
+                    position(lines.end_position(source, section.end)),
                     (section.start, section.end),
                 ),
                 is_top_level: section.parent.is_none(),

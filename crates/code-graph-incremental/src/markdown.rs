@@ -13,7 +13,7 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
     let lines = LineIndex::new(source);
     let node = |kind: &str, sym: u32, start: usize, end: usize| {
         let (start_row, start_col) = lines.position(start);
-        let (end_row, end_col) = lines.position(end);
+        let (end_row, end_col) = lines.end_position(source, end);
         Node {
             kind: lang.intern_kind(kind),
             named: true,
