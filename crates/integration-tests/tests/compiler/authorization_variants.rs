@@ -91,13 +91,14 @@ async fn through_the_server(
         .query_result
 }
 
-/// The ids of `Document` rows that every provider the entity's checks name allows.
+/// The ids of `(document, binder)` rows that both checks allow: the approver checks the
+/// document's id, the policy its binder's.
 async fn redacted(
     deployment: Arc<Deployment>,
     caller: Caller,
     catalog: &Arc<Catalog<ClickHouse>>,
     grants: &Grants,
-    ids: &[i64],
+    rows: &[(i64, i64)],
 ) -> Vec<i64> {
     let compiled = compiler::compile(
         "MATCH (d:Document) WHERE d.id IN [1, 2, 3, 4] RETURN d.title LIMIT 10",
@@ -105,22 +106,28 @@ async fn redacted(
         grants,
     )
     .unwrap();
+    let sql = &compiled.base.sql;
+    assert!(sql.contains("d.binder_id AS _orbit_d_id"), "{sql}");
+    assert!(sql.contains("AS _orbit_d_pk"), "{sql}");
     let schema = Arc::new(Schema::new(vec![
+        Field::new("_orbit_d_pk", DataType::Int64, false),
         Field::new("_orbit_d_id", DataType::Int64, false),
         Field::new("_orbit_d_type", DataType::Utf8, false),
     ]));
+    let (documents, binders): (Vec<i64>, Vec<i64>) = rows.iter().copied().unzip();
     let batch = RecordBatch::try_new(
         schema,
         vec![
-            Arc::new(Int64Array::from(ids.to_vec())),
-            Arc::new(StringArray::from(vec!["Document"; ids.len()])),
+            Arc::new(Int64Array::from(documents)),
+            Arc::new(Int64Array::from(binders)),
+            Arc::new(StringArray::from(vec!["Document"; rows.len()])),
         ],
     )
     .unwrap();
     let result = through_the_server(deployment, caller, &compiled, batch).await;
     let mut ids: Vec<i64> = result
         .authorized_rows()
-        .filter_map(|row| row.get("_orbit_d_id")?.as_int64().copied())
+        .filter_map(|row| row.get("_orbit_d_pk")?.as_int64().copied())
         .collect();
     ids.sort_unstable();
     ids
@@ -152,12 +159,26 @@ async fn a_zanzibar_deployment_scopes_with_keys_and_checks_every_row_check() {
     );
 
     assert_eq!(
-        redacted(deployment.clone(), caller, &catalog, &grants, &[1, 2, 3, 4]).await,
+        redacted(
+            deployment.clone(),
+            caller,
+            &catalog,
+            &grants,
+            &[(1, 10), (2, 20), (3, 10), (4, 10)]
+        )
+        .await,
         [1, 3]
     );
     let (bob, bob_grants) = signed_in(&deployment, "bob", &[]).await;
     assert_eq!(
-        redacted(deployment, bob, &catalog, &bob_grants, &[1, 2, 4]).await,
+        redacted(
+            deployment,
+            bob,
+            &catalog,
+            &bob_grants,
+            &[(1, 10), (2, 20), (4, 10)]
+        )
+        .await,
         [4]
     );
 }

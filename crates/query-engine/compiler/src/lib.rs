@@ -71,7 +71,7 @@ pub use passes::hydrate::{
     VirtualFilter, generate_hydration_plan,
 };
 pub use passes::result_contract::{
-    EdgeMeta, EntityAuthConfig, GroupColumn, KeyKind, MeasureColumn, RedactionNode,
+    EdgeMeta, EntityAuthConfig, GroupColumn, KeyKind, KeySource, MeasureColumn, RedactionNode,
     RelationshipColumn, RelationshipColumnKind, ResultContext, ResultShape, entity_auth,
 };
 pub use surface::gql;

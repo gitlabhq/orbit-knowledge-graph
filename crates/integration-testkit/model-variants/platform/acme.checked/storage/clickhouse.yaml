@@ -2,10 +2,18 @@ kind: storage
 package: acme.checked
 store: acme
 entities:
+  Binder:
+    table: acme_binder
+    columns:
+      id: {immutable: true, backend: {type: Int64}}
+      name: {backend: {type: String}}
+      team_key: {backend: {type: String}}
+    access: {order: [id]}
   Document:
     table: acme_document
     columns:
       id: {immutable: true, backend: {type: Int64}}
       title: {backend: {type: String}}
       team_key: {backend: {type: String}}
+      binder_id: {backend: {type: Int64}}
     access: {order: [id]}

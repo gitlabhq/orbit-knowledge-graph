@@ -574,7 +574,7 @@ async fn execute_output(
         phases: TypeMap::default(),
     };
 
-    HydrationStage::resolve_owners(&mut pipeline_ctx, &mut result)
+    HydrationStage::resolve_keys(&mut pipeline_ctx, &mut result)
         .await
         .expect("owner lookup should succeed");
     let checks = result.resource_checks();

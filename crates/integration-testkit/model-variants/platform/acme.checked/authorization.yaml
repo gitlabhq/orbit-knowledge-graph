@@ -1,11 +1,18 @@
 kind: authorization
 package: acme.checked
 entities:
+  Binder:
+    scope: team
+    permission: read
+    enforce: {clickhouse: {scope_key: team_key}}
+    checks: [{provider: policy, permission: read, resource: binder}]
+    properties: {open: [id, name], hidden: [team_key]}
+
   Document:
     scope: team
     permission: read
     enforce: {clickhouse: {scope_key: team_key}}
     checks:
       - {provider: approver, permission: read, resource: document}
-      - {provider: policy, permission: read, resource: document}
-    properties: {open: [id, title], hidden: [team_key]}
+      - {provider: policy, permission: read, resource: binder, object: Binder, id: binder_id}
+    properties: {open: [id, title, binder_id], hidden: [team_key]}

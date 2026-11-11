@@ -1,9 +1,17 @@
 kind: graph
 package: acme.checked
 entities:
+  Binder:
+    label: name
+    properties:
+      id: int64
+      name: string
+      team_key: string
+
   Document:
     label: title
     properties:
       id: int64
       title: string
       team_key: string
+      binder_id: int64

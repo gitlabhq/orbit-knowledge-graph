@@ -116,7 +116,7 @@ pub async fn resolve_owners(
         server_extensions,
         phases: TypeMap::default(),
     };
-    HydrationStage::resolve_owners(&mut pipeline_ctx, result)
+    HydrationStage::resolve_keys(&mut pipeline_ctx, result)
         .await
         .expect("owner lookup should succeed");
 }

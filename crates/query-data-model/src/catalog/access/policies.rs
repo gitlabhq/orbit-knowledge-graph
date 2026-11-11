@@ -229,17 +229,5 @@ pub(super) fn check_references(
                 ));
             }
         }
-        let mut keys = access.checks.iter().filter_map(|check| match check {
-            Check::Rows { id, object, .. } => Some((*id, *object)),
-            Check::Delegated { .. } => None,
-        });
-        if let Some(first) = keys.next()
-            && keys.any(|key| key != first)
-        {
-            diagnostics.error(&entity.package, format!(
-                "{}'s row checks key its rows by different properties; they share one id and object",
-                entity.name
-            ));
-        }
     }
 }

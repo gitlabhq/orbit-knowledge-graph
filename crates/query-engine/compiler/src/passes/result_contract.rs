@@ -18,7 +18,7 @@ use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
-use crate::logical::columns::free_text;
+use crate::logical::columns::{free_text, redaction_column};
 use crate::logical::{Binding, Kind, Query};
 use crate::passes::codegen::{SqlBackend, rejected};
 use crate::passes::plan::Term;
@@ -32,9 +32,21 @@ pub struct EntityAuthConfig {
     pub provider: String,
     pub resource_type: String,
     pub ability: String,
+    /// The property the check keys rows by: the entity's id, or the id of the object it names.
     pub auth_id_column: String,
-    pub owner_entity: Option<String>,
+    pub key_source: KeySource,
     pub key_kind: KeyKind,
+}
+
+/// Where a returned node holds the key a row check derives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeySource {
+    /// The node's own id.
+    Identity,
+    /// The redaction id column the base query returns.
+    Redaction,
+    /// A read of the key property by the node's id after the base query.
+    Lookup,
 }
 
 /// The type of key a row check sends its provider, from the property it keys rows by.
@@ -64,6 +76,7 @@ pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, Vec<Enti
     graph
         .entities()
         .filter_map(|entity| {
+            let redaction = redaction_column(model, entity.id);
             let checks: Vec<EntityAuthConfig> = model
                 .checks(entity.id)
                 .iter()
@@ -73,15 +86,23 @@ pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, Vec<Enti
                         permission,
                         resource,
                         id,
-                        object,
-                    } => Some(EntityAuthConfig {
-                        provider: provider.clone(),
-                        resource_type: resource.clone(),
-                        ability: access.permission(*permission).name.clone(),
-                        auth_id_column: graph.property(*id).name.clone(),
-                        owner_entity: object.map(|owner| graph.entity(owner).name.clone()),
-                        key_kind: KeyKind::of(graph.property(*id).data_type),
-                    }),
+                        ..
+                    } => {
+                        let key = graph.property(*id);
+                        let key_source = match key.name.as_str() {
+                            DEFAULT_PRIMARY_KEY => KeySource::Identity,
+                            name if Some(name) == redaction => KeySource::Redaction,
+                            _ => KeySource::Lookup,
+                        };
+                        Some(EntityAuthConfig {
+                            provider: provider.clone(),
+                            resource_type: resource.clone(),
+                            ability: access.permission(*permission).name.clone(),
+                            auth_id_column: key.name.clone(),
+                            key_source,
+                            key_kind: KeyKind::of(key.data_type),
+                        })
+                    }
                     Check::Delegated { .. } => None,
                 })
                 .collect();
@@ -152,12 +173,6 @@ impl ResultContext {
             .entry(entity_type.into())
             .or_default()
             .push(config);
-    }
-
-    /// The key every row check of the entity identifies its rows by; the loader makes all of an
-    /// entity's checks share it.
-    pub fn get_entity_auth(&self, entity_type: &str) -> Option<&EntityAuthConfig> {
-        self.entity_auth.get(entity_type)?.first()
     }
 
     /// Every row check of the entity.
@@ -513,8 +528,7 @@ fn return_columns(
         else {
             continue;
         };
-        let redaction_column = crate::logical::columns::redaction_column(model, entity_id)
-            .unwrap_or(DEFAULT_PRIMARY_KEY);
+        let redaction_column = redaction_column(model, entity_id).unwrap_or(DEFAULT_PRIMARY_KEY);
         let needs_separate_pk = redaction_column != DEFAULT_PRIMARY_KEY;
         let authorization_id = if needs_separate_pk {
             let table_alias = table_alias.as_deref().ok_or_else(|| {

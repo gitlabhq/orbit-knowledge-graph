@@ -7,7 +7,7 @@ use compiler::constants::{
 };
 use compiler::internal_column_prefix;
 use compiler::orbit_authorization::Key;
-use compiler::{EntityAuthConfig, KeyKind, QueryType, RedactionNode, ResultContext};
+use compiler::{EntityAuthConfig, KeyKind, KeySource, QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
 use orbit_arrow::{ArrowUtils, ColumnValue};
@@ -19,7 +19,8 @@ pub struct NodeRef {
     /// Hydrated entity properties, populated after redaction.
     /// Empty until the hydration stage fetches full properties for this node.
     pub properties: HashMap<String, ColumnValue>,
-    pub owner_id: Option<i64>,
+    /// The key properties its row checks read, looked up by its id after the base query.
+    pub keys: HashMap<String, ColumnValue>,
 }
 
 impl PartialEq for NodeRef {
@@ -36,18 +37,19 @@ impl NodeRef {
             id,
             entity_type: entity_type.into(),
             properties: HashMap::new(),
-            owner_id: None,
+            keys: HashMap::new(),
         }
     }
 
-    /// The key the check sends its provider for this node: its owner's id when the check names
-    /// an owner, else its own.
+    /// The key the check sends its provider for this node: its own id, or the key property
+    /// looked up by it.
     pub fn check_key(&self, check: &EntityAuthConfig) -> Option<Key> {
-        let id = match check.owner_entity {
-            Some(_) => self.owner_id?,
-            None => self.id,
-        };
-        key(check.key_kind, &ColumnValue::Int64(id))
+        match check.key_source {
+            KeySource::Identity => key(check.key_kind, &ColumnValue::Int64(self.id)),
+            KeySource::Redaction | KeySource::Lookup => {
+                key(check.key_kind, self.keys.get(&check.auth_id_column)?)
+            }
+        }
     }
 }
 
@@ -60,6 +62,8 @@ pub struct QueryResultRow {
     /// `edge_kinds[i]` is the relationship that connects `dynamic_nodes[i]` to `dynamic_nodes[i+1]`.
     /// Empty for non-path-finding queries.
     edge_kinds: Vec<String>,
+    /// The key properties of each returned node, by alias, looked up after the base query.
+    keys: HashMap<String, HashMap<String, ColumnValue>>,
     authorized: bool,
 }
 
@@ -73,6 +77,7 @@ impl QueryResultRow {
             columns,
             dynamic_nodes,
             edge_kinds,
+            keys: HashMap::new(),
             authorized: true,
         }
     }
@@ -105,7 +110,15 @@ impl QueryResultRow {
 
     /// The key the check sends its provider for this row's node.
     pub fn check_key(&self, node: &RedactionNode, check: &EntityAuthConfig) -> Option<Key> {
-        key(check.key_kind, self.columns.get(&node.id_column)?)
+        let value = match check.key_source {
+            KeySource::Identity => self
+                .columns
+                .get(&node.pk_column)
+                .or_else(|| self.columns.get(&node.id_column)),
+            KeySource::Redaction => self.columns.get(&node.id_column),
+            KeySource::Lookup => self.keys.get(&node.alias)?.get(&check.auth_id_column),
+        };
+        key(check.key_kind, value?)
     }
 
     pub fn path_nodes(&self) -> &[NodeRef] {
@@ -171,6 +184,14 @@ impl QueryResultRow {
     pub fn remove_column(&mut self, column: &str) {
         self.columns.remove(column);
     }
+}
+
+/// Key properties of one entity to read by node id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyLookup {
+    pub entity: String,
+    pub ids: Vec<i64>,
+    pub properties: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -363,33 +384,84 @@ impl QueryResult {
             .collect()
     }
 
-    pub fn owner_lookups(&self) -> HashMap<String, Vec<i64>> {
-        let mut lookups: HashMap<String, Vec<i64>> = HashMap::new();
-        for node_ref in self.rows.iter().flat_map(|row| &row.dynamic_nodes) {
-            if node_ref.owner_id.is_none()
-                && self
-                    .ctx
-                    .get_entity_auth(&node_ref.entity_type)
-                    .is_some_and(|auth| auth.owner_entity.is_some())
-            {
-                lookups
-                    .entry(node_ref.entity_type.clone())
-                    .or_default()
-                    .push(node_ref.id);
+    /// The key properties to read for each entity, by node id: the static nodes whose checks
+    /// key rows by a property the row does not carry, and the dynamic nodes whose checks key
+    /// rows by anything but their id.
+    pub fn key_lookups(&self) -> Vec<KeyLookup> {
+        let mut lookups: HashMap<String, (HashSet<i64>, HashSet<String>)> = HashMap::new();
+        let mut need = |entity: &str,
+                        id: Option<i64>,
+                        carried: &[KeySource],
+                        found: Option<&HashMap<String, ColumnValue>>| {
+            let properties: Vec<String> = self
+                .ctx
+                .entity_checks(entity)
+                .iter()
+                .filter(|check| !carried.contains(&check.key_source))
+                .filter(|check| {
+                    found.is_none_or(|found| !found.contains_key(&check.auth_id_column))
+                })
+                .map(|check| check.auth_id_column.clone())
+                .collect();
+            if let (Some(id), false) = (id, properties.is_empty()) {
+                let (ids, columns) = lookups.entry(entity.to_string()).or_default();
+                ids.insert(id);
+                columns.extend(properties);
+            }
+        };
+        for row in &self.rows {
+            for node in self.ctx.nodes() {
+                if let Some(entity) = row.get_type(node) {
+                    let carried = [KeySource::Identity, KeySource::Redaction];
+                    let found = row.keys.get(&node.alias);
+                    need(entity, row.get_public_id(node), &carried, found);
+                }
+            }
+            for node_ref in &row.dynamic_nodes {
+                let found = Some(&node_ref.keys);
+                need(
+                    &node_ref.entity_type,
+                    Some(node_ref.id),
+                    &[KeySource::Identity],
+                    found,
+                );
             }
         }
-        for ids in lookups.values_mut() {
-            ids.sort_unstable();
-            ids.dedup();
-        }
         lookups
+            .into_iter()
+            .map(|(entity, (ids, properties))| {
+                let mut ids: Vec<i64> = ids.into_iter().collect();
+                ids.sort_unstable();
+                let mut properties: Vec<String> = properties.into_iter().collect();
+                properties.sort_unstable();
+                KeyLookup {
+                    entity,
+                    ids,
+                    properties,
+                }
+            })
+            .collect()
     }
 
-    pub fn set_owner_ids(&mut self, owners: &HashMap<(String, i64), i64>) {
+    /// Fills the looked-up key properties into every node they were read for.
+    pub fn set_lookup_keys(
+        &mut self,
+        found: &HashMap<(String, i64), HashMap<String, ColumnValue>>,
+    ) {
+        let nodes: Vec<RedactionNode> = self.ctx.nodes().cloned().collect();
         for row in &mut self.rows {
+            for node in &nodes {
+                let key = row
+                    .get_type(node)
+                    .zip(row.get_public_id(node))
+                    .map(|(entity, id)| (entity.to_string(), id));
+                if let Some(keys) = key.and_then(|key| found.get(&key)) {
+                    row.keys.insert(node.alias.clone(), keys.clone());
+                }
+            }
             for node_ref in &mut row.dynamic_nodes {
-                if let Some(owner_id) = owners.get(&(node_ref.entity_type.clone(), node_ref.id)) {
-                    node_ref.owner_id = Some(*owner_id);
+                if let Some(keys) = found.get(&(node_ref.entity_type.clone(), node_ref.id)) {
+                    node_ref.keys = keys.clone();
                 }
             }
         }
@@ -541,7 +613,7 @@ mod tests {
                 resource_type: "user".to_string(),
                 ability: "read_user".to_string(),
                 auth_id_column: "id".to_string(),
-                owner_entity: None,
+                key_source: KeySource::Identity,
                 key_kind: KeyKind::Int,
                 provider: "rails".to_string(),
             },
@@ -552,7 +624,7 @@ mod tests {
                 resource_type: "project".to_string(),
                 ability: "read".to_string(),
                 auth_id_column: "id".to_string(),
-                owner_entity: None,
+                key_source: KeySource::Identity,
                 key_kind: KeyKind::Int,
                 provider: "rails".to_string(),
             },
@@ -930,7 +1002,7 @@ mod tests {
                     resource_type: "project".to_string(),
                     ability: "view".to_string(),
                     auth_id_column: "id".to_string(),
-                    owner_entity: None,
+                    key_source: KeySource::Identity,
                     key_kind: KeyKind::Int,
                     provider: "cedar".to_string(),
                 },
@@ -1024,7 +1096,7 @@ mod tests {
                     resource_type: "user".to_string(),
                     ability: "read_user".to_string(),
                     auth_id_column: "id".to_string(),
-                    owner_entity: None,
+                    key_source: KeySource::Identity,
                     key_kind: KeyKind::Int,
                     provider: "rails".to_string(),
                 },
@@ -1035,7 +1107,7 @@ mod tests {
                     resource_type: "project".to_string(),
                     ability: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
-                    owner_entity: Some("Project".to_string()),
+                    key_source: KeySource::Redaction,
                     key_kind: KeyKind::Int,
                     provider: "rails".to_string(),
                 },
@@ -1083,7 +1155,7 @@ mod tests {
                     resource_type: "project".to_string(),
                     ability: "read_code".to_string(),
                     auth_id_column: "id".to_string(),
-                    owner_entity: None,
+                    key_source: KeySource::Identity,
                     key_kind: KeyKind::Int,
                     provider: "rails".to_string(),
                 },
@@ -1094,7 +1166,7 @@ mod tests {
                     resource_type: "project".to_string(),
                     ability: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
-                    owner_entity: Some("Project".to_string()),
+                    key_source: KeySource::Redaction,
                     key_kind: KeyKind::Int,
                     provider: "rails".to_string(),
                 },
@@ -1113,16 +1185,30 @@ mod tests {
             }]
         }
 
+        fn project_of(
+            id: i64,
+            project: i64,
+        ) -> HashMap<(String, i64), HashMap<String, ColumnValue>> {
+            HashMap::from([(
+                ("Definition".to_string(), id),
+                HashMap::from([("project_id".to_string(), ColumnValue::Int64(project))]),
+            )])
+        }
+
         #[test]
         fn dynamic_node_uses_resolved_owner_id() {
             let mut result = project_row_with_definition();
             assert_eq!(
-                result.owner_lookups(),
-                HashMap::from([("Definition".to_string(), vec![5000])])
+                result.key_lookups(),
+                [KeyLookup {
+                    entity: "Definition".to_string(),
+                    ids: vec![5000],
+                    properties: vec!["project_id".to_string()],
+                }]
             );
-            result.set_owner_ids(&HashMap::from([(("Definition".to_string(), 5000), 1000)]));
+            result.set_lookup_keys(&project_of(5000, 1000));
 
-            assert!(result.owner_lookups().is_empty());
+            assert!(result.key_lookups().is_empty());
             assert_eq!(result.apply_authorizations(&project_auth()), 0);
             assert_eq!(result.authorized_count(), 1);
         }
@@ -1130,7 +1216,7 @@ mod tests {
         #[test]
         fn dynamic_node_denied_by_own_owner_despite_authorized_sibling() {
             let mut result = project_row_with_definition();
-            result.set_owner_ids(&HashMap::from([(("Definition".to_string(), 5000), 1001)]));
+            result.set_lookup_keys(&project_of(5000, 1001));
 
             assert_eq!(result.apply_authorizations(&project_auth()), 1);
             assert_eq!(result.authorized_count(), 0);
@@ -1142,6 +1228,74 @@ mod tests {
 
             assert_eq!(result.apply_authorizations(&project_auth()), 1);
             assert_eq!(result.authorized_count(), 0);
+        }
+
+        #[test]
+        fn a_returned_node_passes_only_if_each_check_allows_the_key_it_derives() {
+            let batch = make_batch(vec![
+                ("_orbit_f_pk", Arc::new(Int64Array::from(vec![7, 8]))),
+                ("_orbit_f_id", Arc::new(Int64Array::from(vec![100, 100]))),
+                (
+                    "_orbit_f_type",
+                    Arc::new(StringArray::from(vec!["File", "File"])),
+                ),
+            ]);
+            let mut ctx = ResultContext::new();
+            ctx.add_node("f", "File");
+            let check =
+                |provider: &str, resource: &str, column: &str, key_source| EntityAuthConfig {
+                    provider: provider.to_string(),
+                    resource_type: resource.to_string(),
+                    ability: "read".to_string(),
+                    auth_id_column: column.to_string(),
+                    key_source,
+                    key_kind: KeyKind::Int,
+                };
+            ctx.add_entity_auth(
+                "File",
+                check("rails", "project", "project_id", KeySource::Redaction),
+            );
+            ctx.add_entity_auth("File", check("cedar", "file", "id", KeySource::Identity));
+            ctx.add_entity_auth(
+                "File",
+                check("zanzibar", "group", "group_id", KeySource::Lookup),
+            );
+            let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
+            assert_eq!(
+                result.key_lookups(),
+                [KeyLookup {
+                    entity: "File".to_string(),
+                    ids: vec![7, 8],
+                    properties: vec!["group_id".to_string()],
+                }]
+            );
+            let group = |id: i64, group: i64| {
+                (
+                    ("File".to_string(), id),
+                    HashMap::from([("group_id".to_string(), ColumnValue::Int64(group))]),
+                )
+            };
+            result.set_lookup_keys(&HashMap::from([group(7, 30), group(8, 31)]));
+            let answer = |provider: &str, resource: &str, keys| ResourceAuthorization {
+                provider: provider.to_string(),
+                resource_type: resource.to_string(),
+                authorized: keys,
+            };
+            let authorizations = [
+                answer("rails", "project", answers([(100, true)])),
+                answer("cedar", "file", answers([(7, true), (8, true)])),
+                answer("zanzibar", "group", answers([(30, true), (31, false)])),
+            ];
+            let checks = result.resource_checks();
+            assert_eq!(checks.len(), 3);
+
+            assert_eq!(result.apply_authorizations(&authorizations), 1);
+            let f = result.ctx().get("f").unwrap().clone();
+            let kept: Vec<i64> = result
+                .authorized_rows()
+                .filter_map(|row| row.get_public_id(&f))
+                .collect();
+            assert_eq!(kept, [7]);
         }
 
         #[test]

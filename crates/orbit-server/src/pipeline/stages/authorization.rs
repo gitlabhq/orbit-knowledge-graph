@@ -36,7 +36,7 @@ impl PipelineStage for AuthorizationStage {
             .inspect_err(|e| obs.record_error(e))?;
         let t = Instant::now();
 
-        HydrationStage::resolve_owners(ctx, &mut input.query_result)
+        HydrationStage::resolve_keys(ctx, &mut input.query_result)
             .await
             .inspect_err(|e| obs.record_error(e))?;
         let resources_to_check = input.query_result.resource_checks();

@@ -71,11 +71,13 @@ where
         .collect()
 }
 
-/// The property that identifies an entity's rows to its row check, when it has one.
+/// The first property other than the id that a row check of the entity keys rows by; the
+/// row carries it in the redaction id column next to the id.
 pub fn redaction_column(model: &Catalog<impl SqlBackend>, entity: EntityId) -> Option<&str> {
     model.checks(entity).iter().find_map(|check| match check {
         query_data_model::catalog::Check::Rows { id, .. } => {
             Some(model.graph().property(*id).name.as_str())
+                .filter(|name| *name != query_data_model::constants::DEFAULT_PRIMARY_KEY)
         }
         query_data_model::catalog::Check::Delegated { .. } => None,
     })

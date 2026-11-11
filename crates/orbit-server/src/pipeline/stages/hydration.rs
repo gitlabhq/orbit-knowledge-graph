@@ -36,11 +36,12 @@ impl HydrationStage {
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
     }
 
-    pub async fn resolve_owners(
+    /// Reads the key properties the row checks need that the base query did not return.
+    pub async fn resolve_keys(
         ctx: &mut QueryPipelineContext,
         query_result: &mut QueryResult,
     ) -> Result<(), PipelineError> {
-        let lookups = query_result.owner_lookups();
+        let lookups = query_result.key_lookups();
         if lookups.is_empty() {
             return Ok(());
         }
@@ -54,27 +55,22 @@ impl HydrationStage {
             .iter()
             .map(|tp| tp.path.clone())
             .collect();
-        let mut id_columns = HashMap::new();
         let mut arms = Vec::new();
-        for (entity_type, mut ids) in lookups {
-            let Some(auth) = query_result.ctx().get_entity_auth(&entity_type) else {
-                continue;
-            };
-            if ids.len() > MAX_DYNAMIC_HYDRATION_RESULTS {
+        for mut lookup in lookups {
+            if lookup.ids.len() > MAX_DYNAMIC_HYDRATION_RESULTS {
                 warn!(
-                    safe(ENTITY) = entity_type.as_str(),
-                    safe(COUNT) = ids.len(),
+                    safe(ENTITY) = lookup.entity.as_str(),
+                    safe(COUNT) = lookup.ids.len(),
                     safe(LIMIT) = MAX_DYNAMIC_HYDRATION_RESULTS,
-                    "owner lookup is capped, so nodes past the limit are redacted"
+                    "key lookup is capped, so nodes past the limit are redacted"
                 );
-                ids.truncate(MAX_DYNAMIC_HYDRATION_RESULTS);
+                lookup.ids.truncate(MAX_DYNAMIC_HYDRATION_RESULTS);
             }
-            id_columns.insert(entity_type.clone(), auth.auth_id_column.clone());
             arms.push(hydration_helpers::hydration_arm(
                 data_model.model(),
-                &entity_type,
-                &ids,
-                std::slice::from_ref(&auth.auth_id_column),
+                &lookup.entity,
+                &lookup.ids,
+                &lookup.properties,
                 scope.clone(),
             )?);
         }
@@ -84,14 +80,7 @@ impl HydrationStage {
             .get_or_insert_default::<QueryExecutionLog>()
             .0
             .extend(executions);
-        let owners = property_map
-            .iter()
-            .filter_map(|((entity_type, id), props)| {
-                let owner_id = props.get(id_columns.get(entity_type)?)?.as_int64()?;
-                Some(((entity_type.clone(), *id), *owner_id))
-            })
-            .collect();
-        query_result.set_owner_ids(&owners);
+        query_result.set_lookup_keys(&property_map);
         Ok(())
     }
 

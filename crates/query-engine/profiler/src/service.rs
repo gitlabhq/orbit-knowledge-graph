@@ -179,7 +179,7 @@ impl PipelineStage for MockAuthorizationStage {
             .remove::<ExtractionOutput>()
             .ok_or_else(|| PipelineError::Authorization("ExtractionOutput not found".into()))?;
 
-        HydrationStage::resolve_owners(ctx, &mut input.query_result).await?;
+        HydrationStage::resolve_keys(ctx, &mut input.query_result).await?;
         let checks = input.query_result.resource_checks();
         let authorizations: Vec<ResourceAuthorization> = checks
             .iter()

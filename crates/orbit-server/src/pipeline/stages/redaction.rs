@@ -41,7 +41,7 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use orbit_authorization::Key;
-    use query_engine::compiler::{EntityAuthConfig, KeyKind, ResultContext};
+    use query_engine::compiler::{EntityAuthConfig, KeyKind, KeySource, ResultContext};
     use query_engine::pipeline::NoOpObserver;
     use query_engine::types::{QueryResult, ResourceAuthorization};
     use std::sync::Arc;
@@ -68,7 +68,7 @@ mod tests {
                 resource_type: "project".to_string(),
                 ability: "read".to_string(),
                 auth_id_column: "id".to_string(),
-                owner_entity: None,
+                key_source: KeySource::Identity,
                 key_kind: KeyKind::Int,
                 provider: "rails".to_string(),
             },
