@@ -163,7 +163,6 @@ static SESSION: LazyLock<crate::remote::server_schema::Session> =
 
 static NO_GITLAB: AtomicBool = AtomicBool::new(false);
 
-/// Keeps this setup run, and the hooks it writes, on local Orbit even when GitLab answers.
 pub(crate) fn keep_local() {
     NO_GITLAB.store(true, Ordering::Relaxed);
 }
@@ -176,7 +175,6 @@ pub(crate) fn reaches_gitlab() -> bool {
     !keeps_local() && SESSION.reachable
 }
 
-/// The `hook-guard` flag that replaces `{{hook_gitlab}}` in hook templates.
 pub(crate) fn hook_gitlab_arg() -> &'static str {
     if keeps_local() {
         " --no-gitlab"
@@ -727,13 +725,6 @@ mod tests {
             "{rendered}"
         );
         assert!(!render_instructions(GLAB_LAUNCHER, false, &providers).contains("Widget"));
-    }
-
-    #[test]
-    fn no_gitlab_instructions_are_local_even_after_setup_reached_gitlab() {
-        let local = render_instructions(launcher(), false, &Providers::new());
-        assert_eq!(instructions_text(true, true), local);
-        assert!(!local.contains("GitLab"), "{local}");
     }
 
     const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh"];

@@ -656,9 +656,10 @@ enum Commands {
         #[arg(long)]
         no_index: bool,
 
-        /// Keep the agent on local Orbit: setup skips the GitLab check, and the
-        /// hooks it writes print local-only instructions even when signed in.
-        #[arg(long, env = "ORBIT_NO_GITLAB", value_parser = clap::builder::BoolishValueParser::new())]
+        /// Keep GitLab Duo and Claude Code on local Orbit: setup does not
+        /// contact GitLab, and their hooks print local-only instructions even
+        /// when signed in.
+        #[arg(long, env = "ORBIT_NO_GITLAB", value_parser = clap::builder::FalseyValueParser::new())]
         no_gitlab: bool,
 
         /// What to install as the `orbit` skill. `wrapper` loads the real
@@ -698,7 +699,6 @@ enum Commands {
         #[arg(long, hide = true)]
         gitlab: bool,
 
-        /// Print local-only instructions even when signed in; setup adds it with `setup --no-gitlab`.
         #[arg(long, hide = true, conflicts_with = "gitlab")]
         no_gitlab: bool,
     },
