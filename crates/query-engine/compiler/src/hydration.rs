@@ -15,11 +15,13 @@ pub struct HydrationCompileOptions {
     pub path_segment_budget: Option<usize>,
 }
 
+#[derive(Debug)]
 pub struct HydrationRequest {
     pub arms: Vec<HydrationArm>,
     pub options: HydrationCompileOptions,
 }
 
+#[derive(Debug)]
 pub struct HydrationArm {
     pub plan: LogicalPlan,
     pub traversal_paths: Vec<TraversalPath>,

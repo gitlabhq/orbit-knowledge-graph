@@ -7,7 +7,6 @@ use query_data_model::surface::Statement;
 use query_data_model::surface::gql::{self, Routed};
 use query_data_model::{Catalog, ClickHouse, Model};
 
-use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
 use crate::{CompiledQueryContext, QueryError, Result};
 use orbit_authorization::Grants;
@@ -72,9 +71,9 @@ pub fn compile_query(
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), *limits, Arc::clone(data_model));
-    ctx.set_statement(query.statement);
-    crate::finish(&mut ctx, config::run_clickhouse_gql)
+    let stage =
+        crate::split_statement(query.statement, data_model, grants, limits)?.into_single()?;
+    crate::compile_stage(stage, data_model, grants, limits)
 }
 
 fn resolve_schema(

@@ -267,8 +267,8 @@ pub fn generate(input: TokenStream) -> TokenStream {
     }
 
     trait_sigs.push(quote! {
-        type Backend: crate::passes::codegen::SqlBackend;
-        fn data_model(&self) -> &query_data_model::Catalog<Self::Backend>;
+        type Backend: crate::dag::StageBackend;
+        fn data_model(&self) -> &<Self::Backend as crate::dag::StageBackend>::Catalog;
         fn current_phase(&self) -> &'static str;
         fn set_current_phase(&mut self, phase: &'static str);
     });
@@ -323,8 +323,8 @@ pub fn generate(input: TokenStream) -> TokenStream {
                 quote! { #n: #ty }
             })
             .collect();
-        let model_param =
-            quote! { data_model: std::sync::Arc<query_data_model::Catalog<#backend_ty>> };
+        let catalog_ty = quote! { <#backend_ty as crate::dag::StageBackend>::Catalog };
+        let model_param = quote! { data_model: std::sync::Arc<#catalog_ty> };
         let env_names: Vec<_> = pipeline.env.iter().collect();
         let state_names: Vec<_> = pipeline.state.iter().collect();
 
@@ -341,7 +341,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
         trait_impls.push(quote! {
             type Backend = #backend_ty;
 
-            fn data_model(&self) -> &query_data_model::Catalog<Self::Backend> {
+            fn data_model(&self) -> &<Self::Backend as crate::dag::StageBackend>::Catalog {
                 if !self.current_phase.is_empty() {
                     assert!(
                         matches!(self.current_phase, #(#model_arms)|*),
@@ -479,7 +479,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
 
         out.extend(quote! {
             pub struct #ctx_name {
-                pub data_model: std::sync::Arc<query_data_model::Catalog<#backend_ty>>,
+                pub data_model: std::sync::Arc<#catalog_ty>,
                 #(#env_fields,)*
                 #(#state_fields,)*
                 current_phase: &'static str,
