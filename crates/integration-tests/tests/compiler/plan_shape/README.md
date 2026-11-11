@@ -43,8 +43,10 @@ contract:
 
 The plan-shape binary loads the embedded query config, so `settings` sees the
 production settings, such as the query cache. The container suite runs EXPLAIN
-on the seeded ClickHouse for every fixture with `indexes`. Each skip index must
-apply to a read of its table. Other fixtures need no ClickHouse.
+on the seeded ClickHouse for every fixture with `indexes`. It first adds an older
+decoy copy of each row in its own part, with string values that no fixture
+matches. With the table's other skip indexes ignored, each listed skip index must
+apply to a read of its table and prune granules. Other fixtures need no ClickHouse.
 
 After `paginate`, `Limit` shows the fetched rows (the page plus one probe row)
 and `Offset` shows the lowered SKIP. In `input`, `Limit` and `Offset` show the

@@ -103,9 +103,17 @@ impl TestContext {
     }
 
     pub async fn explain_plan(&self, pq: &ParameterizedQuery) -> serde_json::Value {
+        self.explain_plan_with(pq, &[]).await
+    }
+
+    pub async fn explain_plan_with(
+        &self,
+        pq: &ParameterizedQuery,
+        settings: &[(&str, &str)],
+    ) -> serde_json::Value {
         let text = self
             .create_client()
-            .explain_plan(&pq.render())
+            .explain_plan_with(&pq.render(), settings)
             .await
             .expect("explain failed");
         serde_json::from_str(&text).expect("explain output is JSON")
