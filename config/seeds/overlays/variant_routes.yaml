@@ -4,10 +4,19 @@
   replace: |4
           description: Calls with variant storage routes
 - file: gitlab/authorization.yaml
-  find: |4
-        CALLS: same_namespace
-  replace: |4
-        CALLS: {variants: {Definition -> Definition: same_namespace, File -> Definition: same_namespace}}
+  find: |2
+      CALLS:
+        scope: namespace
+        permission: read
+        enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  replace: |2
+      CALLS:
+        scope: namespace
+        permission: read
+        enforce: {clickhouse: {scope_key: traversal_path, of: own}}
+        variants:
+          Definition -> Definition: {clickhouse: {scope_key: traversal_path, of: both}}
+          File -> Definition: {clickhouse: {scope_key: traversal_path, of: both}}
 - file: gitlab/storage/clickhouse.yaml
   find: |2
       CALLS:

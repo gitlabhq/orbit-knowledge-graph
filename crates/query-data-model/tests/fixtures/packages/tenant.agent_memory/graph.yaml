@@ -11,6 +11,7 @@ entities:
       summary: string
       created_at: timestamp
       project_id: int64
+      traversal_path: string
 relationships:
   IN_PROJECT:
     variants:

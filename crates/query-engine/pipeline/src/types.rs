@@ -2,7 +2,10 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use compiler::{CompiledQueryContext, SecurityContext};
+use compiler::CompiledQueryContext;
+use orbit_authorization::Grants;
+
+use crate::session::SecurityContext;
 
 use crate::error::PipelineError;
 
@@ -48,6 +51,8 @@ pub struct QueryPipelineContext {
     pub query_json: String,
     pub compiled: Option<Arc<CompiledQueryContext>>,
     pub security_context: Option<SecurityContext>,
+    /// The caller's scope answers, which the compiler's security phase enforces.
+    pub grants: Option<Grants>,
     /// Server-specific infrastructure (ClickHouse client, etc.)
     pub server_extensions: TypeMap,
     /// Inter-stage data flowing between pipeline stages.
@@ -69,5 +74,11 @@ impl QueryPipelineContext {
         self.security_context
             .as_ref()
             .ok_or_else(|| PipelineError::Security("security context not yet available".into()))
+    }
+
+    pub fn grants(&self) -> Result<&Grants, PipelineError> {
+        self.grants
+            .as_ref()
+            .ok_or_else(|| PipelineError::Security("caller grants not yet available".into()))
     }
 }

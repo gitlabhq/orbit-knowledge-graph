@@ -62,6 +62,22 @@ impl HydrationArm {
             traversal_paths,
         })
     }
+
+    /// Keeps the caller's paths only on an arm whose entity's rows hold a scope key column.
+    pub(crate) fn scope_on<B: crate::passes::codegen::SqlBackend>(
+        &mut self,
+        catalog: &query_data_model::Catalog<B>,
+    ) {
+        let query = crate::logical::Query::new(&self.plan, catalog.model());
+        let keyed = query.bindings().into_iter().all(|binding| {
+            catalog.guard(binding.entity).is_some_and(|guard| {
+                matches!(guard.rule, query_data_model::catalog::Rule::Column(_))
+            })
+        });
+        if !keyed {
+            self.traversal_paths.clear();
+        }
+    }
 }
 
 #[cfg(test)]

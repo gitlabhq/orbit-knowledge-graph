@@ -14,7 +14,7 @@ pub use crate::passes::plan::remote::{RemotePlan, Target, plan};
 pub use crate::passes::remote_security::{Namespaces, check, secure};
 
 use crate::error::{QueryError, Result};
-use crate::types::SecurityContext;
+use orbit_authorization::Grants;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "backend", rename_all = "snake_case")]
@@ -23,8 +23,8 @@ pub enum RemoteRequest {
     Live(ExtractionRequest),
 }
 
-pub fn parse(raw: &str, model: &Model, ctx: &SecurityContext) -> Result<LogicalPlan> {
-    let catalog = match ctx.admin {
+pub fn parse(raw: &str, model: &Model, grants: &Grants) -> Result<LogicalPlan> {
+    let catalog = match grants.caller().admin() {
         true => model.logical().as_admin(),
         false => model.logical(),
     };
@@ -44,12 +44,12 @@ pub fn render(target: &Target, plan: &RemotePlan) -> Result<RemoteRequest> {
 pub fn compile(
     raw: &str,
     model: &Arc<Model>,
-    ctx: &SecurityContext,
+    grants: &Grants,
     namespaces: &Namespaces,
 ) -> Result<RemoteRequest> {
-    let logical = parse(raw, model, ctx)?;
+    let logical = parse(raw, model, grants)?;
     let (target, planned) = plan(&logical, model)?;
-    let emitted = secure(&target, planned, ctx, namespaces)?;
+    let emitted = secure(&target, planned, grants, namespaces)?;
     check(&emitted)?;
     render(&target, &emitted)
 }

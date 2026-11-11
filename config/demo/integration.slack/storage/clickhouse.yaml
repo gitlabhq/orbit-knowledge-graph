@@ -1,0 +1,17 @@
+kind: storage
+package: integration.slack
+store: graph
+entities:
+  SlackWorkspace:
+    table: gl_slack_workspace
+    columns:
+      id: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      name: {backend: {type: String, codec: [ZSTD(1)]}}
+      group_id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id, group_id], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+relationships:
+  INSTALLED_IN:
+    SlackWorkspace -> Group: {fk: {on: source, column: group_id}}

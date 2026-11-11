@@ -69,18 +69,16 @@ pub(super) fn propagate(
 }
 
 fn scoped(query: Query<'_>, edge: &Edge, model: &Catalog<impl SqlBackend>) -> Scoped {
-    let source = query.entity_name(edge.from).unwrap_or_default();
     let (from, to) = (query.entity(edge.from), query.entity(edge.to));
     let scope = |kind: &String| super::variant_scope(model, kind, from, to);
     Scoped {
         from: edge.from,
         to: edge.to,
         preserving: edge.types.iter().all(|kind| {
-            scope(kind).is_some_and(query_data_model::EdgeVariantScope::is_scope_preserving)
+            scope(kind).is_some_and(query_data_model::catalog::EdgeScope::preserves_scope)
         }),
-        to_source: edge
-            .types
-            .iter()
-            .all(|kind| scope(kind).is_some_and(|scope| scope.propagates_to_source(kind, source))),
+        to_source: edge.types.iter().all(|kind| {
+            scope(kind).is_some_and(query_data_model::catalog::EdgeScope::propagates_to_source)
+        }),
     }
 }

@@ -20,7 +20,8 @@ use tracing::Instrument;
 use super::auth::extract_request_context;
 use crate::active_schema::ActiveSchema;
 use crate::analytics::AnalyticsTracker;
-use crate::auth::{Claims, JwtValidator, SourceType, build_security_context};
+use crate::auth::{Claims, JwtValidator, SourceType};
+use crate::authorization::gitlab::VerifiedRequest;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::indexing_status::{IndexingStatusService, build_indexing_status_response};
@@ -631,9 +632,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let req = request.get_ref();
         let traversal_path = parse_authorized_path(&claims, &req.traversal_path)?;
 
-        let security_context =
-            build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
-
         info!(
             safe(TRAVERSAL_PATH) = traversal_path.as_str(),
             safe(RESPONSE_FORMAT) = req.format,
@@ -643,7 +641,12 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let response = self
             .graph_status
-            .get_status(&schema, &traversal_path, req.format, &security_context)
+            .get_status(
+                &schema,
+                &traversal_path,
+                req.format,
+                &caller_grants(&schema, &claims).await?,
+            )
             .await?;
         Ok(Response::new(response))
     }
@@ -674,8 +677,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let ctx = extract_request_context(&request, &self.validator)?;
         let req = request.get_ref();
         let paths = parse_authorized_paths(&ctx.claims, read_item_count_paths(req)?)?;
-        let security_context = build_security_context(&ctx.claims)
-            .map_err(|e| Status::unauthenticated(e.to_string()))?;
 
         info!(
             safe(COUNT) = paths.len(),
@@ -684,7 +685,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let schema = self.active_schema.snapshot()?;
         let counts = self
             .item_counts
-            .count_items(&schema.data_model, &security_context, &paths)
+            .count_items(
+                &schema.data_model,
+                &caller_grants(&schema, &ctx.claims).await?,
+                &paths,
+            )
             .await?;
         Ok(Response::new(build_item_counts_response(
             schema.data_model.model(),
@@ -860,6 +865,34 @@ fn read_item_count_paths(req: &GetItemCountsRequest) -> Result<&[String], Status
         (_, true) => Ok(slice::from_ref(&req.traversal_path)),
         (true, false) => Ok(req.traversal_paths.as_slice()),
     }
+}
+
+/// The caller's scope answers from the active schema's authorization providers.
+async fn caller_grants(
+    schema: &crate::active_schema::SchemaSnapshot,
+    claims: &Claims,
+) -> Result<orbit_authorization::Grants, Status> {
+    let request = orbit_authorization::Request::new(VerifiedRequest {
+        claims: claims.clone(),
+        exchange: None,
+    });
+    let unauthenticated = |error: orbit_authorization::AuthError| match error {
+        orbit_authorization::AuthError::Denied(message) => Status::unauthenticated(message),
+        orbit_authorization::AuthError::NoScopes => Status::unauthenticated(
+            crate::auth::authz::SecurityContextError::NoEnabledNamespaces.to_string(),
+        ),
+        other => Status::unauthenticated(other.to_string()),
+    };
+    let caller = schema
+        .authorization
+        .identify(request)
+        .await
+        .map_err(unauthenticated)?;
+    schema
+        .authorization
+        .grants(&caller)
+        .await
+        .map_err(unauthenticated)
 }
 
 fn parse_authorized_paths(claims: &Claims, paths: &[String]) -> Result<Vec<TraversalPath>, Status> {

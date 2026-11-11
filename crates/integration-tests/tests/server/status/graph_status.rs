@@ -7,7 +7,7 @@ use orbit_server::proto::{
     StructuredGraphStatus, get_graph_status_response,
 };
 use orbit_utils::traversal_path::TraversalPath;
-use query_engine::compiler::{AuthorizedPath, SecurityContext};
+use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 
 use super::fixtures::{admin_context, pinned_schema, seed_namespaces};
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
@@ -42,7 +42,7 @@ async fn get_status(
             &pinned_schema(),
             &TraversalPath::new_unchecked(traversal_path),
             format as i32,
-            security_context,
+            &crate::common::grants(security_context.clone()),
         )
         .await
 }

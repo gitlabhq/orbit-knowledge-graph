@@ -1,9 +1,17 @@
-use crate::auth::{Claims, build_security_context};
+use std::sync::Arc;
+
+use orbit_authorization::{AuthError, Request};
+
+use crate::auth::Claims;
+use crate::authorization::Deployment;
+use crate::authorization::gitlab::{GitLabCaller, RailsExchange, VerifiedRequest};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
 
+/// Identifies the caller through the deployment's identify provider and resolves the scope
+/// answers its reads need.
 #[derive(Clone)]
 pub struct SecurityStage;
 
@@ -16,16 +24,49 @@ impl PipelineStage for SecurityStage {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
+        let missing =
+            |what: &str| PipelineError::Security(format!("{what} not found in server_extensions"));
         let claims = ctx
             .server_extensions
             .get::<Claims>()
-            .ok_or_else(|| PipelineError::Security("Claims not found in server_extensions".into()))
+            .ok_or_else(|| missing("Claims"));
+        let deployment = ctx
+            .server_extensions
+            .get::<Arc<Deployment>>()
+            .ok_or_else(|| missing("authorization"));
+        let (claims, deployment) = match (claims, deployment) {
+            (Ok(claims), Ok(deployment)) => (claims.clone(), Arc::clone(deployment)),
+            (Err(error), _) | (_, Err(error)) => {
+                obs.record_error(&error);
+                return Err(error);
+            }
+        };
+        let exchange = ctx.server_extensions.get::<Arc<RailsExchange>>().cloned();
+        let request = Request::new(VerifiedRequest { claims, exchange });
+        let resolved = async {
+            let caller = deployment.identify(request).await?;
+            let grants = deployment.grants(&caller).await?;
+            Ok::<_, AuthError>((caller, grants))
+        };
+        let (caller, grants) = resolved
+            .await
+            .map_err(security_error)
             .inspect_err(|e| obs.record_error(e))?;
-        let result = build_security_context(claims)
-            .map_err(PipelineError::from)
-            .inspect_err(|e| obs.record_error(e))?;
-        ctx.security_context = Some(result);
+        ctx.security_context = caller
+            .session::<GitLabCaller>()
+            .map(|session| session.context.clone());
+        ctx.grants = Some(grants);
+        ctx.server_extensions.insert(caller);
         Ok(())
+    }
+}
+
+fn security_error(error: AuthError) -> PipelineError {
+    match error {
+        AuthError::NoScopes => PipelineError::NoEnabledNamespaces,
+        AuthError::Denied(message)
+        | AuthError::Invalid(message)
+        | AuthError::Unavailable(message) => PipelineError::Security(message),
     }
 }
 
@@ -73,10 +114,12 @@ mod tests {
     fn pipeline_context(claims: Claims) -> QueryPipelineContext {
         let mut extensions = TypeMap::default();
         extensions.insert(claims);
+        extensions.insert(Arc::new(crate::authorization::tests::deployment()));
         QueryPipelineContext {
             query_json: String::new(),
             compiled: None,
             security_context: None,
+            grants: None,
             server_extensions: extensions,
             phases: TypeMap::default(),
         }
@@ -93,6 +136,12 @@ mod tests {
         let sc = ctx.security_context.unwrap();
         assert_eq!(sc.org_id, 42);
         assert_eq!(sc.traversal_paths[0].path, "42/");
+        let grants = ctx.grants.unwrap();
+        assert!(grants.caller().admin());
+        assert_eq!(
+            grants.scope_set("namespace", "read_security").unwrap(),
+            &orbit_authorization::ScopeSet::Subtrees(vec!["42/".into()])
+        );
     }
 
     #[tokio::test]
@@ -120,6 +169,7 @@ mod tests {
             query_json: String::new(),
             compiled: None,
             security_context: None,
+            grants: None,
             server_extensions: TypeMap::default(),
             phases: TypeMap::default(),
         };

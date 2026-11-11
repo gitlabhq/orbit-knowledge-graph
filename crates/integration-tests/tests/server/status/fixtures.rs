@@ -7,7 +7,7 @@ use orbit_server::active_schema::{ActiveSchema, SchemaSnapshot};
 use orbit_server::item_counts::{ItemCountService, ScopeItemCounts};
 use orbit_server_config::AppConfig;
 use orbit_utils::traversal_path::TraversalPath;
-use query_engine::compiler::{AuthorizedPath, SecurityContext};
+use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 
 use crate::common::TestContext;
 
@@ -128,7 +128,11 @@ pub async fn count_items(
         .map(|scope| TraversalPath::new_unchecked(*scope))
         .collect();
     ItemCountService::new(Arc::new(ctx.create_client()))
-        .count_items(&load_data_model(), security_context, &scopes)
+        .count_items(
+            &load_data_model(),
+            &crate::common::grants(security_context.clone()),
+            &scopes,
+        )
         .await
         .expect("item counts")
 }

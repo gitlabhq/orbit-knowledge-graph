@@ -1,9 +1,9 @@
 use crate::compiler::setup::embedded_model;
-use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
+use query_engine::compiler::{HydrationPlan, compile};
 
 fn compile_query(query: &str) -> query_engine::compiler::CompiledQueryContext {
     let data_model = embedded_model();
-    let security_ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+    let security_ctx = crate::compiler::setup::test_ctx();
     compile(query, &data_model, &security_ctx).unwrap()
 }
 

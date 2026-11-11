@@ -54,6 +54,7 @@ pub struct AppConfig {
     pub schema: SchemaConfig,
     pub analytics: AnalyticsConfig,
     pub billing: BillingConfig,
+    pub authorization: crate::authorization::AuthorizationConfig,
     pub features: FeaturesConfig,
     pub object_storage: ObjectStorageConfig,
 }

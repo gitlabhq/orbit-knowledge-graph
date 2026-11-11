@@ -1,26 +1,17 @@
-//! Security filter injection for multi-tenant isolation.
+//! The security phase on relational plans: each scan's guard becomes a filter on its scope key
+//! column, rendered from the caller's scope set.
 //!
-//! Injects path filters on every scan whose guard names a path column.
-//! The org_id is encoded as the first segment of each path, validated at construction.
+//! - `Subtrees`: `startsWith(column, root)`, or-ed over the minimal roots;
+//! - `Keys`: `column IN keys`;
+//! - `All`: no filter;
+//! - an empty set: `false`, so the read returns no rows.
 //!
-//! Path filtering strategy:
-//! - 1 path: `startsWith(path)`
-//! - 2+ paths: `startsWith(p1) OR startsWith(p2) OR ...`
-//!
-//! # Per-entity role scoping
-//!
-//! Each guard carries the entity's role floor. Before injecting the
-//! `startsWith` predicate for a scan we drop any traversal path where the
-//! user's access level is below that floor.
-//!
-//! This closes the aggregation-query oracle where a Reporter-only user
-//! could count or binary-search properties on a higher-privilege entity
-//! (e.g. Vulnerability) by pairing a Project `group_by` with a Vulnerability
-//! target. Now the target entity's scan is filtered down to zero paths
-//! (producing a Bool(false) predicate) and the aggregation counts nothing.
+//! Each guard names its own permission, so a read of an entity that needs a stronger
+//! permission than its neighbours is filtered down to the scopes where the caller holds it.
 
 use std::collections::HashMap;
 
+use orbit_authorization::{Grants, ScopeKey, ScopeSet};
 use orbit_utils::query_types::SqlType;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 use query_data_model::Catalog;
@@ -31,34 +22,24 @@ use query_data_model::implementations::relational::plan::{
 use query_data_model::plan::tracking::{NodeId, Plan, Ref};
 use serde_json::Value;
 
+use super::guards::{scan, scope_set};
 use crate::error::{QueryError, Result};
 use crate::passes::codegen::ClickHousePlan;
-pub use crate::types::SecurityContext;
 
-/// Per-scan path columns and role floors come from the loader's guards.
-/// Tables without authorization metadata keep the Reporter floor.
 pub fn apply_security_context(
     plan: ClickHousePlan,
     catalog: &Catalog<ClickHouse>,
-    ctx: &SecurityContext,
+    grants: &Grants,
 ) -> Result<ClickHousePlan> {
-    // An entirely empty security context is treated as a fail-closed bug:
-    // the caller forgot to populate traversal paths. Emitting `Bool(false)`
-    // here would silently return empty results, which is indistinguishable
-    // from "user has no namespaces" and obscures the root cause. Note that
-    // this differs from a role-mismatch empty-path set for a specific
-    // alias — in that case the user has paths, just none at the required
-    // role, and returning zero rows for the protected entity is the
-    // intended behavior.
-    if ctx.traversal_paths.is_empty() {
+    // No answers at all means the caller was never resolved; an empty result would hide that.
+    if grants.is_empty() {
         return Err(QueryError::Security(
-            "security context has no traversal_path entries; refusing to compile \
-             because every gl_* alias would fall back to Bool(false) and hide \
-             the underlying auth misconfiguration"
+            "the caller holds no scope answers; refusing to compile because every read \
+             would fall back to false and hide the misconfiguration"
                 .into(),
         ));
     }
-    let mut guards = guards(&plan.plan, catalog, ctx);
+    let mut guards = guards(&plan.plan, catalog, grants)?;
     catalog
         .rebuild(plan, |q, step| {
             let Some(conditions) = guards.remove(&step.node()) else {
@@ -90,8 +71,8 @@ pub fn apply_security_context(
 fn guards(
     graph: &Plan<Relational<ClickHouse>>,
     catalog: &Catalog<ClickHouse>,
-    ctx: &SecurityContext,
-) -> HashMap<NodeId, Vec<Expr>> {
+    grants: &Grants,
+) -> Result<HashMap<NodeId, Vec<Expr>>> {
     let mut guards = HashMap::new();
     for node in graph.nodes() {
         let operation = graph.operation(node);
@@ -103,30 +84,27 @@ fn guards(
         }
         let mut scans = Vec::new();
         collect_scans(graph, *source, &mut scans);
-        let conditions: Vec<Expr> = scans
-            .into_iter()
-            .filter_map(|scan| {
-                let Operation::Scan { table, .. } = graph.operation(scan) else {
-                    return None;
+        let mut conditions = Vec::new();
+        for scanned in scans {
+            let Operation::Scan { table, .. } = graph.operation(scanned) else {
+                continue;
+            };
+            for guard in scan(catalog, *table).into_iter().flatten() {
+                let Some(column) = graph
+                    .outputs(scanned)
+                    .find(|output| graph.name(*output) == Some(guard.column.as_str()))
+                else {
+                    continue;
                 };
-                Some(
-                    super::guards::scan(catalog, *table)?
-                        .into_iter()
-                        .filter_map(move |guard| {
-                            let column = graph.outputs(scan).find(|output| {
-                                graph.name(*output) == Some(guard.column.as_str())
-                            })?;
-                            Some(path_filter(column, &ctx.paths_at_least(guard.min_role)))
-                        }),
-                )
-            })
-            .flatten()
-            .collect();
+                let set = scope_set(grants, catalog.model(), guard.scope, guard.permission)?;
+                conditions.extend(scope_filter(column, set));
+            }
+        }
         if !conditions.is_empty() {
             guards.insert(node, conditions);
         }
     }
-    guards
+    Ok(guards)
 }
 
 fn source_of_rows(operation: &Operation) -> bool {
@@ -148,6 +126,48 @@ fn collect_scans(graph: &Plan<Relational<ClickHouse>>, node: NodeId, scans: &mut
     }
 }
 
+/// The filter a scope set puts on a scope key column; `All` puts none.
+fn scope_filter(column: Ref, set: &ScopeSet) -> Option<Expr> {
+    match set {
+        ScopeSet::All => None,
+        ScopeSet::Subtrees(roots) => {
+            let roots: Vec<TraversalPath> = roots.iter().map(|root| root.as_str().into()).collect();
+            Some(path_filter(column, &roots.iter().collect::<Vec<_>>()))
+        }
+        ScopeSet::Keys(keys) => Some(key_filter(column, keys)),
+    }
+}
+
+fn key_filter(column: Ref, keys: &[ScopeKey]) -> Expr {
+    let (data_type, values): (SqlType, Vec<Value>) = match keys.first() {
+        None => return falsehood(),
+        Some(ScopeKey::Int(_)) => (SqlType::Int64, keys.iter().map(key_value).collect()),
+        Some(ScopeKey::Text(_)) => (SqlType::String, keys.iter().map(key_value).collect()),
+    };
+    Expr::Binary {
+        op: BinaryOp::In,
+        left: Box::new(Expr::Column(column)),
+        right: Box::new(Expr::Parameter {
+            data_type: data_type.to_array(),
+            value: Value::Array(values),
+        }),
+    }
+}
+
+pub(crate) fn key_value(key: &ScopeKey) -> Value {
+    match key {
+        ScopeKey::Int(key) => Value::from(*key),
+        ScopeKey::Text(key) => Value::from(key.as_str()),
+    }
+}
+
+fn falsehood() -> Expr {
+    Expr::Parameter {
+        data_type: SqlType::Bool,
+        value: Value::Bool(false),
+    }
+}
+
 fn path_filter(column: Ref, paths: &[&TraversalPath]) -> Expr {
     let starts_with = |path: &str| Expr::Call {
         function: Function::StartsWith,
@@ -160,10 +180,7 @@ fn path_filter(column: Ref, paths: &[&TraversalPath]) -> Expr {
         ],
     };
     match paths {
-        [] => Expr::Parameter {
-            data_type: SqlType::Bool,
-            value: Value::Bool(false),
-        },
+        [] => falsehood(),
         [path] => starts_with(path.as_str()),
         _ => {
             let collapsed = TraversalPathTrie::from_paths(paths).to_minimal_prefixes();
@@ -237,19 +254,37 @@ mod tests {
     }
 
     fn secured(plan: ClickHousePlan, paths: &[&str]) -> String {
-        let paths = paths.iter().map(|path| path.to_string()).collect();
-        let ctx = SecurityContext::new(1, paths).unwrap();
-        let plan = apply_security_context(plan, model(), &ctx).unwrap();
+        let grants = crate::test_grants::reporter(model().model(), paths);
+        let plan = apply_security_context(plan, model(), &grants).unwrap();
         model().render(&plan).sql
     }
 
     #[test]
-    fn an_empty_security_context_fails_closed() {
-        let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        ctx.traversal_paths.clear();
+    fn grants_with_no_answers_fail_closed() {
+        let grants = Grants::new(orbit_authorization::Caller::new("test", false, ()));
         let plan = scans(&[("gl_project", "p")], None);
-        let error = apply_security_context(plan, model(), &ctx);
+        let error = apply_security_context(plan, model(), &grants);
         assert!(matches!(error, Err(QueryError::Security(_))));
+    }
+
+    #[test]
+    fn key_sets_filter_with_an_in_list_and_all_filters_nothing() {
+        let grants = |set: ScopeSet| {
+            crate::test_grants::reporter(model().model(), &["1/"]).with("namespace", "read", set)
+        };
+        let render = |set| {
+            let plan = scans(&[("gl_project", "p")], None);
+            let plan = apply_security_context(plan, model(), &grants(set)).unwrap();
+            model().render(&plan).sql
+        };
+        assert_eq!(
+            render(ScopeSet::Keys(vec![ScopeKey::Text("1/2/".into())])),
+            "SELECT p.traversal_path FROM gl_project AS p WHERE p.traversal_path IN {p0:Array(String)}"
+        );
+        assert_eq!(
+            render(ScopeSet::All),
+            "SELECT p.traversal_path FROM gl_project AS p"
+        );
     }
 
     #[test]

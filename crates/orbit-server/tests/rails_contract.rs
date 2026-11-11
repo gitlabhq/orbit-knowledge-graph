@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use query_data_model::{Catalog, ClickHouse, RequiredRole};
+use orbit_authorization::Module;
+use orbit_server::authorization::gitlab::{GitLabSession, Role};
+use query_data_model::catalog::Check;
+use query_data_model::{Catalog, ClickHouse};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -54,28 +57,45 @@ impl Snapshot {
         let role = floors.get("project").or_else(|| floors.get("group"))?;
         Some(match role.as_str() {
             "planner" => 15,
-            _ => serde_json::from_value::<RequiredRole>(role.as_str().into())
+            _ => serde_json::from_value::<Role>(role.as_str().into())
                 .unwrap_or_else(|e| panic!("unknown Rails role {role}: {e}"))
-                .as_access_level(),
+                as u32,
         })
     }
 
     fn violations(&self) -> Vec<String> {
         let catalog = Catalog::<ClickHouse>::embedded().expect("embedded model must load");
+        let access = catalog.model().access();
+        let config = orbit_server_config::AppConfig::embedded_defaults().authorization;
+        let options = serde_json::Value::Object(config.providers[&config.identify].options.clone());
+        let session = GitLabSession::build(serde_json::from_value(options).unwrap()).unwrap();
         let mut violations = Vec::new();
         let mut abilities_by_type: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
         for entity in catalog.graph().entities() {
-            let (Some(redaction), Some(floor)) =
-                (catalog.redaction(entity.id), catalog.min_role(entity.id))
-            else {
+            let declared = access.entity(entity.id);
+            let check = declared.checks.iter().find_map(|check| match check {
+                Check::Rows {
+                    permission,
+                    resource,
+                    ..
+                } => Some((resource, permission)),
+                Check::Delegated { .. } => None,
+            });
+            let floor = session.role(&access.permission(declared.permission).name);
+            let (Some((resource, permission)), Some(floor)) = (check, floor) else {
                 panic!(
-                    "{} has no redaction entry, so Rails never checks it",
+                    "{} has no Rails check, so Rails never checks it",
                     entity.name
                 )
             };
-            let (entity, ability) = (&entity.name, redaction.ability.as_str());
+            let floor = floor as u32;
+            let redaction = Redaction {
+                resource,
+                ability: &access.permission(*permission).name,
+            };
+            let (entity, ability) = (&entity.name, redaction.ability);
             abilities_by_type
-                .entry(&redaction.resource)
+                .entry(redaction.resource)
                 .or_default()
                 .insert(ability);
             if !ability.starts_with("read_") {
@@ -83,7 +103,7 @@ impl Snapshot {
                     "{entity}: ability {ability:?} is not an explicit read_ ability"
                 ));
             }
-            let Some(resource_type) = self.resource_types.get(&redaction.resource) else {
+            let Some(resource_type) = self.resource_types.get(redaction.resource) else {
                 violations.push(format!(
                     "{entity}: resource_type {:?} is not registered in Rails",
                     redaction.resource
@@ -116,6 +136,12 @@ impl Snapshot {
         violations.sort();
         violations
     }
+}
+
+/// The Rails resource and ability one entity's row check names.
+struct Redaction<'m> {
+    resource: &'m String,
+    ability: &'m str,
 }
 
 fn check(edit: impl FnOnce(&mut Snapshot)) -> Option<String> {

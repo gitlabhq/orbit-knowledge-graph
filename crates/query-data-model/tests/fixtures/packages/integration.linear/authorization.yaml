@@ -1,9 +1,20 @@
 kind: authorization
 package: integration.linear
 entities:
-  LinearIssue: { scope: namespace, role: maintainer }
+  LinearIssue:
+    scope: namespace
+    permission: read_maintainer
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    properties:
+      open: [id, title, body, state, merge_request_id]
+      hidden: [traversal_path]
+
 relationships:
-  CLOSES: same_namespace
-  RELATES_TO: same_namespace
-properties:
-  LinearIssue.traversal_path: { hidden: true, filterable: false }
+  CLOSES:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  RELATES_TO:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}

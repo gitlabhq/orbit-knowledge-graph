@@ -323,7 +323,7 @@ impl QueryResult {
     }
 
     pub fn resource_checks(&self) -> Vec<ResourceCheck> {
-        let mut ids: HashMap<(&str, &str), HashSet<i64>> = HashMap::new();
+        let mut ids: HashMap<(&str, &str, &str), HashSet<i64>> = HashMap::new();
 
         for row in &self.rows {
             for redaction_node in self.ctx.nodes() {
@@ -333,9 +333,13 @@ impl QueryResult {
                 let Some(auth) = self.ctx.get_entity_auth(&node_ref.entity_type) else {
                     continue;
                 };
-                ids.entry((auth.resource_type.as_str(), auth.ability.as_str()))
-                    .or_default()
-                    .insert(node_ref.id);
+                ids.entry((
+                    auth.provider.as_str(),
+                    auth.resource_type.as_str(),
+                    auth.ability.as_str(),
+                ))
+                .or_default()
+                .insert(node_ref.id);
             }
 
             for node_ref in &row.dynamic_nodes {
@@ -350,14 +354,19 @@ impl QueryResult {
                 } else {
                     node_ref.id
                 };
-                ids.entry((auth.resource_type.as_str(), auth.ability.as_str()))
-                    .or_default()
-                    .insert(auth_id);
+                ids.entry((
+                    auth.provider.as_str(),
+                    auth.resource_type.as_str(),
+                    auth.ability.as_str(),
+                ))
+                .or_default()
+                .insert(auth_id);
             }
         }
 
         ids.into_iter()
-            .map(|((resource_type, ability), ids)| ResourceCheck {
+            .map(|((provider, resource_type, ability), ids)| ResourceCheck {
+                provider: provider.to_string(),
                 resource_type: resource_type.to_string(),
                 ids: ids.into_iter().collect(),
                 ability: ability.to_string(),
@@ -537,7 +546,7 @@ mod tests {
                 ability: "read_user".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
-                required_access_level: 20,
+                provider: "rails".to_string(),
             },
         );
         ctx.add_entity_auth(
@@ -547,7 +556,7 @@ mod tests {
                 ability: "read".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
-                required_access_level: 20,
+                provider: "rails".to_string(),
             },
         );
         ctx
@@ -987,7 +996,7 @@ mod tests {
                     ability: "read_user".to_string(),
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
-                    required_access_level: 20,
+                    provider: "rails".to_string(),
                 },
             );
             ctx.add_entity_auth(
@@ -997,7 +1006,7 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
+                    provider: "rails".to_string(),
                 },
             );
 
@@ -1042,7 +1051,7 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
-                    required_access_level: 20,
+                    provider: "rails".to_string(),
                 },
             );
             ctx.add_entity_auth(
@@ -1052,7 +1061,7 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
+                    provider: "rails".to_string(),
                 },
             );
 

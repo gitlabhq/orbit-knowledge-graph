@@ -170,14 +170,18 @@ impl Sources {
             .collect()
     }
 
+    /// `global` tells the entities whose authorization scope is global, which index once for
+    /// every namespace.
     pub(super) fn resolve(
         graph: &GraphCatalog,
+        global: &dyn Fn(EntityId) -> bool,
         fragments: &[&SourceFragment],
         served: &HashSet<PropertyId>,
         diagnostics: &mut Diagnostics,
     ) -> Self {
         let mut resolver = Resolver {
             graph,
+            global,
             served,
             diagnostics,
             sources: Sources::default(),
@@ -191,6 +195,7 @@ impl Sources {
 
 struct Resolver<'a> {
     graph: &'a GraphCatalog,
+    global: &'a dyn Fn(EntityId) -> bool,
     served: &'a HashSet<PropertyId>,
     diagnostics: &'a mut Diagnostics,
     sources: Sources,
@@ -386,9 +391,9 @@ impl<'a> Resolver<'a> {
             name: name.to_string(),
             source: item.source,
             writer,
-            scope: match spec.global {
-                Some(true) => EtlScope::Global,
-                Some(false) | None => EtlScope::Namespaced,
+            scope: match writer {
+                Writer::Entity(entity) if (self.global)(entity) => EtlScope::Global,
+                _ => EtlScope::Namespaced,
             },
             tables: spec.tables.clone(),
             columns,
@@ -457,7 +462,7 @@ impl<'a> Resolver<'a> {
             columns,
             enrich,
             table: table.cloned().unwrap_or_default(),
-            namespaced: spec.global != Some(true),
+            namespaced: !(self.global)(entity),
         }
     }
 

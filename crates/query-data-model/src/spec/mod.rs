@@ -5,8 +5,9 @@ mod source;
 mod storage;
 
 pub use authorization::{
-    Anchor, AuthorizationFragment, EntityAccess, PropertyAccess, Redaction, ScopeSpec,
-    ScopeVariants,
+    AuthorizationFragment, CheckSpec, DelegatedCheck, DelegatedWord, EdgePolicy, EdgeScope,
+    EntityAccess, PackageManifest, PolicySpec, PolicyWord, PropertyAccess, PropertyClasses,
+    RelationshipAccess, RowCheck, ScopeDeclaration, ScopeKeySpec, ScopeKind, Via,
 };
 pub use graph::{
     Attribute, DefaultValue, Entity, GraphFragment, Property, Relationship, RelationshipVariant,
@@ -30,6 +31,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use crate::catalog::{Diagnostics, ModelId, registered};
+use crate::packages::{Tier, directory};
 use crate::{EntityId, PropertyId, RelationshipId};
 
 /// One package file. Its storage blocks parse only once the store's engine kind is known.
@@ -41,6 +43,20 @@ pub enum Fragment<S = Box<StorageFragment>> {
     Authorization(AuthorizationFragment),
     Service(ServiceFragment),
     Source(Box<SourceFragment>),
+    Package(PackageManifest),
+}
+
+impl Fragment {
+    pub fn package(&self) -> &str {
+        match self {
+            Self::Graph(graph) => &graph.package,
+            Self::Storage(storage) => &storage.package,
+            Self::Authorization(access) => &access.package,
+            Self::Service(service) => &service.package,
+            Self::Source(source) => &source.package,
+            Self::Package(manifest) => &manifest.name,
+        }
+    }
 }
 
 /// A storage fragment's store and engine kind, which choose the backend that parses its blocks.
@@ -60,12 +76,14 @@ struct EngineKind {
 #[derive(Debug)]
 pub struct Fragments {
     fragments: Vec<Fragment>,
+    tiers: BTreeMap<String, Tier>,
     id: ModelId,
 }
 
 impl Fragments {
     pub fn parse<'a>(
         sources: impl IntoIterator<Item = (&'a str, &'a str)>,
+        tiers: &BTreeMap<String, Tier>,
     ) -> Result<Self, crate::DataModelError> {
         let sources: Vec<(&str, &str)> = sources.into_iter().collect();
         let id = ModelId::digest(
@@ -104,8 +122,9 @@ impl Fragments {
             }
         }
         let mut fragments = Vec::with_capacity(parsed.len());
+        let mut owners = Vec::with_capacity(parsed.len());
         for (name, directory, text, fragment) in parsed {
-            fragments.push(match fragment {
+            let fragment = match fragment {
                 Fragment::Storage(header) => {
                     let (package, store) = (&header.package, &header.store);
                     let Some(kind) = kinds.get(store) else {
@@ -130,18 +149,31 @@ impl Fragments {
                 Fragment::Graph(graph) => Fragment::Graph(graph),
                 Fragment::Authorization(access) => Fragment::Authorization(access),
                 Fragment::Service(service) => Fragment::Service(service),
+                Fragment::Package(manifest) => Fragment::Package(manifest),
                 Fragment::Source(mut source) => {
                     source.templates = templates.get(directory).cloned().unwrap_or_default();
                     Fragment::Source(source)
                 }
-            });
+            };
+            owners.push((name, fragment.package().to_string()));
+            fragments.push(fragment);
         }
+        let tiers = package_tiers(&owners, &fragments, tiers, &mut diagnostics);
         diagnostics.finish()?;
-        Ok(Self { fragments, id })
+        Ok(Self {
+            fragments,
+            tiers,
+            id,
+        })
     }
 
     pub fn id(&self) -> ModelId {
         self.id
+    }
+
+    /// The tier the package named `package` was loaded at.
+    pub fn tier(&self, package: &str) -> Option<Tier> {
+        self.tiers.get(package).copied()
     }
 
     /// Marks fragments rewritten under `tag`, so their model differs from the untagged one.
@@ -162,6 +194,59 @@ impl DerefMut for Fragments {
     fn deref_mut(&mut self) -> &mut Vec<Fragment> {
         &mut self.fragments
     }
+}
+
+/// Each package's tier, from where its directory was loaded. A directory holds one manifest
+/// named after it, and every fragment in it names that package.
+fn package_tiers(
+    owners: &[(&str, String)],
+    fragments: &[Fragment],
+    loaded: &BTreeMap<String, Tier>,
+    diagnostics: &mut Diagnostics,
+) -> BTreeMap<String, Tier> {
+    let mut manifests = BTreeMap::new();
+    for ((path, _), fragment) in owners.iter().zip(fragments) {
+        let Fragment::Package(manifest) = fragment else {
+            continue;
+        };
+        let directory = directory(path);
+        if manifest.name != directory {
+            diagnostics.error(
+                path,
+                format!(
+                    "package.yaml names package {}, but sits in directory {directory}",
+                    manifest.name
+                ),
+            );
+        }
+        if manifests.insert(directory, &manifest.name).is_some() {
+            diagnostics.error(
+                path,
+                format!("directory {directory} holds two package manifests"),
+            );
+        }
+    }
+    let mut tiers = BTreeMap::new();
+    for (path, package) in owners {
+        let directory = directory(path);
+        let Some(name) = manifests.get(directory) else {
+            diagnostics.error(
+                path,
+                format!("{path} sits in {directory}, which has no package.yaml"),
+            );
+            continue;
+        };
+        if package != *name {
+            diagnostics.error(path, format!("{path} names package {package}, not {name}"));
+        }
+        match loaded.get(directory) {
+            Some(tier) => {
+                tiers.insert(package.clone(), *tier);
+            }
+            None => diagnostics.error(path, format!("package {directory} was loaded at no tier")),
+        }
+    }
+    tiers
 }
 
 pub(crate) fn parse_variant(variant: &str) -> Option<(&str, &str)> {
@@ -186,10 +271,6 @@ pub(crate) fn snake_case(name: &str) -> String {
         snake.extend(character.to_lowercase());
     }
     snake
-}
-
-fn yes() -> bool {
-    true
 }
 
 fn explicit_null<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>

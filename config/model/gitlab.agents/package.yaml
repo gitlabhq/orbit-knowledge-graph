@@ -1,0 +1,3 @@
+kind: package
+name: gitlab.agents
+requires: [gitlab, gitlab.core]

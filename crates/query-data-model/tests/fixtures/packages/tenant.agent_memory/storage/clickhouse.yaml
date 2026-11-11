@@ -4,12 +4,12 @@ store: graph
 entities:
   AgentMemory:
     table: tenant_agent_memory
-    path_column: null
     columns:
       id: { immutable: true, backend: { type: Int64 } }
       summary: { backend: { type: String } }
       created_at: { immutable: true, backend: { type: "DateTime64(6, 'UTC')" } }
       project_id: { immutable: true, backend: { type: Int64 } }
+      traversal_path: { backend: { type: String } }
     access: { order: [id] }
 relationships:
   IN_PROJECT:

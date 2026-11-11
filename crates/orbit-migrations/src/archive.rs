@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use orbit_utils::source_archive::{
     ArchiveLayout, SourceArchive, SourceArchiveError, file_name, parse_file_name,
 };
-use query_data_model::Packages;
+use query_data_model::{Packages, Tier};
 use rust_embed::Embed;
 
 const LAYOUT: ArchiveLayout = ArchiveLayout {
@@ -56,7 +56,7 @@ impl ModelArchive {
     }
 
     pub fn packages(&self) -> Packages {
-        Packages::new(self.0.sources().clone())
+        Packages::new(Tier::Platform, self.0.sources().clone())
     }
 
     pub fn matches(&self, packages: &Packages) -> bool {

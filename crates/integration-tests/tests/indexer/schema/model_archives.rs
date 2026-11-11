@@ -346,7 +346,10 @@ fn archive_with_sources(
 ) -> ModelArchive {
     let mut sources = query_data_model::Packages::embedded().sources().clone();
     edit(&mut sources);
-    integration_testkit::model_archive(version, &query_data_model::Packages::new(sources))
+    integration_testkit::model_archive(
+        version,
+        &query_data_model::Packages::new(query_data_model::Tier::Platform, sources),
+    )
 }
 
 fn archive_with_extra_newline(version: u32) -> ModelArchive {

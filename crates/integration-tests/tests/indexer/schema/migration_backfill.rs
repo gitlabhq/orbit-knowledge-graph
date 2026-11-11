@@ -323,7 +323,7 @@ impl ArchiveCase {
                 sources.insert("gitlab/graph.yaml".into(), "not: [valid yaml".into());
                 let archive = integration_testkit::model_archive(
                     version,
-                    &query_data_model::Packages::new(sources),
+                    &query_data_model::Packages::new(query_data_model::Tier::Platform, sources),
                 );
                 Some(Bytes::copy_from_slice(archive.bytes()))
             }

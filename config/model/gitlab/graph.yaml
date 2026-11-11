@@ -229,6 +229,11 @@ relationships:
       ContainerRepository -> Project: {cardinality: many_to_one}
       Dependency -> Project: {cardinality: many_to_one}
       AgentSession -> Project: {cardinality: many_to_one}
+      Commit -> Project: {cardinality: many_to_one}
+      Definition -> Project: {cardinality: many_to_one}
+      Directory -> Project: {cardinality: many_to_one}
+      File -> Project: {cardinality: many_to_one}
+      ImportedSymbol -> Project: {cardinality: many_to_one}
 
   LAST_EDITED_BY:
     description: User who most recently edited an entity's content (title/description)

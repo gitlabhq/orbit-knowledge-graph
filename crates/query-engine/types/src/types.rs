@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct ResourceCheck {
+    pub provider: String,
     pub resource_type: String,
     pub ids: Vec<i64>,
     pub ability: String,

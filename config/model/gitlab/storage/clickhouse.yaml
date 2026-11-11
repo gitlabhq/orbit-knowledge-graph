@@ -2970,6 +2970,11 @@ relationships:
     ContainerRepository -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
     Dependency -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
     AgentSession -> Project: {fk: {on: source, column: project_id}, edge_table: gl_edge}
+    Commit -> Project: {fk: {on: source, column: project_id}}
+    Definition -> Project: {fk: {on: source, column: project_id}}
+    Directory -> Project: {fk: {on: source, column: project_id}}
+    File -> Project: {fk: {on: source, column: project_id}}
+    ImportedSymbol -> Project: {fk: {on: source, column: project_id}}
 
   LAST_EDITED_BY:
     User -> MergeRequest: {fk: {on: target, column: last_edited_by_id}, edge_table: gl_edge}

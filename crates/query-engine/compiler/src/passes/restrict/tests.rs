@@ -4,8 +4,8 @@ use query_data_model::{Catalog, ClickHouse};
 
 use crate::surface;
 use crate::testkit::{admin_ctx, non_admin_ctx};
-use crate::types::{AccessLevel, AuthorizedPath, SecurityContext};
 use crate::{QueryError, Result};
+use orbit_authorization::Grants;
 
 static MODEL: LazyLock<Catalog<ClickHouse>> =
     LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
@@ -22,7 +22,7 @@ const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
     "updated_at",
 ];
 
-fn restrict(gql: &str, ctx: &SecurityContext) -> Result<()> {
+fn restrict(gql: &str, ctx: &Grants) -> Result<()> {
     let model = MODEL.model();
     let statement = surface::parse(gql, model.logical().as_admin())?;
     super::restrict(&statement.plan, model, &*MODEL, ctx)
@@ -71,12 +71,34 @@ fn aggregations_need_a_scoped_node() {
 
 #[test]
 fn entities_above_every_authorized_role_are_rejected() {
-    let reporter = SecurityContext::new_with_roles(
-        1,
-        vec![AuthorizedPath::new("1/", AccessLevel::Reporter as u32)],
-    )
-    .unwrap();
+    let reporter = non_admin_ctx();
     let error = restrict("MATCH (v:Vulnerability {id: 1}) RETURN v", &reporter).unwrap_err();
     assert!(matches!(error, QueryError::Authorization(_)), "{error}");
     restrict("MATCH (v:Vulnerability {id: 1}) RETURN v", &admin_ctx()).unwrap();
+}
+
+#[test]
+fn plans_built_in_code_cannot_read_hidden_or_admin_only_fields() {
+    let model = MODEL.model();
+    let arm = |entity: &str, column: &str| crate::hydration::HydrationRequest {
+        arms: vec![
+            crate::hydration::HydrationArm::new(model, entity, &[1], &[column.into()], Vec::new())
+                .unwrap(),
+        ],
+        options: crate::hydration::HydrationCompileOptions::default(),
+    };
+    let restricted = |request: crate::hydration::HydrationRequest, grants: &Grants| {
+        super::restrict_hydration(&request, model, &*MODEL, grants)
+    };
+    for grants in [non_admin_ctx(), admin_ctx()] {
+        let error = restricted(arm("Project", "traversal_path"), &grants).unwrap_err();
+        assert!(error.to_string().contains("field is hidden"), "{error}");
+    }
+    let (reporter, admin) = (non_admin_ctx(), admin_ctx());
+    let error = restricted(arm("User", "email"), &reporter).unwrap_err();
+    assert!(
+        error.to_string().contains("requires administrator access"),
+        "{error}"
+    );
+    restricted(arm("User", "email"), &admin).unwrap();
 }

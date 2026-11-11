@@ -3,15 +3,28 @@ package: gitlab.packages
 entities:
   Dependency:
     scope: namespace
-    role: reporter
-    redaction: {resource: dependency, ability: read_package}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_package, resource: dependency}]
+    properties:
+      open: [id, name, version_pattern, project_id]
+      hidden: [traversal_path]
 
-  Package: {scope: namespace, role: reporter, redaction: {resource: package, ability: read_package}}
+  Package:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_package, resource: package}]
+    properties:
+      open: [id, name, version, package_type, status, created_at, updated_at, project_id]
+      hidden: [traversal_path]
+
   PackageFile:
     scope: namespace
-    role: reporter
-    redaction: {resource: package_file, ability: read_package}
-properties:
-  Dependency.traversal_path: {hidden: true, filterable: false}
-  Package.traversal_path: {hidden: true, filterable: false}
-  PackageFile.traversal_path: {hidden: true, filterable: false}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_package, resource: package_file}]
+    properties:
+      open: [id, file_name, size, file_sha256, status, created_at, updated_at, project_id,
+             package_id]
+      hidden: [traversal_path]

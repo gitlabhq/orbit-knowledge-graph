@@ -6,7 +6,8 @@ use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::stream::{self, StreamExt};
 use query_data_model::{Catalog, ClickHouse};
-use query_engine::compiler::{ParamValue, SecurityContext, compile};
+use query_engine::compiler::{ParamValue, compile};
+use query_engine::pipeline::SecurityContext;
 use rand::RngExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -500,7 +501,17 @@ impl QueryExecutor {
 
         builder = builder.substituted_query(serde_json::Value::String(substituted.clone()));
 
-        let compiled = match compile(&substituted, &self.data_model, &security_ctx) {
+        let config = orbit_server_config::AppConfig::embedded_defaults().authorization;
+        let compiled = orbit_server::authorization::gitlab::session_grants(
+            &config,
+            self.data_model.model(),
+            security_ctx.clone(),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|grants| {
+            compile(&substituted, &self.data_model, &grants).map_err(|error| error.to_string())
+        });
+        let compiled = match compiled {
             Ok(c) => c,
             Err(e) => {
                 let error_msg = format!("Query compilation failed: {}", e);

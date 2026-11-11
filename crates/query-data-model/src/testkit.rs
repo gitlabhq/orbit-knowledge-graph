@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::Packages;
+use crate::{Packages, Tier};
 
 const OVERLAYS: &str = concat!(env!("ORBIT_CONFIG_DIR"), "/seeds/overlays");
 
@@ -27,7 +27,7 @@ pub fn patched<'a>(edits: impl IntoIterator<Item = (&'a str, &'a str, &'a str)>)
         );
         *source = source.replacen(find, replace, 1);
     }
-    Packages::new(sources)
+    Packages::new(Tier::Platform, sources)
 }
 
 /// The embedded packages with the edits of `config/seeds/overlays/<name>.yaml` applied.
@@ -50,9 +50,7 @@ pub fn overlay(name: &str) -> Packages {
 /// opens.
 pub fn with_demo() -> Packages {
     let root = concat!(env!("ORBIT_CONFIG_DIR"), "/demo");
-    let demo = Packages::read_dir(std::path::Path::new(root))
+    let demo = Packages::read_dir(std::path::Path::new(root), Tier::Integration)
         .unwrap_or_else(|error| panic!("reading {root}: {error}"));
-    let mut sources = Packages::embedded().sources().clone();
-    sources.extend(demo.sources().clone());
-    Packages::new(sources)
+    Packages::embedded().with(demo)
 }

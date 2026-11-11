@@ -3,6 +3,9 @@ package: gitlab.container_registry
 entities:
   ContainerRepository:
     scope: namespace
-    role: reporter
-    redaction: {resource: container_repository, ability: read_container_image}
-properties: {ContainerRepository.traversal_path: {hidden: true, filterable: false}}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_container_image, resource: container_repository}]
+    properties:
+      open: [id, name, status, created_at, updated_at, project_id]
+      hidden: [traversal_path]

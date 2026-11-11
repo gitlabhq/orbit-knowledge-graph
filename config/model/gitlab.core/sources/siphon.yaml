@@ -61,7 +61,6 @@ entities:
     - siphon_routes
 
   User:
-    global: true
     tables: [siphon_users]
     order_by: [id]
     query: generated

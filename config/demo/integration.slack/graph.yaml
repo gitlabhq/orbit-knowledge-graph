@@ -5,8 +5,19 @@ entities:
     label: text
     properties:
       id: {type: string}
+      workspace: {type: string}
       channel: {type: string}
       author: {type: string}
       text: {type: string}
       sent_at: {type: timestamp}
+
+  SlackWorkspace:
+    label: name
+    properties:
+      id: {type: string}
+      name: {type: string}
+      group_id: {type: int64}
       traversal_path: {type: string}
+relationships:
+  IN_WORKSPACE: {variants: {SlackMessage -> SlackWorkspace: {cardinality: many_to_one}}}
+  INSTALLED_IN: {variants: {SlackWorkspace -> Group: {cardinality: many_to_one}}}

@@ -96,7 +96,7 @@ entities:
       mutable: true
     reindex: [siphon_p_ci_pipelines]
 
-  Runner: {global: true, tables: [siphon_ci_runners], order_by: [id, runner_type], query: generated}
+  Runner: {tables: [siphon_ci_runners], order_by: [id, runner_type], query: generated}
   Stage:
     tables: [siphon_p_ci_stages]
     order_by: [traversal_path, id, partition_id]

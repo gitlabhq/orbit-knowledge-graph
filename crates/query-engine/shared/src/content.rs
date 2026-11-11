@@ -17,7 +17,7 @@ const DEFAULT_MAX_BATCH_SIZE: usize = 100;
 
 #[derive(Debug, Clone, Default)]
 pub struct ResolverContext {
-    pub security_context: Option<compiler::SecurityContext>,
+    pub security_context: Option<pipeline::SecurityContext>,
 }
 
 #[async_trait]

@@ -5,7 +5,8 @@ pub use render::{ExtractionRequest, RequestFilter, Window};
 use serde::Deserialize;
 
 use crate::catalog::{
-    Diagnostics, ExecuteError, NoOptions, Row, StorageBackend, StoreInput, check_unrelational,
+    Diagnostics, ExecuteError, NoOptions, PolicyKind, Row, StorageBackend, StoreInput,
+    check_unrelational,
 };
 use crate::{EntityId, PropertyId};
 
@@ -50,6 +51,7 @@ impl LiveStore {
 
 impl StorageBackend for Live {
     const KIND: &'static str = "live";
+    const POLICIES: &'static [PolicyKind] = &[PolicyKind::Via, PolicyKind::None];
     type Options = NoOptions;
     type SourceOptions = Option<LiveSource>;
     type ColumnOptions = NoOptions;

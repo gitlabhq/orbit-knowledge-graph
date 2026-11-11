@@ -337,7 +337,7 @@ mod tests {
         let model = Arc::new(
             query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
         );
-        let ctx = compiler::SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
+        let ctx = compiler::uniform_grants(model.model(), false, &["1/9970/"]);
         let queries = [
             (
                 "traversal",

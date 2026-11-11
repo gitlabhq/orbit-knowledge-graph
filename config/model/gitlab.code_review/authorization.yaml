@@ -3,19 +3,38 @@ package: gitlab.code_review
 entities:
   MergeRequest:
     scope: namespace
-    role: reporter
-    redaction: {resource: merge_request, ability: read_merge_request}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_merge_request, resource: merge_request}]
+    properties:
+      open: [id, iid, title, description, source_branch, target_branch, state, merge_status, draft,
+             squash, created_at, updated_at, merge_commit_sha, discussion_locked, prepared_at,
+             project_id, merged_commit_id, latest_build_started_at, latest_build_finished_at,
+             first_deployed_to_production_at, merged_at, latest_closed_at, first_comment_at,
+             first_commit_at, last_commit_at, diff_size, modified_paths_size, commits_count,
+             first_approved_at, first_reassigned_at, added_lines, removed_lines, first_contribution,
+             reviewer_first_assigned_at, author_id, merge_user_id, updated_by_id, last_edited_by_id,
+             closed_by_id, milestone_id, source_project_id, head_pipeline_id,
+             latest_merge_request_diff_id, diff]
+      hidden: [traversal_path]
 
   MergeRequestDiff:
     scope: namespace
-    role: reporter
-    redaction: {resource: merge_request, ability: read_merge_request, id: merge_request_id}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_merge_request, resource: merge_request, object: MergeRequest, id: merge_request_id}]
+    properties:
+      open: [id, merge_request_id, state, base_commit_sha, head_commit_sha, start_commit_sha,
+             commits_count, files_count, project_id, diff_type, real_size, stored_externally,
+             created_at, updated_at, patch]
+      hidden: [traversal_path]
 
   MergeRequestDiffFile:
     scope: namespace
-    role: reporter
-    redaction: {resource: merge_request, ability: read_merge_request, id: merge_request_id}
-properties:
-  MergeRequest.traversal_path: {hidden: true, filterable: false}
-  MergeRequestDiff.traversal_path: {hidden: true, filterable: false}
-  MergeRequestDiffFile.traversal_path: {hidden: true, filterable: false}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_merge_request, resource: merge_request, object: MergeRequest, id: merge_request_id}]
+    properties:
+      open: [id, merge_request_id, merge_request_diff_id, project_id, too_large, new_path, old_path,
+             new_file, renamed_file, deleted_file, binary, generated, a_mode, b_mode, diff]
+      hidden: [traversal_path]

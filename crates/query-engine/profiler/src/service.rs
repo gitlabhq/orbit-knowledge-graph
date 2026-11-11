@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use clickhouse_client::ArrowClickHouseClient;
-use compiler::SecurityContext;
+use pipeline::SecurityContext;
 use pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
     QueryPipelineContext, TypeMap,
@@ -13,6 +13,20 @@ use shared::{
 use types::ResourceAuthorization;
 
 use orbit_server::pipeline::{HydrationStage, RedactionStage};
+
+/// The scope answers the default deployment's `gitlab.session` gives the profiler's session.
+pub fn grants(
+    data_model: &query_data_model::Catalog<query_data_model::ClickHouse>,
+    session: &SecurityContext,
+) -> anyhow::Result<compiler::orbit_authorization::Grants> {
+    let config = orbit_server_config::AppConfig::embedded_defaults().authorization;
+    orbit_server::authorization::gitlab::session_grants(
+        &config,
+        data_model.model(),
+        session.clone(),
+    )
+    .map_err(|error| anyhow::anyhow!("{error}"))
+}
 
 pub struct ProfilerPipelineService {
     data_model: Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
@@ -41,6 +55,10 @@ impl ProfilerPipelineService {
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
             compiled: None,
+            grants: Some(
+                grants(&self.data_model, &security_ctx)
+                    .map_err(|e| PipelineError::Security(e.to_string()))?,
+            ),
             security_context: Some(security_ctx),
             server_extensions,
             phases: TypeMap::default(),

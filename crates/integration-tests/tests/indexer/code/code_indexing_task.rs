@@ -225,7 +225,9 @@ async fn incremental_flag_dead_letters_an_export_the_local_tables_cannot_map() {
     let engine = sources.get_mut("gitlab/storage/duckdb.yaml").unwrap();
     let bindings = engine.find("relationships:").unwrap();
     engine.truncate(bindings);
-    let model = query_data_model::Packages::new(sources).load().unwrap();
+    let model = query_data_model::Packages::new(query_data_model::Tier::Platform, sources)
+        .load()
+        .unwrap();
     let specs = indexer::modules::code::ConverterSpecs::new(
         &query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&model).unwrap(),
         &query_data_model::Catalog::<query_data_model::DuckDb>::from_model(&model).unwrap(),
@@ -543,9 +545,11 @@ async fn indexes_calls_and_extends_edges() {
     let query = format!(
         "MATCH (caller:Definition {{project_id: {project_id}}})-[:CALLS]->(callee:Definition) RETURN caller{{.name, .fqn}}, callee{{.name, .fqn}} LIMIT 25"
     );
-    let security_ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
-        .expect("security context")
-        .with_role(true, None);
+    let security_ctx = crate::common::grants(
+        query_engine::pipeline::SecurityContext::new(1, vec!["1/".into()])
+            .expect("security context")
+            .with_role(true, None),
+    );
     let compiled = compiler::compile(
         &query,
         &integration_testkit::load_data_model(),

@@ -1,64 +1,165 @@
-use std::collections::HashSet;
+mod entities;
+mod policies;
+mod relationships;
+mod vocabulary;
 
-use crate::constants::DEFAULT_PRIMARY_KEY;
-use crate::{EdgeVariantScope, RequiredRole, Scope};
+use std::collections::BTreeSet;
 
 use super::Diagnostics;
-use super::store::Store;
 use crate::generic::AttributeId;
-pub use crate::spec::{Anchor, EntityAccess, PropertyAccess, Redaction};
-use crate::spec::{AuthorizationFragment, ScopeSpec, ScopeVariants, parse_variant};
-use crate::{Endpoint, EntityId, GraphCatalog, Hop, PropertyId};
+use crate::spec::AuthorizationFragment;
+pub use crate::spec::{EdgeScope, PropertyAccess, ScopeKind};
+use crate::{EntityId, GraphCatalog, Hop, PropertyId, RelationshipId, RelationshipVariantId};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ScopeId(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PermissionId(pub usize);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RowFilter {
+pub struct Scope {
+    pub name: String,
+    pub package: String,
+    pub kind: ScopeKind,
+    pub provider: String,
+    /// The entity an owner scope's rows belong to.
+    pub owner: Option<EntityId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Permission {
+    pub name: String,
+    pub package: String,
+}
+
+/// How a backend restricts an entity's reads to the caller's scope keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Policy {
+    ScopeKey(PropertyId),
+    /// Relationships from the entity to the entity whose scope key bounds it.
+    Via(Vec<Hop>),
+    /// The relationship to the entity that owns the row.
+    Owner(Hop),
+    /// Only the entity's checks restrict its rows.
     None,
-    Path {
-        column: String,
-    },
-    PathThrough {
-        hops: Vec<PathHop>,
-        store: String,
-        column: String,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PathHop {
-    pub hop: Hop,
-    pub store: String,
+pub enum Check {
+    /// The provider answers `Check` for each row's `id`, a key of `object` when one is named.
+    Rows {
+        provider: String,
+        permission: PermissionId,
+        resource: String,
+        id: PropertyId,
+        object: Option<EntityId>,
+    },
+    /// The provider answers `Credentials`, and the backend reads with the caller's sign-in.
+    Delegated { provider: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Guard {
-    pub filter: RowFilter,
-    pub min_role: Option<u32>,
-    pub redacted: bool,
+pub struct EntityAccess {
+    pub scope: ScopeId,
+    pub permission: PermissionId,
+    pub enforce: Vec<(String, Policy)>,
+    pub checks: Vec<Check>,
 }
 
-#[derive(Debug)]
+impl EntityAccess {
+    pub fn policy(&self, backend: &str) -> Option<&Policy> {
+        self.enforce
+            .iter()
+            .find(|(kind, _)| kind == backend)
+            .map(|(_, policy)| policy)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipAccess {
+    pub scope: ScopeId,
+    pub permission: PermissionId,
+}
+
+/// The access every entity, relationship, property and attribute of a model declares.
+#[derive(Debug, Default)]
 pub struct Access {
-    entities: Vec<Option<EntityAccess>>,
-    properties: Vec<Option<PropertyAccess>>,
-    attributes: Vec<Option<PropertyAccess>>,
-    variant_scopes: Vec<Option<EdgeVariantScope>>,
+    permissions: Vec<Permission>,
+    scopes: Vec<Scope>,
+    entities: Vec<EntityAccess>,
+    relationships: Vec<RelationshipAccess>,
+    variants: Vec<Vec<(String, EdgeScope)>>,
+    properties: Vec<PropertyAccess>,
+    attributes: Vec<PropertyAccess>,
 }
 
 impl Access {
-    pub fn entity(&self, entity: EntityId) -> Option<&EntityAccess> {
-        self.entities[entity.index()].as_ref()
+    pub fn entity(&self, entity: EntityId) -> &EntityAccess {
+        &self.entities[entity.index()]
+    }
+
+    pub fn relationship(&self, relationship: RelationshipId) -> &RelationshipAccess {
+        &self.relationships[relationship.index()]
+    }
+
+    /// Which endpoints the variant's edge rows share a scope key with, on a backend kind.
+    pub fn edge_scope(&self, variant: RelationshipVariantId, backend: &str) -> Option<EdgeScope> {
+        self.variants[variant.index()]
+            .iter()
+            .find(|(kind, _)| kind == backend)
+            .map(|(_, scope)| *scope)
     }
 
     pub fn property(&self, property: PropertyId) -> PropertyAccess {
-        self.properties[property.index()].unwrap_or(PropertyAccess::OPEN)
+        self.properties[property.index()]
     }
 
     pub fn attribute(&self, attribute: AttributeId) -> PropertyAccess {
-        self.attributes[attribute.index()].unwrap_or(PropertyAccess::OPEN)
+        self.attributes[attribute.index()]
     }
 
-    pub fn variant_scope(&self, variant: crate::RelationshipVariantId) -> Option<EdgeVariantScope> {
-        self.variant_scopes[variant.index()]
+    /// Whether every entity and relationship of the graph has an entry.
+    pub(super) fn covers(&self, graph: &GraphCatalog) -> bool {
+        self.entities.len() == graph.entities().count()
+            && self.relationships.len() == graph.relationships().count()
+    }
+
+    pub fn is_global(&self, entity: EntityId) -> bool {
+        self.scope(self.entity(entity).scope).kind == ScopeKind::Global
+    }
+
+    pub fn scope(&self, scope: ScopeId) -> &Scope {
+        &self.scopes[scope.0]
+    }
+
+    pub fn permission(&self, permission: PermissionId) -> &Permission {
+        &self.permissions[permission.0]
+    }
+
+    pub fn scopes(&self) -> impl Iterator<Item = (ScopeId, &Scope)> {
+        self.scopes.iter().enumerate().map(|(i, s)| (ScopeId(i), s))
+    }
+
+    /// Every scope and permission a read of this model asks the caller's scope keys for.
+    pub fn needs(&self) -> BTreeSet<(ScopeId, PermissionId)> {
+        let entities = self.entities.iter().map(|e| (e.scope, e.permission));
+        let relationships = self.relationships.iter().map(|r| (r.scope, r.permission));
+        entities.chain(relationships).collect()
+    }
+
+    /// Every provider name a package uses, with whether a check needs it to answer `Check`.
+    pub fn providers(&self) -> BTreeSet<(&str, ProviderUse)> {
+        let scopes = self
+            .scopes
+            .iter()
+            .map(|scope| (scope.provider.as_str(), ProviderUse::Scopes));
+        let checks = self.entities.iter().flat_map(|entity| &entity.checks);
+        let checks = checks.map(|check| match check {
+            Check::Rows { provider, .. } => (provider.as_str(), ProviderUse::Check),
+            Check::Delegated { provider } => (provider.as_str(), ProviderUse::Credentials),
+        });
+        scopes.chain(checks).collect()
     }
 
     pub(super) fn resolve(
@@ -66,324 +167,30 @@ impl Access {
         fragments: &[&AuthorizationFragment],
         diagnostics: &mut Diagnostics,
     ) -> Self {
-        let mut access = Self {
-            entities: vec![None; graph.entities().count()],
-            properties: vec![None; graph.properties().count()],
-            attributes: vec![None; graph.attributes().count()],
-            variant_scopes: vec![None; graph.variants().count()],
-        };
-        let mut scoped = HashSet::new();
+        let mut access = Self::default();
         for fragment in fragments {
-            access.declare_entities(graph, fragment, diagnostics);
-            access.declare_variant_scopes(graph, fragment, &mut scoped, diagnostics);
-            access.declare_properties(graph, fragment, diagnostics);
+            access.declare_vocabulary(graph, fragment, diagnostics);
         }
-        access.link_redaction_owners(graph);
-        for entity in graph.entities() {
-            if access.entities[entity.id.index()].is_none() {
-                diagnostics.error(
-                    &entity.package,
-                    format!("entity {} has no authorization entry", entity.name),
-                );
-            }
+        let entities = entities::resolve(&access, graph, fragments, diagnostics);
+        let relationships = relationships::resolve(&access, graph, fragments, diagnostics);
+        match (entities, relationships) {
+            (Some(entities), Some(relationships)) => Self {
+                entities: entities.entities,
+                properties: entities.properties,
+                relationships: relationships.relationships,
+                variants: relationships.variants,
+                attributes: relationships.attributes,
+                ..access
+            },
+            _ => access,
         }
-        access
     }
+}
 
-    fn declare_entities(
-        &mut self,
-        graph: &GraphCatalog,
-        fragment: &AuthorizationFragment,
-        diagnostics: &mut Diagnostics,
-    ) {
-        let package = fragment.package.as_str();
-        for (name, spec) in &fragment.entities {
-            let Some(entity) = graph.entity_id(name) else {
-                diagnostics.error(
-                    package,
-                    format!("authorization names unknown entity {name}"),
-                );
-                continue;
-            };
-            let redaction = spec.redaction.as_ref().and_then(|redaction| {
-                let column = redaction.id.as_deref().unwrap_or(DEFAULT_PRIMARY_KEY);
-                let id = graph.property_id(entity, column);
-                if id.is_none() {
-                    diagnostics.error(
-                        package,
-                        format!("{name} redaction id {column} is not a property"),
-                    );
-                }
-                Some(Redaction {
-                    resource: redaction.resource.clone(),
-                    ability: redaction.ability.clone(),
-                    id: id?,
-                    owner: None,
-                })
-            });
-            let anchor = spec.anchor.as_ref().and_then(|anchor| {
-                let id = graph.property_id(entity, &anchor.property);
-                let target = graph.entity_id(&anchor.entity);
-                let (property, entity) = diagnostics.require(id.zip(target), package, || {
-                    format!(
-                        "{name} anchor {} names no property of {name} or no entity {}",
-                        anchor.property, anchor.entity
-                    )
-                })?;
-                Some(Anchor { property, entity })
-            });
-            if self.entities[entity.index()]
-                .replace(EntityAccess {
-                    scope: spec.scope,
-                    role: spec.role,
-                    redaction,
-                    anchor,
-                })
-                .is_some()
-            {
-                diagnostics.error(package, format!("{name} has two authorization entries"));
-            }
-        }
-    }
-
-    fn declare_variant_scopes(
-        &mut self,
-        graph: &GraphCatalog,
-        fragment: &AuthorizationFragment,
-        scoped: &mut HashSet<crate::RelationshipId>,
-        diagnostics: &mut Diagnostics,
-    ) {
-        let package = fragment.package.as_str();
-        for (name, spec) in &fragment.relationships {
-            let Some(relationship) = graph.relationship_id(name) else {
-                diagnostics.error(
-                    package,
-                    format!("authorization names unknown relationship {name}"),
-                );
-                continue;
-            };
-            if !scoped.insert(relationship) {
-                diagnostics.error(package, format!("{name} has two scope entries"));
-                continue;
-            }
-            let (default, variants) = match spec {
-                ScopeSpec::All(scope) => (Some(*scope), None),
-                ScopeSpec::PerVariant(ScopeVariants { scope, variants }) => {
-                    (*scope, Some(variants))
-                }
-            };
-            for id in &graph.relationship(relationship).variants {
-                self.variant_scopes[id.index()] = default;
-            }
-            for (variant, scope) in variants.into_iter().flatten() {
-                let id = parse_variant(variant)
-                    .and_then(|(source, target)| graph.variant_named(name, source, target))
-                    .map(|variant| variant.id);
-                match id {
-                    Some(id) => self.variant_scopes[id.index()] = Some(*scope),
-                    None => diagnostics.error(
-                        package,
-                        format!("{name} scopes unknown variant `{variant}`"),
-                    ),
-                }
-            }
-        }
-    }
-
-    fn declare_properties(
-        &mut self,
-        graph: &GraphCatalog,
-        fragment: &AuthorizationFragment,
-        diagnostics: &mut Diagnostics,
-    ) {
-        let package = fragment.package.as_str();
-        for (path, declared) in &fragment.properties {
-            let Some((owner, name)) = path.split_once('.') else {
-                diagnostics.error(
-                    package,
-                    format!("authorization names unknown property {path}"),
-                );
-                continue;
-            };
-            let slot = if let Some(property) = graph.property_named(owner, name) {
-                &mut self.properties[property.id.index()]
-            } else if let Some(attribute) = graph
-                .relationship_id(owner)
-                .and_then(|relationship| graph.attribute_id(relationship, name))
-            {
-                &mut self.attributes[attribute.index()]
-            } else {
-                diagnostics.error(
-                    package,
-                    format!("authorization names unknown property {path}"),
-                );
-                continue;
-            };
-            if slot.replace(*declared).is_some() {
-                diagnostics.error(package, format!("{path} has two access entries"));
-            }
-        }
-    }
-
-    fn link_redaction_owners(&mut self, graph: &GraphCatalog) {
-        let keyed_by_id =
-            |redaction: &Redaction| graph.property(redaction.id).name == DEFAULT_PRIMARY_KEY;
-        let owners: Vec<(String, EntityId)> = self
-            .entities
-            .iter()
-            .enumerate()
-            .filter_map(|(index, access)| {
-                let redaction = access.as_ref()?.redaction.as_ref()?;
-                keyed_by_id(redaction).then(|| (redaction.resource.clone(), EntityId(index)))
-            })
-            .collect();
-        for redaction in self
-            .entities
-            .iter_mut()
-            .flatten()
-            .filter_map(|access| access.redaction.as_mut())
-        {
-            if !keyed_by_id(redaction) {
-                redaction.owner = owners
-                    .iter()
-                    .rev()
-                    .find(|(resource, _)| *resource == redaction.resource)
-                    .map(|(_, owner)| *owner);
-            }
-        }
-    }
-
-    pub(super) fn resolve_guards(
-        &self,
-        graph: &GraphCatalog,
-        stores: &mut [Store],
-        diagnostics: &mut Diagnostics,
-    ) {
-        let guards: Vec<Vec<(EntityId, Option<Guard>)>> = stores
-            .iter()
-            .map(|store| {
-                store
-                    .sources()
-                    .map(|source| {
-                        (
-                            source.entity,
-                            self.guard(graph, stores, store, source.entity),
-                        )
-                    })
-                    .collect()
-            })
-            .collect();
-        for (store, guards) in stores.iter_mut().zip(guards) {
-            for (entity, guard) in guards {
-                if guard.is_none() && self.entity(entity).is_some() {
-                    let entity = graph.entity(entity);
-                    diagnostics.error(
-                        &entity.package,
-                        format!(
-                            "{} in store {} has no namespace path column, reaches no entity that has one, and has no redaction rule",
-                            entity.name, store.name
-                        ),
-                    );
-                }
-                store.guards[entity.index()] = guard;
-            }
-        }
-    }
-
-    fn guard(
-        &self,
-        graph: &GraphCatalog,
-        stores: &[Store],
-        store: &Store,
-        entity: EntityId,
-    ) -> Option<Guard> {
-        let access = self.entity(entity)?;
-        if store.trusted {
-            return Some(Guard {
-                filter: RowFilter::None,
-                min_role: None,
-                redacted: false,
-            });
-        }
-        let redacted = access.redaction.is_some();
-        let min_role = Some(
-            access
-                .role
-                .unwrap_or(RequiredRole::Reporter)
-                .as_access_level(),
-        );
-        if access.scope == Scope::Global {
-            return Some(Guard {
-                filter: RowFilter::None,
-                min_role,
-                redacted,
-            });
-        }
-        if let Some(column) = store
-            .source(entity)
-            .and_then(|source| source.path_column.clone())
-        {
-            return Some(Guard {
-                filter: RowFilter::Path { column },
-                min_role,
-                redacted,
-            });
-        }
-        let nearby =
-            || {
-                std::iter::once(store).chain(stores.iter().filter(|other| {
-                    other.connection == store.connection && other.name != store.name
-                }))
-            };
-        let anchor_store = |hop: &Hop| {
-            nearby()
-                .filter(|candidate| hop.from != entity || candidate.name == store.name)
-                .find(|candidate| self.anchors(candidate, hop))
-        };
-        let with_path = |entity: EntityId| {
-            nearby().find_map(|candidate| {
-                let column = candidate.source(entity)?.path_column.clone()?;
-                Some((candidate.name.clone(), column))
-            })
-        };
-        let hops = graph
-            .walk(entity)
-            .max_hops(graph.entities().count())
-            .filter(|hop| anchor_store(hop).is_some())
-            .shortest(|reached| with_path(reached).is_some());
-        match hops {
-            Some(hops) => {
-                let (store, column) = with_path(hops.last()?.to)?;
-                let hops = hops
-                    .into_iter()
-                    .map(|hop| {
-                        let store = anchor_store(&hop)?.name.clone();
-                        Some(PathHop { hop, store })
-                    })
-                    .collect::<Option<Vec<_>>>()?;
-                Some(Guard {
-                    filter: RowFilter::PathThrough {
-                        hops,
-                        store,
-                        column,
-                    },
-                    min_role,
-                    redacted,
-                })
-            }
-            None => redacted.then_some(Guard {
-                filter: RowFilter::None,
-                min_role,
-                redacted,
-            }),
-        }
-    }
-
-    fn anchors(&self, store: &Store, hop: &Hop) -> bool {
-        let anchor = self.variant_scope(hop.variant) == Some(EdgeVariantScope::NamespaceAnchor);
-        let held_by_source = store
-            .foreign_key(hop.variant)
-            .is_some_and(|key| key.holder == Endpoint::Source);
-        hop.forward && anchor && held_by_source
-    }
+/// The query a provider must answer for the packages that name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProviderUse {
+    Scopes,
+    Check,
+    Credentials,
 }

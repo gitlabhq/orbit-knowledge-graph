@@ -5,22 +5,45 @@ use crate::error::{QueryError, Result};
 use crate::logical::Query;
 use crate::passes::codegen::SqlBackend;
 
-pub(super) fn admin_only(query: Query<'_>, model: &Catalog<impl SqlBackend>) -> Result<()> {
+/// Every property and attribute the plan reads, wherever it is read: none hidden, and none
+/// administrator-only unless the caller is an administrator.
+pub(super) fn fields(
+    query: Query<'_>,
+    model: &Catalog<impl SqlBackend>,
+    admin: bool,
+) -> Result<()> {
+    let access = model.model().access();
     let check = |expr: Expr, what: &str| -> Result<()> {
-        let (Expr::Property { binding, property }
-        | Expr::Truncate {
-            binding, property, ..
-        }) = expr
-        else {
-            return Ok(());
+        let (owner, name, declared) = match expr {
+            Expr::Property { binding, property }
+            | Expr::Truncate {
+                binding, property, ..
+            } => (
+                query.entity_name(binding).unwrap_or_default().to_string(),
+                query.property_name(property).to_string(),
+                access.property(property),
+            ),
+            Expr::Attribute { attribute, .. } => {
+                let declared = query.model.graph().attribute(attribute);
+                let relationship = &query.model.graph().relationship(declared.relationship).name;
+                (
+                    relationship.clone(),
+                    declared.name.clone(),
+                    access.attribute(attribute),
+                )
+            }
+            Expr::Edge { .. } | Expr::Node(_) | Expr::Output(_) => return Ok(()),
         };
-        if !model.admin_only(property) {
+        if declared.hidden && !model.trusted() {
+            return Err(QueryError::Restrict(format!(
+                "{what} \"{name}\" for {owner}: field is hidden"
+            )));
+        }
+        if admin || model.trusted() || !declared.admin_only {
             return Ok(());
         }
-        let entity = query.entity_name(binding).unwrap_or_default();
-        let name = query.property_name(property);
         Err(QueryError::Restrict(format!(
-            "{what} \"{name}\" for {entity}: field requires administrator access"
+            "{what} \"{name}\" for {owner}: field requires administrator access"
         )))
     };
     for leaf in query.leaves() {

@@ -1,11 +1,12 @@
 //! Post-compilation policy check over the checked relational plan.
 //!
-//! Runs after security filter injection. Every scan of a namespaced graph
-//! table needs a role-eligible traversal path predicate, or a fail-closed
-//! false predicate, among the filters that directly consume its join tree.
+//! Runs after the security phase. Every scan of a guarded table needs a filter its caller's
+//! scope set allows, or a fail-closed false predicate, among the filters that directly consume
+//! its join tree.
 
 use std::collections::HashMap;
 
+use orbit_authorization::{Grants, ScopeKey, ScopeSet};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::Catalog;
 use query_data_model::implementations::clickhouse::ClickHouse;
@@ -15,15 +16,12 @@ use query_data_model::implementations::relational::plan::{
 use query_data_model::plan::tracking::{NodeId, Plan, Ref};
 use serde_json::Value;
 
+use super::guards::{scan, scope_set};
+use super::security::key_value;
 use crate::error::{QueryError, Result};
 use crate::passes::codegen::ClickHousePlan;
-use crate::types::SecurityContext;
 
-pub fn verify(
-    plan: &ClickHousePlan,
-    catalog: &Catalog<ClickHouse>,
-    ctx: &SecurityContext,
-) -> Result<()> {
+pub fn verify(plan: &ClickHousePlan, catalog: &Catalog<ClickHouse>, grants: &Grants) -> Result<()> {
     let graph = &plan.plan;
     let consumers: HashMap<NodeId, NodeId> = graph
         .nodes()
@@ -33,7 +31,7 @@ pub fn verify(
         let Operation::Scan { table, alias, .. } = graph.operation(node) else {
             continue;
         };
-        let Some(guards) = super::guards::scan(catalog, *table) else {
+        let Some(guards) = scan(catalog, *table) else {
             return Err(QueryError::Security(format!(
                 "post-check failed: unresolved table '{}'",
                 catalog.table_name(*table)
@@ -41,24 +39,38 @@ pub fn verify(
         };
         let filters = join_filters(graph, &consumers, node);
         for guard in guards {
-            let eligible = ctx.paths_at_least(guard.min_role);
+            let allowed = match scope_set(grants, catalog.model(), guard.scope, guard.permission)? {
+                ScopeSet::All => continue,
+                ScopeSet::Subtrees(roots) => {
+                    Allowed::Subtrees(roots.iter().map(|r| r.as_str().into()).collect())
+                }
+                ScopeSet::Keys(keys) => Allowed::Keys(keys),
+            };
             let output = graph
                 .outputs(node)
                 .find(|output| graph.name(*output) == Some(guard.column.as_str()));
             let guarded = output.is_some_and(|output| {
                 filters
                     .iter()
-                    .any(|filter| has_valid_path_filter(filter, output, &eligible))
+                    .any(|filter| has_valid_filter(filter, output, &allowed))
             });
             if !guarded {
+                let access = catalog.model().access();
                 return Err(QueryError::Security(format!(
-                    "post-check failed: column '{alias}.{}' missing valid traversal_path filter at access level {}",
-                    guard.column, guard.min_role
+                    "post-check failed: column '{alias}.{}' missing a valid scope filter for permission {} in scope {}",
+                    guard.column,
+                    access.permission(guard.permission).name,
+                    access.scope(guard.scope).name,
                 )));
             }
         }
     }
     Ok(())
+}
+
+enum Allowed<'g> {
+    Subtrees(Vec<TraversalPath>),
+    Keys(&'g [ScopeKey]),
 }
 
 fn join_filters<'p>(
@@ -82,7 +94,7 @@ fn join_filters<'p>(
     filters
 }
 
-fn has_valid_path_filter(expr: &Expr, column: Ref, eligible: &[&TraversalPath]) -> bool {
+fn has_valid_filter(expr: &Expr, column: Ref, allowed: &Allowed<'_>) -> bool {
     match expr {
         Expr::Bool(false)
         | Expr::Parameter {
@@ -93,31 +105,43 @@ fn has_valid_path_filter(expr: &Expr, column: Ref, eligible: &[&TraversalPath]) 
             op: BinaryOp::And,
             left,
             right,
-        } => {
-            has_valid_path_filter(left, column, eligible)
-                || has_valid_path_filter(right, column, eligible)
-        }
+        } => has_valid_filter(left, column, allowed) || has_valid_filter(right, column, allowed),
         Expr::Binary {
             op: BinaryOp::Or,
             left,
             right,
-        } => {
-            has_valid_path_filter(left, column, eligible)
-                && has_valid_path_filter(right, column, eligible)
-        }
+        } => has_valid_filter(left, column, allowed) && has_valid_filter(right, column, allowed),
         Expr::Call {
             function: Function::StartsWith,
             args,
-        } => match args.as_slice() {
-            [
+        } => match (args.as_slice(), allowed) {
+            (
+                [
+                    Expr::Column(actual),
+                    Expr::Parameter {
+                        value: Value::String(path),
+                        ..
+                    },
+                ],
+                Allowed::Subtrees(roots),
+            ) if *actual == column => roots.iter().any(|root| path.starts_with(root.as_str())),
+            _ => false,
+        },
+        Expr::Binary {
+            op: BinaryOp::In,
+            left,
+            right,
+        } => match (left.as_ref(), right.as_ref(), allowed) {
+            (
                 Expr::Column(actual),
                 Expr::Parameter {
-                    value: Value::String(path),
+                    value: Value::Array(values),
                     ..
                 },
-            ] if *actual == column => eligible
+                Allowed::Keys(keys),
+            ) if *actual == column => values
                 .iter()
-                .any(|authorized| path.starts_with(authorized.as_str())),
+                .all(|value| keys.iter().any(|key| key_value(key) == *value)),
             _ => false,
         },
         _ => false,
@@ -148,6 +172,10 @@ mod tests {
             query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap()
         });
         &MODEL
+    }
+
+    fn grants(roots: &[&str]) -> Grants {
+        crate::test_grants::reporter(model().model(), roots)
     }
 
     const REVIEWER_PROJECT: &str = r#"
@@ -190,7 +218,7 @@ relationships:
             match fragment {
                 Fragment::Authorization(access) => {
                     if let Some(merge_request) = access.entities.get_mut("MergeRequest") {
-                        merge_request.role = Some(query_data_model::RequiredRole::SecurityManager);
+                        merge_request.permission = "read_security".into();
                     }
                 }
                 Fragment::Storage(storage) if storage.store == "graph" => {
@@ -218,7 +246,7 @@ relationships:
 
     fn secured(
         plan: ClickHousePlan,
-        context: &SecurityContext,
+        context: &Grants,
         model: &Catalog<ClickHouse>,
     ) -> Result<ClickHousePlan> {
         let plan = crate::passes::security::apply_security_context(plan, model, context)?;
@@ -226,11 +254,7 @@ relationships:
         Ok(plan)
     }
 
-    fn check(
-        plan: &ClickHousePlan,
-        context: &SecurityContext,
-        model: &Catalog<ClickHouse>,
-    ) -> Result<()> {
+    fn check(plan: &ClickHousePlan, context: &Grants, model: &Catalog<ClickHouse>) -> Result<()> {
         verify(plan, model, context)
     }
 
@@ -321,27 +345,24 @@ relationships:
 
     fn rejected(result: Result<()>) {
         let error = result.unwrap_err().to_string();
-        assert!(
-            error.contains("missing valid traversal_path filter"),
-            "{error}"
-        );
+        assert!(error.contains("missing a valid scope filter"), "{error}");
     }
 
     #[test]
     fn passes_after_security_injection() {
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ctx = grants(&["42/43/"]);
         assert!(secured(project(|_| None), &ctx, model()).is_ok());
     }
 
     #[test]
     fn fails_without_any_filter() {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ctx = grants(&["1/"]);
         rejected(check(&project(|_| Some(literal(true))), &ctx, model()));
     }
 
     #[test]
     fn rejects_path_filters_that_do_not_restrict_every_result() {
-        let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let context = grants(&["42/43/"]);
         let cases: [(Predicate, bool); 7] = [
             (
                 |p| binary(BinaryOp::Or, path(p, "p", "42/43/"), literal(true)),
@@ -391,7 +412,7 @@ relationships:
 
     #[test]
     fn fails_with_wrong_path_literal() {
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ctx = grants(&["42/43/"]);
         rejected(check(
             &project(|p| Some(path(p, "p", "99/"))),
             &ctx,
@@ -401,7 +422,7 @@ relationships:
 
     #[test]
     fn accepts_lowest_common_prefix() {
-        let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
+        let ctx = grants(&["42/10/", "42/20/"]);
         assert!(secured(project(|_| None), &ctx, model()).is_ok());
     }
 
@@ -412,24 +433,28 @@ relationships:
     /// user hitting an entity that requires Security Manager).
     #[test]
     fn accepts_bool_false_as_dead_alias_filter() {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ctx = grants(&["1/"]);
         let plan = project(|_| Some(binary(BinaryOp::And, literal(false), literal(true))));
         assert!(check(&plan, &ctx, model()).is_ok());
     }
 
     #[test]
     fn rejects_reporter_path_for_security_manager_table() {
-        let context = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+        let context = grants(&["1/100/"]);
         let plan = build(model(), |q| {
             table(q, "gl_vulnerability", "v", |v| Some(path(v, "v", "1/100/")))
         });
         let error = check(&plan, &context, model()).unwrap_err();
-        assert!(error.to_string().contains("access level 25"));
+        assert!(
+            error
+                .to_string()
+                .contains("permission read_security in scope namespace")
+        );
     }
 
     #[test]
     fn validates_role_floor_for_denormalized_join() {
-        let context = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+        let context = grants(&["1/100/"]);
         let model = reviewer_project_model();
         let plan = build(&model, |q| {
             let rows = scan(q, "gl_denorm_reviewer_project", "d")?;
@@ -438,8 +463,12 @@ relationships:
             q.select(rows, Vec::new())
         });
         let error = check(&plan, &context, &model).unwrap_err();
-        assert!(error.to_string().contains("d.t2_traversal_path"));
-        assert!(error.to_string().contains("access level 25"));
+        assert!(error.to_string().contains("d.t2_traversal_path"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("permission read_security in scope namespace")
+        );
     }
 
     /// A `col = false` comparison must NOT be treated as a proof that the
@@ -447,7 +476,7 @@ relationships:
     /// AND-chained into the top level.
     #[test]
     fn rejects_bool_false_nested_inside_comparison() {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ctx = grants(&["1/"]);
         let plan = project(|p| {
             Some(binary(
                 BinaryOp::Eq,
@@ -462,14 +491,14 @@ relationships:
     /// arms can still produce rows.
     #[test]
     fn rejects_bool_false_ored_with_true() {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ctx = grants(&["1/"]);
         let plan = project(|_| Some(binary(BinaryOp::Or, literal(false), literal(true))));
         rejected(check(&plan, &ctx, model()));
     }
 
     #[test]
     fn accepts_bool_false_in_nested_and_chain() {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ctx = grants(&["1/"]);
         let plan = project(|p| {
             let id = binary(BinaryOp::Eq, col(p, "p", "id"), literal(5));
             let dead = binary(BinaryOp::And, id, literal(false));
@@ -480,7 +509,7 @@ relationships:
 
     #[test]
     fn rejects_and_chain_with_col_eq_false_and_no_starts_with() {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ctx = grants(&["1/"]);
         let plan = project(|p| {
             let archived = binary(BinaryOp::Eq, col(p, "p", "archived"), literal(false));
             let positive = binary(BinaryOp::Gt, col(p, "p", "id"), literal(0));
@@ -491,7 +520,7 @@ relationships:
 
     #[test]
     fn skips_declared_ctes() {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ctx = grants(&["1/"]);
         let plan = build(model(), |q| {
             let body = q.cte("path_cte", false, |q| table(q, "gl_user", "u", |_| None))?;
             let rows = q.read(&body, Some("c"))?;
@@ -510,7 +539,7 @@ relationships:
 
     #[test]
     fn reports_first_invalid_scan() {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ctx = grants(&["1/"]);
         let plan = build(model(), |q| {
             let first = scan(q, "gl_project", "first")?;
             let second = scan(q, "gl_merge_request", "second")?;
@@ -523,7 +552,7 @@ relationships:
 
     #[test]
     fn subqueries_need_their_own_security_filter() {
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ctx = grants(&["42/43/"]);
         let unfiltered = wrapped(|q| table(q, "gl_project", "p", |_| None));
         rejected(check(&unfiltered, &ctx, model()));
         let filtered = wrapped(|q| table(q, "gl_project", "p", |p| Some(path(p, "p", "42/43/"))));
@@ -554,14 +583,14 @@ relationships:
 
     #[test]
     fn aggregate_subqueries_need_their_own_security_filter() {
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ctx = grants(&["42/43/"]);
         rejected(check(&wrapped(|q| counted(q, false)), &ctx, model()));
         assert!(check(&wrapped(|q| counted(q, true)), &ctx, model()).is_ok());
     }
 
     #[test]
     fn accepts_subquery_wrapping_cte() {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ctx = grants(&["1/"]);
         let plan = wrapped(|q| {
             let body = q.cte("dedup_cte", false, |q| table(q, "gl_user", "u", |_| None))?;
             let rows = q.read(&body, Some("d"))?;
@@ -673,7 +702,7 @@ relationships:
 
     #[test]
     fn security_injection_and_check_cover_nested_query_positions() {
-        let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let context = grants(&["42/43/"]);
         for position in [
             "select",
             "where",
@@ -714,9 +743,9 @@ relationships:
 
     #[test]
     fn union_arms_each_need_a_security_filter() {
-        let reporter = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let reporter = grants(&["1/"]);
         rejected(check(&projects(true), &reporter, model()));
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ctx = grants(&["42/43/"]);
         assert!(secured(projects(false), &ctx, model()).is_ok());
     }
 
@@ -738,9 +767,9 @@ relationships:
 
     #[test]
     fn shared_bodies_need_a_security_filter() {
-        let reporter = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let reporter = grants(&["1/"]);
         rejected(check(&shared(None), &reporter, model()));
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ctx = grants(&["42/43/"]);
         assert!(check(&shared(Some("42/43/")), &ctx, model()).is_ok());
     }
 
@@ -770,13 +799,13 @@ relationships:
 
     #[test]
     fn joined_union_arms_need_a_security_filter() {
-        let reporter = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let reporter = grants(&["1/"]);
         rejected(check(
             &edge_union(("gl_project", "p", "id"), None),
             &reporter,
             model(),
         ));
-        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ctx = grants(&["42/43/"]);
         let plan = edge_union(("gl_edge", "e1", "source_id"), Some("42/43/"));
         assert!(check(&plan, &ctx, model()).is_ok());
     }

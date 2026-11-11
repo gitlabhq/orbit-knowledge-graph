@@ -4,6 +4,9 @@ use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
+use super::access::EdgeScope;
+use super::guards::Guard;
+use super::guards::PolicyKind;
 use super::store::Facts;
 use super::{Access, Diagnostics, Model, Source, Sources, Store};
 use crate::implementations::{
@@ -11,12 +14,14 @@ use crate::implementations::{
 };
 use crate::plan::tracking::{Language, Plan};
 use crate::spec::{Block, Blocks, StorageFragment, Typed};
-use crate::{DataModelError, EntityId, GraphCatalog, Packages, PropertyId};
+use crate::{DataModelError, EntityId, GraphCatalog, Packages, PropertyId, RelationshipVariantId};
 
 /// A storage backend: the blocks its stores' fragments write, and the facts it resolves them
 /// into. A block the YAML omits reads as its type's default.
 pub trait StorageBackend: Sized + 'static {
     const KIND: &'static str;
+    /// The access policies this backend renders into its plans.
+    const POLICIES: &'static [PolicyKind];
     type Options: Block + DeserializeOwned + Default;
     type SourceOptions: Block + DeserializeOwned + Default;
     type ColumnOptions: Block + DeserializeOwned + Default;
@@ -193,9 +198,18 @@ impl<B: StorageBackend> Catalog<B> {
         self.sources(entity).next()
     }
 
-    /// The access level the entity's home store requires of a caller's path.
-    pub fn min_role(&self, entity: EntityId) -> Option<u32> {
-        self.home(entity)?.0.guard(entity)?.min_role
+    /// How the entity's home store on this connection restricts its reads.
+    pub fn guard(&self, entity: EntityId) -> Option<&Guard> {
+        self.home(entity)?.0.guard(entity)
+    }
+
+    /// Which endpoints a variant's edge rows share a scope key with; none on a trusted
+    /// connection, where nothing is scoped.
+    pub fn edge_scope(&self, variant: RelationshipVariantId) -> Option<EdgeScope> {
+        match self.stores().all(|(store, _)| store.trusted) {
+            true => None,
+            false => self.model.access().edge_scope(variant, B::KIND),
+        }
     }
 }
 
@@ -260,6 +274,8 @@ impl Model {
 pub(crate) trait Registered {
     fn kind(&self) -> &'static str;
 
+    fn policies(&self) -> &'static [PolicyKind];
+
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error>;
 
     fn resolve(
@@ -287,6 +303,10 @@ pub(crate) fn registered(kind: &str) -> Option<&'static dyn Registered> {
 impl<B: StorageBackend> Registered for Entry<B> {
     fn kind(&self) -> &'static str {
         B::KIND
+    }
+
+    fn policies(&self) -> &'static [PolicyKind] {
+        B::POLICIES
     }
 
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error> {

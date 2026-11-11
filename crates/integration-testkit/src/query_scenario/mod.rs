@@ -17,13 +17,11 @@ use format::ExpectedIndex;
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use query_engine::compiler::subquery_statements;
-use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, ParameterizedQuery, QueryStats, Realm,
-    ResultContext, SecurityContext,
-};
+use query_engine::compiler::{CompiledQueryContext, ParameterizedQuery, QueryStats, ResultContext};
 use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
-    NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
+    AccessLevel, AuthorizedPath, NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext,
+    Realm, SecurityContext, TypeMap,
 };
 use query_engine::shared::content::ColumnResolverRegistry;
 use query_engine::shared::{CompilationStage, PipelineOutput, RedactionOutput};
@@ -375,7 +373,8 @@ async fn assert_indexes_used(
 ) {
     let query = &compiled.base;
     let plan = ctx.explain_plan(query).await;
-    let ctes = subquery_statements(raw, data_model, security).expect("subqueries render");
+    let ctes = subquery_statements(raw, data_model, &grants_for(data_model, security))
+        .expect("subqueries render");
     for ExpectedIndex { table, index } in expected {
         let mut cte_plans = Vec::new();
         let mut scans = Vec::new();
@@ -529,6 +528,7 @@ async fn compile_like_server(
         query_json: query.to_owned(),
         compiled: None,
         security_context: Some(security.clone()),
+        grants: Some(grants_for(data_model, security)),
         server_extensions,
         phases: TypeMap::default(),
     };
@@ -569,6 +569,7 @@ async fn execute_output(
         query_json: String::new(),
         compiled: Some(Arc::clone(compiled)),
         security_context: Some(security.clone()),
+        grants: Some(grants_for(data_model, security)),
         server_extensions,
         phases: TypeMap::default(),
     };
@@ -1134,6 +1135,20 @@ fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
     ctx
 }
 
+/// The scope answers the default deployment's `gitlab.session` gives the scenario's session.
+fn grants_for(
+    data_model: &query_data_model::Catalog<query_data_model::ClickHouse>,
+    security: &SecurityContext,
+) -> query_engine::compiler::orbit_authorization::Grants {
+    let config = orbit_server_config::AppConfig::embedded_defaults().authorization;
+    orbit_server::authorization::gitlab::session_grants(
+        &config,
+        data_model.model(),
+        security.clone(),
+    )
+    .expect("the default deployment answers the scenario's session")
+}
+
 fn claims_for(security: &SecurityContext) -> Claims {
     Claims {
         sub: "user:1".into(),
@@ -1268,7 +1283,10 @@ mod tests {
     #[test]
     fn gql_syntax_errors_report_position_without_echoing_source() {
         let data_model = load_data_model();
-        let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let security = grants_for(
+            &data_model,
+            &SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+        );
         for (raw, position) in [
             ("CREATE (u:User)", "line 1, column 1"),
             (

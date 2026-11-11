@@ -134,12 +134,7 @@ fn surface_and_model_errors_keep_their_kind() {
 
 #[test]
 fn relationship_attributes_filter_inline_and_in_where() {
-    let mut sources = Packages::embedded().sources().clone();
-    sources.insert(
-        "overlay/graph.yaml".into(),
-        "kind: graph\npackage: overlay\nrelationships:\n  ON_BRANCH:\n    variants: {}\n    attributes: {branch: string, project_id: int64}\n".into(),
-    );
-    let model = Packages::new(sources).load().unwrap();
+    let model = support::branch_attributes("{open: [branch, project_id]}");
     let statement = gql::parse(
         "MATCH (f:File {project_id: 1})-[r:ON_BRANCH {branch: 'main'}]->(b:Branch) \
          WHERE r.project_id = 1 RETURN b",

@@ -6,7 +6,8 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 
 use crate::catalog::{
-    Diagnostics, ExecuteError, NoOptions, Row, StorageBackend, StoreInput, check_unrelational,
+    Diagnostics, ExecuteError, NoOptions, PolicyKind, Row, StorageBackend, StoreInput,
+    check_unrelational,
 };
 use crate::{EntityId, PropertyId};
 
@@ -61,6 +62,7 @@ impl CodeStore {
 
 impl StorageBackend for OrbitCode {
     const KIND: &'static str = "orbit_code";
+    const POLICIES: &'static [PolicyKind] = &[PolicyKind::Via, PolicyKind::None];
     type Options = NoOptions;
     type SourceOptions = CodeSource;
     type ColumnOptions = NoOptions;

@@ -95,6 +95,23 @@ impl<'p> Neighbors<'p> {
         let center_entity = anchor.binding.entity;
         let mut center = Node::new(query, anchor, model);
         let graph = query.model.graph();
+        // A variant exists in a store only through its binding, so an unbound kind has no rows here.
+        let relationships: Vec<RelationshipId> = relationships
+            .iter()
+            .copied()
+            .filter(|relationship| {
+                graph
+                    .relationship(*relationship)
+                    .variants
+                    .iter()
+                    .any(|variant| {
+                        model
+                            .stores()
+                            .any(|(store, _)| store.binding(*variant).is_some())
+                    })
+            })
+            .collect();
+        let relationships = relationships.as_slice();
         let names: Vec<String> = relationships
             .iter()
             .map(|relationship| graph.relationship(*relationship).name.clone())
@@ -134,7 +151,7 @@ impl<'p> Neighbors<'p> {
                         continue;
                     }
                     let owned = model
-                        .variant_scope(variant.id)
+                        .edge_scope(variant.id)
                         .is_some_and(|scope| match source {
                             true => scope.edge_path_is_target_path(),
                             false => scope.edge_path_is_source_path(),
@@ -161,14 +178,12 @@ impl<'p> Neighbors<'p> {
                     })
                 {
                     found = true;
-                    let source = &graph.entity(variant.source).name;
-                    carries &= model.variant_scope(variant.id).is_some_and(|scope| {
+                    carries &= model.edge_scope(variant.id).is_some_and(|scope| {
                         match center_is_target {
-                            // The edge row carries the target's path; a source shares it only where the ontology says so.
-                            true => scope.is_scope_preserving(),
+                            // The edge row carries the target's path; a source shares it only where the package says so.
+                            true => scope.preserves_scope(),
                             false => {
-                                scope.propagates_to_source(name, source)
-                                    || scope.edge_path_is_source_path()
+                                scope.propagates_to_source() || scope.edge_path_is_source_path()
                             }
                         }
                     });

@@ -125,7 +125,7 @@ impl Catalog<OrbitCode> {
             })
     }
 
-    pub fn guard(&self, index: Index) -> Option<&Guard> {
+    pub fn index_guard(&self, index: Index) -> Option<&Guard> {
         self.model().stores()[index.store].guard(index.entity)
     }
 

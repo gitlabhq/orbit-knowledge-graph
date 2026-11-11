@@ -1,12 +1,14 @@
 use std::time::Instant;
 
 use orbit_log_fields::info;
-use tokio::sync::mpsc;
-use tonic::{Status, Streaming};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use orbit_authorization::{AuthError, Caller, CheckRequest};
 
 use super::HydrationStage;
-use crate::proto::ExecuteQueryMessage;
-use crate::redaction::{RedactionExchangeError, RedactionService};
+use crate::authorization::Deployment;
+use crate::redaction::{ResourceAuthorization, ResourceCheck};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -42,26 +44,9 @@ impl PipelineStage for AuthorizationStage {
             info!("No redaction required, returning result directly");
             Vec::new()
         } else {
-            let tx = ctx
-                .server_extensions
-                .get::<mpsc::Sender<Result<ExecuteQueryMessage, Status>>>()
-                .ok_or_else(|| {
-                    PipelineError::Authorization("tx not available in server_extensions".into())
-                })
-                .inspect_err(|e| obs.record_error(e))?
-                .clone();
-            let stream = ctx
-                .server_extensions
-                .get_mut::<Streaming<ExecuteQueryMessage>>()
-                .ok_or_else(|| {
-                    PipelineError::Authorization("stream not available in server_extensions".into())
-                })
-                .inspect_err(|e| obs.record_error(e))?;
-            RedactionService::request_authorization(&resources_to_check, &tx, stream)
+            check(ctx, resources_to_check)
                 .await
-                .map_err(RedactionExchangeError::into_pipeline_error)
                 .inspect_err(|e| obs.record_error(e))?
-                .authorizations
         };
 
         obs.authorized(t.elapsed());
@@ -71,4 +56,57 @@ impl PipelineStage for AuthorizationStage {
             authorizations,
         })
     }
+}
+
+/// Asks each provider the checks name about its rows, in one batch per provider.
+async fn check(
+    ctx: &QueryPipelineContext,
+    resources: Vec<ResourceCheck>,
+) -> Result<Vec<ResourceAuthorization>, PipelineError> {
+    let missing = |what: &str| {
+        PipelineError::Authorization(format!("{what} not available in server_extensions"))
+    };
+    let deployment = ctx
+        .server_extensions
+        .get::<Arc<Deployment>>()
+        .ok_or_else(|| missing("authorization"))?;
+    let caller = ctx
+        .server_extensions
+        .get::<Caller>()
+        .ok_or_else(|| missing("caller"))?;
+    let mut by_provider: BTreeMap<String, Vec<CheckRequest>> = BTreeMap::new();
+    for resource in resources {
+        by_provider
+            .entry(resource.provider)
+            .or_default()
+            .push(CheckRequest {
+                permission: resource.ability,
+                resource: resource.resource_type,
+                ids: resource.ids,
+            });
+    }
+    let mut authorizations = Vec::new();
+    for (provider, requests) in by_provider {
+        let allowed = deployment
+            .check(caller, &provider, requests.clone())
+            .await
+            .map_err(|error| match error {
+                AuthError::Unavailable(message) => PipelineError::Streaming(message),
+                AuthError::Denied(message) | AuthError::Invalid(message) => {
+                    PipelineError::Authorization(message)
+                }
+                AuthError::NoScopes => PipelineError::NoEnabledNamespaces,
+            })?;
+        for (request, allowed) in requests.into_iter().zip(allowed) {
+            authorizations.push(ResourceAuthorization {
+                resource_type: request.resource,
+                authorized: request
+                    .ids
+                    .into_iter()
+                    .map(|id| (id, allowed.contains(&id)))
+                    .collect(),
+            });
+        }
+    }
+    Ok(authorizations)
 }

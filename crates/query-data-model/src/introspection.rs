@@ -376,15 +376,23 @@ relationships:
     const AUTHORIZATION: &str = "
 kind: authorization
 package: test
+permissions: [read]
+scopes:
+  namespace: {kind: hierarchy, provider: session}
 entities:
-  Project: {scope: namespace, role: reporter, redaction: {resource: project, ability: read_project}}
-  MergeRequest: {scope: namespace, role: reporter, redaction: {resource: merge_request, ability: read_merge_request}}
+  Project:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    properties: {open: [id, name], hidden: [traversal_path]}
+  MergeRequest:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    properties: {open: [id, state, title, body, project_id], hidden: [traversal_path]}
 relationships:
-  IN_PROJECT: namespace_anchor
-  RELATES_TO: same_namespace
-properties:
-  Project.traversal_path: {hidden: true, filterable: false}
-  MergeRequest.traversal_path: {hidden: true, filterable: false}
+  IN_PROJECT: {scope: namespace, permission: read, enforce: {clickhouse: {scope_key: traversal_path, of: holder}}}
+  RELATES_TO: {scope: namespace, permission: read, enforce: {clickhouse: {scope_key: traversal_path, of: both}}}
 ";
 
     const GRAPH_STORE: &str = "
@@ -464,12 +472,16 @@ relationships:
 ";
 
     fn model() -> Model {
-        Model::from_yaml([
-            ("graph.yaml", GRAPH),
-            ("authorization.yaml", AUTHORIZATION),
-            ("storage/clickhouse.yaml", GRAPH_STORE),
-            ("storage/duckdb.yaml", LOCAL_STORE),
-        ])
+        Model::from_yaml(
+            crate::Tier::Platform,
+            [
+                ("test/package.yaml", "kind: package\nname: test\n"),
+                ("test/graph.yaml", GRAPH),
+                ("test/authorization.yaml", AUTHORIZATION),
+                ("test/storage/clickhouse.yaml", GRAPH_STORE),
+                ("test/storage/duckdb.yaml", LOCAL_STORE),
+            ],
+        )
         .unwrap()
     }
 

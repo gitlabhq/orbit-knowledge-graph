@@ -4,6 +4,7 @@ use std::time::Duration;
 use crate::active_schema::SchemaSnapshot;
 use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::RequestContext;
+use crate::authorization::gitlab::RailsExchange;
 use crate::proto::ExecuteQueryMessage;
 use crate::proto::execute_query_message::Content;
 use clickhouse_client::ArrowClickHouseClient;
@@ -111,7 +112,8 @@ impl QueryPipelineService {
         server_extensions.insert(Arc::clone(&schema.data_model));
         server_extensions.insert(claims);
         server_extensions.insert(tx.clone());
-        server_extensions.insert(stream);
+        server_extensions.insert(Arc::new(RailsExchange::new(tx.clone(), stream)));
+        server_extensions.insert(Arc::clone(&schema.authorization));
         if let Some(registry) = &self.resolver_registry {
             server_extensions.insert(ColumnResolverRegistry::clone(registry));
         }
@@ -120,6 +122,7 @@ impl QueryPipelineService {
             query_json: query.text,
             compiled: None,
             security_context: None,
+            grants: None,
             server_extensions,
             phases: TypeMap::default(),
         };

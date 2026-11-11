@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{EdgeVariantScope, TraversalPathKind};
+use crate::TraversalPathKind;
 
 use super::{Column, RelationalFacts, Table};
-use crate::catalog::{Catalog, Lookup, Redaction, StorageBackend};
+use crate::catalog::{Catalog, Check, EdgeScope, Lookup, StorageBackend};
 use crate::implementations::clickhouse::backend::IndexKind;
 use crate::{
     DenormalizedKey, DenormalizedProperty, Endpoint, EntityId, ForeignKey, MaterializedJoin,
@@ -74,50 +74,34 @@ where
         self.column(property).is_some() || self.lookup(property).is_some()
     }
 
-    /// Every store on the connection is trusted, so no read is scoped or redacted.
+    /// Every store on the connection is trusted, so no read is scoped or checked.
     pub fn trusted(&self) -> bool {
         self.stores().all(|(store, _)| store.trusted)
-    }
-
-    pub fn variant_scope(&self, variant: RelationshipVariantId) -> Option<EdgeVariantScope> {
-        match self.trusted() {
-            true => None,
-            false => self.model().access().variant_scope(variant),
-        }
     }
 
     pub fn admin_only(&self, property: PropertyId) -> bool {
         !self.trusted() && self.model().access().property(property).admin_only
     }
 
-    pub fn redaction(&self, entity: EntityId) -> Option<&Redaction> {
+    /// The checks the entity's returned rows go through; none on a trusted connection.
+    pub fn checks(&self, entity: EntityId) -> &[Check] {
         match self.trusted() {
-            true => None,
-            false => self.model().access().entity(entity)?.redaction.as_ref(),
+            true => &[],
+            false => &self.model().access().entity(entity).checks,
         }
     }
 
-    /// Each foreign key of a namespace-anchor variant or an entity's declared anchor, with the
-    /// entity it anchors to; a declared anchor counts only when that entity is stored here.
+    /// Each foreign key of a variant whose target holds its source's scope, with that target.
     pub fn anchor_keys(&self) -> impl Iterator<Item = (PropertyId, EntityId)> + '_ {
-        let graph = self.graph();
-        let variants = graph
+        self.graph()
             .variants()
-            .filter(|variant| {
-                self.variant_scope(variant.id) == Some(EdgeVariantScope::NamespaceAnchor)
-            })
+            .filter(|variant| self.edge_scope(variant.id) == Some(EdgeScope::Holder))
             .filter_map(|variant| {
                 let key = self
                     .routes(variant.id)
                     .find_map(|route| route.foreign_key)?;
                 Some((key.key.property, variant.target))
-            });
-        let declared = graph.entities().filter_map(|entity| {
-            let anchor = self.model().access().entity(entity.id)?.anchor?;
-            self.table_of(anchor.entity)
-                .map(|_| (anchor.property, anchor.entity))
-        });
-        variants.chain(declared)
+            })
     }
 
     pub fn edge_table(&self, variant: RelationshipVariantId) -> Option<&str> {

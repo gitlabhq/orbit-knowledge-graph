@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use query_data_model::catalog::{Render, RowFilter};
+use query_data_model::catalog::{Render, Rule};
 use query_data_model::implementations::live::{ExtractionRequest, Live, RequestFilter};
 use query_data_model::implementations::orbit_code::{
     OrbitCode, RequestField, StructuralSearchRequest,
@@ -10,7 +10,7 @@ use query_data_model::plan::live::{LiveError, LiveOperation};
 use query_data_model::plan::logical::{LogicalOperation, PlanError};
 use query_data_model::plan::tracking::Rejected;
 use query_data_model::surface::{SurfaceError, gql};
-use query_data_model::{Model, Packages, testkit};
+use query_data_model::{Model, Packages, Tier, testkit};
 
 fn model() -> Arc<Model> {
     testkit::with_demo().load().unwrap()
@@ -35,19 +35,19 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
     let message = model.entity("SlackMessage").unwrap();
     let live = model.physical::<Live>("data_extraction").unwrap();
     let guard = live.store("slack").unwrap().guard(message).unwrap();
-    assert_eq!(
-        guard.filter,
-        RowFilter::Path {
-            column: "traversal_path".into()
-        }
-    );
+    let names = |rule: &Rule| match rule {
+        Rule::Via(hops) => hops
+            .iter()
+            .map(|hop| model.graph().relationship(hop.relationship).name.clone())
+            .collect::<Vec<_>>(),
+        other => panic!("expected a via chain, got {other:?}"),
+    };
+    assert_eq!(names(&guard.rule), ["IN_WORKSPACE", "INSTALLED_IN"]);
     let file = model.entity("File").unwrap();
     let code = model.physical::<OrbitCode>("code_indexing").unwrap();
     let guard = code.store("code").unwrap().guard(file).unwrap();
-    assert_eq!(
-        (guard.filter.clone(), guard.redacted),
-        (RowFilter::None, true)
-    );
+    assert_eq!(names(&guard.rule), ["IN_PROJECT"]);
+    assert!(!model.access().entity(file).checks.is_empty());
 }
 
 #[test]
@@ -118,12 +118,23 @@ fn code_construction_rejects_unknown_captures_and_misplaced_steps() {
     let none = code.build(|q| q.repositories(index, []));
     assert_eq!(none.unwrap_err(), CodeError::NoRepositories);
 
-    let mut edited = testkit::with_demo().sources().clone();
-    edited.insert(
-        "integration.extra/authorization.yaml".into(),
-        "kind: authorization\npackage: integration.extra\n".into(),
-    );
-    let other = Packages::new(edited).load().unwrap();
+    let extra = [
+        (
+            "integration.extra/package.yaml".to_string(),
+            "kind: package\nname: integration.extra\n".to_string(),
+        ),
+        (
+            "integration.extra/authorization.yaml".to_string(),
+            "kind: authorization\npackage: integration.extra\n".to_string(),
+        ),
+    ];
+    let other = testkit::with_demo()
+        .with(Packages::new(
+            Tier::Integration,
+            extra.into_iter().collect(),
+        ))
+        .load()
+        .unwrap();
     let foreign = other.physical::<OrbitCode>("code_indexing").unwrap();
     let foreign = foreign.index("code", "File").unwrap();
     let rejected = code.build(|q| q.repositories(foreign, [42]));

@@ -17,7 +17,7 @@ use crate::passes::{
 };
 use crate::surface;
 use crate::types::QueryType;
-use crate::types::SecurityContext;
+use orbit_authorization::Grants;
 use query_data_model::surface::Statement;
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
@@ -26,7 +26,7 @@ fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
 
 compiler_pipeline_macros::define_compiler_ctx! {
     env {
-        pub security_ctx: SecurityContext,
+        pub grants: Grants,
     }
 
     state {
@@ -45,7 +45,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
     phases {
         gql_parse {
-            reads_env: [security_ctx, data_model]
+            reads_env: [grants, data_model]
             mutates: [raw, statement]
         }
         gql_parse_trusted {
@@ -69,11 +69,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [statement]
         }
         restrict {
-            reads_env: [data_model, security_ctx]
+            reads_env: [data_model, grants]
             reads_state: [statement]
         }
         restrict_hydration {
-            reads_env: [data_model, security_ctx]
+            reads_env: [data_model, grants]
             reads_state: [hydration]
         }
         tp_bounds {
@@ -102,7 +102,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [relational, result_ctx]
         }
         hydrate_plan {
-            reads_env: [security_ctx, data_model]
+            reads_env: [grants, data_model]
             reads_state: [statement, relational]
             mutates: [hydration_plan]
         }
@@ -116,11 +116,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [query_config, relational]
         }
         security {
-            reads_env: [security_ctx, data_model]
+            reads_env: [grants, data_model]
             mutates: [relational]
         }
         security_check {
-            reads_env: [security_ctx, data_model]
+            reads_env: [grants, data_model]
             reads_state: [relational]
         }
         codegen {
@@ -138,13 +138,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
     pipelines {
         clickhouse_gql {
             backend: query_data_model::ClickHouse
-            env: [security_ctx]
+            env: [grants]
             state: [raw, statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
             phases: [gql_parse, normalize, restrict, admit, tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         ch_hydration {
             backend: query_data_model::ClickHouse
-            env: [security_ctx]
+            env: [grants]
             state: [tp_bounds, hydration, plan_metadata, query_config, relational, hydration_query]
             phases: [restrict_hydration, plan, settings, security, security_check, render_hydration]
         }
@@ -176,7 +176,7 @@ fn parse<C: CompilerCtx>(ctx: &mut C, admin: bool, all_columns: bool) -> Result<
 }
 
 fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let admin = ctx.security_ctx().admin;
+    let admin = ctx.grants().caller().admin();
     parse(ctx, admin, false)
 }
 
@@ -215,13 +215,13 @@ fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn restrict(ctx: &mut impl CompilerCtx) -> Result<()> {
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let model = ctx.data_model();
-    restrict::restrict(&statement.plan, model.model(), model, ctx.security_ctx())
+    restrict::restrict(&statement.plan, model.model(), model, ctx.grants())
 }
 
 fn restrict_hydration(ctx: &mut impl CompilerCtx) -> Result<()> {
     let request = require(ctx.hydration().as_ref(), "hydration")?;
     let model = ctx.data_model();
-    restrict::restrict_hydration(request, model.model(), model, ctx.security_ctx())
+    restrict::restrict_hydration(request, model.model(), model, ctx.grants())
 }
 
 fn tp_bounds(ctx: &mut impl CompilerCtx) -> Result<()> {
@@ -280,7 +280,7 @@ fn result_contract(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn security(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let model = ctx.data_model();
-    let plan = security::apply_security_context(plan, model, ctx.security_ctx())?;
+    let plan = security::apply_security_context(plan, model, ctx.grants())?;
     ctx.set_relational(plan);
     Ok(())
 }
@@ -301,7 +301,7 @@ fn security_check(
 ) -> Result<()> {
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let model = ctx.data_model();
-    security_check::verify(plan, model, ctx.security_ctx())
+    security_check::verify(plan, model, ctx.grants())
 }
 
 fn hydrate_plan(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) -> Result<()> {
@@ -313,7 +313,7 @@ fn hydrate_plan(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHous
         .outputs(relational.root())
         .filter_map(|output| relational.name(output))
         .collect();
-    let plan = hydrate::generate_hydration_plan(query, &projected, model, ctx.security_ctx());
+    let plan = hydrate::generate_hydration_plan(query, &projected, model, ctx.grants());
     ctx.set_hydration_plan(plan);
     Ok(())
 }

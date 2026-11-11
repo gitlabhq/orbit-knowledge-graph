@@ -27,7 +27,5 @@ pub use implementations::clickhouse::facts::{
 };
 pub use implementations::duckdb::DuckDb;
 pub use implementations::relational::RelationshipRoute;
-pub use packages::Packages;
-pub use types::{
-    DataType, EdgeVariantScope, EnumType, FieldSelectivity, RequiredRole, Scope, TraversalPathKind,
-};
+pub use packages::{Packages, Tier};
+pub use types::{Cardinality, DataType, EnumType, FieldSelectivity, TraversalPathKind};

@@ -16,7 +16,8 @@ fn local_dictionary_credentials() -> DictionaryCredentials {
 
 fn load_model(model_path: Option<&PathBuf>) -> Result<Arc<Model>> {
     let packages = match model_path {
-        Some(path) => Packages::read_dir(path).context("failed to read model packages")?,
+        Some(path) => Packages::read_dir(path, query_data_model::Tier::Platform)
+            .context("failed to read model packages")?,
         None => Packages::embedded(),
     };
     Ok(packages.load()?)

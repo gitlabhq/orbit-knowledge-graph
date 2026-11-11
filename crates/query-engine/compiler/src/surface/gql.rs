@@ -9,7 +9,8 @@ use query_data_model::{Catalog, ClickHouse, Model};
 
 use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
-use crate::{CompiledQueryContext, QueryError, Result, SecurityContext};
+use crate::{CompiledQueryContext, QueryError, Result};
+use orbit_authorization::Grants;
 
 pub use query_data_model::surface::gql::{GRAMMAR, outline};
 
@@ -34,11 +35,11 @@ pub enum PreparedStatement {
 pub fn prepare(
     raw: &str,
     data_model: &Arc<Catalog<ClickHouse>>,
-    security_context: &SecurityContext,
+    grants: &Grants,
     scope: IntrospectionScope,
 ) -> Result<PreparedStatement> {
-    match route(raw, data_model, security_context.admin, scope)? {
-        RoutedStatement::Query(query) => compile_query(*query, data_model, security_context)
+    match route(raw, data_model, grants.caller().admin(), scope)? {
+        RoutedStatement::Query(query) => compile_query(*query, data_model, grants)
             .map(|compiled| PreparedStatement::Query(Box::new(compiled))),
         RoutedStatement::Schema(response) => Ok(PreparedStatement::Schema(response)),
     }
@@ -65,9 +66,9 @@ pub fn route(
 pub fn compile_query(
     query: ParsedQuery,
     data_model: &Arc<Catalog<ClickHouse>>,
-    security_context: &SecurityContext,
+    grants: &Grants,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseGqlCtx::new(security_context.clone(), Arc::clone(data_model));
+    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), Arc::clone(data_model));
     ctx.set_statement(query.statement);
     crate::finish(&mut ctx, config::run_clickhouse_gql)
 }

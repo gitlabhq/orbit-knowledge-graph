@@ -1,4 +1,5 @@
-use query_data_model::Catalog;
+use query_data_model::catalog::{Check, EdgeScope};
+use query_data_model::{Catalog, EntityId};
 use std::collections::HashSet;
 
 use crate::passes::codegen::SqlBackend;
@@ -10,6 +11,19 @@ use crate::error::{QueryError, Result};
 use crate::logical::Leaf;
 use crate::logical::Query;
 use crate::logical::columns::free_text;
+
+/// The entity's row check is on an entity that holds other rows' scope, such as a project.
+fn checked_by_scope_holder(model: &Catalog<impl SqlBackend>, entity: EntityId) -> bool {
+    model.checks(entity).iter().any(|check| match check {
+        Check::Rows { object, .. } => {
+            let checked = object.unwrap_or(entity);
+            model.graph().variants().any(|variant| {
+                variant.target == checked && model.edge_scope(variant.id) == Some(EdgeScope::Holder)
+            })
+        }
+        Check::Delegated { .. } => false,
+    })
+}
 
 fn sides(fact: &Leaf<'_>) -> impl Iterator<Item = Expr> {
     std::iter::once(fact.left()).chain(fact.right())
@@ -113,10 +127,7 @@ pub(super) fn aggregation_text(
             };
             let by_namespace = query
                 .entity(binding)
-                .and_then(|entity| model.redaction(entity))
-                .is_some_and(|redaction| {
-                    matches!(redaction.resource.as_str(), "project" | "group")
-                });
+                .is_some_and(|entity| checked_by_scope_holder(model, entity));
             if rows.contains(&binding) || by_namespace || !free_text(model.graph(), id) {
                 continue;
             }

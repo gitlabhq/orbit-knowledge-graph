@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 chrono = { workspace = true }
+orbit-authorization = { path = "../../orbit-authorization" }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../../orbit-server-config" }
 orbit-utils = { path = "../../utils" }

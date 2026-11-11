@@ -1,4 +1,5 @@
-use std::path::Path;
+mod support;
+
 use std::sync::Arc;
 
 use query_data_model::catalog::Unresolved;
@@ -7,44 +8,11 @@ use query_data_model::plan::logical::{
     count,
 };
 use query_data_model::plan::tracking::{Declared, NodeId, Rejected};
-use query_data_model::{DataModelError, Direction, EntityId, Model};
-
-fn package_sources(packages: &[&str]) -> Vec<(String, String)> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/packages");
-    let all = query_data_model::Packages::read_dir(&root).unwrap();
-    packages
-        .iter()
-        .flat_map(|package| {
-            let prefix = format!("{package}/");
-            all.sources()
-                .iter()
-                .filter(move |(name, _)| name.starts_with(&prefix))
-                .map(|(name, yaml)| (name.clone(), yaml.clone()))
-        })
-        .collect()
-}
+use query_data_model::{Direction, EntityId, Model};
+use support::load_with;
 
 fn load(packages: &[&str]) -> Arc<Model> {
     load_with(packages, |_, yaml| yaml).unwrap()
-}
-
-fn load_with(
-    packages: &[&str],
-    edit: impl Fn(&str, String) -> String,
-) -> Result<Arc<Model>, DataModelError> {
-    let sources: Vec<_> = package_sources(packages)
-        .into_iter()
-        .map(|(name, yaml)| {
-            let edited = edit(&name, yaml);
-            (name, edited)
-        })
-        .collect();
-    Model::from_yaml(
-        sources
-            .iter()
-            .map(|(name, yaml)| (name.as_str(), yaml.as_str())),
-    )
-    .map(Arc::new)
 }
 
 fn operations(plan: &LogicalPlan) -> Vec<&LogicalOperation> {
@@ -229,7 +197,7 @@ fn shared_bodies_are_reused_and_scoped() {
 #[test]
 fn handles_from_another_plan_or_snapshot_are_rejected() {
     let model = load(&["gitlab"]);
-    let other = load(&["gitlab", "linear"]);
+    let other = load(&["gitlab", "integration.linear"]);
     let catalog = model.logical();
     let requests = catalog.entity("MergeRequest").unwrap();
     let foreign = other.logical().entity("MergeRequest").unwrap();
@@ -300,7 +268,7 @@ fn an_invalid_follow_names_the_connecting_relationships() {
 fn property_policy_and_types_are_checked_at_construction() {
     let model = load_with(&["gitlab"], |name, yaml| {
         if name.ends_with("authorization.yaml") {
-            yaml.replace("{ admin_only: true, like: false }", "{ filterable: false }")
+            yaml.replace("admin_exact: [email]", "unfiltered: [email]")
         } else {
             yaml
         }

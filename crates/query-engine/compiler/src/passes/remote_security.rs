@@ -1,20 +1,22 @@
 //! The security phase for code and live plans: each read's guard becomes the request's own
-//! form of a path filter, then a check proves every read carries it.
+//! form of its scope restriction, then a check proves every read carries it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
+use orbit_authorization::{Grants, ScopeKey, ScopeSet};
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::catalog::Guard;
+use query_data_model::Model;
+use query_data_model::catalog::{Guard, Rule};
 use query_data_model::plan::code::CodeOperation;
 use query_data_model::plan::live::LiveOperation;
 use query_data_model::plan::tracking::{Language, NodeId, Plan};
 
+use super::guards::scope_set;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::remote::{RemotePlan, Target};
-use crate::types::SecurityContext;
 
-/// Where each repository and workspace sits in the namespace tree, resolved on the graph
-/// connection before the request goes out.
+/// The scope key of each repository and workspace a plan reads, resolved on the graph
+/// connection through the read's `via` chain before the request goes out.
 #[derive(Debug, Clone, Default)]
 pub struct Namespaces {
     pub repositories: BTreeMap<i64, TraversalPath>,
@@ -24,58 +26,53 @@ pub struct Namespaces {
 pub fn secure(
     target: &Target,
     plan: RemotePlan,
-    ctx: &SecurityContext,
+    grants: &Grants,
     namespaces: &Namespaces,
 ) -> Result<RemotePlan> {
     match (target, plan) {
         (Target::Code(code), RemotePlan::Code(plan)) => {
-            let index = plan
-                .nodes()
-                .find_map(|node| match plan.operation(node) {
-                    CodeOperation::Repositories { index, .. } => Some(*index),
-                    _ => None,
-                })
-                .ok_or_else(|| QueryError::Security("the code plan reads no index".into()))?;
-            let readable = readable(code.guard(index), ctx)?;
+            let mut allowed: HashMap<NodeId, Vec<i64>> = HashMap::new();
+            for node in plan.nodes() {
+                let CodeOperation::Repositories { index, projects } = plan.operation(node) else {
+                    continue;
+                };
+                let set = admitted(code.model(), code.index_guard(*index), grants)?;
+                let keep = |project: &i64| match set {
+                    None => true,
+                    Some(set) => namespaces
+                        .repositories
+                        .get(project)
+                        .is_some_and(|path| holds(set, path)),
+                };
+                allowed.insert(node, projects.iter().copied().filter(keep).collect());
+            }
             let plan = code.rebuild(plan, |q, step| {
                 let files = step.keep(q)?;
-                let CodeOperation::Repositories { projects, .. } = &step.operation else {
-                    return Ok(files);
-                };
-                let allowed: Vec<i64> = projects
-                    .iter()
-                    .copied()
-                    .filter(|project| {
-                        namespaces
-                            .repositories
-                            .get(project)
-                            .is_some_and(|path| path.is_within_scope(&readable))
-                    })
-                    .collect();
-                q.restrict(files, allowed)
+                match allowed.remove(&step.node()) {
+                    Some(projects) => q.restrict(files, projects),
+                    None => Ok(files),
+                }
             })?;
             Ok(RemotePlan::Code(plan))
         }
         (Target::Live(live), RemotePlan::Live(plan)) => {
-            let operation = plan
-                .nodes()
-                .find_map(|node| match plan.operation(node) {
-                    LiveOperation::Call(operation) => Some(*operation),
-                    _ => None,
-                })
-                .ok_or_else(|| QueryError::Security("the live plan calls no operation".into()))?;
-            let readable = readable(live.guard(operation), ctx)?;
-            let workspaces: Vec<String> = namespaces
-                .workspaces
-                .iter()
-                .filter(|(_, path)| path.is_within_scope(&readable))
-                .map(|(workspace, _)| workspace.clone())
-                .collect();
+            let mut allowed: HashMap<NodeId, Vec<String>> = HashMap::new();
+            for node in plan.nodes() {
+                let LiveOperation::Call(operation) = plan.operation(node) else {
+                    continue;
+                };
+                let set = admitted(live.model(), live.operation_guard(*operation), grants)?;
+                let workspaces = namespaces.workspaces.iter().filter(|(_, path)| match set {
+                    None => true,
+                    Some(set) => holds(set, path),
+                });
+                allowed.insert(node, workspaces.map(|(name, _)| name.clone()).collect());
+            }
             let plan = live.rebuild(plan, |q, step| {
                 let calls = step.keep(q)?;
-                match step.operation {
-                    LiveOperation::Call(_) => q.workspaces(calls, workspaces.clone()),
-                    _ => Ok(calls),
+                match allowed.remove(&step.node()) {
+                    Some(workspaces) => q.workspaces(calls, workspaces),
+                    None => Ok(calls),
                 }
             })?;
             Ok(RemotePlan::Live(plan))
@@ -86,9 +83,31 @@ pub fn secure(
     }
 }
 
-fn readable<'c>(guard: Option<&Guard>, ctx: &'c SecurityContext) -> Result<Vec<&'c TraversalPath>> {
+/// The caller's scope set for a read's `via` policy; none for a read only its checks restrict.
+fn admitted<'g>(
+    model: &Model,
+    guard: Option<&Guard>,
+    grants: &'g Grants,
+) -> Result<Option<&'g ScopeSet>> {
     let guard = guard.ok_or_else(|| QueryError::Security("the read has no guard".into()))?;
-    Ok(ctx.paths_at_least(guard.min_role.unwrap_or_default()))
+    match guard.rule {
+        Rule::Via(_) => scope_set(grants, model, guard.scope, guard.permission).map(Some),
+        Rule::Checked => Ok(None),
+        _ => Err(QueryError::Security(
+            "a remote read is restricted through a via chain or its checks".into(),
+        )),
+    }
+}
+
+fn holds(set: &ScopeSet, path: &TraversalPath) -> bool {
+    match set {
+        ScopeSet::All => true,
+        ScopeSet::Subtrees(roots) => {
+            let roots: Vec<TraversalPath> = roots.iter().map(|root| root.as_str().into()).collect();
+            path.is_within_scope(&roots.iter().collect::<Vec<_>>())
+        }
+        ScopeSet::Keys(keys) => keys.contains(&ScopeKey::Text(path.as_str().to_string())),
+    }
 }
 
 /// Every repository read feeds a restriction, and every call a workspace precondition.

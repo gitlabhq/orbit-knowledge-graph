@@ -70,17 +70,12 @@ impl HydrationStage {
                 ids.truncate(MAX_DYNAMIC_HYDRATION_RESULTS);
             }
             id_columns.insert(entity_type.clone(), auth.auth_id_column.clone());
-            let scoped = data_model
-                .graph()
-                .entity_id(&entity_type)
-                .is_some_and(|entity| data_model.has_path_column(entity));
-            let paths = if scoped { scope.clone() } else { Vec::new() };
             arms.push(hydration_helpers::hydration_arm(
                 data_model.model(),
                 &entity_type,
                 &ids,
                 std::slice::from_ref(&auth.auth_id_column),
-                paths,
+                scope.clone(),
             )?);
         }
 
@@ -157,7 +152,7 @@ impl HydrationStage {
         let compiled = compile_hydration(
             HydrationRequest { arms, options },
             data_model,
-            ctx.security_context()?,
+            ctx.grants()?,
         )
         .map_err(|e| PipelineError::Compile {
             client_safe: false,

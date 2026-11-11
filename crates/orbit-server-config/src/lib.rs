@@ -8,6 +8,7 @@
 
 pub mod analytics;
 pub mod app;
+pub mod authorization;
 pub mod billing;
 pub mod clickhouse;
 pub mod clickhouse_setup;
@@ -28,6 +29,7 @@ pub mod tls;
 
 pub use analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
 pub use app::{AppConfig, ConfigError, EMBEDDED_DEFAULTS, SECRET_FILE_DIR, SharedAppConfig};
+pub use authorization::{AuthorizationConfig, ProviderConfig};
 pub use billing::{BillingAuthMode, BillingConfig, QuotaAuthMode, QuotaConfig, QuotaConfigError};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use clickhouse_setup::ClickHouseSetupConfig;

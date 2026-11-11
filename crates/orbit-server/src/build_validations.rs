@@ -25,14 +25,7 @@ fn named_queries_render_and_compile() {
         query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
             .unwrap_or_else(|error| panic!("embedded model failed to load: {error}")),
     );
-    let security_context = compiler::SecurityContext::new_with_roles(
-        1,
-        vec![compiler::AuthorizedPath::new(
-            "1/",
-            compiler::AccessLevel::Owner as u32,
-        )],
-    )
-    .expect("static security context must be valid");
+    let security_context = compiler::uniform_grants(data_model.model(), false, &["1/"]);
     let queries = named_queries::NamedQueries::load_from_dir(&directory)
         .unwrap_or_else(|error| panic!("named queries failed to load: {error}"));
 

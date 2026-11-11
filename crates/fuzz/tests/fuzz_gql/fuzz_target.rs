@@ -1,5 +1,6 @@
 use bolero::check;
-use compiler::{SecurityContext, compile};
+use compiler::compile;
+use compiler::orbit_authorization::Grants;
 use query_data_model::{Catalog, ClickHouse};
 use std::str::from_utf8;
 use std::sync::{Arc, OnceLock};
@@ -10,9 +11,9 @@ fn data_model() -> &'static Arc<Catalog<ClickHouse>> {
         .get_or_init(|| Arc::new(Catalog::<ClickHouse>::embedded().expect("load embedded model")))
 }
 
-fn ctx() -> &'static SecurityContext {
-    static CTX: OnceLock<SecurityContext> = OnceLock::new();
-    CTX.get_or_init(|| SecurityContext::new(1, vec!["1/".into()]).expect("test ctx"))
+fn ctx() -> &'static Grants {
+    static CTX: OnceLock<Grants> = OnceLock::new();
+    CTX.get_or_init(|| compiler::uniform_grants(data_model().model(), false, &["1/"]))
 }
 
 fn main() {

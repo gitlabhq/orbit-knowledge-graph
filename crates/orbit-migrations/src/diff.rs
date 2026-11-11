@@ -292,9 +292,11 @@ impl Contents<'_> {
     fn relationship(&self, id: RelationshipId) -> String {
         let graph = self.catalog.graph();
         let relationship = graph.relationship(id);
+        // A variant only a foreign key carries writes no edge rows, so it changes no table.
         let mut variants: Vec<String> = relationship
             .variants
             .iter()
+            .filter(|variant| self.catalog.edge_table(**variant).is_some())
             .map(|variant| self.variant(*variant))
             .collect();
         variants.sort();
@@ -466,7 +468,9 @@ mod tests {
         *source = source.replacen(from, to, 1);
         derive_scope(
             &embedded.load().unwrap(),
-            &Packages::new(sources).load().unwrap(),
+            &Packages::new(query_data_model::Tier::Platform, sources)
+                .load()
+                .unwrap(),
         )
         .unwrap()
     }

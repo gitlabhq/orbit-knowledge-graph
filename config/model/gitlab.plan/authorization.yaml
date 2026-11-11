@@ -1,17 +1,32 @@
 kind: authorization
 package: gitlab.plan
 entities:
-  Label: {scope: namespace, role: reporter, redaction: {resource: label, ability: read_label}}
+  Label:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_label, resource: label}]
+    properties:
+      open: [id, title, description, color, created_at, updated_at, project_id, group_id]
+      hidden: [traversal_path]
+
   Milestone:
     scope: namespace
-    role: reporter
-    redaction: {resource: milestone, ability: read_milestone}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_milestone, resource: milestone}]
+    properties:
+      open: [id, iid, title, description, state, due_date, start_date, created_at, updated_at,
+             project_id, group_id]
+      hidden: [traversal_path]
 
   WorkItem:
     scope: namespace
-    role: reporter
-    redaction: {resource: work_item, ability: read_work_item}
-properties:
-  Label.traversal_path: {hidden: true, filterable: false}
-  Milestone.traversal_path: {hidden: true, filterable: false}
-  WorkItem.traversal_path: {hidden: true, filterable: false}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_work_item, resource: work_item}]
+    properties:
+      open: [id, iid, title, description, state, work_item_type, confidential, due_date, start_date,
+             weight, created_at, updated_at, closed_at, project_id, author_id, milestone_id,
+             namespace_id, closed_by_id]
+      hidden: [traversal_path]

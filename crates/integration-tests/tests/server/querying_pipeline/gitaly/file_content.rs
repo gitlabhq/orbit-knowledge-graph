@@ -14,7 +14,7 @@ use gitlab_client::GitlabClient;
 use orbit_arrow::ColumnValue;
 use orbit_server::content::gitaly::file_content::GitalyContentService;
 use prost::Message;
-use query_engine::compiler::SecurityContext;
+use query_engine::pipeline::SecurityContext;
 use query_engine::shared::content::{ColumnResolver, ResolverContext};
 use tokio::net::TcpListener;
 

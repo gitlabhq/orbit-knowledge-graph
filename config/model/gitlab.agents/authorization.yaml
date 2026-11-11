@@ -3,6 +3,9 @@ package: gitlab.agents
 entities:
   AgentSession:
     scope: namespace
-    role: reporter
-    redaction: {resource: project, ability: read_code, id: project_id}
-properties: {AgentSession.traversal_path: {hidden: true, filterable: false}}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]
+    properties:
+      open: [id, flow_type, source, project_id, session_started_at]
+      hidden: [traversal_path]

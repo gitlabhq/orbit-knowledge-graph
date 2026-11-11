@@ -3,25 +3,61 @@ package: gitlab.ci
 entities:
   Deployment:
     scope: namespace
-    role: reporter
-    redaction: {resource: deployment, ability: read_deployment}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_deployment, resource: deployment}]
+    properties:
+      open: [id, iid, project_id, ref, tag, sha, status, deployable_type, deployable_id, on_stop,
+             archived, created_at, finished_at, updated_at, environment_id, user_id]
+      hidden: [traversal_path]
 
   Environment:
     scope: namespace
-    role: reporter
-    redaction: {resource: environment, ability: read_environment}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_environment, resource: environment}]
+    properties:
+      open: [id, project_id, name, slug, external_url, environment_type, state, tier, auto_stop_at,
+             auto_delete_at, auto_stop_setting, cluster_agent_id, kubernetes_namespace,
+             flux_resource_path, description, created_at, updated_at, merge_request_id]
+      hidden: [traversal_path]
 
-  Job: {scope: namespace, role: reporter, redaction: {resource: ci_build, ability: read_build}}
+  Job:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_build, resource: ci_build}]
+    properties:
+      open: [id, name, status, ref, tag, allow_failure, coverage, environment, when, retried,
+             failure_reason, created_at, started_at, finished_at, queued_at, duration,
+             queued_duration, type, runner_id, timeout, timeout_source, exit_code, scheduling_type,
+             project_id, user_id, upstream_pipeline_id, stage_id, pipeline_id, auto_canceled_by_id]
+      hidden: [traversal_path]
+
   Pipeline:
     scope: namespace
-    role: reporter
-    redaction: {resource: ci_pipeline, ability: read_pipeline}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_pipeline, resource: ci_pipeline}]
+    properties:
+      open: [id, iid, sha, ref, status, source, tag, duration, failure_reason, created_at,
+             started_at, finished_at, committed_at, updated_at, before_sha, yaml_errors, protected,
+             project_id, user_id, merge_request_id, auto_canceled_by_id]
+      hidden: [traversal_path]
 
-  Runner: {scope: global, role: reporter, redaction: {resource: ci_runner, ability: read_runner}}
-  Stage: {scope: namespace, role: reporter, redaction: {resource: ci_stage, ability: read_build}}
-properties:
-  Deployment.traversal_path: {hidden: true, filterable: false}
-  Environment.traversal_path: {hidden: true, filterable: false}
-  Job.traversal_path: {hidden: true, filterable: false}
-  Pipeline.traversal_path: {hidden: true, filterable: false}
-  Stage.traversal_path: {hidden: true, filterable: false}
+  Runner:
+    scope: global
+    permission: read
+    checks: [{provider: rails, permission: read_runner, resource: ci_runner}]
+    properties:
+      open: [id, runner_type, name, description, active, locked, run_untagged, access_level,
+             maximum_timeout, organization_id, created_at, contacted_at]
+
+  Stage:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_build, resource: ci_stage}]
+    properties:
+      open: [id, name, status, position, created_at, updated_at, project_id, pipeline_id]
+      hidden: [traversal_path]

@@ -3,8 +3,9 @@
 
 use std::sync::Arc;
 
+use compiler::QueryError;
+use compiler::orbit_authorization::Grants;
 use compiler::remote::{self, RemotePlan, RemoteRequest};
-use compiler::{AuthorizedPath, QueryError, SecurityContext};
 use query_data_model::catalog::Row;
 use query_data_model::implementations::live::{DataExtraction, ExtractionRequest, RequestFilter};
 use query_data_model::implementations::orbit_code::{
@@ -14,6 +15,7 @@ use query_data_model::plan::code::CodeOperation;
 use query_data_model::plan::live::{Condition, LiveOperation};
 use query_data_model::plan::logical::{LogicalOperation, LogicalPlan, Projection};
 use query_data_model::{Model, testkit};
+use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 use serde_json::json;
 
 use crate::seeded_remote::{SeededCodeSearch, SeededDataExtraction, seeded_namespaces};
@@ -25,8 +27,10 @@ fn model() -> Arc<Model> {
     testkit::with_demo().load().unwrap()
 }
 
-fn caller(path: &str) -> SecurityContext {
-    SecurityContext::new_with_roles(1, vec![AuthorizedPath::new(path, 20)]).unwrap()
+fn caller(path: &str) -> Grants {
+    let session = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new(path, 20)]).unwrap();
+    let config = orbit_server_config::AppConfig::embedded_defaults().authorization;
+    orbit_server::authorization::gitlab::session_grants(&config, &model(), session).unwrap()
 }
 
 fn logical(plan: &LogicalPlan) -> Vec<String> {
@@ -123,7 +127,7 @@ struct Compiled {
     request: RemoteRequest,
 }
 
-fn stages(query: &str, ctx: &SecurityContext) -> Result<Compiled, QueryError> {
+fn stages(query: &str, ctx: &Grants) -> Result<Compiled, QueryError> {
     let model = model();
     let plan = remote::parse(query, &model, ctx)?;
     let (target, planned) = remote::plan(&plan, &model)?;

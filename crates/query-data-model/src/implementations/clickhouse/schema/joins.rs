@@ -65,6 +65,7 @@ pub(super) fn resolve(
             Some(PathColumn {
                 name: source.path_column.clone()?,
                 entity: table.entity,
+                table: table.name.clone(),
             })
         })
         .collect();

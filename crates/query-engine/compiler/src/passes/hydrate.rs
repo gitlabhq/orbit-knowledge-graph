@@ -10,7 +10,7 @@ use query_data_model::catalog::Lookup;
 use crate::logical::columns::{defaults, returned, selections};
 use crate::logical::{DynamicColumnMode, Kind, Query};
 use crate::passes::codegen::SqlBackend;
-use crate::types::SecurityContext;
+use orbit_authorization::Grants;
 use query_data_model::plan::logical::Expr;
 use query_data_model::plan::logical::Operator;
 
@@ -110,7 +110,7 @@ pub struct VirtualColumnRequest {
 ///   keeps only its virtual columns.
 /// - PathFinding/Neighbors: dynamic plan over all ontology entity types.
 ///
-/// The security context is threaded through so dynamic plans can strip
+/// The caller grants are threaded through so dynamic plans can strip
 /// `admin_only` fields before they reach the hydration query — static
 /// plans rely on `RestrictPass` having already pruned them from
 /// `node.columns`.
@@ -118,14 +118,12 @@ pub fn generate_hydration_plan(
     query: Query<'_>,
     projected: &[&str],
     model: &Catalog<impl SqlBackend>,
-    security_ctx: &SecurityContext,
+    grants: &Grants,
 ) -> HydrationPlan {
     match query.kind() {
-        Kind::PathFinding | Kind::Neighbors => HydrationPlan::Dynamic(build_dynamic_specs(
-            query.dynamic_columns(),
-            model,
-            security_ctx,
-        )),
+        Kind::PathFinding | Kind::Neighbors => {
+            HydrationPlan::Dynamic(build_dynamic_specs(query.dynamic_columns(), model, grants))
+        }
         Kind::Aggregation | Kind::Traversal => {
             let mut templates = build_static_templates(query, projected, model);
 
@@ -234,7 +232,7 @@ fn build_static_templates(
 fn build_dynamic_specs(
     mode: DynamicColumnMode,
     model: &Catalog<impl SqlBackend>,
-    security_ctx: &SecurityContext,
+    grants: &Grants,
 ) -> Vec<DynamicEntityColumns> {
     let graph = model.graph();
     graph
@@ -243,7 +241,7 @@ fn build_dynamic_specs(
             let name = entity.name.as_str();
             let table = model.table_of(entity.id)?;
 
-            let admin_only: HashSet<&str> = if security_ctx.admin {
+            let admin_only: HashSet<&str> = if grants.caller().admin() {
                 HashSet::new()
             } else {
                 entity
@@ -397,12 +395,17 @@ entities:
 "#
         );
         let sources = [
-            ("graph.yaml", graph),
-            ("storage/clickhouse.yaml", storage.as_str()),
+            ("test/package.yaml", "kind: package\nname: test\n"),
+            ("test/graph.yaml", graph),
+            ("test/storage/clickhouse.yaml", storage.as_str()),
         ]
         .into_iter()
-        .chain(rest.iter().map(|yaml| ("extra.yaml", *yaml)));
-        let model = Arc::new(Model::from_yaml(sources).unwrap());
+        .chain(
+            rest.iter()
+                .enumerate()
+                .map(|(index, yaml)| (["test/extra.yaml", "test/more.yaml"][index], *yaml)),
+        );
+        let model = Arc::new(Model::from_yaml(query_data_model::Tier::Platform, sources).unwrap());
         Catalog::<ClickHouse>::from_model(&model).unwrap()
     }
 
@@ -437,7 +440,7 @@ lookups:
 "#,
             dependencies.join(", ")
         );
-        let access = "{kind: authorization, package: test, entities: {TestNode: {scope: global}}}";
+        let access = "{kind: authorization, package: test, permissions: [read], scopes: {global: {kind: global, provider: session}}, entities: {TestNode: {scope: global, permission: read, properties: {open: [id, name, project_id, branch, path]}}}}";
         catalog(entity, graph, &[&service, access])
     }
 
@@ -564,10 +567,13 @@ entities:
         let access = r#"
 kind: authorization
 package: test
-entities: {User: {scope: global}}
-properties:
-  User.is_admin: {admin_only: true}
-  User.is_auditor: {admin_only: true}
+permissions: [read]
+scopes: {global: {kind: global, provider: session}}
+entities:
+  User:
+    scope: global
+    permission: read
+    properties: {open: [id, username, state], admin: [is_admin, is_auditor]}
 "#;
         catalog(
             "User: {table: gl_user, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, username: {backend: {type: String}}, state: {backend: {type: String}}, is_admin: {backend: {type: Bool}}, is_auditor: {backend: {type: Bool}}}}",

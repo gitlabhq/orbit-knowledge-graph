@@ -71,8 +71,8 @@ fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
     ctx.security_context
         .as_ref()
         .is_some_and(|sc| match sc.realm {
-            Some(compiler::Realm::SaaS) => sc.is_gitlab_team_member,
-            Some(compiler::Realm::SelfManaged) | Some(compiler::Realm::Dedicated) => sc.admin,
+            Some(pipeline::Realm::SaaS) => sc.is_gitlab_team_member,
+            Some(pipeline::Realm::SelfManaged) | Some(pipeline::Realm::Dedicated) => sc.admin,
             None => false,
         })
 }
@@ -80,14 +80,15 @@ fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use compiler::SecurityContext;
     use pipeline::QueryPipelineContext;
+    use pipeline::SecurityContext;
 
     fn make_ctx(security_context: Option<SecurityContext>) -> QueryPipelineContext {
         QueryPipelineContext {
             query_json: String::new(),
             compiled: None,
             security_context,
+            grants: None,
             server_extensions: Default::default(),
             phases: Default::default(),
         }
@@ -97,7 +98,7 @@ mod tests {
         let sc = SecurityContext::new(1, vec!["1/9970/".into()])
             .unwrap()
             .with_role(admin, Some(20))
-            .with_realm(Some(compiler::Realm::SaaS))
+            .with_realm(Some(pipeline::Realm::SaaS))
             .with_team_member(team_member);
         make_ctx(Some(sc))
     }
@@ -106,7 +107,7 @@ mod tests {
         let sc = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_role(admin, None)
-            .with_realm(Some(compiler::Realm::SelfManaged));
+            .with_realm(Some(pipeline::Realm::SelfManaged));
         make_ctx(Some(sc))
     }
 
@@ -150,7 +151,7 @@ mod tests {
         let sc = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_role(true, None)
-            .with_realm(Some(compiler::Realm::Dedicated));
+            .with_realm(Some(pipeline::Realm::Dedicated));
         assert!(can_see_debug_sql(&make_ctx(Some(sc))));
     }
 
@@ -158,7 +159,7 @@ mod tests {
     fn dedicated_non_admin_denied() {
         let sc = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_realm(Some(compiler::Realm::Dedicated));
+            .with_realm(Some(pipeline::Realm::Dedicated));
         assert!(!can_see_debug_sql(&make_ctx(Some(sc))));
     }
 

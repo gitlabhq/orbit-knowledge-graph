@@ -56,7 +56,6 @@ pub struct PipelineSpec {
     pub filter: Option<String>,
     pub lookups: Option<Vec<ExtractLookup<Raw>>>,
     pub reindex: Option<Vec<Short<ReindexTrigger<Raw>>>>,
-    pub global: Option<bool>,
     pub partition_count: Option<u32>,
     pub columns: Option<IndexMap<String, String>>,
     pub binary: Option<Vec<String>>,
@@ -77,7 +76,6 @@ fn rules(section: &str) -> (&'static [&'static str], &'static [&'static str]) {
             &[
                 "filter",
                 "reindex",
-                "global",
                 "partition_count",
                 "columns",
                 "binary",
@@ -101,7 +99,6 @@ impl PipelineSpec {
             ("filter", self.filter.is_some()),
             ("lookups", self.lookups.is_some()),
             ("reindex", self.reindex.is_some()),
-            ("global", self.global.is_some()),
             ("partition_count", self.partition_count.is_some()),
             ("columns", self.columns.is_some()),
             ("binary", self.binary.is_some()),

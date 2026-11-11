@@ -1,4 +1,24 @@
 kind: authorization
 package: integration.slack
 entities:
-  SlackMessage: {scope: namespace, role: reporter}
+  SlackMessage:
+    scope: namespace
+    permission: read
+    enforce: {live: {scope_key: {via: [IN_WORKSPACE, INSTALLED_IN]}}}
+    checks: [{provider: slack, kind: delegated}]
+    properties:
+      open: [id, workspace, channel, author, text, sent_at]
+
+  SlackWorkspace:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}, live: {scope_key: {via: INSTALLED_IN}}}
+    properties:
+      open: [id, name, group_id]
+      hidden: [traversal_path]
+relationships:
+  IN_WORKSPACE: {scope: namespace, permission: read, enforce: {}}
+  INSTALLED_IN:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: holder}}

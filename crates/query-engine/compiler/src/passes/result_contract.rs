@@ -1,4 +1,5 @@
 use query_data_model::Catalog;
+use query_data_model::catalog::Check;
 use query_data_model::implementations::relational::plan::RelationalPlan;
 use std::collections::{HashMap, HashSet};
 
@@ -28,30 +29,40 @@ use crate::types::QueryType;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntityAuthConfig {
+    pub provider: String,
     pub resource_type: String,
     pub ability: String,
     pub auth_id_column: String,
     pub owner_entity: Option<String>,
-    pub required_access_level: u32,
 }
 
-/// How the server authorizes each redacted entity, by entity name.
+/// The row check each checked entity's returned rows go through, by entity name.
 pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, EntityAuthConfig> {
     let graph = model.graph();
+    let access = model.model().access();
     graph
         .entities()
         .filter_map(|entity| {
-            let redaction = model.redaction(entity.id)?;
-            let config = EntityAuthConfig {
-                resource_type: redaction.resource.clone(),
-                ability: redaction.ability.clone(),
-                auth_id_column: graph.property(redaction.id).name.clone(),
-                owner_entity: redaction
-                    .owner
-                    .map(|owner| graph.entity(owner).name.clone()),
-                required_access_level: model.min_role(entity.id)?,
-            };
-            Some((entity.name.clone(), config))
+            let check = model
+                .checks(entity.id)
+                .iter()
+                .find_map(|check| match check {
+                    Check::Rows {
+                        provider,
+                        permission,
+                        resource,
+                        id,
+                        object,
+                    } => Some(EntityAuthConfig {
+                        provider: provider.clone(),
+                        resource_type: resource.clone(),
+                        ability: access.permission(*permission).name.clone(),
+                        auth_id_column: graph.property(*id).name.clone(),
+                        owner_entity: object.map(|owner| graph.entity(owner).name.clone()),
+                    }),
+                    Check::Delegated { .. } => None,
+                })?;
+            Some((entity.name.clone(), check))
         })
         .collect()
 }

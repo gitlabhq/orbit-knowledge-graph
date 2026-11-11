@@ -1,10 +1,11 @@
+use query_data_model::catalog::Rule;
 use query_data_model::implementations::orbit_code::OrbitCode;
 use query_data_model::plan::code::{CodePlan, Field, Matches, Trigrams};
 use query_data_model::plan::logical::{
     Columns, Comparison, Conjunct, Expr, Literal, LogicalOperation, LogicalPlan, MATCH_LINE,
     Operand, Predicate, Projection, Structural,
 };
-use query_data_model::{Catalog, EntityId, PropertyId};
+use query_data_model::{Catalog, Endpoint, EntityId, PropertyId};
 
 use super::unsupported;
 use crate::error::{QueryError, Result};
@@ -79,9 +80,13 @@ pub(super) fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<C
     })?)
 }
 
-/// The foreign key that names an entity's repository.
+/// The foreign key on the entity that names its repository: the first step of its `via` chain.
 fn anchor(code: &Catalog<OrbitCode>, entity: EntityId) -> Option<PropertyId> {
-    Some(code.model().access().entity(entity)?.anchor?.property)
+    let Rule::Via(hops) = &code.guard(entity)?.rule else {
+        return None;
+    };
+    let key = code.model().foreign_key(hops.first()?.variant)?;
+    (key.holder == Endpoint::Source).then_some(key.property)
 }
 
 fn repositories(predicate: &Predicate, anchor: Option<PropertyId>) -> Result<Vec<i64>> {

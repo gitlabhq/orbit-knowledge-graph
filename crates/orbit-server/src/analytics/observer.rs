@@ -244,7 +244,7 @@ mod tests {
         let model = Arc::new(
             query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
         );
-        let ctx = query_engine::compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ctx = query_engine::compiler::uniform_grants(model.model(), false, &["1/"]);
         let gql = "MATCH (u:User {id: 1}) RETURN u LIMIT 10";
         let compiled = query_engine::compiler::compile(gql, &model, &ctx).unwrap();
         obs.set_compiled(&compiled);

@@ -68,7 +68,7 @@ mod tests {
                 ability: "read".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
-                required_access_level: 20,
+                provider: "rails".to_string(),
             },
         );
 
@@ -76,6 +76,7 @@ mod tests {
             query_json: String::new(),
             compiled: None,
             security_context: None,
+            grants: None,
             server_extensions: Default::default(),
             phases: Default::default(),
         };

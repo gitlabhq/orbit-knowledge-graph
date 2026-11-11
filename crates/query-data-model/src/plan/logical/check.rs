@@ -109,7 +109,7 @@ pub(super) fn edge_attribute(
         });
     };
     let accesses = ids.iter().map(|id| model.access().attribute(*id));
-    let access = accesses.fold(PropertyAccess::OPEN, |all, one| PropertyAccess {
+    let access = accesses.fold(PropertyAccess::COMPUTED, |all, one| PropertyAccess {
         hidden: all.hidden || one.hidden,
         admin_only: all.admin_only || one.admin_only,
         filterable: all.filterable && one.filterable,
@@ -159,7 +159,7 @@ pub(super) fn scalar<'m>(
                 property: None,
                 access: PropertyAccess {
                     like: false,
-                    ..PropertyAccess::OPEN
+                    ..PropertyAccess::COMPUTED
                 },
                 name: format!("{field:?}"),
             }),
@@ -187,7 +187,7 @@ pub(super) fn scalar<'m>(
             (name, LogicalType::Scalar(data_type)) => Ok(Typed {
                 data_type: *data_type,
                 property: None,
-                access: PropertyAccess::OPEN,
+                access: PropertyAccess::COMPUTED,
                 name: name.unwrap_or("output").to_string(),
             }),
             (name, found) => Err(mismatch(name.unwrap_or("output"), "a scalar", *found)),

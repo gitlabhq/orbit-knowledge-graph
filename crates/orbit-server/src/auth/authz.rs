@@ -1,5 +1,5 @@
-use query_engine::compiler::{AuthorizedPath, SecurityContext};
 use query_engine::pipeline::PipelineError;
+use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 
 use super::Claims;
 

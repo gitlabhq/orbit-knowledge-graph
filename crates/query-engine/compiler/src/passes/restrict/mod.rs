@@ -1,10 +1,9 @@
 //! Access restriction on the logical plan.
 //!
-//! Rejects entities whose role floor no authorized path meets, and, for
-//! callers that are not instance administrators, every read of an
-//! `admin_only` property and every aggregation in which a globally scoped
-//! entity is not reachable from a `traversal_path`-scoped one, since
-//! aggregation bypasses the Rails redaction layer.
+//! Rejects entities for which the caller holds the entity's permission in no scope, and, for
+//! callers that are not instance administrators, every read of an `admin_only` property and
+//! every aggregation in which an entity without a scope key is not reachable from one with a
+//! scope key, since aggregation bypasses the row checks.
 
 mod hydration;
 mod properties;
@@ -13,7 +12,9 @@ mod tests;
 
 pub use hydration::restrict_hydration;
 
+use orbit_authorization::Grants;
 use query_data_model::Catalog;
+use query_data_model::catalog::Rule;
 use std::collections::HashSet;
 
 use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
@@ -24,26 +25,24 @@ use crate::error::{QueryError, Result};
 use crate::logical::Kind;
 use crate::logical::Query;
 use crate::passes::codegen::SqlBackend;
-use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
+use crate::passes::guards::scope_set;
 
 pub fn restrict(
     plan: &LogicalPlan,
     logical: &Model,
     model: &Catalog<impl SqlBackend>,
-    security_ctx: &SecurityContext,
+    grants: &Grants,
 ) -> Result<()> {
     let query = Query::new(plan, logical);
     let entities = entities(query);
     for (_, entity) in &entities {
-        role_floor(query, *entity, model, security_ctx)?;
+        readable(*entity, model, grants)?;
     }
-    if security_ctx.admin {
-        return Ok(());
-    }
-    if query.kind() == Kind::Aggregation {
+    let admin = grants.caller().admin();
+    if !admin && query.kind() == Kind::Aggregation {
         aggregation_scope(query, &entities, model)?;
     }
-    properties::admin_only(query, model)
+    properties::fields(query, model, admin)
 }
 
 fn entities(query: Query<'_>) -> Vec<(Ref, EntityId)> {
@@ -54,25 +53,34 @@ fn entities(query: Query<'_>) -> Vec<(Ref, EntityId)> {
         .collect()
 }
 
-pub(super) fn role_floor(
-    query: Query<'_>,
+/// The caller holds the entity's permission in at least one scope.
+pub(super) fn readable(
     entity: EntityId,
     model: &Catalog<impl SqlBackend>,
-    security_ctx: &SecurityContext,
+    grants: &Grants,
 ) -> Result<()> {
-    let Some(min_role) = model
-        .min_role(entity)
-        .filter(|level| *level > DEFAULT_PATH_ACCESS_LEVEL)
-    else {
-        return Ok(());
-    };
-    if security_ctx.paths_at_least(min_role).is_empty() {
-        let name = &query.model.graph().entity(entity).name;
+    let name = &model.graph().entity(entity).name;
+    let guard = model.guard(entity).ok_or_else(|| {
+        QueryError::Security(format!(
+            "{name} has no guard on connection {}",
+            model.connection()
+        ))
+    })?;
+    if scope_set(grants, model.model(), guard.scope, guard.permission)?.is_empty() {
+        let access = model.model().access();
         return Err(QueryError::Authorization(format!(
-            "{name} requires access level {min_role} on at least one authorized path"
+            "{name} requires permission {} in at least one {} scope",
+            access.permission(guard.permission).name,
+            access.scope(guard.scope).name
         )));
     }
     Ok(())
+}
+
+fn scoped(model: &Catalog<impl SqlBackend>, entity: EntityId) -> bool {
+    model
+        .guard(entity)
+        .is_some_and(|guard| matches!(guard.rule, Rule::Column(_) | Rule::Owner(_)))
 }
 
 fn aggregation_scope(
@@ -82,7 +90,7 @@ fn aggregation_scope(
 ) -> Result<()> {
     let mut reachable: HashSet<Ref> = entities
         .iter()
-        .filter(|(_, entity)| model.has_path_column(*entity))
+        .filter(|(_, entity)| scoped(model, *entity))
         .map(|(output, _)| *output)
         .collect();
     if reachable.is_empty() {

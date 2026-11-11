@@ -3,38 +3,62 @@ package: gitlab.security
 entities:
   Finding:
     scope: namespace
-    role: security_manager
-    redaction: {resource: security_finding, ability: read_security_resource}
+    permission: read_security
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_security_resource, resource: security_finding}]
+    properties:
+      open: [id, uuid, name, description, solution, severity, deduplicated, overridden_uuid,
+             project_id, scan_id, scanner_id]
+      hidden: [traversal_path]
 
   SecurityScan:
     scope: namespace
-    role: security_manager
-    redaction: {resource: security_scan, ability: read_scan}
+    permission: read_security
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_scan, resource: security_scan}]
+    properties:
+      open: [id, scan_type, status, latest, created_at, updated_at, project_id, pipeline_id,
+             build_id]
+      hidden: [traversal_path]
 
   Vulnerability:
     scope: namespace
-    role: security_manager
-    redaction: {resource: vulnerability, ability: read_vulnerability}
+    permission: read_security
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_vulnerability, resource: vulnerability}]
+    properties:
+      open: [id, description, state, severity, report_type, resolved_on_default_branch,
+             present_on_default_branch, created_at, updated_at, detected_at, resolved_at,
+             confirmed_at, dismissed_at, project_id, finding_id, author_id, confirmed_by_id,
+             resolved_by_id, dismissed_by_id]
+      exact: [title]
+      hidden: [traversal_path]
 
   VulnerabilityIdentifier:
     scope: namespace
-    role: security_manager
-    redaction: {resource: vulnerability_identifier, ability: read_vulnerability}
+    permission: read_security
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_vulnerability, resource: vulnerability_identifier}]
+    properties:
+      open: [id, external_type, external_id, name, url, created_at, updated_at, project_id]
+      hidden: [traversal_path]
 
   VulnerabilityOccurrence:
     scope: namespace
-    role: security_manager
-    redaction: {resource: vulnerability_occurrence, ability: read_vulnerability}
+    permission: read_security
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_vulnerability, resource: vulnerability_occurrence}]
+    properties:
+      open: [id, uuid, name, description, solution, cve, location, location_fingerprint, severity,
+             report_type, detection_method, created_at, updated_at, detected_at, project_id,
+             scanner_id, vulnerability_id, primary_identifier_id]
+      hidden: [traversal_path]
 
   VulnerabilityScanner:
     scope: namespace
-    role: security_manager
-    redaction: {resource: vulnerability_scanner, ability: read_vulnerability_scanner}
-properties:
-  Finding.traversal_path: {hidden: true, filterable: false}
-  SecurityScan.traversal_path: {hidden: true, filterable: false}
-  Vulnerability.title: {like: false}
-  Vulnerability.traversal_path: {hidden: true, filterable: false}
-  VulnerabilityIdentifier.traversal_path: {hidden: true, filterable: false}
-  VulnerabilityOccurrence.traversal_path: {hidden: true, filterable: false}
-  VulnerabilityScanner.traversal_path: {hidden: true, filterable: false}
+    permission: read_security
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_vulnerability_scanner, resource: vulnerability_scanner}]
+    properties:
+      open: [id, external_id, name, vendor, created_at, updated_at, project_id]
+      hidden: [traversal_path]

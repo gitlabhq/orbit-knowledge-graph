@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use query_data_model::catalog::{RowFilter, Scope};
+use query_data_model::catalog::{Rule, ScopeKind};
 use query_data_model::implementations::clickhouse::ClickHouse;
-use query_data_model::{Endpoint, Model, Packages};
+use query_data_model::{Endpoint, Model, Packages, Tier};
 
 fn model() -> Arc<Model> {
     Packages::embedded().load().unwrap()
@@ -15,14 +15,40 @@ fn graph_store_entities_filter_on_their_own_path_column() {
     let store = catalog.store("graph").unwrap();
     for entity in model.graph().entities() {
         let guard = store.guard(entity.id).unwrap();
-        let expected = match model.access().entity(entity.id).unwrap().scope {
-            Scope::Global => RowFilter::None,
-            Scope::Namespace => RowFilter::Path {
-                column: "traversal_path".into(),
-            },
+        let expected = match model.access().scope(guard.scope).kind {
+            ScopeKind::Global => Rule::Global,
+            _ => Rule::Column("traversal_path".into()),
         };
-        assert_eq!(guard.filter, expected, "{}", entity.name);
+        assert_eq!(guard.rule, expected, "{}", entity.name);
     }
+}
+
+#[test]
+fn every_package_declares_its_manifest_and_requirements() {
+    let embedded = Packages::embedded();
+    let directories: std::collections::BTreeSet<&str> = embedded
+        .sources()
+        .keys()
+        .map(|path| path.split_once('/').unwrap().0)
+        .collect();
+    for directory in directories {
+        assert!(
+            embedded
+                .sources()
+                .contains_key(&format!("{directory}/package.yaml")),
+            "{directory}"
+        );
+    }
+    let mut sources = embedded.sources().clone();
+    sources.remove("gitlab.ci/package.yaml");
+    let error = Packages::new(Tier::Platform, sources)
+        .load()
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("gitlab.ci/graph.yaml sits in gitlab.ci, which has no package.yaml"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -76,7 +102,15 @@ fn load_error(entry: &str) -> String {
     let mut sources = Packages::embedded().sources().clone();
     let yaml = format!("kind: source\npackage: gitlab.extra\nsource: siphon\n{entry}");
     sources.insert("gitlab.extra/source.yaml".into(), yaml);
-    Packages::new(sources).load().unwrap_err().to_string()
+    sources.insert(
+        "gitlab.extra/package.yaml".into(),
+        "kind: package\nname: gitlab.extra\nrequires: [gitlab, gitlab.core, gitlab.source_code]\n"
+            .into(),
+    );
+    Packages::new(Tier::Platform, sources)
+        .load()
+        .unwrap_err()
+        .to_string()
 }
 
 #[test]
@@ -109,9 +143,9 @@ fn source_fragments_reject_fields_outside_their_section() {
             .contains("pipeline AUTHORED_t omits to, which the relationships section requires")
     );
     let derived = "derived:\n  D: {emits: [AUTHORED], tables: [t], order_by: [id], \
-                   query: d.sql.j2, transform: d, global: true}\n";
+                   query: d.sql.j2, transform: d, partition_count: 2}\n";
     assert!(
         load_error(derived)
-            .contains("pipeline D sets global, which the derived section does not allow")
+            .contains("pipeline D sets partition_count, which the derived section does not allow")
     );
 }

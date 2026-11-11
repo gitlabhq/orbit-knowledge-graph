@@ -147,7 +147,7 @@ impl Catalog<Live> {
         self.home(entity)?.1.endpoint(entity)
     }
 
-    pub fn guard(&self, operation: Operation) -> Option<&Guard> {
+    pub fn operation_guard(&self, operation: Operation) -> Option<&Guard> {
         self.model().stores()[operation.store].guard(operation.entity)
     }
 

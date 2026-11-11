@@ -12,16 +12,18 @@
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
-//! use compiler::{compile, SecurityContext};
+//! use compiler::compile;
+//! use compiler::orbit_authorization::{Caller, Grants, ScopeSet};
 //! use query_data_model::{Catalog, ClickHouse};
 //!
 //! let data_model = Arc::new(Catalog::<ClickHouse>::embedded().unwrap());
 //!
-//! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+//! let grants = Grants::new(Caller::new("user:1", false, ()))
+//!     .with("global", "read", ScopeSet::All);
 //!
 //! let query = "MATCH (u:User {id: 1}) RETURN u.username LIMIT 10";
 //!
-//! let result = compile(query, &data_model, &ctx).unwrap();
+//! let result = compile(query, &data_model, &grants).unwrap();
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
@@ -32,6 +34,8 @@ pub mod hydration;
 pub mod metrics;
 pub(crate) mod query_limits;
 
+#[cfg(test)]
+mod test_grants;
 pub mod tp_bounds;
 pub mod types;
 
@@ -49,6 +53,7 @@ pub use constants::{
 pub use error::{QueryError, RejectionReason, Result};
 pub use logical::DynamicColumnMode;
 pub use metrics::{METRICS, QueryEngineMetrics};
+use orbit_authorization::Grants;
 pub use query_data_model::Direction;
 pub use query_data_model::plan::logical::Operator;
 use query_data_model::{Catalog, ClickHouse, DuckDb};
@@ -57,6 +62,7 @@ pub use types::QueryType;
 pub use analytics::ExecMetrics;
 pub use analytics::QueryStats;
 pub use hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
+pub use orbit_authorization;
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect, ddl::generate_local_ddl,
 };
@@ -69,7 +75,6 @@ pub use passes::result_contract::{
     RelationshipColumnKind, ResultContext, ResultShape, entity_auth,
 };
 pub use surface::gql;
-pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
 use std::sync::Arc;
@@ -93,9 +98,9 @@ fn finish<C: config::CompilerCtx>(
 pub fn subquery_statements(
     raw: &str,
     data_model: &Arc<Catalog<ClickHouse>>,
-    ctx: &SecurityContext,
+    grants: &Grants,
 ) -> Result<Vec<passes::codegen::SubqueryStatement>> {
-    let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
+    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), Arc::clone(data_model));
     ctx.set_raw(raw.to_string());
     config::run_clickhouse_gql(&mut ctx)?;
     let plan = ctx.relational().as_ref().ok_or_else(|| {
@@ -108,9 +113,9 @@ pub fn subquery_statements(
 pub fn compile(
     raw: &str,
     data_model: &Arc<Catalog<ClickHouse>>,
-    ctx: &SecurityContext,
+    grants: &Grants,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
+    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), Arc::clone(data_model));
     ctx.set_raw(raw.to_string());
     finish(&mut ctx, config::run_clickhouse_gql)
 }
@@ -132,13 +137,36 @@ pub fn check(raw: &str, data_model: &Arc<Catalog<ClickHouse>>) -> Result<()> {
     config::run_check_gql(&mut ctx).count_err()
 }
 
+/// The grants of a caller that holds every permission of the model on `roots`, for tools and
+/// tests that compile without a deployment's providers: hierarchy scopes answer `roots`, global
+/// scopes `All`.
+pub fn uniform_grants(model: &query_data_model::Model, admin: bool, roots: &[&str]) -> Grants {
+    use orbit_authorization::{Caller, ScopeSet};
+    use query_data_model::catalog::ScopeKind;
+    let access = model.access();
+    let roots: Vec<String> = roots.iter().map(|root| root.to_string()).collect();
+    let mut grants = Grants::new(Caller::new("tool", admin, ()));
+    for (scope, permission) in access.needs() {
+        let (scope, permission) = (access.scope(scope), access.permission(permission));
+        let set = match scope.kind {
+            ScopeKind::Global => ScopeSet::All,
+            _ => ScopeSet::Subtrees(roots.clone()),
+        };
+        grants = grants.with(&scope.name, &permission.name, set);
+    }
+    grants
+}
+
 /// Compile a hydration request into ClickHouse SQL: restrict, plan, settings, security, render.
 pub fn compile_hydration(
-    request: HydrationRequest,
+    mut request: HydrationRequest,
     data_model: &Arc<Catalog<ClickHouse>>,
-    ctx: &SecurityContext,
+    grants: &Grants,
 ) -> Result<ParameterizedQuery> {
-    let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
+    for arm in &mut request.arms {
+        arm.scope_on(data_model);
+    }
+    let mut ctx = config::ChHydrationCtx::new(grants.clone(), Arc::clone(data_model));
     ctx.set_hydration(request);
     config::run_ch_hydration(&mut ctx)
         .and_then(|()| {
@@ -151,19 +179,20 @@ pub fn compile_hydration(
 
 #[cfg(test)]
 pub(crate) mod testkit {
-    use crate::types::{AccessLevel, AuthorizedPath, SecurityContext};
+    use std::sync::LazyLock;
 
-    pub fn non_admin_ctx() -> SecurityContext {
-        SecurityContext::new(1, vec!["1/".into()]).unwrap()
+    use orbit_authorization::Grants;
+    use query_data_model::Model;
+
+    static MODEL: LazyLock<std::sync::Arc<Model>> =
+        LazyLock::new(|| query_data_model::Packages::embedded().load().unwrap());
+
+    pub fn non_admin_ctx() -> Grants {
+        crate::test_grants::reporter(&MODEL, &["1/"])
     }
 
-    pub fn admin_ctx() -> SecurityContext {
-        SecurityContext::new_with_roles(
-            1,
-            vec![AuthorizedPath::new("1/", AccessLevel::Owner as u32)],
-        )
-        .unwrap()
-        .with_role(true, Some(AccessLevel::Owner as u32))
+    pub fn admin_ctx() -> Grants {
+        crate::test_grants::grants(&MODEL, true, &["1/"], &[])
     }
 }
 
@@ -179,7 +208,7 @@ mod tests {
     static LOCAL: LazyLock<Arc<Catalog<DuckDb>>> =
         LazyLock::new(|| Arc::new(Catalog::<DuckDb>::embedded().expect("model must load")));
 
-    fn security_ctx() -> SecurityContext {
+    fn security_ctx() -> orbit_authorization::Grants {
         crate::testkit::non_admin_ctx()
     }
 
@@ -302,7 +331,10 @@ mod tests {
                     }
                     Fragment::Authorization(access) => {
                         if let Some(user) = access.entities.get_mut("User") {
-                            user.scope = query_data_model::Scope::Namespace;
+                            user.scope = "namespace".into();
+                            let policy = orbit_utils::yaml::from_str("{scope_key: traversal_path}");
+                            user.enforce.insert("clickhouse".into(), policy.unwrap());
+                            user.properties.hidden.push("traversal_path".into());
                         }
                     }
                     _ => {}

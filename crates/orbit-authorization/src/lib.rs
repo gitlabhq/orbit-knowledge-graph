@@ -156,6 +156,8 @@ pub enum AuthError {
     Denied(String),
     #[error("authorization provider unavailable: {0}")]
     Unavailable(String),
+    #[error("the caller holds no scope")]
+    NoScopes,
     #[error("authorization provider misconfigured: {0}")]
     Invalid(String),
 }
@@ -184,6 +186,8 @@ pub struct Answers {
     pub scopes: Option<Arc<dyn Provider<Scopes>>>,
     pub check: Option<Arc<dyn Provider<Check>>>,
     pub credentials: Option<Arc<dyn Provider<Credentials>>>,
+    /// The `Scopes` answers name exactly the scopes the caller holds, so no check must confirm them.
+    pub scopes_exact: bool,
 }
 
 pub trait Module: Sized + Send + Sync + 'static {
@@ -219,6 +223,11 @@ impl Grants {
 
     pub fn caller(&self) -> &Caller {
         &self.caller
+    }
+
+    /// No scope was answered, which means the caller was never resolved.
+    pub fn is_empty(&self) -> bool {
+        self.scopes.is_empty()
     }
 
     /// The answer for a scope and permission; one nobody asked for fails closed.

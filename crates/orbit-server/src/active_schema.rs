@@ -13,8 +13,11 @@ use orbit_migrations::catalog::ModelCatalog;
 use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::AppConfig;
+use orbit_server_config::AuthorizationConfig;
 use query_data_model::introspection::{IntrospectionScope, build_relationship_patterns};
 use query_data_model::{Catalog, ClickHouse};
+
+use crate::authorization::{Deployment, Registry};
 use query_engine::compiler::check;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -36,6 +39,7 @@ impl ActiveSchema {
     ) {
         register_state_gauge(active);
         let loader = SnapshotLoader {
+            authorization: config.authorization.clone(),
             graph,
             embedded,
             catalog,
@@ -51,8 +55,13 @@ impl ActiveSchema {
 
     #[cfg(any(test, feature = "testkit"))]
     pub fn pinned(data_model: Arc<Catalog<ClickHouse>>) -> Arc<Self> {
-        let snapshot = SchemaSnapshot::new(*orbit_migrations::version::SCHEMA_VERSION, data_model)
-            .expect("pinned schema snapshot must load");
+        let authorization = orbit_server_config::AppConfig::embedded_defaults().authorization;
+        let snapshot = SchemaSnapshot::new(
+            *orbit_migrations::version::SCHEMA_VERSION,
+            data_model,
+            &authorization,
+        )
+        .expect("pinned schema snapshot must load");
         Arc::new(Self {
             installed: RwLock::new(Some(Arc::new(snapshot))),
         })
@@ -171,10 +180,16 @@ pub struct SchemaSnapshot {
     pub data_model: Arc<Catalog<ClickHouse>>,
     pub named_queries: Arc<NamedQueries>,
     pub relationship_patterns: String,
+    pub authorization: Arc<Deployment>,
 }
 
 impl SchemaSnapshot {
-    fn new(migration_version: u32, data_model: Arc<Catalog<ClickHouse>>) -> anyhow::Result<Self> {
+    fn new(
+        migration_version: u32,
+        data_model: Arc<Catalog<ClickHouse>>,
+        authorization: &AuthorizationConfig,
+    ) -> anyhow::Result<Self> {
+        let deployment = Deployment::bind(authorization, data_model.model(), &Registry::gitlab())?;
         let mut named_queries = NamedQueries::load_embedded()?;
         named_queries.retain(|query| match fits_data_model(query, &data_model) {
             Ok(()) => true,
@@ -196,11 +211,13 @@ impl SchemaSnapshot {
             data_model,
             named_queries: Arc::new(named_queries),
             relationship_patterns,
+            authorization: Arc::new(deployment),
         })
     }
 }
 
 struct SnapshotLoader {
+    authorization: AuthorizationConfig,
     graph: Arc<ArrowClickHouseClient>,
     embedded: ModelArchive,
     catalog: ModelCatalog,
@@ -238,7 +255,7 @@ impl SnapshotLoader {
         if !version_tables_complete(&self.graph, version, &expected_tables).await? {
             return Err(anyhow!("v{version} tables are incomplete"));
         }
-        SchemaSnapshot::new(version, data_model).map(Arc::new)
+        SchemaSnapshot::new(version, data_model, &self.authorization).map(Arc::new)
     }
 }
 

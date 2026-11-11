@@ -1,79 +1,260 @@
 kind: authorization
 package: gitlab
+permissions: [read, read_security, read_build, read_code, read_container_image, read_deployment, read_environment, read_group, read_label, read_merge_request, read_milestone, read_note, read_package, read_pipeline, read_runner, read_scan, read_security_resource, read_user, read_vulnerability, read_vulnerability_scanner, read_work_item]
+scopes:
+  namespace: {kind: hierarchy, provider: gitlab_session}
+  global: {kind: global, provider: gitlab_session}
 relationships:
-  APPROVED: prune_to_target
-  ASSIGNED: prune_to_target
-  AUTHORED: prune_to_target
-  AUTO_CANCELED_BY: same_namespace
-  BUILT_BY: same_namespace
-  CALLS: same_namespace
-  CHILD_OF: prune_to_source
-  CLOSED: prune_to_target
-  CLOSES: prune_to_source
-  CONFIRMED_BY: prune_to_target
+  APPROVED:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  ASSIGNED:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  AUTHORED:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  AUTO_CANCELED_BY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  BUILT_BY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  CALLS:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  CHILD_OF:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
+  CLOSED:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  CLOSES:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
+  CONFIRMED_BY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
   CONTAINS:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
     variants:
-      Group -> Group: same_namespace
-      Group -> Project: same_namespace
-      User -> Project: prune_to_target
-      Project -> Branch: same_namespace
-      Branch -> Directory: same_namespace
-      Branch -> File: same_namespace
-      Directory -> Directory: same_namespace
-      Directory -> File: same_namespace
-
-  CREATED_FOR_MR: prune_to_source
-  CREATED_MR: prune_to_source
-  CREATOR: prune_to_target
-  DECLARES_DEPENDENCY: same_namespace
-  DEFINES: same_namespace
-  DEPLOYED_BY: prune_to_target
-  DEPLOYED_TO: prune_to_target
-  DETECTED_BY: {variants: {VulnerabilityOccurrence -> VulnerabilityScanner: same_namespace}}
-  DISMISSED_BY: prune_to_target
-  EXTENDS: same_namespace
-  FIXES: prune_to_target
-  HAS_DIFF: same_namespace
-  HAS_FILE: same_namespace
-  HAS_FINDING: same_namespace
-  HAS_HEAD_PIPELINE: same_namespace
-  HAS_IDENTIFIER: {variants: {VulnerabilityOccurrence -> VulnerabilityIdentifier: same_namespace}}
-  HAS_JOB: same_namespace
-  HAS_LABEL: prune_to_source
-  HAS_LATEST_DIFF: same_namespace
-  HAS_PACKAGE_FILE: same_namespace
-  HAS_STAGE: same_namespace
-  HAS_VULNERABILITY: same_namespace
+      Group -> Group: {clickhouse: {scope_key: traversal_path, of: nested}}
+      Group -> Project: {clickhouse: {scope_key: traversal_path, of: nested}}
+      User -> Project: {clickhouse: {scope_key: traversal_path, of: target}}
+      WorkItem -> WorkItem: {clickhouse: {scope_key: traversal_path, of: own}}
+  CREATED_FOR_MR:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
+  CREATED_MR:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
+  CREATOR:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  DECLARES_DEPENDENCY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  DEFINES:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  DEPLOYED_BY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  DEPLOYED_TO:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  DETECTED_BY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: own}}
+    variants:
+      VulnerabilityOccurrence -> VulnerabilityScanner: {clickhouse: {scope_key: traversal_path, of: both}}
+  DISMISSED_BY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  EXTENDS:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  FIXES:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  HAS_DIFF:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  HAS_FILE:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  HAS_FINDING:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  HAS_HEAD_PIPELINE:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  HAS_IDENTIFIER:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: own}}
+    variants:
+      VulnerabilityOccurrence -> VulnerabilityIdentifier: {clickhouse: {scope_key: traversal_path, of: both}}
+  HAS_JOB:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  HAS_LABEL:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
+  HAS_LATEST_DIFF:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  HAS_NOTE:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: own}}
+  HAS_PACKAGE_FILE:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  HAS_STAGE:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  HAS_VULNERABILITY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
   IMPORTS:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
     variants:
-      File -> ImportedSymbol: same_namespace
-      ImportedSymbol -> Definition: prune_to_source
-
-  IN_ENVIRONMENT: same_namespace
-  IN_GROUP: namespace_anchor
-  IN_MILESTONE: prune_to_source
-  IN_PIPELINE: same_namespace
-  IN_PROJECT: namespace_anchor
-  LAST_EDITED_BY: prune_to_target
-  MEMBER_OF: prune_to_target
-  MERGED: prune_to_target
-  MERGED_AT_COMMIT: same_namespace
-  OCCURRENCE_OF: same_namespace
-  ON_BRANCH: same_namespace
-  OWNER: prune_to_target
-  RAN_BY: same_namespace
-  RELATED_TO: prune_to_source
-  REOPENED: prune_to_target
-  RESOLVED_BY: prune_to_target
-  REVIEWER: prune_to_target
-  RUNS_ON: prune_to_source
-  SCANS: same_namespace
-  SOURCE_PROJECT: prune_to_source
+      ImportedSymbol -> Definition: {clickhouse: {scope_key: traversal_path, of: source}}
+  IN_ENVIRONMENT:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  IN_GROUP:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: holder}}
+  IN_MILESTONE:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
+  IN_PIPELINE:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  IN_PROJECT:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: holder}}
+  LAST_EDITED_BY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  MEMBER_OF:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  MENTIONS:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: own}}
+  MERGED:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  MERGED_AT_COMMIT:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  OCCURRENCE_OF:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  ON_BRANCH:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  OWNER:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  RAN_BY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  RELATED_TO:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
+  REOPENED:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  RESOLVED_BY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  REVIEWER:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  RUNS_ON:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
+  SCANS:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  SOURCE_PROJECT:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
   TRIGGERED:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
     variants:
-      User -> Pipeline: prune_to_target
-      MergeRequest -> Pipeline: same_namespace
-      User -> Job: prune_to_target
-
-  TRIGGERS_PIPELINE: prune_to_target
-  UPDATED_BY: prune_to_target
+      MergeRequest -> Pipeline: {clickhouse: {scope_key: traversal_path, of: both}}
+  TRIGGERED_BY_PIPELINE:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: own}}
+  TRIGGERS_PIPELINE:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  UPDATED_BY:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}

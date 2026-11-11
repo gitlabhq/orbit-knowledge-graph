@@ -71,10 +71,14 @@ where
         .collect()
 }
 
-/// The property that identifies an entity's rows to redaction, when the entity is redacted.
+/// The property that identifies an entity's rows to its row check, when it has one.
 pub fn redaction_column(model: &Catalog<impl SqlBackend>, entity: EntityId) -> Option<&str> {
-    let redaction = model.redaction(entity)?;
-    Some(&model.graph().property(redaction.id).name)
+    model.checks(entity).iter().find_map(|check| match check {
+        query_data_model::catalog::Check::Rows { id, .. } => {
+            Some(model.graph().property(*id).name.as_str())
+        }
+        query_data_model::catalog::Check::Delegated { .. } => None,
+    })
 }
 
 /// Free text: a uuid, or a string not declared low selectivity.

@@ -227,11 +227,9 @@ fn node_access<B: SqlBackend>(
     let uncovered_filter = pattern.has_uncovered_filter(node);
     let returned =
         !pattern.aggregate() || aggregation_row_nodes(query, model).contains(node.alias.as_str());
-    let role_floor = query.binding(&node.alias).is_some_and(|binding| {
-        model
-            .min_role(binding.entity)
-            .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
-    });
+    let role_floor = query
+        .binding(&node.alias)
+        .is_some_and(|binding| crate::passes::guards::stricter_than_edges(model, binding.entity));
     let authorized_from_table =
         returned && !node.uses_default_pk() || role_floor && !pattern.holds_fk(&node.alias);
     let filter_only = pattern.aggregate()

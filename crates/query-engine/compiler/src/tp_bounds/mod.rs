@@ -29,11 +29,11 @@ fn variant_scope(
     kind: &str,
     source: Option<EntityId>,
     target: Option<EntityId>,
-) -> Option<query_data_model::EdgeVariantScope> {
+) -> Option<query_data_model::catalog::EdgeScope> {
     let graph = model.graph();
     let variant: RelationshipVariantId =
         graph.variant_id(graph.relationship_id(kind)?, source?, target?)?;
-    model.variant_scope(variant)
+    model.edge_scope(variant)
 }
 
 #[derive(Clone, Default)]

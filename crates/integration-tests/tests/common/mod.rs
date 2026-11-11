@@ -4,26 +4,42 @@ use std::sync::Arc;
 
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
+use query_engine::compiler::CompiledQueryContext;
 pub use query_engine::compiler::compile;
-use query_engine::compiler::{AccessLevel, AuthorizedPath, CompiledQueryContext, SecurityContext};
-use query_engine::pipeline::{QueryPipelineContext, TypeMap};
+use query_engine::compiler::orbit_authorization::Grants;
+use query_engine::pipeline::{
+    AccessLevel, AuthorizedPath, QueryPipelineContext, SecurityContext, TypeMap,
+};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
 pub use integration_testkit::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, edge_table_for, load_data_model,
 };
 
-pub fn test_security_context() -> SecurityContext {
+/// The scope answers the default deployment's `gitlab.session` gives `session`.
+pub fn grants(session: SecurityContext) -> Grants {
+    let config = orbit_server_config::AppConfig::embedded_defaults().authorization;
+    orbit_server::authorization::gitlab::session_grants(&config, load_data_model().model(), session)
+        .expect("the default deployment answers the session")
+}
+
+pub fn test_session() -> SecurityContext {
     SecurityContext::new(1, vec!["1/".into()]).expect("valid security context")
 }
 
-pub fn admin_security_context() -> SecurityContext {
-    SecurityContext::new_with_roles(
-        1,
-        vec![AuthorizedPath::new("1/", AccessLevel::Owner as u32)],
+pub fn test_security_context() -> Grants {
+    grants(test_session())
+}
+
+pub fn admin_security_context() -> Grants {
+    grants(
+        SecurityContext::new_with_roles(
+            1,
+            vec![AuthorizedPath::new("1/", AccessLevel::Owner as u32)],
+        )
+        .expect("valid admin security context")
+        .with_role(true, Some(AccessLevel::Owner as u32)),
     )
-    .expect("valid admin security context")
-    .with_role(true, Some(AccessLevel::Owner as u32))
 }
 
 pub async fn compile_and_execute(
@@ -95,7 +111,8 @@ pub async fn resolve_owners(
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::new(compiled.clone())),
-        security_context: Some(test_security_context()),
+        security_context: Some(test_session()),
+        grants: Some(test_security_context()),
         server_extensions,
         phases: TypeMap::default(),
     };

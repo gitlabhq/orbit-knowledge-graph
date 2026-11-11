@@ -1,46 +1,13 @@
-use std::path::Path;
+mod support;
 
-use query_data_model::catalog::RowFilter;
+use query_data_model::catalog::Rule;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::duckdb::DuckDb;
 use query_data_model::{DataModelError, Direction, Endpoint, Model, Packages};
-
-fn package_sources(packages: &[&str]) -> Vec<(String, String)> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/packages");
-    let all = Packages::read_dir(&root).unwrap();
-    packages
-        .iter()
-        .flat_map(|package| {
-            let prefix = format!("{package}/");
-            all.sources()
-                .iter()
-                .filter(move |(name, _)| name.starts_with(&prefix))
-                .map(|(name, yaml)| (name.clone(), yaml.clone()))
-        })
-        .collect()
-}
+use support::load_with;
 
 fn load(packages: &[&str]) -> Result<std::sync::Arc<Model>, DataModelError> {
     load_with(packages, |_, yaml| yaml)
-}
-
-fn load_with(
-    packages: &[&str],
-    edit: impl Fn(&str, String) -> String,
-) -> Result<std::sync::Arc<Model>, DataModelError> {
-    let sources: Vec<_> = package_sources(packages)
-        .into_iter()
-        .map(|(name, yaml)| {
-            let edited = edit(&name, yaml);
-            (name, edited)
-        })
-        .collect();
-    Model::from_yaml(
-        sources
-            .iter()
-            .map(|(name, yaml)| (name.as_str(), yaml.as_str())),
-    )
-    .map(std::sync::Arc::new)
 }
 
 fn spec_errors<T: std::fmt::Debug>(result: Result<T, DataModelError>) -> Vec<String> {
@@ -52,7 +19,7 @@ fn spec_errors<T: std::fmt::Debug>(result: Result<T, DataModelError>) -> Vec<Str
 
 #[test]
 fn platform_integration_and_custom_packages_compose_into_one_graph() {
-    let model = load(&["gitlab", "linear", "agent_memory"]).unwrap();
+    let model = load(&["gitlab", "integration.linear", "tenant.agent_memory"]).unwrap();
     let graph = model.graph();
     let in_project = model.relationship("IN_PROJECT").unwrap();
     let memory = model.entity("AgentMemory").unwrap();
@@ -78,7 +45,7 @@ fn platform_integration_and_custom_packages_compose_into_one_graph() {
 
 #[test]
 fn a_clickhouse_catalog_resolves_tables_columns_and_routes() {
-    let model = load(&["gitlab", "linear", "agent_memory"]).unwrap();
+    let model = load(&["gitlab", "integration.linear", "tenant.agent_memory"]).unwrap();
     let graph = model.graph();
     let catalog = model.physical::<ClickHouse>("main").unwrap();
     let store = catalog.store("graph").unwrap();
@@ -138,7 +105,7 @@ fn virtual_columns_come_from_the_lookup_registry() {
 
 #[test]
 fn one_query_can_join_stores_on_the_same_connection() {
-    let model = load(&["gitlab", "linear"]).unwrap();
+    let model = load(&["gitlab", "integration.linear"]).unwrap();
     let graph = model.graph();
     let catalog = model.physical::<ClickHouse>("main").unwrap();
     let issue = model.entity("LinearIssue").unwrap();
@@ -183,13 +150,16 @@ fn one_query_can_join_stores_on_the_same_connection() {
 
 #[test]
 fn a_foreign_key_must_join_within_its_connection() {
-    let errors = spec_errors(load_with(&["gitlab", "linear"], |name, yaml| {
-        if name == "linear/storage/clickhouse.lake.yaml" {
-            yaml.replace("connection: main", "connection: lake")
-        } else {
-            yaml
-        }
-    }));
+    let errors = spec_errors(load_with(
+        &["gitlab", "integration.linear"],
+        |name, yaml| {
+            if name == "integration.linear/storage/clickhouse.lake.yaml" {
+                yaml.replace("connection: main", "connection: lake")
+            } else {
+                yaml
+            }
+        },
+    ));
     assert_eq!(
         errors,
         [
@@ -225,162 +195,269 @@ fn backends_reject_unknown_options() {
 }
 
 #[test]
-fn guards_follow_path_columns_or_reach_one_through_the_graph() {
-    let model = load(&["gitlab", "linear", "agent_memory"]).unwrap();
-    let graph = model.graph();
+fn guards_read_the_declared_scope_key_of_each_store() {
+    let model = load(&["gitlab", "integration.linear", "tenant.agent_memory"]).unwrap();
+    let access = model.access();
     let catalog = model.physical::<ClickHouse>("main").unwrap();
     let store = catalog.store("graph").unwrap();
     let issue = model.entity("LinearIssue").unwrap();
 
     let guard = store.guard(issue).unwrap();
-    assert_eq!(
-        guard.filter,
-        RowFilter::Path {
-            column: "traversal_path".into()
-        }
-    );
-    assert_eq!(guard.min_role, Some(40));
+    assert_eq!(guard.rule, Rule::Column("traversal_path".into()));
+    assert_eq!(access.permission(guard.permission).name, "read_maintainer");
+    assert_eq!(access.scope(guard.scope).name, "namespace");
     let lake = catalog.store("lake").unwrap().guard(issue).unwrap();
-    assert_eq!(
-        lake.filter,
-        RowFilter::Path {
-            column: "trav_path".into()
-        }
-    );
+    assert_eq!(lake.rule, Rule::Column("trav_path".into()));
 
     let memory = store.guard(model.entity("AgentMemory").unwrap()).unwrap();
-    let RowFilter::PathThrough {
-        hops,
-        store: home,
-        column,
-    } = &memory.filter
-    else {
-        panic!("expected a path through the graph, got {memory:?}");
-    };
-    assert_eq!(
-        (home.as_str(), column.as_str()),
-        ("graph", "traversal_path")
-    );
-    assert_eq!(hops.len(), 1);
-    assert_eq!(graph.entity(hops[0].hop.to).name, "Project");
-    assert_eq!(hops[0].store, "graph");
-    assert_eq!(memory.min_role, Some(30));
+    assert_eq!(memory.rule, Rule::Column("traversal_path".into()));
+    assert_eq!(access.permission(memory.permission).name, "read_developer");
 
     let user = store.guard(model.entity("User").unwrap()).unwrap();
-    assert_eq!(user.filter, RowFilter::None);
+    assert_eq!(user.rule, Rule::Global);
+    assert_eq!(
+        store.edge_guard("gl_edge").unwrap().rule,
+        Rule::Column("traversal_path".into())
+    );
 }
 
 #[test]
-fn an_entity_that_cannot_be_authorized_fails_the_load() {
-    let errors = spec_errors(load_with(&["gitlab", "agent_memory"], |name, yaml| {
-        match name {
-        "agent_memory/storage/clickhouse.yaml" => yaml.replace(
-            "AgentMemory -> Project: { fk: { on: source, column: project_id }, edge_table: gl_edge }",
-            "AgentMemory -> Project: { edge_table: gl_edge }",
-        ),
-        _ => yaml,
-    }
-    }));
+fn an_entity_without_a_policy_for_its_store_fails_the_load() {
+    let errors = spec_errors(load_with(
+        &["gitlab", "tenant.agent_memory"],
+        |name, yaml| match name {
+            "tenant.agent_memory/authorization.yaml" => yaml.replace(
+                "    enforce: {clickhouse: {scope_key: traversal_path}}\n",
+                "",
+            ),
+            _ => yaml,
+        },
+    ));
+    assert_eq!(
+        errors,
+        ["tenant.agent_memory: AgentMemory is stored in graph but enforces no clickhouse policy"]
+    );
+}
+
+#[test]
+fn a_relational_store_cannot_enforce_a_via_chain() {
+    let errors = spec_errors(load_with(
+        &["gitlab", "tenant.agent_memory"],
+        |name, yaml| match name {
+            "tenant.agent_memory/authorization.yaml" => yaml.replace(
+                "{clickhouse: {scope_key: traversal_path}}",
+                "{clickhouse: {scope_key: {via: IN_PROJECT}}}",
+            ),
+            _ => yaml,
+        },
+    ));
+    assert_eq!(
+        errors,
+        ["tenant.agent_memory: clickhouse cannot enforce AgentMemory's Via policy"]
+    );
+}
+
+#[test]
+fn a_via_step_needs_one_target() {
+    let errors = spec_errors(load_with(
+        &["gitlab", "tenant.agent_memory"],
+        |name, yaml| match name {
+            "tenant.agent_memory/authorization.yaml" => yaml.replace(
+                "{clickhouse: {scope_key: traversal_path}}",
+                "{clickhouse: {scope_key: {via: REMEMBERS}}}",
+            ),
+            _ => yaml,
+        },
+    ));
     assert_eq!(
         errors,
         [
-            "tenant.agent_memory: AgentMemory in store graph has no namespace path column, reaches no entity that has one, and has no redaction rule"
+            "tenant.agent_memory: AgentMemory reaches 2 entities from AgentMemory through REMEMBERS; a step needs one target",
+            "tenant.agent_memory: AgentMemory is stored in graph but enforces no clickhouse policy",
         ]
     );
 }
 
 #[test]
-fn redaction_alone_authorizes_an_entity_without_a_path() {
-    let model = load_with(&["gitlab", "agent_memory"], |name, yaml| match name {
-        "agent_memory/storage/clickhouse.yaml" => yaml.replace(
-            "AgentMemory -> Project: { fk: { on: source, column: project_id }, edge_table: gl_edge }",
-            "AgentMemory -> Project: { edge_table: gl_edge }",
-        ),
-        "agent_memory/authorization.yaml" => yaml.replace(
-            "{ scope: namespace, role: developer }",
-            "{ scope: namespace, role: developer, redaction: { resource: agent_memory, ability: read_agent_memory } }",
-        ),
-        _ => yaml,
-    })
-    .unwrap();
-    let memory = model.entity("AgentMemory").unwrap();
-    let store = model
-        .stores()
-        .iter()
-        .find(|store| store.name == "graph")
-        .unwrap();
-    let guard = store.guard(memory).unwrap();
-    assert_eq!(guard.filter, RowFilter::None);
-    assert!(guard.redacted);
-    assert_eq!(guard.min_role, Some(30));
+fn a_checked_entity_needs_its_checks() {
+    let checked = |checks: &str| {
+        let checks = checks.to_string();
+        load_with(&["gitlab"], move |name, yaml| {
+            match name {
+            "gitlab/authorization.yaml" => yaml.replace(
+                "    enforce: {clickhouse: {scope_key: traversal_path}}\n    checks: [{provider: rails, permission: read_note, resource: note}]",
+                &format!("    enforce: {{clickhouse: none}}\n{checks}"),
+            ),
+            _ => yaml,
+        }
+        })
+    };
+    let model =
+        checked("    checks: [{provider: rails, permission: read_note, resource: note}]").unwrap();
+    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let guard = catalog.guard(model.entity("Note").unwrap()).unwrap();
+    assert_eq!(guard.rule, Rule::Checked);
+    assert_eq!(
+        spec_errors(checked("")),
+        ["gitlab: Note enforces none and declares no check"]
+    );
 }
 
 #[test]
-fn only_namespace_anchors_carry_a_path_to_another_entity() {
-    let errors = spec_errors(load_with(&["gitlab", "agent_memory"], |name, yaml| {
-        if name == "gitlab/authorization.yaml" {
-            yaml.replace("IN_PROJECT: namespace_anchor", "IN_PROJECT: same_namespace")
-        } else {
-            yaml
+fn packages_below_the_platform_tier_declare_no_checks_or_none() {
+    let errors = spec_errors(load_with(
+        &["gitlab", "tenant.agent_memory"],
+        |name, yaml| {
+            match name {
+            "tenant.agent_memory/authorization.yaml" => yaml.replace(
+                "    enforce: {clickhouse: {scope_key: traversal_path}}\n",
+                "    enforce: {clickhouse: none}\n    checks: [{provider: rails, permission: read, resource: memory}]\n",
+            ),
+            _ => yaml,
         }
-    }));
+        },
+    ));
     assert_eq!(
         errors,
         [
-            "tenant.agent_memory: AgentMemory in store graph has no namespace path column, reaches no entity that has one, and has no redaction rule"
+            "tenant.agent_memory: AgentMemory enforces none, which only a platform package may",
+            "tenant.agent_memory: AgentMemory declares a check; a tenant package declares none",
         ]
     );
 }
 
 #[test]
 fn every_entity_needs_an_authorization_entry() {
-    let errors = spec_errors(load_with(&["gitlab", "linear"], |name, yaml| {
-        if name == "linear/authorization.yaml" {
-            yaml.replace(
-                "entities:\n  LinearIssue: { scope: namespace, role: maintainer }\n",
-                "",
-            )
-        } else {
-            yaml
-        }
-    }));
+    let errors = spec_errors(load_with(
+        &["gitlab", "integration.linear"],
+        |name, yaml| {
+            if name == "integration.linear/authorization.yaml" {
+                yaml.replace("  LinearIssue:\n", "  LinearIssueRemoved:\n")
+            } else {
+                yaml
+            }
+        },
+    ));
     assert_eq!(
         errors,
-        ["integration.linear: entity LinearIssue has no authorization entry"]
+        [
+            "integration.linear: authorization names unknown entity LinearIssueRemoved",
+            "integration.linear: entity LinearIssue has no authorization entry",
+        ]
     );
 }
 
 #[test]
 fn a_package_cannot_loosen_another_package_access_rule() {
-    let errors = spec_errors(load_with(&["gitlab", "linear"], |name, yaml| {
-        if name == "linear/authorization.yaml" {
-            yaml.replace("properties:\n", "properties:\n  User.email: {}\n")
-                .replace(
-                    "relationships:\n",
-                    "relationships:\n  AUTHORED: same_namespace\n",
-                )
-        } else {
-            yaml
-        }
-    }));
+    let errors = spec_errors(load_with(
+        &["gitlab", "integration.linear"],
+        |name, yaml| {
+            if name == "integration.linear/authorization.yaml" {
+                yaml.replace(
+                "entities:\n",
+                "entities:\n  User: {scope: global, permission: read, properties: {open: [id, username, email]}}\n",
+            )
+            .replace(
+                "relationships:\n",
+                "relationships:\n  AUTHORED: {scope: namespace, permission: read, enforce: {}}\n",
+            )
+            } else {
+                yaml
+            }
+        },
+    ));
     assert_eq!(
         errors,
         [
-            "integration.linear: AUTHORED has two scope entries",
-            "integration.linear: User.email has two access entries",
+            "integration.linear: User.id has two access classes",
+            "integration.linear: User.username has two access classes",
+            "integration.linear: User.email has two access classes",
+            "integration.linear: User has two authorization entries",
+            "integration.linear: AUTHORED has two authorization entries",
+            "integration.linear: User is in Global scope global, which a Integration package may not use",
+        ]
+    );
+}
+
+#[test]
+fn every_property_has_one_access_class() {
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| match name {
+        "gitlab/authorization.yaml" => yaml.replace("      admin_exact: [email]\n", ""),
+        _ => yaml,
+    }));
+    assert_eq!(errors, ["gitlab: User.email has no access class"]);
+}
+
+#[test]
+fn a_package_names_only_what_it_requires() {
+    let errors = spec_errors(load_with(
+        &["gitlab", "integration.linear"],
+        |name, yaml| match name {
+            "integration.linear/package.yaml" => yaml.replace("requires: [gitlab]", "requires: []"),
+            _ => yaml,
+        },
+    ));
+    assert!(
+        errors.contains(
+            &"integration.linear: integration.linear names namespace from package gitlab, which it does not require"
+                .to_string()
+        ),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn a_package_directory_holds_its_manifest() {
+    let errors = spec_errors(load_with(
+        &["gitlab", "integration.linear"],
+        |name, yaml| match name {
+            "integration.linear/package.yaml" => {
+                yaml.replace("name: integration.linear", "name: linear")
+            }
+            _ => yaml,
+        },
+    ));
+    assert!(
+        errors.contains(
+            &"integration.linear/package.yaml: package.yaml names package linear, but sits in directory integration.linear"
+                .to_string()
+        ),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn an_integration_package_declares_no_vocabulary() {
+    let errors = spec_errors(load_with(
+        &["gitlab", "integration.linear"],
+        |name, yaml| match name {
+            "integration.linear/authorization.yaml" => yaml.replace(
+                "package: integration.linear\n",
+                "package: integration.linear\npermissions: [read_linear]\n",
+            ),
+            _ => yaml,
+        },
+    ));
+    assert_eq!(
+        errors,
+        [
+            "integration.linear: integration.linear is a Integration package and declares permissions or scopes, which only a platform package may"
         ]
     );
 }
 
 #[test]
 fn packages_cannot_redeclare_another_package_entity() {
-    let errors = spec_errors(load_with(&["gitlab", "linear"], |name, yaml| {
-        if name == "linear/graph.yaml" {
-            yaml.replace("  LinearIssue:\n", "  MergeRequest:\n")
-        } else {
-            yaml
-        }
-    }));
+    let errors = spec_errors(load_with(
+        &["gitlab", "integration.linear"],
+        |name, yaml| {
+            if name == "integration.linear/graph.yaml" {
+                yaml.replace("  LinearIssue:\n", "  MergeRequest:\n")
+            } else {
+                yaml
+            }
+        },
+    ));
     assert!(
         errors.contains(
             &"integration.linear: entity MergeRequest is already declared by gitlab".to_string()
@@ -411,25 +488,28 @@ fn every_bad_reference_is_reported_in_one_load() {
 }
 
 #[test]
-fn an_unknown_role_fails_to_parse_and_names_the_roles() {
+fn an_unknown_permission_or_scope_fails_the_load() {
     let errors = spec_errors(load_with(&["gitlab"], |name, yaml| match name {
-        "gitlab/authorization.yaml" => yaml.replace(
-            "role: reporter, redaction: { resource: note",
-            "role: viewer, redaction: { resource: note",
-        ),
+        "gitlab/authorization.yaml" => yaml
+            .replace("permission: read_note,", "permission: read_notes,")
+            .replace(
+                "  Group:\n    scope: namespace",
+                "  Group:\n    scope: namespaces",
+            ),
         _ => yaml,
     }));
     assert_eq!(
         errors,
         [
-            "gitlab/authorization.yaml: unknown variant `viewer`, expected one of guest, reporter, security_manager, developer, maintainer, owner"
+            "gitlab: Group names unknown scope namespaces",
+            "gitlab: Note checks unknown permission read_notes",
         ]
     );
 }
 
 #[test]
 fn frontend_errors_name_the_alternatives() {
-    let model = load(&["gitlab", "linear"]).unwrap();
+    let model = load(&["gitlab", "integration.linear"]).unwrap();
     let user = model.entity("User").unwrap();
     let request = model.entity("MergeRequest").unwrap();
     let has_note = model.relationship("HAS_NOTE").unwrap();
@@ -495,7 +575,7 @@ fn access_entries_apply_to_relationship_attributes() {
     let storage = attribute_storage(ATTRIBUTE_COLUMNS);
     let model = load_with(&["gitlab"], |name, yaml| match name {
         "gitlab/authorization.yaml" => {
-            yaml + "  HAS_NOTE.thread: { hidden: true, filterable: false }\n  HAS_NOTE.mood: { hidden: true }\n"
+            attribute_access(yaml, "{open: [position], hidden: [thread, mood]}")
         }
         _ => storage(name, yaml),
     });
@@ -505,7 +585,7 @@ fn access_entries_apply_to_relationship_attributes() {
     );
     let model = load_with(&["gitlab"], |name, yaml| match name {
         "gitlab/authorization.yaml" => {
-            yaml + "  HAS_NOTE.thread: { hidden: true, filterable: false }\n"
+            attribute_access(yaml, "{open: [position], hidden: [thread]}")
         }
         _ => storage(name, yaml),
     })
@@ -542,10 +622,20 @@ fn bad_relationship_attributes_fail_the_load() {
     );
 }
 
+const HAS_NOTE_ACCESS: &str = "  HAS_NOTE:\n    scope: namespace\n    permission: read\n    enforce: {clickhouse: {scope_key: traversal_path, of: both}}\n";
+
+fn attribute_access(yaml: String, classes: &str) -> String {
+    yaml.replace(
+        HAS_NOTE_ACCESS,
+        &format!("{HAS_NOTE_ACCESS}    attributes: {classes}\n"),
+    )
+}
+
 fn attribute_storage(edge_columns: &'static str) -> impl Fn(&str, String) -> String {
     move |name, yaml| {
         match name {
         "gitlab/graph.yaml" => yaml.replace(HAS_NOTE_VARIANT, HAS_NOTE_ATTRIBUTES),
+        "gitlab/authorization.yaml" => attribute_access(yaml, "{open: [position, thread]}"),
         "gitlab/storage/clickhouse.yaml" => yaml.replace(
             "sort_key: [traversal_path, source_id, relationship_kind, target_id] }",
             &format!(
@@ -588,7 +678,7 @@ fn attributes_need_a_matching_edge_column() {
 
 #[test]
 fn string_enums_keep_their_declared_values() {
-    let model = load(&["gitlab", "linear"]).unwrap();
+    let model = load(&["gitlab", "integration.linear"]).unwrap();
     let issue = model.entity("LinearIssue").unwrap();
     let state = model.property(issue, "state").unwrap();
     assert_eq!(state.enum_type, query_data_model::EnumType::String);
@@ -599,7 +689,7 @@ fn string_enums_keep_their_declared_values() {
 fn model_identity_changes_with_the_spec() {
     let first = load(&["gitlab"]).unwrap();
     let again = load(&["gitlab"]).unwrap();
-    let extended = load(&["gitlab", "linear"]).unwrap();
+    let extended = load(&["gitlab", "integration.linear"]).unwrap();
     assert_eq!(first.id(), again.id());
     assert_ne!(first.id(), extended.id());
     let fragments = || Packages::embedded().fragments().unwrap();
@@ -624,16 +714,19 @@ fn edit_one(
 
 #[test]
 fn packages_sharing_a_domain_agree_on_its_description() {
-    let errors = spec_errors(load_with(&["gitlab", "linear"], |name, yaml| match name {
-        "gitlab/graph.yaml" => {
-            yaml.replace("domain: core\n", "domain: core\ndomain_description: Core\n")
-        }
-        "linear/graph.yaml" => yaml.replace(
-            "domain: planning\n",
-            "domain: core\ndomain_description: Planning\n",
-        ),
-        _ => yaml,
-    }));
+    let errors = spec_errors(load_with(
+        &["gitlab", "integration.linear"],
+        |name, yaml| match name {
+            "gitlab/graph.yaml" => {
+                yaml.replace("domain: core\n", "domain: core\ndomain_description: Core\n")
+            }
+            "integration.linear/graph.yaml" => yaml.replace(
+                "domain: planning\n",
+                "domain: core\ndomain_description: Planning\n",
+            ),
+            _ => yaml,
+        },
+    ));
     assert_eq!(
         errors,
         ["integration.linear: domain core already has another description"]
@@ -678,9 +771,9 @@ fn a_misspelled_shared_field_fails_the_load() {
 #[test]
 fn trusted_and_untrusted_stores_cannot_share_a_connection() {
     let errors = spec_errors(load_with(
-        &["gitlab", "linear"],
+        &["gitlab", "integration.linear"],
         edit_one(
-            "linear/storage/clickhouse.lake.yaml",
+            "integration.linear/storage/clickhouse.lake.yaml",
             "  connection: main\n",
             "  connection: main\n  trusted: true\n",
         ),
@@ -688,7 +781,8 @@ fn trusted_and_untrusted_stores_cannot_share_a_connection() {
     assert_eq!(
         errors,
         [
-            "integration.linear: store lake and store graph share connection main but only one is trusted"
+            "integration.linear: integration.linear uses trusted store lake, which only a platform package may",
+            "integration.linear: store lake and store graph share connection main but only one is trusted",
         ]
     );
 }
@@ -696,16 +790,20 @@ fn trusted_and_untrusted_stores_cannot_share_a_connection() {
 #[test]
 fn one_connection_has_one_backend() {
     let errors = spec_errors(load_with(
-        &["gitlab", "linear"],
+        &["gitlab", "integration.linear"],
         edit_one(
-            "linear/storage/clickhouse.lake.yaml",
+            "integration.linear/storage/clickhouse.lake.yaml",
             "  kind: clickhouse",
             "  kind: duckdb",
         ),
     ));
     assert_eq!(
         errors,
-        ["integration.linear: store lake is duckdb but connection main is clickhouse"]
+        [
+            "integration.linear: store lake is duckdb but connection main is clickhouse",
+            "integration.linear: LinearIssue is stored in lake but enforces no duckdb policy",
+            "integration.linear: RELATES_TO is stored in lake but enforces no duckdb policy",
+        ]
     );
 }
 
@@ -877,19 +975,24 @@ fn join_filters_reject_values_that_are_not_plain_words() {
 }
 
 #[test]
-fn every_untrusted_guard_carries_the_declared_role() {
-    use query_data_model::{Packages, RequiredRole, testkit};
+fn every_guard_carries_the_declared_scope_and_permission() {
+    use query_data_model::testkit;
 
     for packages in [Packages::embedded(), testkit::with_demo()] {
         let model = packages.load().unwrap();
         for store in model.stores() {
             for source in store.sources() {
                 let entity = model.graph().entity(source.entity);
-                let declared = model.access().entity(source.entity).unwrap().role;
-                let expected = (!store.trusted)
-                    .then(|| declared.unwrap_or(RequiredRole::Reporter).as_access_level());
+                let declared = model.access().entity(source.entity);
                 let guard = store.guard(source.entity).unwrap();
-                assert_eq!(guard.min_role, expected, "{} {}", store.name, entity.name);
+                assert_eq!(
+                    (guard.scope, guard.permission),
+                    (declared.scope, declared.permission),
+                    "{} {}",
+                    store.name,
+                    entity.name
+                );
+                assert_eq!(store.trusted, guard.rule == Rule::Trusted);
             }
         }
     }

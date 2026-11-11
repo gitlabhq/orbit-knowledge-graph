@@ -34,6 +34,8 @@ pub struct Column {
 pub struct PathColumn {
     pub name: String,
     pub entity: Option<EntityId>,
+    /// The table whose rows the column scopes: the entity's own, or an edge table.
+    pub table: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +97,7 @@ impl Table {
         let path_columns = source.path_column.iter().map(|name| PathColumn {
             name: name.clone(),
             entity: Some(source.entity),
+            table: table.to_string(),
         });
         Self {
             entity: Some(source.entity),
@@ -106,9 +109,10 @@ impl Table {
 
     /// An edge table, filtered by its store's path column.
     pub fn edge(name: &str, store: &Store, sort_key: Vec<String>, columns: Vec<Column>) -> Self {
-        let path_columns = store.path_column.iter().map(|name| PathColumn {
-            name: name.clone(),
+        let path_columns = store.path_column.iter().map(|column| PathColumn {
+            name: column.clone(),
             entity: None,
+            table: name.to_string(),
         });
         Self {
             sort_key,

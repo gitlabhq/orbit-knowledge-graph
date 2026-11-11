@@ -1,21 +1,26 @@
 mod access;
 mod backend;
 mod bindings;
+mod composition;
 mod diagnostics;
+mod guards;
 mod layout;
 mod lookups;
 mod names;
 pub mod sources;
 mod store;
 
-pub use crate::Scope;
-pub use access::{Access, EntityAccess, Guard, PathHop, PropertyAccess, Redaction, RowFilter};
+pub use access::{
+    Access, Check, EdgeScope, EntityAccess, Permission, PermissionId, Policy, PropertyAccess,
+    ProviderUse, RelationshipAccess, Scope, ScopeId, ScopeKind,
+};
 pub(crate) use backend::registered;
 pub use backend::{
     Catalog, ColumnInput, ExecuteError, NoOptions, Render, Row, SourceInput, StorageBackend,
     StoreInput, check_unrelational,
 };
 pub use diagnostics::{Diagnostics, SpecError};
+pub use guards::{Guard, PolicyKind, Rule};
 pub use lookups::{Lookup, Lookups};
 pub use names::{Reversed, Unresolved};
 pub use sources::Sources;
@@ -25,6 +30,7 @@ use std::collections::HashSet;
 
 use sha2::{Digest as _, Sha256};
 
+use crate::packages::{Tier, directory};
 use crate::spec::{Fragment, Fragments};
 use crate::{DataModelError, GraphCatalog, PropertyId};
 
@@ -42,10 +48,17 @@ pub struct Model {
 }
 
 impl Model {
+    /// A model of package files that were all loaded at `tier`.
     pub fn from_yaml<'a>(
+        tier: Tier,
         sources: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Result<Self, DataModelError> {
-        Self::load(&Fragments::parse(sources)?)
+        let sources: Vec<(&str, &str)> = sources.into_iter().collect();
+        let tiers = sources
+            .iter()
+            .map(|(path, _)| (directory(path).to_string(), tier))
+            .collect();
+        Self::load(&Fragments::parse(sources, &tiers)?)
     }
 
     pub fn load(fragments: &Fragments) -> Result<Self, DataModelError> {
@@ -59,16 +72,22 @@ impl Model {
                 Fragment::Storage(storage) => storages.push(storage.as_ref()),
                 Fragment::Service(service) => services.push(service),
                 Fragment::Source(source) => sources.push(source.as_ref()),
+                Fragment::Package(_) => {}
             }
         }
 
         let graph = GraphCatalog::from_spec(graphs, &mut diagnostics);
         let access = Access::resolve(&graph, &authorizations, &mut diagnostics);
+        composition::check(fragments, &access, &mut diagnostics);
         let lookups = Lookups::resolve(&graph, &services, &mut diagnostics);
         let served: HashSet<PropertyId> = lookups.served().collect();
         let (mut stores, blocks) = layout::resolve(&graph, &storages, &served, &mut diagnostics);
-        access.resolve_guards(&graph, &mut stores, &mut diagnostics);
-        let sources = Sources::resolve(&graph, &sources, &served, &mut diagnostics);
+        let complete = access.covers(&graph);
+        if complete {
+            guards::resolve(&graph, &access, &mut stores, &mut diagnostics);
+        }
+        let global = |entity| complete && access.is_global(entity);
+        let sources = Sources::resolve(&graph, &global, &sources, &served, &mut diagnostics);
         diagnostics.finish()?;
         let mut model = Self {
             id: fragments.id(),
@@ -106,6 +125,13 @@ impl Model {
 
     pub fn sources(&self) -> &Sources {
         &self.sources
+    }
+
+    /// The foreign key some store binds the variant to.
+    pub fn foreign_key(&self, variant: crate::RelationshipVariantId) -> Option<crate::ForeignKey> {
+        self.stores
+            .iter()
+            .find_map(|store| store.foreign_key(variant))
     }
 
     /// Whether some store binds a variant to this property as its foreign key.

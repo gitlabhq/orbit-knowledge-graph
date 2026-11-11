@@ -1844,6 +1844,7 @@ dependencies = [
  "compiler-pipeline-macros",
  "named-queries",
  "opentelemetry",
+ "orbit-authorization",
  "orbit-observability",
  "orbit-server-config",
  "orbit-utils",
@@ -6095,6 +6096,7 @@ dependencies = [
  "opentelemetry",
  "orbit-analytics",
  "orbit-arrow",
+ "orbit-authorization",
  "orbit-billing",
  "orbit-log-fields",
  "orbit-migrations",
@@ -7074,7 +7076,9 @@ name = "pipeline"
 version = "0.1.0"
 dependencies = [
  "compiler",
+ "orbit-authorization",
  "orbit-utils",
+ "serde",
  "strum 0.28.0",
  "thiserror 2.0.18",
 ]

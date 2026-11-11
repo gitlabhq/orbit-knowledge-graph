@@ -117,6 +117,7 @@ impl Store {
             bindings: vec![None; graph.variants().count()],
             declared: HashSet::new(),
             guards: vec![None; graph.entities().count()],
+            edge_guards: Default::default(),
             facts: None,
         }
     }

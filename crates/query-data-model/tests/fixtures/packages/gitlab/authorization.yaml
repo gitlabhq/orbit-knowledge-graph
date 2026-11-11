@@ -1,19 +1,67 @@
 kind: authorization
 package: gitlab
+permissions: [read, read_developer, read_maintainer, read_group, read_merge_request, read_note, read_project]
+scopes:
+  namespace: {kind: hierarchy, provider: gitlab_session}
+  global: {kind: global, provider: gitlab_session}
 entities:
-  Group: { scope: namespace, role: reporter, redaction: { resource: group, ability: read_group } }
-  Project: { scope: namespace, role: reporter, redaction: { resource: project, ability: read_project } }
-  User: { scope: global }
-  MergeRequest: { scope: namespace, role: reporter, redaction: { resource: merge_request, ability: read_merge_request } }
-  Note: { scope: namespace, role: reporter, redaction: { resource: note, ability: read_note } }
+  Group:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_group, resource: group}]
+    properties:
+      open: [id, name, full_path]
+      hidden: [traversal_path]
+
+  Project:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_project, resource: project}]
+    properties:
+      open: [id, name, full_path]
+      hidden: [traversal_path]
+
+  User:
+    scope: global
+    permission: read
+    properties:
+      open: [id, username]
+      admin_exact: [email]
+
+  MergeRequest:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_merge_request, resource: merge_request}]
+    properties:
+      open: [id, iid, title, state, project_id, author_id, diff]
+      hidden: [traversal_path]
+
+  Note:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_note, resource: note}]
+    properties:
+      open: [id, body, project_id, author_id]
+      hidden: [traversal_path]
+
 relationships:
-  CONTAINS: same_namespace
-  IN_PROJECT: namespace_anchor
-  AUTHORED: prune_to_target
-  HAS_NOTE: same_namespace
-properties:
-  Group.traversal_path: { hidden: true, filterable: false }
-  Project.traversal_path: { hidden: true, filterable: false }
-  MergeRequest.traversal_path: { hidden: true, filterable: false }
-  Note.traversal_path: { hidden: true, filterable: false }
-  User.email: { admin_only: true, like: false }
+  AUTHORED:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}
+  CONTAINS:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: nested}}
+  HAS_NOTE:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}
+  IN_PROJECT:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: holder}}

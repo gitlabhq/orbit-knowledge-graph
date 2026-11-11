@@ -9,7 +9,7 @@ use crate::common::{
 use integration_testkit::{run_subtests, run_subtests_shared, t};
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
-use query_engine::compiler::SecurityContext;
+use query_engine::compiler::orbit_authorization::Grants;
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::{PipelineOutput, RedactionOutput};
@@ -189,7 +189,7 @@ async fn run_pipeline_with_security(
     ctx: &TestContext,
     query: &str,
     svc: &MockRedactionService,
-    security_ctx: SecurityContext,
+    security_ctx: Grants,
 ) -> Value {
     let value = GraphFormatter.format(&pipeline_output(ctx, query, svc, security_ctx).await);
     assert_valid(&value);
@@ -200,7 +200,7 @@ pub(super) async fn pipeline_output(
     ctx: &TestContext,
     query: &str,
     svc: &MockRedactionService,
-    security_ctx: SecurityContext,
+    security_ctx: Grants,
 ) -> PipelineOutput {
     let data_model = load_data_model();
     let client = Arc::new(ctx.create_client());
@@ -216,7 +216,11 @@ pub(super) async fn pipeline_output(
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),
-        security_context: Some(security_ctx),
+        security_context: security_ctx
+            .caller()
+            .session::<orbit_server::authorization::gitlab::GitLabCaller>()
+            .map(|session| session.context.clone()),
+        grants: Some(security_ctx.clone()),
         server_extensions,
         phases: TypeMap::default(),
     };

@@ -5,9 +5,9 @@ use std::slice;
 use std::sync::Arc;
 
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_authorization::Grants;
 use orbit_log_fields::info;
 use orbit_utils::traversal_path::TraversalPath;
-use query_engine::compiler::SecurityContext;
 use tonic::Status;
 
 use crate::active_schema::SchemaSnapshot;
@@ -33,7 +33,7 @@ impl GraphStatusService {
         schema: &SchemaSnapshot,
         traversal_path: &TraversalPath,
         format: i32,
-        security_context: &SecurityContext,
+        grants: &Grants,
     ) -> Result<GetGraphStatusResponse, Status> {
         if traversal_path.is_empty() {
             return Err(Status::invalid_argument("traversal_path is required"));
@@ -48,7 +48,7 @@ impl GraphStatusService {
         let (statuses, counts) = tokio::join!(
             self.indexing_status.read_scope_statuses(schema, scopes),
             self.item_counts
-                .count_items_or_zeros(&schema.data_model, security_context, scopes),
+                .count_items_or_zeros(&schema.data_model, grants, scopes),
         );
         let status = statuses
             .into_iter()

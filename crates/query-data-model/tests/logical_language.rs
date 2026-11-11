@@ -4,7 +4,8 @@ use query_data_model::plan::logical::{
     Columns, ErrorClass, Expr, Hops, Literal, LogicalCatalog, LogicalOperation, LogicalPlan,
     LogicalType, Matching, Measure, Order, PlanError, Predicate, Projection, Step, TimeUnit,
 };
-use query_data_model::{Direction, Model, Packages};
+
+use query_data_model::Direction;
 
 #[test]
 fn a_pattern_binds_aliases_hops_and_edges() {
@@ -181,21 +182,7 @@ fn construction_errors_name_their_class() {
     assert_eq!(page.class(), ErrorClass::Shape);
 }
 
-fn platform(extra: &[(&str, &str)]) -> Model {
-    let packages = Packages::embedded();
-    let sources = packages
-        .sources()
-        .iter()
-        .map(|(name, yaml)| (name.as_str(), yaml.as_str()))
-        .chain(extra.iter().copied());
-    Model::from_yaml(sources).unwrap()
-}
-
-/// Edge-owned attributes on a relationship whose edge table holds a column for each.
-const ATTRIBUTES: (&str, &str) = (
-    "overlay/graph.yaml",
-    "kind: graph\npackage: overlay\nrelationships:\n  ON_BRANCH:\n    variants: {}\n    attributes: {branch: string, project_id: int64}\n",
-);
+const ATTRIBUTES: &str = "{open: [branch, project_id]}";
 
 fn on_branch(catalog: LogicalCatalog<'_>, column: &str) -> Result<LogicalPlan, PlanError> {
     catalog.build(|q| {
@@ -215,7 +202,7 @@ fn on_branch(catalog: LogicalCatalog<'_>, column: &str) -> Result<LogicalPlan, P
 
 #[test]
 fn edges_filter_and_select_relationship_attributes() {
-    let model = platform(&[ATTRIBUTES]);
+    let model = support::branch_attributes(ATTRIBUTES);
     let plan = on_branch(model.logical(), "branch").unwrap();
     let operations: Vec<_> = plan.nodes().map(|node| plan.operation(node)).collect();
     let LogicalOperation::Filter(Predicate::Compare {
@@ -235,7 +222,7 @@ fn edges_filter_and_select_relationship_attributes() {
 
 #[test]
 fn edge_attributes_are_checked_at_construction() {
-    let model = platform(&[ATTRIBUTES]);
+    let model = support::branch_attributes(ATTRIBUTES);
     let unknown = on_branch(model.logical(), "brnch").unwrap_err();
     assert_eq!(unknown.class(), ErrorClass::Reference);
     assert_eq!(
@@ -245,13 +232,7 @@ fn edge_attributes_are_checked_at_construction() {
     let typed = on_branch(model.logical(), "project_id").unwrap_err();
     assert_eq!(typed.class(), ErrorClass::Type);
 
-    let hidden = platform(&[
-        ATTRIBUTES,
-        (
-            "overlay/authorization.yaml",
-            "kind: authorization\npackage: overlay\nproperties:\n  ON_BRANCH.branch: { hidden: true }\n",
-        ),
-    ]);
+    let hidden = support::branch_attributes("{open: [project_id], hidden: [branch]}");
     let error = on_branch(hidden.logical(), "branch").unwrap_err();
     assert_eq!(error.class(), ErrorClass::Policy);
     assert_eq!(error.to_string(), "ON_BRANCH.branch is hidden");

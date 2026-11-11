@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::panic::RefUnwindSafe;
 
-use super::access::Guard;
+use super::guards::Guard;
 use crate::spec::{AccessHints, Binding, Resolved};
 use crate::{Endpoint, EntityId, ForeignKey, PropertyId, RelationshipVariantId};
 
@@ -45,6 +45,7 @@ pub struct Store {
     pub(super) bindings: Vec<Option<(String, Binding<Resolved>)>>,
     pub(super) declared: HashSet<RelationshipVariantId>,
     pub(super) guards: Vec<Option<Guard>>,
+    pub(super) edge_guards: std::collections::BTreeMap<String, Guard>,
     pub(super) facts: Option<Facts>,
 }
 
@@ -119,6 +120,11 @@ impl Store {
 
     pub fn guard(&self, entity: EntityId) -> Option<&Guard> {
         self.guards[entity.index()].as_ref()
+    }
+
+    /// The guard of an edge table the store holds.
+    pub fn edge_guard(&self, table: &str) -> Option<&Guard> {
+        self.edge_guards.get(table)
     }
 
     pub(super) fn facts<T: 'static>(&self) -> Option<&T> {

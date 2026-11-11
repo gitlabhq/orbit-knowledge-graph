@@ -1,6 +1,16 @@
 kind: authorization
 package: tenant.agent_memory
 entities:
-  AgentMemory: { scope: namespace, role: developer }
+  AgentMemory:
+    scope: namespace
+    permission: read_developer
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    properties:
+      open: [id, summary, created_at, project_id]
+      hidden: [traversal_path]
+
 relationships:
-  REMEMBERS: prune_to_target
+  REMEMBERS:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: target}}

@@ -99,8 +99,8 @@ fn relationship(
     let (from, to) = (query.entity(edge.from)?, query.entity(edge.to)?);
     edge.types.iter().find_map(|kind| {
         match super::variant_scope(model, kind, Some(from), Some(to)) {
-            Some(query_data_model::EdgeVariantScope::PruneToSource) => from_bound,
-            Some(query_data_model::EdgeVariantScope::PruneToTarget) => to_bound,
+            Some(query_data_model::catalog::EdgeScope::Source) => from_bound,
+            Some(query_data_model::catalog::EdgeScope::Target) => to_bound,
             _ => None,
         }
         .cloned()

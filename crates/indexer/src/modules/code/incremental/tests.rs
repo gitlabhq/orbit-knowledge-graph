@@ -702,7 +702,9 @@ async fn local_tables_the_export_cannot_map_are_a_fatal_error() {
     let engine = sources.get_mut("gitlab/storage/duckdb.yaml").unwrap();
     let bindings = engine.find("relationships:").unwrap();
     engine.truncate(bindings);
-    let model = query_data_model::Packages::new(sources).load().unwrap();
+    let model = query_data_model::Packages::new(query_data_model::Tier::Platform, sources)
+        .load()
+        .unwrap();
     let specs = ConverterSpecs::new(
         &query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&model).unwrap(),
         &query_data_model::Catalog::<query_data_model::DuckDb>::from_model(&model).unwrap(),

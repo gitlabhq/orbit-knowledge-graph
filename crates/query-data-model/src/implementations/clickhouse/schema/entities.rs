@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use super::layout::{build_indexes, merge, projections};
 use super::resolve::Resolver;
 use super::{Column, GraphTable, Table};
-use crate::catalog::{Scope, SourceInput};
+use crate::catalog::SourceInput;
 use crate::implementations::clickhouse::ClickHouse;
 use crate::implementations::clickhouse::spec::{IndexDetail, IndexSpec, IndexSpecs};
 use crate::implementations::relational::entity_layout;
@@ -44,10 +44,7 @@ impl Resolver<'_, '_> {
             if self.creates() {
                 self.schema.graph_tables.push(GraphTable {
                     name: table.to_string(),
-                    global: input
-                        .access
-                        .entity(entity)
-                        .is_some_and(|access| access.scope == Scope::Global),
+                    global: input.access.is_global(entity),
                     has_path_column: bound.path_column.is_some(),
                 });
                 self.schema

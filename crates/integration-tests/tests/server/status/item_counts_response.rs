@@ -1,7 +1,7 @@
 use integration_testkit::run_subtests_shared;
 use orbit_server::item_counts::build_item_counts_response;
 use orbit_server::proto::{DomainItemCount, GetItemCountsRequest, GetItemCountsResponse};
-use query_engine::compiler::{AuthorizedPath, SecurityContext};
+use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 
 use super::fixtures::{admin_context, count_items, pinned_schema, seed_namespaces};
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};

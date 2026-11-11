@@ -364,6 +364,7 @@ async fn run_pipeline(
         query_json: query.to_string(),
         compiled: None,
         security_context: None,
+        grants: None,
         server_extensions,
         phases: TypeMap::default(),
     };

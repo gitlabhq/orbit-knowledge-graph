@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
+use orbit_authorization::{Grants, ScopeKey, ScopeSet};
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::catalog::{PermissionId, Rule, ScopeId};
 use query_data_model::{Catalog, ClickHouse};
-use query_engine::compiler::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 
 pub struct Visibility {
     pub scope_groups: Vec<Vec<usize>>,
@@ -24,27 +25,33 @@ impl Visibility {
     }
 }
 
+/// The entities a caller can count in each requested scope: those whose rows hold a scope key,
+/// in the scopes where the caller holds each entity's permission.
 pub fn get_visibility(
     data_model: &Catalog<ClickHouse>,
-    security_context: &SecurityContext,
+    grants: &Grants,
     scopes: &[&TraversalPath],
 ) -> Visibility {
+    let access = data_model.model().access();
     let mut scope_groups: Vec<Vec<usize>> = Vec::new();
-    let mut group_by_role: HashMap<u32, usize> = HashMap::new();
+    let mut groups: HashMap<(ScopeId, PermissionId), usize> = HashMap::new();
     let entities = data_model
         .graph()
         .entities()
-        .filter(|entity| data_model.has_path_column(entity.id))
         .filter_map(|entity| {
+            let guard = data_model.guard(entity.id)?;
+            let Rule::Column(_) = guard.rule else {
+                return None;
+            };
             let table = data_model.table_of(entity.id)?;
-            let required_role = data_model
-                .min_role(entity.id)
-                .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
-            let scope_group = *group_by_role.entry(required_role).or_insert_with(|| {
-                let paths_with_role = security_context.paths_at_least(required_role);
+            let key = (guard.scope, guard.permission);
+            let scope_group = *groups.entry(key).or_insert_with(|| {
+                let scope = &access.scope(guard.scope).name;
+                let permission = &access.permission(guard.permission).name;
+                let set = grants.scope_set(scope, permission).ok();
                 scope_groups.push(
                     (0..scopes.len())
-                        .filter(|&index| scopes[index].is_within_scope(&paths_with_role))
+                        .filter(|&index| set.is_some_and(|set| holds(set, scopes[index])))
                         .collect(),
                 );
                 scope_groups.len() - 1
@@ -62,26 +69,41 @@ pub fn get_visibility(
     }
 }
 
+fn holds(set: &ScopeSet, scope: &TraversalPath) -> bool {
+    match set {
+        ScopeSet::All => true,
+        ScopeSet::Subtrees(roots) => {
+            let roots: Vec<TraversalPath> = roots.iter().map(|root| root.as_str().into()).collect();
+            scope.is_within_scope(&roots.iter().collect::<Vec<_>>())
+        }
+        ScopeSet::Keys(keys) => keys.contains(&ScopeKey::Text(scope.as_str().to_string())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use query_engine::compiler::AuthorizedPath;
+    use orbit_authorization::Caller;
 
     use super::*;
 
     #[test]
-    fn entities_need_a_path_column_and_a_scope_at_their_role_floor() {
+    fn entities_need_a_scope_key_and_a_scope_with_their_permission() {
         let data_model = Catalog::<ClickHouse>::embedded().unwrap();
-        let security_context = SecurityContext::new_with_roles(
-            1,
-            vec![
-                AuthorizedPath::new("1/20/", 20),
-                AuthorizedPath::new("1/30/", 30),
-            ],
-        )
-        .unwrap();
+        let grants = Grants::new(Caller::new("user:1", false, ()))
+            .with(
+                "namespace",
+                "read",
+                ScopeSet::Subtrees(vec!["1/20/".into(), "1/30/".into()]),
+            )
+            .with(
+                "namespace",
+                "read_security",
+                ScopeSet::Subtrees(vec!["1/30/".into()]),
+            )
+            .with("global", "read", ScopeSet::All);
         let scopes = ["1/20/", "1/30/", "1/99/"].map(TraversalPath::new_unchecked);
         let scopes: Vec<&TraversalPath> = scopes.iter().collect();
-        let visible = get_visibility(&data_model, &security_context, &scopes);
+        let visible = get_visibility(&data_model, &grants, &scopes);
 
         let scopes_of = |name: &str| {
             visible

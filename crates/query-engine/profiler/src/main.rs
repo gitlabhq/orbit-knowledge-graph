@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::Parser;
 use clickhouse_client::ArrowClickHouseClient;
-use compiler::SecurityContext;
+use pipeline::SecurityContext;
 use query_data_model::{Catalog, ClickHouse, Packages};
 use tracing::Instrument;
 use tracing_subscriber::layer::SubscriberExt;
@@ -247,8 +247,12 @@ fn compile_one(
     data_model: &Arc<Catalog<ClickHouse>>,
     security_ctx: &SecurityContext,
 ) -> Result<compiler::CompiledQueryContext> {
-    compiler::compile(query, data_model, security_ctx)
-        .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
+    compiler::compile(
+        query,
+        data_model,
+        &service::grants(data_model, security_ctx)?,
+    )
+    .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
 }
 
 fn format_hydration(plan: &compiler::HydrationPlan) -> String {
@@ -360,7 +364,7 @@ fn query_entries(raw: &str, cli: &Cli) -> Result<Vec<(String, String)>> {
     Ok(entries)
 }
 
-fn authorized_path(entry: &str) -> Result<compiler::AuthorizedPath> {
+fn authorized_path(entry: &str) -> Result<pipeline::AuthorizedPath> {
     let (path, level) = match entry.split_once('@') {
         Some((path, level)) => (
             path,
@@ -368,9 +372,9 @@ fn authorized_path(entry: &str) -> Result<compiler::AuthorizedPath> {
                 .parse::<u32>()
                 .with_context(|| format!("access level in {entry:?} is not a number"))?,
         ),
-        None => (entry, compiler::DEFAULT_PATH_ACCESS_LEVEL),
+        None => (entry, pipeline::DEFAULT_PATH_ACCESS_LEVEL),
     };
-    Ok(compiler::AuthorizedPath::new(
+    Ok(pipeline::AuthorizedPath::new(
         orbit_utils::traversal_path::TraversalPath::new_unchecked(path),
         level,
     ))
@@ -405,7 +409,8 @@ async fn main() -> Result<()> {
         String::new()
     };
     eprintln!("using table prefix: {prefix:?}");
-    let packages = Packages::read_dir(&cli.model).context("failed to read model packages")?;
+    let packages = Packages::read_dir(&cli.model, query_data_model::Tier::Platform)
+        .context("failed to read model packages")?;
     let data_model = Arc::new(Catalog::<ClickHouse>::versioned(&packages, &prefix)?);
 
     let authorized_paths = cli

@@ -3,42 +3,58 @@ package: gitlab.source_code
 entities:
   Branch:
     scope: namespace
-    role: reporter
-    redaction: {resource: project, ability: read_code, id: project_id}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]
+    properties:
+      open: [id, project_id, name, is_default]
+      hidden: [traversal_path]
 
   Commit:
     scope: namespace
-    role: reporter
-    redaction: {resource: project, ability: read_code, id: project_id}
-    anchor: {property: project_id, entity: Project}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]
+    properties:
+      open: [id, sha, project_id]
+      hidden: [traversal_path]
 
   Definition:
     scope: namespace
-    role: reporter
-    redaction: {resource: project, ability: read_code, id: project_id}
-    anchor: {property: project_id, entity: Project}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]
+    properties:
+      open: [id, project_id, branch, commit_sha, file_path, fqn, name, definition_type, start_line,
+             end_line, start_byte, end_byte, start_char, end_char, content]
+      hidden: [traversal_path]
 
   Directory:
     scope: namespace
-    role: reporter
-    redaction: {resource: project, ability: read_code, id: project_id}
-    anchor: {property: project_id, entity: Project}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]
+    properties:
+      open: [id, project_id, branch, commit_sha, path, name]
+      hidden: [traversal_path]
 
   File:
     scope: namespace
-    role: reporter
-    redaction: {resource: project, ability: read_code, id: project_id}
-    anchor: {property: project_id, entity: Project}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}, orbit_code: {scope_key: {via: IN_PROJECT}}}
+    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]
+    properties:
+      open: [id, project_id, branch, commit_sha, path, name, extension, language, size_bytes,
+             content, reason]
+      hidden: [traversal_path]
 
   ImportedSymbol:
     scope: namespace
-    role: reporter
-    redaction: {resource: project, ability: read_code, id: project_id}
-    anchor: {property: project_id, entity: Project}
-properties:
-  Branch.traversal_path: {hidden: true, filterable: false}
-  Commit.traversal_path: {hidden: true, filterable: false}
-  Definition.traversal_path: {hidden: true, filterable: false}
-  Directory.traversal_path: {hidden: true, filterable: false}
-  File.traversal_path: {hidden: true, filterable: false}
-  ImportedSymbol.traversal_path: {hidden: true, filterable: false}
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]
+    properties:
+      open: [id, project_id, branch, commit_sha, file_path, import_type, import_path,
+             identifier_name, identifier_alias, start_line, end_line, start_byte, end_byte,
+             start_char, end_char]
+      hidden: [traversal_path]

@@ -1,6 +1,7 @@
 pub mod active_schema;
 pub mod analytics;
 pub mod auth;
+pub mod authorization;
 mod billing_adapter;
 #[cfg(test)]
 mod build_validations;

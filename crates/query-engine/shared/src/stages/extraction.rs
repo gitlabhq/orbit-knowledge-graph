@@ -59,6 +59,7 @@ mod tests {
             query_json: String::new(),
             compiled: None,
             security_context: None,
+            grants: None,
             server_extensions: Default::default(),
             phases: Default::default(),
         };

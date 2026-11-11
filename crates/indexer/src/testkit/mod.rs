@@ -23,7 +23,9 @@ pub fn patched_model(
     let source = sources.get_mut(path).unwrap();
     assert!(source.contains(find), "{path} does not contain {find:?}");
     *source = source.replacen(find, replace, 1);
-    query_data_model::Packages::new(sources).load().unwrap()
+    query_data_model::Packages::new(query_data_model::Tier::Platform, sources)
+        .load()
+        .unwrap()
 }
 
 /// Routes the `File` variants of `CALLS` to `gl_edge`, so one relationship spans two tables.

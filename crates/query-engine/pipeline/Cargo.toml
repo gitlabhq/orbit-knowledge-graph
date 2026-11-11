@@ -9,6 +9,8 @@ orbit-utils = { path = "../../utils" }
 compiler = { path = "../compiler" }
 strum = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+orbit-authorization = { path = "../../orbit-authorization" }
 
 [lints]
 workspace = true
