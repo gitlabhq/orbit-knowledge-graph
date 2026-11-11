@@ -21,7 +21,7 @@ folder so it can be removed as a unit (see *Removing the gates* below). Task #29
 | `comment_check_hook.sh` | Lefthook entry point: maps the checker's exit code 3 to a blocked commit and lets every other failure through. |
 | `comment_check_test.py` | Unit tests for the comment check (`mise run lint:comments:test`). |
 | `narration-comments.yml` | Lower-precision ast-grep-native fallback for the `block_label` half (see below). Committed for documentation / ast-grep-only setups; **not** the active gate. |
-| `unit-tests/` | Opt-in gate for Rust tests (`mise run lint:unit-tests`): an ast-grep rule with its own `sgconfig.yml`, and `check.py`, which rejects test functions that a diff adds without a reason. |
+| `unit-tests/` | Opt-in gate for Rust tests (`mise run lint:unit-tests`): `check.py` rejects tests that a diff adds without a `// unit-test:` reason. |
 
 ## Prose linter
 
@@ -133,23 +133,22 @@ Behavior tests belong in YAML: plan-shape fixtures check compiler output,
 data-correctness scenarios check query results, and indexer scenarios check
 indexing. A Rust unit test is opt-in, for logic that YAML cannot reach.
 
-The `unit-test` rule matches every Rust test function under `crates/`: a
-`#[test]`, `#[tokio::test]`, or `#[rstest]` function, or a subtest that takes
-`&TestContext`. `check.py` runs the rule on the files a diff changes and keeps
-only the functions whose `fn` line the diff adds, so existing tests pass. It
-takes `--staged` for a commit hook or `--range BASE HEAD` for CI, and finishes
-in well under a second.
+`check.py` reads the Rust files that a diff changes under `crates/`. It flags a
+test whose `#[test]`, `#[tokio::test]`, or `#[rstest]` line or `fn` line is new,
+and a subtest name that a diff adds to a `run_subtests!` call. Existing tests
+pass. It takes `--staged` for a commit hook or `--range BASE HEAD` for CI, and
+it sets the git diff prefixes and path quoting itself.
 
-To keep a Rust test, put this on the line above its `fn`:
+To keep a Rust test, put an opt-in on the line above its `fn`:
 
 ```rust
 #[test]
-// ast-grep-ignore: unit-test -- timing guarantee of a crypto primitive; no query or scenario reaches it
+// unit-test: timing guarantee of a crypto primitive; no query or scenario reaches it
 fn token_mismatch_takes_the_same_time_at_any_byte() {}
 ```
 
-The reason after `--` must be at least ten characters. An opt-in without one is
-rejected. Good reasons name mission-critical logic, such as cryptography, data
+The reason must be at least ten characters and say why YAML cannot check the
+behavior. Good reasons name mission-critical logic, such as cryptography, data
 structure invariants, security policy edge cases, exact parser or encoder
 output, and concurrency primitives.
 
@@ -160,7 +159,7 @@ A rejection lists each test as `path/name/start_line`, one per line.
 - **lefthook** `pre-commit` job `narration` (advisory; prints warnings, does not
   block — `|| true` in `lefthook.yml`), `comments`, `prose`, and `yaml-suites`
   (these three block the commit), and `unit-tests` (blocks a staged Rust test
-  that has no opt-in reason).
+  that has no `// unit-test:` reason).
 - **CI** jobs `lint:narration`, `lint:comments`, `lint:mr-description`,
   `lint:prose`, `lint:yaml`, and `unit-test-opt-in`, defined in
   [`.gitlab/ci/linting.yml`](../../.gitlab/ci/linting.yml). The first three use
