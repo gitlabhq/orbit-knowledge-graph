@@ -38,17 +38,18 @@ Agent memory needs custom node types for one tenant.
 
 **A data model of versioned packages replaces the ontology. A loader checks the packages once, and every compiler pipeline builds, rewrites and renders its plans through the model's checked catalogs.**
 
-1. **Packages replace the ontology.** A package is a set of fragments: graph, storage, service, authorization and source. They form layers around the graph, and each layer names only the layers inside it.
-2. **The loader does the work once, and infers nothing.** It resolves every name to an ID, checks every rule, and fails once with every error. Every column, relationship binding and access policy is declared. A hash of the packages identifies the model, and every plan carries it.
-3. **Packages load at runtime from a registry keyed by package.** Each package has its own version line and declares the packages it requires. A new version needs no rebuild and no deploy. The publisher's tier bounds what a package may declare.
-4. **A version goes live after its backfill.** The migration scope is the diff between the new version's storage and source fragments and the active one's. The indexing engine of ADR 023 backfills the tables in scope, then the registry promotes the version and the query engine swaps models atomically.
-5. **A backend implements one trait.** A catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. Shared code reads capabilities and never checks a backend name.
-6. **Every plan is built through a checked catalog builder.** There is one logical plan language and one physical plan language per kind of backend. Shared tracking checks every connection as it is made, and rewrites use the same builder, so no phase can leave an invalid plan.
-7. **Surfaces parse, and the compiler plans.** A surface turns text into a logical plan, and construction errors replace the validation pass. The planning phase reads the logical plan and builds the physical plan in one step, with no intermediate plan description.
-8. **Authorization runs through providers, and security enforces it in its own phase.** Packages declare each entity's scope, permission, one policy per backend and its checks. A deployment binds provider names to modules that identify the caller, list the caller's scopes and check rows; GitLab is one such module. A final check proves that every read carries its policy.
-9. **The catalog renders its own plans.** The catalog that builds a plan renders it, into SQL with parameters or into the backend's native request.
-10. **A query that spans connections runs as an execution DAG.** The planner splits it into stages, one per connection, connected by key sets and rows. The query engine runs the DAG and applies the final order, limit and pagination.
-11. **Plans are tested in three stages.** Plan tests assert the logical plan, the physical plan right after planning, and the physical plan after every phase.
+1. **Packages drive everything, and nothing is hidden.** Every behavior traces to a declaration in a package. Code knows no entity, relationship, table, connection, permission or domain by name, and holds no default for a fact a package can declare. A missing declaration fails the load; it never falls back to a guess.
+2. **Packages replace the ontology.** A package is a set of fragments: graph, storage, service, authorization and source. They form layers around the graph, and each layer names only the layers inside it.
+3. **The loader does the work once, and infers nothing.** It resolves every name to an ID, checks every rule, and fails once with every error. Every column, relationship binding and access policy is declared. A hash of the packages identifies the model, and every plan carries it.
+4. **Packages load at runtime from a registry keyed by package.** Each package has its own version line and declares the packages it requires. A new version needs no rebuild and no deploy. The publisher's tier bounds what a package may declare.
+5. **A version goes live after its backfill.** The migration scope is the diff between the new version's storage and source fragments and the active one's. The indexing engine of ADR 023 backfills the tables in scope, then the registry promotes the version and the query engine swaps models atomically.
+6. **A backend implements one trait.** A catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. Shared code reads capabilities and never checks a backend name.
+7. **Every plan is built through a checked catalog builder.** There is one logical plan language and one physical plan language per kind of backend. Shared tracking checks every connection as it is made, and rewrites use the same builder, so no phase can leave an invalid plan.
+8. **Surfaces parse, and the compiler plans.** A surface turns text into a logical plan, and construction errors replace the validation pass. The planning phase reads the logical plan and builds the physical plan in one step, with no intermediate plan description.
+9. **Authorization runs through providers, and security enforces it in its own phase.** Packages declare each entity's scope, permission, one policy per backend and its checks. A deployment binds provider names to modules that identify the caller, list the caller's scopes and check rows; GitLab is one such module. A final check proves that every read carries its policy.
+10. **The catalog renders its own plans.** The catalog that builds a plan renders it, into SQL with parameters or into the backend's native request.
+11. **A query that spans connections runs as an execution DAG.** The planner splits it into stages, one per connection, connected by key sets and rows. The query engine runs the DAG and applies the final order, limit and pagination.
+12. **Plans are tested in three stages.** Plan tests assert the logical plan, the physical plan right after planning, and the physical plan after every phase.
 
 ## How it works
 
@@ -258,7 +259,7 @@ endif
 @enduml
 ```
 
-Later stages read facts by ID, and every plan carries the `ModelId` it was built against.
+Later stages read facts by ID, and every plan carries the `ModelId` it was built against. A missing declaration is always a load error, never a default.
 
 The platform package declares the vocabulary that every package uses: the permissions and the scope kinds. A scope kind is a rule every backend can render:
 
@@ -531,6 +532,7 @@ Every stage gets its own policy, and plan tests assert the logical plan, the pla
 
 - A package that fails its load checks is rejected, and the previous model keeps serving. Publishing must run the same checks, so authors see the errors first.
 - The loader is strict. A fragment cannot carry unknown fields for later use.
+- A test loads every shipped package, collects every declared name, and fails if one appears as a literal in the non-test source of the query engine, the indexer, the migrations or the server. A hard-coded table, entity or connection name fails CI.
 - Every scoped entity declares a policy for each backend that stores it. A new backend for an existing entity needs an authorization change as well as a storage change.
 - The query engine has no built-in authorization system. A deployment without Rails supplies its own `Identify` and `Scopes` modules, and a `Check` module where its scope answer is not exact.
 - A change to storage goes live only after its backfill. A change that only adds query metadata takes effect on the next load.

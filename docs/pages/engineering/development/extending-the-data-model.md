@@ -506,7 +506,7 @@ physical:
 
 ### Load checks
 
-The loader collects every error, names its package, and fails once:
+The loader collects every error, names its package, and fails once. A missing declaration is always an error, never a default:
 
 - An unknown entity, property, relationship, variant, permission, scope, provider, field or template.
 - An entity or variant declared twice, or a second authorization entry.
