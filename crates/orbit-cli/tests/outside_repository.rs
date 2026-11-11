@@ -218,10 +218,7 @@ fn setup_says_when_the_agent_plugin_is_skipped_and_leaves_it_off_the_configured_
         1,
         "{printed}"
     );
-    assert!(
-        printed.contains("Claude Code gets no Orbit instructions"),
-        "{printed}"
-    );
+    assert!(!printed.contains("gets no Orbit instructions"), "{printed}");
     let card = configured_card(&printed);
     assert!(card.contains("Claude Code   hooks, skill  "), "{printed}");
     assert!(!card.contains("agent plugins"), "{printed}");
