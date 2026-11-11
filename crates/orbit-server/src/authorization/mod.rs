@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use orbit_authorization::{
-    Answers, AuthError, Caller, Check, CheckRequest, Grants, Identify, Module, Need, Provider,
-    Request, ScopeKind, Scopes,
+    Answers, AuthError, Caller, Check, CheckRequest, Credential, Credentials, Grants, Identify,
+    Module, Need, Provider, Request, ScopeKind, Scopes,
 };
 use orbit_server_config::AuthorizationConfig;
 use query_data_model::Model;
@@ -47,6 +47,7 @@ pub struct Deployment {
     identify: Arc<dyn Provider<Identify>>,
     needs: Vec<(Need, Arc<dyn Provider<Scopes>>)>,
     checks: BTreeMap<String, Arc<dyn Provider<Check>>>,
+    credentials: BTreeMap<String, Arc<dyn Provider<Credentials>>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -124,6 +125,7 @@ impl Deployment {
             }
         }
         let mut checks = BTreeMap::new();
+        let mut credentials = BTreeMap::new();
         for (name, used) in &uses {
             let Some((_, built)) = answers.get(name) else {
                 continue;
@@ -136,8 +138,13 @@ impl Deployment {
                     None => missing(name, "Check", &mut errors),
                 }
             }
-            if used.contains(&ProviderUse::Credentials) && built.credentials.is_none() {
-                missing(name, "Credentials", &mut errors);
+            if used.contains(&ProviderUse::Credentials) {
+                match &built.credentials {
+                    Some(provider) => {
+                        credentials.insert(name.to_string(), Arc::clone(provider));
+                    }
+                    None => missing(name, "Credentials", &mut errors),
+                }
             }
         }
         inexact_without_checks(model, &answers, &mut errors);
@@ -146,6 +153,7 @@ impl Deployment {
                 identify,
                 needs: bound_needs,
                 checks,
+                credentials,
             }),
             _ => Err(BindError(errors)),
         }
@@ -188,6 +196,23 @@ impl Deployment {
             })
             .await?;
         Ok(allowed)
+    }
+
+    /// The caller's sign-in for a delegated service, from the provider a check names.
+    pub async fn credentials(
+        &self,
+        caller: &Caller,
+        provider: &str,
+        service: &str,
+    ) -> Result<Credential, AuthError> {
+        let signer = self.credentials.get(provider).ok_or_else(|| {
+            AuthError::Invalid(format!("no provider {provider} answers Credentials"))
+        })?;
+        let query = Credentials {
+            caller: caller.clone(),
+            service: service.to_string(),
+        };
+        signer.call(query).await
     }
 }
 

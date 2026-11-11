@@ -1,0 +1,23 @@
+kind: storage
+package: acme
+store: acme
+engine:
+  kind: clickhouse
+  connection: main
+  backend:
+    version_column: _version
+    deleted_column: _deleted
+entities:
+  Folder:
+    table: acme_folder
+    columns:
+      id: {immutable: true, backend: {type: Int64}}
+      name: {backend: {type: String}}
+      team_key: {backend: {type: String}}
+    access: {order: [id]}
+  Person:
+    table: acme_person
+    columns:
+      id: {immutable: true, backend: {type: Int64}}
+      name: {backend: {type: String}}
+    access: {order: [id]}

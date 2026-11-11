@@ -1,0 +1,12 @@
+identify: oidc
+providers:
+  oidc: {module: fake.oidc}
+  directory:
+    module: fake.zanzibar
+    relations: {alice: [team-a, team-b], bob: [team-c]}
+    allowed: {alice: [1, 2, 3], bob: [4]}
+  approver:
+    module: fake.zanzibar
+    relations: {}
+    allowed: {alice: [1, 2, 3], bob: [4]}
+  policy: {module: fake.cedar, denied: [2]}

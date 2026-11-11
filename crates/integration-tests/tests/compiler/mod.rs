@@ -1,3 +1,4 @@
+mod authorization_variants;
 mod dialects;
 mod ontology;
 mod plan_shape;

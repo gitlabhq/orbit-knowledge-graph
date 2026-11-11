@@ -1,0 +1,11 @@
+kind: authorization
+package: acme.checked
+entities:
+  Document:
+    scope: team
+    permission: read
+    enforce: {clickhouse: {scope_key: team_key}}
+    checks:
+      - {provider: approver, permission: read, resource: document}
+      - {provider: policy, permission: read, resource: document}
+    properties: {open: [id, title], hidden: [team_key]}

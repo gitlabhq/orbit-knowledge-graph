@@ -1,0 +1,4 @@
+identify: oidc
+providers:
+  oidc: {module: fake.oidc}
+  directory: {module: fake.oidc}
