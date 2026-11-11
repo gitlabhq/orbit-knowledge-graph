@@ -281,61 +281,52 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         }
     };
 
-    let kinds_for = |dir: Direction| match dir {
-        Direction::Incoming => (
-            incoming_kinds,
-            incoming_scope_preserving,
-            incoming_cross_scope,
-        ),
-        _ => (
-            outgoing_kinds,
-            outgoing_scope_preserving,
-            outgoing_cross_scope,
-        ),
-    };
-    let path_bounded = |dir: Direction| {
-        !center_node_ids.is_empty() && center_has_tp && !kinds_for(dir).1.is_empty()
-    };
-    let directions = match direction {
-        Direction::Both => vec![Direction::Outgoing, Direction::Incoming],
-        dir => vec![dir],
-    };
-    let arm_bounds: Vec<(Direction, &[String], bool, bool)> = directions
-        .iter()
-        .flat_map(|&dir| {
-            let (all_kinds, carrying, rest) = kinds_for(dir);
-            if !path_bounded(dir) {
-                let id_bound =
-                    checks_center_rows || (keeps_id_guards && dir == Direction::Incoming);
-                return vec![(dir, all_kinds.as_slice(), false, id_bound)];
-            }
-            if rest.is_empty() {
-                return vec![(dir, all_kinds.as_slice(), true, checks_center_rows)];
-            }
-            vec![
-                (dir, carrying.as_slice(), true, checks_center_rows),
-                (
-                    dir,
-                    rest.as_slice(),
-                    false,
-                    checks_center_rows || keeps_id_guards,
-                ),
-            ]
-        })
-        .collect();
-    let reads_center_paths =
-        fused_table.is_none() && arm_bounds.iter().any(|(_, _, path, _)| *path);
-    let uses_center_rows = if fused_table.is_some() {
-        checks_center_rows
-    } else {
-        arm_bounds.iter().any(|(_, _, path, id)| *path || *id)
-    };
-    let mut query = if let Some(table) = fused_table {
+    let (mut query, uses_center_rows, reads_center_paths) = if let Some(table) = fused_table {
         let mut q = build_fused_both_arm(plan, table, checks_center_rows);
         q.order_by = order_by;
         q.limit = Some(input.limit);
-        q
+        (q, checks_center_rows, false)
     } else {
+        let directions = match direction {
+            Direction::Both => vec![Direction::Outgoing, Direction::Incoming],
+            dir => vec![dir],
+        };
+        let arm_bounds: Vec<(Direction, &[String], bool, bool)> = directions
+            .into_iter()
+            .flat_map(|dir| {
+                let (all_kinds, carrying, rest) = match dir {
+                    Direction::Incoming => (
+                        incoming_kinds,
+                        incoming_scope_preserving,
+                        incoming_cross_scope,
+                    ),
+                    _ => (
+                        outgoing_kinds,
+                        outgoing_scope_preserving,
+                        outgoing_cross_scope,
+                    ),
+                };
+                if center_node_ids.is_empty() || !center_has_tp || carrying.is_empty() {
+                    let id_bound =
+                        checks_center_rows || (keeps_id_guards && dir == Direction::Incoming);
+                    return vec![(dir, all_kinds.as_slice(), false, id_bound)];
+                }
+                if rest.is_empty() {
+                    return vec![(dir, all_kinds.as_slice(), true, checks_center_rows)];
+                }
+                vec![
+                    (dir, carrying.as_slice(), true, checks_center_rows),
+                    (
+                        dir,
+                        rest.as_slice(),
+                        false,
+                        checks_center_rows || keeps_id_guards,
+                    ),
+                ]
+            })
+            .collect();
+        let reads_center_paths = arm_bounds.iter().any(|(_, _, path, _)| *path);
+        let uses_center_rows = arm_bounds.iter().any(|(_, _, path, id)| *path || *id);
         let mut arms: Vec<Query> = arm_bounds
             .iter()
             .map(|&(dir, kinds, path, id)| build_arm(dir, kinds, path, id))
@@ -344,7 +335,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         first.union_all = arms;
         first.order_by = order_by;
         first.limit = Some(input.limit);
-        first
+        (first, uses_center_rows, reads_center_paths)
     };
     if uses_center_rows {
         let (order_by, limit_by) = latest_row_dedup(center_rows, center_sort_key);
