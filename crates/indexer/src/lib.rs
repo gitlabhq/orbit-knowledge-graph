@@ -67,9 +67,9 @@ use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
-    CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
-    NamespaceDeletionScheduler, NamespaceDispatcher, NamespaceFreshness, Scheduled,
-    StaleEdgeReconciliation, TableCleanup,
+    CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, GraphStatsSnapshot,
+    MigrationCompletionChecker, NamespaceDeletionScheduler, NamespaceDispatcher,
+    NamespaceFreshness, Scheduled, StaleEdgeReconciliation, TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -343,7 +343,23 @@ pub async fn run_dispatcher(
         config.schedule.tasks.code_backfill.publish_window,
     ));
 
-    let tasks: Vec<Box<dyn ScheduledTask>> = vec![
+    let analytics = analytics::IndexingAnalytics::from_config(&config.analytics)?;
+    if let Some(gitlab) = config.gitlab.clone() {
+        let client = GitlabClient::new(gitlab).map_err(HandlerInitError::new)?;
+        analytics.watch_gitlab_instance(Arc::new(client));
+    }
+    let graph_stats = analytics.graph_stats_reporter().map(|reporter| {
+        GraphStatsSnapshot::new(
+            clients.graph.clone(),
+            clients.datalake.clone(),
+            catalog.clone(),
+            reporter,
+            metrics.clone(),
+            config.schedule.tasks.graph_stats.clone(),
+        )
+    });
+
+    let mut tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
             metrics.clone(),
@@ -413,6 +429,10 @@ pub async fn run_dispatcher(
             catalog,
         )),
     ];
+    if let Some(task) = graph_stats {
+        info!("graph stats analytics enabled");
+        tasks.push(Box::new(task));
+    }
 
     let routes: Vec<Arc<dyn Route>> = vec![
         Arc::new(CodeIndexingTaskRoute::new(
@@ -441,7 +461,9 @@ pub async fn run_dispatcher(
         Box::new(max_deliveries_reconciler),
     ];
 
-    orchestrator::launch(triggers, shutdown)
+    let result = orchestrator::launch(triggers, shutdown)
         .await
-        .map_err(DispatcherError::from)
+        .map_err(DispatcherError::from);
+    analytics.shutdown().await;
+    result
 }

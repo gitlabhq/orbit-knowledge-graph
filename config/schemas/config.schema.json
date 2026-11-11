@@ -861,6 +861,9 @@
         },
         "namespace-freshness": {
           "$ref": "#/$defs/NamespaceFreshnessConfig"
+        },
+        "graph-stats": {
+          "$ref": "#/$defs/GraphStatsConfig"
         }
       },
       "additionalProperties": false,
@@ -873,7 +876,8 @@
         "namespace-deletion",
         "migration-completion",
         "stale-edge-reconciliation",
-        "namespace-freshness"
+        "namespace-freshness",
+        "graph-stats"
       ]
     },
     "GlobalDispatcherConfig": {
@@ -1051,6 +1055,25 @@
     },
     "NamespaceFreshnessConfig": {
       "description": "Records how far indexed SDLC data trails the datalake for every enabled namespace.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "$ref": "#/$defs/CronSchedule"
+        },
+        "run_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cron",
+        "run_timeout_secs"
+      ]
+    },
+    "GraphStatsConfig": {
+      "description": "Sends the daily `gkg_graph_stats` snapshot. Runs only when analytics is on.",
       "type": "object",
       "properties": {
         "cron": {

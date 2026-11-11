@@ -303,6 +303,8 @@ impl TestContext {
             datalake: defaults.datalake,
             schedule: defaults.schedule,
             schema: defaults.schema,
+            gitlab: None,
+            analytics: defaults.analytics,
         };
         Self { server, config }
     }

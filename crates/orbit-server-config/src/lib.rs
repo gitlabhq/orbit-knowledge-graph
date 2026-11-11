@@ -34,10 +34,10 @@ pub use clickhouse_setup::ClickHouseSetupConfig;
 pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
     CronSchedule, DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
-    GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
-    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, NamespaceFreshnessConfig,
-    ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
-    StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
+    GlobalDispatcherConfig, GraphStatsConfig, HandlersConfiguration, IndexerModule,
+    MigrationCompletionConfig, NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig,
+    NamespaceFreshnessConfig, ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
+    SiphonRouterConfig, StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
