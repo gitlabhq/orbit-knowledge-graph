@@ -53,9 +53,12 @@ impl PipelineStage for LiveSeedStage {
         let Some(prepared) = self.prepare(ctx) else {
             return Ok(());
         };
-        let outcome = run_seed(&prepared)
+        let Some(outcome) = run_seed(&prepared)
             .await
-            .inspect_err(|e| obs.record_error(e))?;
+            .inspect_err(|e| obs.record_error(e))?
+        else {
+            return Ok(());
+        };
         ctx.phases.remove::<compiler::gql::ParsedQuery>();
         ctx.query_json = outcome.query_json;
         ctx.frontend = Frontend::JsonDsl;
@@ -196,7 +199,10 @@ fn detect(input: &Input, search: &SearchCatalog) -> Option<SeedPlan> {
     })
 }
 
-async fn run_seed(prepared: &Prepared) -> Result<SeedOutcome, PipelineError> {
+/// Runs the search and rewrites the query. `None` leaves the query to the stored
+/// path: an inbound anchor set larger than one search may fan out to is answered
+/// from the index alone, where the searched entity's stored rows still match.
+async fn run_seed(prepared: &Prepared) -> Result<Option<SeedOutcome>, PipelineError> {
     let spec = prepared
         .runtime
         .search
@@ -232,6 +238,9 @@ async fn run_seed(prepared: &Prepared) -> Result<SeedOutcome, PipelineError> {
             extra_filters,
         } => {
             let resolved = resolve_anchors(prepared, anchor, cited_by_property).await?;
+            if resolved.len() > spec.max_rows as usize {
+                return Ok(None);
+            }
             let anchor_ids: Vec<i64> = resolved.iter().map(|a| a.target.id).collect();
             anchor_nodes = resolved.iter().map(|a| a.node.clone()).collect();
             let targets = resolved.into_iter().map(|a| a.target).collect();
@@ -258,10 +267,16 @@ async fn run_seed(prepared: &Prepared) -> Result<SeedOutcome, PipelineError> {
     };
 
     let pins = neighbor_pins(&prepared.plan, &rows, anchor_ids.as_deref());
-    let mut seed = build_seed(&prepared.plan, &rows, &pins);
-    seed.nodes.extend(anchor_nodes);
-    let query_json = build_phase_b(&prepared.input, &prepared.plan, &pins);
-    Ok(SeedOutcome { query_json, seed })
+    let mut seed = build_seed(
+        &prepared.plan,
+        &rows,
+        &pins,
+        keeps_anchor(&prepared.input, &prepared.plan),
+    );
+    seed.anchors = anchor_nodes;
+    let seed_ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
+    let query_json = build_phase_b(&prepared.input, &prepared.plan, &pins, &seed_ids);
+    Ok(Some(SeedOutcome { query_json, seed }))
 }
 
 /// The pinned id set for each neighbour of the searched alias: the inbound anchor
@@ -278,8 +293,13 @@ fn neighbor_pins(
     };
     let mut pins = BTreeMap::new();
     for neighbor in &plan.neighbors {
+        // An anchor is pinned only to the ids a kept row cites, so an anchor no
+        // message reached does not come back on its own.
         let ids = if Some(neighbor.alias.as_str()) == anchor_alias {
-            anchor_ids.unwrap_or_default().to_vec()
+            let cited = target_ids(rows, &neighbor.relationship, &neighbor.entity);
+            let mut ids = anchor_ids.unwrap_or_default().to_vec();
+            ids.retain(|id| cited.contains(id));
+            ids
         } else {
             target_ids(rows, &neighbor.relationship, &neighbor.entity)
         };
@@ -288,7 +308,14 @@ fn neighbor_pins(
     pins
 }
 
-fn build_seed(plan: &SeedPlan, rows: &[SeedRow], pins: &BTreeMap<String, Vec<i64>>) -> GraphSeed {
+/// `anchor_in_stored_query` says the stored query still returns the inbound anchor,
+/// so a seed row must reach an anchor that survived it, like any other hop.
+fn build_seed(
+    plan: &SeedPlan,
+    rows: &[SeedRow],
+    pins: &BTreeMap<String, Vec<i64>>,
+    anchor_in_stored_query: bool,
+) -> GraphSeed {
     let nodes = rows
         .iter()
         .map(|row| SeedGraphNode {
@@ -318,20 +345,57 @@ fn build_seed(plan: &SeedPlan, rows: &[SeedRow], pins: &BTreeMap<String, Vec<i64
             }
         }
     }
-    GraphSeed { nodes, edges }
+    // An anchor served from the seed is already satisfied: the search kept only
+    // rows citing it.
+    let anchor_alias = match &plan.seeding {
+        Seeding::Inbound { anchor, .. } if !anchor_in_stored_query => Some(anchor.alias.as_str()),
+        _ => None,
+    };
+    let required_hops = plan
+        .neighbors
+        .iter()
+        .filter(|neighbor| Some(neighbor.alias.as_str()) != anchor_alias)
+        .map(|neighbor| (neighbor.relationship.clone(), neighbor.entity.clone()))
+        .collect();
+    GraphSeed {
+        nodes,
+        edges,
+        anchors: Vec::new(),
+        required_hops,
+    }
 }
 
 /// Rewrites the pattern into JSON-DSL without the aliases the seed already produced
 /// (the searched alias, and the inbound anchor which the indexed part resolved):
 /// every remaining node keeps its columns, a neighbour is pinned to its seed ids,
 /// and relationships that touched a removed alias are dropped.
-fn build_phase_b(input: &Input, plan: &SeedPlan, pins: &BTreeMap<String, Vec<i64>>) -> String {
-    let removed = removed_aliases(plan);
+///
+/// When the seed produced every alias, the stored query would have no node, which
+/// the query schema rejects. It then keeps one alias, pinned: the inbound anchor to
+/// its resolved ids, or the searched alias to the seed row ids.
+fn build_phase_b(
+    input: &Input,
+    plan: &SeedPlan,
+    pins: &BTreeMap<String, Vec<i64>>,
+    seed_ids: &[i64],
+) -> String {
+    let mut removed = removed_aliases(input, plan);
+    let mut pins = pins.clone();
+    if input.nodes.iter().all(|node| removed.contains(&node.id)) {
+        let kept = match &plan.seeding {
+            Seeding::Inbound { anchor, .. } => anchor.alias.clone(),
+            Seeding::Pushdown { .. } => {
+                pins.insert(plan.seed_alias.clone(), seed_ids.to_vec());
+                plan.seed_alias.clone()
+            }
+        };
+        removed.retain(|alias| *alias != kept);
+    }
     let nodes: Vec<Value> = input
         .nodes
         .iter()
         .filter(|node| !removed.contains(&node.id))
-        .map(|node| phase_b_node(node, pins))
+        .map(|node| phase_b_node(node, &pins))
         .collect();
 
     let relationships: Vec<Value> = input
@@ -355,13 +419,49 @@ fn build_phase_b(input: &Input, plan: &SeedPlan, pins: &BTreeMap<String, Vec<i64
 }
 
 /// The aliases the seed already produced, so the stored query omits them: always the
-/// searched alias, plus the inbound anchor (served from the indexed part).
-fn removed_aliases(plan: &SeedPlan) -> Vec<String> {
+/// searched alias, plus the inbound anchor unless the stored query still needs it.
+fn removed_aliases(input: &Input, plan: &SeedPlan) -> Vec<String> {
     let mut removed = vec![plan.seed_alias.clone()];
-    if let Seeding::Inbound { anchor, .. } = &plan.seeding {
+    if let Seeding::Inbound { anchor, .. } = &plan.seeding
+        && !keeps_anchor(input, plan)
+    {
         removed.push(anchor.alias.clone());
     }
     removed
+}
+
+/// The stored query keeps the inbound anchor, pinned, when more of the pattern hangs
+/// off it (in (m)-[:CITES]->(i)-[:CITES]->(g), g is constrained only through i), or
+/// when nothing else would be left to query.
+fn keeps_anchor(input: &Input, plan: &SeedPlan) -> bool {
+    let Seeding::Inbound { anchor, .. } = &plan.seeding else {
+        return false;
+    };
+    anchor_component(input, &plan.seed_alias, &anchor.alias).len() > 1 || input.nodes.len() <= 2
+}
+
+/// The aliases reachable from the anchor without passing through the searched alias:
+/// the stored part of the pattern that constrains the anchor.
+fn anchor_component(input: &Input, seed_alias: &str, anchor_alias: &str) -> Vec<String> {
+    let mut component = vec![anchor_alias.to_string()];
+    let mut next = 0;
+    while next < component.len() {
+        let alias = component[next].clone();
+        next += 1;
+        for rel in &input.relationships {
+            let other = if rel.from == alias {
+                &rel.to
+            } else if rel.to == alias {
+                &rel.from
+            } else {
+                continue;
+            };
+            if other != seed_alias && !component.contains(other) {
+                component.push(other.clone());
+            }
+        }
+    }
+    component
 }
 
 fn phase_b_node(node: &InputNode, pins: &BTreeMap<String, Vec<i64>>) -> Value {
@@ -392,6 +492,10 @@ fn relationship_to_json(rel: &InputRelationship) -> Value {
     })
 }
 
+/// The stored rows read to find the distinct anchors: a path can repeat an anchor,
+/// so this is well above the search fan-out limit.
+const ANCHOR_SCAN_ROWS: u32 = 1000;
+
 /// One indexed anchor the inbound part resolved: its search target (id plus the
 /// `cited_by` value that fills `$cited_by`) and its full node for the result graph.
 struct AnchorResolved {
@@ -400,30 +504,38 @@ struct AnchorResolved {
 }
 
 /// Runs the indexed part for the anchor alias and reads each anchor's id, `cited_by`
-/// value, and full properties. Bounded to `max_rows`; `run_inbound_search` rejects an
-/// oversized set.
+/// value, and full properties. The caller falls back to the stored path when there
+/// are more anchors than one search may fan out to.
 async fn resolve_anchors(
     prepared: &Prepared,
     anchor: &Neighbor,
     cited_by_property: &str,
 ) -> Result<Vec<AnchorResolved>, PipelineError> {
-    let spec = prepared.runtime.search.get(&prepared.plan.seed_entity);
-    let max_rows = spec.map(|s| s.max_rows).unwrap_or(20);
-    let node = prepared
-        .input
-        .node(&anchor.alias)
-        .ok_or_else(|| PipelineError::custom("inbound anchor left the pattern"))?;
-
-    let mut anchor_node = json!({ "id": "x", "entity": anchor.entity, "columns": "*" });
-    if let Some(filters) = filters_to_json(&node.filters) {
-        anchor_node["filters"] = filters;
-    }
-    let anchor_query = json!({
+    // The anchors are resolved with the stored part of the pattern that hangs off
+    // them, so only anchors that can complete the path fan out to a search.
+    let input = &prepared.input;
+    let component = anchor_component(input, &prepared.plan.seed_alias, &anchor.alias);
+    let nodes: Vec<Value> = input
+        .nodes
+        .iter()
+        .filter(|node| component.contains(&node.id))
+        .map(|node| phase_b_node(node, &BTreeMap::new()))
+        .collect();
+    let relationships: Vec<Value> = input
+        .relationships
+        .iter()
+        .filter(|rel| component.contains(&rel.from) && component.contains(&rel.to))
+        .map(relationship_to_json)
+        .collect();
+    let mut anchor_query = json!({
         "query_type": "traversal",
-        "nodes": [anchor_node],
-        "limit": max_rows + 1,
-    })
-    .to_string();
+        "nodes": nodes,
+        "limit": ANCHOR_SCAN_ROWS,
+    });
+    if !relationships.is_empty() {
+        anchor_query["relationships"] = Value::Array(relationships);
+    }
+    let anchor_query = anchor_query.to_string();
 
     let compiled = compiler::compile_model(
         &anchor_query,
@@ -448,7 +560,12 @@ async fn resolve_anchors(
 
     let result = QueryResult::from_batches(&batches, &compiled.base.result_context)
         .map_err(|e| PipelineError::Execution(e.to_string()))?;
-    let Some(anchor_result_node) = compiled.base.result_context.nodes().next() else {
+    let Some(anchor_result_node) = compiled
+        .base
+        .result_context
+        .nodes()
+        .find(|node| node.alias == anchor.alias)
+    else {
         return Ok(Vec::new());
     };
 
@@ -457,6 +574,12 @@ async fn resolve_anchors(
         let Some(id) = row.get_public_id(anchor_result_node) else {
             continue;
         };
+        if anchors
+            .iter()
+            .any(|known: &AnchorResolved| known.target.id == id)
+        {
+            continue;
+        }
         let properties = row.entity_properties(&anchor_result_node.alias);
         let cited_by_value = properties
             .get(cited_by_property)
@@ -743,7 +866,8 @@ mod tests {
         .expect("parses");
         let plan = detect(&input, &catalog()).expect("plan");
         let pins = BTreeMap::from([("i".to_string(), vec![10, 20])]);
-        let phase_b: Value = serde_json::from_str(&build_phase_b(&input, &plan, &pins)).unwrap();
+        let phase_b: Value =
+            serde_json::from_str(&build_phase_b(&input, &plan, &pins, &[])).unwrap();
 
         let ids: Vec<&str> = phase_b["nodes"]
             .as_array()
@@ -770,7 +894,7 @@ mod tests {
     fn detects_the_inbound_shape_from_an_indexed_anchor() {
         let plan = plan_for(
             "MATCH (i:Incident)<-[:CITES]-(m:SlackMessage)-[:CITES]->(g:GitLabRef) \
-             WHERE i.reference = 'INC-15808' RETURN i, m, g LIMIT 20",
+             WHERE i.reference = 'INC-77' RETURN i, m, g LIMIT 20",
         );
         assert_eq!(plan.seed_alias, "m");
         match &plan.seeding {
@@ -795,5 +919,103 @@ mod tests {
         )
         .expect("parses");
         assert!(detect(&input, &catalog()).is_none());
+    }
+
+    #[test]
+    fn a_two_hop_inbound_query_keeps_the_anchor_pinned() {
+        let input = compiler::parse_gql_input(
+            "MATCH (i:Incident)<-[:CITES]-(m:SlackMessage) WHERE i.reference = 'INC-77' \
+             RETURN i, m LIMIT 20",
+            &data_model(),
+        )
+        .expect("parses");
+        let plan = detect(&input, &catalog()).expect("plan");
+        let pins = BTreeMap::from([("i".to_string(), vec![10])]);
+        let phase_b: Value =
+            serde_json::from_str(&build_phase_b(&input, &plan, &pins, &[101])).unwrap();
+
+        let nodes = phase_b["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 1, "the stored query keeps one node");
+        assert_eq!(nodes[0]["id"], "i");
+        assert_eq!(nodes[0]["node_ids"], json!([10]));
+        assert!(phase_b.get("relationships").is_none());
+    }
+
+    #[test]
+    fn a_search_only_query_pins_the_searched_alias_to_the_seed_rows() {
+        let input = compiler::parse_gql_input(
+            "MATCH (m:SlackMessage) WHERE m.text CONTAINS 'deploy' RETURN m LIMIT 20",
+            &data_model(),
+        )
+        .expect("parses");
+        let plan = detect(&input, &catalog()).expect("plan");
+        let phase_b: Value =
+            serde_json::from_str(&build_phase_b(&input, &plan, &BTreeMap::new(), &[101, 102]))
+                .unwrap();
+
+        let nodes = phase_b["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0]["node_ids"], json!([101, 102]));
+        assert!(
+            nodes[0].get("filters").is_none(),
+            "the live predicate is not compiled"
+        );
+    }
+
+    #[test]
+    fn a_pushdown_seed_requires_every_hop_but_an_inbound_seed_skips_its_anchor() {
+        let pushdown = plan_for(
+            "MATCH (m:SlackMessage)-[:CITES]->(i:Incident) WHERE m.text CONTAINS 'deploy' RETURN m, i LIMIT 20",
+        );
+        let seed = build_seed(&pushdown, &[], &BTreeMap::new(), false);
+        assert_eq!(
+            seed.required_hops,
+            vec![("CITES".to_string(), "Incident".to_string())]
+        );
+
+        let inbound = plan_for(
+            "MATCH (i:Incident)<-[:CITES]-(m:SlackMessage)-[:CITES]->(g:GitLabRef) \
+             WHERE i.reference = 'INC-77' RETURN i, m, g LIMIT 20",
+        );
+        let seed = build_seed(&inbound, &[], &BTreeMap::new(), false);
+        assert_eq!(
+            seed.required_hops,
+            vec![("CITES".to_string(), "GitLabRef".to_string())]
+        );
+    }
+
+    #[test]
+    fn an_anchor_with_onward_hops_stays_pinned_and_becomes_a_required_hop() {
+        let input = compiler::parse_gql_input(
+            "MATCH (m:SlackMessage)-[:CITES]->(i:Incident)-[:CITES]->(g:GitLabRef) \
+             WHERE i.created_at >= '2026-11-01' RETURN i, m, g LIMIT 20",
+            &data_model(),
+        )
+        .expect("parses");
+        let plan = detect(&input, &catalog()).expect("plan");
+        assert!(matches!(plan.seeding, Seeding::Inbound { .. }));
+        assert_eq!(anchor_component(&input, "m", "i"), vec!["i", "g"]);
+
+        let pins = BTreeMap::from([("i".to_string(), vec![10])]);
+        let phase_b: Value =
+            serde_json::from_str(&build_phase_b(&input, &plan, &pins, &[])).unwrap();
+        let ids: Vec<&str> = phase_b["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["i", "g"],
+            "g stays constrained through the pinned anchor"
+        );
+        assert_eq!(phase_b["relationships"].as_array().unwrap().len(), 1);
+
+        let seed = build_seed(&plan, &[], &pins, keeps_anchor(&input, &plan));
+        assert_eq!(
+            seed.required_hops,
+            vec![("CITES".to_string(), "Incident".to_string())]
+        );
     }
 }

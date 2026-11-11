@@ -589,8 +589,8 @@ mod tests {
     fn inbound_filters_substitute_the_cited_by_value_and_keep_extra() {
         let mapping = BTreeMap::from([("text".to_string(), "$cited_by".to_string())]);
         let extra = BTreeMap::from([("channel_name".to_string(), "incidents".to_string())]);
-        let filters = inbound_filters(&mapping, "INC-15808", &extra);
-        assert_eq!(filters["text"], "INC-15808");
+        let filters = inbound_filters(&mapping, "INC-77", &extra);
+        assert_eq!(filters["text"], "INC-77");
         assert_eq!(filters["channel_name"], "incidents");
     }
 }

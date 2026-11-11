@@ -7,7 +7,9 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use shared::PipelineOutput;
+#[cfg(test)]
+use shared::GraphSeed;
+use shared::{PipelineOutput, SeedGraphEdge, SeedGraphNode};
 use types::{QueryResult, QueryResultRow};
 
 use semver::Version;
@@ -231,9 +233,12 @@ impl GraphFormatter {
         }
     }
 
-    /// Adds the live-search seed nodes and edges to the result graph. A seed node
-    /// never overwrites one the stored query already returned (which carries full
-    /// properties); seed edges dedup against the stored edges.
+    /// Adds the live-search seed nodes and edges to the result graph, with MATCH
+    /// semantics: a seed edge stays only when its target is in the result (or is an
+    /// inbound anchor), and a seed node stays only when its kept edges complete
+    /// every required hop. A seed node never overwrites one the stored query already
+    /// returned (which carries full properties); seed edges dedup against the stored
+    /// edges.
     fn splice_seed(
         output: &PipelineOutput,
         node_map: &mut IndexMap<(String, i64), GraphNode>,
@@ -243,7 +248,46 @@ impl GraphFormatter {
         let Some(seed) = &output.seed else {
             return;
         };
-        for node in &seed.nodes {
+        let anchors: HashSet<(&str, i64)> = seed
+            .anchors
+            .iter()
+            .map(|node| (node.entity_type.as_str(), node.id))
+            .collect();
+        let reached: Vec<&SeedGraphEdge> = seed
+            .edges
+            .iter()
+            .filter(|edge| {
+                anchors.contains(&(edge.to_entity.as_str(), edge.to_id))
+                    || node_map.contains_key(&(edge.to_entity.clone(), edge.to_id))
+            })
+            .collect();
+        let completes = |node: &SeedGraphNode| {
+            seed.required_hops.iter().all(|(relationship, entity)| {
+                reached.iter().any(|edge| {
+                    edge.from_id == node.id
+                        && edge.from_entity == node.entity_type
+                        && &edge.edge_type == relationship
+                        && &edge.to_entity == entity
+                })
+            })
+        };
+        let kept: Vec<&SeedGraphNode> = seed.nodes.iter().filter(|node| completes(node)).collect();
+        if kept.is_empty() {
+            return;
+        }
+        let kept_ids: HashSet<(&str, i64)> = kept
+            .iter()
+            .map(|node| (node.entity_type.as_str(), node.id))
+            .collect();
+
+        let reached_anchors = seed.anchors.iter().filter(|anchor| {
+            reached.iter().any(|edge| {
+                kept_ids.contains(&(edge.from_entity.as_str(), edge.from_id))
+                    && edge.to_entity == anchor.entity_type
+                    && edge.to_id == anchor.id
+            })
+        });
+        for node in kept.iter().copied().chain(reached_anchors) {
             node_map
                 .entry((node.entity_type.clone(), node.id))
                 .or_insert_with(|| GraphNode {
@@ -252,7 +296,10 @@ impl GraphFormatter {
                     properties: node.properties.clone(),
                 });
         }
-        for edge in &seed.edges {
+        for edge in reached {
+            if !kept_ids.contains(&(edge.from_entity.as_str(), edge.from_id)) {
+                continue;
+            }
             let key = (
                 edge.from_entity.clone(),
                 edge.from_id,
@@ -769,6 +816,94 @@ mod tests {
             pagination: None,
             seed: None,
         }
+    }
+
+    fn seed_node(entity: &str, id: i64) -> SeedGraphNode {
+        SeedGraphNode {
+            entity_type: entity.to_string(),
+            id,
+            properties: Map::new(),
+        }
+    }
+
+    fn seed_edge(from_id: i64, to_entity: &str, to_id: i64) -> SeedGraphEdge {
+        SeedGraphEdge {
+            from_entity: "Message".to_string(),
+            from_id,
+            to_entity: to_entity.to_string(),
+            to_id,
+            edge_type: "CITES".to_string(),
+        }
+    }
+
+    fn node_keys(response: &GraphResponse) -> Vec<(String, i64)> {
+        let mut keys: Vec<_> = response
+            .nodes
+            .iter()
+            .map(|node| (node.entity_type.clone(), node.id))
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn a_seed_node_stays_only_when_it_completes_the_path() {
+        let mut output = make_search_output();
+        output.seed = Some(GraphSeed {
+            nodes: vec![
+                seed_node("Message", 101),
+                seed_node("Message", 102),
+                seed_node("Message", 103),
+            ],
+            edges: vec![seed_edge(101, "Project", 1), seed_edge(102, "Project", 9)],
+            anchors: vec![],
+            required_hops: vec![("CITES".to_string(), "Project".to_string())],
+        });
+
+        let response = GraphFormatter.build_response(&output);
+
+        let message_ids: Vec<i64> = response
+            .nodes
+            .iter()
+            .filter(|node| node.entity_type == "Message")
+            .map(|node| node.id)
+            .collect();
+        assert_eq!(
+            message_ids,
+            vec![101],
+            "102 cites a project outside the result; 103 cites none"
+        );
+        assert_eq!(response.edges.len(), 1);
+        assert_eq!(
+            (response.edges[0].from_id, response.edges[0].to_id),
+            (101, 1)
+        );
+    }
+
+    #[test]
+    fn an_inbound_anchor_joins_only_when_a_kept_seed_reaches_it() {
+        let mut output = make_search_output();
+        output.seed = Some(GraphSeed {
+            nodes: vec![seed_node("Message", 201), seed_node("Message", 202)],
+            edges: vec![
+                seed_edge(201, "Incident", 50),
+                seed_edge(201, "Project", 1),
+                seed_edge(202, "Incident", 60),
+            ],
+            anchors: vec![seed_node("Incident", 50), seed_node("Incident", 60)],
+            required_hops: vec![("CITES".to_string(), "Project".to_string())],
+        });
+
+        let response = GraphFormatter.build_response(&output);
+
+        let keys = node_keys(&response);
+        assert!(keys.contains(&("Incident".to_string(), 50)));
+        assert!(keys.contains(&("Message".to_string(), 201)));
+        assert!(
+            !keys.contains(&("Incident".to_string(), 60)),
+            "202 does not complete the path, so its anchor stays out"
+        );
+        assert!(!keys.contains(&("Message".to_string(), 202)));
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //! that point at an indexed anchor. These mirror the two acceptance queries:
 //!
 //! - `(m:SlackMessage)-[:CITES]->(i:Incident)-[:CITES]->(g:GitLabRef) WHERE m.text CONTAINS 'deploy'`
-//! - `(i:Incident)<-[:CITES]-(m:SlackMessage)-[:CITES]->(g:GitLabRef) WHERE i.reference = 'INC-15808'`
+//! - `(i:Incident)<-[:CITES]-(m:SlackMessage)-[:CITES]->(g:GitLabRef) WHERE i.reference = 'INC-77'`
 //!
 //! The indexed hops (Incident, GitLabRef tables) are not exercised here; the test
 //! asserts the id sets the engine hands the stored query, plus the seed rows.
@@ -159,7 +159,7 @@ fn fake_messages() -> Vec<FakeMessage> {
     vec![
         FakeMessage {
             id: 101,
-            text: "deploy failed, see INC-15808",
+            text: "deploy failed, see INC-77",
             edges: vec![("CITES", "Incident", 10), ("CITES", "GitLabRef", 900)],
         },
         FakeMessage {
@@ -174,7 +174,7 @@ fn fake_messages() -> Vec<FakeMessage> {
         },
         FakeMessage {
             id: 104,
-            text: "INC-15808 postmortem notes",
+            text: "INC-77 postmortem notes",
             edges: vec![("CITES", "Incident", 20), ("CITES", "GitLabRef", 903)],
         },
     ]
@@ -270,10 +270,10 @@ async fn inbound_search_finds_rows_that_point_at_an_indexed_anchor() {
     let client = connect(addr, key).await;
     let spec = slack_spec();
 
-    // The indexed part resolved Incident 10 (reference INC-15808) before the search.
+    // The indexed part resolved Incident 10 (reference INC-77) before the search.
     let targets = vec![InboundTarget {
         id: 10,
-        cited_by_value: "INC-15808".to_string(),
+        cited_by_value: "INC-77".to_string(),
     }];
 
     let scopes = scope_paths();
@@ -303,7 +303,7 @@ async fn inbound_search_finds_rows_that_point_at_an_indexed_anchor() {
     assert_eq!(
         ids,
         vec![101],
-        "only the message that actually cites incident 10 is kept; the INC-15808 decoy citing 20 is dropped"
+        "only the message that actually cites incident 10 is kept; the INC-77 decoy citing 20 is dropped"
     );
     assert_eq!(
         target_ids(&anchor.rows, "CITES", "GitLabRef"),

@@ -89,6 +89,12 @@ pub struct PipelineOutput {
 pub struct GraphSeed {
     pub nodes: Vec<SeedGraphNode>,
     pub edges: Vec<SeedGraphEdge>,
+    /// The indexed anchors of an inbound search. They join the result only when a
+    /// seed node survives.
+    pub anchors: Vec<SeedGraphNode>,
+    /// The hops, as (relationship, target entity), that a seed node must complete
+    /// in the stored result to stay in it: a MATCH returns only whole paths.
+    pub required_hops: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
