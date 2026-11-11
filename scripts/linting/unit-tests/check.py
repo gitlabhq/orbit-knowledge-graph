@@ -23,6 +23,9 @@ A Rust unit test is opt-in. Put this on the line above `fn`, with a reason:
 
     // ast-grep-ignore: unit-test -- <why only a Rust test can check this>
 
+The reason must say why YAML cannot check the behavior. Do not restate the
+test name.
+
 Good reasons name mission-critical logic that YAML cannot reach, for example:
   - cryptography, such as token signing or constant-time comparison
   - data structure correctness, such as an index or cache invariant
