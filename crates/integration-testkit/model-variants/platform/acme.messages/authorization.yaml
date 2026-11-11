@@ -1,0 +1,9 @@
+kind: authorization
+package: acme.messages
+entities:
+  Message:
+    scope: team
+    permission: read
+    enforce: {clickhouse: {scope_key: team_key}}
+    checks: [{provider: slack, permission: read, resource: message}]
+    properties: {open: [id, text], hidden: [team_key]}

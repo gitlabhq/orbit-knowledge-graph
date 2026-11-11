@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use orbit_authorization::{Grants, ScopeKey, ScopeSet};
+use orbit_authorization::{Grants, Key, ScopeSet};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::Catalog;
 use query_data_model::implementations::clickhouse::ClickHouse;
@@ -70,7 +70,7 @@ pub fn verify(plan: &ClickHousePlan, catalog: &Catalog<ClickHouse>, grants: &Gra
 
 enum Allowed<'g> {
     Subtrees(Vec<TraversalPath>),
-    Keys(&'g [ScopeKey]),
+    Keys(&'g [Key]),
 }
 
 fn join_filters<'p>(
@@ -139,9 +139,10 @@ fn has_valid_filter(expr: &Expr, column: Ref, allowed: &Allowed<'_>) -> bool {
                     ..
                 },
                 Allowed::Keys(keys),
-            ) if *actual == column => values
-                .iter()
-                .all(|value| keys.iter().any(|key| key_value(key) == *value)),
+            ) if *actual == column => values.iter().all(|value| {
+                keys.iter()
+                    .any(|key| key_value(key).is_ok_and(|(_, key)| key == *value))
+            }),
             _ => false,
         },
         _ => false,

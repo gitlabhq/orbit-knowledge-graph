@@ -1,13 +1,13 @@
 //! One authorization contract serves GitLab and other systems: the same packages and compiler
 //! run against a Zanzibar-style, an OIDC-groups and a Slack sign-in deployment of seeded fakes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use arrow::array::{Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use compiler::orbit_authorization::{Caller, CheckRequest, Grants, Request, ScopeKey, ScopeSet};
+use compiler::orbit_authorization::{Caller, CheckRequest, Grants, Key, Request, ScopeSet};
 use integration_testkit::authorization_variants::fakes::OidcToken;
 use integration_testkit::authorization_variants::{deployment, platform, registry};
 use orbit_server::authorization::{BindError, Deployment};
@@ -34,11 +34,7 @@ async fn signed_in(deployment: &Deployment, subject: &str, groups: &[&str]) -> (
 }
 
 fn keys(keys: &[&str]) -> ScopeSet {
-    ScopeSet::Keys(
-        keys.iter()
-            .map(|key| ScopeKey::Text(key.to_string()))
-            .collect(),
-    )
+    ScopeSet::Keys(keys.iter().map(|key| Key::Text(key.to_string())).collect())
 }
 
 /// The compiled SQL and the values of its array parameters.
@@ -93,7 +89,7 @@ async fn redacted(
             .push(CheckRequest {
                 permission: check.ability,
                 resource: check.resource_type,
-                ids: check.ids,
+                ids: check.ids.into_iter().map(Key::Int).collect(),
             });
     }
     let mut authorizations = Vec::new();
@@ -109,7 +105,10 @@ async fn redacted(
                 authorized: request
                     .ids
                     .iter()
-                    .map(|id| (*id, allowed.contains(id)))
+                    .map(|key| match key {
+                        Key::Int(id) => (*id, allowed.contains(key)),
+                        other => panic!("Document is keyed by integer ids, not {other:?}"),
+                    })
                     .collect(),
             });
         }
@@ -242,4 +241,28 @@ fn a_module_that_does_not_answer_the_needed_query_fails_the_bind() {
         errors,
         ["packages name provider slack, which the deployment does not bind"]
     );
+}
+
+#[tokio::test]
+async fn a_check_answers_string_keyed_rows_with_text_keys() {
+    let (_, deployment) = bind("messages", &["acme", "acme.messages"]);
+    let (alice, _) = signed_in(&deployment, "alice", &["team-a"]).await;
+    let text =
+        |ids: &[&str]| -> Vec<Key> { ids.iter().map(|id| Key::Text(id.to_string())).collect() };
+    let request = CheckRequest {
+        permission: "read".into(),
+        resource: "message".into(),
+        ids: text(&["m1", "m2", "m3"]),
+    };
+    let allowed = deployment
+        .check(&alice, "slack", vec![request.clone()])
+        .await
+        .unwrap();
+    assert_eq!(allowed, [BTreeSet::from_iter(text(&["m1", "m3"]))]);
+    let (bob, _) = signed_in(&deployment, "bob", &["team-c"]).await;
+    let allowed = deployment
+        .check(&bob, "slack", vec![request])
+        .await
+        .unwrap();
+    assert_eq!(allowed, [BTreeSet::new()]);
 }

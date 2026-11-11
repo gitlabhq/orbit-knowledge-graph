@@ -1,0 +1,11 @@
+kind: storage
+package: acme.messages
+store: acme
+entities:
+  Message:
+    table: acme_message
+    columns:
+      id: {immutable: true, backend: {type: String}}
+      text: {backend: {type: String}}
+      team_key: {backend: {type: String}}
+    access: {order: [id]}

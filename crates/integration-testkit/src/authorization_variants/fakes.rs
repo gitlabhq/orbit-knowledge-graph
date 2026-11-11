@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use orbit_authorization::{
-    Answers, AuthError, Caller, Check, Identify, Module, Need, Provider, ScopeKey, ScopeKind,
-    ScopeSet, Scopes,
+    Answers, AuthError, Caller, Check, Identify, Key, Module, Need, Provider, ScopeKind, ScopeSet,
+    Scopes,
 };
 use serde::Deserialize;
 
@@ -36,7 +36,7 @@ fn answer(globals: &BTreeSet<String>, scope: &str, keys: Vec<String>) -> ScopeSe
     match (globals.contains(scope), keys.is_empty()) {
         (true, false) => ScopeSet::All,
         (true, true) => ScopeSet::Keys(Vec::new()),
-        (false, _) => ScopeSet::Keys(keys.into_iter().map(ScopeKey::Text).collect()),
+        (false, _) => ScopeSet::Keys(keys.into_iter().map(Key::Text).collect()),
     }
 }
 
@@ -155,19 +155,20 @@ impl Provider<Scopes> for Zanzibar {
 
 #[async_trait]
 impl Provider<Check> for Zanzibar {
-    async fn call(&self, query: Check) -> Result<Vec<BTreeSet<i64>>, AuthError> {
-        let allowed: BTreeSet<i64> = self
+    async fn call(&self, query: Check) -> Result<Vec<BTreeSet<Key>>, AuthError> {
+        let allowed: BTreeSet<Key> = self
             .options
             .allowed
             .get(query.caller.subject())
             .into_iter()
             .flatten()
             .copied()
+            .map(Key::Int)
             .collect();
-        let pick = |ids: &[i64]| {
+        let pick = |ids: &[Key]| {
             ids.iter()
-                .copied()
                 .filter(|id| allowed.contains(id))
+                .cloned()
                 .collect()
         };
         Ok(query
@@ -206,9 +207,9 @@ impl Module for Cedar {
 
 #[async_trait]
 impl Provider<Check> for Cedar {
-    async fn call(&self, query: Check) -> Result<Vec<BTreeSet<i64>>, AuthError> {
-        let allow = |id: &i64| !self.0.denied.contains(id);
-        let pick = |ids: &[i64]| ids.iter().copied().filter(allow).collect();
+    async fn call(&self, query: Check) -> Result<Vec<BTreeSet<Key>>, AuthError> {
+        let allow = |key: &&Key| !matches!(key, Key::Int(id) if self.0.denied.contains(id));
+        let pick = |ids: &[Key]| ids.iter().filter(allow).cloned().collect();
         Ok(query
             .requests
             .iter()

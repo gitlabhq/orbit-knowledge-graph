@@ -1,0 +1,8 @@
+identify: oidc
+providers:
+  oidc: {module: fake.oidc}
+  directory: {module: fake.oidc}
+  slack:
+    module: fake.slack
+    handles: {}
+    readable: {alice: [m1, m3]}

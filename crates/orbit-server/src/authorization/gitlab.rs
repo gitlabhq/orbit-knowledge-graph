@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use orbit_authorization::{
-    Answers, AuthError, Caller, Check, Identify, Module, Need, Provider, ScopeKind, ScopeSet,
+    Answers, AuthError, Caller, Check, Identify, Key, Module, Need, Provider, ScopeKind, ScopeSet,
     Scopes,
 };
 use query_engine::pipeline::SecurityContext;
@@ -250,21 +250,23 @@ impl Module for RailsAbilities {
 
 #[async_trait]
 impl Provider<Check> for RailsAbilities {
-    async fn call(&self, query: Check) -> Result<Vec<BTreeSet<i64>>, AuthError> {
+    async fn call(&self, query: Check) -> Result<Vec<BTreeSet<Key>>, AuthError> {
+        let resources = query
+            .requests
+            .iter()
+            .map(|request| {
+                Ok(ResourceCheck {
+                    provider: String::new(),
+                    resource_type: request.resource.clone(),
+                    ids: request.ids.iter().map(rails_id).collect::<Result<_, _>>()?,
+                    ability: request.permission.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, AuthError>>()?;
         let exchange = gitlab_caller(&query.caller)?
             .exchange
             .clone()
             .ok_or_else(|| AuthError::Unavailable("the request holds no Rails stream".into()))?;
-        let resources: Vec<ResourceCheck> = query
-            .requests
-            .iter()
-            .map(|request| ResourceCheck {
-                provider: String::new(),
-                resource_type: request.resource.clone(),
-                ids: request.ids.clone(),
-                ability: request.permission.clone(),
-            })
-            .collect();
         let mut stream = exchange.stream.lock().await;
         let result = RedactionService::request_authorization(&resources, &exchange.tx, &mut stream)
             .await
@@ -286,9 +288,42 @@ impl Provider<Check> for RailsAbilities {
             .iter()
             .map(|request| {
                 let granted = authorized.get(request.resource.as_str());
-                let allowed = |id: &i64| granted.and_then(|g| g.get(id)).copied() == Some(true);
-                request.ids.iter().copied().filter(allowed).collect()
+                let allowed = |key: &&Key| {
+                    matches!(key, Key::Int(id) if granted.and_then(|g| g.get(id)).copied() == Some(true))
+                };
+                request.ids.iter().filter(allowed).cloned().collect()
             })
             .collect())
+    }
+}
+
+/// Rails keys its objects by integer id; any other key names no Rails object.
+fn rails_id(key: &Key) -> Result<i64, AuthError> {
+    match key {
+        Key::Int(id) => Ok(*id),
+        other => Err(AuthError::Invalid(format!(
+            "gitlab.abilities checks integer ids, not {other:?}"
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use orbit_authorization::{Caller, CheckRequest};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn rails_abilities_fail_closed_on_keys_that_are_not_integer_ids() {
+        let check = Check {
+            caller: Caller::new("user:1", false, ()),
+            requests: vec![CheckRequest {
+                permission: "read_message".into(),
+                resource: "message".into(),
+                ids: vec![Key::Int(1), Key::Text("m1".into())],
+            }],
+        };
+        let error = RailsAbilities.call(check).await.unwrap_err();
+        assert!(matches!(error, AuthError::Invalid(message) if message.contains("Text(\"m1\")")));
     }
 }

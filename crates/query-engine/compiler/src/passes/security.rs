@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use orbit_authorization::{Grants, ScopeKey, ScopeSet};
+use orbit_authorization::{Grants, Key, ScopeSet};
 use orbit_utils::query_types::SqlType;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 use query_data_model::Catalog;
@@ -97,7 +97,7 @@ fn guards(
                     continue;
                 };
                 let set = scope_set(grants, catalog.model(), guard.scope, guard.permission)?;
-                conditions.extend(scope_filter(column, set));
+                conditions.extend(scope_filter(column, set)?);
             }
         }
         if !conditions.is_empty() {
@@ -127,37 +127,50 @@ fn collect_scans(graph: &Plan<Relational<ClickHouse>>, node: NodeId, scans: &mut
 }
 
 /// The filter a scope set puts on a scope key column; `All` puts none.
-fn scope_filter(column: Ref, set: &ScopeSet) -> Option<Expr> {
+fn scope_filter(column: Ref, set: &ScopeSet) -> Result<Option<Expr>> {
     match set {
-        ScopeSet::All => None,
+        ScopeSet::All => Ok(None),
         ScopeSet::Subtrees(roots) => {
             let roots: Vec<TraversalPath> = roots.iter().map(|root| root.as_str().into()).collect();
-            Some(path_filter(column, &roots.iter().collect::<Vec<_>>()))
+            Ok(Some(path_filter(column, &roots.iter().collect::<Vec<_>>())))
         }
-        ScopeSet::Keys(keys) => Some(key_filter(column, keys)),
+        ScopeSet::Keys(keys) => key_filter(column, keys).map(Some),
     }
 }
 
-fn key_filter(column: Ref, keys: &[ScopeKey]) -> Expr {
-    let (data_type, values): (SqlType, Vec<Value>) = match keys.first() {
-        None => return falsehood(),
-        Some(ScopeKey::Int(_)) => (SqlType::Int64, keys.iter().map(key_value).collect()),
-        Some(ScopeKey::Text(_)) => (SqlType::String, keys.iter().map(key_value).collect()),
+fn key_filter(column: Ref, keys: &[Key]) -> Result<Expr> {
+    let Some(first) = keys.first() else {
+        return Ok(falsehood());
     };
-    Expr::Binary {
+    let (data_type, _) = key_value(first)?;
+    let mut values = Vec::with_capacity(keys.len());
+    for key in keys {
+        let (key_type, value) = key_value(key)?;
+        if key_type != data_type {
+            return Err(QueryError::Security(
+                "a scope answer mixes key types in one set".into(),
+            ));
+        }
+        values.push(value);
+    }
+    Ok(Expr::Binary {
         op: BinaryOp::In,
         left: Box::new(Expr::Column(column)),
         right: Box::new(Expr::Parameter {
             data_type: data_type.to_array(),
             value: Value::Array(values),
         }),
-    }
+    })
 }
 
-pub(crate) fn key_value(key: &ScopeKey) -> Value {
+/// A key as the one column value it filters; a composite key fills no single column.
+pub(crate) fn key_value(key: &Key) -> Result<(SqlType, Value)> {
     match key {
-        ScopeKey::Int(key) => Value::from(*key),
-        ScopeKey::Text(key) => Value::from(key.as_str()),
+        Key::Int(key) => Ok((SqlType::Int64, Value::from(*key))),
+        Key::Text(key) | Key::Uuid(key) => Ok((SqlType::String, Value::from(key.as_str()))),
+        Key::Composite(_) => Err(QueryError::Security(
+            "a composite scope key cannot filter one column".into(),
+        )),
     }
 }
 
@@ -278,13 +291,32 @@ mod tests {
             model().render(&plan).sql
         };
         assert_eq!(
-            render(ScopeSet::Keys(vec![ScopeKey::Text("1/2/".into())])),
+            render(ScopeSet::Keys(vec![Key::Text("1/2/".into())])),
             "SELECT p.traversal_path FROM gl_project AS p WHERE p.traversal_path IN {p0:Array(String)}"
         );
         assert_eq!(
             render(ScopeSet::All),
             "SELECT p.traversal_path FROM gl_project AS p"
         );
+    }
+
+    #[test]
+    fn key_sets_a_column_cannot_hold_fail_closed() {
+        let compile = |keys: Vec<Key>| {
+            let grants = crate::test_grants::reporter(model().model(), &["1/"]).with(
+                "namespace",
+                "read",
+                ScopeSet::Keys(keys),
+            );
+            apply_security_context(scans(&[("gl_project", "p")], None), model(), &grants)
+        };
+        let composite = Key::Composite(vec![Key::Int(1), Key::Text("1/".into())]);
+        assert!(matches!(
+            compile(vec![composite]),
+            Err(QueryError::Security(_))
+        ));
+        let mixed = vec![Key::Text("1/".into()), Key::Int(1)];
+        assert!(matches!(compile(mixed), Err(QueryError::Security(_))));
     }
 
     #[test]

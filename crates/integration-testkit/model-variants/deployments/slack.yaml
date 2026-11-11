@@ -7,3 +7,4 @@ providers:
   slack:
     module: fake.slack
     handles: {"user:1": slack-sign-in-1}
+    readable: {}

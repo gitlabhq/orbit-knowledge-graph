@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use orbit_authorization::{Grants, ScopeKey, ScopeSet};
+use orbit_authorization::{Grants, Key, ScopeSet};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::catalog::{PermissionId, Rule, ScopeId};
 use query_data_model::{Catalog, ClickHouse};
@@ -76,7 +76,7 @@ fn holds(set: &ScopeSet, scope: &TraversalPath) -> bool {
             let roots: Vec<TraversalPath> = roots.iter().map(|root| root.as_str().into()).collect();
             scope.is_within_scope(&roots.iter().collect::<Vec<_>>())
         }
-        ScopeSet::Keys(keys) => keys.contains(&ScopeKey::Text(scope.as_str().to_string())),
+        ScopeSet::Keys(keys) => keys.contains(&Key::Text(scope.as_str().to_string())),
     }
 }
 

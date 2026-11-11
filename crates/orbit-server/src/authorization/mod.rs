@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use orbit_authorization::{
     Answers, AuthError, Caller, Check, CheckRequest, Credential, Credentials, Grants, Identify,
-    Module, Need, Provider, Request, ScopeKind, Scopes,
+    Key, Module, Need, Provider, Request, ScopeKind, Scopes,
 };
 use orbit_server_config::AuthorizationConfig;
 use query_data_model::Model;
@@ -184,7 +184,7 @@ impl Deployment {
         caller: &Caller,
         provider: &str,
         requests: Vec<CheckRequest>,
-    ) -> Result<Vec<BTreeSet<i64>>, AuthError> {
+    ) -> Result<Vec<BTreeSet<Key>>, AuthError> {
         let checker = self
             .checks
             .get(provider)
