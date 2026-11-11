@@ -28,7 +28,7 @@ cases:
             - (SemiJoin _orbit_neighbor_edge.source_id IN subquery (SemiJoin _orbit_neighbor_edge.traversal_path IN subquery (_) (_)) (_))
             - (SemiJoin _orbit_neighbor_edge.source_id IN subquery (Filter ..., _orbit_neighbor_edge.relationship_kind = 'CONTAINS' (_)) (_))
 
-  - name: A pinned center that joins its latest rows bounds the join by id and skips the center rows lookup
+  - name: A pinned center with a non-default key keeps its FINAL center join and skips the center rows id lookup
     query:
       json: |
         {"query_type":"neighbors","nodes":[{"id":"d","entity":"MergeRequestDiff","node_ids":[1]}],"neighbors":{"direction":"incoming","rel_types":["HAS_DIFF"]}}
@@ -38,7 +38,7 @@ cases:
       clickhouse:
         emitted:
           expect:
-            - (Filter d.id = 1 (Deduplicate Final (Scan Table(gl_merge_request_diff) AS d)))
+            - (Join ON _orbit_neighbor_edge.target_id = d.id (_) (Deduplicate Final (Scan Table(gl_merge_request_diff) AS d)))
           reject: ["(SemiJoin _orbit_neighbor_edge.target_id IN subquery (_) (_))"]
 
   - name: A pinned center with a non-denormalized filter checks liveness through its join only
@@ -110,7 +110,7 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Neighbors center=d direction=outgoing directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_join=false ... (_))"]
+          expect: ["(Neighbors center=d direction=outgoing directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_join=true ... (_))"]
         emitted:
           expect:
             - (Join ON _orbit_neighbor_edge.source_id = d.id (_) (Deduplicate Final (Scan Table(gl_definition) AS d)))
