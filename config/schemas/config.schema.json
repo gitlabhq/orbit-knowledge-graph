@@ -65,6 +65,9 @@
     "billing": {
       "$ref": "#/$defs/BillingConfig"
     },
+    "authorization": {
+      "$ref": "#/$defs/AuthorizationConfig"
+    },
     "features": {
       "$ref": "#/$defs/FeaturesConfig"
     },
@@ -92,6 +95,7 @@
     "schema",
     "analytics",
     "billing",
+    "authorization",
     "features",
     "object_storage"
   ],
@@ -1266,19 +1270,226 @@
       "additionalProperties": false
     },
     "QuerySettings": {
-      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: true\n    query_cache_ttl: 10\n  aggregation:\n    max_execution_time: 60\n```",
+      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  limits: { ... }\n  default:\n    max_execution_time: 30\n    use_query_cache: true\n    query_cache_ttl: 10\n  aggregation:\n    max_execution_time: 60\n```",
       "type": "object",
       "properties": {
+        "limits": {
+          "$ref": "#/$defs/QueryLimits"
+        },
         "default": {
           "$ref": "#/$defs/QueryConfig"
         }
       },
       "required": [
+        "limits",
         "default"
       ],
       "additionalProperties": {
         "$ref": "#/$defs/QueryConfig"
       }
+    },
+    "QueryLimits": {
+      "description": "The `query.limits` section. Every key is required and at least 1.",
+      "type": "object",
+      "properties": {
+        "nodes": {
+          "description": "Nodes in one MATCH pattern.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "hops": {
+          "description": "Hops of one variable-length relationship.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "path_depth": {
+          "description": "Hops a path-finding query searches.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "relationship_types": {
+          "description": "Relationship types one relationship pattern names.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "default_rows": {
+          "description": "Rows a query returns when it names no LIMIT.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_rows": {
+          "description": "The largest LIMIT.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_skip": {
+          "description": "The largest SKIP.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "in_values": {
+          "description": "Values of an IN list on a property other than `id`.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "pinned_ids": {
+          "description": "Ids an IN list on `id` pins.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "columns": {
+          "description": "Columns one node returns.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "aggregates": {
+          "description": "Aggregates of one aggregation.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "group_keys": {
+          "description": "Group keys of one aggregation.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "string_chars": {
+          "description": "Characters of one string literal.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "identifier_bytes": {
+          "description": "Bytes of one identifier.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "nesting": {
+          "description": "Depth of nested conditions.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "query_bytes": {
+          "description": "Bytes of one query text.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "predicates": {
+          "description": "Predicates across the whole query.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "node_filter_properties": {
+          "description": "Filtered properties on one node.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "relationship_filter_properties": {
+          "description": "Filtered properties on one relationship.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "filter_entries_per_property": {
+          "description": "Filters on one property of one node or relationship.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "id_range_span": {
+          "description": "The widest `id_range` that makes a node selective.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "path_anchor_span": {
+          "description": "The widest `id_range` that anchors a path-finding endpoint.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "path_anchor_rows": {
+          "description": "Rows one path-finding endpoint seeds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "hydration_rows": {
+          "description": "Rows one dynamic hydration or key lookup reads per entity.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "hydration_path_segments": {
+          "description": "Traversal path segments one hydration read binds before it widens to parent paths.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "in_subquery_index_values": {
+          "description": "ClickHouse `use_index_for_in_with_subqueries_max_values` for queries with shared or membership reads.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "path_finding_max_execution_time": {
+          "description": "The ceiling on ClickHouse `max_execution_time` for path finding, in seconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "path_finding_max_memory_usage": {
+          "description": "The ceiling on ClickHouse `max_memory_usage` for path finding, in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "nodes",
+        "hops",
+        "path_depth",
+        "relationship_types",
+        "default_rows",
+        "max_rows",
+        "max_skip",
+        "in_values",
+        "pinned_ids",
+        "columns",
+        "aggregates",
+        "group_keys",
+        "string_chars",
+        "identifier_bytes",
+        "nesting",
+        "query_bytes",
+        "predicates",
+        "node_filter_properties",
+        "relationship_filter_properties",
+        "filter_entries_per_property",
+        "id_range_span",
+        "path_anchor_span",
+        "path_anchor_rows",
+        "hydration_rows",
+        "hydration_path_segments",
+        "in_subquery_index_values",
+        "path_finding_max_execution_time",
+        "path_finding_max_memory_usage"
+      ]
     },
     "QueryConfig": {
       "description": "Query execution settings. All fields map to ClickHouse query-level\nsettings. The closed set of fields prevents arbitrary user input from\nreaching the SETTINGS clause (CWE-89).\n\n`None` means \"not specified at this layer\" -- the merge logic in\n[`QuerySettings::resolve`] fills in from the default. The derived\n`Default` is therefore all-`None`: nothing specified, nothing emitted.",
@@ -1635,6 +1846,39 @@
           "const": "license_checksum"
         }
       ]
+    },
+    "AuthorizationConfig": {
+      "description": "The modules that answer the provider names packages use.",
+      "type": "object",
+      "properties": {
+        "identify": {
+          "description": "The one provider that identifies callers.",
+          "type": "string"
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ProviderConfig"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "identify",
+        "providers"
+      ]
+    },
+    "ProviderConfig": {
+      "type": "object",
+      "properties": {
+        "module": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "additionalProperties": true
     },
     "FeaturesConfig": {
       "description": "An unrecognized key fails deserialization as an unknown [`Feature`] variant,\nrather than being silently ignored.",

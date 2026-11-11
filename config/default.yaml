@@ -202,6 +202,35 @@ grpc:
   max_result_bytes: 67108864
 
 query:
+  limits:
+    nodes: 5
+    hops: 3
+    path_depth: 3
+    relationship_types: 10
+    default_rows: 30
+    max_rows: 1000
+    max_skip: 10000
+    in_values: 100
+    pinned_ids: 500
+    columns: 50
+    aggregates: 10
+    group_keys: 4
+    string_chars: 1024
+    identifier_bytes: 64
+    nesting: 32
+    query_bytes: 32768
+    predicates: 16
+    node_filter_properties: 10
+    relationship_filter_properties: 5
+    filter_entries_per_property: 10
+    id_range_span: 100000
+    path_anchor_span: 500
+    path_anchor_rows: 500
+    hydration_rows: 1000
+    hydration_path_segments: 2000
+    in_subquery_index_values: 1000000
+    path_finding_max_execution_time: 15
+    path_finding_max_memory_usage: 16106127360
   default:
     max_execution_time: 30
     max_ast_elements: 1000000          # 20x ClickHouse default, matches Siphon

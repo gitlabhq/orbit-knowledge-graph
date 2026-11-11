@@ -11,6 +11,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::limits::QueryLimits;
+
 /// Escape a string for use as a ClickHouse SETTINGS value.
 /// Single-quotes the value and escapes embedded quotes and backslashes.
 fn escape_setting_str(s: &str) -> String {
@@ -215,6 +217,7 @@ impl QueryConfig {
 ///
 /// ```yaml
 /// query:
+///   limits: { ... }
 ///   default:
 ///     max_execution_time: 30
 ///     use_query_cache: true
@@ -224,6 +227,8 @@ impl QueryConfig {
 /// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct QuerySettings {
+    pub limits: QueryLimits,
+
     pub default: QueryConfig,
 
     /// Per-query-type overrides. Keys must match `QueryType` variant names
@@ -415,6 +420,7 @@ mod tests {
             },
         );
         let settings = QuerySettings {
+            limits: crate::AppConfig::embedded_defaults().query.limits,
             default: QueryConfig {
                 max_execution_time: Some(30),
                 use_query_cache: Some(false),
@@ -442,7 +448,10 @@ default:
 aggregation:
   max_execution_time: 120
 "#;
-        let settings: QuerySettings = orbit_utils::yaml::from_str(yaml).unwrap();
+        let limits =
+            serde_json::to_string(&crate::AppConfig::embedded_defaults().query.limits).unwrap();
+        let yaml = format!("limits: {limits}{yaml}");
+        let settings: QuerySettings = orbit_utils::yaml::from_str(&yaml).unwrap();
         assert_eq!(settings.default.max_execution_time, Some(30));
         assert_eq!(settings.overrides.len(), 1);
         assert_eq!(
@@ -459,6 +468,7 @@ aggregation:
         overrides.insert("aggregation".to_string(), QueryConfig::default());
         overrides.insert("bogus_type".to_string(), QueryConfig::default());
         let settings = QuerySettings {
+            limits: crate::AppConfig::embedded_defaults().query.limits,
             default: QueryConfig::default(),
             overrides,
         };
