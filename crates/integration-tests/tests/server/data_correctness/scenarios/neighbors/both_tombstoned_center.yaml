@@ -1,0 +1,76 @@
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      user: [99540, 99542]
+      group: [99541, 99543, 99544, 99545]
+      work_item: [99550, 99551, 99552, 99553]
+  extra_seed:
+    gl_user:
+      - { id: 99540, username: live_center_member, name: Live Center Member, state: active, _version: "2024-01-01 00:00:00" }
+      - { id: 99542, username: deleted_center_member, name: Deleted Center Member, state: active, _version: "2024-01-01 00:00:00" }
+    gl_group:
+      - { id: 99541, name: Live Center, full_path: public-group/live-center, visibility_level: public, traversal_path: "1/100/99541/", _version: "2024-01-01 00:00:00" }
+      - { id: 99543, name: Deleted Center, full_path: public-group/deleted-center, visibility_level: public, traversal_path: "1/100/99543/", _version: "2024-01-01 00:00:00" }
+      - { id: 99543, name: Deleted Center, full_path: public-group/deleted-center, visibility_level: public, traversal_path: "1/100/99543/", _version: "2024-06-01 00:00:00", _deleted: true }
+      - { id: 99544, name: Live Center Child, full_path: public-group/live-center/child, visibility_level: public, traversal_path: "1/100/99541/99544/", _version: "2024-01-01 00:00:00" }
+      - { id: 99545, name: Deleted Center Child, full_path: public-group/deleted-center/child, visibility_level: public, traversal_path: "1/100/99543/99545/", _version: "2024-01-01 00:00:00" }
+    gl_work_item:
+      - { id: 99550, iid: 1, title: Live Center Item, state: opened, work_item_type: issue, project_id: 1000, namespace_id: 100, traversal_path: "1/100/", _version: "2024-01-01 00:00:00" }
+      - { id: 99551, iid: 2, title: Live Center Related, state: closed, work_item_type: issue, project_id: 1000, namespace_id: 100, traversal_path: "1/100/", _version: "2024-01-01 00:00:00" }
+      - { id: 99552, iid: 3, title: Deleted Center Item, state: opened, work_item_type: issue, project_id: 1000, namespace_id: 100, traversal_path: "1/100/", _version: "2024-01-01 00:00:00" }
+      - { id: 99552, iid: 3, title: Deleted Center Item, state: opened, work_item_type: issue, project_id: 1000, namespace_id: 100, traversal_path: "1/100/", _version: "2024-06-01 00:00:00", _deleted: true }
+      - { id: 99553, iid: 4, title: Deleted Center Related, state: closed, work_item_type: issue, project_id: 1000, namespace_id: 100, traversal_path: "1/100/", _version: "2024-01-01 00:00:00" }
+    gl_edge:
+      - { traversal_path: "1/100/99541/", source_id: 99540, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99541, target_kind: Group, source_tags: ["state:active"], target_tags: ["visibility:public"], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/99543/", source_id: 99542, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99543, target_kind: Group, source_tags: ["state:active"], target_tags: ["visibility:public"], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/99541/99544/", source_id: 99541, source_kind: Group, relationship_kind: CONTAINS, target_id: 99544, target_kind: Group, source_tags: [], target_tags: [], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/99543/99545/", source_id: 99543, source_kind: Group, relationship_kind: CONTAINS, target_id: 99545, target_kind: Group, source_tags: [], target_tags: [], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/", source_id: 99550, source_kind: WorkItem, relationship_kind: RELATED_TO, target_id: 99551, target_kind: WorkItem, source_tags: ["state:opened"], target_tags: ["state:closed"], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/", source_id: 99552, source_kind: WorkItem, relationship_kind: RELATED_TO, target_id: 99553, target_kind: WorkItem, source_tags: ["state:opened"], target_tags: ["state:closed"], _version: "2024-01-01 00:00:00" }
+
+cases:
+  - name: both_tombstoned_center_among_pinned_ids
+    description: Neighbors in both directions of two pinned centers skip the center whose latest row is a tombstone, even while its edges are live
+    query:
+      gql: |
+        MATCH (g:Group)-[:MEMBER_OF|`CONTAINS`]-(n) WHERE g.id IN [99541, 99543] RETURN g, n
+    expect:
+      node_count: 3
+      nodes:
+        Group: { ids: [99541, 99544] }
+        User: { ids: [99540] }
+      edges:
+        MEMBER_OF: [[99540, 99541]]
+        CONTAINS: [[99541, 99544]]
+
+  - name: both_tombstoned_center_unpinned
+    description: Neighbors in both directions of an unpinned center filtered on an edge tag skip a center whose latest row is a tombstone, even while its edge is live
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:RELATED_TO]-(n) WHERE w.state = 'opened' RETURN w, n
+    expect:
+      skip_requirements: ["filter:state"]
+      node_count: 2
+      nodes:
+        WorkItem: { ids: [99550, 99551] }
+      edges:
+        RELATED_TO: [[99550, 99551]]
+
+  - name: both_tombstoned_center_single_id_incoming_only
+    description: Neighbors of one pinned center whose latest row is a tombstone return nothing when every relationship reaches it as the target
+    query:
+      gql: |
+        MATCH (g:Group {id: 99543})-[:MEMBER_OF]-(n) RETURN g, n
+    expect:
+      skip_requirements: [node_ids, neighbors, "relationship:MEMBER_OF"]
+      node_count: 0
+
+  - name: both_tombstoned_center_single_id
+    description: Neighbors in both directions of one pinned center whose latest row is a tombstone return nothing
+    query:
+      gql: |
+        MATCH (g:Group {id: 99543})-[:MEMBER_OF|`CONTAINS`]-(n) RETURN g, n
+    expect:
+      skip_requirements: [node_ids, neighbors, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+      node_count: 0
