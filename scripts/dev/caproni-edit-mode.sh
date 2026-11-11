@@ -127,7 +127,7 @@ build() {
 # CI image lacks; macOS has no /proc, so ps answers there.
 process_command() { # pid
   if [[ -r "/proc/$1/cmdline" ]]; then
-    tr '\0' ' ' <"/proc/$1/cmdline"
+    tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null
   else
     ps -o command= -p "$1" 2>/dev/null
   fi
@@ -142,28 +142,40 @@ lock_holder_alive() { # pid
 
 # Every reloader declares the build watcher so that any subset of reloaders rebuilds on
 # save. Only one watcher per checkout may run cargo; the lock holds its pid. Caproni starts
-# all four at the same instant, so every step must be atomic: noclobber creates with O_EXCL,
-# and a stale lock (the watcher execs watchexec, so nothing removes it on exit) is claimed by
-# rename, which only one caller can win, before anyone creates a fresh one. A lock that
-# exists but is still empty belongs to a writer mid-create and counts as held.
+# all four at the same instant, so every step must be atomic: noclobber creates with O_EXCL.
+# A lock that exists but is still empty belongs to a writer mid-create and counts as held.
+# A stale lock (the watcher execs watchexec, so nothing removes it on exit) may be removed
+# only by the owner of the claim <lock>.stale.<dead pid>, itself taken with this function.
+# Renaming the stale lock away instead lets a racer that read the same dead pid move the
+# winner's fresh lock. A claim left behind by a killed watcher holds a dead pid and goes
+# stale the same way, hence the recursion.
+claim_lock() { # path
+  local lock="$1" holder
+  if (set -o noclobber; echo "$$" >"$lock") 2>/dev/null; then
+    return 0
+  fi
+  holder="$(cat "$lock" 2>/dev/null || true)"
+  if [[ -z "$holder" ]] || lock_holder_alive "$holder"; then
+    return 1
+  fi
+  replace_stale_lock "$lock" "$holder"
+}
+
+replace_stale_lock() { # path, dead holder pid
+  local lock="$1" holder="$2" claim="$1.stale.$2" status=1
+  claim_lock "$claim" || return 1
+  # A late racer can win the claim after an earlier owner replaced the lock and dropped it.
+  if [[ "$(cat "$lock" 2>/dev/null || true)" == "$holder" ]]; then
+    rm -f "$lock"
+    (set -o noclobber; echo "$$" >"$lock") 2>/dev/null && status=0
+  fi
+  rm -f "$claim"
+  return "$status"
+}
+
 acquire_watch_lock() {
-  local holder attempt
   mkdir -p "$GENERATED_DIR"
-  for attempt in 1 2; do
-    if (set -o noclobber; echo "$$" >"$WATCH_LOCK") 2>/dev/null; then
-      return 0
-    fi
-    holder="$(cat "$WATCH_LOCK" 2>/dev/null || true)"
-    if [[ -z "$holder" ]] || lock_holder_alive "$holder"; then
-      return 1
-    fi
-    if [[ "$attempt" -eq 1 ]] && mv "$WATCH_LOCK" "$WATCH_LOCK.stale.$$" 2>/dev/null; then
-      rm -f "$WATCH_LOCK.stale.$$"
-    else
-      return 1
-    fi
-  done
-  return 1
+  claim_lock "$WATCH_LOCK"
 }
 
 watch() {
