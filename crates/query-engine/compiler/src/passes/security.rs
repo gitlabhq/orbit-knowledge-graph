@@ -60,12 +60,15 @@ pub fn apply_security_context(
     }
     let mut guards = guards(&plan.plan, catalog, ctx);
     catalog
-        .rewrite(plan, |q, rows| {
-            let Some(mut conditions) = q.original().and_then(|node| guards.remove(&node)) else {
-                return Ok(rows);
+        .rebuild(plan, |q, step| {
+            let Some(conditions) = guards.remove(&step.node()) else {
+                return step.keep(q);
             };
-            let mut detached = q.detach(rows)?;
-            match &mut detached.operation {
+            let mut conditions = conditions
+                .into_iter()
+                .map(|condition| step.expr(condition))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            match &mut step.operation {
                 Operation::Filter(predicate) => {
                     conditions.push(predicate.clone());
                     if let Some(guarded) = balanced(BinaryOp::And, conditions) {
@@ -74,12 +77,12 @@ pub fn apply_security_context(
                 }
                 _ => {
                     if let Some(guard) = balanced(BinaryOp::And, conditions) {
-                        let source = detached.inputs.remove(0);
-                        detached.inputs.insert(0, q.filter(source, guard)?);
+                        let source = step.inputs.remove(0);
+                        step.inputs.insert(0, q.filter(source, guard)?);
                     }
                 }
             }
-            q.reattach(detached)
+            step.keep(q)
         })
         .map_err(|error| QueryError::Security(error.to_string()))
 }

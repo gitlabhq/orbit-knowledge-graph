@@ -122,4 +122,19 @@ impl<L: Language> Plan<L> {
         let info = &self.arena.bodies[body.0];
         (&info.name, info.root)
     }
+
+    /// The bodies defined directly in the scope of `body`, or at the top when `body` is `None`.
+    pub fn defines(&self, body: Option<BodyId>) -> Vec<BodyId> {
+        let scope = body.map_or(ScopeId(0), |body| self.arena.bodies[body.0].scope);
+        self.bodies()
+            .filter(|inner| self.arena.parents[self.arena.bodies[inner.0].scope.0] == Some(scope))
+            .collect()
+    }
+
+    pub(super) fn handle(&self, output: OutputId) -> Ref {
+        Ref {
+            plan: self.arena.plan,
+            output,
+        }
+    }
 }

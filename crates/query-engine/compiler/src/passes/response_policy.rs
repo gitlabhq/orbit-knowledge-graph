@@ -62,26 +62,25 @@ pub fn apply_text_excerpts<B: SqlBackend>(
         return Ok(plan);
     };
     model
-        .rewrite(plan, |q, rows| {
-            if q.original() != Some(compute) {
-                return Ok(rows);
+        .rebuild(plan, |q, step| {
+            if step.node() != compute {
+                return step.keep(q);
             }
-            let mut detached = q.detach(rows)?;
-            let source = &detached.inputs[0];
+            let source = &step.inputs[0];
             let excerpted: Vec<_> = columns
                 .iter()
                 .flat_map(|(alias, names)| names.iter().map(move |name| (alias, name)))
                 .filter_map(|(alias, name)| source.qualified(alias, name).ok())
                 .map(|column| column.output())
                 .collect();
-            if let Operation::Compute(values) = &mut detached.operation {
+            if let Operation::Compute(values) = &mut step.operation {
                 for value in values {
                     if matches!(value, Expr::Column(output) if excerpted.contains(output)) {
                         *value = excerpt(value.clone(), max_chars);
                     }
                 }
             }
-            q.reattach(detached)
+            step.keep(q)
         })
         .map_err(rejected)
 }

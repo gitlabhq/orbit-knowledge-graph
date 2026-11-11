@@ -2,7 +2,6 @@ mod builder;
 mod catalog;
 mod check;
 mod conditions;
-mod detach;
 mod error;
 mod expr;
 mod filter;
@@ -11,6 +10,7 @@ pub mod limits;
 mod measure;
 mod pattern;
 mod predicate;
+mod rebuild;
 mod results;
 mod shape;
 mod step;
@@ -20,7 +20,6 @@ use crate::DataType;
 
 pub use builder::{InternalName, LogicalBuilder};
 pub use catalog::LogicalCatalog;
-pub use detach::Detached;
 pub use error::{ErrorClass, PlanError};
 pub use expr::{EdgeField, Expr, Literal, Operand, TimeUnit};
 pub use handle::{Binding, Rows};
@@ -29,7 +28,7 @@ pub use predicate::{Comparison, Conjunct, Matching, Operator, Predicate};
 pub use step::{Hops, Step};
 
 use crate::plan::code::{Language as CodeLanguage, Pattern};
-use crate::plan::tracking::{Body, Language, Plan, Ref};
+use crate::plan::tracking::{BodyId, Language, Plan, Ref};
 use crate::{Direction, EntityId, Hop, RelationshipId};
 
 #[derive(Debug)]
@@ -79,7 +78,7 @@ pub enum LogicalOperation {
         skip: Option<u64>,
     },
     Union,
-    Read(Body),
+    Read(BodyId),
     Structural(Structural),
 }
 

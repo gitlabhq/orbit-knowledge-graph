@@ -1,3 +1,4 @@
+mod apply;
 mod builder;
 mod pattern;
 
@@ -7,7 +8,7 @@ pub use pattern::{Language, Pattern};
 use crate::EntityId;
 use crate::catalog::{Catalog, Guard};
 use crate::implementations::orbit_code::OrbitCode;
-use crate::plan::tracking::{self, Construction, Declared, Plan, Ref, Rejected};
+use crate::plan::tracking::{self, Declared, Each, Plan, Ref, Rejected, Step};
 
 #[derive(Debug)]
 pub struct CodeLanguage;
@@ -132,22 +133,21 @@ impl Catalog<OrbitCode> {
         &'c self,
         construct: impl FnOnce(&mut CodeBuilder<'c>) -> Result<Matches, CodeError>,
     ) -> Result<CodePlan, CodeError> {
-        let mut builder = CodeBuilder::new(self, Construction::new(self.model().id()));
+        let mut builder = CodeBuilder::new(self);
         let root = construct(&mut builder);
         builder.finish(root)
     }
 
-    pub fn rewrite<'c>(
+    pub fn rebuild<'c>(
         &'c self,
         plan: CodePlan,
-        mut visit: impl FnMut(&mut CodeBuilder<'c>, Matches) -> Result<Matches, CodeError>,
+        visit: impl FnMut(
+            &mut CodeBuilder<'c>,
+            &mut Step<'_, '_, CodeBuilder<'c>>,
+        ) -> Result<Matches, CodeError>,
     ) -> Result<CodePlan, CodeError> {
-        let construction = Construction::rewrite(plan, self.model().id())?;
-        let mut builder = CodeBuilder::new(self, construction);
-        let root = tracking::rewrite(&mut builder, CodeBuilder::construction, |q, rows| {
-            let matches = q.view(rows)?;
-            visit(q, matches).map(Matches::into_inner)
-        });
-        builder.finish_rows(root)
+        let mut builder = CodeBuilder::new(self);
+        let root = tracking::rebuild(&mut builder, &plan, &mut Each(visit));
+        builder.finish(root)
     }
 }

@@ -38,10 +38,6 @@ impl<'m> LogicalBuilder<'m> {
         &mut self.construction
     }
 
-    pub(super) fn construction_ref(&self) -> &Construction<Logical> {
-        &self.construction
-    }
-
     pub(super) fn view(&self, rows: tracking::Rows) -> Result<Rows<'m>, PlanError> {
         Rows::view(self.catalog, &self.construction, rows)
     }
@@ -74,6 +70,22 @@ impl<'m> LogicalBuilder<'m> {
         })
     }
 
+    /// Appends `operation` with the outputs it declares, under the tracking checks only.
+    pub(super) fn apply(
+        &mut self,
+        operation: LogicalOperation,
+        inputs: Vec<Rows<'m>>,
+        outputs: Outputs<LogicalType>,
+    ) -> Result<Rows<'m>, PlanError> {
+        match operation {
+            LogicalOperation::Read(body) => {
+                let body = self.construction.body(body)?;
+                self.read(body)
+            }
+            operation => self.connect(operation, inputs, |_, _, _| Ok(outputs)),
+        }
+    }
+
     pub(super) fn attempt<T>(
         &mut self,
         step: impl FnOnce(LogicalCatalog<'m>, &mut Construction<Logical>) -> Result<T, PlanError>,
@@ -85,10 +97,6 @@ impl<'m> LogicalBuilder<'m> {
 
     pub fn catalog(&self) -> LogicalCatalog<'m> {
         self.catalog
-    }
-
-    pub fn operation(&self, rows: &Rows<'m>) -> Result<&LogicalOperation, PlanError> {
-        Ok(self.construction.operation(rows.inner())?)
     }
 
     pub fn internal_name(&mut self, purpose: &str) -> Result<InternalName, PlanError> {
@@ -259,7 +267,9 @@ impl<'m> LogicalBuilder<'m> {
     }
 
     pub fn read(&mut self, body: Body) -> Result<Rows<'m>, PlanError> {
-        let connected = self.construction.read(body, LogicalOperation::Read(body))?;
+        let connected = self
+            .construction
+            .read(body, LogicalOperation::Read(body.id()))?;
         self.view(connected.rows)
     }
 
@@ -269,10 +279,6 @@ impl<'m> LogicalBuilder<'m> {
     ) -> Result<(), PlanError> {
         let outputs: Vec<Ref> = bindings.into_iter().map(Binding::output).collect();
         Ok(self.construction.declare_order(&outputs)?)
-    }
-
-    pub fn reconnect(&mut self, from: Ref, to: Ref) -> Result<(), PlanError> {
-        Ok(self.construction.reconnect(from, to)?)
     }
 
     pub(super) fn bound(binding: Binding<'m>) -> Result<EntityId, PlanError> {

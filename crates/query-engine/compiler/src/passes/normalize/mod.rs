@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use query_data_model::plan::logical::{
     EdgeField, Expr, LogicalBuilder, LogicalOperation, LogicalPlan, PlanError, Projection, Rows,
 };
-use query_data_model::plan::tracking::Ref;
-use query_data_model::{Direction, Model};
+use query_data_model::plan::tracking::{Ref, Step};
+use query_data_model::{Direction, Model, RelationshipId};
 
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
@@ -29,7 +29,7 @@ pub fn normalize(
     let narrowed = kinds::narrowed(query)?;
     shared_keys(query, &narrowed, data)?;
     let catalog = model.logical().as_admin();
-    Ok(catalog.rewrite(plan, |q, rows| rewrite(q, rows, &narrowed, model))?)
+    Ok(catalog.rebuild(plan, |q, step| rewrite(q, step, &narrowed, model))?)
 }
 
 fn available(query: Query<'_>, data: &Catalog<impl SqlBackend>) -> Result<()> {
@@ -96,37 +96,42 @@ fn kind(edge: Ref) -> Expr {
 
 fn rewrite<'m>(
     q: &mut LogicalBuilder<'m>,
-    rows: Rows<'m>,
+    step: &mut Step<'_, '_, LogicalBuilder<'m>>,
     narrowed: &HashMap<Ref, Narrowed>,
     model: &Model,
 ) -> std::result::Result<Rows<'m>, PlanError> {
-    let operation = q.operation(&rows)?.clone();
-    match operation {
-        LogicalOperation::Filter(predicate) => {
-            let rewritten = enums::coerce(kinds::without_types(&predicate), model);
-            if rewritten.as_ref() == Some(&predicate) {
-                return Ok(rows);
-            }
-            let mut detached = q.detach(rows)?;
-            let input = detached.inputs.remove(0);
-            match rewritten {
+    if let LogicalOperation::Filter(predicate) = &step.operation {
+        let rewritten = enums::coerce(kinds::without_types(predicate), model);
+        if rewritten.as_ref() != Some(predicate) {
+            let input = step.inputs.remove(0);
+            return match rewritten {
                 Some(predicate) => q.filter(input, predicate),
                 None => Ok(input),
-            }
-        }
-        LogicalOperation::Follow { .. }
-        | LogicalOperation::Neighbors { .. }
-        | LogicalOperation::Shortest { .. } => {
-            let outputs = q.outputs(&rows)?;
-            let [.., edge, _] = outputs[..] else {
-                return Ok(rows);
             };
-            match narrowed.get(&edge) {
-                Some(narrowed) => q.retype(rows, narrowed.ids.clone()),
-                None => Ok(rows),
-            }
         }
-        _ => Ok(rows),
+    }
+    let outputs = step.outputs();
+    if let [.., edge, _] = outputs[..]
+        && let Some(narrowed) = narrowed.get(&edge)
+    {
+        retype(&mut step.operation, &narrowed.ids);
+    }
+    step.keep(q)
+}
+
+fn retype(operation: &mut LogicalOperation, narrowed: &[RelationshipId]) {
+    match operation {
+        LogicalOperation::Follow {
+            relationships,
+            hops,
+            ..
+        } => {
+            hops.retain(|hop| narrowed.contains(&hop.relationship));
+            *relationships = narrowed.to_vec();
+        }
+        LogicalOperation::Neighbors { relationships, .. }
+        | LogicalOperation::Shortest { relationships, .. } => *relationships = narrowed.to_vec(),
+        _ => {}
     }
 }
 

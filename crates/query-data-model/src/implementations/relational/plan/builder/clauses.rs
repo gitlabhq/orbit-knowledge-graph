@@ -1,4 +1,5 @@
 use super::RelationalBuilder;
+use crate::DataType;
 use crate::implementations::relational::RelationalBackend;
 use crate::implementations::relational::plan::stage::Stage;
 use crate::implementations::relational::plan::{
@@ -14,9 +15,57 @@ pub struct Aggregated {
 
 impl<B: RelationalBackend> RelationalBuilder<'_, B> {
     pub fn filter(&mut self, rows: Relation, predicate: Expr) -> Result<Relation, RelationalError> {
-        let stage = self.guard(rows.stage.filter())?;
-        self.check(&predicate)?;
-        self.pass(Operation::Filter(predicate), rows, stage)
+        self.apply(
+            Operation::Filter(predicate),
+            vec![rows],
+            Outputs::preserve(),
+        )
+    }
+
+    pub fn aggregate(
+        &mut self,
+        rows: Relation,
+        groups: Vec<Expr>,
+        measures: Vec<Measure>,
+    ) -> Result<Aggregated, RelationalError> {
+        let width = groups.len();
+        let operation = Operation::Aggregate { groups, measures };
+        let rows = self.apply(operation, vec![rows], Outputs::preserve())?;
+        let mut columns = self.columns(&rows)?;
+        let measures = columns.split_off(width);
+        Ok(Aggregated {
+            rows,
+            groups: columns,
+            measures,
+        })
+    }
+
+    pub fn compute(
+        &mut self,
+        rows: Relation,
+        items: Vec<Declare<Expr>>,
+    ) -> Result<(Relation, Vec<Column>), RelationalError> {
+        let (names, values): (Vec<_>, Vec<_>) = items
+            .into_iter()
+            .map(|item| {
+                (
+                    Declare::<Option<DataType>> {
+                        name: item.name,
+                        value: None,
+                    },
+                    item.value,
+                )
+            })
+            .unzip();
+        let width = values.len();
+        let rows = self.apply(
+            Operation::Compute(values),
+            vec![rows],
+            Outputs::extend(names),
+        )?;
+        let mut columns = self.columns(&rows)?;
+        let computed = columns.split_off(columns.len() - width);
+        Ok((rows, computed))
     }
 
     pub(super) fn pass(
@@ -31,12 +80,20 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         Ok(relation)
     }
 
-    pub fn aggregate(
+    fn columns(&self, rows: &Relation) -> Result<Vec<Column>, RelationalError> {
+        let outputs = self.construction.outputs(&rows.rows)?;
+        outputs
+            .into_iter()
+            .map(|output| self.column(output))
+            .collect()
+    }
+
+    pub(super) fn aggregated(
         &mut self,
         rows: Relation,
         groups: Vec<Expr>,
         measures: Vec<Measure>,
-    ) -> Result<Aggregated, RelationalError> {
+    ) -> Result<Relation, RelationalError> {
         let stage = self.guard(rows.stage.aggregate())?;
         for group in &groups {
             self.check(group)?;
@@ -44,86 +101,66 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         for measure in &measures {
             self.check_measure(measure)?;
         }
+        let declared = || {
+            Output::Declare(Declare {
+                name: None,
+                value: None,
+            })
+        };
         let outputs = groups
             .iter()
             .map(|group| match group {
                 Expr::Column(output) => Output::Keep(*output),
-                _ => Output::Declare(Declare {
-                    name: None,
-                    value: None,
-                }),
+                _ => declared(),
             })
-            .chain(measures.iter().map(|_| {
-                Output::Declare(Declare {
-                    name: None,
-                    value: None,
-                })
-            }))
+            .chain(measures.iter().map(|_| declared()))
             .collect::<Vec<_>>();
-        let operation = Operation::Aggregate {
-            groups: groups.clone(),
-            measures,
-        };
-        let (mut relation, declared) =
+        let width = groups.len();
+        let operation = Operation::Aggregate { groups, measures };
+        let (mut relation, _) =
             self.connect(operation, vec![rows], stage, Outputs::replace(outputs))?;
-        let mut fresh = declared.into_iter();
-        let mut columns = Vec::new();
-        for group in &groups {
-            let output = match group {
-                Expr::Column(output) => *output,
-                _ => fresh
-                    .next()
-                    .expect("one declared output per computed group"),
-            };
-            columns.push(self.column(output)?);
-        }
+        let mut kept = self.columns(&relation)?;
+        kept.truncate(width);
         relation
             .visible
-            .retain(|visible| columns.contains(&visible.column));
-        let measures = fresh
-            .map(|output| self.column(output))
-            .collect::<Result<_, _>>()?;
-        Ok(Aggregated {
-            rows: relation,
-            groups: columns,
-            measures,
-        })
+            .retain(|visible| kept.contains(&visible.column));
+        Ok(relation)
     }
 
-    pub fn compute(
+    pub(super) fn computed(
         &mut self,
         rows: Relation,
-        items: Vec<Declare<Expr>>,
-    ) -> Result<(Relation, Vec<Column>), RelationalError> {
+        values: Vec<Expr>,
+        outputs: Outputs<Option<DataType>>,
+    ) -> Result<Relation, RelationalError> {
         let stage = self.guard(rows.stage.compute())?;
+        let names = match outputs {
+            Outputs::Preserve(names) if names.len() == values.len() => names,
+            _ => return self.guard(Err(RelationalError::Incomplete("computed names"))),
+        };
         let mut declared = Vec::new();
-        for item in &items {
-            self.check(&item.value)?;
-            let data_type = match &item.value {
+        for (name, value) in names.into_iter().zip(&values) {
+            self.check(value)?;
+            let data_type = match value {
                 Expr::Column(output) => self.column(*output)?.data_type,
                 _ => None,
             };
             declared.push(Declare {
-                name: item.name.clone(),
+                name: name.name,
                 value: data_type,
             });
         }
-        let values = items.into_iter().map(|item| item.value).collect();
         let (mut relation, outputs) = self.connect(
             Operation::Compute(values),
             vec![rows],
             stage,
             Outputs::extend(declared),
         )?;
-        let columns = outputs
-            .iter()
-            .map(|output| self.column(*output))
-            .collect::<Result<Vec<_>, _>>()?;
         for output in &outputs {
             let (name, _) = self.construction.value(*output)?;
             relation.computed.push((*output, name.map(str::to_string)));
         }
         relation.visible.extend(self.named(&outputs, None)?);
-        Ok((relation, columns))
+        Ok(relation)
     }
 }

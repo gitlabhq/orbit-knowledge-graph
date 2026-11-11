@@ -1,10 +1,10 @@
-use super::{RelationalBuilder, complete, supported};
+use super::{RelationalBuilder, complete};
+use crate::implementations::relational::RelationalBackend;
 use crate::implementations::relational::plan::stage::Stage;
 use crate::implementations::relational::plan::{
     Column, Expr, Operation, Order, Relation, RelationalError, Selection,
 };
-use crate::implementations::relational::{RelationalBackend, RelationalFacts};
-use crate::plan::tracking::{Declare, Output, Outputs};
+use crate::plan::tracking::{Declare, Output, Outputs, Ref};
 
 impl<B: RelationalBackend> RelationalBuilder<'_, B> {
     pub fn order(
@@ -12,11 +12,7 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         rows: Relation,
         orders: Vec<Order>,
     ) -> Result<Relation, RelationalError> {
-        let stage = self.guard(rows.stage.order())?;
-        for order in &orders {
-            self.check(&order.value)?;
-        }
-        self.pass(Operation::Order(orders), rows, stage)
+        self.apply(Operation::Order(orders), vec![rows], Outputs::preserve())
     }
 
     pub fn latest(
@@ -25,25 +21,12 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         key: Vec<Column>,
         version: Column,
     ) -> Result<Relation, RelationalError> {
-        let stage = self.guard(rows.stage.latest())?;
-        let (name, _) = self.construction.value(version.output)?;
-        let name = name.unwrap_or_default().to_string();
-        let versioned = self.catalog.stores().any(|(_, facts)| {
-            facts
-                .relational()
-                .versioning
-                .as_ref()
-                .is_some_and(|versioning| versioning.version == name)
-        });
-        self.guard(match versioned {
-            true => Ok(()),
-            false => Err(RelationalError::NotVersion(name)),
-        })?;
+        let key = key.into_iter().map(Column::output).collect();
         let operation = Operation::Latest {
-            key: key.into_iter().map(Column::output).collect(),
+            key,
             version: version.output,
         };
-        self.pass(operation, rows, stage)
+        self.apply(operation, vec![rows], Outputs::preserve())
     }
 
     pub fn limit_by(
@@ -52,12 +35,11 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         count: u32,
         by: Vec<Expr>,
     ) -> Result<Relation, RelationalError> {
-        self.guard(supported(B::CAPABILITIES.limit_by, "limit by"))?;
-        let stage = self.guard(rows.stage.limit_by())?;
-        for value in &by {
-            self.check(value)?;
-        }
-        self.pass(Operation::LimitBy { count, by }, rows, stage)
+        self.apply(
+            Operation::LimitBy { count, by },
+            vec![rows],
+            Outputs::preserve(),
+        )
     }
 
     pub fn limit(
@@ -66,8 +48,11 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         count: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Relation, RelationalError> {
-        let stage = self.guard(rows.stage.limit())?;
-        self.pass(Operation::Limit { count, offset }, rows, stage)
+        self.apply(
+            Operation::Limit { count, offset },
+            vec![rows],
+            Outputs::preserve(),
+        )
     }
 
     pub fn select(
@@ -75,16 +60,34 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         rows: Relation,
         columns: Vec<Column>,
     ) -> Result<Relation, RelationalError> {
+        let columns = columns.into_iter().map(Column::output).collect();
+        let operation = Operation::Select(Selection::Columns(columns));
+        self.apply(operation, vec![rows], Outputs::preserve())
+    }
+
+    pub fn select_all(&mut self, rows: Relation) -> Result<Relation, RelationalError> {
+        let operation = Operation::Select(Selection::All);
+        self.apply(operation, vec![rows], Outputs::preserve())
+    }
+
+    pub fn union(&mut self, arms: Vec<Relation>) -> Result<Relation, RelationalError> {
+        self.apply(Operation::Union, arms, Outputs::preserve())
+    }
+
+    pub(super) fn selected(
+        &mut self,
+        rows: Relation,
+        refs: Vec<Ref>,
+    ) -> Result<Relation, RelationalError> {
         let stage = self.guard(rows.stage.select())?;
         let dropped = rows
             .computed
             .iter()
-            .find(|(output, _)| !columns.iter().any(|column| column.output == *output));
+            .find(|(output, _)| !refs.contains(output));
         if let Some((_, name)) = dropped {
             let name = name.clone().unwrap_or_default();
             return self.guard(Err(RelationalError::Unselected(name)));
         }
-        let refs: Vec<_> = columns.iter().map(|column| column.output).collect();
         let outputs = Outputs::replace(refs.iter().copied().map(Output::Keep));
         let operation = Operation::Select(Selection::Columns(refs.clone()));
         let (mut relation, _) = self.connect(operation, vec![rows], stage, outputs)?;
@@ -92,14 +95,7 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         Ok(relation)
     }
 
-    pub fn select_all(&mut self, rows: Relation) -> Result<Relation, RelationalError> {
-        let stage = self.guard(rows.stage.select())?;
-        let operation = Operation::Select(Selection::All);
-        let (relation, _) = self.connect(operation, vec![rows], stage, Outputs::preserve())?;
-        Ok(relation)
-    }
-
-    pub fn union(&mut self, arms: Vec<Relation>) -> Result<Relation, RelationalError> {
+    pub(super) fn united(&mut self, arms: Vec<Relation>) -> Result<Relation, RelationalError> {
         let arms = self.guard(
             arms.into_iter()
                 .map(|arm| complete(arm, "a union arm"))

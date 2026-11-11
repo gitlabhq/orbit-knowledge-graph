@@ -73,7 +73,7 @@ impl<L: Language> Construction<L> {
             }
             let info = &this.arena.bodies[body.body.0];
             let defined = this.arena.parents[info.scope.0].unwrap_or(ScopeId(0));
-            if !this.arena.sees(this.scope, defined) || !this.rebuilt(body.body) {
+            if !this.arena.sees(this.scope, defined) {
                 return Err(Rejected::BodyNotVisible(info.name.clone()));
             }
             let outputs = this.arena.nodes[info.root.0]

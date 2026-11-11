@@ -3,17 +3,17 @@ use crate::DataType;
 use crate::catalog::Catalog;
 use crate::implementations::live::Live;
 use crate::plan::logical::Literal;
-use crate::plan::tracking::{self, Construction, Declare, Declared, Output, Outputs, Ref};
+use crate::plan::tracking::{self, Construction, Declared, Ref};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
-    output: Ref,
-    name: String,
-    value: LiveValue,
+    pub(super) output: Ref,
+    pub(super) name: String,
+    pub(super) value: LiveValue,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Conditions(Vec<(Field, Condition)>);
+pub struct Conditions(Vec<Condition>);
 
 impl Field {
     pub fn eq(&self, value: impl Into<Literal>) -> Conditions {
@@ -21,7 +21,7 @@ impl Field {
             field: self.output,
             value: value.into(),
         };
-        Conditions(vec![(self.clone(), condition)])
+        Conditions(vec![condition])
     }
 
     pub fn contains(&self, text: impl Into<String>) -> Conditions {
@@ -29,7 +29,7 @@ impl Field {
             field: self.output,
             text: text.into(),
         };
-        Conditions(vec![(self.clone(), condition)])
+        Conditions(vec![condition])
     }
 }
 
@@ -43,7 +43,7 @@ impl Conditions {
 
 #[derive(Debug)]
 pub struct Calls {
-    rows: tracking::Rows,
+    pub(super) rows: tracking::Rows,
     fields: Vec<Field>,
 }
 
@@ -69,30 +69,20 @@ impl Calls {
 }
 
 pub struct LiveBuilder<'c> {
-    catalog: &'c Catalog<Live>,
-    construction: Construction<LiveLanguage>,
+    pub(super) catalog: &'c Catalog<Live>,
+    pub(super) construction: Construction<LiveLanguage>,
 }
 
 impl<'c> LiveBuilder<'c> {
-    pub(super) fn new(
-        catalog: &'c Catalog<Live>,
-        construction: Construction<LiveLanguage>,
-    ) -> Self {
+    pub(super) fn new(catalog: &'c Catalog<Live>) -> Self {
         Self {
             catalog,
-            construction,
+            construction: Construction::new(catalog.model().id()),
         }
     }
 
-    pub(super) fn construction(&mut self) -> &mut Construction<LiveLanguage> {
-        &mut self.construction
-    }
-
-    pub(super) fn finish(
-        self,
-        root: Result<tracking::Rows, LiveError>,
-    ) -> Result<LivePlan, LiveError> {
-        Ok(self.construction.finish(root?)?)
+    pub(super) fn finish(self, root: Result<Calls, LiveError>) -> Result<LivePlan, LiveError> {
+        Ok(self.construction.finish(root?.rows)?)
     }
 
     pub(super) fn view(&self, rows: tracking::Rows) -> Result<Calls, LiveError> {
@@ -109,50 +99,62 @@ impl<'c> LiveBuilder<'c> {
         Ok(Calls { rows, fields })
     }
 
-    pub fn operation(&self, calls: &Calls) -> Result<&LiveOperation, LiveError> {
-        Ok(self.construction.operation(&calls.rows)?)
-    }
-
-    fn connect(
-        &mut self,
-        operation: LiveOperation,
-        inputs: Vec<Calls>,
-        check: impl FnOnce() -> Result<Outputs<LiveValue>, LiveError>,
-    ) -> Result<Calls, LiveError> {
-        let rows = self.construction.attempt(|construction| {
-            let outputs = check()?;
-            let inputs = inputs.into_iter().map(Calls::into_inner).collect();
-            Ok::<_, LiveError>(construction.connect(operation, inputs, outputs)?.rows)
-        })?;
-        self.view(rows)
-    }
-
     pub fn call(&mut self, operation: Declared<Operation>) -> Result<Calls, LiveError> {
         let operation = self
             .construction
             .attempt(|construction| construction.declared(operation))?;
-        let graph = self.catalog.graph();
-        let store = &self.catalog.model().stores()[operation.store];
-        let declared: Vec<Declare<LiveValue>> = graph
-            .entity(operation.entity)
-            .properties
-            .iter()
-            .filter(|property| store.column(**property).is_some())
-            .map(|property| {
-                let declared = graph.property(*property);
-                let value = LiveValue {
-                    property: *property,
-                    data_type: declared.data_type,
-                };
-                Declare::named(&declared.name, value)
-            })
-            .collect();
-        self.connect(LiveOperation::Call(operation), Vec::new(), || {
-            Ok(Outputs::extend(declared))
-        })
+        self.apply(LiveOperation::Call(operation), Vec::new())
     }
 
-    fn pushed(&self, field: &Field, text: bool, condition: &'static str) -> Result<(), LiveError> {
+    pub fn filter(&mut self, calls: Calls, conditions: Conditions) -> Result<Calls, LiveError> {
+        self.apply(LiveOperation::Filter(conditions.0), vec![calls])
+    }
+
+    pub fn window(
+        &mut self,
+        calls: Calls,
+        field: &Field,
+        from: Option<String>,
+        to: Option<String>,
+    ) -> Result<Calls, LiveError> {
+        let operation = LiveOperation::Window {
+            field: field.output,
+            from,
+            to,
+        };
+        self.apply(operation, vec![calls])
+    }
+
+    pub fn workspaces(
+        &mut self,
+        calls: Calls,
+        workspaces: impl IntoIterator<Item = String>,
+    ) -> Result<Calls, LiveError> {
+        let mut workspaces: Vec<String> = workspaces.into_iter().collect();
+        workspaces.sort();
+        workspaces.dedup();
+        self.apply(LiveOperation::Workspaces(workspaces), vec![calls])
+    }
+
+    pub fn limit(&mut self, calls: Calls, rows: u64) -> Result<Calls, LiveError> {
+        self.apply(LiveOperation::Limit(rows), vec![calls])
+    }
+
+    pub fn select(
+        &mut self,
+        calls: Calls,
+        fields: impl IntoIterator<Item = Field>,
+    ) -> Result<Calls, LiveError> {
+        let refs = fields.into_iter().map(|field| field.output).collect();
+        self.apply(LiveOperation::Select(refs), vec![calls])
+    }
+
+    pub(super) fn pushed(
+        &self,
+        field: &Field,
+        text: bool,
+        condition: &'static str,
+    ) -> Result<(), LiveError> {
         let graph = self.catalog.graph();
         let property = graph.property(field.value.property);
         let endpoint = self
@@ -183,7 +185,7 @@ impl<'c> LiveBuilder<'c> {
         }
     }
 
-    fn typed(field: &Field, value: &Literal) -> Result<(), LiveError> {
+    pub(super) fn typed(field: &Field, value: &Literal) -> Result<(), LiveError> {
         let fits = matches!(
             (field.value.data_type, value),
             (
@@ -205,95 +207,5 @@ impl<'c> LiveBuilder<'c> {
                 expected: format!("{:?}", field.value.data_type).to_lowercase(),
             }),
         }
-    }
-
-    pub fn filter(&mut self, calls: Calls, conditions: Conditions) -> Result<Calls, LiveError> {
-        let checked: Result<(), LiveError> =
-            conditions
-                .0
-                .iter()
-                .try_for_each(|(field, condition)| match condition {
-                    Condition::Equals { value, .. } => {
-                        self.pushed(field, false, "equality")?;
-                        Self::typed(field, value)
-                    }
-                    Condition::Contains { .. } => self.pushed(field, true, "contains"),
-                });
-        let conditions = conditions
-            .0
-            .into_iter()
-            .map(|(_, condition)| condition)
-            .collect();
-        self.connect(LiveOperation::Filter(conditions), vec![calls], || {
-            checked?;
-            Ok(Outputs::preserve())
-        })
-    }
-
-    pub fn window(
-        &mut self,
-        calls: Calls,
-        field: &Field,
-        from: Option<String>,
-        to: Option<String>,
-    ) -> Result<Calls, LiveError> {
-        let timed = matches!(field.value.data_type, DataType::Date | DataType::DateTime)
-            && (from.is_some() || to.is_some());
-        let checked = match timed {
-            true => self.pushed(field, false, "a time window"),
-            false => Err(LiveError::Window),
-        };
-        let operation = LiveOperation::Window {
-            field: field.output,
-            from,
-            to,
-        };
-        self.connect(operation, vec![calls], || {
-            checked?;
-            Ok(Outputs::preserve())
-        })
-    }
-
-    pub fn workspaces(
-        &mut self,
-        calls: Calls,
-        workspaces: impl IntoIterator<Item = String>,
-    ) -> Result<Calls, LiveError> {
-        let mut workspaces: Vec<String> = workspaces.into_iter().collect();
-        workspaces.sort();
-        workspaces.dedup();
-        let empty = workspaces.is_empty();
-        self.connect(
-            LiveOperation::Workspaces(workspaces),
-            vec![calls],
-            || match empty {
-                true => Err(LiveError::NoWorkspace),
-                false => Ok(Outputs::preserve()),
-            },
-        )
-    }
-
-    pub fn limit(&mut self, calls: Calls, rows: u64) -> Result<Calls, LiveError> {
-        self.connect(LiveOperation::Limit(rows), vec![calls], || match rows {
-            0 => Err(LiveError::EmptyLimit),
-            _ => Ok(Outputs::preserve()),
-        })
-    }
-
-    pub fn select(
-        &mut self,
-        calls: Calls,
-        fields: impl IntoIterator<Item = Field>,
-    ) -> Result<Calls, LiveError> {
-        let (refs, outputs): (Vec<_>, Vec<_>) = fields
-            .into_iter()
-            .map(|field| {
-                let declare = Declare::named(field.name, field.value);
-                (field.output, Output::Declare(declare))
-            })
-            .unzip();
-        self.connect(LiveOperation::Select(refs), vec![calls], || {
-            Ok(Outputs::replace(outputs))
-        })
     }
 }

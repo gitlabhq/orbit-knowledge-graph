@@ -1,7 +1,7 @@
 use super::limits::Limits;
 use super::{LogicalBuilder, LogicalPlan, PlanError, Rows};
 use crate::catalog::Store;
-use crate::plan::tracking::{self, Declared};
+use crate::plan::tracking::{self, Declared, Each, Step};
 use crate::{EntityId, Model, PropertyId, RelationshipId, RelationshipVariantId};
 
 #[derive(Debug, Clone, Copy)]
@@ -124,17 +124,16 @@ impl<'m> LogicalCatalog<'m> {
         Ok(builder.finish(Ok(root.into_inner()))?)
     }
 
-    pub fn rewrite(
+    pub fn rebuild(
         self,
         plan: LogicalPlan,
-        mut visit: impl FnMut(&mut LogicalBuilder<'m>, Rows<'m>) -> Result<Rows<'m>, PlanError>,
+        visit: impl FnMut(
+            &mut LogicalBuilder<'m>,
+            &mut Step<'_, '_, LogicalBuilder<'m>>,
+        ) -> Result<Rows<'m>, PlanError>,
     ) -> Result<LogicalPlan, PlanError> {
-        let construction = tracking::Construction::rewrite(plan, self.model.id())?;
-        let mut builder = LogicalBuilder::new(self, construction);
-        let root = tracking::rewrite(&mut builder, LogicalBuilder::construction, |q, rows| {
-            let rows = q.view(rows)?;
-            visit(q, rows).map(Rows::into_inner)
-        });
-        builder.finish(root)
+        let mut builder = LogicalBuilder::new(self, tracking::Construction::new(self.model.id()));
+        let root = tracking::rebuild(&mut builder, &plan, &mut Each(visit));
+        builder.finish(root.map(Rows::into_inner))
     }
 }

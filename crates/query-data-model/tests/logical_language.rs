@@ -258,7 +258,7 @@ fn edge_attributes_are_checked_at_construction() {
 }
 
 #[test]
-fn plans_carry_the_declared_node_order_through_rewrites() {
+fn plans_carry_the_declared_node_order_through_rebuilds() {
     let model = support::gitlab();
     let catalog = model.logical();
     let plan = catalog
@@ -274,7 +274,7 @@ fn plans_carry_the_declared_node_order_through_rewrites() {
             Ok::<_, PlanError>(rows)
         })
         .unwrap();
-    let plan = catalog.rewrite(plan, |_, rows| Ok(rows)).unwrap();
+    let plan = catalog.rebuild(plan, |q, step| step.keep(q)).unwrap();
     let order: Vec<_> = plan
         .declaration_order()
         .map(|output| plan.name(output).unwrap())

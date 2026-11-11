@@ -3,7 +3,7 @@ use super::{
 };
 use crate::catalog::Catalog;
 use crate::implementations::orbit_code::{OrbitCode, SearchMode};
-use crate::plan::tracking::{self, Construction, Declare, Declared, Output, Outputs, Ref};
+use crate::plan::tracking::{self, Construction, Declared, Ref};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
@@ -23,7 +23,7 @@ impl Trigrams {
 
 #[derive(Debug)]
 pub struct Matches {
-    rows: tracking::Rows,
+    pub(super) rows: tracking::Rows,
     fields: Vec<Field>,
     index: Option<Index>,
 }
@@ -73,35 +73,21 @@ impl Matches {
 
 pub struct CodeBuilder<'c> {
     catalog: &'c Catalog<OrbitCode>,
-    construction: Construction<CodeLanguage>,
+    pub(super) construction: Construction<CodeLanguage>,
     index: Option<Index>,
 }
 
 impl<'c> CodeBuilder<'c> {
-    pub(super) fn new(
-        catalog: &'c Catalog<OrbitCode>,
-        construction: Construction<CodeLanguage>,
-    ) -> Self {
+    pub(super) fn new(catalog: &'c Catalog<OrbitCode>) -> Self {
         Self {
             catalog,
-            construction,
+            construction: Construction::new(catalog.model().id()),
             index: None,
         }
     }
 
-    pub(super) fn construction(&mut self) -> &mut Construction<CodeLanguage> {
-        &mut self.construction
-    }
-
     pub(super) fn finish(self, root: Result<Matches, CodeError>) -> Result<CodePlan, CodeError> {
-        self.finish_rows(root.map(Matches::into_inner))
-    }
-
-    pub(super) fn finish_rows(
-        self,
-        root: Result<tracking::Rows, CodeError>,
-    ) -> Result<CodePlan, CodeError> {
-        Ok(self.construction.finish(root?)?)
+        Ok(self.construction.finish(root?.rows)?)
     }
 
     pub(super) fn view(&mut self, rows: tracking::Rows) -> Result<Matches, CodeError> {
@@ -125,25 +111,7 @@ impl<'c> CodeBuilder<'c> {
         })
     }
 
-    pub fn operation(&self, matches: &Matches) -> Result<&CodeOperation, CodeError> {
-        Ok(self.construction.operation(&matches.rows)?)
-    }
-
-    fn connect(
-        &mut self,
-        operation: CodeOperation,
-        inputs: Vec<Matches>,
-        check: impl FnOnce(&[Matches]) -> Result<Outputs<CodeValue>, CodeError>,
-    ) -> Result<Matches, CodeError> {
-        let rows = self.construction.attempt(|construction| {
-            let outputs = check(&inputs)?;
-            let inputs = inputs.into_iter().map(Matches::into_inner).collect();
-            Ok::<_, CodeError>(construction.connect(operation, inputs, outputs)?.rows)
-        })?;
-        self.view(rows)
-    }
-
-    fn files(inputs: &[Matches], step: &'static str) -> Result<Index, CodeError> {
+    pub(super) fn files(inputs: &[Matches], step: &'static str) -> Result<Index, CodeError> {
         match inputs {
             [files] if files.matched() => Err(CodeError::AfterMatch(step)),
             [files] => files.index.ok_or(CodeError::Incomplete("repositories")),
@@ -151,7 +119,7 @@ impl<'c> CodeBuilder<'c> {
         }
     }
 
-    fn searchable(&self, index: Index, mode: SearchMode) -> Result<(), CodeError> {
+    pub(super) fn searchable(&self, index: Index, mode: SearchMode) -> Result<(), CodeError> {
         let graph = self.catalog.graph();
         let store = &self.catalog.model().stores()[index.store];
         let facts = self.catalog.backend(&store.name);
@@ -179,14 +147,7 @@ impl<'c> CodeBuilder<'c> {
         let mut projects: Vec<i64> = projects.into_iter().collect();
         projects.sort_unstable();
         projects.dedup();
-        let operation = CodeOperation::Repositories {
-            index,
-            projects: projects.clone(),
-        };
-        self.connect(operation, Vec::new(), |_| match projects.is_empty() {
-            true => Err(CodeError::NoRepositories),
-            false => Ok(Outputs::extend([Declare::named("path", CodeValue::Path)])),
-        })
+        self.apply(CodeOperation::Repositories { index, projects }, Vec::new())
     }
 
     pub fn restrict(
@@ -197,14 +158,7 @@ impl<'c> CodeBuilder<'c> {
         let mut readable: Vec<i64> = readable.into_iter().collect();
         readable.sort_unstable();
         readable.dedup();
-        let empty = readable.is_empty();
-        self.connect(CodeOperation::Restrict(readable), vec![files], |inputs| {
-            Self::files(inputs, "a repository restriction")?;
-            match empty {
-                true => Err(CodeError::NoReadableRepository),
-                false => Ok(Outputs::preserve()),
-            }
-        })
+        self.apply(CodeOperation::Restrict(readable), vec![files])
     }
 
     pub fn languages(
@@ -212,63 +166,20 @@ impl<'c> CodeBuilder<'c> {
         files: Matches,
         languages: impl IntoIterator<Item = Language>,
     ) -> Result<Matches, CodeError> {
-        let languages: Vec<Language> = languages.into_iter().collect();
-        let empty = languages.is_empty();
-        self.connect(CodeOperation::Languages(languages), vec![files], |inputs| {
-            Self::files(inputs, "a language filter")?;
-            match empty {
-                true => Err(CodeError::Incomplete("at least one language")),
-                false => Ok(Outputs::preserve()),
-            }
-        })
+        let languages = languages.into_iter().collect();
+        self.apply(CodeOperation::Languages(languages), vec![files])
     }
 
     pub fn prefilter(&mut self, files: Matches, trigrams: Trigrams) -> Result<Matches, CodeError> {
-        let index = Self::files(std::slice::from_ref(&files), "a prefilter");
-        let short = trigrams
-            .0
-            .iter()
-            .find(|atom| atom.chars().count() < 3)
-            .cloned();
-        let searchable = index
-            .clone()
-            .and_then(|index| self.searchable(index, SearchMode::Trigram));
-        self.connect(CodeOperation::Prefilter(trigrams.0), vec![files], |_| {
-            index?;
-            searchable?;
-            match short {
-                Some(atom) => Err(CodeError::ShortAtom(atom)),
-                None => Ok(Outputs::preserve()),
-            }
-        })
+        self.apply(CodeOperation::Prefilter(trigrams.0), vec![files])
     }
 
     pub fn structural(&mut self, files: Matches, pattern: Pattern) -> Result<Matches, CodeError> {
-        let index = Self::files(std::slice::from_ref(&files), "a structural match");
-        let searchable = index
-            .clone()
-            .and_then(|index| self.searchable(index, SearchMode::Structural));
-        let declared: Vec<Declare<CodeValue>> =
-            std::iter::once(Declare::named("line", CodeValue::Line))
-                .chain(
-                    pattern
-                        .captures()
-                        .iter()
-                        .map(|capture| Declare::named(capture, CodeValue::Capture)),
-                )
-                .collect();
-        self.connect(CodeOperation::Structural(pattern), vec![files], |_| {
-            index?;
-            searchable?;
-            Ok(Outputs::extend(declared))
-        })
+        self.apply(CodeOperation::Structural(pattern), vec![files])
     }
 
     pub fn top(&mut self, matches: Matches, count: u64) -> Result<Matches, CodeError> {
-        self.connect(CodeOperation::Top(count), vec![matches], |_| match count {
-            0 => Err(CodeError::EmptyTop),
-            _ => Ok(Outputs::preserve()),
-        })
+        self.apply(CodeOperation::Top(count), vec![matches])
     }
 
     pub fn select(
@@ -276,15 +187,7 @@ impl<'c> CodeBuilder<'c> {
         matches: Matches,
         fields: impl IntoIterator<Item = Field>,
     ) -> Result<Matches, CodeError> {
-        let (refs, outputs): (Vec<_>, Vec<_>) = fields
-            .into_iter()
-            .map(|field| {
-                let declare = Declare::named(field.name, field.value);
-                (field.output, Output::Declare(declare))
-            })
-            .unzip();
-        self.connect(CodeOperation::Select(refs), vec![matches], |_| {
-            Ok(Outputs::replace(outputs))
-        })
+        let refs = fields.into_iter().map(|field| field.output).collect();
+        self.apply(CodeOperation::Select(refs), vec![matches])
     }
 }

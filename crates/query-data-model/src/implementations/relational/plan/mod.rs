@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 use crate::DataType;
 
 pub use block::Block;
-pub use builder::{Aggregated, Detached, RelationalBuilder, SharePolicy, Subquery};
+pub use builder::{Aggregated, RelationalBuilder, SharePolicy, Subquery};
 pub use error::RelationalError;
 pub use expr::{BinaryOp, Expr, Function, TextMatch, TimeUnit, UnaryOp};
 pub use operation::{
@@ -22,7 +22,9 @@ pub use relation::{Column, Relation};
 
 use super::{RelationalBackend, RelationalFacts};
 use crate::catalog::Catalog;
-use crate::plan::tracking::{BodyId, Declared, Language, NodeId, Plan, Ref};
+use crate::plan::tracking::{
+    self, BodyId, Declared, Each, Hook, Language, NodeId, Plan, Ref, Step,
+};
 
 #[derive(Debug)]
 pub struct Relational<B>(PhantomData<B>);
@@ -123,11 +125,29 @@ impl<B: RelationalBackend> Catalog<B> {
         builder.finish(root)
     }
 
-    pub fn rewrite<'c>(
+    /// Rebuilds `plan` through the checked builder; `visit` sees each old operation once, after its
+    /// inputs, and keeps, replaces or wraps it.
+    pub fn rebuild<'c>(
         &'c self,
         plan: RelationalPlan<B>,
-        visit: impl FnMut(&mut RelationalBuilder<'c, B>, Relation) -> Result<Relation, RelationalError>,
+        visit: impl FnMut(
+            &mut RelationalBuilder<'c, B>,
+            &mut Step<'_, '_, RelationalBuilder<'c, B>>,
+        ) -> Result<Relation, RelationalError>,
     ) -> Result<RelationalPlan<B>, RelationalError> {
-        RelationalBuilder::rewriting(self, plan)?.rewrite(visit)
+        self.rebuild_with(&plan, &mut Each(visit))
+    }
+
+    pub(super) fn rebuild_with<'c>(
+        &'c self,
+        plan: &RelationalPlan<B>,
+        hook: &mut impl Hook<RelationalBuilder<'c, B>>,
+    ) -> Result<RelationalPlan<B>, RelationalError> {
+        self.build(|q| {
+            if !plan.settings.is_empty() {
+                q.settings(plan.settings.clone())?;
+            }
+            tracking::rebuild(q, plan, hook)
+        })
     }
 }
