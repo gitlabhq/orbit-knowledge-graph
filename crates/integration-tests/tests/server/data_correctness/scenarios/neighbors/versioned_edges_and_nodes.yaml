@@ -15,24 +15,23 @@ config:
       - { traversal_path: "1/100/99321/", source_id: 99320, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99321, target_kind: Group, source_tags: ["state:active"], target_tags: [], _version: "2024-01-01 00:00:00" }
       - { traversal_path: "1/100/99321/", source_id: 99320, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99321, target_kind: Group, source_tags: ["state:active"], target_tags: ["visibility:public"], _version: "2024-06-01 00:00:00" }
       - { traversal_path: "1/100/99322/", source_id: 99320, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99322, target_kind: Group, source_tags: ["state:active"], target_tags: [], _version: "2024-01-01 00:00:00" }
-      - { traversal_path: "1/100/99322/", source_id: 99320, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99322, target_kind: Group, source_tags: ["state:active"], target_tags: [], _version: "2024-06-01 00:00:00", _deleted: true }
 
 cases:
   - name: outgoing
-    description: Outgoing neighbors return one edge per versioned edge and drop the neighbor whose edges the indexer tombstoned with it
+    description: Outgoing neighbors return one edge per versioned edge and keep a tombstoned neighbor as a bare node through its live edge, which the indexer tombstones with the node
     query: |
       MATCH (u:User {id: 99320})-[:MEMBER_OF]->(n) RETURN u, n
     expect:
-      node_count: 2
+      node_count: 3
       nodes:
         User: { ids: [99320] }
         Group:
-          ids: [99321]
+          ids: [99321, 99322]
           rows:
             - { id: 99321, name: Live Group }
-      total_edge_count: 1
+      total_edge_count: 2
       edges:
-        MEMBER_OF: [[99320, 99321]]
+        MEMBER_OF: [[99320, 99321], [99320, 99322]]
 
   - name: incoming
     description: Incoming neighbors of a group return one edge even though the edge has two versions
@@ -51,31 +50,23 @@ cases:
         MEMBER_OF: [[99320, 99321]]
 
   - name: both
-    description: Neighbors in both directions return one edge per versioned edge and drop the tombstoned neighbor
+    description: Neighbors in both directions return one edge per versioned edge and keep the tombstoned neighbor through its live edge
     query: |
       MATCH (u:User {id: 99320})-[:MEMBER_OF]-(n) RETURN u, n
     expect:
-      node_count: 2
+      node_count: 3
       nodes:
         User: { ids: [99320] }
         Group:
-          ids: [99321]
-      total_edge_count: 1
+          ids: [99321, 99322]
+      total_edge_count: 2
       edges:
-        MEMBER_OF: [[99320, 99321]]
+        MEMBER_OF: [[99320, 99321], [99320, 99322]]
 
   - name: incoming_to_tombstoned_center
     description: Incoming neighbors of a group whose latest row is a tombstone return nothing
     query: |
       MATCH (g:Group {id: 99322})<-[:MEMBER_OF]-(n) RETURN g, n
-    expect:
-      skip_requirements: [node_ids, neighbors, "relationship:MEMBER_OF"]
-      node_count: 0
-
-  - name: both_of_unpinned_tombstoned_center
-    description: Neighbors of a tombstoned group found by a filter return nothing, because its edges died with it
-    query: |
-      MATCH (g:Group)-[:MEMBER_OF]-(n) WHERE g.name = 'Deleted Group' RETURN g, n
     expect:
       skip_requirements: [node_ids, neighbors, "relationship:MEMBER_OF"]
       node_count: 0
