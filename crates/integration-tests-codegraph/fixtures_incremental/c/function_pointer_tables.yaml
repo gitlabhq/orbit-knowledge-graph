@@ -44,6 +44,14 @@ fixtures:
       	local(1);
       }
 
+      void
+      run_local(void)
+      {
+      	void (*fp)(int);
+      	fp = sll_if_print;
+      	fp(1);
+      }
+
   - path: print.h
     content: |
       void llc_if_print(int n);
@@ -107,3 +115,20 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { function: llc_if_print, file: print-llc.c } }
+
+  - name: "a function that walks the table refers to it"
+    query: |
+      MATCH (r:Definition)-[:USES_VALUE]->(t:Definition)
+      WHERE t.name = 'printers'
+      RETURN r.name AS reader
+    assert:
+      - { row: { reader: lookup } }
+
+  - name: "an assignment still binds the pointer, so its call resolves"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.name = 'run_local'
+      RETURN b.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: sll_if_print } }

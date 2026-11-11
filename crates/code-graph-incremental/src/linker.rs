@@ -945,6 +945,18 @@ impl<'t> Fold<'t> {
                                     .resolved(Resolution::Local)
                             });
                         }
+                        // `p = printers;` reads a table or other variable defined in the file
+                        Value::LocalDef(node)
+                            if node != self.enclosing()
+                                && self.tree.cursor(node).has(C::Variable) =>
+                        {
+                            self.edges.push(Edge {
+                                site: Some(c.index()),
+                                call_resolution: crate::tree::CallResolution::Reference,
+                                ..Edge::local(self.enclosing(), node, EdgeKind::Calls)
+                                    .resolved(Resolution::Local)
+                            });
+                        }
                         _ => {}
                     }
                 }
