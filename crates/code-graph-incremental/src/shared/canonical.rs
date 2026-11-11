@@ -183,6 +183,10 @@ pub enum Canonical {
     Dispatch,
     #[strum(serialize = "__qualifier")]
     Qualifier,
+    /// A name read as a value, not called: a function stored in a table, a variable, or a
+    /// field. Links to what the name resolves to as a USES_VALUE reference.
+    #[strum(serialize = "__ref")]
+    Ref,
 }
 
 impl From<Canonical> for u16 {

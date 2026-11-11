@@ -1,0 +1,86 @@
+name: "C: a function named in an initializer is a value use of it"
+
+# Dispatch tables and function-pointer variables name a function without calling it:
+# `{ ether_if_print, DLT_EN10MB }` in a printer table, or `void (*hook)(int) = ppp_if_print;`.
+# The function is reached through the pointer, so the graph needs an edge from where it is
+# named, or nothing refers to it at all.
+
+fixtures:
+  - path: print.c
+    content: |
+      #include <stddef.h>
+
+      struct printer {
+      	void (*f)(int);
+      	int type;
+      };
+
+      void ether_if_print(int n) { }
+      void ppp_if_print(int n) { }
+      void sll_if_print(int n) { }
+
+      static const struct printer printers[] = {
+      	{ ether_if_print,	1 },
+      	{ ppp_if_print,		9 },
+      	{ NULL,			0 },
+      };
+
+      static void (*hook)(int) = sll_if_print;
+
+      void
+      lookup(int t)
+      {
+      	const struct printer *p;
+      	for (p = printers; p->f != NULL; p++)
+      		if (p->type == t)
+      			p->f(t);
+      }
+
+      void
+      install(void)
+      {
+      	void (*local)(int) = ether_if_print;
+      	struct printer one = { ppp_if_print, 2 };
+      	local(1);
+      }
+
+tests:
+  - name: "a table of function pointers is a definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['printers', 'hook']
+      RETURN d.name AS name, d.kind AS kind
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: hook, kind: Variable } }
+      - { row: { name: printers, kind: Variable } }
+
+  - name: "the table refers to each function it names"
+    query: |
+      MATCH (t:Definition)-[:USES_VALUE]->(f:Definition)
+      WHERE t.name = 'printers'
+      RETURN f.name AS function
+      ORDER BY function
+    assert:
+      - { row_count: 2 }
+      - { row: { function: ether_if_print } }
+      - { row: { function: ppp_if_print } }
+
+  - name: "a function-pointer variable refers to its function"
+    query: |
+      MATCH (t:Definition)-[:USES_VALUE]->(f:Definition)
+      WHERE t.name = 'hook'
+      RETURN f.name AS function
+    assert:
+      - { row: { function: sll_if_print } }
+
+  - name: "a function that stores a function pointer refers to it"
+    query: |
+      MATCH (t:Definition)-[:USES_VALUE]->(f:Definition)
+      WHERE t.name = 'install'
+      RETURN f.name AS function
+      ORDER BY function
+    assert:
+      - { row: { function: ether_if_print } }
+      - { row: { function: ppp_if_print } }

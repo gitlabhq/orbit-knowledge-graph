@@ -62,6 +62,40 @@ stages:
       - match: '(preproc_include path: $S:system_lib_string)'
         replace: '(__import (__source @$S) (__source_path @$S|strip=<|strip_suffix(">")) (__name "*"))'
 
+  # Top-level variables and tables are definitions, so the references in their initializers,
+  # such as the functions a dispatch table names, have a source. Locals stay bindings. One
+  # declaration is lifted per pass, so the stage repeats for files with several.
+  - name: top-level-variables
+    rules: &c_globals
+      - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: (function_declarator declarator: (parenthesized_declarator $P:pointer_declarator)) value: $V:identifier)) $$$B)'
+        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$P|regex_replace("^[\s*]+", "")) (__variable) (__ref @$V))) $$$B)'
+      - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:identifier)) $$$B)'
+        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$N) (__variable) (__ref @$V))) $$$B)'
+      - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: $N:identifier value: $V:identifier)) $$$B)'
+        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$N) (__variable) (__ref @$V))) $$$B)'
+      - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: $N:identifier value: $V)) $$$B)'
+        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$N) (__variable) $V)) $$$B)'
+      - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: (array_declarator declarator: $N:identifier) value: $V)) $$$B)'
+        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$N) (__variable) $V)) $$$B)'
+      - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V)) $$$B)'
+        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$N) (__variable) $V)) $$$B)'
+      - match: '(translation_unit $$$A (declaration declarator: (init_declarator declarator: (function_declarator declarator: (parenthesized_declarator $P:pointer_declarator)) value: $V)) $$$B)'
+        replace: '(translation_unit @$ROOT $$$A (c_global (__def (__defname @$P|regex_replace("^[\s*]+", "")) (__variable) $V)) $$$B)'
+  - name: top-level-variables-2
+    rules: *c_globals
+  - name: top-level-variables-3
+    rules: *c_globals
+  - name: top-level-variables-4
+    rules: *c_globals
+  - name: top-level-variables-5
+    rules: *c_globals
+  - name: top-level-variables-6
+    rules: *c_globals
+  - name: top-level-variables-7
+    rules: *c_globals
+  - name: top-level-variables-8
+    rules: *c_globals
+
   - name: normalize
     rules:
       - match: '(translation_unit $$$C)'
@@ -92,6 +126,20 @@ stages:
         replace: '(__def (__defname @$N) (__field_def))'
       - match: '(field_declaration declarator: (array_declarator declarator: $N:field_identifier))'
         replace: '(__def (__defname @$N) (__field_def))'
+
+  # A function or variable named in an initializer, such as `{ ether_if_print, DLT_EN10MB }`
+  # in a dispatch table or `void (*hook)(int) = f;`, is reached through a pointer, never
+  # called by name, so the name is a value reference to it.
+  - name: value-references
+    rules:
+      - match: '(initializer_list $$$A $N:identifier $$$B)'
+        replace: '(initializer_list $$$A (__ref @$N) $$$B)'
+      - match: '(initializer_pair value: $N:identifier)'
+        replace: '(initializer_pair (__ref @$N))'
+      - match: '(init_declarator declarator: $D value: $N:identifier)'
+        replace: '(init_declarator declarator: $D value: (__ref @$N))'
+      - match: '(argument_list $$$A $N:identifier $$$B)'
+        replace: '(argument_list $$$A (__ref @$N) $$$B)'
 
   - name: retag-calls
     rules:
@@ -203,6 +251,8 @@ stages:
         tag: { value: "true", declares_type: "true" }
       - match: '(__def (__field_def))'
         tag: { value: "true" }
+      - match: '(__def (__variable))'
+        tag: { value: "true", scoped: "true" }
 
   - name: tag-file-dir
     rules:
@@ -322,6 +372,9 @@ display:
         tag:
           signature: '@$ROOT|source("4096")|top_until("=", "()[]{}")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
       - match: '(__def (__field_def))'
+        tag:
+          signature: '@$ROOT|source("4096")|top_until(";|=", "()[]{}")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
+      - match: '(__def (__variable))'
         tag:
           signature: '@$ROOT|source("4096")|top_until(";|=", "()[]{}")|regex_replace("\s+", " ")|regex_replace("^ | $", "")'
       - match: '(__def (__field_def))'

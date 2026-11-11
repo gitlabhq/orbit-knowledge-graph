@@ -291,6 +291,9 @@ impl<'t> Fold<'t> {
             self.type_site = c.has(C::Type);
             self.handle_call(c);
             self.type_site = false;
+        } else if k == C::Ref {
+            self.link_value_reference(c);
+            return;
         } else if k == C::Member {
             let in_chain = c.parent().is_some_and(|parent| {
                 parent.is(C::Callee)
@@ -739,6 +742,29 @@ impl<'t> Fold<'t> {
             self.resolve_obj(obj, c.sym(), self.enclosing(), Role::Value);
             for edge in &mut self.edges[first..] {
                 edge.call_resolution = crate::tree::CallResolution::Reference;
+            }
+        }
+    }
+
+    fn link_value_reference(&mut self, reference: Cursor<'t>) {
+        let from = self.enclosing();
+        if from == 0 {
+            return;
+        }
+        for value in self.lookup(reference.sym()) {
+            if let Value::LocalDef(target) | Value::ImportRef(target) = value
+                && target != from
+            {
+                let resolution = if matches!(value, Value::LocalDef(_)) {
+                    Resolution::Local
+                } else {
+                    Resolution::Import
+                };
+                self.edges.push(Edge {
+                    site: Some(reference.index()),
+                    call_resolution: crate::tree::CallResolution::Reference,
+                    ..Edge::local(from, target, EdgeKind::Calls).resolved(resolution)
+                });
             }
         }
     }
