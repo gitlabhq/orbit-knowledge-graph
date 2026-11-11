@@ -1,5 +1,5 @@
 repos:
-  # GitLab (Ruby + TypeScript)
+  # GitLab (Ruby + TypeScript + Markdown)
   - name: gitlab
     source: gitlab
     project: gitlab-org/gitlab
