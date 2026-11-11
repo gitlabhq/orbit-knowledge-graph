@@ -17,6 +17,8 @@ pub type CodePlan = Plan<CodeLanguage>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeValue {
+    /// The repository a match is in, named after the key its `via` chain starts from.
+    Repository,
     Path,
     Line,
     Capture,
@@ -123,6 +125,17 @@ impl Catalog<OrbitCode> {
                     })
                     .collect(),
             })
+    }
+
+    /// The key that names a match's repository: the foreign key the read's `via` chain starts
+    /// from; none for a read only its checks restrict.
+    pub fn repository_key(&self, index: Index) -> Option<&str> {
+        let crate::catalog::Rule::Via(hops) = &self.index_guard(index)?.rule else {
+            return None;
+        };
+        let key = self.model().foreign_key(hops.first()?.variant)?;
+        (key.holder == crate::Endpoint::Source)
+            .then(|| self.graph().property(key.property).name.as_str())
     }
 
     pub fn index_guard(&self, index: Index) -> Option<&Guard> {

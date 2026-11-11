@@ -186,7 +186,7 @@ fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
             "Prefilter [\"compile\"]",
             "Structural compile($$$ARGS)",
             "Top 50",
-            "Select path,line,ARGS",
+            "Select path,line,ARGS,project_id",
         ]
     );
     assert_eq!(
@@ -206,6 +206,7 @@ fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
                 RequestField::Path,
                 RequestField::Line,
                 RequestField::Capture("ARGS".into()),
+                RequestField::Repository("project_id".into()),
             ],
         })
     );
@@ -218,17 +219,17 @@ fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
             "trigrams": ["compile"],
             "pattern": "compile($$$ARGS)",
             "limit": 50,
-            "fields": ["path", "line", {"capture": "ARGS"}],
+            "fields": ["path", "line", {"capture": "ARGS"}, {"repository": "project_id"}],
         })
     );
     assert_eq!(
         rows(&compiled.request, "alice"),
         [
             row(
-                json!({"path": "crates/query-engine/compiler/src/lib.rs", "line": 120, "ARGS": "raw, fe, &data_model, &ctx"})
+                json!({"path": "crates/query-engine/compiler/src/lib.rs", "line": 120, "ARGS": "raw, fe, &data_model, &ctx", "project_id": 42})
             ),
             row(
-                json!({"path": "crates/orbit-server/src/query.rs", "line": 48, "ARGS": "&text, Frontend::Gql, &catalog, &security"})
+                json!({"path": "crates/orbit-server/src/query.rs", "line": 48, "ARGS": "&text, Frontend::Gql, &catalog, &security", "project_id": 42})
             ),
         ]
     );
@@ -383,4 +384,89 @@ fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture() {
         relational.err().unwrap().to_string(),
         "schema violation: structural matches run on the code connection, not in SQL"
     );
+}
+
+/// The rows the graph connection would return for each lookup, from the seeded namespaces.
+fn lookup_rows(lookup: &remote::ScopeLookup) -> Vec<Row> {
+    let seeded = seeded_namespaces();
+    let scope =
+        |path: &orbit_utils::traversal_path::TraversalPath| serde_json::Value::from(path.as_str());
+    match lookup.resolves {
+        remote::Resolves::Repositories => seeded
+            .repositories
+            .iter()
+            .map(|(id, path)| row(json!({"id": id, lookup.scope.clone(): scope(path)})))
+            .collect(),
+        remote::Resolves::Workspaces => seeded
+            .workspaces
+            .iter()
+            .map(|(id, path)| row(json!({"id": id, lookup.scope.clone(): scope(path)})))
+            .collect(),
+    }
+}
+
+#[test]
+fn via_chains_resolve_their_scope_keys_on_the_graph_connection() {
+    let model = model();
+    let graph =
+        query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&model).unwrap();
+    let grants = caller("1/9970/");
+    let sql = |query: &str| {
+        let logical = remote::parse(query, &model, &grants).unwrap();
+        let (target, planned) = remote::plan(&logical, &model).unwrap();
+        let lookups = remote::lookups(&target, &planned, &graph, &grants).unwrap();
+        let results: Vec<_> = lookups
+            .iter()
+            .map(|lookup| (lookup, lookup_rows(lookup)))
+            .collect();
+        let namespaces = remote::namespaces(&results).unwrap();
+        let emitted = remote::secure(&target, planned, &grants, &namespaces).unwrap();
+        remote::check(&emitted).unwrap();
+        (
+            lookups
+                .iter()
+                .map(|lookup| lookup.query.sql.clone())
+                .collect::<Vec<_>>(),
+            physical(&emitted),
+        )
+    };
+    let (code, emitted) = sql(CODE);
+    assert_eq!(
+        code,
+        [
+            "SELECT k0.id, k0.traversal_path FROM gl_project AS k0 FINAL WHERE (startsWith(k0.traversal_path, {p0:String}) AND k0.id IN {p1:Array(Int64)})"
+        ]
+    );
+    assert_eq!(emitted[..2], ["Repositories [42]", "Restrict [42]"]);
+    let (live, emitted) = sql(SLACK);
+    assert_eq!(
+        live,
+        [
+            "SELECT k0.id, k1.traversal_path FROM gl_slack_workspace AS k0 FINAL INNER JOIN gl_group AS k1 FINAL ON (k0.group_id = k1.id) WHERE startsWith(k1.traversal_path, {p0:String})"
+        ]
+    );
+    assert_eq!(emitted[1], "Workspaces [\"T01\"]");
+}
+
+#[test]
+fn code_rows_go_through_the_read_code_check() {
+    let model = model();
+    let logical = remote::parse(CODE, &model, &caller("1/9970/")).unwrap();
+    let checks = remote::row_checks(&logical, &model);
+    assert_eq!(
+        checks,
+        [remote::RowCheck {
+            provider: "rails".into(),
+            permission: "read_code".into(),
+            resource: "project".into(),
+            field: "project_id".into(),
+        }]
+    );
+    let compiled = stages(CODE, &caller("1/9970/")).unwrap();
+    let found = rows(&compiled.request, "alice");
+    assert_eq!(
+        remote::apply_check(found.clone(), &checks[0], &[42].into()).len(),
+        2
+    );
+    assert!(remote::apply_check(found, &checks[0], &Default::default()).is_empty());
 }

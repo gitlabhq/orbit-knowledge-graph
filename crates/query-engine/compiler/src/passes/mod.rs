@@ -12,6 +12,7 @@ pub mod remote_security;
 pub mod response_policy;
 pub mod restrict;
 pub mod result_contract;
+pub mod scope_lookup;
 pub mod security;
 pub mod security_check;
 pub mod settings;

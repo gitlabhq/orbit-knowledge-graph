@@ -72,7 +72,7 @@ impl Matches {
 }
 
 pub struct CodeBuilder<'c> {
-    catalog: &'c Catalog<OrbitCode>,
+    pub(super) catalog: &'c Catalog<OrbitCode>,
     pub(super) construction: Construction<CodeLanguage>,
     index: Option<Index>,
 }

@@ -56,16 +56,18 @@ impl CodeSearch for SeededCodeSearch {
         let matches = request
             .repositories
             .iter()
-            .filter_map(|project| self.repositories.get(project))
-            .flat_map(|repository| &repository.matches)
-            .filter(|found| found.pattern == request.pattern)
-            .filter(|found| {
+            .filter_map(|project| Some((*project, self.repositories.get(project)?)))
+            .flat_map(|(project, repository)| {
+                repository.matches.iter().map(move |found| (project, found))
+            })
+            .filter(|(_, found)| found.pattern == request.pattern)
+            .filter(|(_, found)| {
                 request.languages.is_empty() || request.languages.contains(&found.language)
             });
         let limit = request.limit.map_or(usize::MAX, |limit| limit as usize);
         Ok(matches
             .take(limit)
-            .map(|found| {
+            .map(|(project, found)| {
                 request
                     .fields
                     .iter()
@@ -74,6 +76,7 @@ impl CodeSearch for SeededCodeSearch {
                             ("path".to_string(), Value::from(found.path.as_str()))
                         }
                         RequestField::Line => ("line".to_string(), Value::from(found.line)),
+                        RequestField::Repository(name) => (name.clone(), Value::from(project)),
                         RequestField::Capture(name) => {
                             (name.clone(), found.captures.get(name).cloned().into())
                         }

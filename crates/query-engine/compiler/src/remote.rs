@@ -13,8 +13,64 @@ use serde::Serialize;
 pub use crate::passes::plan::remote::{RemotePlan, Target, plan};
 pub use crate::passes::remote_security::{Namespaces, check, secure};
 
+pub use crate::passes::scope_lookup::{Resolves, ScopeLookup, lookups, namespaces};
+
 use crate::error::{QueryError, Result};
 use orbit_authorization::Grants;
+use query_data_model::catalog::{Check, Row};
+use query_data_model::plan::logical::LogicalOperation;
+
+/// A row check the remote rows of a read go through, on the field that holds each row's key.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RowCheck {
+    pub provider: String,
+    pub permission: String,
+    pub resource: String,
+    pub field: String,
+}
+
+/// The row checks of the entity the plan reads.
+pub fn row_checks(plan: &LogicalPlan, model: &Model) -> Vec<RowCheck> {
+    let access = model.access();
+    let graph = model.graph();
+    plan.nodes()
+        .filter_map(|node| match plan.operation(node) {
+            LogicalOperation::Entities(entity) => Some(*entity),
+            _ => None,
+        })
+        .flat_map(|entity| &access.entity(entity).checks)
+        .filter_map(|check| match check {
+            Check::Rows {
+                provider,
+                permission,
+                resource,
+                id,
+                ..
+            } => Some(RowCheck {
+                provider: provider.clone(),
+                permission: access.permission(*permission).name.clone(),
+                resource: resource.clone(),
+                field: graph.property(*id).name.clone(),
+            }),
+            Check::Delegated { .. } => None,
+        })
+        .collect()
+}
+
+/// The rows whose key the check allows; a row without the key fails closed.
+pub fn apply_check(
+    rows: Vec<Row>,
+    check: &RowCheck,
+    allowed: &std::collections::BTreeSet<i64>,
+) -> Vec<Row> {
+    rows.into_iter()
+        .filter(|row| {
+            row.get(&check.field)
+                .and_then(serde_json::Value::as_i64)
+                .is_some_and(|id| allowed.contains(&id))
+        })
+        .collect()
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "backend", rename_all = "snake_case")]

@@ -47,6 +47,17 @@ pub(super) fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<C
         }
     }
     let entity = entity.ok_or_else(|| unsupported(BACKEND, "search without an entity"))?;
+    for check in &code.model().access().entity(entity).checks {
+        if let query_data_model::catalog::Check::Rows { id, .. } = check {
+            let field = graph.property(*id).name.clone();
+            if !returned
+                .iter()
+                .any(|item| matches!(item, Returned::Field(name) if *name == field))
+            {
+                returned.push(Returned::Field(field));
+            }
+        }
+    }
     let Structural {
         pattern, language, ..
     } = structural.ok_or_else(|| unsupported(BACKEND, "search without a structural pattern"))?;

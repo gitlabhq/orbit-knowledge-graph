@@ -21,6 +21,7 @@ pub enum RequestField {
     Path,
     Line,
     Capture(String),
+    Repository(String),
 }
 
 impl Render for Catalog<OrbitCode> {
@@ -67,6 +68,7 @@ impl Render for Catalog<OrbitCode> {
                     CodeValue::Path => RequestField::Path,
                     CodeValue::Line => RequestField::Line,
                     CodeValue::Capture => RequestField::Capture(name.to_string()),
+                    CodeValue::Repository => RequestField::Repository(name.to_string()),
                 }
             })
             .collect();

@@ -28,9 +28,15 @@ impl CodeBuilder<'_> {
             false => Ok(Outputs::preserve()),
         };
         match operation {
-            CodeOperation::Repositories { projects, .. } => match projects.is_empty() {
+            CodeOperation::Repositories { projects, index } => match projects.is_empty() {
                 true => Err(CodeError::NoRepositories),
-                false => Ok(Outputs::extend([Declare::named("path", CodeValue::Path)])),
+                false => Ok(Outputs::extend(
+                    std::iter::once(Declare::named("path", CodeValue::Path)).chain(
+                        self.catalog
+                            .repository_key(*index)
+                            .map(|key| Declare::named(key, CodeValue::Repository)),
+                    ),
+                )),
             },
             CodeOperation::Restrict(readable) => {
                 Self::files(inputs, "a repository restriction")?;

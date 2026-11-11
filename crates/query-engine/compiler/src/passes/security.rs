@@ -19,7 +19,7 @@ use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, Function, Operation, Relational,
 };
-use query_data_model::plan::tracking::{NodeId, Plan, Ref};
+use query_data_model::plan::tracking::{NodeId, Plan};
 use serde_json::Value;
 
 use super::guards::{scan, scope_set};
@@ -97,7 +97,7 @@ fn guards(
                     continue;
                 };
                 let set = scope_set(grants, catalog.model(), guard.scope, guard.permission)?;
-                conditions.extend(scope_filter(column, set));
+                conditions.extend(scope_filter(Expr::Column(column), set));
             }
         }
         if !conditions.is_empty() {
@@ -127,7 +127,7 @@ fn collect_scans(graph: &Plan<Relational<ClickHouse>>, node: NodeId, scans: &mut
 }
 
 /// The filter a scope set puts on a scope key column; `All` puts none.
-fn scope_filter(column: Ref, set: &ScopeSet) -> Option<Expr> {
+pub(crate) fn scope_filter(column: Expr, set: &ScopeSet) -> Option<Expr> {
     match set {
         ScopeSet::All => None,
         ScopeSet::Subtrees(roots) => {
@@ -138,7 +138,7 @@ fn scope_filter(column: Ref, set: &ScopeSet) -> Option<Expr> {
     }
 }
 
-fn key_filter(column: Ref, keys: &[ScopeKey]) -> Expr {
+fn key_filter(column: Expr, keys: &[ScopeKey]) -> Expr {
     let (data_type, values): (SqlType, Vec<Value>) = match keys.first() {
         None => return falsehood(),
         Some(ScopeKey::Int(_)) => (SqlType::Int64, keys.iter().map(key_value).collect()),
@@ -146,7 +146,7 @@ fn key_filter(column: Ref, keys: &[ScopeKey]) -> Expr {
     };
     Expr::Binary {
         op: BinaryOp::In,
-        left: Box::new(Expr::Column(column)),
+        left: Box::new(column),
         right: Box::new(Expr::Parameter {
             data_type: data_type.to_array(),
             value: Value::Array(values),
@@ -168,11 +168,11 @@ fn falsehood() -> Expr {
     }
 }
 
-fn path_filter(column: Ref, paths: &[&TraversalPath]) -> Expr {
+fn path_filter(column: Expr, paths: &[&TraversalPath]) -> Expr {
     let starts_with = |path: &str| Expr::Call {
         function: Function::StartsWith,
         args: vec![
-            Expr::Column(column),
+            column.clone(),
             Expr::Parameter {
                 data_type: SqlType::String,
                 value: Value::String(path.to_string()),
