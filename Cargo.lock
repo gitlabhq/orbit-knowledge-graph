@@ -3121,6 +3121,7 @@ dependencies = [
  "anyhow",
  "arrow 60.1.0",
  "duckdb",
+ "orbit-authorization",
  "orbit-search",
  "orbit-utils",
  "query-data-model",
