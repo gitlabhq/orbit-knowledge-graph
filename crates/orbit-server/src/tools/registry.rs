@@ -106,7 +106,7 @@ pub(super) mod params {
         json!({
             "type": "array",
             "items": { "type": "string" },
-            "description": "Entity types to expand with their properties and relationships. Pass the names you intend to query (e.g. [\"MergeRequest\", \"User\"]) to get their filterable fields and types."
+            "description": "Entity types to expand with their properties and relationships. Pass the entity names you intend to query to get their filterable fields and types."
         })
     }
 

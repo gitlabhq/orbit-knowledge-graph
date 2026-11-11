@@ -49,7 +49,7 @@ impl StorageBackend for DuckDb {
         relational
             .tables
             .extend(edge_table_specs(&input, diagnostics));
-        relational.check_attribute_columns(&input, diagnostics);
+        relational.check_edge_columns(&input, diagnostics);
         relational
     }
 }

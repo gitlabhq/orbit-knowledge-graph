@@ -85,7 +85,7 @@ impl StorageBackend for ClickHouse {
         resolve_denormalized(&input, &mut read_paths, diagnostics);
         resolve_joins(&input, &mut read_paths, diagnostics);
         let schema = schema::resolve(&input, &mut relational, &mut read_paths, diagnostics);
-        relational.check_attribute_columns(&input, diagnostics);
+        relational.check_edge_columns(&input, diagnostics);
         ClickHouseStore {
             relational,
             read_paths,

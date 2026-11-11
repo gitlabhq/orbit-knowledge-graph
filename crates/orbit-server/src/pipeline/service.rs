@@ -110,6 +110,7 @@ impl QueryPipelineService {
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(Arc::clone(&schema.data_model));
+        server_extensions.insert(schema.limits);
         server_extensions.insert(claims);
         server_extensions.insert(tx.clone());
         server_extensions.insert(Arc::new(RailsExchange::new(tx.clone(), stream)));

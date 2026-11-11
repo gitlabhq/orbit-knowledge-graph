@@ -3,6 +3,7 @@ package: gitlab.ci
 store: graph
 entities:
   Deployment:
+    complete: true
     table: gl_deployment
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -12,7 +13,7 @@ entities:
       tag: {immutable: true, backend: {type: Bool}}
       sha: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
       status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
-      deployable_type: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      deployable_type: {immutable: true, selectivity: low, backend: {type: String, codec: [ZSTD(1)]}}
       deployable_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
       on_stop: {backend: {type: String, codec: [ZSTD(1)]}}
       archived: {backend: {type: Bool}}
@@ -39,6 +40,7 @@ entities:
       path_lookups: {id: {table: gl_deployment, key: id}}
 
   Environment:
+    complete: true
     table: gl_environment
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -46,8 +48,8 @@ entities:
       name: {backend: {type: String, codec: [ZSTD(1)]}}
       slug: {backend: {type: String, codec: [ZSTD(1)]}}
       external_url: {backend: {type: String, codec: [ZSTD(1)]}}
-      environment_type: {backend: {type: String, codec: [ZSTD(1)]}}
-      state: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      environment_type: {selectivity: low, backend: {type: String, codec: [ZSTD(1)]}}
+      state: {stored_as_text: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
       tier: {backend: {type: LowCardinality(String), codec: [LZ4]}}
       auto_stop_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
       auto_delete_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
@@ -77,17 +79,18 @@ entities:
       path_lookups: {id: {table: gl_environment, key: id}}
 
   Job:
+    complete: true
     table: gl_job
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
       name: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
-      status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      status: {stored_as_text: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
       ref: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
       tag: {immutable: true, backend: {type: Nullable(Bool)}}
       allow_failure: {backend: {type: Bool}}
       coverage: {backend: {type: String, codec: [ZSTD(1)]}}
       environment: {backend: {type: String, codec: [ZSTD(1)]}}
-      when: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      when: {immutable: true, stored_as_text: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
       retried: {backend: {type: Nullable(Bool)}}
       failure_reason: {backend: {type: String, codec: [ZSTD(1)]}}
       created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
@@ -96,7 +99,7 @@ entities:
       queued_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
       duration: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
       queued_duration: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
-      type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      type: {immutable: true, selectivity: low, backend: {type: LowCardinality(String), codec: [LZ4]}}
       runner_id: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
       timeout: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
       timeout_source: {backend: {type: LowCardinality(String), codec: [LZ4]}}
@@ -134,13 +137,14 @@ entities:
       path_lookups: {id: {table: gl_job, key: id}}
 
   Pipeline:
+    complete: true
     table: gl_pipeline
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
       iid: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
       sha: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
       ref: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
-      status: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      status: {stored_as_text: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
       source: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
       tag: {immutable: true, backend: {type: Bool}}
       duration: {backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
@@ -177,6 +181,7 @@ entities:
       path_lookups: {id: {table: gl_pipeline, key: id}}
 
   Runner:
+    complete: true
     table: gl_runner
     path_column:
     columns:
@@ -200,6 +205,7 @@ entities:
       epoch_nulls: [created_at, contacted_at]
 
   Stage:
+    complete: true
     table: gl_stage
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}

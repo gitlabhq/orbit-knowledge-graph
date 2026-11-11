@@ -204,7 +204,15 @@ pub(super) async fn pipeline_output(
 ) -> PipelineOutput {
     let data_model = load_data_model();
     let client = Arc::new(ctx.create_client());
-    let compiled = Arc::new(compile(query, &data_model, &security_ctx).unwrap());
+    let compiled = Arc::new(
+        compile(
+            query,
+            &data_model,
+            &security_ctx,
+            query_data_model::testkit::limits(),
+        )
+        .unwrap(),
+    );
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
@@ -213,6 +221,7 @@ pub(super) async fn pipeline_output(
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
     server_extensions.insert(data_model);
+    server_extensions.insert(*query_data_model::testkit::limits());
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),

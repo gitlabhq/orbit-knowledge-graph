@@ -3,15 +3,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use query_engine::formatters::{GraphEdge, GraphResponse};
 
 use super::format::AllPagesExpect;
+use crate::visitor::int;
 
 type EdgeIdentity = (String, i64, String, i64, String, Option<i64>);
 
 fn edge_identity(edge: &GraphEdge) -> EdgeIdentity {
     (
         edge.from.clone(),
-        edge.from_id,
+        int(&edge.from_id),
         edge.to.clone(),
-        edge.to_id,
+        int(&edge.to_id),
         edge.edge_type.clone(),
         edge.depth,
     )
@@ -76,8 +77,8 @@ impl PageCollection {
             self.node_ids
                 .entry(node.entity_type.clone())
                 .or_default()
-                .push(node.id);
-            self.nodes.insert((node.entity_type.clone(), node.id));
+                .push(int(&node.id));
+            self.nodes.insert((node.entity_type.clone(), int(&node.id)));
         }
         let mut paths: BTreeMap<usize, Vec<_>> = BTreeMap::new();
         for edge in &response.edges {

@@ -33,7 +33,12 @@ fn named_queries_render_and_compile() {
         let rendered = query
             .render_example()
             .unwrap_or_else(|error| panic!("named query failed to render: {error}"));
-        if let Err(error) = compiler::compile(&rendered, &data_model, &security_context) {
+        if let Err(error) = compiler::compile(
+            &rendered,
+            &data_model,
+            &security_context,
+            query_data_model::testkit::limits(),
+        ) {
             panic!("named query `{}` failed to compile: {error}", query.name);
         }
     }

@@ -9,6 +9,7 @@ mod pagination;
 mod regression;
 mod response;
 
+use query_data_model::testkit::limits;
 use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
@@ -33,7 +34,7 @@ use response::{
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
-use crate::visitor::{NodeExt, Requirement, ResponseView};
+use crate::visitor::{NodeExt, Requirement, ResponseView, int};
 use crate::{SeededColumnResolver, collect_subtest_results, load_data_model};
 
 pub use duckdb::run_duckdb_dir;
@@ -373,7 +374,7 @@ async fn assert_indexes_used(
 ) {
     let query = &compiled.base;
     let plan = ctx.explain_plan(query).await;
-    let ctes = subquery_statements(raw, data_model, &grants_for(data_model, security))
+    let ctes = subquery_statements(raw, data_model, &grants_for(data_model, security), limits())
         .expect("subqueries render");
     for ExpectedIndex { table, index } in expected {
         let mut cte_plans = Vec::new();
@@ -523,6 +524,7 @@ async fn compile_like_server(
 ) -> Result<Arc<CompiledQueryContext>, PipelineError> {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::clone(data_model));
+    server_extensions.insert(*limits());
     server_extensions.insert(claims_for(security));
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: query.to_owned(),
@@ -562,6 +564,7 @@ async fn execute_output(
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
     server_extensions.insert(Arc::clone(data_model));
+    server_extensions.insert(*limits());
     server_extensions.insert(claims_for(security));
     server_extensions.insert(resolver_registry);
 
@@ -752,7 +755,13 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 .iter()
                 .find(|edge| edge.edge_type == *kind && expected.matches(edge));
             let edge = edge.unwrap_or_else(|| panic!("{label}: expected {kind} edge {expected:?}"));
-            view.assert_edge_exists(&edge.from, edge.from_id, &edge.to, edge.to_id, kind);
+            view.assert_edge_exists(
+                &edge.from,
+                int(&edge.from_id),
+                &edge.to,
+                int(&edge.to_id),
+                kind,
+            );
         }
     }
     for (kind, edges) in &expect.edge_absent {
@@ -843,7 +852,10 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             std::collections::BTreeMap::new();
         for &pid in pids.iter() {
             if let Some(last) = view.path(pid).last() {
-                actual.entry(last.to.clone()).or_default().push(last.to_id);
+                actual
+                    .entry(last.to.clone())
+                    .or_default()
+                    .push(int(&last.to_id));
             }
         }
         for vals in actual.values_mut() {
@@ -883,7 +895,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             .iter()
             .map(|&pid| {
                 let edges = view.path(pid);
-                let dest_id = edges.last().map_or(0, |e| e.to_id);
+                let dest_id = edges.last().map_or(0, |e| int(&e.to_id));
                 (dest_id, edges)
             })
             .collect();
@@ -918,7 +930,11 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                     assert_eq!(&edge.from, from, "{label}: path {i} edge {j} from entity");
                 }
                 if let Some(from_id) = exp.from_id {
-                    assert_eq!(edge.from_id, from_id, "{label}: path {i} edge {j} from_id");
+                    assert_eq!(
+                        int(&edge.from_id),
+                        from_id,
+                        "{label}: path {i} edge {j} from_id"
+                    );
                 }
                 if let Some(ref t) = exp.edge_type {
                     assert_eq!(&edge.edge_type, t, "{label}: path {i} edge {j} type");
@@ -927,7 +943,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                     assert_eq!(&edge.to, to, "{label}: path {i} edge {j} to entity");
                 }
                 if let Some(to_id) = exp.to_id {
-                    assert_eq!(edge.to_id, to_id, "{label}: path {i} edge {j} to_id");
+                    assert_eq!(int(&edge.to_id), to_id, "{label}: path {i} edge {j} to_id");
                 }
                 if let Some(step) = exp.step {
                     assert_eq!(edge.step, Some(step), "{label}: path {i} edge {j} step");
@@ -1294,7 +1310,7 @@ mod tests {
                 "line 2, column",
             ),
         ] {
-            let error = compile(raw, &data_model, &security).unwrap_err();
+            let error = compile(raw, &data_model, &security, limits()).unwrap_err();
             let message = error.to_string();
             assert!(error.is_client_safe(), "{message}");
             assert!(message.contains("Orbit query syntax"), "{message}");

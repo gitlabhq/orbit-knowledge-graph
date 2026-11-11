@@ -2,42 +2,50 @@
 //! attached to it, each bound to the storage facts that decide how it lowers.
 
 use query_data_model::Catalog;
-use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 
 use super::filters::{BoundFilter, bind_facts, unindex_if_key_narrowed};
+use crate::error::Result;
 use crate::logical::Query;
 use crate::logical::anchors::Anchor;
-use crate::logical::columns::redaction_column;
+use crate::logical::columns::{identity_column, redaction_column};
 use crate::passes::codegen::SqlBackend;
 
 pub(crate) struct Node<'p> {
     pub alias: &'p str,
     pub entity: &'p str,
     pub table: Option<&'p str>,
+    /// The column holding the node's identity.
+    pub id: &'p str,
     pub redaction: &'p str,
-    pub pinned: Option<Vec<i64>>,
+    pub pinned: Option<Vec<orbit_authorization::Key>>,
     pub range: Option<(i64, i64)>,
     pub filters: Vec<(String, BoundFilter)>,
     pub has_traversal_path: bool,
 }
 
 impl<'p> Node<'p> {
-    pub fn new<B: SqlBackend>(query: Query<'p>, anchor: Anchor<'p>, model: &'p Catalog<B>) -> Self {
+    pub fn new<B: SqlBackend>(
+        query: Query<'p>,
+        anchor: Anchor<'p>,
+        model: &'p Catalog<B>,
+    ) -> Result<Self> {
         let binding = anchor.binding;
+        let id = identity_column(model, binding.entity)?;
         let graph = query.model.graph();
         let source = model.source(binding.entity).map(|(_, source)| source);
         let mut filters = bind_facts(query, &anchor, binding.name, model);
         unindex_if_key_narrowed(&mut filters);
-        Self {
+        Ok(Self {
             alias: binding.name,
             entity: &graph.entity(binding.entity).name,
             table: source.and_then(|source| source.table.as_deref()),
-            redaction: redaction_column(model, binding.entity).unwrap_or(DEFAULT_PRIMARY_KEY),
+            id,
+            redaction: redaction_column(model, binding.entity).unwrap_or(id),
             pinned: anchor.pinned,
             range: anchor.range,
             filters,
             has_traversal_path: source.is_some_and(|source| source.path_column.is_some()),
-        }
+        })
     }
 
     pub fn is_id_pinned_only(&self) -> bool {
@@ -45,6 +53,6 @@ impl<'p> Node<'p> {
     }
 
     pub fn uses_default_pk(&self) -> bool {
-        self.redaction == DEFAULT_PRIMARY_KEY
+        self.redaction == self.id
     }
 }

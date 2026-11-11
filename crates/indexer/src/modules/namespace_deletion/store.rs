@@ -14,7 +14,8 @@ use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 
 use query_data_model::catalog::sources::DataSource;
-use query_data_model::implementations::clickhouse::schema::{EngineTable, Schema};
+use query_data_model::implementations::clickhouse::schema::Schema;
+use query_data_model::implementations::clickhouse::spec::TableRole;
 use query_data_model::{Catalog, ClickHouse, DataModelError};
 
 use super::lower::{self, DeletionStatement, ReconcileStatement};
@@ -83,21 +84,18 @@ struct EngineQueries {
 
 impl EngineQueries {
     fn new(schema: &Schema) -> Result<Self, DataModelError> {
-        let table = |role| {
+        let table = |role: TableRole| {
             schema
-                .engine_table(role)
+                .role_table(role)
                 .map(|table| prefixed_table_name(table, *SCHEMA_VERSION))
+                .ok_or_else(|| DataModelError::Invalid(format!("no table holds the {role:?} role")))
         };
-        let schedule = table(EngineTable::DeletionSchedule)?;
+        let schedule = table(TableRole::DeletionSchedule)?;
         Ok(Self {
             mark_complete: mark_deletion_complete_sql(&schedule),
             schedule: schedule_deletion_insert_sql(&schedule),
-            delete_sdlc_checkpoints: delete_sdlc_checkpoints_sql(&table(
-                EngineTable::PipelineCheckpoints,
-            )?),
-            delete_code_checkpoints: delete_code_checkpoints_sql(&table(
-                EngineTable::CodeCheckpoints,
-            )?),
+            delete_sdlc_checkpoints: delete_sdlc_checkpoints_sql(&table(TableRole::PlanProgress)?),
+            delete_code_checkpoints: delete_code_checkpoints_sql(&table(TableRole::CodeProgress)?),
             due: due_namespaces_query_sql(&schedule),
         })
     }

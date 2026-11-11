@@ -1,4 +1,5 @@
-use super::limits::Limits;
+use orbit_server_config::QueryLimits;
+
 use super::{LogicalBuilder, LogicalPlan, PlanError, Rows};
 use crate::catalog::Store;
 use crate::plan::tracking::{self, Declared, Each, Step};
@@ -9,17 +10,17 @@ pub struct LogicalCatalog<'m> {
     model: &'m Model,
     admin: bool,
     connection: Option<&'m str>,
-    limits: Limits,
+    limits: &'m QueryLimits,
     all_columns: bool,
 }
 
 impl Model {
-    pub fn logical(&self) -> LogicalCatalog<'_> {
+    pub fn logical<'m>(&'m self, limits: &'m QueryLimits) -> LogicalCatalog<'m> {
         LogicalCatalog {
             model: self,
             admin: false,
             connection: None,
-            limits: Limits::QUERY,
+            limits,
             all_columns: false,
         }
     }
@@ -58,12 +59,7 @@ impl<'m> LogicalCatalog<'m> {
         }
     }
 
-    #[must_use]
-    pub fn with_limits(self, limits: Limits) -> Self {
-        Self { limits, ..self }
-    }
-
-    pub fn limits(self) -> Limits {
+    pub fn limits(self) -> &'m QueryLimits {
         self.limits
     }
 
@@ -87,11 +83,17 @@ impl<'m> LogicalCatalog<'m> {
         if self.connection.is_none() {
             return true;
         }
-        let Some(home) = self.stores().find(|store| store.source(entity).is_some()) else {
+        let mut holders = self.stores().filter(|store| store.source(entity).is_some());
+        let Some(first) = holders.next() else {
             return true;
         };
+        let home = std::iter::once(first)
+            .chain(holders)
+            .find(|store| store.complete(entity))
+            .unwrap_or(first);
         !home.excludes(property)
-            && (self.model.lookup(property).is_some() || home.column(property).is_some())
+            && (home.complete(entity) && self.model.lookup(property).is_some()
+                || home.column(property).is_some())
     }
 
     /// Every variant keeps its rows in an edge table, which the loader checks holds each

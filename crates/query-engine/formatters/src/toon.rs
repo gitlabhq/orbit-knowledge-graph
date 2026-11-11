@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write;
 use std::sync::LazyLock;
 
+use compiler::orbit_authorization::Key;
 use indexmap::IndexMap;
 use orbit_utils::strings::quote_escaped;
 use semver::Version;
@@ -12,8 +13,8 @@ use toon_format::utils::format_canonical_number;
 use toon_format::{EncodeOptions, encode, is_literal_like, is_valid_unquoted_key};
 
 use super::graph::{
-    ColumnDescriptor, GraphEdge, GraphResponse, GroupColumnDescriptor, PaginationResponse,
-    group_node_cell,
+    ColumnDescriptor, GraphEdge, GraphResponse, GroupColumnDescriptor, GroupIds,
+    PaginationResponse, group_node_cell,
 };
 use super::text::column_order;
 use super::{FormatName, GraphFormatter, ResultFormatter};
@@ -26,7 +27,7 @@ pub static TOON_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
 });
 
 type Properties = Map<String, Value>;
-type NodesByType<'a> = BTreeMap<&'a str, IndexMap<i64, &'a Properties>>;
+type NodesByType<'a> = BTreeMap<&'a str, IndexMap<Key, &'a Properties>>;
 
 #[derive(Clone, Copy)]
 pub struct ToonFormatter;
@@ -58,24 +59,24 @@ impl ResultFormatter for ToonFormatter {
 
 fn relationships<'a>(
     response: &'a GraphResponse,
-    (entity, id): (&str, i64),
+    (entity, id): (&str, &Key),
     label: impl Fn(&str) -> Option<&'a str>,
 ) -> String {
-    let names: HashMap<(&str, i64), &Value> = response
+    let names: HashMap<(&str, &Key), &Value> = response
         .nodes
         .iter()
         .filter_map(|node| {
             let label = label(&node.entity_type)?;
             let name = node.properties.get(label).filter(|name| !name.is_null())?;
-            Some(((node.entity_type.as_str(), node.id), name))
+            Some(((node.entity_type.as_str(), &node.id), name))
         })
         .collect();
-    let mut groups: IndexMap<String, Vec<(&str, i64)>> = IndexMap::new();
+    let mut groups: IndexMap<String, Vec<(&str, &Key)>> = IndexMap::new();
     for edge in &response.edges {
-        let (arrow, other) = if (edge.from.as_str(), edge.from_id) == (entity, id) {
-            ("->", (edge.to.as_str(), edge.to_id))
-        } else if (edge.to.as_str(), edge.to_id) == (entity, id) {
-            ("<-", (edge.from.as_str(), edge.from_id))
+        let (arrow, other) = if (edge.from.as_str(), &edge.from_id) == (entity, id) {
+            ("->", (edge.to.as_str(), &edge.to_id))
+        } else if (edge.to.as_str(), &edge.to_id) == (entity, id) {
+            ("<-", (edge.from.as_str(), &edge.from_id))
         } else {
             continue;
         };
@@ -100,9 +101,7 @@ fn relationships<'a>(
             match names.get(other) {
                 Some(Value::String(name)) => write_text(&mut out, name),
                 Some(name) => write_value(&mut out, name),
-                None => {
-                    let _ = write!(out, "{}", other.1);
-                }
+                None => write_id(&mut out, other.1),
             }
         }
         out.push('\n');
@@ -147,7 +146,7 @@ fn encode_response(response: &GraphResponse) -> String {
         },
     );
     if let Some(rows) = &response.rows {
-        write_row_table(&mut out, rows);
+        write_row_table(&mut out, rows, &response.group_ids);
     }
     append_encoded(
         &mut out,
@@ -164,10 +163,10 @@ fn nodes_by_type(response: &GraphResponse) -> NodesByType<'_> {
         nodes
             .entry(node.entity_type.as_str())
             .or_default()
-            .insert(node.id, &node.properties);
+            .insert(node.id.clone(), &node.properties);
     }
     for cell in response.rows.iter().flatten().flat_map(Map::values) {
-        if let Some((entity, id, properties)) = group_node_cell(cell) {
+        if let Some((entity, id, properties)) = group_node_cell(cell, &response.group_ids) {
             nodes
                 .entry(entity)
                 .or_default()
@@ -178,7 +177,7 @@ fn nodes_by_type(response: &GraphResponse) -> NodesByType<'_> {
     nodes
 }
 
-fn write_node_table(out: &mut String, entity: &str, entries: &IndexMap<i64, &Properties>) {
+fn write_node_table(out: &mut String, entity: &str, entries: &IndexMap<Key, &Properties>) {
     let mut keys: Vec<&str> = entries
         .values()
         .flat_map(|properties| properties.keys().map(String::as_str))
@@ -190,7 +189,7 @@ fn write_node_table(out: &mut String, entity: &str, entries: &IndexMap<i64, &Pro
     write_header(out, 1, entity, entries.len(), &columns);
     for (id, properties) in entries {
         out.push_str("    ");
-        let _ = write!(out, "{id}");
+        write_id(out, id);
         for key in &keys {
             out.push(',');
             write_value(out, properties.get(*key).unwrap_or(&Value::Null));
@@ -213,11 +212,14 @@ fn write_edge_table(out: &mut String, edges: &[GraphEdge]) {
     for edge in edges {
         out.push_str("  ");
         write_text(out, &edge.from);
-        let _ = write!(out, ",{},", edge.from_id);
+        out.push(',');
+        write_id(out, &edge.from_id);
+        out.push(',');
         write_text(out, &edge.edge_type);
         out.push(',');
         write_text(out, &edge.to);
-        let _ = write!(out, ",{}", edge.to_id);
+        out.push(',');
+        write_id(out, &edge.to_id);
         if has_path {
             out.push(',');
             write_optional(out, edge.path_id);
@@ -232,7 +234,7 @@ fn write_edge_table(out: &mut String, edges: &[GraphEdge]) {
     }
 }
 
-fn write_row_table(out: &mut String, rows: &[Properties]) {
+fn write_row_table(out: &mut String, rows: &[Properties], group_ids: &GroupIds) {
     let mut columns: Vec<&str> = Vec::new();
     for column in rows.iter().flat_map(Map::keys) {
         if !columns.contains(&column.as_str()) {
@@ -247,14 +249,23 @@ fn write_row_table(out: &mut String, rows: &[Properties]) {
                 out.push(',');
             }
             let cell = row.get(*column).unwrap_or(&Value::Null);
-            match group_node_cell(cell) {
-                Some((_, id, _)) => {
-                    let _ = write!(out, "{id}");
-                }
+            match group_node_cell(cell, group_ids) {
+                Some((_, id, _)) => write_id(out, &id),
                 None => write_value(out, cell),
             }
         }
         out.push('\n');
+    }
+}
+
+/// An identity key as a TOON cell: an integer bare, a string quoted as TOON quotes text.
+fn write_id(out: &mut String, id: &Key) {
+    match id {
+        Key::Int(id) => {
+            let _ = write!(out, "{id}");
+        }
+        Key::Text(id) | Key::Uuid(id) => write_text(out, id),
+        Key::Composite(_) => write_text(out, &id.to_string()),
     }
 }
 
@@ -371,7 +382,7 @@ mod tests {
     fn node(entity: &str, id: i64, properties: Value) -> GraphNode {
         GraphNode {
             entity_type: entity.into(),
-            id,
+            id: Key::Int(id),
             properties: properties.as_object().unwrap().clone(),
         }
     }
@@ -379,9 +390,9 @@ mod tests {
     fn edge(from_id: i64, to_id: i64, depth: Option<i64>) -> GraphEdge {
         GraphEdge {
             from: "User".into(),
-            from_id,
+            from_id: Key::Int(from_id),
             to: "Group".into(),
-            to_id,
+            to_id: Key::Int(to_id),
             edge_type: "MEMBER_OF".into(),
             depth,
             path_id: None,
@@ -392,9 +403,9 @@ mod tests {
     fn link(from: &str, from_id: i64, edge_type: &str, to: &str, to_id: i64) -> GraphEdge {
         GraphEdge {
             from: from.into(),
-            from_id,
+            from_id: Key::Int(from_id),
             to: to.into(),
-            to_id,
+            to_id: Key::Int(to_id),
             edge_type: edge_type.into(),
             depth: None,
             path_id: None,
@@ -412,6 +423,7 @@ mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         }
     }
 
@@ -523,7 +535,7 @@ mod tests {
         let at = text.find('\n').unwrap() + 1;
         text.insert_str(
             at,
-            &relationships(&graph, ("MergeRequest", 5), |entity| {
+            &relationships(&graph, ("MergeRequest", &Key::Int(5)), |entity| {
                 labels.get(entity).copied()
             }),
         );
@@ -544,6 +556,9 @@ mod tests {
     fn aggregation_rows_share_one_lifted_node() {
         let group = json!({"type": "Group", "id": "22", "properties": {"name": "Toolbox"}});
         let mut aggregation = response("aggregation", vec![], vec![]);
+        aggregation
+            .group_ids
+            .insert(("Group".into(), "22".into()), Key::Int(22));
         aggregation.rows = Some(
             [1, 2]
                 .into_iter()

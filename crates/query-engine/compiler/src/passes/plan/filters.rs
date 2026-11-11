@@ -159,7 +159,13 @@ pub fn bind_filter(
         property: property_id,
         data_type,
         selectivity: property_id
-            .map(|property| graph.property(property).selectivity)
+            .map(|property| {
+                model.selectivity(property).unwrap_or_else(|| {
+                    query_data_model::FieldSelectivity::from_data_type(
+                        graph.property(property).data_type,
+                    )
+                })
+            })
             .or_else(|| data_type.map(query_data_model::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
         namespace_anchor: property_id

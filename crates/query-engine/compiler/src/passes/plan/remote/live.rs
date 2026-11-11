@@ -4,12 +4,12 @@ use query_data_model::plan::logical::{
     Columns, Comparison, Conjunct, Expr, Literal, LogicalOperation, LogicalPlan, Matching, Operand,
     Predicate, Projection,
 };
-use query_data_model::{Catalog, PropertyId};
+use query_data_model::{Catalog, PropertyId, StorageBackend};
 
 use super::unsupported;
 use crate::error::Result;
 
-const BACKEND: &str = "live";
+const BACKEND: &str = Live::KIND;
 
 enum Pushed {
     Equals(PropertyId, Literal),

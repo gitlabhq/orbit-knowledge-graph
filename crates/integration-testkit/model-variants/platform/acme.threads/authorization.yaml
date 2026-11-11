@@ -1,0 +1,21 @@
+kind: authorization
+package: acme.threads
+scopes:
+  space: {kind: hierarchy, provider: directory}
+entities:
+  Thread:
+    scope: space
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    properties: {open: [key, title], hidden: [traversal_path]}
+
+  Post:
+    scope: space
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    properties: {open: [slug, body], hidden: [traversal_path]}
+relationships:
+  REPLIES_TO:
+    scope: space
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: both}}

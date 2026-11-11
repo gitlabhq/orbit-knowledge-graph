@@ -5,7 +5,6 @@ use clickhouse_client::FromArrowColumn;
 use integration_testkit::{load_data_model, t};
 use orbit_server::active_schema::{ActiveSchema, SchemaSnapshot};
 use orbit_server::item_counts::{ItemCountService, ScopeItemCounts};
-use orbit_server_config::AppConfig;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 
@@ -65,7 +64,7 @@ pub const STALE_FIRST_PASS: CheckpointRow = CheckpointRow {
 };
 
 pub fn use_production_query_settings() {
-    orbit_server_config::query::init(AppConfig::embedded_defaults().query);
+    orbit_server_config::query::init_embedded_defaults();
 }
 
 pub async fn query_cache_usage(ctx: &TestContext) -> Vec<String> {

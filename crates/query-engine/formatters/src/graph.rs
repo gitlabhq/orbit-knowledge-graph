@@ -8,31 +8,34 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use compiler::orbit_authorization::Key;
 use shared::PipelineOutput;
-use types::{QueryResult, QueryResultRow};
+use types::{QueryResult, QueryResultRow, identity};
 
 use semver::Version;
 
 use super::{FormatName, ResultFormatter, column_value_to_json};
 
 mod id_as_string {
+    use compiler::orbit_authorization::Key;
     use serde::Serializer;
 
-    pub fn serialize<S>(value: &i64, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(value: &Key, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         serializer.serialize_str(&value.to_string())
     }
 
+    /// Tests read ids back without the model, so a decimal id reads as an integer key.
     #[cfg(feature = "testutils")]
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<i64, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Key, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         use serde::Deserialize;
         let s = String::deserialize(deserializer)?;
-        s.parse::<i64>().map_err(serde::de::Error::custom)
+        Ok(s.parse::<i64>().map_or(Key::Text(s), Key::Int))
     }
 }
 
@@ -45,14 +48,23 @@ pub(crate) fn is_reserved_node_key(key: &str) -> bool {
     key == "type" || key == "id"
 }
 
-pub(crate) fn group_node_cell(cell: &Value) -> Option<(&str, i64, &Map<String, Value>)> {
+/// A group-key node cell with the typed key its row carried, which the cell writes as text.
+pub(crate) fn group_node_cell<'a>(
+    cell: &'a Value,
+    ids: &GroupIds,
+) -> Option<(&'a str, Key, &'a Map<String, Value>)> {
     let cell = cell.as_object()?;
+    let entity = cell.get("type")?.as_str()?;
+    let id = cell.get("id")?.as_str()?;
     Some((
-        cell.get("type")?.as_str()?,
-        cell.get("id")?.as_str()?.parse().ok()?,
+        entity,
+        ids.get(&(entity.to_string(), id.to_string()))?.clone(),
         cell.get("properties")?.as_object()?,
     ))
 }
+
+/// The typed key of each group-key node cell, by entity and the id text the cell holds.
+pub type GroupIds = std::collections::HashMap<(String, String), Key>;
 
 #[derive(Debug, Serialize)]
 #[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
@@ -69,6 +81,8 @@ pub struct GraphResponse {
     pub rows: Option<Vec<Map<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pagination: Option<PaginationResponse>,
+    #[serde(skip)]
+    pub group_ids: GroupIds,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -106,7 +120,7 @@ pub struct GraphNode {
     #[serde(rename = "type")]
     pub entity_type: String,
     #[serde(with = "id_as_string")]
-    pub id: i64,
+    pub id: Key,
     #[serde(flatten)]
     pub properties: serde_json::Map<String, Value>,
 }
@@ -116,10 +130,10 @@ pub struct GraphNode {
 pub struct GraphEdge {
     pub from: String,
     #[serde(with = "id_as_string")]
-    pub from_id: i64,
+    pub from_id: Key,
     pub to: String,
     #[serde(with = "id_as_string")]
-    pub to_id: i64,
+    pub to_id: Key,
     #[serde(rename = "type")]
     pub edge_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,7 +144,7 @@ pub struct GraphEdge {
     pub step: Option<usize>,
 }
 
-type EdgeKey = (String, i64, String, i64, String, Option<i64>);
+type EdgeKey = (String, Key, String, Key, String, Option<i64>);
 
 #[derive(Clone, Copy)]
 pub struct GraphFormatter;
@@ -163,12 +177,13 @@ impl GraphFormatter {
             .map(|qt| qt.to_string())
             .unwrap_or_default();
 
-        let mut node_map: IndexMap<(String, i64), GraphNode> = IndexMap::new();
+        let mut node_map: IndexMap<(String, Key), GraphNode> = IndexMap::new();
         let mut edges: Vec<GraphEdge> = Vec::new();
         let mut edge_set: HashSet<EdgeKey> = HashSet::new();
         let mut columns: Option<Vec<ColumnDescriptor>> = None;
         let mut group_columns: Option<Vec<GroupColumnDescriptor>> = None;
         let mut rows: Option<Vec<Map<String, Value>>> = None;
+        let mut group_ids = GroupIds::new();
         let aggregations = Some(&output.compiled.shape.measures);
         let group_by = &output.compiled.shape.groups;
 
@@ -191,6 +206,7 @@ impl GraphFormatter {
                         result_context,
                         aggs,
                         group_by,
+                        &mut group_ids,
                     ));
                 }
             }
@@ -224,6 +240,7 @@ impl GraphFormatter {
             group_columns,
             rows,
             pagination,
+            group_ids,
         }
     }
 
@@ -231,7 +248,7 @@ impl GraphFormatter {
         &self,
         result: &QueryResult,
         result_context: &ResultContext,
-        node_map: &mut IndexMap<(String, i64), GraphNode>,
+        node_map: &mut IndexMap<(String, Key), GraphNode>,
     ) {
         for row in result.authorized_rows() {
             for node in result_context.nodes() {
@@ -241,7 +258,7 @@ impl GraphFormatter {
                 let Some(entity_type) = row.get_type(node) else {
                     continue;
                 };
-                let key = (entity_type.to_string(), id);
+                let key = (entity_type.to_string(), id.clone());
                 node_map.entry(key).or_insert_with(|| {
                     let properties = Self::extract_node_properties(row, &node.alias);
                     GraphNode {
@@ -277,13 +294,13 @@ impl GraphFormatter {
                 let Some(edge_type) = row.get_column_string(&meta.type_column) else {
                     continue;
                 };
-                let Some(src_id) = row.get_column_i64(&meta.src_column) else {
+                let Some(src_id) = row.get(&meta.src_column).and_then(identity) else {
                     continue;
                 };
                 let Some(src_type) = row.get_column_string(&meta.src_type_column) else {
                     continue;
                 };
-                let Some(dst_id) = row.get_column_i64(&meta.dst_column) else {
+                let Some(dst_id) = row.get(&meta.dst_column).and_then(identity) else {
                     continue;
                 };
                 let Some(dst_type) = row.get_column_string(&meta.dst_type_column) else {
@@ -293,9 +310,9 @@ impl GraphFormatter {
 
                 let key = (
                     src_type.clone(),
-                    src_id,
+                    src_id.clone(),
                     dst_type.clone(),
-                    dst_id,
+                    dst_id.clone(),
                     edge_type.clone(),
                     depth,
                 );
@@ -350,6 +367,7 @@ impl GraphFormatter {
         result_context: &ResultContext,
         aggs: &[MeasureColumn],
         groups: &[GroupColumn],
+        group_ids: &mut GroupIds,
     ) -> Vec<Map<String, Value>> {
         let agg_col_names = Self::agg_col_names(aggs);
         let mut rows = Vec::new();
@@ -371,7 +389,7 @@ impl GraphFormatter {
                     None => {
                         obj.insert(
                             col_name.clone(),
-                            Self::extract_group_node(row, result_context, &group.node),
+                            Self::extract_group_node(row, result_context, &group.node, group_ids),
                         );
                     }
                 }
@@ -392,6 +410,7 @@ impl GraphFormatter {
         row: &QueryResultRow,
         result_context: &ResultContext,
         alias: &str,
+        group_ids: &mut GroupIds,
     ) -> Value {
         let Some(node) = result_context.get(alias) else {
             return Value::Null;
@@ -406,6 +425,7 @@ impl GraphFormatter {
         let mut obj = Map::new();
         obj.insert("type".to_string(), Value::String(entity_type.to_string()));
         obj.insert("id".to_string(), Value::String(id.to_string()));
+        group_ids.insert((entity_type.to_string(), id.to_string()), id);
         obj.insert(
             "properties".to_string(),
             Value::Object(Self::extract_node_properties(row, &node.alias)),
@@ -416,14 +436,14 @@ impl GraphFormatter {
     fn extract_path_finding(
         &self,
         result: &QueryResult,
-        node_map: &mut IndexMap<(String, i64), GraphNode>,
+        node_map: &mut IndexMap<(String, Key), GraphNode>,
         edges: &mut Vec<GraphEdge>,
     ) {
         // Dedupe paths by canonical (node_seq, edge_kinds) tuple. ReplacingMergeTree
         // edge rows can leak multiple `_version` copies between background merges,
         // which inflates path_finding into N identical logical paths. Collapse here
         // so callers see one path_id per logical path.
-        type PathKey = (Vec<(String, i64)>, Vec<String>);
+        type PathKey = (Vec<(String, Key)>, Vec<String>);
         let mut seen_paths: HashSet<PathKey> = HashSet::new();
         let mut path_id_counter: usize = 0;
 
@@ -431,9 +451,9 @@ impl GraphFormatter {
             let dynamic_nodes = row.dynamic_nodes();
             let edge_kinds = row.edge_kinds();
 
-            let path_signature: Vec<(String, i64)> = dynamic_nodes
+            let path_signature: Vec<(String, Key)> = dynamic_nodes
                 .iter()
-                .map(|n| (n.entity_type.clone(), n.id))
+                .map(|n| (n.entity_type.clone(), n.id.clone()))
                 .collect();
             if !seen_paths.insert((path_signature, edge_kinds.to_vec())) {
                 continue;
@@ -442,7 +462,7 @@ impl GraphFormatter {
             path_id_counter += 1;
 
             for node_ref in dynamic_nodes {
-                let key = (node_ref.entity_type.clone(), node_ref.id);
+                let key = (node_ref.entity_type.clone(), node_ref.id.clone());
                 node_map.entry(key).or_insert_with(|| {
                     let mut properties = serde_json::Map::new();
                     for (k, value) in &node_ref.properties {
@@ -452,7 +472,7 @@ impl GraphFormatter {
                     }
                     GraphNode {
                         entity_type: node_ref.entity_type.clone(),
-                        id: node_ref.id,
+                        id: node_ref.id.clone(),
                         properties,
                     }
                 });
@@ -465,9 +485,9 @@ impl GraphFormatter {
 
                 edges.push(GraphEdge {
                     from: from.entity_type.clone(),
-                    from_id: from.id,
+                    from_id: from.id.clone(),
                     to: to.entity_type.clone(),
-                    to_id: to.id,
+                    to_id: to.id.clone(),
                     edge_type,
                     depth: None,
                     path_id: Some(path_id),
@@ -483,14 +503,14 @@ impl GraphFormatter {
         result: &QueryResult,
         result_context: &ResultContext,
         output: &PipelineOutput,
-        node_map: &mut IndexMap<(String, i64), GraphNode>,
+        node_map: &mut IndexMap<(String, Key), GraphNode>,
         edges: &mut Vec<GraphEdge>,
         edge_set: &mut HashSet<EdgeKey>,
     ) {
         let direction = output.compiled.shape.neighbors_direction;
 
         for row in result.authorized_rows() {
-            let mut center: Option<(String, i64)> = None;
+            let mut center: Option<(String, Key)> = None;
             for node in result_context.nodes() {
                 let Some(id) = row.get_public_id(node) else {
                     continue;
@@ -499,10 +519,10 @@ impl GraphFormatter {
                     continue;
                 };
                 if center.is_none() {
-                    center = Some((entity_type.to_string(), id));
+                    center = Some((entity_type.to_string(), id.clone()));
                 }
                 let properties = Self::extract_node_properties(row, &node.alias);
-                let key = (entity_type.to_string(), id);
+                let key = (entity_type.to_string(), id.clone());
                 node_map.entry(key).or_insert_with(|| GraphNode {
                     entity_type: entity_type.to_string(),
                     id,
@@ -518,7 +538,9 @@ impl GraphFormatter {
                 .get_column_string(relationship_type_column())
                 .unwrap_or_default();
 
-            let (center_type, center_id) = center.unwrap_or_default();
+            let Some((center_type, center_id)) = center else {
+                continue;
+            };
 
             let is_outgoing = row
                 .get(neighbor_is_outgoing_column())
@@ -531,12 +553,12 @@ impl GraphFormatter {
                     center_type,
                     center_id,
                     neighbor.entity_type.clone(),
-                    neighbor.id,
+                    neighbor.id.clone(),
                 )
             } else {
                 (
                     neighbor.entity_type.clone(),
-                    neighbor.id,
+                    neighbor.id.clone(),
                     center_type,
                     center_id,
                 )
@@ -547,9 +569,9 @@ impl GraphFormatter {
             // rows don't do unnecessary node-map work.
             let key = (
                 from.clone(),
-                from_id,
+                from_id.clone(),
                 to.clone(),
-                to_id,
+                to_id.clone(),
                 rel_type.clone(),
                 None,
             );
@@ -563,10 +585,10 @@ impl GraphFormatter {
                     neighbor_props.insert(key.clone(), column_value_to_json(value));
                 }
             }
-            let neighbor_key = (neighbor.entity_type.clone(), neighbor.id);
+            let neighbor_key = (neighbor.entity_type.clone(), neighbor.id.clone());
             node_map.entry(neighbor_key).or_insert_with(|| GraphNode {
                 entity_type: neighbor.entity_type.clone(),
-                id: neighbor.id,
+                id: neighbor.id.clone(),
                 properties: neighbor_props,
             });
 
@@ -846,7 +868,7 @@ mod tests {
             node.entity_type, "Project",
             "entity_type must come from _orbit_p_type"
         );
-        assert_eq!(node.id, 42, "id must come from _orbit_p_id");
+        assert_eq!(node.id, Key::Int(42), "id must come from _orbit_p_id");
         assert!(
             !node.properties.contains_key("type"),
             "properties must not contain 'type' (would collide with entity_type under flatten)"
@@ -1045,7 +1067,7 @@ mod tests {
 
         let node = GraphNode {
             entity_type: "File".to_string(),
-            id: beyond_safe,
+            id: Key::Int(beyond_safe),
             properties: serde_json::Map::new(),
         };
         let json = serde_json::to_value(&node).unwrap();
@@ -1058,9 +1080,9 @@ mod tests {
 
         let edge = GraphEdge {
             from: "User".to_string(),
-            from_id: beyond_safe,
+            from_id: Key::Int(beyond_safe),
             to: "File".to_string(),
-            to_id: -beyond_safe,
+            to_id: Key::Int(-beyond_safe),
             edge_type: "AUTHORED".to_string(),
             depth: None,
             path_id: None,

@@ -2,7 +2,9 @@ kind: graph
 package: integration.slack
 entities:
   SlackMessage:
+    identity: id
     label: text
+    default_columns: [id, workspace, channel, author, text, sent_at]
     properties:
       id: {type: string}
       workspace: {type: string}
@@ -12,7 +14,9 @@ entities:
       sent_at: {type: timestamp}
 
   SlackWorkspace:
+    identity: id
     label: name
+    default_columns: [id, name, group_id, traversal_path]
     properties:
       id: {type: string}
       name: {type: string}

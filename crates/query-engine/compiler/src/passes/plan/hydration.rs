@@ -17,6 +17,7 @@ use query_data_model::plan::logical::{Columns, Projection};
 use serde_json::Value;
 
 use super::node::Node;
+use crate::constants::hydration_id_column;
 use crate::error::{QueryError, Result};
 use crate::hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 use crate::logical::Query;
@@ -35,7 +36,8 @@ pub(crate) struct Arm<'p> {
     alias: &'p str,
     entity: &'p str,
     table: &'p str,
-    ids: Option<Vec<i64>>,
+    id: &'p str,
+    ids: Option<Vec<orbit_authorization::Key>>,
     columns: Vec<(&'p str, Option<query_data_model::DataType>)>,
     path_filter: Option<PathFilter>,
     sort_key: &'p [String],
@@ -74,7 +76,7 @@ impl<'p> Arm<'p> {
             .into_iter()
             .next()
             .ok_or_else(|| QueryError::Lowering("hydration node has no entity".into()))?;
-        let node = Node::new(query, anchor, model);
+        let node = Node::new(query, anchor, model)?;
         let table = node
             .table
             .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
@@ -100,6 +102,7 @@ impl<'p> Arm<'p> {
             alias: node.alias,
             entity: node.entity,
             table,
+            id: node.id,
             ids: node.pinned,
             columns,
             path_filter: path_filter(&arm.traversal_paths, options),
@@ -154,7 +157,7 @@ pub(crate) fn emit<B: RelationalBackend>(
 
 fn arm<B: RelationalBackend>(q: &mut RelationalBuilder<'_, B>, node: &Arm<'_>) -> Built<Relation> {
     let alias = node.alias;
-    let pk = DEFAULT_PRIMARY_KEY;
+    let pk = node.id;
     let keys = q.subquery(alias, |q| {
         let rows = scan(q, node.table, alias, false)?;
         let scope = [&rows];
@@ -172,7 +175,7 @@ fn arm<B: RelationalBackend>(q: &mut RelationalBuilder<'_, B>, node: &Arm<'_>) -
         };
         predicates.extend(path_filter.map(Some));
         if let Some(ids) = &node.ids {
-            predicates.push(Some(id_list::<B>(col(&scope, alias, pk)?, ids)));
+            predicates.push(Some(id_list::<B>(col(&scope, alias, pk)?, ids)?));
         }
         let rows = filtered(q, rows, predicates)?;
         let mut names = vec![pk, DELETED_COLUMN];
@@ -237,7 +240,7 @@ fn arm<B: RelationalBackend>(q: &mut RelationalBuilder<'_, B>, node: &Arm<'_>) -
         }
     };
     let items = vec![
-        (format!("{alias}_{pk}"), col(&[&rows], alias, pk)?),
+        (hydration_id_column(), col(&[&rows], alias, pk)?),
         (format!("{alias}_entity_type"), string(node.entity)),
         (format!("{alias}_props"), props),
     ];
@@ -289,7 +292,15 @@ mod tests {
 
     fn arm(paths: Vec<TraversalPath>) -> HydrationArm {
         let columns = ["title".to_string()];
-        HydrationArm::new(MODEL.model(), "MergeRequest", &[1], &columns, paths).unwrap()
+        HydrationArm::new(
+            MODEL.model(),
+            crate::testkit::limits(),
+            "MergeRequest",
+            &[orbit_authorization::Key::Int(1)],
+            &columns,
+            paths,
+        )
+        .unwrap()
     }
 
     fn render(arm: HydrationArm, dynamic: bool) -> (String, HashMap<String, ParamValue>) {
@@ -300,7 +311,13 @@ mod tests {
                 path_segment_budget: None,
             },
         };
-        let planned = plan(Request::Hydration(&request), None, &*MODEL).unwrap();
+        let planned = plan(
+            Request::Hydration(&request),
+            None,
+            &*MODEL,
+            crate::testkit::limits(),
+        )
+        .unwrap();
         let rendered = MODEL.render(&planned.plan);
         (rendered.sql, rendered.parameters)
     }

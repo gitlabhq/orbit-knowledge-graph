@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use duckdb_client::search::{NodeHydrator, NodeValue, excluded_path_predicate};
+use duckdb_client::search::{Key, NodeHydrator, NodeValue, excluded_path_predicate};
 use duckdb_client::{DuckDbClient, bool_column, i64_column, sql_lit, string_column};
 
 use crate::commands::{context, setup::spec};
@@ -224,16 +224,16 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
         }
         let links: Vec<_> = edges
             .iter()
-            .filter(|row| row.target_id == node.id && !row.hidden)
+            .filter(|row| Key::Int(row.target_id) == node.id && !row.hidden)
             .collect();
         let used_via: Vec<_> = via
             .iter()
-            .filter(|row| row.target_id == node.id && !row.hidden)
+            .filter(|row| Key::Int(row.target_id) == node.id && !row.hidden)
             .collect();
         let tests: Vec<_> = edges
             .iter()
             .chain(&via)
-            .filter(|row| row.target_id == node.id && row.hidden)
+            .filter(|row| Key::Int(row.target_id) == node.id && row.hidden)
             .collect();
         if links.is_empty() && used_via.is_empty() && tests.is_empty() {
             writeln!(out, "\nNo indexed connections.")?;

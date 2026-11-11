@@ -6,6 +6,7 @@ mod enums;
 mod kinds;
 
 use crate::passes::codegen::SqlBackend;
+use orbit_server_config::QueryLimits;
 use query_data_model::Catalog;
 use std::collections::HashMap;
 
@@ -23,12 +24,13 @@ pub fn normalize(
     plan: LogicalPlan,
     model: &Model,
     data: &Catalog<impl SqlBackend>,
+    limits: &QueryLimits,
 ) -> Result<LogicalPlan> {
     let query = Query::new(&plan, model);
     available(query, data)?;
     let narrowed = kinds::narrowed(query)?;
     shared_keys(query, &narrowed, data)?;
-    let catalog = model.logical().as_admin();
+    let catalog = model.logical(limits).as_admin();
     Ok(catalog.rebuild(plan, |q, step| rewrite(q, step, &narrowed, model))?)
 }
 

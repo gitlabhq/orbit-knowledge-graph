@@ -4,6 +4,8 @@
 //! subtests sequentially, truncating tables between them to avoid cross-test
 //! contamination while eliminating per-test container startup overhead.
 
+use integration_testkit::visitor::{IntIds, int};
+use query_data_model::testkit::limits;
 use std::collections::HashSet;
 
 use crate::common::compile;
@@ -104,12 +106,12 @@ async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
 
     let gql = "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.int_id(&u)).collect();
     assert_eq!(
         raw_ids,
         ALL_USER_IDS.iter().copied().collect::<HashSet<_>>(),
@@ -129,7 +131,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
 
     let gql = "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -149,7 +151,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1, 2]));
@@ -164,7 +166,7 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
 
     let gql = "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -180,7 +182,7 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1, 2, 3, 4]));
@@ -202,6 +204,7 @@ async fn agent_session_hidden_when_project_read_code_is_denied(ctx: &TestContext
         "MATCH (w:AgentSession) WHERE w.id >= 1 AND w.id <= 10000 RETURN w LIMIT 10",
         &data_model,
         &test_security_context(),
+        limits(),
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
@@ -216,7 +219,7 @@ async fn agent_session_hidden_when_project_read_code_is_denied(ctx: &TestContext
     // The redaction id of an AgentSession row is its project, not the session.
     let visible_projects: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&w))
+        .filter_map(|r| r.int_id(&w))
         .collect();
     assert_eq!(result.authorized_count(), 1);
     assert_eq!(visible_projects, HashSet::from([1000]));
@@ -228,7 +231,7 @@ async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 20";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -236,7 +239,7 @@ async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
 
     let raw_pairs: HashSet<(i64, i64)> = result
         .iter()
-        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?)))
+        .filter_map(|r| Some((r.int_id(&u)?, r.int_id(&g)?)))
         .collect();
 
     let expected_raw = HashSet::from([
@@ -261,7 +264,7 @@ async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?)))
+        .filter_map(|r| Some((r.int_id(&u)?, r.int_id(&g)?)))
         .collect();
 
     let expected_authorized = HashSet::from([(1, 100), (2, 100)]);
@@ -286,7 +289,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &T
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 20";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -301,7 +304,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &T
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?)))
+        .filter_map(|r| Some((r.int_id(&u)?, r.int_id(&g)?)))
         .collect();
 
     assert_eq!(
@@ -311,7 +314,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &T
     );
 
     for row in result.authorized_rows() {
-        let group_id = row.get_id(&g).unwrap();
+        let group_id = row.int_id(&g).unwrap();
         assert_eq!(group_id, 100, "no denied groups should appear");
     }
 }
@@ -322,7 +325,7 @@ async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group), (g)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 30";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -331,7 +334,7 @@ async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
 
     let raw_paths: HashSet<(i64, i64, i64)> = result
         .iter()
-        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?, r.get_id(&p)?)))
+        .filter_map(|r| Some((r.int_id(&u)?, r.int_id(&g)?, r.int_id(&p)?)))
         .collect();
 
     let expected_raw = HashSet::from([
@@ -362,7 +365,7 @@ async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
 
     let authorized_paths: HashSet<(i64, i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?, r.get_id(&p)?)))
+        .filter_map(|r| Some((r.int_id(&u)?, r.int_id(&g)?, r.int_id(&p)?)))
         .collect();
 
     assert_eq!(
@@ -378,7 +381,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContex
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group), (g)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 30";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -395,7 +398,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContex
 
     let authorized_paths: HashSet<(i64, i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?, r.get_id(&p)?)))
+        .filter_map(|r| Some((r.int_id(&u)?, r.int_id(&g)?, r.int_id(&p)?)))
         .collect();
 
     let expected = HashSet::from([
@@ -409,7 +412,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContex
     assert_eq!(authorized_paths, expected);
 
     for row in result.authorized_rows() {
-        let project_id = row.get_id(&p).unwrap();
+        let project_id = row.int_id(&p).unwrap();
         assert!(
             project_id != 1001 && project_id != 1003,
             "denied projects 1001, 1003 must not appear"
@@ -430,7 +433,7 @@ async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
 
     let gql = "MATCH (g:Group)-[:CONTAINS]->(p:Project) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, p LIMIT 20";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -438,7 +441,7 @@ async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
 
     let raw_pairs: HashSet<(i64, i64)> = result
         .iter()
-        .filter_map(|r| Some((r.get_id(&g)?, r.get_id(&p)?)))
+        .filter_map(|r| Some((r.int_id(&g)?, r.int_id(&p)?)))
         .collect();
 
     let expected_raw = HashSet::from([
@@ -460,7 +463,7 @@ async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id(&g)?, r.get_id(&p)?)))
+        .filter_map(|r| Some((r.int_id(&g)?, r.int_id(&p)?)))
         .collect();
 
     let expected_authorized = HashSet::from([(100, 1000), (100, 1002), (102, 1004)]);
@@ -480,12 +483,12 @@ async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
 
     let gql = "MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN p LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let p = result.ctx().get("p").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.int_id(&p)).collect();
     assert_eq!(
         raw_ids,
         ALL_PROJECT_IDS.iter().copied().collect::<HashSet<_>>()
@@ -498,7 +501,7 @@ async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&p))
+        .filter_map(|r| r.int_id(&p))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1000, 1004]));
@@ -513,7 +516,7 @@ async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group), (g)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     for col in [
         "_orbit_u_id",
@@ -539,9 +542,9 @@ async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
         assert_eq!(row.get_type(&u), Some("User"));
         assert_eq!(row.get_type(&g), Some("Group"));
         assert_eq!(row.get_type(&p), Some("Project"));
-        assert!(row.get_id(&u).is_some());
-        assert!(row.get_id(&g).is_some());
-        assert!(row.get_id(&p).is_some());
+        assert!(row.int_id(&u).is_some());
+        assert!(row.int_id(&g).is_some());
+        assert!(row.int_id(&p).is_some());
     }
 }
 
@@ -551,7 +554,7 @@ async fn empty_query_result_stays_empty(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {username: 'nonexistent'}) RETURN u LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -572,7 +575,7 @@ async fn all_authorized_preserves_all_data(ctx: &TestContext) {
 
     let gql = "MATCH (g:Group)-[:CONTAINS]->(p:Project) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, p LIMIT 20";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -597,7 +600,7 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
 
     let gql = "MATCH (g:Group)-[:CONTAINS]->(p:Project) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, p LIMIT 20";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -674,17 +677,17 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
 
     let row_1000 = authorized
         .iter()
-        .find(|r| r.get_id(&p) == Some(1000))
+        .find(|r| r.int_id(&p) == Some(1000))
         .unwrap();
-    assert_eq!(row_1000.get_id(&g), Some(100));
+    assert_eq!(row_1000.int_id(&g), Some(100));
     assert_eq!(row_1000.get_type(&g), Some("Group"));
     assert_eq!(row_1000.get_type(&p), Some("Project"));
 
     let row_1002 = authorized
         .iter()
-        .find(|r| r.get_id(&p) == Some(1002))
+        .find(|r| r.int_id(&p) == Some(1002))
         .unwrap();
-    assert_eq!(row_1002.get_id(&g), Some(100));
+    assert_eq!(row_1002.int_id(&g), Some(100));
     assert_eq!(row_1002.get_type(&g), Some("Group"));
     assert_eq!(row_1002.get_type(&p), Some("Project"));
 }
@@ -695,7 +698,7 @@ async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group), (g)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 30";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -712,9 +715,9 @@ async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
     assert!(result.authorized_count() > 0);
 
     for row in result.authorized_rows() {
-        assert_eq!(row.get_id(&u), Some(1));
-        assert_eq!(row.get_id(&g), Some(100));
-        assert_eq!(row.get_id(&p), Some(1000));
+        assert_eq!(row.int_id(&u), Some(1));
+        assert_eq!(row.int_id(&g), Some(100));
+        assert_eq!(row.int_id(&p), Some(1000));
 
         assert_eq!(row.get_type(&u), Some("User"));
         assert_eq!(row.get_type(&g), Some("Group"));
@@ -728,12 +731,12 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
 
     let gql = "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
-    let all_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    let all_ids: HashSet<i64> = result.iter().filter_map(|r| r.int_id(&u)).collect();
     assert_eq!(
         all_ids,
         ALL_USER_IDS.iter().copied().collect::<HashSet<_>>()
@@ -746,7 +749,7 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1, 2]));
@@ -758,7 +761,7 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
         .rows()
         .iter()
         .filter(|r| !r.is_authorized())
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
     assert_eq!(unauthorized_ids, HashSet::from([3, 4, 5]));
 }
@@ -843,7 +846,7 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
 
     let gql = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000}) RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -856,11 +859,11 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
             "path should have at least start and end nodes"
         );
 
-        assert_eq!(path_nodes[0].id, 1);
+        assert_eq!(int(&path_nodes[0].id), 1);
         assert_eq!(path_nodes[0].entity_type, "User");
 
         let last = path_nodes.last().unwrap();
-        assert_eq!(last.id, 1000);
+        assert_eq!(int(&last.id), 1000);
         assert_eq!(last.entity_type, "Project");
 
         let edge_kinds = row.edge_kinds();
@@ -883,7 +886,7 @@ async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
 
     let gql = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000}) RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -903,7 +906,7 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
 
     let gql = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [1000, 1002, 1004] RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -922,7 +925,8 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
         let path_nodes = row.path_nodes();
         for node in path_nodes {
             assert_ne!(
-                node.id, 102,
+                int(&node.id),
+                102,
                 "denied group 102 should not appear in authorized paths"
             );
         }
@@ -930,7 +934,7 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
 
     let authorized_ends: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .filter_map(|r| r.path_nodes().last().map(|n| int(&n.id)))
         .collect();
 
     assert!(
@@ -965,7 +969,7 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
 
     let gql = "MATCH path = ANY SHORTEST (start:User)-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project) WHERE start.id IN [1, 2] AND `end`.id IN [1000, 1002] RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1004,7 +1008,7 @@ async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
 
     let gql = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000}) RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1027,7 +1031,7 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
 
     let gql = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [1000, 1002] RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1044,7 +1048,7 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
 
     let authorized_ends: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .filter_map(|r| r.path_nodes().last().map(|n| int(&n.id)))
         .collect();
 
     assert!(authorized_ends.contains(&1000));
@@ -1057,7 +1061,7 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
 
     let gql = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [1000, 1002] RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1074,7 +1078,7 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
 
     let authorized_ends: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .filter_map(|r| r.path_nodes().last().map(|n| int(&n.id)))
         .collect();
 
     assert!(
@@ -1093,7 +1097,7 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
 
     let gql = "MATCH path = ANY SHORTEST (start:User)-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000}) WHERE start.id IN [1, 2] RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1110,7 +1114,7 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
 
     let authorized_starts: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.path_nodes().first().map(|n| n.id))
+        .filter_map(|r| r.path_nodes().first().map(|n| int(&n.id)))
         .collect();
 
     assert_eq!(
@@ -1126,7 +1130,7 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
 
     let gql = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [1000, 1002, 1004] RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1145,7 +1149,8 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
         for node in row.path_nodes() {
             if node.entity_type == "Group" {
                 assert_ne!(
-                    node.id, 102,
+                    int(&node.id),
+                    102,
                     "denied group 102 should never appear in authorized paths"
                 );
             }
@@ -1154,7 +1159,7 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
 
     let authorized_ends: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .filter_map(|r| r.path_nodes().last().map(|n| int(&n.id)))
         .collect();
 
     assert!(
@@ -1173,7 +1178,7 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
 
     let gql = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000}) RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1199,7 +1204,7 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
 
     let gql = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [1000, 1002, 1004] RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1250,15 +1255,15 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
             "post-redaction: edge_kinds length must still match hops"
         );
 
-        assert_eq!(path_nodes[0].id, 1);
+        assert_eq!(int(&path_nodes[0].id), 1);
         assert_eq!(path_nodes[0].entity_type, "User");
-        assert_eq!(path_nodes[1].id, 100);
+        assert_eq!(int(&path_nodes[1].id), 100);
         assert_eq!(path_nodes[1].entity_type, "Group");
 
         assert_eq!(edge_kinds[0], "MEMBER_OF");
         assert_eq!(edge_kinds[1], "CONTAINS");
 
-        let end_id = path_nodes.last().unwrap().id;
+        let end_id = int(&path_nodes.last().unwrap().id);
         assert_ne!(
             end_id, 1004,
             "path to project 1004 (via denied group 102) must not survive"
@@ -1267,7 +1272,7 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
 
     let authorized_ends: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .filter_map(|r| r.path_nodes().last().map(|n| int(&n.id)))
         .collect();
     assert!(
         authorized_ends.contains(&1000),
@@ -1289,7 +1294,7 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {state: 'active'}) WHERE u.username IN ['alice', 'bob', 'charlie', 'diana'] RETURN u ORDER BY u.username LIMIT 100";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         !query.base.sql.contains("JOIN"),
@@ -1301,7 +1306,7 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
-    let raw_usernames: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    let raw_usernames: Vec<i64> = result.iter().filter_map(|r| r.int_id(&u)).collect();
     assert_eq!(
         raw_usernames.len(),
         4,
@@ -1319,7 +1324,7 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1, 2]));
@@ -1331,12 +1336,12 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
 
     let gql = "MATCH (p:Project) WHERE p.visibility_level IN ['public', 'internal'] RETURN p ORDER BY p.id LIMIT 50";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let p = result.ctx().get("p").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.int_id(&p)).collect();
     assert_eq!(
         raw_ids,
         HashSet::from([1000, 1002, 1004]),
@@ -1351,7 +1356,7 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&p))
+        .filter_map(|r| r.int_id(&p))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1000]));
@@ -1363,12 +1368,12 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
 
     let gql = "MATCH (g:Group) WHERE g.id IN [100, 101, 102] RETURN g LIMIT 100";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&g)).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.int_id(&g)).collect();
     assert_eq!(
         raw_ids,
         HashSet::from([100, 101, 102]),
@@ -1383,7 +1388,7 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&g))
+        .filter_map(|r| r.int_id(&g))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([100, 102]));
@@ -1395,12 +1400,12 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
 
     let gql = "MATCH (u:User) WHERE u.id >= 2 AND u.id <= 4 RETURN u LIMIT 100";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.int_id(&u)).collect();
     assert_eq!(
         raw_ids,
         HashSet::from([2, 3, 4]),
@@ -1421,12 +1426,12 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
 
     let gql = "MATCH (p:Project) WHERE p.id IN [1000, 1003] RETURN p LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let p = result.ctx().get("p").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.int_id(&p)).collect();
     assert_eq!(
         raw_ids,
         HashSet::from([1000, 1003]),
@@ -1441,7 +1446,7 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&p))
+        .filter_map(|r| r.int_id(&p))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1000]));
@@ -1453,7 +1458,7 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {username: 'definitely_does_not_exist_12345'}) RETURN u LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1473,7 +1478,7 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
 
     let gql = "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 100";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1497,7 +1502,7 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {state: 'active'}) RETURN u LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -1513,7 +1518,7 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
     let u = result.ctx().get("u").unwrap().clone();
 
     for row in result.iter() {
-        assert!(row.get_id(&u).is_some(), "ID should exist before redaction");
+        assert!(row.int_id(&u).is_some(), "ID should exist before redaction");
         assert_eq!(row.get_type(&u), Some("User"), "type should be User");
     }
 
@@ -1523,7 +1528,7 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
     run_redaction(&mut result, &mock_service);
 
     for row in result.authorized_rows() {
-        assert_eq!(row.get_id(&u), Some(1));
+        assert_eq!(row.int_id(&u), Some(1));
         assert_eq!(row.get_type(&u), Some("User"));
     }
 }
@@ -1589,7 +1594,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
     let gql =
         "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username, .state} LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -1628,7 +1633,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
     assert_eq!(authorized_ids, HashSet::from([1, 2, 3]));
 
@@ -1643,7 +1648,7 @@ async fn column_selection_wildcard_returns_listed_columns_plus_mandatory(ctx: &T
 
     let gql = "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN properties(g) LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_g_id"),
@@ -1688,7 +1693,7 @@ async fn column_selection_wildcard_returns_listed_columns_plus_mandatory(ctx: &T
 
     let authorized: Vec<_> = result.authorized_rows().collect();
     assert_eq!(authorized.len(), 1);
-    assert_eq!(authorized[0].get_id(&g), Some(100));
+    assert_eq!(authorized[0].int_id(&g), Some(100));
     assert_eq!(authorized[0].get_type(&g), Some("Group"));
 }
 
@@ -1698,7 +1703,7 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
 
     let gql = "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -1726,7 +1731,7 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
     assert_eq!(authorized_ids, HashSet::from([1, 2]));
 
@@ -1741,7 +1746,7 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group), (g)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u{.username}, g{.name}, p{.name, .visibility_level} LIMIT 30";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -1797,9 +1802,9 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
     );
 
     let authorized: Vec<_> = result.authorized_rows().collect();
-    assert_eq!(authorized[0].get_id(&u), Some(1));
-    assert_eq!(authorized[0].get_id(&g), Some(100));
-    assert_eq!(authorized[0].get_id(&p), Some(1000));
+    assert_eq!(authorized[0].int_id(&u), Some(1));
+    assert_eq!(authorized[0].int_id(&g), Some(100));
+    assert_eq!(authorized[0].int_id(&p), Some(1000));
     assert_eq!(authorized[0].get_type(&u), Some("User"));
     assert_eq!(authorized[0].get_type(&g), Some("Group"));
     assert_eq!(authorized[0].get_type(&p), Some("Project"));
@@ -1811,7 +1816,7 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username, .state}, g{.name} LIMIT 20";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -1835,8 +1840,8 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
     );
 
     for row in result.authorized_rows() {
-        let user_id = row.get_id(&u).expect("user ID must exist after redaction");
-        let group_id = row.get_id(&g).expect("group ID must exist after redaction");
+        let user_id = row.int_id(&u).expect("user ID must exist after redaction");
+        let group_id = row.int_id(&g).expect("group ID must exist after redaction");
 
         assert_eq!(user_id, 1, "only user 1 should be authorized");
         assert_eq!(group_id, 100, "only group 100 should be authorized");
@@ -1852,7 +1857,7 @@ async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group), (g)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u{.username}, g{.name}, p{.name} LIMIT 50";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1881,7 +1886,7 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
 
     let gql = "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username IN ['alice', 'bob'] RETURN u{.username, .name, .state} ORDER BY u.username LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -1897,12 +1902,12 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
 
     let authorized: Vec<_> = result.authorized_rows().collect();
 
-    let alice = authorized.iter().find(|r| r.get_id(&u) == Some(1)).unwrap();
-    assert_eq!(alice.get_id(&u), Some(1));
+    let alice = authorized.iter().find(|r| r.int_id(&u) == Some(1)).unwrap();
+    assert_eq!(alice.int_id(&u), Some(1));
     assert_eq!(alice.get_type(&u), Some("User"));
 
-    let bob = authorized.iter().find(|r| r.get_id(&u) == Some(2)).unwrap();
-    assert_eq!(bob.get_id(&u), Some(2));
+    let bob = authorized.iter().find(|r| r.int_id(&u) == Some(2)).unwrap();
+    assert_eq!(bob.int_id(&u), Some(2));
     assert_eq!(bob.get_type(&u), Some("User"));
 }
 
@@ -1912,7 +1917,7 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
 
     let gql = "MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN p{.id, .name, .visibility_level} LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_p_id"),
@@ -1940,7 +1945,7 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&p))
+        .filter_map(|r| r.int_id(&p))
         .collect();
     assert_eq!(authorized_ids, HashSet::from([1000, 1004]));
 
@@ -1976,7 +1981,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
 
     let gql = "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(mr) AS mr_count LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -2028,7 +2033,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
     assert_eq!(result.authorized_count(), 1);
 
     let authorized: Vec<_> = result.authorized_rows().collect();
-    assert_eq!(authorized[0].get_id(&u), Some(1));
+    assert_eq!(authorized[0].int_id(&u), Some(1));
     assert_eq!(authorized[0].get_type(&u), Some("User"));
 }
 
@@ -2058,7 +2063,7 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
 
     let gql = "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN properties(u), count(mr) AS mr_count LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -2102,7 +2107,7 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     assert_eq!(result.authorized_count(), 1);
 
     let authorized: Vec<_> = result.authorized_rows().collect();
-    assert_eq!(authorized[0].get_id(&u), Some(1));
+    assert_eq!(authorized[0].int_id(&u), Some(1));
     assert_eq!(authorized[0].get_type(&u), Some("User"));
 }
 
@@ -2112,7 +2117,7 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
 
     let gql = "MATCH (g:Group)-[:CONTAINS]->(p:Project) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.name, .visibility_level}, p{.name, .visibility_level} LIMIT 20";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -2120,7 +2125,7 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
 
     let raw_pairs: HashSet<(i64, i64)> = result
         .iter()
-        .filter_map(|r| Some((r.get_id(&g)?, r.get_id(&p)?)))
+        .filter_map(|r| Some((r.int_id(&g)?, r.int_id(&p)?)))
         .collect();
 
     let expected_pairs = HashSet::from([
@@ -2144,7 +2149,7 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id(&g)?, r.get_id(&p)?)))
+        .filter_map(|r| Some((r.int_id(&g)?, r.int_id(&p)?)))
         .collect();
 
     assert_eq!(
@@ -2160,7 +2165,7 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {state: 'active'}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username} LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(query.base.sql.contains("_orbit_u_id"));
     assert!(query.base.sql.contains("_orbit_u_type"));
@@ -2184,7 +2189,7 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
 
     assert_eq!(result.authorized_count(), 4);
     for row in result.authorized_rows() {
-        assert!(row.get_id(&u).is_some());
+        assert!(row.int_id(&u).is_some());
         assert_eq!(row.get_type(&u), Some("User"));
     }
 }
@@ -2195,7 +2200,7 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
 
     let gql = "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username, .name, .state} LIMIT 10";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2215,7 +2220,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {id: 1})-->(neighbor) RETURN u, neighbor";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -2251,7 +2256,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     );
 
     for row in result.iter() {
-        assert_eq!(row.get_id(&u), Some(1));
+        assert_eq!(row.int_id(&u), Some(1));
         assert_eq!(row.get_type(&u), Some("User"));
         assert!(
             row.neighbor_node().is_some(),
@@ -2298,7 +2303,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
 
     let neighbor_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .filter_map(|r| r.neighbor_node().map(|n| int(&n.id)))
         .collect();
     assert_eq!(neighbor_ids, HashSet::from([100, 102]));
 
@@ -2323,7 +2328,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
         .next()
         .and_then(|r| r.neighbor_node())
         .expect("should have authorized neighbor");
-    assert_eq!(authorized_neighbor.id, 100);
+    assert_eq!(int(&authorized_neighbor.id), 100);
     assert_eq!(authorized_neighbor.entity_type, "Group");
 }
 
@@ -2333,7 +2338,7 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {id: 1})-->(neighbor) RETURN u, neighbor";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2355,7 +2360,7 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
 
     let gql = "MATCH (u:User)-->(neighbor) WHERE u.id IN [1, 3] RETURN u, neighbor";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -2379,7 +2384,7 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
 
     let authorized_center_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
     assert_eq!(authorized_center_ids, HashSet::from([1]));
 }
@@ -2390,7 +2395,7 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
 
     let gql = "MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(neighbor) RETURN g, neighbor";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2414,7 +2419,7 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
         .next()
         .and_then(|r| r.neighbor_node())
         .unwrap();
-    assert_eq!(neighbor.id, 1);
+    assert_eq!(int(&neighbor.id), 1);
     assert_eq!(neighbor.entity_type, "User");
 }
 
@@ -2484,7 +2489,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     let gql = "MATCH (f:File {id: 3000})-[:DEFINES]->(neighbor) RETURN f, neighbor";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2500,7 +2505,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     // not the File's own ID (3000), because redaction resolves through the owner.
     for row in result.iter() {
         assert_eq!(
-            row.get_id(&f),
+            row.int_id(&f),
             Some(1000),
             "center _orbit_f_id should be the owning Project ID for indirect-auth entities"
         );
@@ -2529,7 +2534,10 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     let authorized_neighbors: Vec<(i64, &str)> = result
         .authorized_rows()
-        .filter_map(|r| r.neighbor_node().map(|n| (n.id, n.entity_type.as_str())))
+        .filter_map(|r| {
+            r.neighbor_node()
+                .map(|n| (int(&n.id), n.entity_type.as_str()))
+        })
         .collect();
     assert_eq!(authorized_neighbors.len(), 2);
     let neighbor_ids: HashSet<i64> = authorized_neighbors.iter().map(|(id, _)| *id).collect();
@@ -2543,7 +2551,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     let pre_deny_ids: HashSet<i64> = result
         .iter()
-        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .filter_map(|r| r.neighbor_node().map(|n| int(&n.id)))
         .collect();
     assert_eq!(
         pre_deny_ids,
@@ -2560,7 +2568,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     let post_deny_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .filter_map(|r| r.neighbor_node().map(|n| int(&n.id)))
         .collect();
     assert!(
         post_deny_ids.is_empty(),
@@ -2571,7 +2579,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         assert!(
             !row.is_authorized(),
             "row with neighbor {:?} should be unauthorized",
-            row.neighbor_node().map(|n| n.id)
+            row.neighbor_node().map(|n| int(&n.id))
         );
     }
 
@@ -2580,7 +2588,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     let pre_redaction_neighbor_ids: HashSet<i64> = result
         .iter()
-        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .filter_map(|r| r.neighbor_node().map(|n| int(&n.id)))
         .collect();
     assert_eq!(
         pre_redaction_neighbor_ids,
@@ -2599,7 +2607,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     let post_redaction_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .filter_map(|r| r.neighbor_node().map(|n| int(&n.id)))
         .collect();
     assert!(
         post_redaction_ids.is_empty(),
@@ -2626,7 +2634,7 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
 
     let gql = "MATCH path = ANY SHORTEST (start:File {id: 3000})-[:DEFINES*1..2]->(`end`:Definition) WHERE `end`.id IN [5000, 5001] RETURN path";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2662,7 +2670,7 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
 
     let gql = "MATCH (f:File)-[:DEFINES]->(neighbor) WHERE f.id IN [3000, 3002] RETURN f, neighbor";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2688,7 +2696,7 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
 
     let neighbor_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .filter_map(|r| r.neighbor_node().map(|n| int(&n.id)))
         .collect();
     assert_eq!(
         neighbor_ids,
@@ -2708,7 +2716,7 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 20";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_e0_kind"),
@@ -2740,8 +2748,8 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     assert_eq!(result.len(), 7, "should have 7 user-group memberships");
 
     for row in result.iter() {
-        let user_id = row.get_id(&u).expect("user id should be present");
-        let group_id = row.get_id(&g).expect("group id should be present");
+        let user_id = row.int_id(&u).expect("user id should be present");
+        let group_id = row.int_id(&g).expect("group id should be present");
 
         assert_eq!(
             row.get("_orbit_e0_kind")
@@ -2784,11 +2792,11 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
 
     let authorized_user_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
     let authorized_group_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&g))
+        .filter_map(|r| r.int_id(&g))
         .collect();
 
     for unauthorized_user in [2, 3, 4, 5] {
@@ -2808,8 +2816,8 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     }
 
     let authorized_row = result.authorized_rows().next().expect("should have 1 row");
-    assert_eq!(authorized_row.get_id(&u), Some(1));
-    assert_eq!(authorized_row.get_id(&g), Some(100));
+    assert_eq!(authorized_row.int_id(&u), Some(1));
+    assert_eq!(authorized_row.int_id(&g), Some(100));
     assert_eq!(
         authorized_row
             .get("_orbit_e0_kind")
@@ -2860,7 +2868,7 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
 
     let gql = "MATCH (u:User)-[:MEMBER_OF]->(g:Group), (g)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 30";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_e0_kind"),
@@ -2903,9 +2911,9 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
 
     let row = result.authorized_rows().next().expect("should have 1 row");
 
-    assert_eq!(row.get_id(&u), Some(1), "user should be 1");
-    assert_eq!(row.get_id(&g), Some(100), "group should be 100");
-    assert_eq!(row.get_id(&p), Some(1000), "project should be 1000");
+    assert_eq!(row.int_id(&u), Some(1), "user should be 1");
+    assert_eq!(row.int_id(&g), Some(100), "group should be 100");
+    assert_eq!(row.int_id(&p), Some(1000), "project should be 1000");
 
     assert_eq!(
         row.get("_orbit_e0_kind")
@@ -2983,7 +2991,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {id: 1})-->(neighbor) RETURN u, neighbor";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
 
     // Note: the entity type 'User' is passed as a parameter, not embedded in SQL
     assert!(
@@ -3050,7 +3058,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     // User.user_type is int-based: 0=human, 6=project_bot, 11=service_account.
     let gql = "MATCH (u:User {user_type: 0}) RETURN u{.user_type}";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3077,7 +3085,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {user_type: 6}) RETURN u{.user_type}";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3090,7 +3098,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     // MergeRequest.state is int-based: 1=opened, 2=closed, 3=merged, 4=locked.
     let gql = "MATCH (mr:MergeRequest {state: 1}) RETURN mr{.state}";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3113,7 +3121,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let gql = "MATCH (mr:MergeRequest {state: 3}) RETURN mr{.state}";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3125,7 +3133,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let gql = "MATCH (mr:MergeRequest) WHERE mr.state IN [1, 2] RETURN mr";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3137,7 +3145,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {state: 'active'}) RETURN u{.state}";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3160,7 +3168,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let gql = "MATCH (u:User {state: 'blocked'}) RETURN u";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3172,7 +3180,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let gql = "MATCH (u:User) WHERE u.state IN ['active', 'blocked'] RETURN u";
 
-    let query = compile(gql, &data_model, &security_ctx).unwrap();
+    let query = compile(gql, &data_model, &security_ctx, limits()).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3191,7 +3199,7 @@ async fn search_merge_requests_with_redaction(ctx: &TestContext) {
     .await;
     let mr = result.ctx().get("mr").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&mr)).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.int_id(&mr)).collect();
     assert_eq!(
         raw_ids,
         ALL_MR_IDS.iter().copied().collect::<HashSet<_>>(),
@@ -3209,7 +3217,7 @@ async fn search_merge_requests_with_redaction(ctx: &TestContext) {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&mr))
+        .filter_map(|r| r.int_id(&mr))
         .collect();
     assert_eq!(authorized_ids, HashSet::from([2000, 2001]));
 }
@@ -3222,7 +3230,7 @@ async fn redaction_preserves_row_order(ctx: &TestContext) {
     .await;
     let u = result.ctx().get("u").unwrap().clone();
 
-    let raw_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    let raw_ids: Vec<i64> = result.iter().filter_map(|r| r.int_id(&u)).collect();
     assert_eq!(raw_ids, vec![1, 2, 3, 4, 5]);
 
     let mut mock_service = MockRedactionService::new();
@@ -3233,7 +3241,7 @@ async fn redaction_preserves_row_order(ctx: &TestContext) {
 
     let authorized_ids: Vec<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
     assert_eq!(
         authorized_ids,
@@ -3250,7 +3258,7 @@ async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
     .await;
     let u = result.ctx().get("u").unwrap().clone();
 
-    let raw_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    let raw_ids: Vec<i64> = result.iter().filter_map(|r| r.int_id(&u)).collect();
     assert_eq!(raw_ids, vec![5, 4, 3, 2, 1]);
 
     let mut mock_service = MockRedactionService::new();
@@ -3261,7 +3269,7 @@ async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
 
     let authorized_ids: Vec<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
+        .filter_map(|r| r.int_id(&u))
         .collect();
     assert_eq!(
         authorized_ids,
@@ -3318,7 +3326,7 @@ async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
 
     let collision_exists = result
         .iter()
-        .any(|r| r.get_id(&u) == Some(1) && r.get_id(&g) == Some(1));
+        .any(|r| r.int_id(&u) == Some(1) && r.int_id(&g) == Some(1));
     assert!(collision_exists, "should have row where User 1 → Group 1");
 
     // Allow User 1 but deny Group 1 — the (1, 1) row must be redacted
@@ -3332,7 +3340,7 @@ async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?)))
+        .filter_map(|r| Some((r.int_id(&u)?, r.int_id(&g)?)))
         .collect();
 
     assert!(

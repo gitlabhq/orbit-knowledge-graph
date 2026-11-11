@@ -1,6 +1,6 @@
 use anyhow::Result;
 use duckdb_client::DuckDbClient;
-use duckdb_client::search::{NodeHydrator, NodeValue};
+use duckdb_client::search::{Key, NodeHydrator, NodeValue};
 
 use crate::commands::setup::spec;
 use crate::workspace;
@@ -17,12 +17,12 @@ pub(crate) fn resolve_ids(
             ("project_id", git.project_id.into()),
             ("commit_sha", git.commit_sha.clone().into()),
         ],
-        Some(ids),
+        Some(&ids.iter().copied().map(Key::Int).collect::<Vec<_>>()),
     )?;
     let mut missing: Vec<i64> = ids
         .iter()
         .copied()
-        .filter(|id| !definitions.iter().any(|node| node.id == *id))
+        .filter(|id| !definitions.iter().any(|node| node.id == Key::Int(*id)))
         .collect();
     missing.sort_unstable();
     missing.dedup();
@@ -83,9 +83,12 @@ mod tests {
         assert_eq!(
             definitions
                 .iter()
-                .map(|node| (node.id, node.properties["file_path"].as_str().unwrap()))
+                .map(|node| (
+                    node.id.clone(),
+                    node.properties["file_path"].as_str().unwrap()
+                ))
                 .collect::<Vec<_>>(),
-            vec![(8, "src/b.rs"), (7, "src/a.rs")]
+            vec![(Key::Int(8), "src/b.rs"), (Key::Int(7), "src/a.rs")]
         );
         assert!(
             definitions

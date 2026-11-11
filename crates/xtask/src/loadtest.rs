@@ -35,6 +35,7 @@ use orbit_server::proto::{
     ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, GetClusterHealthRequest,
     RedactionExchange, RedactionResponse, ResourceAuthorization, redaction_exchange,
 };
+use query_engine::compiler::orbit_authorization::Key;
 use rand::SeedableRng;
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::seq::SliceRandom;
@@ -879,13 +880,16 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
 }
 
 /// `(entity, id)` for every pinned node id in a query, deduplicated.
-fn node_refs(query: &str) -> Result<Vec<(String, i64)>> {
+fn node_refs(query: &str) -> Result<Vec<(String, Key)>> {
     use query_engine::compiler::logical::Query;
     let model = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()?;
-    let catalog = model.model().logical().as_admin();
+    let limits = orbit_server_config::AppConfig::embedded_defaults()
+        .query
+        .limits;
+    let catalog = model.model().logical(&limits).as_admin();
     let statement = query_engine::compiler::surface::parse(query, catalog)?;
     let query = Query::new(&statement.plan, model.model());
-    let mut refs: Vec<(String, i64)> = query
+    let mut refs: Vec<(String, Key)> = query
         .anchors(&query.leaves())
         .into_iter()
         .flat_map(|anchor| {
@@ -1111,7 +1115,10 @@ mod tests {
         let query = "MATCH (u1:User)-[:MEMBER_OF]->(g:Group), (u2:User {id: 2})-[:MEMBER_OF]->(g) WHERE u1.id IN [2, 1] RETURN u1, u2, g";
         assert_eq!(
             node_refs(query).unwrap(),
-            [("User".to_string(), 1), ("User".to_string(), 2)]
+            [
+                ("User".to_string(), Key::Int(1)),
+                ("User".to_string(), Key::Int(2))
+            ]
         );
         assert!(node_refs("MATCH (p:Project) RETURN p").unwrap().is_empty());
         assert!(node_refs("not a query").is_err());

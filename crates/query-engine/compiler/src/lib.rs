@@ -23,7 +23,8 @@
 //!
 //! let query = "MATCH (u:User {id: 1}) RETURN u.username LIMIT 10";
 //!
-//! let result = compile(query, &data_model, &grants).unwrap();
+//! let limits = orbit_server_config::AppConfig::embedded_defaults().query.limits;
+//! let result = compile(query, &data_model, &grants, &limits).unwrap();
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
@@ -32,7 +33,6 @@ pub mod constants;
 pub mod error;
 pub mod hydration;
 pub mod metrics;
-pub(crate) mod query_limits;
 
 #[cfg(test)]
 mod test_grants;
@@ -54,6 +54,7 @@ pub use error::{QueryError, RejectionReason, Result};
 pub use logical::DynamicColumnMode;
 pub use metrics::{METRICS, QueryEngineMetrics};
 use orbit_authorization::Grants;
+pub use orbit_server_config::QueryLimits;
 pub use query_data_model::Direction;
 pub use query_data_model::plan::logical::Operator;
 use query_data_model::{Catalog, ClickHouse, DuckDb};
@@ -99,8 +100,9 @@ pub fn subquery_statements(
     raw: &str,
     data_model: &Arc<Catalog<ClickHouse>>,
     grants: &Grants,
+    limits: &QueryLimits,
 ) -> Result<Vec<passes::codegen::SubqueryStatement>> {
-    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), Arc::clone(data_model));
+    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), *limits, Arc::clone(data_model));
     ctx.set_raw(raw.to_string());
     config::run_clickhouse_gql(&mut ctx)?;
     let plan = ctx.relational().as_ref().ok_or_else(|| {
@@ -114,8 +116,9 @@ pub fn compile(
     raw: &str,
     data_model: &Arc<Catalog<ClickHouse>>,
     grants: &Grants,
+    limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), Arc::clone(data_model));
+    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), *limits, Arc::clone(data_model));
     ctx.set_raw(raw.to_string());
     finish(&mut ctx, config::run_clickhouse_gql)
 }
@@ -124,15 +127,19 @@ pub fn compile(
 ///
 /// No security or hydration phases — local mode trusts all data.
 #[must_use = "the compiled query context should be used"]
-pub fn compile_local(raw: &str, data_model: &Arc<Catalog<DuckDb>>) -> Result<CompiledQueryContext> {
-    let mut c = config::DuckdbGqlCtx::new(Arc::clone(data_model));
+pub fn compile_local(
+    raw: &str,
+    data_model: &Arc<Catalog<DuckDb>>,
+    limits: &QueryLimits,
+) -> Result<CompiledQueryContext> {
+    let mut c = config::DuckdbGqlCtx::new(*limits, Arc::clone(data_model));
     c.set_raw(raw.to_string());
     finish(&mut c, config::run_duckdb_gql)
 }
 
 /// Parse and admit a query without a caller, as startup checks of shipped queries do.
-pub fn check(raw: &str, data_model: &Arc<Catalog<ClickHouse>>) -> Result<()> {
-    let mut ctx = config::CheckGqlCtx::new(Arc::clone(data_model));
+pub fn check(raw: &str, data_model: &Arc<Catalog<ClickHouse>>, limits: &QueryLimits) -> Result<()> {
+    let mut ctx = config::CheckGqlCtx::new(*limits, Arc::clone(data_model));
     ctx.set_raw(raw.to_string());
     config::run_check_gql(&mut ctx).count_err()
 }
@@ -162,11 +169,12 @@ pub fn compile_hydration(
     mut request: HydrationRequest,
     data_model: &Arc<Catalog<ClickHouse>>,
     grants: &Grants,
+    limits: &QueryLimits,
 ) -> Result<ParameterizedQuery> {
     for arm in &mut request.arms {
         arm.scope_on(data_model);
     }
-    let mut ctx = config::ChHydrationCtx::new(grants.clone(), Arc::clone(data_model));
+    let mut ctx = config::ChHydrationCtx::new(grants.clone(), *limits, Arc::clone(data_model));
     ctx.set_hydration(request);
     config::run_ch_hydration(&mut ctx)
         .and_then(|()| {
@@ -194,6 +202,16 @@ pub(crate) mod testkit {
     pub fn admin_ctx() -> Grants {
         crate::test_grants::grants(&MODEL, true, &["1/"], &[])
     }
+
+    pub fn limits() -> &'static orbit_server_config::QueryLimits {
+        static LIMITS: LazyLock<orbit_server_config::QueryLimits> = LazyLock::new(|| {
+            orbit_server_config::query::init_embedded_defaults();
+            orbit_server_config::AppConfig::embedded_defaults()
+                .query
+                .limits
+        });
+        &LIMITS
+    }
 }
 
 #[cfg(test)]
@@ -213,7 +231,7 @@ mod tests {
     }
 
     fn compile_sql(query: &str) -> String {
-        compile(query, &MODEL, &security_ctx())
+        compile(query, &MODEL, &security_ctx(), crate::testkit::limits())
             .expect("should compile")
             .base
             .render()
@@ -223,7 +241,7 @@ mod tests {
     fn relationship_filter_keeps_edge_column_type() {
         let query = "MATCH (u:User {id: 1})-[:MEMBER_OF {target_id: 2}]->(p:Project) RETURN u, p";
 
-        let compiled = compile(query, &MODEL, &security_ctx()).unwrap();
+        let compiled = compile(query, &MODEL, &security_ctx(), crate::testkit::limits()).unwrap();
         let filter_param = compiled
             .base
             .params
@@ -240,7 +258,13 @@ mod tests {
     fn malformed_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile("not a query", &MODEL, &security_ctx()).expect_err("must reject");
+        let err = compile(
+            "not a query",
+            &MODEL,
+            &security_ctx(),
+            crate::testkit::limits(),
+        )
+        .expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             matches!(err, QueryError::Validation(_)),
@@ -257,7 +281,8 @@ mod tests {
         use std::sync::atomic::Ordering;
         let query = "MATCH (x:NotARealEntity) RETURN x{.id} LIMIT 1";
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile(query, &MODEL, &security_ctx()).expect_err("must reject");
+        let err = compile(query, &MODEL, &security_ctx(), crate::testkit::limits())
+            .expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             !matches!(err, crate::error::QueryError::PipelineInvariant(_)),
@@ -290,7 +315,8 @@ mod tests {
         let prefixed = packaged_model(&versioned(embedded_fragments(), "v1_"));
 
         let query = "MATCH (g:Group {id: 1}) RETURN g{.name} LIMIT 1";
-        let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
+        let compiled = compile(query, &prefixed, &security_ctx(), crate::testkit::limits())
+            .expect("should compile");
         let sql = compiled.base.render();
 
         assert!(
@@ -324,6 +350,8 @@ mod tests {
                                 ColumnStorage {
                                     immutable: false,
                                     column: None,
+                                    selectivity: None,
+                                    stored_as_text: false,
                                     backend: Box::new(Some(column)),
                                 },
                             );
@@ -348,7 +376,7 @@ mod tests {
             (packaged_model(&scoped()), "gl_user"),
             (packaged_model(&versioned(scoped(), "v1_")), "v1_gl_user"),
         ] {
-            let sql = compile(query, &model, &security_ctx())
+            let sql = compile(query, &model, &security_ctx(), crate::testkit::limits())
                 .expect("should compile")
                 .base
                 .render();
@@ -393,7 +421,7 @@ mod tests {
             ),
             (packaged_model(&renamed()), "gl_renamed_user"),
         ] {
-            let sql = compile(query, &model, &security_ctx())
+            let sql = compile(query, &model, &security_ctx(), crate::testkit::limits())
                 .expect("should compile")
                 .base
                 .render();
@@ -554,18 +582,22 @@ mod tests {
             let query = format!(
                 "MATCH (u:User)-->(neighbor) WHERE u.id IN {ids} RETURN u, neighbor LIMIT 10"
             );
-            let compiled = compile(&query, &MODEL, &security_ctx()).unwrap();
+            let compiled =
+                compile(&query, &MODEL, &security_ctx(), crate::testkit::limits()).unwrap();
             let context = &compiled.base.result_context;
             (
                 context
                     .neighbors_center()
-                    .map(|(entity, id)| (entity.to_string(), id)),
+                    .map(|(entity, id)| (entity.to_string(), id.clone())),
                 context.label("User").map(str::to_string),
             )
         };
         assert_eq!(
             center("[1]"),
-            (Some(("User".into(), 1)), Some("username".into()))
+            (
+                Some(("User".into(), orbit_authorization::Key::Int(1))),
+                Some("username".into())
+            )
         );
         assert_eq!(center("[1, 2]"), (None, None));
     }
@@ -691,10 +723,15 @@ mod tests {
     fn denorm_preserves_role_gated_node_table_for_security() {
         let query = "MATCH (v:Vulnerability {state: 'detected'})-[:IN_PROJECT]->(proj:Project {id: 1}) RETURN proj, count(v) AS n LIMIT 10";
 
-        let sql = compile(query, &MODEL, &crate::testkit::admin_ctx())
-            .expect("should compile")
-            .base
-            .render();
+        let sql = compile(
+            query,
+            &MODEL,
+            &crate::testkit::admin_ctx(),
+            crate::testkit::limits(),
+        )
+        .expect("should compile")
+        .base
+        .render();
 
         assert!(
             sql.contains("gl_vulnerability"),
@@ -744,7 +781,7 @@ mod tests {
         ];
 
         for (name, query) in queries {
-            let compiled = compile(query, &MODEL, &security_ctx())
+            let compiled = compile(query, &MODEL, &security_ctx(), crate::testkit::limits())
                 .unwrap_or_else(|err| panic!("{name} should compile: {err}"));
             let sql = compiled.base.render();
             assert!(
@@ -769,6 +806,7 @@ mod tests {
                 &format!("{query} RETURN count(p) AS c LIMIT 20"),
                 &MODEL,
                 &security_ctx(),
+                crate::testkit::limits(),
             )
             .unwrap_err();
             assert!(
@@ -788,7 +826,7 @@ mod tests {
         ] {
             let query = format!("MATCH (f:File) WHERE f.path {operator} 'ALI' RETURN f LIMIT 10");
 
-            let sql = compile_local(&query, &LOCAL)
+            let sql = compile_local(&query, &LOCAL, crate::testkit::limits())
                 .expect("should compile")
                 .base
                 .render();
@@ -818,7 +856,8 @@ mod tests {
     fn multi_filter_range_compiles_both_predicates() {
         let model = Arc::clone(&MODEL);
         let query = "MATCH (mr:MergeRequest {id: 1}) WHERE mr.created_at >= '2026-04-01T00:00:00Z' AND mr.created_at < '2026-05-01T00:00:00Z' RETURN mr{.id, .created_at} LIMIT 10";
-        let compiled = compile(query, &model, &security_ctx()).expect("should compile");
+        let compiled = compile(query, &model, &security_ctx(), crate::testkit::limits())
+            .expect("should compile");
         let sql = compiled.base.render();
 
         assert!(
@@ -834,6 +873,7 @@ mod tests {
             "MATCH (f:File {id: 1, content: 'x'}) RETURN f{.path, .content} LIMIT 5",
             &model,
             &security_ctx(),
+            crate::testkit::limits(),
         )
         .expect("virtual column filter should compile");
 
@@ -859,7 +899,7 @@ mod tests {
         let compiled = compile(
             "MATCH (f:File {project_id: 1000}) WHERE f.id IN [1, 2] AND f.content CONTAINS 'needle' RETURN f{.project_id, .path} LIMIT 10",
             &model,
-            &security_ctx(),
+            &security_ctx(), crate::testkit::limits(),
         )
         .expect("filter-only virtual column should compile");
 
@@ -893,7 +933,7 @@ mod tests {
         let compiled = compile(
             "MATCH (f:File {id: 1}) WHERE f.content CONTAINS 'needle' RETURN f{.path, .content} LIMIT 5",
             &model,
-            &security_ctx(),
+            &security_ctx(), crate::testkit::limits(),
         )
         .expect("should compile");
 
@@ -917,7 +957,7 @@ mod tests {
         let err = compile(
             "MATCH (f:File {project_id: 1000}) WHERE f.content CONTAINS 'needle' RETURN f{.path} LIMIT 10",
             &model,
-            &security_ctx(),
+            &security_ctx(), crate::testkit::limits(),
         )
         .expect_err("virtual filter without node_ids should be rejected");
 
@@ -935,7 +975,7 @@ mod tests {
         let err = compile(
             "MATCH (f:File) WHERE f.content CONTAINS 'needle' RETURN f.language, count(f) AS total LIMIT 5",
             &model,
-            &security_ctx(),
+            &security_ctx(), crate::testkit::limits(),
         )
         .expect_err("virtual filter on aggregation should be rejected");
 
@@ -953,7 +993,7 @@ mod tests {
         let err = compile(
             "MATCH (f:File {id: 1})-->(neighbor) WHERE f.content CONTAINS 'needle' RETURN f, neighbor LIMIT 5",
             &model,
-            &security_ctx(),
+            &security_ctx(), crate::testkit::limits(),
         )
         .expect_err("virtual filter on neighbors should be rejected");
 
@@ -972,6 +1012,7 @@ mod tests {
             "MATCH (f:File {id: 1}) WHERE f.content > 'x' RETURN f LIMIT 5",
             &model,
             &security_ctx(),
+            crate::testkit::limits(),
         )
         .expect_err("unsupported op on virtual column should be rejected");
 
@@ -1022,6 +1063,7 @@ mod tests {
             &format!("MATCH (n:Note {{id: 1}}) RETURN n{{.note}} LIMIT {limit}"),
             &model,
             &security_ctx(),
+            crate::testkit::limits(),
         )
         .expect("note query should compile");
         let sql = compiled.base.render();

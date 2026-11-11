@@ -20,6 +20,7 @@ pub mod remote;
 pub mod rows;
 mod traversal;
 
+use orbit_server_config::QueryLimits;
 use query_data_model::Catalog;
 use query_data_model::implementations::relational::plan::RelationalPlan;
 use std::collections::HashMap;
@@ -76,6 +77,7 @@ pub fn plan<B: SqlBackend>(
     request: Request<'_>,
     tp_bounds: Option<&TpBounds>,
     model: &Catalog<B>,
+    limits: &QueryLimits,
 ) -> Result<Planned<RelationalPlan<B>>> {
     let query = match request {
         Request::Query(query) => query,
@@ -92,7 +94,7 @@ pub fn plan<B: SqlBackend>(
     };
     match query.kind() {
         Kind::PathFinding => {
-            let path = path_finding::PathFinding::new(query, model)?;
+            let path = path_finding::PathFinding::new(query, model, limits.path_anchor_rows)?;
             let plan = model
                 .build(|q| path_finding::emit(q, &path))
                 .map_err(rejected)?;
@@ -114,7 +116,9 @@ pub fn plan<B: SqlBackend>(
             };
             Ok(Planned { plan, metadata })
         }
-        Kind::Traversal | Kind::Aggregation => pattern(query, tp_bounds, model),
+        Kind::Traversal | Kind::Aggregation => {
+            pattern(query, tp_bounds, model, limits.id_range_span)
+        }
     }
 }
 
@@ -123,6 +127,7 @@ fn pattern<B: SqlBackend>(
     query: Query<'_>,
     tp_bounds: Option<&TpBounds>,
     model: &Catalog<B>,
+    id_range_span: i64,
 ) -> Result<Planned<RelationalPlan<B>>> {
     let limit = query
         .row_limit()
@@ -130,7 +135,7 @@ fn pattern<B: SqlBackend>(
     let pattern = pattern::Pattern::new(query, model)?;
     let mut planned = None;
     let plan = rows::build(model, |q| {
-        let matched = pattern.execution(q, tp_bounds)?;
+        let matched = pattern.execution(q, tp_bounds, id_range_span)?;
         let nodes = metadata::bindings(&pattern.nodes, query, &matched.bindings)?;
         let (rows, stable_order) = match query.kind() {
             Kind::Aggregation => {

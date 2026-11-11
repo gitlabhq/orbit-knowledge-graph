@@ -3,6 +3,7 @@ package: gitlab.security
 store: graph
 entities:
   Finding:
+    complete: true
     table: gl_finding
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -32,6 +33,7 @@ entities:
       path_lookups: {id: {table: gl_finding, key: id}}
 
   SecurityScan:
+    complete: true
     table: gl_security_scan
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -59,6 +61,7 @@ entities:
       path_lookups: {id: {table: gl_security_scan, key: id}}
 
   Vulnerability:
+    complete: true
     table: gl_vulnerability
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -106,10 +109,11 @@ entities:
       path_lookups: {id: {table: gl_vulnerability, key: id}}
 
   VulnerabilityIdentifier:
+    complete: true
     table: gl_vulnerability_identifier
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
-      external_type: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      external_type: {immutable: true, selectivity: low, backend: {type: String, codec: [ZSTD(1)]}}
       external_id: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
       name: {backend: {type: String, codec: [ZSTD(1)]}}
       url: {backend: {type: String, codec: [ZSTD(1)]}}
@@ -131,6 +135,7 @@ entities:
       path_lookups: {id: {table: gl_vulnerability_identifier, key: id}}
 
   VulnerabilityOccurrence:
+    complete: true
     table: gl_vulnerability_occurrence
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -171,12 +176,13 @@ entities:
       path_lookups: {id: {table: gl_vulnerability_occurrence, key: id}}
 
   VulnerabilityScanner:
+    complete: true
     table: gl_vulnerability_scanner
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
       external_id: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
       name: {backend: {type: String, codec: [ZSTD(1)]}}
-      vendor: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      vendor: {selectivity: low, backend: {type: LowCardinality(String), codec: [LZ4]}}
       created_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
       updated_at: {backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}
       project_id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}

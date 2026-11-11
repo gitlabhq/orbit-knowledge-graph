@@ -1,8 +1,9 @@
 use pest::Span;
 use pest::error::{Error, ErrorVariant, LineColLocation};
 
+use orbit_server_config::QueryLimits;
+
 use super::Rule;
-use crate::plan::logical::limits::{MAX_ROWS, MAX_SKIP};
 use crate::surface::SurfaceError;
 
 const INVARIANT_PREFIXES: [&str; 3] = [
@@ -11,22 +12,22 @@ const INVARIANT_PREFIXES: [&str; 3] = [
     "pest_consume::parser",
 ];
 
-pub(super) fn parse_failure(error: Error<Rule>) -> SurfaceError {
+pub(super) fn parse_failure(error: Error<Rule>, limits: &QueryLimits) -> SurfaceError {
     let (line, column) = match error.line_col {
         LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
     };
     SurfaceError::Schema(format!(
         "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); predicates support AND, NOT, and parentheses, and each comparison starts with a property such as n.name; patterns require named nodes and bounded paths.",
-        expected_message(&error.variant)
+        expected_message(&error.variant, limits)
     ))
 }
 
-fn expected_message(variant: &ErrorVariant<Rule>) -> String {
+fn expected_message(variant: &ErrorVariant<Rule>, limits: &QueryLimits) -> String {
     match variant {
         ErrorVariant::ParsingError {
             positives,
             negatives,
-        } => match (labels(positives), labels(negatives)) {
+        } => match (labels(positives, limits), labels(negatives, limits)) {
             (expected, unexpected) if unexpected.is_empty() => format!("expected {expected}"),
             (expected, unexpected) if expected.is_empty() => format!("unexpected {unexpected}"),
             (expected, unexpected) => format!("unexpected {unexpected}; expected {expected}"),
@@ -35,9 +36,9 @@ fn expected_message(variant: &ErrorVariant<Rule>) -> String {
     }
 }
 
-fn labels(rules: &[Rule]) -> String {
+fn labels(rules: &[Rule], limits: &QueryLimits) -> String {
     let mut labels: Vec<String> = Vec::new();
-    for label in rules.iter().map(rule_label) {
+    for label in rules.iter().map(|rule| rule_label(rule, limits)) {
         if !labels.contains(&label) {
             labels.push(label);
         }
@@ -50,7 +51,7 @@ fn labels(rules: &[Rule]) -> String {
     }
 }
 
-fn rule_label(rule: &Rule) -> String {
+fn rule_label(rule: &Rule, limits: &QueryLimits) -> String {
     match rule {
         Rule::EOI => "end of query",
         Rule::Query | Rule::Matches | Rule::Match => "MATCH",
@@ -62,7 +63,7 @@ fn rule_label(rule: &Rule) -> String {
         Rule::Debug => "DEBUG",
         Rule::SchemaCall => "CALL db.schema()",
         Rule::Pattern | Rule::PatternElement | Rule::NodePattern => {
-            "a node pattern such as (n:Label)"
+            "a node pattern such as (n:Entity)"
         }
         Rule::PatternElementChain | Rule::RelationshipPattern => {
             "a relationship such as -[:TYPE]->"
@@ -93,10 +94,10 @@ fn rule_label(rule: &Rule) -> String {
         Rule::SortItem => "a sort key",
         Rule::SortDirection => "ASC or DESC",
         Rule::UnsignedInteger => "a non-negative integer",
-        Rule::LimitCount => return format!("an integer from 1 to {MAX_ROWS}"),
-        Rule::SkipCount => return format!("an integer from 0 to {MAX_SKIP}"),
+        Rule::LimitCount => return format!("an integer from 1 to {}", limits.max_rows),
+        Rule::SkipCount => return format!("an integer from 0 to {}", limits.max_skip),
         Rule::PathCount => "1",
-        Rule::HopCount => "a hop count from 1 to 3",
+        Rule::HopCount => return format!("a hop count from 1 to {}", limits.hops),
         Rule::StringLiteral
         | Rule::NumberLiteral
         | Rule::BooleanLiteral

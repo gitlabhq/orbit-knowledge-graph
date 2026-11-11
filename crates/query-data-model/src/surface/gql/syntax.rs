@@ -6,9 +6,9 @@ use pest_consume::{Error, match_nodes};
 
 use super::ast::*;
 use super::{QueryParser, Rule};
-use crate::plan::logical::limits::{MAX_IN_VALUES, MAX_PINS, MAX_TEXT};
+use orbit_server_config::QueryLimits;
 
-pub(super) type Node<'i> = pest_consume::Node<'i, Rule, ()>;
+pub(super) type Node<'i> = pest_consume::Node<'i, Rule, &'i QueryLimits>;
 pub(super) type Result<T> = std::result::Result<T, Error<Rule>>;
 
 #[pest_consume::parser]
@@ -93,7 +93,7 @@ impl QueryParser {
     }
 
     fn LegacyShortestPath(input: Node) -> Result<()> {
-        Err(input.error("use ANY SHORTEST (a)-[:CONTAINS*1..3]->(b) for shortest paths"))
+        Err(input.error("use ANY SHORTEST (a)-[:TYPE*1..3]->(b) for shortest paths"))
     }
 
     fn PathSearch(input: Node) -> Result<()> {
@@ -258,12 +258,13 @@ impl QueryParser {
 
     fn NotExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
         let span = input.as_span();
+        let nesting = input.user_data().nesting;
         let mut children: Vec<_> = input.into_children().collect();
         let predicate = children
             .pop()
             .ok_or_else(|| error_at(span, "expected a condition"))?;
         let mut expression = Self::predicate(predicate)?;
-        if children.len() + expression.depth() > super::MAX_NESTING {
+        if children.len() + expression.depth() > nesting {
             return Err(error_at(span, "expression nesting is too deep"));
         }
         for _negation in children {
@@ -728,11 +729,13 @@ fn list(input: Node) -> Result<Value> {
         .children()
         .any(|child| child.as_rule() == Rule::ListOverflow)
     {
+        let limits = input.user_data();
+        let (pins, values) = (limits.pinned_ids, limits.in_values);
         let message = match input.as_rule() {
-            Rule::InListLiteral => format!(
-                "IN takes at most {MAX_PINS} values on id and {MAX_IN_VALUES} on other properties"
-            ),
-            _ => format!("a list takes at most {MAX_IN_VALUES} values"),
+            Rule::InListLiteral => {
+                format!("IN takes at most {pins} values on id and {values} on other properties")
+            }
+            _ => format!("a list takes at most {values} values"),
         };
         return Err(error_at(input.as_span(), &message));
     }
@@ -771,7 +774,7 @@ fn unsupported_function(call: &Node, in_where: bool) -> Error<Rule> {
     let name = call.children().next().map_or("", |node| node.as_str());
     let hint = match name.to_ascii_lowercase().as_str() {
         "type" => {
-            "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], RETURN type(r), and ORDER BY type(r)"
+            "type() takes one relationship variable and works in WHERE type(r) = 'TYPE', WHERE type(r) IN ['TYPE', 'OTHER'], RETURN type(r), and ORDER BY type(r)"
         }
         "count" | "sum" | "avg" | "min" | "max" if in_where => &format!(
             "{name}() belongs in RETURN with an alias, as in RETURN count(mr) AS n; WHERE cannot filter on an aggregate"
@@ -831,7 +834,8 @@ fn name<'i>(node: &Node<'i>) -> Result<Name<'i>> {
         .and_then(|s| s.strip_suffix('`'))
         .unwrap_or(raw)
         .to_owned();
-    super::identifier(&value).map_err(|error| node.error(error))?;
+    super::identifier(&value, node.user_data().identifier_bytes)
+        .map_err(|error| node.error(error))?;
     Ok(Name {
         span: node.as_span(),
         value,
@@ -879,10 +883,9 @@ fn string(node: &Node) -> Result<String> {
             _ => return Err(mismatch(node)),
         }
     }
-    if result.chars().count() > MAX_TEXT {
-        return Err(node.error(format!(
-            "string literal must not exceed {MAX_TEXT} characters"
-        )));
+    let max = node.user_data().string_chars;
+    if result.chars().count() > max {
+        return Err(node.error(format!("string literal must not exceed {max} characters")));
     }
     Ok(result)
 }

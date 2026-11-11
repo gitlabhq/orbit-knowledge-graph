@@ -4,7 +4,12 @@ use super::setup::{embedded_model, test_ctx};
 
 fn assert_reserved(query: &str, identifier: &str) {
     let expected = format!("identifier {identifier:?} conflicts with reserved prefix \"_orbit_\"");
-    match compile(query, &embedded_model(), &test_ctx()) {
+    match compile(
+        query,
+        &embedded_model(),
+        &test_ctx(),
+        query_data_model::testkit::limits(),
+    ) {
         Err(QueryError::Validation(message)) => assert_eq!(message, expected, "{query}"),
         other => panic!("{query} must be rejected, got {other:?}"),
     }

@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS;
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::implementations::clickhouse::schema::EngineTable;
-use query_data_model::{Catalog, ClickHouse};
+use query_data_model::catalog::Rule;
+use query_data_model::implementations::clickhouse::spec::TableRole;
+use query_data_model::implementations::orbit_code::OrbitCode;
+use query_data_model::{Catalog, ClickHouse, EntityId, Model, StorageBackend};
 use tonic::Status;
 
 use super::phase::Phase;
@@ -12,8 +14,6 @@ use crate::status_query::{
     bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
     map_column_extraction_error, uncached_query_config,
 };
-
-pub(super) const PROJECT_NODE: &str = "Project";
 
 const PROJECT_COVERAGE_SQL: &str = r#"
 WITH projects AS (
@@ -23,7 +23,7 @@ WITH projects AS (
          FROM {project_table:Identifier} FINAL
          WHERE _deleted = 0
            AND {in_scopes}),
-     code AS (
+     coverage AS (
          SELECT project_id,
                 countIf(indexed_at IS NOT NULL) > 0 AS is_indexed,
                 NOT is_indexed AND countIf(attempts >= {max_code_attempts:Int64}) > 0 AS is_gap
@@ -34,11 +34,11 @@ WITH projects AS (
          GROUP BY project_id)
 SELECT scope,
        toInt64(uniqExact(projects.id)) AS total_known,
-       toInt64(uniqExactIf(projects.id, code.is_indexed)) AS indexed,
-       toInt64(uniqExactIf(projects.id, code.is_gap)) AS gaps
+       toInt64(uniqExactIf(projects.id, coverage.is_indexed)) AS indexed,
+       toInt64(uniqExactIf(projects.id, coverage.is_gap)) AS gaps
 FROM projects
 ARRAY JOIN path_prefixes AS scope
-LEFT JOIN code ON code.project_id = projects.id
+LEFT JOIN coverage ON coverage.project_id = projects.id
 WHERE scope IN {scopes:Array(String)}
 GROUP BY scope
 "#;
@@ -107,15 +107,48 @@ pub async fn read_project_coverage(
         .collect())
 }
 
+/// The entity the code store scopes every read through: the repositories code is indexed for.
+pub(super) fn repository_entity(model: &Model) -> Result<EntityId, Status> {
+    let mut ends = model
+        .stores()
+        .iter()
+        .filter(|store| store.kind == OrbitCode::KIND)
+        .flat_map(|store| {
+            store
+                .sources()
+                .filter_map(move |source| match &store.guard(source.entity)?.rule {
+                    Rule::Via(hops) => hops.last().map(|hop| hop.to),
+                    _ => None,
+                })
+        });
+    let first = ends.next().ok_or_else(|| {
+        Status::internal(format!(
+            "no {} store scopes its reads through an entity",
+            OrbitCode::KIND
+        ))
+    })?;
+    match ends.all(|end| end == first) {
+        true => Ok(first),
+        false => Err(Status::internal(format!(
+            "{} stores scope their reads through different entities",
+            OrbitCode::KIND
+        ))),
+    }
+}
+
 fn find_coverage_tables(catalog: &Catalog<ClickHouse>) -> Result<(&str, &str), Status> {
-    let project_table = catalog
-        .graph()
-        .entity_id(PROJECT_NODE)
-        .and_then(|entity| catalog.table_of(entity))
-        .ok_or_else(|| Status::internal(format!("model missing required node: {PROJECT_NODE}")))?;
+    let repository = repository_entity(catalog.model())?;
+    let project_table = catalog.table_of(repository).ok_or_else(|| {
+        Status::internal(format!(
+            "{} has no table on connection {}",
+            catalog.graph().entity(repository).name,
+            catalog.connection()
+        ))
+    })?;
     let code_checkpoint_table = catalog
         .schema()
-        .and_then(|schema| schema.engine_table(EngineTable::CodeCheckpoints))
-        .map_err(|error| Status::internal(error.to_string()))?;
+        .map_err(|error| Status::internal(error.to_string()))?
+        .role_table(TableRole::CodeProgress)
+        .ok_or_else(|| Status::internal("the model holds repository progress in no table"))?;
     Ok((project_table, code_checkpoint_table))
 }

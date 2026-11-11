@@ -1,3 +1,4 @@
+use orbit_authorization::Key;
 use orbit_utils::query_types::{SqlType, TimeZone};
 use query_data_model::constants::{DELETED_COLUMN, RELATIONSHIP_KIND_COLUMN};
 use query_data_model::implementations::relational::RelationalBackend;
@@ -189,15 +190,29 @@ pub(crate) fn in_list<B: RelationalBackend>(
     }
 }
 
-pub(crate) fn id_list<B: RelationalBackend>(value: Expr, ids: &[i64]) -> Expr {
-    let values = ids.iter().map(|id| Value::from(*id)).collect();
-    in_list::<B>(value, SqlType::Int64, values)
-        .unwrap_or_else(|| param::<B>(SqlType::Bool, false.into()))
+/// A key as the value of the one identity column it matches; a composite key fills no single
+/// column.
+pub(crate) fn key_value(key: &Key) -> Built<(SqlType, Value)> {
+    match key {
+        Key::Int(key) => Ok((SqlType::Int64, Value::from(*key))),
+        Key::Text(key) | Key::Uuid(key) => Ok((SqlType::String, Value::from(key.as_str()))),
+        Key::Composite(_) => Err(RelationalError::Unsupported("composite identity keys")),
+    }
 }
 
-pub(crate) fn ids<B: RelationalBackend>(value: Expr, ids: &[i64]) -> Expr {
+pub(crate) fn id_list<B: RelationalBackend>(value: Expr, ids: &[Key]) -> Built<Expr> {
+    let values = ids.iter().map(key_value).collect::<Built<Vec<_>>>()?;
+    let data_type = values
+        .first()
+        .map_or(SqlType::Int64, |(data_type, _)| *data_type);
+    let values = values.into_iter().map(|(_, value)| value).collect();
+    Ok(in_list::<B>(value, data_type, values)
+        .unwrap_or_else(|| param::<B>(SqlType::Bool, false.into())))
+}
+
+pub(crate) fn ids<B: RelationalBackend>(value: Expr, ids: &[Key]) -> Built<Expr> {
     match ids {
-        [id] => eq(value, super::int(*id)),
+        [Key::Int(id)] => Ok(eq(value, super::int(*id))),
         _ => id_list::<B>(value, ids),
     }
 }

@@ -9,7 +9,7 @@ use orbit_log_fields::{info, warn};
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::introspection::SchemaResponse;
-use query_data_model::{DEFAULT_PRIMARY_KEY, EntityId, GraphCatalog, Model};
+use query_data_model::{EntityId, GraphCatalog, Model};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -762,7 +762,12 @@ impl OrbitServiceImpl {
                     name: entity.name.clone(),
                     domain: entity.domain.clone().unwrap_or_default(),
                     description: entity.description.clone().unwrap_or_default(),
-                    primary_key: DEFAULT_PRIMARY_KEY.to_string(),
+                    primary_key: entity
+                        .identity
+                        .iter()
+                        .map(|property| graph.property(*property).name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(","),
                     label_field: entity.label.clone(),
                     properties,
                     style,

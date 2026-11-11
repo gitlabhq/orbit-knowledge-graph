@@ -181,7 +181,7 @@ pub(crate) fn term<B: RelationalBackend>(
     Ok(match term {
         Term::Column(value) => column(scope, value)?,
         Term::Value(value) => predicates::Lowering { scope }.output::<B>(value)?,
-        Term::Id(id) => literal((*id).into()),
+        Term::Id(id) => literal(expr::key_value(id)?.1),
         Term::Output(name) => named(scope, name)?,
         Term::Text(value) => call(Function::ToString, vec![column(scope, value)?]),
         Term::Group(index) => groups

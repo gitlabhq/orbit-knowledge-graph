@@ -2,8 +2,6 @@ use serde_json::Value;
 
 use crate::query_types::{ParamValue, SqlType, TimeZone};
 
-pub const MAX_BOUND_PATH_SEGMENTS: usize = 2000;
-
 const MAX_ARRAY_PARAM_BYTES: usize = 48 * 1024;
 const MAX_URL_ENCODED_BYTES_PER_CHAR: usize = 3;
 const PARAM_FRAMING_BYTES: usize = 12;

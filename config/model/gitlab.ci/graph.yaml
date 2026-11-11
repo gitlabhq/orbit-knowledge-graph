@@ -6,8 +6,9 @@ entities:
   Deployment:
     style: {size: 26, color: "#14B8A6"}
     description: A deployment of a specific commit to a CI/CD environment
+    identity: id
     label: id
-    defaults: [id, iid, status, ref, sha]
+    default_columns: [id, iid, status, ref, sha]
     properties:
       id: {type: int64, description: Unique ID.}
       iid: {type: int64, description: Project-scoped deployment number.}
@@ -26,7 +27,6 @@ entities:
       deployable_type:
         type: string
         description: Polymorphic type (typically CommitStatus, the STI base class for Ci::Build).
-        selectivity: low
         default: ''
       deployable_id: {type: int64?, description: Deployable ID.}
       on_stop: {type: string, description: Job name that stops this deployment., default: ''}
@@ -43,8 +43,9 @@ entities:
   Environment:
     style: {size: 22, color: "#0EA5E9"}
     description: A CI/CD deployment target (production, staging, review app, etc.)
+    identity: id
     label: name
-    defaults: [id, name, state, tier]
+    default_columns: [id, name, state, tier]
     properties:
       id: {type: int64, description: Unique ID.}
       project_id:
@@ -56,13 +57,11 @@ entities:
       environment_type:
         type: string
         description: Category from name prefix before first '/' (e.g. 'review'); empty when no '/'.
-        selectivity: low
         default: ''
       state:
         type: enum
         description: Lifecycle state.
         values: {0: available, 1: stopping, 2: stopped}
-        stored_as_text: true
         default: available
       tier:
         type: enum
@@ -90,8 +89,9 @@ entities:
   Job:
     style: {size: 24, color: "#8B5CF6"}
     description: A CI/CD job that executes scripts within a pipeline stage
+    identity: id
     label: name
-    defaults: [id, name, status, ref]
+    default_columns: [id, name, status, ref]
     properties:
       id: {type: int64, description: Unique ID.}
       name: {type: string, description: Job name from .gitlab-ci.yml., default: ''}
@@ -112,7 +112,6 @@ entities:
           10: waiting_for_resource
           11: waiting_for_callback
           12: canceling
-        stored_as_text: true
         terminal: [success, failed, canceled, skipped]
         default: ''
       ref: {type: string, description: Branch or tag name., default: ''}
@@ -130,7 +129,6 @@ entities:
         type: enum
         description: Run condition.
         values: {0: on_success, 1: on_failure, 2: always, 3: manual, 4: delayed}
-        stored_as_text: true
         default: ''
       retried: {type: boolean?, description: Whether superseded by a retry.}
       failure_reason:
@@ -203,7 +201,6 @@ entities:
       type:
         type: string
         description: "STI class: Ci::Build, Ci::Bridge, or GenericCommitStatus."
-        selectivity: low
         default: ''
       runner_id: {type: int64?, description: Executing runner ID.}
       timeout: {type: int64?, description: Effective timeout in seconds.}
@@ -245,8 +242,9 @@ entities:
     description: >-
       A CI/CD pipeline that runs a series of stages and jobs to build, test, and
       deploy code
+    identity: id
     label: id
-    defaults: [id, iid, status, ref, source]
+    default_columns: [id, iid, status, ref, source]
     properties:
       id: {type: int64, description: Unique ID.}
       iid: {type: int64?, description: Project-scoped pipeline number.}
@@ -269,7 +267,6 @@ entities:
           10: waiting_for_resource
           11: waiting_for_callback
           12: canceling
-        stored_as_text: true
         terminal: [success, failed, canceled, skipped]
         default: ''
       source:
@@ -347,8 +344,9 @@ entities:
   Runner:
     style: {size: 22, color: "#A78BFA"}
     description: A CI/CD runner that executes jobs
+    identity: id
     label: name
-    defaults: [id, runner_type, name, active]
+    default_columns: [id, runner_type, name, active]
     properties:
       id: {type: int64, description: Unique ID.}
       runner_type:
@@ -376,8 +374,9 @@ entities:
     description: >-
       A stage within a CI/CD pipeline that groups related jobs (e.g., build, test,
       deploy)
+    identity: id
     label: name
-    defaults: [id, name, status]
+    default_columns: [id, name, status]
     properties:
       id: {type: int64, description: Unique ID.}
       name: {type: string, description: "Stage name (e.g. build, test, deploy).", default: ''}

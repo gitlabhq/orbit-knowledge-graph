@@ -352,6 +352,7 @@ async fn run_pipeline(
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::new(db.create_client()));
     server_extensions.insert(Arc::clone(data_model));
+    server_extensions.insert(*query_data_model::testkit::limits());
     server_extensions.insert(claims.clone());
     let mut registry = ColumnResolverRegistry::new();
     registry.register("gitaly", Arc::new(MockColumnResolver));
@@ -408,7 +409,7 @@ async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, Pi
 
 #[tokio::test]
 async fn corpus_smoke() {
-    orbit_server_config::query::init(orbit_server_config::AppConfig::embedded_defaults().query);
+    orbit_server_config::query::init_embedded_defaults();
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_if_needed().await;

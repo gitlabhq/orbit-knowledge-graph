@@ -3,6 +3,7 @@ package: integration.slack
 store: graph
 entities:
   SlackWorkspace:
+    complete: true
     table: gl_slack_workspace
     columns:
       id: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}

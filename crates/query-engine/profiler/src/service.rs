@@ -31,14 +31,20 @@ pub fn grants(
 pub struct ProfilerPipelineService {
     data_model: Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     client: Arc<ArrowClickHouseClient>,
+    limits: compiler::QueryLimits,
 }
 
 impl ProfilerPipelineService {
     pub fn new(
         data_model: Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         client: Arc<ArrowClickHouseClient>,
+        limits: compiler::QueryLimits,
     ) -> Self {
-        Self { data_model, client }
+        Self {
+            data_model,
+            client,
+            limits,
+        }
     }
 
     pub async fn run_query(
@@ -51,6 +57,7 @@ impl ProfilerPipelineService {
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(Arc::clone(&self.data_model));
+        server_extensions.insert(self.limits);
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),

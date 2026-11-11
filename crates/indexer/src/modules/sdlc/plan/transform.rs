@@ -368,8 +368,9 @@ fn int_enum_values(
     catalog: &Catalog<ClickHouse>,
     property: PropertyId,
 ) -> Option<BTreeMap<i64, String>> {
+    let enum_type = catalog.enum_type(property);
     let property = catalog.graph().property(property);
-    match property.enum_type {
+    match enum_type {
         EnumType::Int => property.enum_values.clone(),
         EnumType::String => None,
     }
@@ -429,7 +430,7 @@ fn node_columns(columns: &[SourceColumn], catalog: &Catalog<ClickHouse>) -> Vec<
             let property = catalog.graph().property(column.property);
             let col = column.column.as_str();
             if property.data_type == DataType::Enum
-                && property.enum_type == EnumType::Int
+                && catalog.enum_type(column.property) == EnumType::Int
                 && let Some(values) = &property.enum_values
             {
                 return NodeColumn::IntEnum {

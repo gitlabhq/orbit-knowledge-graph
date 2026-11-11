@@ -162,7 +162,10 @@ where
                     condition
                         .node_properties()
                         .filter(|column| {
-                            column.name != query_data_model::constants::DEFAULT_PRIMARY_KEY
+                            pattern
+                                .nodes
+                                .get(&column.source)
+                                .is_none_or(|node| column.name != node.id_column)
                         })
                         .map(|column| column.source.clone()),
                 );

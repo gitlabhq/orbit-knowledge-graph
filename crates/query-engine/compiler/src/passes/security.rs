@@ -180,15 +180,10 @@ fn key_values(keys: &[Key]) -> Result<Option<(SqlType, Vec<Value>)>> {
     Ok(Some((data_type, values)))
 }
 
-/// A key as the one column value it filters; a composite key fills no single column.
+/// A scope key as the one column value it filters.
 pub(crate) fn key_value(key: &Key) -> Result<(SqlType, Value)> {
-    match key {
-        Key::Int(key) => Ok((SqlType::Int64, Value::from(*key))),
-        Key::Text(key) | Key::Uuid(key) => Ok((SqlType::String, Value::from(key.as_str()))),
-        Key::Composite(_) => Err(QueryError::Security(
-            "a composite scope key cannot filter one column".into(),
-        )),
-    }
+    crate::passes::plan::build::expr::key_value(key)
+        .map_err(|_| QueryError::Security("a composite scope key cannot filter one column".into()))
 }
 
 fn falsehood() -> Expr {

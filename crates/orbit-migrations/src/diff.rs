@@ -273,7 +273,7 @@ impl Contents<'_> {
             property.data_type,
             property.nullable,
             !self.catalog.model().immutable(id),
-            property.enum_type,
+            self.catalog.model().enum_type(id),
             property.enum_values,
         )
     }

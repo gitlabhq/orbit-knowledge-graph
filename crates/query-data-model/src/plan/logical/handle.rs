@@ -286,7 +286,7 @@ impl<'m> Rows<'m> {
 fn single<'m>(name: &str, binding: Binding<'m>) -> Result<Binding<'m>, PlanError> {
     match binding.hops.max > 1 {
         true => Err(PlanError::shape(format!(
-            "{name} has a variable length and binds a list; only a one-hop relationship can be filtered, returned, or sorted, so list the types in the pattern instead, such as -[{name}:CLOSES|MENTIONS*1..3]->"
+            "{name} has a variable length and binds a list; only a one-hop relationship can be filtered, returned, or sorted, so list the types in the pattern instead, such as -[{name}:TYPE|OTHER*1..3]->"
         ))),
         false => Ok(binding),
     }

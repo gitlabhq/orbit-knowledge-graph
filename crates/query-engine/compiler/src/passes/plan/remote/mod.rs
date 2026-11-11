@@ -12,7 +12,7 @@ use query_data_model::implementations::orbit_code::OrbitCode;
 use query_data_model::plan::code::CodePlan;
 use query_data_model::plan::live::LivePlan;
 use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
-use query_data_model::{Catalog, EntityId, Model, PropertyId};
+use query_data_model::{Catalog, EntityId, Model, PropertyId, StorageBackend};
 
 use crate::error::{QueryError, Result};
 
@@ -73,7 +73,9 @@ fn target(logical: &LogicalPlan, model: &Arc<Model>) -> Result<Target> {
         }
     }
     Err(QueryError::Validation(format!(
-        "no code or live connection serves {}",
+        "no {} or {} connection serves {}",
+        OrbitCode::KIND,
+        Live::KIND,
         model.graph().entity(entity).name
     )))
 }

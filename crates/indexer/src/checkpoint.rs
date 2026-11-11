@@ -8,7 +8,8 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use query_data_model::DataModelError;
-use query_data_model::implementations::clickhouse::schema::{EngineTable, Schema};
+use query_data_model::implementations::clickhouse::schema::Schema;
+use query_data_model::implementations::clickhouse::spec::TableRole;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -234,7 +235,9 @@ impl ClickHouseCheckpointStore {
         schema: &Schema,
         version: u32,
     ) -> Result<Self, DataModelError> {
-        let table = schema.engine_table(EngineTable::PipelineCheckpoints)?;
+        let table = schema
+            .role_table(TableRole::PlanProgress)
+            .ok_or_else(|| DataModelError::Invalid("no table holds plan progress".into()))?;
         Ok(Self {
             client,
             table: prefixed_table_name(table, version),

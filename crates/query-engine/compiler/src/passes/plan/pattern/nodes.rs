@@ -5,12 +5,11 @@ use crate::passes::codegen::SqlBackend;
 use query_data_model::Catalog;
 use std::collections::{HashMap, HashSet};
 
-use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::plan::logical::{Columns, Expr, Measure};
 
 use super::{NodePlan, Pattern};
 use crate::logical::anchors::Anchor;
-use crate::logical::columns::{free_text, redaction_column, returned, selections};
+use crate::logical::columns::{free_text, identity_column, redaction_column, returned, selections};
 use crate::logical::{Query, binding};
 use crate::passes::plan::filters::{bind_facts, unindex_if_key_narrowed};
 use crate::passes::plan::predicates::{
@@ -24,12 +23,13 @@ impl NodePlan {
         anchor: &Anchor<'_>,
         selection: Option<&Columns>,
         model: &Catalog<B>,
-    ) -> Self
+    ) -> crate::error::Result<Self>
     where
         B: SqlBackend,
     {
         let binding = anchor.binding;
         let entity = binding.entity;
+        let id_column = identity_column(model, entity)?.to_string();
         let graph = model.graph();
         let stored = |name: &str| {
             graph
@@ -41,7 +41,7 @@ impl NodePlan {
         filters.retain(|(property, _)| stored(property));
         unindex_if_key_narrowed(&mut filters);
         let has_traversal_path = model.has_path_column(entity);
-        Self {
+        Ok(Self {
             alias: binding.name.to_string(),
             entity: Some(graph.entity(entity).name.clone()),
             table: model.table_of(entity).map(String::from),
@@ -57,8 +57,9 @@ impl NodePlan {
                 (true, true) => ReadScope::HighFanOut,
             },
             redaction_id_column: redaction_column(model, entity)
-                .unwrap_or(DEFAULT_PRIMARY_KEY)
+                .unwrap_or(&id_column)
                 .to_string(),
+            id_column,
             columns: returned(model, entity, selection)
                 .into_iter()
                 .filter(|name| stored(name))
@@ -74,7 +75,7 @@ impl NodePlan {
                     (property.name.clone(), property.data_type)
                 })
                 .collect(),
-        }
+        })
     }
 
     pub fn is_id_pinned_only(&self) -> bool {
@@ -82,7 +83,7 @@ impl NodePlan {
     }
 
     pub fn uses_default_pk(&self) -> bool {
-        self.redaction_id_column == DEFAULT_PRIMARY_KEY
+        self.redaction_id_column == self.id_column
     }
 
     pub(crate) fn is_pinned(&self) -> bool {
@@ -111,7 +112,7 @@ impl NodePlan {
             .map(|(property, filter)| property_filter(&self.alias, property, filter))
             .collect();
         predicates.extend(self.predicates.iter().cloned());
-        predicates.extend(self.id_predicates(Column::new(&self.alias, DEFAULT_PRIMARY_KEY)));
+        predicates.extend(self.id_predicates(Column::new(&self.alias, &self.id_column)));
         predicates.push(live(&self.alias));
         predicates
     }
@@ -136,7 +137,7 @@ pub(super) fn build_nodes<B>(
     query: Query<'_>,
     anchors: &[Anchor<'_>],
     model: &Catalog<B>,
-) -> HashMap<String, NodePlan>
+) -> crate::error::Result<HashMap<String, NodePlan>>
 where
     B: SqlBackend,
 {
@@ -145,8 +146,8 @@ where
         .iter()
         .map(|anchor| {
             let selection = selected.get(&anchor.binding.output).copied();
-            let node = NodePlan::new(query, anchor, selection, model);
-            (node.alias.clone(), node)
+            let node = NodePlan::new(query, anchor, selection, model)?;
+            Ok((node.alias.clone(), node))
         })
         .collect()
 }
@@ -186,7 +187,7 @@ fn aggregation_row_nodes<'p>(
         .filter(|group| match group {
             Expr::Node(_) => true,
             Expr::Property { property, .. } | Expr::Truncate { property, .. } => {
-                free_text(model.graph(), *property)
+                free_text(model, *property)
             }
             _ => false,
         })

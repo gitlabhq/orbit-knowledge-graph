@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use query_data_model::plan::logical::{Columns, Expr, LogicalOperation, Projection};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::{DataType, FieldSelectivity};
-use query_data_model::{Entity, EntityId, GraphCatalog, PropertyId};
+use query_data_model::{Entity, EntityId, PropertyId};
 
 use super::Query;
 
@@ -39,7 +39,7 @@ pub fn defaults(entity: &Entity) -> impl Iterator<Item = PropertyId> + '_ {
         .properties
         .iter()
         .copied()
-        .filter(|property| entity.defaults.contains(property))
+        .filter(|property| entity.default_columns.contains(property))
 }
 
 /// The properties a binding returns: the listed ones, else the defaults or every readable property.
@@ -53,7 +53,7 @@ where
         selection => {
             let entity = graph.entity(entity);
             let defaulted = matches!(selection, None | Some(Columns::Default));
-            let properties: Vec<PropertyId> = match defaulted && !entity.defaults.is_empty() {
+            let properties: Vec<PropertyId> = match defaulted {
                 true => defaults(entity).collect(),
                 false => entity.properties.clone(),
             };
@@ -76,19 +76,33 @@ where
 pub fn redaction_column(model: &Catalog<impl SqlBackend>, entity: EntityId) -> Option<&str> {
     model.checks(entity).iter().find_map(|check| match check {
         query_data_model::catalog::Check::Rows { id, .. } => {
-            Some(model.graph().property(*id).name.as_str())
-                .filter(|name| *name != query_data_model::constants::DEFAULT_PRIMARY_KEY)
+            let graph = model.graph();
+            (graph.entity(entity).identity != [*id]).then(|| graph.property(*id).name.as_str())
         }
         query_data_model::catalog::Check::Delegated { .. } => None,
     })
 }
 
-/// Free text: a uuid, or a string not declared low selectivity.
-pub fn free_text(graph: &GraphCatalog, property: PropertyId) -> bool {
-    let property = graph.property(property);
-    match property.data_type {
+/// The column holding the entity's identity on the catalog's connection; an entity this
+/// connection does not store has none, and no SQL plan reads it.
+pub fn identity_column(
+    model: &Catalog<impl SqlBackend>,
+    entity: EntityId,
+) -> crate::error::Result<&str> {
+    model.identity_column(entity).ok_or_else(|| {
+        crate::error::QueryError::Lowering(format!(
+            "{} has no identity column on connection {}",
+            model.graph().entity(entity).name,
+            model.connection()
+        ))
+    })
+}
+
+/// Free text: a uuid, or a string its store does not declare low selectivity.
+pub fn free_text(model: &Catalog<impl SqlBackend>, property: PropertyId) -> bool {
+    match model.graph().property(property).data_type {
         DataType::Uuid => true,
-        DataType::String => property.selectivity != FieldSelectivity::Low,
+        DataType::String => model.selectivity(property) != Some(FieldSelectivity::Low),
         _ => false,
     }
 }

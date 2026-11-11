@@ -189,13 +189,42 @@ impl<B: StorageBackend> Catalog<B> {
             .filter_map(move |(store, _)| Some((store, store.source(entity)?)))
     }
 
+    /// The store on this connection that plans read the entity from: its complete store when the
+    /// connection holds it, else the one partial store here.
     pub fn home(&self, entity: EntityId) -> Option<(&Store, &B::Store)> {
-        self.stores()
-            .find(|(store, _)| store.source(entity).is_some())
+        let mut holders = self
+            .stores()
+            .filter(|(store, _)| store.source(entity).is_some());
+        let first = holders.next()?;
+        Some(
+            std::iter::once(first)
+                .chain(holders)
+                .find(|(store, _)| store.complete(entity))
+                .unwrap_or(first),
+        )
+    }
+
+    /// The selectivity hint the entity's home store on this connection declares for the property.
+    pub fn selectivity(&self, property: PropertyId) -> Option<crate::FieldSelectivity> {
+        let entity = self.graph().property(property).entity;
+        self.home(entity)?.0.selectivity(property)
+    }
+
+    /// How the entity's home store on this connection keeps an enum property.
+    pub fn enum_type(&self, property: PropertyId) -> crate::EnumType {
+        let entity = self.graph().property(property).entity;
+        match self
+            .home(entity)
+            .is_some_and(|(store, _)| store.stored_as_text(property))
+        {
+            true => crate::EnumType::String,
+            false => crate::EnumType::Int,
+        }
     }
 
     pub fn source(&self, entity: EntityId) -> Option<(&Store, &Source)> {
-        self.sources(entity).next()
+        let (store, _) = self.home(entity)?;
+        Some((store, store.source(entity)?))
     }
 
     /// How the entity's home store on this connection restricts its reads.

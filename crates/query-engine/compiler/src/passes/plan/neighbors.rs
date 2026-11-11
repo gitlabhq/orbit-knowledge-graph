@@ -93,7 +93,7 @@ impl<'p> Neighbors<'p> {
             ));
         }
         let center_entity = anchor.binding.entity;
-        let mut center = Node::new(query, anchor, model);
+        let mut center = Node::new(query, anchor, model)?;
         let graph = query.model.graph();
         // A variant exists in a store only through its binding, so an unbound kind has no rows here.
         let relationships: Vec<RelationshipId> = relationships

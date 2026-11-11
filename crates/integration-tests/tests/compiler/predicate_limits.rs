@@ -6,8 +6,13 @@ fn assert_budget(query: &str, count: usize) {
     let data_model = embedded_model();
     let local = embedded_local_model();
     for result in [
-        compile(query, &data_model, &test_ctx()),
-        compile_local(query, &local),
+        compile(
+            query,
+            &data_model,
+            &test_ctx(),
+            query_data_model::testkit::limits(),
+        ),
+        compile_local(query, &local, query_data_model::testkit::limits()),
     ] {
         if count == 16 {
             result.unwrap();

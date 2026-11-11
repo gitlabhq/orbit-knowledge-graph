@@ -1,6 +1,7 @@
 //! One authorization contract serves GitLab and other systems: the same packages and compiler
 //! run against a Zanzibar-style, an OIDC-groups and a Slack sign-in deployment of seeded fakes.
 
+use query_data_model::testkit::limits;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -47,7 +48,7 @@ fn compiled(
     grants: &Grants,
     query: &str,
 ) -> (String, Vec<serde_json::Value>) {
-    let compiled = compiler::compile(query, catalog, grants).unwrap();
+    let compiled = compiler::compile(query, catalog, grants, limits()).unwrap();
     let arrays = compiled
         .base
         .params
@@ -104,6 +105,7 @@ async fn redacted(
         "MATCH (d:Document) WHERE d.id IN [1, 2, 3, 4] RETURN d.title LIMIT 10",
         catalog,
         grants,
+        limits(),
     )
     .unwrap();
     let sql = &compiled.base.sql;
@@ -206,6 +208,7 @@ async fn an_oidc_deployment_scopes_with_the_exact_groups_claim_and_no_checks() {
         "MATCH (f:Folder) WHERE f.id = 1 RETURN f.team_key",
         &catalog,
         &grants,
+        limits(),
     );
     assert!(error.is_err());
 }
@@ -301,6 +304,7 @@ async fn the_server_redacts_string_keyed_rows_a_check_denies() {
         "MATCH (m:Message) WHERE m.id IN ['m1', 'm2', 'm3'] RETURN m.text LIMIT 10",
         &catalog,
         &grants,
+        limits(),
     )
     .unwrap();
     let schema = Arc::new(Schema::new(vec![

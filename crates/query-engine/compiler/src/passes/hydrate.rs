@@ -416,7 +416,7 @@ entities:
 
     fn model(dependencies: &[&str], disabled: bool) -> Catalog<ClickHouse> {
         stored_model(
-            "TestNode: {table: gl_test_node, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, project_id: {backend: {type: String}}, branch: {backend: {type: String}}, path: {backend: {type: String}}}}",
+            "TestNode: {complete: true, table: gl_test_node, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, project_id: {backend: {type: String}}, branch: {backend: {type: String}}, path: {backend: {type: String}}}}",
             dependencies,
             disabled,
         )
@@ -428,7 +428,9 @@ kind: graph
 package: test
 entities:
   TestNode:
+    identity: id
     label: name
+    default_columns: [id, name]
     properties: {id: int64, name: string, project_id: string, branch: string, path: string}
 "#;
         let service = format!(
@@ -511,7 +513,7 @@ lookups:
     #[test]
     fn inject_skips_keys_the_store_does_not_hold() {
         let model = stored_model(
-            "TestNode: {table: gl_test_node, exclude: [path], access: {order: [id]}, columns: {id: {backend: {type: Int64}}, project_id: {backend: {type: String}}, branch: {backend: {type: String}}}}",
+            "TestNode: {complete: true, table: gl_test_node, exclude: [path], access: {order: [id]}, columns: {id: {backend: {type: Int64}}, project_id: {backend: {type: String}}, branch: {backend: {type: String}}}}",
             &["branch", "path"],
             false,
         );
@@ -563,8 +565,9 @@ kind: graph
 package: test
 entities:
   User:
+    identity: id
     label: username
-    defaults: [{}]
+    default_columns: [{}]
     properties: {{id: int64, username: string, state: string, is_admin: boolean, is_auditor: boolean}}
 "#,
             defaults.join(", ")
@@ -581,7 +584,7 @@ entities:
     properties: {open: [id, username, state], admin: [is_admin, is_auditor]}
 "#;
         catalog(
-            "User: {table: gl_user, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, username: {backend: {type: String}}, state: {backend: {type: String}}, is_admin: {backend: {type: Bool}}, is_auditor: {backend: {type: Bool}}}}",
+            "User: {complete: true, table: gl_user, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, username: {backend: {type: String}}, state: {backend: {type: String}}, is_admin: {backend: {type: Bool}}, is_auditor: {backend: {type: Bool}}}}",
             &graph,
             &[access],
         )
@@ -591,7 +594,7 @@ entities:
 
     #[test]
     fn dynamic_wildcard_strips_admin_only_for_non_admin() {
-        let model = user_model(&[]);
+        let model = user_model(&["id", "username"]);
         let ctx = non_admin_ctx();
         let mode = DynamicColumnMode::All;
 
@@ -617,7 +620,7 @@ entities:
 
     #[test]
     fn dynamic_wildcard_preserves_admin_only_for_admin() {
-        let model = user_model(&[]);
+        let model = user_model(&["id", "username"]);
         let ctx = admin_ctx();
         let mode = DynamicColumnMode::All;
 

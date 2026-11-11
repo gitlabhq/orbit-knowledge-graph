@@ -3,10 +3,11 @@ package: gitlab.agents
 store: graph
 entities:
   AgentSession:
+    complete: true
     table: gl_agent_session
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [Delta(8), LZ4]}}
-      flow_type: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      flow_type: {stored_as_text: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
       source: {backend: {type: LowCardinality(String), codec: [LZ4]}}
       project_id: {immutable: true, backend: {type: Int64, codec: [Delta(8), LZ4]}}
       session_started_at: {immutable: true, backend: {type: "DateTime64(0, 'UTC')", codec: [Delta(8), ZSTD(1)]}}

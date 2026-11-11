@@ -97,7 +97,7 @@ pub(super) fn aggregation_text(
             Expr::Node(binding) => Some(*binding),
             Expr::Property { binding, property } => {
                 query.entity_name(*binding)?;
-                free_text(model.graph(), *property).then_some(*binding)
+                free_text(model, *property).then_some(*binding)
             }
             _ => None,
         })
@@ -128,7 +128,7 @@ pub(super) fn aggregation_text(
             let by_namespace = query
                 .entity(binding)
                 .is_some_and(|entity| checked_by_scope_holder(model, entity));
-            if rows.contains(&binding) || by_namespace || !free_text(model.graph(), id) {
+            if rows.contains(&binding) || by_namespace || !free_text(model, id) {
                 continue;
             }
             return Err(QueryError::Validation(format!(

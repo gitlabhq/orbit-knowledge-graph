@@ -14,7 +14,7 @@ use orbit_arrow::{ArrowUtils, ColumnValue};
 
 #[derive(Debug, Clone)]
 pub struct NodeRef {
-    pub id: i64,
+    pub id: Key,
     pub entity_type: String,
     /// Hydrated entity properties, populated after redaction.
     /// Empty until the hydration stage fetches full properties for this node.
@@ -32,9 +32,9 @@ impl PartialEq for NodeRef {
 impl Eq for NodeRef {}
 
 impl NodeRef {
-    pub fn new(id: i64, entity_type: impl Into<String>) -> Self {
+    pub fn new(id: impl Into<Key>, entity_type: impl Into<String>) -> Self {
         Self {
-            id,
+            id: id.into(),
             entity_type: entity_type.into(),
             properties: HashMap::new(),
             keys: HashMap::new(),
@@ -45,7 +45,7 @@ impl NodeRef {
     /// looked up by it.
     pub fn check_key(&self, check: &EntityAuthConfig) -> Option<Key> {
         match check.key_source {
-            KeySource::Identity => key(check.key_kind, &ColumnValue::Int64(self.id)),
+            KeySource::Identity => key(check.key_kind, &identity_value(&self.id)?),
             KeySource::Redaction | KeySource::Lookup => {
                 key(check.key_kind, self.keys.get(&check.auth_id_column)?)
             }
@@ -90,14 +90,16 @@ impl QueryResultRow {
         self.columns.iter()
     }
 
-    pub fn get_id(&self, node: &RedactionNode) -> Option<i64> {
-        self.columns.get(&node.id_column)?.as_int64().copied()
+    pub fn get_id(&self, node: &RedactionNode) -> Option<Key> {
+        identity(self.columns.get(&node.id_column)?)
     }
 
-    pub fn get_public_id(&self, node: &RedactionNode) -> Option<i64> {
+    /// The node's identity key: its primary key column, or its redaction id when the base query
+    /// returned no separate primary key.
+    pub fn get_public_id(&self, node: &RedactionNode) -> Option<Key> {
         self.columns
             .get(&node.pk_column)
-            .and_then(|v| v.as_int64().copied())
+            .and_then(identity)
             .or_else(|| self.get_id(node))
     }
 
@@ -190,7 +192,7 @@ impl QueryResultRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyLookup {
     pub entity: String,
-    pub ids: Vec<i64>,
+    pub ids: Vec<Key>,
     pub properties: Vec<String>,
 }
 
@@ -214,7 +216,7 @@ impl std::error::Error for QueryResultError {}
 enum DynamicNodeColumns<'a> {
     Paths(Vec<&'a ListArray>),
     Neighbor {
-        ids: &'a Int64Array,
+        ids: &'a dyn Array,
         types: &'a StringArray,
     },
 }
@@ -224,7 +226,10 @@ impl<'a> DynamicNodeColumns<'a> {
         match ctx.query_type {
             Some(QueryType::PathFinding) => Ok(Self::Paths(vec![column(batch, path_column())?])),
             Some(QueryType::Neighbors) => Ok(Self::Neighbor {
-                ids: column(batch, neighbor_id_column())?,
+                ids: batch
+                    .column_by_name(neighbor_id_column())
+                    .ok_or(QueryResultError)?
+                    .as_ref(),
                 types: column(batch, neighbor_type_column())?,
             }),
             Some(QueryType::Traversal) => Ok(Self::Paths(
@@ -248,10 +253,10 @@ impl<'a> DynamicNodeColumns<'a> {
                 Ok(result)
             }
             Self::Neighbor { ids, types } => {
-                if ids.is_null(row) || types.is_null(row) {
+                if types.is_null(row) {
                     return Err(QueryResultError);
                 }
-                Ok(vec![NodeRef::new(ids.value(row), types.value(row))])
+                Ok(vec![NodeRef::new(array_key(*ids, row)?, types.value(row))])
             }
         }
     }
@@ -281,22 +286,32 @@ fn path_nodes(path: &ListArray, row: usize) -> Result<Vec<NodeRef>, QueryResultE
     if nodes.null_count() > 0 || nodes.num_columns() < 2 {
         return Err(QueryResultError);
     }
-    let ids = nodes
-        .column(0)
-        .as_any()
-        .downcast_ref::<Int64Array>()
-        .ok_or(QueryResultError)?;
+    let ids = nodes.column(0).as_ref();
     let types = nodes
         .column(1)
         .as_any()
         .downcast_ref::<StringArray>()
         .ok_or(QueryResultError)?;
-    if ids.null_count() > 0 || types.null_count() > 0 {
+    if types.null_count() > 0 {
         return Err(QueryResultError);
     }
-    Ok((0..nodes.len())
-        .map(|index| NodeRef::new(ids.value(index), types.value(index)))
-        .collect())
+    (0..nodes.len())
+        .map(|index| Ok(NodeRef::new(array_key(ids, index)?, types.value(index))))
+        .collect()
+}
+
+/// The identity key at `index` of an id column, in the column's own type; a null fails closed.
+fn array_key(ids: &dyn Array, index: usize) -> Result<Key, QueryResultError> {
+    if ids.is_null(index) {
+        return Err(QueryResultError);
+    }
+    if let Some(ids) = ids.as_any().downcast_ref::<Int64Array>() {
+        return Ok(Key::Int(ids.value(index)));
+    }
+    ids.as_any()
+        .downcast_ref::<StringArray>()
+        .map(|ids| Key::Text(ids.value(index).to_string()))
+        .ok_or(QueryResultError)
 }
 
 impl QueryResult {
@@ -388,9 +403,9 @@ impl QueryResult {
     /// key rows by a property the row does not carry, and the dynamic nodes whose checks key
     /// rows by anything but their id.
     pub fn key_lookups(&self) -> Vec<KeyLookup> {
-        let mut lookups: HashMap<String, (HashSet<i64>, HashSet<String>)> = HashMap::new();
+        let mut lookups: HashMap<String, (HashSet<Key>, HashSet<String>)> = HashMap::new();
         let mut need = |entity: &str,
-                        id: Option<i64>,
+                        id: Option<Key>,
                         carried: &[KeySource],
                         found: Option<&HashMap<String, ColumnValue>>| {
             let properties: Vec<String> = self
@@ -421,7 +436,7 @@ impl QueryResult {
                 let found = Some(&node_ref.keys);
                 need(
                     &node_ref.entity_type,
-                    Some(node_ref.id),
+                    Some(node_ref.id.clone()),
                     &[KeySource::Identity],
                     found,
                 );
@@ -430,7 +445,7 @@ impl QueryResult {
         lookups
             .into_iter()
             .map(|(entity, (ids, properties))| {
-                let mut ids: Vec<i64> = ids.into_iter().collect();
+                let mut ids: Vec<Key> = ids.into_iter().collect();
                 ids.sort_unstable();
                 let mut properties: Vec<String> = properties.into_iter().collect();
                 properties.sort_unstable();
@@ -446,7 +461,7 @@ impl QueryResult {
     /// Fills the looked-up key properties into every node they were read for.
     pub fn set_lookup_keys(
         &mut self,
-        found: &HashMap<(String, i64), HashMap<String, ColumnValue>>,
+        found: &HashMap<(String, Key), HashMap<String, ColumnValue>>,
     ) {
         let nodes: Vec<RedactionNode> = self.ctx.nodes().cloned().collect();
         for row in &mut self.rows {
@@ -460,7 +475,8 @@ impl QueryResult {
                 }
             }
             for node_ref in &mut row.dynamic_nodes {
-                if let Some(keys) = found.get(&(node_ref.entity_type.clone(), node_ref.id)) {
+                if let Some(keys) = found.get(&(node_ref.entity_type.clone(), node_ref.id.clone()))
+                {
                     node_ref.keys = keys.clone();
                 }
             }
@@ -547,6 +563,24 @@ fn allows(
                     == Some(true)
             })
         })
+}
+
+/// An identity column value as the key it holds; identities are integers or strings.
+pub fn identity(value: &ColumnValue) -> Option<Key> {
+    match value {
+        ColumnValue::Int64(id) => Some(Key::Int(*id)),
+        ColumnValue::String(id) => Some(Key::Text(id.clone())),
+        _ => None,
+    }
+}
+
+/// The column value an identity key was read from.
+pub fn identity_value(key: &Key) -> Option<ColumnValue> {
+    match key {
+        Key::Int(id) => Some(ColumnValue::Int64(*id)),
+        Key::Text(id) | Key::Uuid(id) => Some(ColumnValue::String(id.clone())),
+        Key::Composite(_) => None,
+    }
 }
 
 /// A row value as the key of a check, in the type the check's provider keys by.
@@ -647,28 +681,92 @@ mod tests {
         ]
     }
 
+    mod string_identity_tests {
+        use super::*;
+        use arrow::array::{ListArray, StructArray};
+        use arrow::buffer::OffsetBuffer;
+        use arrow::datatypes::{DataType, Fields};
+
+        #[test]
+        fn neighbor_ids_decode_in_their_column_type() {
+            let batch = make_batch(vec![
+                (
+                    neighbor_id_column(),
+                    Arc::new(StringArray::from(vec!["T1", "T2"])),
+                ),
+                (
+                    neighbor_type_column(),
+                    Arc::new(StringArray::from(vec!["SlackWorkspace"; 2])),
+                ),
+            ]);
+            let ctx = ResultContext::new().with_query_type(QueryType::Neighbors);
+            let result = QueryResult::from_batches(&[batch], &ctx).unwrap();
+            let ids: Vec<&Key> = result
+                .rows()
+                .iter()
+                .filter_map(|row| row.neighbor_node().map(|node| &node.id))
+                .collect();
+            assert_eq!(ids, [&Key::Text("T1".into()), &Key::Text("T2".into())]);
+        }
+
+        #[test]
+        fn path_nodes_keep_text_ids_and_a_null_id_fails_closed() {
+            let fields = Fields::from(vec![
+                Field::new("id", DataType::Utf8, true),
+                Field::new("kind", DataType::Utf8, false),
+            ]);
+            let path = |ids: Vec<Option<&str>>| {
+                let len = ids.len() as i32;
+                let nodes = StructArray::new(
+                    fields.clone(),
+                    vec![
+                        Arc::new(StringArray::from(ids)) as Arc<dyn Array>,
+                        Arc::new(StringArray::from(vec!["Thread"; len as usize])),
+                    ],
+                    None,
+                );
+                let item = Arc::new(Field::new("item", DataType::Struct(fields.clone()), false));
+                let offsets = OffsetBuffer::new(vec![0, len].into());
+                make_batch(vec![(
+                    path_column(),
+                    Arc::new(ListArray::new(item, offsets, Arc::new(nodes), None)),
+                )])
+            };
+            let ctx = ResultContext::new().with_query_type(QueryType::PathFinding);
+            let result =
+                QueryResult::from_batches(&[path(vec![Some("a"), Some("b")])], &ctx).unwrap();
+            let ids: Vec<&Key> = result.rows()[0]
+                .path_nodes()
+                .iter()
+                .map(|node| &node.id)
+                .collect();
+            assert_eq!(ids, [&Key::Text("a".into()), &Key::Text("b".into())]);
+            assert!(QueryResult::from_batches(&[path(vec![Some("a"), None])], &ctx).is_err());
+        }
+    }
+
     mod node_ref_tests {
         use super::*;
 
         #[test]
         fn new_creates_node_ref() {
-            let node = NodeRef::new(42, "User");
-            assert_eq!(node.id, 42);
+            let node = NodeRef::new(Key::Int(42), "User");
+            assert_eq!(node.id, Key::Int(42));
             assert_eq!(node.entity_type, "User");
         }
 
         #[test]
         fn new_accepts_string() {
-            let node = NodeRef::new(1, String::from("Project"));
+            let node = NodeRef::new(Key::Int(1), String::from("Project"));
             assert_eq!(node.entity_type, "Project");
         }
 
         #[test]
         fn equality() {
-            let a = NodeRef::new(1, "User");
-            let b = NodeRef::new(1, "User");
-            let c = NodeRef::new(2, "User");
-            let d = NodeRef::new(1, "Project");
+            let a = NodeRef::new(Key::Int(1), "User");
+            let b = NodeRef::new(Key::Int(1), "User");
+            let c = NodeRef::new(Key::Int(2), "User");
+            let d = NodeRef::new(Key::Int(1), "Project");
 
             assert_eq!(a, b);
             assert_ne!(a, c);
@@ -677,7 +775,7 @@ mod tests {
 
         #[test]
         fn clone() {
-            let original = NodeRef::new(99, "Group");
+            let original = NodeRef::new(Key::Int(99), "Group");
             let cloned = original.clone();
             assert_eq!(original, cloned);
         }
@@ -706,8 +804,8 @@ mod tests {
             let u = result.ctx().get("u").unwrap();
             let p = result.ctx().get("p").unwrap();
 
-            assert_eq!(row.get_id(u), Some(1));
-            assert_eq!(row.get_id(p), Some(100));
+            assert_eq!(row.get_id(u), Some(Key::Int(1)));
+            assert_eq!(row.get_id(p), Some(Key::Int(100)));
         }
 
         #[test]
@@ -716,7 +814,7 @@ mod tests {
             let row = &result.rows()[0];
             let u = result.ctx().get("u").unwrap();
 
-            assert_eq!(row.get_public_id(u), Some(1));
+            assert_eq!(row.get_public_id(u), Some(Key::Int(1)));
         }
 
         #[test]
@@ -737,8 +835,8 @@ mod tests {
             let row = &result.rows()[0];
             let d = result.ctx().get("d").unwrap();
 
-            assert_eq!(row.get_id(d), Some(1000));
-            assert_eq!(row.get_public_id(d), Some(5000));
+            assert_eq!(row.get_id(d), Some(Key::Int(1000)));
+            assert_eq!(row.get_public_id(d), Some(Key::Int(5000)));
         }
 
         #[test]
@@ -873,8 +971,8 @@ mod tests {
             assert_eq!(result.len(), 4);
 
             let u = result.ctx().get("u").unwrap();
-            let ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(u)).collect();
-            assert_eq!(ids, vec![1, 2, 3, 4]);
+            let ids: Vec<Key> = result.iter().filter_map(|r| r.get_id(u)).collect();
+            assert_eq!(ids, [1, 2, 3, 4].map(Key::Int));
         }
 
         #[test]
@@ -888,8 +986,8 @@ mod tests {
         fn iter_returns_all_rows() {
             let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let u = result.ctx().get("u").unwrap();
-            let ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(u)).collect();
-            assert_eq!(ids, vec![1, 2, 3]);
+            let ids: Vec<Key> = result.iter().filter_map(|r| r.get_id(u)).collect();
+            assert_eq!(ids, [1, 2, 3].map(Key::Int));
         }
 
         #[test]
@@ -901,8 +999,8 @@ mod tests {
             let authorized: Vec<_> = result.authorized_rows().collect();
             assert_eq!(authorized.len(), 2);
 
-            let ids: Vec<i64> = authorized.iter().filter_map(|r| r.get_id(u)).collect();
-            assert_eq!(ids, vec![1, 3]);
+            let ids: Vec<Key> = authorized.iter().filter_map(|r| r.get_id(u)).collect();
+            assert_eq!(ids, [1, 3].map(Key::Int));
         }
 
         #[test]
@@ -1114,7 +1212,7 @@ mod tests {
             );
 
             let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
-            result.rows[0].dynamic_nodes = vec![NodeRef::new(1000, "Definition")];
+            result.rows[0].dynamic_nodes = vec![NodeRef::new(Key::Int(1000), "Definition")];
 
             let authorizations = vec![
                 ResourceAuthorization {
@@ -1173,7 +1271,7 @@ mod tests {
             );
 
             let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
-            result.rows[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
+            result.rows[0].dynamic_nodes = vec![NodeRef::new(Key::Int(5000), "Definition")];
             result
         }
 
@@ -1188,9 +1286,9 @@ mod tests {
         fn project_of(
             id: i64,
             project: i64,
-        ) -> HashMap<(String, i64), HashMap<String, ColumnValue>> {
+        ) -> HashMap<(String, Key), HashMap<String, ColumnValue>> {
             HashMap::from([(
-                ("Definition".to_string(), id),
+                ("Definition".to_string(), Key::Int(id)),
                 HashMap::from([("project_id".to_string(), ColumnValue::Int64(project))]),
             )])
         }
@@ -1202,7 +1300,7 @@ mod tests {
                 result.key_lookups(),
                 [KeyLookup {
                     entity: "Definition".to_string(),
-                    ids: vec![5000],
+                    ids: vec![Key::Int(5000)],
                     properties: vec!["project_id".to_string()],
                 }]
             );
@@ -1265,13 +1363,13 @@ mod tests {
                 result.key_lookups(),
                 [KeyLookup {
                     entity: "File".to_string(),
-                    ids: vec![7, 8],
+                    ids: vec![Key::Int(7), Key::Int(8)],
                     properties: vec!["group_id".to_string()],
                 }]
             );
             let group = |id: i64, group: i64| {
                 (
-                    ("File".to_string(), id),
+                    ("File".to_string(), Key::Int(id)),
                     HashMap::from([("group_id".to_string(), ColumnValue::Int64(group))]),
                 )
             };
@@ -1291,11 +1389,11 @@ mod tests {
 
             assert_eq!(result.apply_authorizations(&authorizations), 1);
             let f = result.ctx().get("f").unwrap().clone();
-            let kept: Vec<i64> = result
+            let kept: Vec<Key> = result
                 .authorized_rows()
                 .filter_map(|row| row.get_public_id(&f))
                 .collect();
-            assert_eq!(kept, [7]);
+            assert_eq!(kept, [Key::Int(7)]);
         }
 
         #[test]
@@ -1361,7 +1459,7 @@ mod tests {
             let result = QueryResult::from_batches(&[batch], &user_ctx()).unwrap();
             let u = result.ctx().get("u").unwrap();
 
-            assert_eq!(result.rows()[0].get_id(u), Some(1));
+            assert_eq!(result.rows()[0].get_id(u), Some(Key::Int(1)));
             assert_eq!(result.rows()[1].get_id(u), None);
         }
 
@@ -1432,7 +1530,7 @@ mod tests {
             let row = &result.rows()[0];
             let u = result.ctx().get("u").unwrap();
 
-            assert_eq!(row.get_id(u), Some(1));
+            assert_eq!(row.get_id(u), Some(Key::Int(1)));
             assert_eq!(row.get_type(u), Some("User"));
             assert_eq!(row.get("view_count"), Some(&ColumnValue::Int64(1000)));
             assert_eq!(

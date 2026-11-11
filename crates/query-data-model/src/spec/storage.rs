@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use super::{Naming, Raw, explicit_null};
-use crate::{Endpoint, ForeignKey, PropertyId};
+use crate::{Endpoint, FieldSelectivity, ForeignKey, PropertyId};
 
 /// A backend block, typed by its store's backend when the fragment is parsed.
 pub trait Block: Any + Debug + Send + Sync {}
@@ -68,6 +68,9 @@ pub struct EngineSpec<K: Blocks = Erased> {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, bound = "K: Typed")]
 pub struct EntityStorage<K: Blocks = Erased> {
+    /// This store holds or excludes every graph property of the entity, and plans read it here.
+    #[serde(default)]
+    pub complete: bool,
     pub table: Option<String>,
     #[serde(default, deserialize_with = "explicit_null")]
     pub path_column: Option<Option<String>>,
@@ -87,6 +90,11 @@ pub struct ColumnStorage<K: Blocks = Erased> {
     #[serde(default)]
     pub immutable: bool,
     pub column: Option<String>,
+    /// How well an equality filter on the column narrows; without it the planner judges by type.
+    pub selectivity: Option<FieldSelectivity>,
+    /// The column holds an enum's labels rather than its integer codes.
+    #[serde(default)]
+    pub stored_as_text: bool,
     #[serde(default)]
     pub backend: K::Column,
 }
@@ -119,9 +127,12 @@ impl<K: Typed> StorageFragment<K> {
         let column = |column: ColumnStorage<K>| ColumnStorage {
             immutable: column.immutable,
             column: column.column,
+            selectivity: column.selectivity,
+            stored_as_text: column.stored_as_text,
             backend: erase(column.backend),
         };
         let entity = |entity: EntityStorage<K>| EntityStorage {
+            complete: entity.complete,
             table: entity.table,
             path_column: entity.path_column,
             columns: entity

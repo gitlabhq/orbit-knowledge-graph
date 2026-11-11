@@ -3,6 +3,7 @@ package: gitlab.core
 store: graph
 entities:
   Group:
+    complete: true
     table: gl_group
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -27,11 +28,12 @@ entities:
       path_lookups: {id: {table: gl_group, key: id}, full_path: {table: gl_group, key: full_path}}
 
   Note:
+    complete: true
     table: gl_note
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
       note: {backend: {type: String, codec: [ZSTD(3)]}}
-      noteable_type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      noteable_type: {immutable: true, stored_as_text: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
       noteable_id: {immutable: true, backend: {type: Nullable(Int64), codec: [Delta(8), LZ4]}}
       line_code: {backend: {type: String, codec: [ZSTD(1)]}}
       commit_id: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
@@ -66,6 +68,7 @@ entities:
       path_lookups: {id: {table: gl_note, key: id}}
 
   Project:
+    complete: true
     table: gl_project
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -96,6 +99,7 @@ entities:
         full_path: {table: gl_project, key: full_path}
 
   User:
+    complete: true
     table: gl_user
     path_column:
     columns:
@@ -105,7 +109,7 @@ entities:
       name: {backend: {type: String, codec: [ZSTD(1)]}}
       first_name: {backend: {type: String, codec: [ZSTD(1)]}}
       last_name: {backend: {type: String, codec: [ZSTD(1)]}}
-      state: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      state: {stored_as_text: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
       avatar_url: {backend: {type: Nullable(String), codec: [ZSTD(1)]}}
       public_email: {backend: {type: String, codec: [ZSTD(1)]}}
       preferred_language: {backend: {type: String, codec: [ZSTD(1)]}}

@@ -1,9 +1,10 @@
 use compiler::{QueryError, compile, compile_local};
+use query_data_model::testkit::limits;
 
 use super::setup::{embedded_local_model, embedded_model, test_ctx};
 
 fn rejected(query: &str) -> String {
-    match compile(query, &embedded_model(), &test_ctx()) {
+    match compile(query, &embedded_model(), &test_ctx(), limits()) {
         Err(error) => error.to_string(),
         Ok(_) => panic!("{query} must be rejected"),
     }
@@ -46,6 +47,7 @@ fn nested_id_lists_keep_the_in_list_cap() {
         &format!("MATCH (p:Project) WHERE p.id IN [{ids}] RETURN p"),
         &embedded_model(),
         &test_ctx(),
+        limits(),
     )
     .expect("a top-level id list pins up to 500 ids");
 }
@@ -61,7 +63,7 @@ fn text_operators_on_relationship_columns_are_rejected() {
 #[test]
 fn measure_inputs_must_be_stored() {
     let query = "MATCH (d:Definition) WHERE d.id = 1 RETURN max(d.content) AS longest";
-    let error = compile_local(query, &embedded_local_model())
+    let error = compile_local(query, &embedded_local_model(), limits())
         .expect_err("the local store does not hold Definition.content");
     assert!(
         matches!(&error, QueryError::AllowlistRejected(message)
@@ -81,7 +83,7 @@ fn relationship_variables_and_type_conditions_compile() {
         "MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE type(r) = 'MEMBER_OF' RETURN p",
         "MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 102}) WHERE type(r) IN ['MEMBER_OF', 'CONTAINS'] RETURN p",
     ] {
-        compile(query, &embedded_model(), &test_ctx())
+        compile(query, &embedded_model(), &test_ctx(), limits())
             .unwrap_or_else(|error| panic!("{query}: {error}"));
     }
 }

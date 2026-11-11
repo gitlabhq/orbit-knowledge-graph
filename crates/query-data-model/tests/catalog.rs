@@ -605,7 +605,7 @@ fn every_bad_reference_is_reported_in_one_load() {
             "gitlab: AUTHORED variant `User -> Notes` names an unknown entity",
             "gitlab: store graph names unknown property User.usernam",
             "gitlab: store graph binds unknown variant AUTHORED(User -> Note)",
-            "gitlab: User.username is neither stored nor excluded by any store",
+            "gitlab: store graph is complete for User but neither stores nor excludes User.username",
             "gitlab: pipeline Note emits unknown variant User -[AUTHORED]-> Note",
             "gitlab: pipeline Note emits no declared AUTHORED variant",
         ]
@@ -757,18 +757,14 @@ fn attribute_access(yaml: String, classes: &str) -> String {
 }
 
 fn attribute_storage(edge_columns: &'static str) -> impl Fn(&str, String) -> String {
-    move |name, yaml| {
-        match name {
+    move |name, yaml| match name {
         "gitlab/graph.yaml" => yaml.replace(HAS_NOTE_VARIANT, HAS_NOTE_ATTRIBUTES),
         "gitlab/authorization.yaml" => attribute_access(yaml, "{open: [position, thread]}"),
         "gitlab/storage/clickhouse.yaml" => yaml.replace(
-            "sort_key: [traversal_path, source_id, relationship_kind, target_id] }",
-            &format!(
-                "sort_key: [traversal_path, source_id, relationship_kind, target_id], columns: {{ {edge_columns} }} }}"
-            ),
+            "target_id: { type: Int64 } }",
+            &format!("target_id: {{ type: Int64 }}, {edge_columns} }}"),
         ),
         _ => yaml,
-    }
     }
 }
 
@@ -806,7 +802,10 @@ fn string_enums_keep_their_declared_values() {
     let model = load(&["gitlab", "integration.linear"]).unwrap();
     let issue = model.entity("LinearIssue").unwrap();
     let state = model.property(issue, "state").unwrap();
-    assert_eq!(state.enum_type, query_data_model::EnumType::String);
+    assert_eq!(
+        model.enum_type(state.id),
+        query_data_model::EnumType::String
+    );
     assert_eq!(state.enum_values.as_ref().unwrap()[&3], "done");
 }
 
@@ -1138,7 +1137,9 @@ fn storage_must_hold_or_exclude_every_property() {
     );
     assert_eq!(
         errors,
-        ["gitlab: Project.full_path is neither stored nor excluded by any store"]
+        [
+            "gitlab: store graph is complete for Project but neither stores nor excludes Project.full_path"
+        ]
     );
 }
 
@@ -1268,5 +1269,105 @@ fn variants_that_share_a_key_column_name_distinct_types() {
         [
             "gitlab: store graph keys HAS_NOTE(MergeRequest -> Note) and HAS_NOTE(WorkItem -> Note) on noteable_id without distinct type values"
         ]
+    );
+}
+
+#[test]
+fn every_entity_declares_a_typed_identity_and_default_columns() {
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| match name {
+        "gitlab/graph.yaml" => yaml
+            .replace("  Group:\n    identity: id\n", "  Group:\n")
+            .replace(
+                "  User:\n    identity: id\n",
+                "  User:\n    identity: [email, mail]\n",
+            )
+            .replace("    default_columns: [id, body]\n", ""),
+        _ => yaml,
+    }));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: entity Group declares no identity",
+            "gitlab: entity Note declares no default_columns",
+            "gitlab: User identity email is String?; an identity is a non-null integer, string or uuid",
+            "gitlab: User identity mail is not a property",
+            "gitlab: Group check keys rows by its identity, which is not one property; name an object and id",
+            "gitlab: store graph CONTAINS(Group -> Project) names an edge table but the store does not hold its source",
+            "gitlab: store graph CONTAINS(Group -> Group) names an edge table but the store does not hold its source",
+            "gitlab: store graph AUTHORED(User -> MergeRequest) foreign key author_id is Int but User.email is String; keys are never cast",
+            "gitlab: store graph AUTHORED(User -> Note) foreign key author_id is Int but User.email is String; keys are never cast",
+            "gitlab: Group writes entity Group, which no store holds",
+        ]
+    );
+}
+
+#[test]
+fn exactly_one_store_is_complete_and_partial_stores_list_what_they_hold() {
+    let errors = spec_errors(load_with(
+        &["gitlab", "integration.linear"],
+        |name, yaml| match name {
+            "gitlab/storage/clickhouse.yaml" => {
+                yaml.replace("  User:\n    complete: true\n", "  User:\n")
+            }
+            "integration.linear/storage/clickhouse.lake.yaml" => yaml
+                .replace("  LinearIssue:\n", "  LinearIssue:\n    complete: true\n")
+                .replace(
+                    "ticket_title, backend",
+                    "ticket_title, stored_as_text: true, backend",
+                )
+                .replace("state: {stored_as_text: true, backend", "state: {backend"),
+            _ => yaml,
+        },
+    ));
+    assert_eq!(
+        errors,
+        [
+            "integration.linear: store lake stores LinearIssue.title as text, but it is not an enum",
+            "integration.linear: stores graph and lake both mark LinearIssue complete: true; exactly one store is complete",
+            "integration.linear: stores graph and lake disagree on whether LinearIssue.title is stored as text",
+            "integration.linear: stores graph and lake disagree on whether LinearIssue.state is stored as text",
+            "gitlab: User is stored in graph but no store marks it complete: true",
+        ]
+    );
+}
+
+#[test]
+fn edge_tables_hold_ids_of_their_endpoint_identity_types() {
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| {
+        match name {
+        "gitlab/graph.yaml" => yaml.replace(
+            "    default_columns: [id, body]\n    properties:\n      id: int64",
+            "    default_columns: [id, body]\n    properties:\n      id: string",
+        ),
+        "gitlab/storage/clickhouse.yaml" => yaml.replace(
+            "  Note:\n    complete: true\n    table: gl_note\n    columns:\n      id: { immutable: true, backend: { type: Int64 } }",
+            "  Note:\n    complete: true\n    table: gl_note\n    columns:\n      id: { immutable: true, backend: { type: String } }",
+        ),
+        _ => yaml,
+    }
+    }));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph IN_PROJECT(Note -> Project) binds edge table gl_edge whose source_id is Int, but Note's identity is String; keys are never cast",
+            "gitlab: store graph AUTHORED(User -> Note) binds edge table gl_edge whose target_id is Int, but Note's identity is String; keys are never cast",
+            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) binds edge table gl_edge whose target_id is Int, but Note's identity is String; keys are never cast",
+        ]
+    );
+}
+
+#[test]
+fn an_engine_table_role_is_held_by_one_table() {
+    let packages = query_data_model::testkit::patched([(
+        "gitlab/storage/clickhouse.yaml",
+        "role: code_progress",
+        "role: plan_progress",
+    )]);
+    let errors = spec_errors(packages.load());
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.ends_with("both hold the PlanProgress role")),
+        "{errors:?}"
     );
 }

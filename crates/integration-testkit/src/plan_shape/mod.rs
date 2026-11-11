@@ -5,6 +5,7 @@ mod operator;
 mod pattern;
 mod terms;
 
+use query_data_model::testkit::limits;
 use query_engine::compiler;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -214,9 +215,9 @@ fn check<B: SqlBackend>(
 ) -> Result<(), Vec<String>> {
     let raw = &scenario.query;
     let label = format!("{}: {} [{backend}]", path.display(), scenario.name);
-    let catalog = model.model().logical().as_admin();
+    let catalog = model.model().logical(limits()).as_admin();
     let parsed = compiler::surface::parse(raw, catalog).and_then(|statement| {
-        let plan = normalize::normalize(statement.plan, catalog.model(), model)?;
+        let plan = normalize::normalize(statement.plan, catalog.model(), model, limits())?;
         Ok(query_data_model::surface::Statement { plan, ..statement })
     });
     let statement = match parsed {
@@ -247,7 +248,7 @@ fn check<B: SqlBackend>(
         Some(hydration) => plan::Request::Hydration(hydration),
         None => plan::Request::Query(query),
     };
-    let relational = plan::plan(request, tp_bounds.as_ref(), model)
+    let relational = plan::plan(request, tp_bounds.as_ref(), model, limits())
         .and_then(|planned| {
             let tree = emitted::tree(&planned.plan, model);
             Ok((tree, passes(planned, scenario, backend, model, query)?))
@@ -343,7 +344,22 @@ fn hydration_request(
                 let endpoint = rows.endpoint()?;
                 let rows = match &anchor.pinned {
                     None => rows,
-                    Some(pinned) => q.pin(rows, endpoint.property("id")?, pinned)?,
+                    Some(pinned) => {
+                        let ids: Vec<_> = pinned
+                            .iter()
+                            .map(|key| {
+                                compiler::logical::anchors::literal(key)
+                                    .expect("pinned keys are single")
+                            })
+                            .collect();
+                        let graph = query.model.graph();
+                        let identity = graph.entity(binding.entity).identity[0];
+                        q.pin(
+                            rows,
+                            endpoint.property(&graph.property(identity).name)?,
+                            &ids,
+                        )?
+                    }
                 };
                 let projection = Projection::Graph {
                     binding: endpoint.output(),
@@ -758,7 +774,8 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         let paths = (0..count)
             .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
             .collect();
-        let arm = HydrationArm::new(model.model(), "File", &[1], &[], paths).unwrap();
+        let arm =
+            HydrationArm::new(model.model(), limits(), "File", &[1.into()], &[], paths).unwrap();
         let request = HydrationRequest {
             arms: vec![arm],
             options: HydrationCompileOptions {
@@ -766,7 +783,8 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
                 path_segment_budget: budget,
             },
         };
-        let planned = plan::plan(plan::Request::Hydration(&request), None, &model).unwrap();
+        let planned =
+            plan::plan(plan::Request::Hydration(&request), None, &model, limits()).unwrap();
         let rendered = model.render(&planned.plan);
         assert_eq!(rendered.sql.contains("arrayExists"), set);
         assert_eq!(

@@ -5,12 +5,12 @@ use query_data_model::plan::logical::{
     Columns, Comparison, Conjunct, Expr, Literal, LogicalOperation, LogicalPlan, MATCH_LINE,
     Operand, Predicate, Projection, Structural,
 };
-use query_data_model::{Catalog, Endpoint, EntityId, PropertyId};
+use query_data_model::{Catalog, Endpoint, EntityId, PropertyId, StorageBackend};
 
 use super::unsupported;
 use crate::error::{QueryError, Result};
 
-const BACKEND: &str = "code";
+const BACKEND: &str = OrbitCode::KIND;
 
 enum Returned {
     Field(String),

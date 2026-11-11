@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::schema::{EngineTable, Schema};
+use crate::schema::Schema;
 use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor, RowWriter, Writer};
+use query_data_model::implementations::clickhouse::spec::TableRole;
 use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, EntityId, RelationshipId};
 use serde::{Deserialize, Serialize};
@@ -422,10 +423,7 @@ fn migration_action_for_table(
         return TableMigrationAction::CloneFromActive;
     }
 
-    if schema
-        .engine_table(EngineTable::CodeCheckpoints)
-        .is_ok_and(|code_checkpoints| code_checkpoints == table)
-    {
+    if schema.role_table(TableRole::CodeProgress) == Some(table) {
         return if matches!(scope, MigrationScope::Code) {
             TableMigrationAction::RebuildEmpty
         } else {

@@ -1,0 +1,23 @@
+kind: graph
+package: acme.threads
+entities:
+  Thread:
+    identity: key
+    label: title
+    default_columns: [key, title]
+    properties:
+      key: string
+      title: string
+      traversal_path: string
+
+  Post:
+    identity: slug
+    label: body
+    default_columns: [slug, body]
+    properties:
+      slug: string
+      body: string
+      traversal_path: string
+relationships:
+  REPLIES_TO:
+    variants: {Post -> Thread: {cardinality: many_to_many}}

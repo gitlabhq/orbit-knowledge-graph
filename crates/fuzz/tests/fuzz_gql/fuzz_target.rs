@@ -19,7 +19,7 @@ fn ctx() -> &'static Grants {
 fn main() {
     check!().for_each(|input: &[u8]| {
         if let Ok(s) = from_utf8(input)
-            && let Err(error) = compile(s, data_model(), ctx())
+            && let Err(error) = compile(s, data_model(), ctx(), query_data_model::testkit::limits())
         {
             assert!(error.is_client_safe(), "{s:?}\n{error}");
         }

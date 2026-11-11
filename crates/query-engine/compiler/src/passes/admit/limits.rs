@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use orbit_server_config::QueryLimits;
 use query_data_model::plan::logical::Expr;
 
 use crate::error::{QueryError, Result};
@@ -7,29 +8,29 @@ use crate::logical::Leaf;
 use crate::logical::Query;
 use crate::logical::anchors::Anchor;
 
-pub(super) const MAX_PREDICATES: usize = 16;
-pub(super) const MAX_FILTERS_PER_NODE: usize = 10;
-pub(super) const MAX_FILTERS_PER_REL: usize = 5;
-const MAX_FILTER_ENTRIES_PER_PROPERTY: usize = 10;
-
-pub(super) fn predicates(facts: &[Leaf<'_>]) -> Result<()> {
+pub(super) fn predicates(facts: &[Leaf<'_>], max: usize) -> Result<()> {
     let count = facts.len();
-    if count > MAX_PREDICATES {
+    if count > max {
         return Err(QueryError::Validation(format!(
-            "Query has {count} predicates; the maximum is {MAX_PREDICATES} across the entire query. Remove redundant conditions or simplify the query."
+            "Query has {count} predicates; the maximum is {max} across the entire query. Remove redundant conditions or simplify the query."
         )));
     }
     Ok(())
 }
 
-pub(super) fn filters(query: Query<'_>, facts: &[Leaf<'_>], anchors: &[Anchor<'_>]) -> Result<()> {
+pub(super) fn filters(
+    query: Query<'_>,
+    facts: &[Leaf<'_>],
+    anchors: &[Anchor<'_>],
+    limits: &QueryLimits,
+) -> Result<()> {
     let nodes = anchors.iter().map(|anchor| {
         let owner = format!("node \"{}\"", anchor.binding.name);
         (
             anchor.binding.output,
             owner,
             anchor.filters.clone(),
-            MAX_FILTERS_PER_NODE,
+            limits.node_filter_properties,
         )
     });
     let edges = query.steps().into_iter().enumerate().map(|(index, step)| {
@@ -42,9 +43,10 @@ pub(super) fn filters(query: Query<'_>, facts: &[Leaf<'_>], anchors: &[Anchor<'_
             step.edge,
             format!("relationship[{index}]"),
             attached,
-            MAX_FILTERS_PER_REL,
+            limits.relationship_filter_properties,
         )
     });
+    let per_property = limits.filter_entries_per_property;
     for (target, owner, attached, maximum) in nodes.chain(edges) {
         let conditions = facts.iter().filter(|fact| {
             !fact.attached() && !fact.compares_bindings() && fact.binding() == target
@@ -59,12 +61,10 @@ pub(super) fn filters(query: Query<'_>, facts: &[Leaf<'_>], anchors: &[Anchor<'_
                 counts.len()
             )));
         }
-        if let Some((property, count)) = counts
-            .into_iter()
-            .find(|(_, count)| *count > MAX_FILTER_ENTRIES_PER_PROPERTY)
+        if let Some((property, count)) = counts.into_iter().find(|(_, count)| *count > per_property)
         {
             return Err(QueryError::Validation(format!(
-                "filter entry count ({count}) on property \"{property}\" for {owner} must not exceed {MAX_FILTER_ENTRIES_PER_PROPERTY}"
+                "filter entry count ({count}) on property \"{property}\" for {owner} must not exceed {per_property}"
             )));
         }
     }

@@ -3,33 +3,30 @@
 
 use std::collections::HashMap;
 
-use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
-use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use compiler::constants::{
-    hydration_node_alias, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
-    traversal_path_column,
+    hydration_id_column, hydration_node_alias, neighbor_traversal_path_column, primary_key_column,
+    redaction_id_column, traversal_path_column,
 };
-use compiler::{DynamicEntityColumns, HydrationArm, HydrationTemplate, Operator, VirtualFilter};
+use compiler::orbit_authorization::{Grants, Key, ScopeSet};
+use compiler::{
+    DynamicEntityColumns, HydrationArm, HydrationTemplate, Operator, QueryLimits, VirtualFilter,
+};
 use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
 use query_data_model::{DataType, Model};
-use types::QueryResult;
+use types::identity;
+use types::{QueryResult, QueryResultRow};
 
 pub use crate::content::PropertyMap;
 
 /// Tries the PK column first (`_orbit_{alias}_pk`), falling back to the
 /// redaction ID column (`_orbit_{alias}_id`).
-pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
-    let pk_col = primary_key_column(&template.node_alias);
-    let id_col = redaction_id_column(&template.node_alias);
-    let mut ids: Vec<i64> = result
+pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<Key> {
+    let mut ids: Vec<Key> = result
         .authorized_rows()
-        .filter_map(|row| {
-            row.get_column_i64(&pk_col)
-                .or_else(|| row.get_column_i64(&id_col))
-        })
+        .filter_map(|row| static_id(row, &template.node_alias))
         .collect();
     ids.sort_unstable();
     ids.dedup();
@@ -55,13 +52,13 @@ pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<Travers
 pub fn extract_dynamic_refs(
     result: &QueryResult,
     static_nodes: &[compiler::RedactionNode],
-) -> HashMap<String, Vec<i64>> {
-    let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
+) -> HashMap<String, Vec<Key>> {
+    let mut refs: HashMap<String, Vec<Key>> = HashMap::new();
     for row in result.authorized_rows() {
         for node_ref in row.dynamic_nodes() {
             refs.entry(node_ref.entity_type.clone())
                 .or_default()
-                .push(node_ref.id);
+                .push(node_ref.id.clone());
         }
         for node in static_nodes {
             if let Some(id) = row.get_public_id(node)
@@ -119,14 +116,49 @@ pub fn collect_dynamic_ref_paths(
         .collect()
 }
 
-pub fn hydration_arm(
+/// A static node's identity: its primary key column, or its redaction id.
+fn static_id(row: &QueryResultRow, alias: &str) -> Option<Key> {
+    row.get(&primary_key_column(alias))
+        .and_then(identity)
+        .or_else(|| row.get(&redaction_id_column(alias)).and_then(identity))
+}
+
+/// The subtrees in which the caller holds the entity's permission, which bound its hydration
+/// read; a scope answered with keys or with `All` bounds no path, and security still scopes the read.
+pub fn granted_paths(
+    grants: &Grants,
     model: &Model,
     entity: &str,
-    ids: &[i64],
+) -> Result<Vec<TraversalPath>, PipelineError> {
+    let entity = model
+        .entity(entity)
+        .map_err(|error| PipelineError::custom(error.to_string()))?;
+    let access = model.access();
+    let declared = access.entity(entity);
+    let set = grants
+        .scope_set(
+            &access.scope(declared.scope).name,
+            &access.permission(declared.permission).name,
+        )
+        .map_err(|error| PipelineError::Authorization(error.to_string()))?;
+    Ok(match set {
+        ScopeSet::Subtrees(roots) => roots
+            .iter()
+            .map(|root| TraversalPath::new_unchecked(root.clone()))
+            .collect(),
+        ScopeSet::All | ScopeSet::Keys(_) => Vec::new(),
+    })
+}
+
+pub fn hydration_arm(
+    model: &Model,
+    limits: &QueryLimits,
+    entity: &str,
+    ids: &[Key],
     columns: &[String],
     traversal_paths: Vec<TraversalPath>,
 ) -> Result<HydrationArm, PipelineError> {
-    HydrationArm::new(model, entity, ids, columns, traversal_paths).map_err(|error| {
+    HydrationArm::new(model, limits, entity, ids, columns, traversal_paths).map_err(|error| {
         PipelineError::Compile {
             client_safe: false,
             reason: error.rejection_reason(),
@@ -143,18 +175,17 @@ pub fn parse_hydration_batches(
     let alias = hydration_node_alias();
     let entity_type_col = format!("{alias}_entity_type");
     let props_col = format!("{alias}_props");
-    let id_col = format!("{alias}_id");
+    let id_col = hydration_id_column();
 
     let mut result = HashMap::new();
     let mut field_types_cache: HashMap<String, HashMap<String, DataType>> = HashMap::new();
 
     for batch in batches {
         for row_idx in 0..batch.num_rows() {
-            let Some(id) = ArrowUtils::get_column::<Int64Type>(batch, &id_col, row_idx) else {
+            let row_data = ArrowUtils::extract_row(batch, row_idx);
+            let Some(id) = row_data.get(&id_col).and_then(identity) else {
                 continue;
             };
-
-            let row_data = ArrowUtils::extract_row(batch, row_idx);
 
             let entity_type = row_data
                 .iter()
@@ -231,12 +262,7 @@ pub fn merge_static_properties(
 ) {
     for row in result.authorized_rows_mut() {
         for template in templates {
-            let pk_col = primary_key_column(&template.node_alias);
-            let id_col = redaction_id_column(&template.node_alias);
-            let id = row
-                .get_column_i64(&pk_col)
-                .or_else(|| row.get_column_i64(&id_col));
-            if let Some(id) = id
+            if let Some(id) = static_id(row, &template.node_alias)
                 && let Some(props) = property_map.get(&(template.entity_type.clone(), id))
             {
                 for (key, value) in props {
@@ -251,7 +277,9 @@ pub fn merge_static_properties(
 pub fn merge_dynamic_properties(result: &mut QueryResult, property_map: &PropertyMap) {
     for row in result.authorized_rows_mut() {
         for node_ref in row.dynamic_nodes_mut() {
-            if let Some(props) = property_map.get(&(node_ref.entity_type.clone(), node_ref.id)) {
+            if let Some(props) =
+                property_map.get(&(node_ref.entity_type.clone(), node_ref.id.clone()))
+            {
                 node_ref.properties = props.clone();
             }
         }
@@ -304,6 +332,7 @@ pub fn strip_injected_columns<'a>(
 
 pub fn hydrate_static(
     model: &Model,
+    limits: &QueryLimits,
     templates: &[HydrationTemplate],
     query_result: &QueryResult,
 ) -> Result<Vec<HydrationArm>, PipelineError> {
@@ -327,6 +356,7 @@ pub fn hydrate_static(
 
         arms.push(hydration_arm(
             model,
+            limits,
             &template.entity_type,
             &ids,
             &template.columns,
@@ -344,9 +374,10 @@ pub fn hydrate_static(
 /// its own rows carry. A neighbor can sit above the center node, so the center path is no fallback.
 pub fn hydrate_dynamic(
     model: &Model,
+    limits: &QueryLimits,
     entity_specs: &[DynamicEntityColumns],
-    refs: &HashMap<String, Vec<i64>>,
-    traversal_paths: &[TraversalPath],
+    refs: &HashMap<String, Vec<Key>>,
+    grants: &Grants,
     ref_paths: &HashMap<String, Vec<TraversalPath>>,
 ) -> Result<Vec<HydrationArm>, PipelineError> {
     let mut arms = Vec::new();
@@ -365,22 +396,17 @@ pub fn hydrate_dynamic(
             continue;
         }
 
-        let capped_ids: Vec<i64> = ids
-            .iter()
-            .copied()
-            .take(MAX_DYNAMIC_HYDRATION_RESULTS)
-            .collect();
+        let capped_ids: Vec<Key> = ids.iter().take(limits.hydration_rows).cloned().collect();
 
-        let tps = if spec.has_traversal_path {
-            ref_paths
-                .get(entity_type)
-                .map_or_else(|| traversal_paths.to_vec(), Clone::clone)
-        } else {
-            Vec::new()
+        let tps = match (spec.has_traversal_path, ref_paths.get(entity_type)) {
+            (false, _) => Vec::new(),
+            (true, Some(paths)) => paths.clone(),
+            (true, None) => granted_paths(grants, model, entity_type)?,
         };
 
         arms.push(hydration_arm(
             model,
+            limits,
             entity_type,
             &capped_ids,
             &spec.columns,
@@ -456,5 +482,30 @@ pub fn strip_filter_injected_static(result: &mut QueryResult, templates: &[Hydra
         for key in &col_keys {
             row.remove_column(key);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use compiler::orbit_authorization::{Caller, Grants, ScopeSet};
+    use query_data_model::Packages;
+
+    use super::{TraversalPath, granted_paths};
+
+    #[test]
+    fn lookups_read_within_the_subtrees_the_caller_holds_the_permission_in() {
+        let model = Packages::embedded().load().unwrap();
+        let grants = Grants::new(Caller::new("user:1", false, ())).with(
+            "namespace",
+            "read",
+            ScopeSet::Subtrees(vec!["1/9970/".into()]),
+        );
+        let paths = granted_paths(&grants, &model, "MergeRequest").unwrap();
+        assert_eq!(paths, [TraversalPath::new_unchecked("1/9970/".to_string())]);
+        let unanswered = granted_paths(&grants, &model, "Vulnerability").unwrap_err();
+        assert!(
+            unanswered.to_string().contains("no scope answer"),
+            "{unanswered}"
+        );
     }
 }

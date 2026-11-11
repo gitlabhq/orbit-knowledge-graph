@@ -142,7 +142,7 @@ impl<'m> LogicalBuilder<'m> {
             vec![rows],
             |catalog, construction, _| {
                 super::limits::in_values(catalog.model(), &checked, catalog.limits())?;
-                super::conditions::conditions(catalog.model(), construction, &checked)?;
+                super::conditions::conditions(catalog, construction, &checked)?;
                 filter::predicate(catalog.model(), construction, &checked)?;
                 Ok(Outputs::preserve())
             },
@@ -214,15 +214,21 @@ impl<'m> LogicalBuilder<'m> {
         })
     }
 
-    pub fn pin(&mut self, rows: Rows<'m>, key: Expr, ids: &[i64]) -> Result<Rows<'m>, PlanError> {
-        let predicate = key.one_of(ids.iter().copied().map(Literal::Int));
+    /// Keeps the rows whose `key` is one of `ids`, each a literal of the key's type.
+    pub fn pin(
+        &mut self,
+        rows: Rows<'m>,
+        key: Expr,
+        ids: &[Literal],
+    ) -> Result<Rows<'m>, PlanError> {
+        let predicate = key.one_of(ids.iter().cloned());
         let checked = predicate.clone();
         let count = ids.len();
         self.connect(
             LogicalOperation::Filter(predicate),
             vec![rows],
             |catalog, construction, _| {
-                super::limits::at_most("pinned ids", count, catalog.limits().pins)?;
+                super::limits::at_most("pinned ids", count, catalog.limits().pinned_ids)?;
                 filter::predicate(catalog.model(), construction, &checked)?;
                 Ok(Outputs::preserve())
             },

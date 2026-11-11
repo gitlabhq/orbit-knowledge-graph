@@ -6,8 +6,9 @@ entities:
   MergeRequest:
     style: {size: 28, color: "#F59E0B"}
     description: A merge request for code review and merging changes into a target branch
+    identity: id
     label: title
-    defaults: [id, iid, title, state, source_branch, target_branch]
+    default_columns: [id, iid, title, state, source_branch, target_branch]
     properties:
       id: {type: int64, description: Unique ID.}
       iid: {type: int64?, description: Project-scoped merge request number.}
@@ -24,7 +25,6 @@ entities:
       merge_status:
         type: string
         description: "Mergeability status: unchecked, preparing, checking, can_be_merged, cannot_be_merged, cannot_be_merged_recheck, cannot_be_merged_rechecking."
-        selectivity: low
         default: unchecked
       draft: {type: boolean, description: Whether this is a draft/WIP merge request., default: false}
       squash: {type: boolean, description: Whether to squash commits on merge., default: false}
@@ -90,8 +90,9 @@ entities:
     description: >-
       A snapshot of changes (commits and file diffs) associated with a merge request
       at a point in time
+    identity: id
     label: id
-    defaults: [id, merge_request_id, state]
+    default_columns: [id, merge_request_id, state]
     properties:
       id: {type: int64, description: Unique ID.}
       merge_request_id:
@@ -100,7 +101,6 @@ entities:
       state:
         type: string
         description: "Diff state: empty, without_files, collected, overflow. Deprecated values may still appear: timeout, overflow_commits_safe_size, overflow_diff_files_limit, overflow_diff_lines_limit."
-        selectivity: low
         default: ''
       base_commit_sha:
         type: string
@@ -140,8 +140,9 @@ entities:
   MergeRequestDiffFile:
     style: {size: 20, color: "#B45309"}
     description: A file changed in a merge request diff
+    identity: id
     label: old_path
-    defaults: [id, new_path, old_path, new_file, deleted_file]
+    default_columns: [id, new_path, old_path, new_file, deleted_file]
     properties:
       id:
         type: int64
@@ -175,12 +176,10 @@ entities:
       a_mode:
         type: string
         description: Git mode bits before the change (e.g. 100644).
-        selectivity: low
         default: ''
       b_mode:
         type: string
         description: Git mode bits after the change (e.g. 100755).
-        selectivity: low
         default: ''
       traversal_path: {type: string, description: Namespace path for authz., default: 0/}
       diff:

@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
-use crate::constants::{DEFAULT_PRIMARY_KEY as KEY, EDGE_RESERVED_COLUMNS};
-use crate::{DataType, FieldSelectivity};
+use crate::DataType;
+use crate::constants::EDGE_RESERVED_COLUMNS;
 use indexmap::IndexMap;
 
 use super::catalog::{Domain, GraphCatalog};
 use super::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 use crate::catalog::Diagnostics;
 use crate::spec::{
-    Attribute, DefaultValue, Entity, GraphFragment, Property, Raw, Relationship,
+    Attribute, DefaultValue, Entity, GraphFragment, OneOrMany, Property, Raw, Relationship,
     RelationshipVariant, Short, parse_variant, parse_word,
 };
 
@@ -93,9 +93,6 @@ impl GraphCatalog {
             );
             return;
         }
-        if !spec.properties.contains_key(KEY) {
-            diagnostics.error(package, format!("entity {name} has no `{KEY}` property"));
-        }
         self.entity_ids.insert(name.clone(), id);
         let mut names = HashMap::with_capacity(spec.properties.len());
         let mut properties = Vec::with_capacity(spec.properties.len());
@@ -110,15 +107,25 @@ impl GraphCatalog {
             properties.push(property_id);
             self.properties.push(declared);
         }
-        let defaults = spec
-            .defaults
-            .iter()
-            .filter_map(|default| {
-                diagnostics.require(names.get(default).copied(), package, || {
-                    format!("{name} default {default} is not a property")
+        let identity =
+            self.declare_identity(&name, spec.identity.as_ref(), &names, package, diagnostics);
+        let default_columns = match spec.default_columns.as_deref() {
+            None | Some([]) => {
+                diagnostics.error(
+                    package,
+                    format!("entity {name} declares no default_columns"),
+                );
+                Vec::new()
+            }
+            Some(written) => written
+                .iter()
+                .filter_map(|column| {
+                    diagnostics.require(names.get(column).copied(), package, || {
+                        format!("{name} default column {column} is not a property")
+                    })
                 })
-            })
-            .collect();
+                .collect(),
+        };
         if !names.contains_key(&spec.label) {
             let label = &spec.label;
             diagnostics.error(package, format!("{name} label {label} is not a property"));
@@ -130,11 +137,54 @@ impl GraphCatalog {
             package: package.to_string(),
             domain,
             description: spec.description,
+            identity,
             label: spec.label,
-            defaults,
+            default_columns,
             style: spec.style,
             properties,
         });
+    }
+
+    fn declare_identity(
+        &self,
+        name: &str,
+        written: Option<&OneOrMany>,
+        names: &HashMap<String, PropertyId>,
+        package: &str,
+        diagnostics: &mut Diagnostics,
+    ) -> Vec<PropertyId> {
+        let Some(written) = written else {
+            diagnostics.error(package, format!("entity {name} declares no identity"));
+            return Vec::new();
+        };
+        let mut identity = Vec::new();
+        for property in written.values() {
+            let Some(id) = diagnostics.require(names.get(property).copied(), package, || {
+                format!("{name} identity {property} is not a property")
+            }) else {
+                continue;
+            };
+            let declared = &self.properties[id.index()];
+            if !matches!(
+                declared.data_type,
+                DataType::Int | DataType::String | DataType::Uuid
+            ) || declared.nullable
+            {
+                diagnostics.error(
+                    package,
+                    format!(
+                        "{name} identity {property} is {:?}{}; an identity is a non-null integer, string or uuid",
+                        declared.data_type,
+                        if declared.nullable { "?" } else { "" }
+                    ),
+                );
+            }
+            if identity.contains(&id) {
+                diagnostics.error(package, format!("{name} identity names {property} twice"));
+            }
+            identity.push(id);
+        }
+        identity
     }
 
     fn declare_relationships(
@@ -291,11 +341,7 @@ fn declare_property(
         description: spec.description,
         unique: spec.unique,
         enum_values: spec.enum_values,
-        enum_type: spec.enum_type,
         terminal_values: spec.terminal_values,
-        selectivity: spec
-            .selectivity
-            .unwrap_or_else(|| FieldSelectivity::from_data_type(data_type)),
         default: spec.default,
     };
     check_default(&property, package, diagnostics);

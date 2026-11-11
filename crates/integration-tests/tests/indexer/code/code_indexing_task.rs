@@ -554,6 +554,7 @@ async fn indexes_calls_and_extends_edges() {
         &query,
         &integration_testkit::load_data_model(),
         &security_ctx,
+        query_data_model::testkit::limits(),
     )
     .expect("CALLS query compiles");
     let sql = compiled.base.render();

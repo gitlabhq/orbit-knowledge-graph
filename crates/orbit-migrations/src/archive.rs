@@ -67,3 +67,36 @@ impl ModelArchive {
         self.0.write_atomic(path)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use query_data_model::implementations::clickhouse::spec::TableRole;
+    use query_data_model::{Catalog, ClickHouse};
+
+    use super::ModelArchive;
+
+    #[test]
+    fn every_bundled_version_declares_its_engine_tables_and_enabled_namespaces() {
+        for version in ModelArchive::bundled_versions().unwrap() {
+            let model = ModelArchive::bundled(version)
+                .unwrap()
+                .unwrap()
+                .packages()
+                .load()
+                .unwrap();
+            let catalog = Catalog::<ClickHouse>::from_model(&model).unwrap();
+            let schema = catalog.schema().unwrap();
+            for role in [
+                TableRole::PlanProgress,
+                TableRole::CodeProgress,
+                TableRole::DeletionSchedule,
+            ] {
+                assert!(schema.role_table(role).is_some(), "v{version} {role:?}");
+            }
+            assert!(
+                model.sources().enabled_namespaces().is_some(),
+                "v{version} lists no enabled namespaces"
+            );
+        }
+    }
+}

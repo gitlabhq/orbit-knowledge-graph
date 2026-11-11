@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::catalog::sources::Role;
-use query_data_model::implementations::clickhouse::schema::EngineTable;
+use query_data_model::implementations::clickhouse::spec::TableRole;
 use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, DataModelError};
 
@@ -151,7 +151,9 @@ impl CodeTableNames {
             definition: table(&kinds.definition)?,
             imported_symbol: table(&kinds.imported_symbol)?,
             checkpoints: prefixed_table_name(
-                schema.engine_table(EngineTable::CodeCheckpoints)?,
+                schema.role_table(TableRole::CodeProgress).ok_or_else(|| {
+                    DataModelError::Invalid("no table holds repository progress".into())
+                })?,
                 *SCHEMA_VERSION,
             ),
             edge_tables,

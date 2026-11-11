@@ -127,10 +127,12 @@ impl Resolver<'_, '_> {
                 continue;
             };
             if let Some(role) = spec.role
-                && self.schema.engine_table(role).is_ok()
+                && let Some(other) = self.schema.role_table(role)
             {
-                self.diagnostics
-                    .error(&package, format!("{context} repeats the table role {role}"));
+                self.diagnostics.error(
+                    &package,
+                    format!("{context} and table {other} both hold the {role:?} role"),
+                );
             }
             self.schema.auxiliary.push(AuxiliaryTable {
                 table,

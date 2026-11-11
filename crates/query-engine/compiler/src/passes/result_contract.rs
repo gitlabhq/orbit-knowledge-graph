@@ -4,7 +4,6 @@ use query_data_model::{Catalog, DataType};
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::Direction;
-use query_data_model::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     Column, Expr, Operation, Relation, RelationalBuilder, RelationalError, Selection,
@@ -59,7 +58,7 @@ pub enum KeyKind {
 
 impl KeyKind {
     /// The loader admits only integer, string and uuid check keys.
-    fn of(data_type: DataType) -> Self {
+    pub(crate) fn of(data_type: DataType) -> Self {
         match data_type {
             DataType::Int => Self::Int,
             DataType::Uuid => Self::Uuid,
@@ -90,7 +89,7 @@ pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, Vec<Enti
                     } => {
                         let key = graph.property(*id);
                         let key_source = match key.name.as_str() {
-                            DEFAULT_PRIMARY_KEY => KeySource::Identity,
+                            _ if entity.identity == [*id] => KeySource::Identity,
                             name if Some(name) == redaction => KeySource::Redaction,
                             _ => KeySource::Lookup,
                         };
@@ -141,7 +140,7 @@ pub struct ResultContext {
     nodes: HashMap<String, RedactionNode>,
     entity_auth: HashMap<String, Vec<EntityAuthConfig>>,
     edges: Vec<EdgeMeta>,
-    neighbors_center: Option<(String, i64)>,
+    neighbors_center: Option<(String, orbit_authorization::Key)>,
     labels: HashMap<String, String>,
 }
 
@@ -210,10 +209,10 @@ impl ResultContext {
         &self.edges
     }
 
-    pub fn neighbors_center(&self) -> Option<(&str, i64)> {
+    pub fn neighbors_center(&self) -> Option<(&str, &orbit_authorization::Key)> {
         self.neighbors_center
             .as_ref()
-            .map(|(entity, id)| (entity.as_str(), *id))
+            .map(|(entity, id)| (entity.as_str(), id))
     }
 
     pub fn label(&self, entity: &str) -> Option<&str> {
@@ -420,7 +419,7 @@ pub fn apply<B: SqlBackend>(
         && let Some([id]) = center.pinned.as_deref()
     {
         let entity = model.graph().entity(center.binding.entity);
-        ctx.neighbors_center = Some((entity.name.clone(), *id));
+        ctx.neighbors_center = Some((entity.name.clone(), id.clone()));
         ctx.labels = model
             .graph()
             .entities()
@@ -483,7 +482,7 @@ fn aggregation_row_nodes<'p>(
             Logical::Property { binding, property }
             | Logical::Truncate {
                 binding, property, ..
-            } if free_text(model.graph(), *property) => Some(query.name(*binding)),
+            } if free_text(model, *property) => Some(query.name(*binding)),
             _ => None,
         })
         .collect()
@@ -528,8 +527,9 @@ fn return_columns(
         else {
             continue;
         };
-        let redaction_column = redaction_column(model, entity_id).unwrap_or(DEFAULT_PRIMARY_KEY);
-        let needs_separate_pk = redaction_column != DEFAULT_PRIMARY_KEY;
+        let id_column = crate::logical::columns::identity_column(model, entity_id)?;
+        let redaction_column = redaction_column(model, entity_id).unwrap_or(id_column);
+        let needs_separate_pk = redaction_column != id_column;
         let authorization_id = if needs_separate_pk {
             let table_alias = table_alias.as_deref().ok_or_else(|| {
                 QueryError::PipelineInvariant(format!(

@@ -5,7 +5,7 @@ use std::panic::RefUnwindSafe;
 
 use super::guards::Guard;
 use crate::spec::{AccessHints, Binding, Resolved};
-use crate::{Endpoint, EntityId, ForeignKey, PropertyId, RelationshipVariantId};
+use crate::{Endpoint, EntityId, FieldSelectivity, ForeignKey, PropertyId, RelationshipVariantId};
 
 /// A store's backend facts, which only the backend's catalog reads.
 pub(crate) type Facts = Box<dyn BackendFacts>;
@@ -19,6 +19,8 @@ impl<T: Any + Debug + Send + Sync + RefUnwindSafe> BackendFacts for T {}
 pub struct Source {
     pub entity: EntityId,
     pub package: String,
+    /// The store holds or excludes every property, and plans read the entity here.
+    pub complete: bool,
     pub table: Option<String>,
     pub key: String,
     pub path_column: Option<String>,
@@ -29,6 +31,8 @@ pub struct Source {
 pub struct StoredColumn {
     pub name: String,
     pub immutable: bool,
+    pub selectivity: Option<FieldSelectivity>,
+    pub stored_as_text: bool,
 }
 
 #[derive(Debug)]
@@ -66,6 +70,21 @@ impl Store {
         self.columns[property.index()]
             .as_ref()
             .is_some_and(|column| column.immutable)
+    }
+
+    /// The selectivity hint the store declares for the column, if any.
+    pub fn selectivity(&self, property: PropertyId) -> Option<FieldSelectivity> {
+        self.columns[property.index()].as_ref()?.selectivity
+    }
+
+    pub fn stored_as_text(&self, property: PropertyId) -> bool {
+        self.columns[property.index()]
+            .as_ref()
+            .is_some_and(|column| column.stored_as_text)
+    }
+
+    pub fn complete(&self, entity: EntityId) -> bool {
+        self.source(entity).is_some_and(|source| source.complete)
     }
 
     pub fn excludes(&self, property: PropertyId) -> bool {

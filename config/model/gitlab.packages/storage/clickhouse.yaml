@@ -3,6 +3,7 @@ package: gitlab.packages
 store: graph
 entities:
   Dependency:
+    complete: true
     table: gl_dependency
     columns:
       id: {backend: {type: Int64, codec: [Delta(8), LZ4]}}
@@ -22,6 +23,7 @@ entities:
       path_lookups: {id: {table: gl_dependency, key: id}}
 
   Package:
+    complete: true
     table: gl_package
     columns:
       id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -48,6 +50,7 @@ entities:
       path_lookups: {id: {table: gl_package, key: id}}
 
   PackageFile:
+    complete: true
     table: gl_package_file
     columns:
       id: {backend: {type: Int64, codec: [Delta(8), LZ4]}}

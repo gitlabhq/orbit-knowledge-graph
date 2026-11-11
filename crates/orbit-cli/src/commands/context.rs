@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
-use duckdb_client::search::{NodeHydrator, NodeValue};
+use duckdb_client::search::{Key, NodeHydrator, NodeValue};
 use duckdb_client::{i64_column, sql_lit, string_column};
 
 use crate::commands::{definition, relations};
@@ -16,6 +16,14 @@ pub(crate) struct SourceRange {
     pub(crate) file: String,
     pub(crate) start: usize,
     pub(crate) end: usize,
+}
+
+/// A local code node's id; the code graph keys its files and definitions by integer.
+pub(crate) fn int_id(node: &NodeValue) -> Result<i64> {
+    match node.id {
+        Key::Int(id) => Ok(id),
+        ref other => anyhow::bail!("{} {other} has no integer id", node.entity_type),
+    }
 }
 
 pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
@@ -34,7 +42,7 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
             .context("node has an invalid source property")
     };
     Ok(SourceRange {
-        id: node.id,
+        id: int_id(node)?,
         fqn: string("fqn")?,
         kind: string("definition_type")?,
         file: string("file_path")?,
@@ -723,7 +731,7 @@ fn resolve_targets(
                     }
                 },
                 Err(error) => {
-                    let mut matches = hydrator.query(
+                    let matches = hydrator.query(
                         client,
                         &[
                             ("project_id", git.project_id.into()),
@@ -732,8 +740,8 @@ fn resolve_targets(
                         ],
                         None,
                     )?;
-                    matches.sort_by_key(|node| node.id);
-                    let mut found: Vec<i64> = matches.into_iter().map(|node| node.id).collect();
+                    let mut found: Vec<i64> = matches.iter().map(int_id).collect::<Result<_>>()?;
+                    found.sort_unstable();
                     if found.is_empty() {
                         found = named(client, git, target, None)?;
                     }
@@ -1237,7 +1245,13 @@ fn resolve_files(
             ("project_id", git.project_id.into()),
             ("commit_sha", git.commit_sha.clone().into()),
         ],
-        Some(&selected_ids),
+        Some(
+            &selected_ids
+                .iter()
+                .copied()
+                .map(Key::Int)
+                .collect::<Vec<_>>(),
+        ),
     )?;
     for id in ids {
         anyhow::ensure!(
@@ -1255,7 +1269,7 @@ fn resolve_files(
     }
     for node in &mut nodes {
         node.properties
-            .insert("reason".into(), reasons[&node.id].clone().into());
+            .insert("reason".into(), reasons[&int_id(node)?].clone().into());
     }
     nodes.sort_by(|a, b| {
         a.properties["path"]

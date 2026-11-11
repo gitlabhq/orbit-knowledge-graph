@@ -203,7 +203,7 @@ impl Grammar {
     fn parsed_pairs(&self, text: &str) -> Option<Vec<usize>> {
         let mut pairs = Vec::new();
         let mut skip_below = None;
-        for (depth, name) in gql::outline(text)? {
+        for (depth, name) in gql::outline(text, query_data_model::testkit::limits())? {
             if skip_below.is_some_and(|d| depth > d) {
                 continue;
             }

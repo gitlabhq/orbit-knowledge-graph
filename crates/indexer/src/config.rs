@@ -97,8 +97,8 @@ impl From<&AppConfig> for DispatcherConfig {
 pub enum DispatcherError {
     #[error("invalid layout: {0}")]
     Layout(#[from] query_data_model::DataModelError),
-    #[error("the model declares no {0} source")]
-    MissingSource(&'static str),
+    #[error("no source lists the enabled namespaces")]
+    NoEnabledNamespaces,
     #[error("model archive error: {0}")]
     Archive(#[from] orbit_migrations::catalog::CatalogError),
 

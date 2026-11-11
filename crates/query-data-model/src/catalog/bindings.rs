@@ -4,7 +4,6 @@ use indexmap::IndexMap;
 
 use super::Diagnostics;
 use super::store::Store;
-use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::spec::{
     Binding, Discriminator, Key, KeySpec, Raw, Resolved, StorageFragment, parse_variant,
 };
@@ -158,10 +157,13 @@ impl Store {
             Endpoint::Target => Endpoint::Source,
         };
         let referenced = variant.endpoint(other);
-        let referenced_key = graph.property_id(referenced, DEFAULT_PRIMARY_KEY);
+        let referenced_key = match graph.entity(referenced).identity.as_slice() {
+            [identity] => Some(*identity),
+            _ => None,
+        };
         let referenced_key = diagnostics.require(referenced_key, package, || {
             format!(
-                "{label} references {}, which has no id",
+                "{label} references {}, which has no single identity property",
                 graph.entity(referenced).name
             )
         })?;
@@ -173,9 +175,10 @@ impl Store {
             diagnostics.error(
                 package,
                 format!(
-                    "{label} foreign key {} is {held:?} but {}.id is {id:?}; keys are never cast",
+                    "{label} foreign key {} is {held:?} but {}.{} is {id:?}; keys are never cast",
                     key.column,
-                    graph.entity(referenced).name
+                    graph.entity(referenced).name,
+                    graph.property(referenced_key).name
                 ),
             );
             return None;
@@ -241,6 +244,69 @@ fn label(graph: &GraphCatalog, variant: &RelationshipVariant) -> String {
     format!("{relationship}({source} -> {target})")
 }
 
+/// The one store that marks the entity `complete: true`.
+fn complete_store<'s>(
+    entity: &crate::spec::Entity,
+    holders: &[&'s Store],
+    diagnostics: &mut Diagnostics,
+) -> Option<&'s Store> {
+    let mut complete = holders
+        .iter()
+        .copied()
+        .filter(|store| store.complete(entity.id));
+    let first = complete.next();
+    match (first, complete.next()) {
+        (None, _) => diagnostics.error(
+            &entity.package,
+            format!(
+                "{} is stored in {} but no store marks it complete: true",
+                entity.name,
+                holders
+                    .iter()
+                    .map(|store| store.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ),
+        (Some(first), Some(second)) => diagnostics.error(
+            &second.package,
+            format!(
+                "stores {} and {} both mark {} complete: true; exactly one store is complete",
+                first.name, second.name, entity.name
+            ),
+        ),
+        _ => {}
+    }
+    first
+}
+
+fn agree_on_text(
+    entity: &crate::spec::Entity,
+    graph: &GraphCatalog,
+    holders: &[&Store],
+    property: PropertyId,
+    diagnostics: &mut Diagnostics,
+) {
+    let mut stored = holders
+        .iter()
+        .filter(|store| store.column(property).is_some());
+    if let Some(first) = stored.next()
+        && let Some(other) =
+            stored.find(|store| store.stored_as_text(property) != first.stored_as_text(property))
+    {
+        diagnostics.error(
+            &other.package,
+            format!(
+                "stores {} and {} disagree on whether {}.{} is stored as text",
+                first.name,
+                other.name,
+                entity.name,
+                graph.property(property).name
+            ),
+        );
+    }
+}
+
 /// The checks that span stores: every property and variant is bound somewhere, stores agree on
 /// immutability, and every foreign key joins within its connection.
 pub(super) fn check(
@@ -257,21 +323,23 @@ pub(super) fn check(
         if holders.is_empty() {
             continue;
         }
+        let complete = complete_store(entity, &holders, diagnostics);
         for id in &entity.properties {
             let covered = served.contains(id)
-                || holders
-                    .iter()
-                    .any(|store| store.column(*id).is_some() || store.excludes(*id));
+                || complete.is_none_or(|store| store.column(*id).is_some() || store.excludes(*id));
             if !covered {
                 diagnostics.error(
                     &entity.package,
                     format!(
-                        "{}.{} is neither stored nor excluded by any store",
+                        "store {} is complete for {} but neither stores nor excludes {}.{}",
+                        complete.map_or("", |store| store.name.as_str()),
+                        entity.name,
                         entity.name,
                         graph.property(*id).name
                     ),
                 );
             }
+            agree_on_text(entity, graph, &holders, *id, diagnostics);
             let mut stored = holders.iter().filter(|store| store.column(*id).is_some());
             if let Some(first) = stored.next()
                 && let Some(other) =

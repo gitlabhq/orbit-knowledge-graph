@@ -4,13 +4,14 @@ use query_data_model::plan::logical::{
     Columns, ErrorClass, Expr, Hops, Literal, LogicalCatalog, LogicalOperation, LogicalPlan,
     LogicalType, Matching, Measure, Order, PlanError, Predicate, Projection, Step, TimeUnit,
 };
+use query_data_model::testkit::limits;
 
 use query_data_model::Direction;
 
 #[test]
 fn a_pattern_binds_aliases_hops_and_edges() {
     let model = support::gitlab();
-    let catalog = model.logical();
+    let catalog = model.logical(limits());
     let plan = catalog
         .build(|q| {
             let users = catalog.entity("User")?;
@@ -74,7 +75,7 @@ fn a_pattern_binds_aliases_hops_and_edges() {
 #[test]
 fn neighbors_paths_and_aggregates_declare_their_outputs() {
     let model = support::gitlab();
-    let catalog = model.logical();
+    let catalog = model.logical(limits());
     let plan = catalog
         .build(|q| {
             let rows = q.entities_as(catalog.entity("Project")?, "p")?;
@@ -129,7 +130,7 @@ fn neighbors_paths_and_aggregates_declare_their_outputs() {
 #[test]
 fn construction_errors_name_their_class() {
     let model = support::gitlab();
-    let catalog = model.logical();
+    let catalog = model.logical(limits());
     let unknown = catalog
         .build(|q| {
             let rows = q.entities_as(catalog.entity("User")?, "u")?;
@@ -203,7 +204,7 @@ fn on_branch(catalog: LogicalCatalog<'_>, column: &str) -> Result<LogicalPlan, P
 #[test]
 fn edges_filter_and_select_relationship_attributes() {
     let model = support::branch_attributes(ATTRIBUTES);
-    let plan = on_branch(model.logical(), "branch").unwrap();
+    let plan = on_branch(model.logical(limits()), "branch").unwrap();
     let operations: Vec<_> = plan.nodes().map(|node| plan.operation(node)).collect();
     let LogicalOperation::Filter(Predicate::Compare {
         left: Expr::Attribute { attribute, .. },
@@ -223,17 +224,17 @@ fn edges_filter_and_select_relationship_attributes() {
 #[test]
 fn edge_attributes_are_checked_at_construction() {
     let model = support::branch_attributes(ATTRIBUTES);
-    let unknown = on_branch(model.logical(), "brnch").unwrap_err();
+    let unknown = on_branch(model.logical(limits()), "brnch").unwrap_err();
     assert_eq!(unknown.class(), ErrorClass::Reference);
     assert_eq!(
         unknown.to_string(),
         "unknown column brnch; available: relationship_kind, source_id, source_kind, target_id, target_kind, branch, project_id"
     );
-    let typed = on_branch(model.logical(), "project_id").unwrap_err();
+    let typed = on_branch(model.logical(limits()), "project_id").unwrap_err();
     assert_eq!(typed.class(), ErrorClass::Type);
 
     let hidden = support::branch_attributes("{open: [project_id], hidden: [branch]}");
-    let error = on_branch(hidden.logical(), "branch").unwrap_err();
+    let error = on_branch(hidden.logical(limits()), "branch").unwrap_err();
     assert_eq!(error.class(), ErrorClass::Policy);
     assert_eq!(error.to_string(), "ON_BRANCH.branch is hidden");
 }
@@ -241,7 +242,7 @@ fn edge_attributes_are_checked_at_construction() {
 #[test]
 fn plans_carry_the_declared_node_order_through_rebuilds() {
     let model = support::gitlab();
-    let catalog = model.logical();
+    let catalog = model.logical(limits());
     let plan = catalog
         .build(|q| {
             let rows = q.entities_as(catalog.entity("User")?, "u")?;

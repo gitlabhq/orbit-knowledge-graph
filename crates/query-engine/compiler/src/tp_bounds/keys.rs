@@ -1,3 +1,4 @@
+use orbit_authorization::Key;
 use query_data_model::TraversalPathKind;
 use query_data_model::plan::logical::{Comparison, Expr, Literal};
 use query_data_model::{EntityId, PropertyId};
@@ -43,11 +44,12 @@ pub(super) fn keys(
     };
     let mut keys = Vec::new();
     for id in anchor.pins.first().into_iter().flatten() {
-        keys.push(key(
-            entity,
-            TraversalPathKind::Id,
-            TpLookupValue::Numeric(*id),
-        ));
+        let value = match id {
+            Key::Int(id) => TpLookupValue::Numeric(*id),
+            Key::Text(id) | Key::Uuid(id) => TpLookupValue::Text(id.clone()),
+            Key::Composite(_) => continue,
+        };
+        keys.push(key(entity, TraversalPathKind::Id, value));
     }
     if let Some(Literal::String(path)) =
         single_eq(&|property| query.property_name(property) == "full_path")

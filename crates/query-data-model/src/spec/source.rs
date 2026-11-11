@@ -153,6 +153,8 @@ pub struct SourceDeclaration {
     pub version: String,
     pub watermark: String,
     pub deleted: String,
+    /// The table of the source that lists the namespaces enabled for indexing.
+    pub enabled_namespaces: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

@@ -2,14 +2,18 @@ kind: graph
 package: acme.checked
 entities:
   Binder:
+    identity: id
     label: name
+    default_columns: [id, name, team_key]
     properties:
       id: int64
       name: string
       team_key: string
 
   Document:
+    identity: id
     label: title
+    default_columns: [id, title, team_key, binder_id]
     properties:
       id: int64
       title: string

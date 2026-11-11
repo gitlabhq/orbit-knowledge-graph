@@ -138,8 +138,12 @@ where
             self.condition = predicates;
             return self.reads.share(rows, Some(alias), false);
         }
+        let span = self.reads.id_range_span;
         if relation.single_edge_table().is_some()
-            || !stored::<B>() && predicates.iter().any(Predicate::is_selective)
+            || !stored::<B>()
+                && predicates
+                    .iter()
+                    .any(|predicate| predicate.is_selective(span))
         {
             return current_edge_rows(&mut self.reads, pattern, relation, alias, predicates);
         }

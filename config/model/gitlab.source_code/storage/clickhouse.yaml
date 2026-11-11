@@ -3,6 +3,7 @@ package: gitlab.source_code
 store: graph
 entities:
   Branch:
+    complete: true
     table: gl_branch
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -20,6 +21,7 @@ entities:
       path_lookups: {id: {table: gl_branch, key: id}}
 
   Commit:
+    complete: true
     table: gl_commit
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [Delta(8), LZ4]}}
@@ -36,6 +38,7 @@ entities:
       path_lookups: {id: {table: gl_commit, key: id}}
 
   Definition:
+    complete: true
     table: gl_definition
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -46,7 +49,7 @@ entities:
       file_path: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
       fqn: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
       name: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
-      definition_type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      definition_type: {immutable: true, selectivity: low, backend: {type: LowCardinality(String), codec: [LZ4]}}
       start_line: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
       end_line: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
       start_byte: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -67,6 +70,7 @@ entities:
       path_lookups: {id: {table: gl_definition, key: id}}
 
   Directory:
+    complete: true
     table: gl_directory
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -88,6 +92,7 @@ entities:
       path_lookups: {id: {table: gl_directory, key: id}}
 
   File:
+    complete: true
     table: gl_file
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -97,10 +102,10 @@ entities:
       commit_sha: {backend: {type: String, codec: [ZSTD(1)]}}
       path: {immutable: true, backend: {type: String, codec: [ZSTD(3)]}}
       name: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
-      extension: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
-      language: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      extension: {immutable: true, selectivity: low, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      language: {immutable: true, selectivity: low, backend: {type: LowCardinality(String), codec: [LZ4]}}
       size_bytes: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}
-      reason: {backend: {type: LowCardinality(String), codec: [LZ4]}}
+      reason: {selectivity: low, backend: {type: LowCardinality(String), codec: [LZ4]}}
     access: {filter: [id, project_id], text: [name, path], order: [project_id, branch, id]}
     backend:
       indexes:
@@ -113,6 +118,7 @@ entities:
       path_lookups: {id: {table: gl_file, key: id}}
 
   ImportedSymbol:
+    complete: true
     table: gl_imported_symbol
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -121,7 +127,7 @@ entities:
       branch: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
       commit_sha: {backend: {type: String, codec: [ZSTD(1)]}}
       file_path: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
-      import_type: {immutable: true, backend: {type: LowCardinality(String), codec: [LZ4]}}
+      import_type: {immutable: true, selectivity: low, backend: {type: LowCardinality(String), codec: [LZ4]}}
       import_path: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
       identifier_name: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}
       identifier_alias: {immutable: true, backend: {type: String, codec: [ZSTD(9)]}}

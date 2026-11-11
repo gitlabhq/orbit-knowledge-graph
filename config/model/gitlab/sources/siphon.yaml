@@ -6,6 +6,7 @@ declare:
   version: _siphon_replicated_at
   watermark: _siphon_watermark
   deleted: _siphon_deleted
+  enabled_namespaces: siphon_knowledge_graph_enabled_namespaces
 roles:
   entities: {merge_request: MergeRequest, work_item: WorkItem, commit: Commit, project: Project, note: Note}
   tables:

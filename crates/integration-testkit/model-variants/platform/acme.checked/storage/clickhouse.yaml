@@ -3,6 +3,7 @@ package: acme.checked
 store: acme
 entities:
   Binder:
+    complete: true
     table: acme_binder
     columns:
       id: {immutable: true, backend: {type: Int64}}
@@ -10,6 +11,7 @@ entities:
       team_key: {backend: {type: String}}
     access: {order: [id]}
   Document:
+    complete: true
     table: acme_document
     columns:
       id: {immutable: true, backend: {type: Int64}}

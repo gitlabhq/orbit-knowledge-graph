@@ -54,3 +54,16 @@ pub fn with_demo() -> Packages {
         .unwrap_or_else(|error| panic!("reading {root}: {error}"));
     Packages::embedded().with(demo)
 }
+
+/// The `query.limits` of the embedded `config/default.yaml`; its query settings are installed
+/// too, as the server installs its loaded ones at startup.
+pub fn limits() -> &'static orbit_server_config::QueryLimits {
+    static LIMITS: std::sync::LazyLock<orbit_server_config::QueryLimits> =
+        std::sync::LazyLock::new(|| {
+            orbit_server_config::query::init_embedded_defaults();
+            orbit_server_config::AppConfig::embedded_defaults()
+                .query
+                .limits
+        });
+    &LIMITS
+}

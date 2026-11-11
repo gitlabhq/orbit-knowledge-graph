@@ -9,9 +9,13 @@ engine:
     version_column: _version
     deleted_column: _deleted
     edge_tables:
-      gl_edge: { shared: true, sort_key: [traversal_path, source_id, relationship_kind, target_id] }
+      gl_edge:
+        shared: true
+        sort_key: [traversal_path, source_id, relationship_kind, target_id]
+        columns: { source_id: { type: Int64 }, target_id: { type: Int64 } }
 entities:
   Group:
+    complete: true
     table: gl_group
     columns:
       id: { immutable: true, backend: { type: Int64 } }
@@ -20,6 +24,7 @@ entities:
       traversal_path: { backend: { type: String } }
     access: { order: [id] }
   Project:
+    complete: true
     table: gl_project
     columns:
       id: { immutable: true, backend: { type: Int64 } }
@@ -28,6 +33,7 @@ entities:
       traversal_path: { backend: { type: String } }
     access: { order: [id] }
   User:
+    complete: true
     table: gl_user
     path_column: null
     columns:
@@ -36,6 +42,7 @@ entities:
       email: { backend: { type: Nullable(String) } }
     access: { order: [id] }
   MergeRequest:
+    complete: true
     table: gl_merge_request
     columns:
       id: { immutable: true, backend: { type: Int64 } }
@@ -49,6 +56,7 @@ entities:
     backend:
       indexes: { title: text, state: set, project_id: bloom_filter, id: [bloom_filter, minmax] }
   Note:
+    complete: true
     table: gl_note
     columns:
       id: { immutable: true, backend: { type: Int64 } }

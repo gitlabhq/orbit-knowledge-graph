@@ -71,7 +71,7 @@ pub(crate) fn compiled(gql: &str) -> compiler::CompiledQueryContext {
         query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
     );
     let ctx = compiler::uniform_grants(model.model(), false, &["1/"]);
-    compiler::compile(gql, &model, &ctx).unwrap()
+    compiler::compile(gql, &model, &ctx, query_data_model::testkit::limits()).unwrap()
 }
 
 #[cfg(test)]

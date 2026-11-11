@@ -33,7 +33,6 @@ use datalake::{Datalake, DatalakeQuery};
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
 use orbit_log_fields::info;
-use orbit_migrations::completion::SIPHON_SOURCE;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use pipeline::Pipeline;
 
@@ -98,11 +97,12 @@ pub async fn register_handlers(
         catalog
             .model()
             .sources()
-            .source_named(SIPHON_SOURCE)
+            .enabled_namespaces()
+            .map(|(source, _)| source)
             .ok_or_else(|| {
-                HandlerInitError::new(std::io::Error::other(format!(
-                    "the model declares no {SIPHON_SOURCE} source"
-                )))
+                HandlerInitError::new(std::io::Error::other(
+                    "no source lists the enabled namespaces",
+                ))
             })?,
         transform::system_notes::edge_table(catalog).map_err(HandlerInitError::new)?,
         entity_handler_config.system_notes_resolve_lookup_batch_size,

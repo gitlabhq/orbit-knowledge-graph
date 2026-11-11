@@ -246,7 +246,9 @@ mod tests {
         );
         let ctx = query_engine::compiler::uniform_grants(model.model(), false, &["1/"]);
         let gql = "MATCH (u:User {id: 1}) RETURN u LIMIT 10";
-        let compiled = query_engine::compiler::compile(gql, &model, &ctx).unwrap();
+        let compiled =
+            query_engine::compiler::compile(gql, &model, &ctx, query_data_model::testkit::limits())
+                .unwrap();
         obs.set_compiled(&compiled);
         obs.compiled(Duration::from_millis(5));
         obs.executed(Duration::from_millis(50), 2);

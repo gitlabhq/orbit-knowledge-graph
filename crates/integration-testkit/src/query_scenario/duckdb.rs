@@ -1,3 +1,4 @@
+use query_data_model::testkit::limits;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -64,7 +65,7 @@ fn run_step(
     let label = format!("{name} [duckdb]");
     let expect = &step.expect;
     expect.validate_pages_exclusive(&label);
-    let compiled = compile_local(query, data_model).map(Arc::new);
+    let compiled = compile_local(query, data_model, limits()).map(Arc::new);
     let Some(compiled) = assert_compilation(compiled, expect, &label) else {
         return;
     };
@@ -75,7 +76,7 @@ fn run_step(
         let output = execute(database, &compiled, &label);
         let baseline = assert_output(&output, expect, &label);
         for run in 2..=repeat_count(expect, &label) {
-            let compiled = compile_local(query, data_model).map(Arc::new);
+            let compiled = compile_local(query, data_model, limits()).map(Arc::new);
             let compiled = assert_compilation(compiled, expect, &label)
                 .expect("repeated query should compile");
             let output = execute(database, &compiled, &label);
@@ -88,7 +89,7 @@ fn run_step(
     for (index, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", index + 1);
         let compiled = Arc::new(
-            compile_local(&page_query(query, index), data_model)
+            compile_local(&page_query(query, index), data_model, limits())
                 .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}")),
         );
         let output = execute(database, &compiled, &page_label);
@@ -101,10 +102,10 @@ fn run_step(
         collected.assert_expect(all_pages, &label);
         if all_pages.matches_unpaginated {
             let query = unpaginated(query);
-            let compiled =
-                Arc::new(compile_local(&query, data_model).unwrap_or_else(|error| {
-                    panic!("{label}: unpaginated compile failed: {error}")
-                }));
+            let compiled = Arc::new(
+                compile_local(&query, data_model, limits())
+                    .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}")),
+            );
             let output = execute(database, &compiled, &label);
             assert_pagination(&output, &label);
             let response =

@@ -20,7 +20,6 @@ pub use self::response::{build_indexing_status_response, format_timestamp};
 
 use self::checkpoints::PlanCheckpoints;
 use self::phase::combine_phases;
-use self::projects::PROJECT_NODE;
 use crate::active_schema::SchemaSnapshot;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,6 +83,16 @@ impl IndexingStatusService {
 
         let now = Utc::now();
         let model = schema.data_model.model();
+        let repository = projects::repository_entity(model)
+            .map(|entity| model.graph().entity(entity).name.clone())
+            .inspect_err(|error| {
+                warn!(
+                    safe(ERROR_TYPE) = "model",
+                    expanded(ERROR_MESSAGE) = %error,
+                    "Indexing status could not find the repository entity"
+                )
+            })
+            .ok();
         let plans: Vec<PipelineDescriptor> = model
             .sources()
             .descriptors(model.graph())
@@ -94,7 +103,15 @@ impl IndexingStatusService {
         scopes
             .iter()
             .map(|scope| {
-                build_scope_status(schema, &plans, scope, &checkpoints, coverage.as_ref(), now)
+                build_scope_status(
+                    schema,
+                    &plans,
+                    repository.as_deref(),
+                    scope,
+                    &checkpoints,
+                    coverage.as_ref(),
+                    now,
+                )
             })
             .collect()
     }
@@ -103,6 +120,7 @@ impl IndexingStatusService {
 fn build_scope_status(
     schema: &SchemaSnapshot,
     plans: &[PipelineDescriptor],
+    repository: Option<&str>,
     scope: &TraversalPath,
     checkpoints: &HashMap<i64, PlanCheckpoints>,
     coverage: Option<&HashMap<String, ProjectCoverage>>,
@@ -128,11 +146,11 @@ fn build_scope_status(
     let last_completed_at =
         root_checkpoints.and_then(|by_plan| by_plan.get_last_completed_at(&plans));
 
-    // The Project plan writes the project list, so the code total is final only once it settles.
+    // The repository entity's plan writes the repository list, so the code total settles with it.
     let project_list_phase = combine_phases(
         plan_phases
             .iter()
-            .filter(|(plan, _)| plan.entity == PROJECT_NODE)
+            .filter(|(plan, _)| Some(plan.entity.as_str()) == repository)
             .map(|(_, phase)| *phase),
     )
     .unwrap_or(Phase::Unknown);

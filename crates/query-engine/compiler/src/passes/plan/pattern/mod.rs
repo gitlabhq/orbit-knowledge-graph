@@ -36,10 +36,12 @@ pub struct NodePlan {
     pub joined: bool,
     pub filters: Vec<(String, BoundFilter)>,
     pub predicates: Vec<Predicate>,
-    pub node_ids: Option<Vec<i64>>,
+    pub node_ids: Option<Vec<orbit_authorization::Key>>,
     pub id_range: Option<(i64, i64)>,
     pub has_traversal_path: bool,
     pub read_scope: ReadScope,
+    /// The column holding the node's identity.
+    pub id_column: String,
     pub redaction_id_column: String,
     pub columns: Vec<String>,
     pub emit_select: bool,
@@ -119,7 +121,7 @@ impl<B: SqlBackend> Pattern<'_, B> {
 impl<'a, B: SqlBackend> Pattern<'a, B> {
     pub(crate) fn new(query: Query<'a>, model: &'a Catalog<B>) -> Result<Self> {
         let facts = query.leaves();
-        let nodes = nodes::build_nodes(query, &query.anchors(&facts), model);
+        let nodes = nodes::build_nodes(query, &query.anchors(&facts), model)?;
         let relations = relations::build_relations(query, &facts, model, &nodes);
         let mut pattern = Self {
             query,
@@ -156,8 +158,9 @@ impl<'a, B: SqlBackend> Pattern<'a, B> {
         &self,
         q: &mut RelationalBuilder<'_, B>,
         tp_bounds: Option<&crate::tp_bounds::TpBounds>,
+        id_range_span: i64,
     ) -> Result<Matched> {
-        let reads = Reads::new(q, tp_bounds, !stored::<B>());
+        let reads = Reads::new(q, tp_bounds, !stored::<B>(), id_range_span);
         steps::RelationBuilder::new(self, reads).build(|bindings| {
             self.conditions
                 .iter()

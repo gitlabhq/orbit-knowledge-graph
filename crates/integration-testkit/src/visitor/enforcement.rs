@@ -424,6 +424,7 @@ mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         };
         let view = ResponseView::for_query(&input, resp);
         assert_eq!(view.path_ids().len(), 1);
@@ -627,6 +628,7 @@ mod tests {
             group_columns: None,
             rows: None,
             pagination: None,
+            group_ids: Default::default(),
         };
         let view = ResponseView::for_query(&input, resp);
         drop(view);

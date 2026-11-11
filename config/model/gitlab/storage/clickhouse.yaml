@@ -2671,7 +2671,7 @@ engine:
           enable_block_offset_column: "1"
         ttl: snapshot_date + INTERVAL 400 DAY
       checkpoint:
-        role: pipeline_checkpoints
+        role: plan_progress
         engine: ReplacingMergeTree(_version, _deleted)
         columns:
           key: {type: String, codec: [ZSTD(1)]}
@@ -2701,7 +2701,7 @@ engine:
           enable_block_number_column: "1"
           enable_block_offset_column: "1"
       code_indexing_checkpoint:
-        role: code_checkpoints
+        role: code_progress
         engine: ReplacingMergeTree(_version, _deleted)
         columns:
           traversal_path: {type: String, codec: [ZSTD(1)]}

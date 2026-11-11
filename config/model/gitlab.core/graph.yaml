@@ -6,8 +6,9 @@ entities:
   Group:
     style: {size: 45, color: "#8B5CF6"}
     description: A GitLab group (top-level group or subgroup)
+    identity: id
     label: name
-    defaults: [id, name, full_path, visibility_level]
+    default_columns: [id, name, full_path, visibility_level]
     properties:
       id: {type: int64, description: Unique ID.}
       full_path: {type: string, description: Full path (e.g. gitlab-org/quality)., unique: true, default: ''}
@@ -25,8 +26,9 @@ entities:
   Note:
     style: {size: 24, color: "#64748B"}
     description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.)
+    identity: id
     label: id
-    defaults: [id, noteable_type, noteable_id, created_at]
+    default_columns: [id, noteable_type, noteable_id, created_at]
     properties:
       id: {type: int64, description: Unique ID.}
       note: {type: string, description: Text content (markdown)., default: ''}
@@ -44,7 +46,6 @@ entities:
           7: Vulnerability
           8: AbuseReport
           9: ComplianceManagement::Projects::ComplianceViolation
-        stored_as_text: true
         default: ''
       noteable_id:
         type: int64?
@@ -72,8 +73,9 @@ entities:
   Project:
     style: {size: 40, color: "#3B82F6"}
     description: A GitLab project/repository
+    identity: id
     label: name
-    defaults: [id, name, full_path, visibility_level]
+    default_columns: [id, name, full_path, visibility_level]
     properties:
       id: {type: int64, description: Unique ID.}
       full_path: {type: string, description: Full path (e.g. gitlab-org/gitlab)., unique: true, default: ''}
@@ -94,8 +96,9 @@ entities:
   User:
     style: {size: 32, color: "#10B981"}
     description: A GitLab user account
+    identity: id
     label: username
-    defaults: [id, username, name, state]
+    default_columns: [id, username, name, state]
     properties:
       id: {type: int64, description: Unique ID.}
       username: {type: string, description: Unique handle., unique: true, default: ''}
@@ -123,7 +126,6 @@ entities:
           3: blocked_pending_approval
           4: banned
           5: deactivated
-        stored_as_text: true
         default: ''
       avatar_url:
         type: string?

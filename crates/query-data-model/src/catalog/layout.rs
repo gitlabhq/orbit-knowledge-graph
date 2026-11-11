@@ -5,9 +5,8 @@ use indexmap::IndexMap;
 use super::Diagnostics;
 use super::backend::{EntityBlocks, StoreBlocks};
 use super::store::{Source, Store, StoredColumn};
-use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::spec::{AccessHints, EngineSpec, EntityStorage, Resolved, StorageFragment};
-use crate::{EntityId, GraphCatalog, PropertyId};
+use crate::{DataType, EntityId, GraphCatalog, PropertyId};
 
 /// Resolves every storage fragment into one store per store name, each holding its entities and
 /// variant bindings, with the backend blocks its fragments wrote.
@@ -162,11 +161,31 @@ impl Store {
                 continue;
             }
             let stored = column.column.as_deref().unwrap_or(written);
+            if column.stored_as_text && graph.property(id).data_type != DataType::Enum {
+                diagnostics.error(
+                    package,
+                    format!(
+                        "store {} stores {name}.{written} as text, but it is not an enum",
+                        self.name
+                    ),
+                );
+            }
             self.columns[id.index()] = Some(StoredColumn {
                 name: stored.to_string(),
                 immutable: column.immutable,
+                selectivity: column.selectivity,
+                stored_as_text: column.stored_as_text,
             });
             columns.push((id, stored, column.backend.as_ref()));
+        }
+        if !spec.complete && !spec.exclude.is_empty() {
+            diagnostics.error(
+                package,
+                format!(
+                    "store {} excludes properties of {name} but is not complete; a partial store lists only what it holds",
+                    self.name
+                ),
+            );
         }
         for written in &spec.exclude {
             if let Some(id) = property(written, diagnostics) {
@@ -174,13 +193,28 @@ impl Store {
             }
         }
         let access = self.access(entity, name, &spec.access, package, graph, diagnostics);
-        let key = graph
-            .property_id(entity, DEFAULT_PRIMARY_KEY)
-            .and_then(|id| self.column(id))
-            .map(str::to_string);
-        let key = diagnostics.require(key, package, || {
-            format!("store {} does not store the id of {name}", self.name)
+        let identity = match graph.entity(entity).identity.as_slice() {
+            [] => return None,
+            [identity] => *identity,
+            _ => {
+                diagnostics.error(
+                    package,
+                    format!(
+                        "store {} keys rows by one column, but {name} has a composite identity",
+                        self.name
+                    ),
+                );
+                return None;
+            }
+        };
+        let key = diagnostics.require(self.column(identity), package, || {
+            format!(
+                "store {} does not store {name}.{}, its identity",
+                self.name,
+                graph.property(identity).name
+            )
         })?;
+        let key = key.to_string();
         let path_column = spec
             .path_column
             .clone()
@@ -199,6 +233,7 @@ impl Store {
         self.sources[entity.index()] = Some(Source {
             entity,
             package: package.to_string(),
+            complete: spec.complete,
             table: spec.table.clone(),
             key,
             path_column,

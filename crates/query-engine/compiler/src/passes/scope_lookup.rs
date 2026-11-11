@@ -147,10 +147,12 @@ fn lookup(
     )?)?;
     let shape = |what: &str| QueryError::Security(format!("the scope lookup {what}"));
     let table = |entity| {
-        graph
-            .table_of(entity)
-            .map(str::to_string)
-            .ok_or_else(|| shape("reaches an entity the graph connection does not store"))
+        graph.table_of(entity).map(str::to_string).ok_or_else(|| {
+            shape(&format!(
+                "reaches an entity connection {} does not store",
+                graph.connection()
+            ))
+        })
     };
     let column = |property| {
         graph

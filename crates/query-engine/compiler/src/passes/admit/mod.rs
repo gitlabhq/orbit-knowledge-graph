@@ -1,15 +1,15 @@
 //! Rejects queries past the engine limits: predicate and filter caps,
 //! virtual-column and text-index rules, and scans with no selective node.
 
-#[cfg(test)]
-mod contract;
 mod limits;
 mod rules;
 mod selectivity;
 
 use crate::passes::codegen::SqlBackend;
-use query_data_model::Catalog;
+use orbit_server_config::QueryLimits;
+use query_data_model::implementations::orbit_code::OrbitCode;
 use query_data_model::plan::logical::{Expr, LogicalOperation, Predicate, TimeUnit};
+use query_data_model::{Catalog, StorageBackend};
 
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
@@ -17,19 +17,25 @@ use crate::logical::Leaf;
 use crate::logical::Query;
 use crate::logical::anchors::Anchor;
 
-pub fn admit(query: Query<'_>, model: &Catalog<impl SqlBackend>, selectivity: bool) -> Result<()> {
+pub fn admit(
+    query: Query<'_>,
+    model: &Catalog<impl SqlBackend>,
+    limits: &QueryLimits,
+    selectivity: bool,
+) -> Result<()> {
     if query
         .operations()
         .any(|(_, operation)| matches!(operation, LogicalOperation::Structural(_)))
     {
-        return Err(QueryError::Validation(
-            "structural matches run on the code connection, not in SQL".into(),
-        ));
+        return Err(QueryError::Validation(format!(
+            "structural matches run on an {} connection, not in SQL",
+            OrbitCode::KIND
+        )));
     }
     let facts = query.leaves();
     let anchors = query.anchors(&facts);
-    limits::predicates(&facts)?;
-    limits::filters(query, &facts, &anchors)?;
+    self::limits::predicates(&facts, limits.predicates)?;
+    self::limits::filters(query, &facts, &anchors, limits)?;
     rules::negated(query, &facts, model)?;
     filters(query, &facts, &anchors, model)?;
     rules::epoch(query, &facts, model)?;
@@ -37,7 +43,7 @@ pub fn admit(query: Query<'_>, model: &Catalog<impl SqlBackend>, selectivity: bo
     rules::order(query, model)?;
     buckets(query, &anchors)?;
     if selectivity {
-        selectivity::selectivity(query, &facts, &anchors)?;
+        selectivity::selectivity(query, &facts, &anchors, limits)?;
     }
     Ok(())
 }

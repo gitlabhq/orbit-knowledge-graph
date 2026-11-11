@@ -58,7 +58,7 @@ impl Lowering<'_> {
             Predicate::Filter { column, filter } => {
                 expr::filter::<B>(self.scope, column, filter, negated)?
             }
-            Predicate::Ids { column, values } => expr::ids::<B>(self.column(column)?, values),
+            Predicate::Ids { column, values } => expr::ids::<B>(self.column(column)?, values)?,
             Predicate::IdRange { column, start, end } => {
                 expr::id_range(self.column(column)?, *start, *end)
             }

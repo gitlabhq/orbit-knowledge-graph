@@ -8,7 +8,7 @@ static MODEL: LazyLock<Catalog<ClickHouse>> =
     LazyLock::new(|| Catalog::<ClickHouse>::embedded().expect("embedded packages load"));
 
 fn main() {
-    let catalog = MODEL.model().logical();
+    let catalog = MODEL.model().logical(query_data_model::testkit::limits());
     check!().for_each(|input: &[u8]| {
         let Some(text) = Grammar::orbit().derive("Query", &mut Bytes(input)) else {
             return;

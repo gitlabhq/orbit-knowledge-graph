@@ -29,13 +29,19 @@ pub(crate) struct PathFinding<'p> {
     end: Node<'p>,
     max_depth: u32,
     tables: Vec<String>,
+    id_type: SqlType,
     kinds: Vec<String>,
     scoped: bool,
     limit: u32,
+    anchor_rows: u32,
 }
 
 impl<'p> PathFinding<'p> {
-    pub fn new<B: SqlBackend>(query: Query<'p>, model: &'p Catalog<B>) -> Result<Self> {
+    pub fn new<B: SqlBackend>(
+        query: Query<'p>,
+        model: &'p Catalog<B>,
+        anchor_rows: u32,
+    ) -> Result<Self> {
         let (from, to, relationships, max_depth) = query
             .operations()
             .find_map(|(_, operation)| match operation {
@@ -55,7 +61,7 @@ impl<'p> PathFinding<'p> {
                 .iter()
                 .position(|anchor| anchor.binding.output == output)
                 .ok_or_else(|| QueryError::Lowering("path endpoint is not a binding".into()))?;
-            Ok::<_, QueryError>(Node::new(query, anchors.swap_remove(index), model))
+            Node::new(query, anchors.swap_remove(index), model)
         };
         let (start, end) = (node(from)?, node(to)?);
         let graph = query.model.graph();
@@ -66,14 +72,17 @@ impl<'p> PathFinding<'p> {
         let (rows, _) = query
             .limit()
             .ok_or_else(|| QueryError::PipelineInvariant("the surfaces always limit".into()))?;
+        let tables = model.edge_tables(relationships);
         Ok(Self {
             scoped: start.has_traversal_path && end.has_traversal_path,
             start,
             end,
             max_depth,
-            tables: model.edge_tables(relationships),
+            id_type: id_type(model, &tables)?,
+            tables,
             kinds,
             limit: u32::try_from(rows).unwrap_or(u32::MAX),
+            anchor_rows,
         })
     }
 
@@ -88,8 +97,9 @@ pub(crate) fn stable_order() -> Vec<Term> {
 }
 
 enum AnchorFilter {
-    Ids(Vec<i64>),
-    Shared(String),
+    Ids(Vec<orbit_authorization::Key>),
+    /// A body of the anchor's rows, and the identity column it keeps.
+    Shared(String, String),
 }
 
 struct Anchor {
@@ -133,8 +143,8 @@ fn anchor_filter<B: RelationalBackend>(
     value: Expr,
 ) -> Built<Expr> {
     match filter {
-        AnchorFilter::Ids(values) => Ok(id_list::<B>(value, values)),
-        AnchorFilter::Shared(name) => bodies.member(q, value, name, DEFAULT_PRIMARY_KEY),
+        AnchorFilter::Ids(values) => id_list::<B>(value, values),
+        AnchorFilter::Shared(name, key) => bodies.member(q, value, name, key),
     }
 }
 
@@ -143,6 +153,7 @@ fn anchor<B: RelationalBackend>(
     bodies: &mut Bodies,
     node: &Node<'_>,
     force_cte: bool,
+    limit: u32,
 ) -> Built<Anchor> {
     let (alias, table) = (node.alias, node.table.unwrap_or_default());
     if !force_cte && node.is_id_pinned_only() {
@@ -162,7 +173,7 @@ fn anchor<B: RelationalBackend>(
     let name = node_filter_cte(alias);
     let has_tp = node.has_traversal_path;
     let body = q.cte(&name, false, |q| {
-        let mut names = vec![DEFAULT_PRIMARY_KEY];
+        let mut names = vec![node.id];
         if has_tp {
             names.push(TRAVERSAL_PATH_COLUMN);
         }
@@ -179,11 +190,11 @@ fn anchor<B: RelationalBackend>(
                 )?);
             }
             if let Some(pinned) = &node.pinned {
-                let id = col(scope, alias, DEFAULT_PRIMARY_KEY)?;
-                parts.push(ids::<B>(id, pinned));
+                let id = col(scope, alias, node.id)?;
+                parts.push(ids::<B>(id, pinned)?);
             }
             if let Some((start, end)) = node.range {
-                let id = col(scope, alias, DEFAULT_PRIMARY_KEY)?;
+                let id = col(scope, alias, node.id)?;
                 parts.push(id_range(id, start, end));
             }
             Ok(parts)
@@ -192,17 +203,16 @@ fn anchor<B: RelationalBackend>(
         let items = columns(&[&rows], alias, names, false)?;
         let (rows, outputs) = computed(q, rows, items)?;
         let order = Order {
-            value: col(&[&rows], alias, DEFAULT_PRIMARY_KEY)?,
+            value: col(&[&rows], alias, node.id)?,
             descending: false,
         };
         let rows = q.order(rows, vec![order])?;
-        let limit = crate::query_limits::MAX_PATH_ANCHOR_LIMIT as u32;
         let rows = q.limit(rows, Some(limit), None)?;
         q.select(rows, outputs)
     })?;
     bodies.0.push((name.clone(), body));
     Ok(Anchor {
-        filter: Some(AnchorFilter::Shared(name.clone())),
+        filter: Some(AnchorFilter::Shared(name.clone(), node.id.to_string())),
         shared: Some(name),
         has_tp,
     })
@@ -242,6 +252,34 @@ fn scope_cte<B: RelationalBackend>(
     Ok(Some(path_scope_cte().to_string()))
 }
 
+/// The one type the edge tables' ID columns share, which the path's node array holds.
+fn id_type<B: SqlBackend>(model: &Catalog<B>, tables: &[String]) -> Result<SqlType> {
+    let mut types = Vec::new();
+    for table in tables {
+        for column in [SOURCE_ID_COLUMN, TARGET_ID_COLUMN] {
+            let data_type = model
+                .physical_table(table)
+                .and_then(|table| table.column(column)?.data_type)
+                .ok_or_else(|| {
+                    QueryError::Lowering(format!("edge table {table} has no typed {column}"))
+                })?;
+            let sql_type = expr::parameter_type(Some(&data_type));
+            if !types.contains(&sql_type) {
+                types.push(sql_type);
+            }
+        }
+    }
+    match types.as_slice() {
+        [only] => Ok(*only),
+        [] => Err(QueryError::Lowering(
+            "path finding reads no edge table".into(),
+        )),
+        _ => Err(QueryError::Validation(
+            "path finding cannot join edge tables whose node ids have different types".into(),
+        )),
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Way {
     Forward,
@@ -252,6 +290,7 @@ struct Frontier<'a> {
     kinds: &'a [String],
     anchor_entity: &'a str,
     edge_tables: &'a [String],
+    id_type: SqlType,
     scope: Option<&'a str>,
     include_tp: bool,
     anchor: &'a Anchor,
@@ -361,7 +400,7 @@ fn frontier_arm<B: RelationalBackend>(
         steps.push(call(Function::Tuple, pair));
     }
     let path_nodes = match steps.is_empty() {
-        true => Expr::EmptyArray(vec![SqlType::Int64, SqlType::String]),
+        true => Expr::EmptyArray(vec![options.id_type, SqlType::String]),
         false => call(Function::Array, steps),
     };
     let mut kinds_of = Vec::new();
@@ -399,14 +438,15 @@ pub(crate) fn emit<B: RelationalBackend>(
 ) -> Built<Relation> {
     let (start, end) = (&path.start, &path.end);
     let mut bodies = Bodies::default();
-    let start_anchor = anchor(q, &mut bodies, start, path.scoped)?;
-    let end_anchor = anchor(q, &mut bodies, end, path.scoped)?;
+    let start_anchor = anchor(q, &mut bodies, start, path.scoped, path.anchor_rows)?;
+    let end_anchor = anchor(q, &mut bodies, end, path.scoped, path.anchor_rows)?;
     let scope = scope_cte(q, &mut bodies, &start_anchor, &end_anchor)?;
     let (start_entity, end_entity) = (start.entity, end.entity);
     let options = Frontier {
         kinds: &path.kinds,
         anchor_entity: start_entity,
         edge_tables: &path.tables,
+        id_type: path.id_type,
         scope: scope.as_deref(),
         include_tp: path.scoped,
         anchor: &start_anchor,
@@ -455,10 +495,10 @@ pub(crate) fn emit<B: RelationalBackend>(
         let reached = col(&scope, forward_cte(), end_node_column())?;
         if end.is_id_pinned_only() {
             let ids = end.pinned.as_deref().unwrap_or_default();
-            predicates.push(id_list::<B>(reached, ids));
+            predicates.push(id_list::<B>(reached, ids)?);
         } else if !end.filters.is_empty() || end.range.is_some() {
             let name = node_filter_cte(end.alias);
-            predicates.push(bodies.member(q, reached, &name, DEFAULT_PRIMARY_KEY)?);
+            predicates.push(bodies.member(q, reached, &name, end.id)?);
         }
         let items = vec![
             (

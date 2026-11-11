@@ -11,6 +11,8 @@ use crate::{Model, Property, RelationshipId, RelationshipVariantId};
 pub(super) struct Typed<'m> {
     pub(super) data_type: DataType,
     pub(super) property: Option<&'m Property>,
+    /// How the property's complete store keeps it, when it is an enum property.
+    pub(super) enum_type: Option<crate::EnumType>,
     pub(super) access: PropertyAccess,
     pub(super) name: String,
 }
@@ -126,6 +128,42 @@ pub(super) fn edge_attribute(
     })
 }
 
+/// The one identity type every source or target of the edge's relationships has.
+fn endpoint_identity(
+    model: &Model,
+    construction: &Construction<Logical>,
+    edge: Ref,
+    source: bool,
+) -> Result<DataType, PlanError> {
+    let graph = model.graph();
+    let mut types = Vec::new();
+    for relationship in edge_relationships(model, construction, edge)? {
+        for variant in &graph.relationship(relationship).variants {
+            let variant = graph.variant(*variant);
+            let endpoint = if source {
+                variant.source
+            } else {
+                variant.target
+            };
+            let [identity] = graph.entity(endpoint).identity.as_slice() else {
+                return Err(PlanError::shape(
+                    "an edge endpoint with a composite identity has no one id",
+                ));
+            };
+            let data_type = graph.property(*identity).data_type;
+            if !types.contains(&data_type) {
+                types.push(data_type);
+            }
+        }
+    }
+    match types.as_slice() {
+        [only] => Ok(*only),
+        _ => Err(PlanError::shape(
+            "the edge's endpoints have identities of different types; name one relationship",
+        )),
+    }
+}
+
 pub(super) fn scalar<'m>(
     model: &'m Model,
     construction: &Construction<Logical>,
@@ -151,12 +189,14 @@ pub(super) fn scalar<'m>(
         Expr::Edge { binding, field } => match construction.value(binding)? {
             (_, LogicalType::Edge) => Ok(Typed {
                 data_type: match field {
-                    EdgeField::Source | EdgeField::Target => DataType::Int,
+                    EdgeField::Source => endpoint_identity(model, construction, binding, true)?,
+                    EdgeField::Target => endpoint_identity(model, construction, binding, false)?,
                     EdgeField::Kind | EdgeField::SourceKind | EdgeField::TargetKind => {
                         DataType::String
                     }
                 },
                 property: None,
+                enum_type: None,
                 access: PropertyAccess {
                     like: false,
                     ..PropertyAccess::COMPUTED
@@ -172,6 +212,7 @@ pub(super) fn scalar<'m>(
             Ok(Typed {
                 data_type: declared.data_type,
                 property: None,
+                enum_type: None,
                 access: PropertyAccess {
                     like: false,
                     ..resolved.access
@@ -187,6 +228,7 @@ pub(super) fn scalar<'m>(
             (name, LogicalType::Scalar(data_type)) => Ok(Typed {
                 data_type: *data_type,
                 property: None,
+                enum_type: None,
                 access: PropertyAccess::COMPUTED,
                 name: name.unwrap_or("output").to_string(),
             }),
@@ -208,6 +250,7 @@ fn property_of<'m>(
         (_, LogicalType::Entity(bound)) if *bound == property.entity => Ok(Typed {
             data_type: property.data_type,
             property: Some(property),
+            enum_type: Some(model.enum_type(property.id)),
             access: model.access().property(property.id),
             name,
         }),

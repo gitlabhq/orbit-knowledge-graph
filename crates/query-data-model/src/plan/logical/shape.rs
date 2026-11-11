@@ -118,7 +118,7 @@ fn named(plan: &LogicalPlan) -> Result<(), PlanError> {
         };
         if relationships.is_empty() && !narrowed(plan, edge) {
             return Err(PlanError::shape(
-                "shortest paths require named relationship types, such as -[:CONTAINS*1..3]->; a wildcard expands over every edge type",
+                "shortest paths require named relationship types, such as -[:TYPE*1..3]->; a wildcard expands over every edge type",
             ));
         }
     }

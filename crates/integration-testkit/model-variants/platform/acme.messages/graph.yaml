@@ -2,7 +2,9 @@ kind: graph
 package: acme.messages
 entities:
   Message:
+    identity: id
     label: text
+    default_columns: [id, text, team_key]
     properties:
       id: string
       text: string
