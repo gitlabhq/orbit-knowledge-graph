@@ -94,12 +94,15 @@ fn aggregation_scope(
         .map(|(output, _)| *output)
         .collect();
     if reachable.is_empty() {
-        return Err(QueryError::Restrict(
-            "aggregation requires at least one node scoped by traversal_path \
-             (e.g. Group, Project, Note); aggregating on globally-scoped entities \
-             such as User alone is not permitted"
-                .into(),
-        ));
+        let global: Vec<&str> = entities
+            .iter()
+            .map(|(_, entity)| model.graph().entity(*entity).name.as_str())
+            .collect();
+        return Err(QueryError::Restrict(format!(
+            "aggregation requires at least one node scoped by traversal_path; \
+             aggregating on globally-scoped entities ({}) alone is not permitted",
+            global.join(", ")
+        )));
     }
     let mut edges: Vec<(Ref, Ref)> = query.steps().iter().map(|s| (s.from, s.to)).collect();
     edges.extend(
