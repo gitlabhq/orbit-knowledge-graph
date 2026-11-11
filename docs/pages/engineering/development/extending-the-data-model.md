@@ -27,6 +27,7 @@ kind: graph
 package: gitlab.code_review
 entities:
   MergeRequest:
+    identity: id
     label: title
     default_columns: [id, iid, title, state]
     properties:
@@ -111,10 +112,28 @@ relationships:
   AUTHORED:
     User -> MergeRequest: {fk: {on: target, column: author_id}}
   APPROVED:
-    User -> MergeRequest: {edge_table: gl_edge}
+    User -> MergeRequest: {edge_table: gl_edge, on_delete: tombstone}
 ```
 
 `AUTHORED` is a foreign key: the `author_id` column on the `MergeRequest` row holds the author. `APPROVED` is many-to-many, so its rows live in an edge table. Every variant names one of the two, so a variant with no binding fails the load.
+
+An edge-table binding also declares its lifecycle. `on_delete: tombstone` means the indexing engine tombstones the edge in the same flow that tombstones either endpoint.
+
+An edge table declares its endpoint ID columns with their types, in the store's engine block:
+
+```yaml
+engine:
+  edge_tables:
+    gl_edge:
+      columns:
+        source_id: {backend: {type: Int64}}
+        target_id: {backend: {type: Int64}}
+        source_kind: {backend: {type: LowCardinality(String)}}
+        target_kind: {backend: {type: LowCardinality(String)}}
+        relationship_kind: {backend: {type: LowCardinality(String)}}
+```
+
+A variant binds to an edge table only when both endpoint identities match its ID column types. An integration whose entities have string IDs declares its own edge table with `String` columns.
 
 `access` says how the columns are queried, in terms every backend understands. ClickHouse turns it into its skip indexes and sort key, so an integration author never writes ClickHouse details. The `backend` block overrides that only where a platform package needs to.
 
@@ -152,6 +171,19 @@ relationships:
 
 A filter on `a.branch` in `(a)-[:CALLS]->(b)` then also filters the edge read on its `branch` column.
 
+Code entities have their own writer, the code indexer, declared like any other source:
+
+```yaml
+# packages/gitlab.source_code/sources/code_indexer.yaml
+kind: source
+package: gitlab.source_code
+source: code_indexer
+entities: [Branch, Directory, File, Definition, ImportedSymbol]
+relationships: [CONTAINS, DEFINES, CALLS, IMPORTS]
+```
+
+Every stored entity and every edge-table variant has exactly one declared writer.
+
 Publish the new package version to the registry. The registry diffs its storage against the active version, the indexing engine backfills the tables in scope, and the version goes live.
 
 ## Add an indexed third-party source
@@ -182,6 +214,7 @@ kind: graph
 package: integration.slack
 entities:
   SlackMessage:
+    identity: id
     label: text
     properties:
       id: {type: string}
@@ -341,6 +374,7 @@ kind: graph
 package: tenant.agent_memory
 entities:
   Memory:
+    identity: id
     label: summary
     properties:
       id: {type: string}
@@ -520,6 +554,10 @@ The loader collects every error, names its package, and fails once. A missing de
 - A provider name the deployment does not bind, or one bound to a module that does not answer the query the check needs.
 - A user-scoped entity whose owner relationship does not reach `User`, or allows more than one owner per row.
 - A relationship variant with no storage binding in the home store of its endpoints.
+- An entity without a declared `identity`, or an identity property that does not exist.
+- A foreign key column, `via` step or edge-table ID column whose type differs from the identity it points to. Nothing is cast.
+- An edge-table binding without `on_delete`.
+- A stored entity or edge-table variant with no writer, or with two.
 - A foreign key binding on a many-to-many variant, on the wrong side of a one-to-many variant, or on a column its table does not hold.
 - An edge table copy that names no property of that endpoint, or a graph attribute with no edge column.
 - Two backends, or a trusted and an untrusted store, on one connection.

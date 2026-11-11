@@ -144,7 +144,8 @@ packages/
 │   │   ├── clickhouse.yaml
 │   │   └── orbit_code.yaml
 │   └── sources/
-│       └── siphon.yaml
+│       ├── siphon.yaml
+│       └── code_indexer.yaml
 ├── integration.jira/
 │   ├── package.yaml
 │   ├── graph.yaml
@@ -201,16 +202,36 @@ Each layer names only the layers inside it, and the loader checks them from the 
 
 | Layer | Fragment | Names | Owns |
 |---|---|---|---|
-| 0 | graph | nothing | entities, properties, types, defaults; relationship variants, their cardinality and edge-owned attributes |
-| 1 | storage | the graph | tables, columns, storage types, immutable columns, access hints; a foreign key or an edge table for every variant |
+| 0 | graph | nothing | entities, their identity, properties, types, defaults; relationship variants, their cardinality and edge-owned attributes |
+| 1 | storage | the graph | tables, columns, storage types, immutable columns, access and statistics hints; a foreign key or an edge table for every variant, and its lifecycle |
 | 1 | service | the graph | lookups for virtual properties |
 | 2 | authorization | the graph, backends, provider names | scope, permission, one policy per backend that stores the entity, checks by provider |
-| 2 | source | the graph | source tables, query templates, column map; rows land in the tables storage binds |
+| 2 | source | the graph | every writer: source tables, query templates, column map, or the code indexer; rows land in the tables storage binds |
 | package | `package.yaml` | other packages | name, `requires` |
 
 Nothing is inferred: a forgotten column, an unbound variant or a backend without a policy fails the load.
 Storage access hints are backend-neutral, and each backend turns them into its own indexes and sort keys. A `backend` block overrides that only where a platform package needs to.
 An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
+
+Keys are typed, and nothing casts them:
+
+- An entity declares its identity: one property such as `id`, or a composite such as a Jira site and key. Its type is the property's declared type: an integer, a string, a UUID.
+- A foreign key column has the type of the identity it points to. An edge table declares its endpoint ID columns, and a variant binds to it only when both endpoint identities match those types. An integration with string IDs declares its own edge table.
+- A `via` step or a join between different key types needs a declared relationship or a service lookup; the loader rejects a mismatch instead of casting.
+
+Storage also declares the lifecycle of what it keeps:
+
+- The identity of a row is the entity's identity, not the physical key. A row that moves to another path tombstones its old row.
+- Each edge-table binding declares what a deleted endpoint does to its edges, such as `on_delete: tombstone`, and the indexing engine applies it in the same flow that tombstones the node. A binding without it fails the load.
+
+The four places that hold facts are fixed, and nothing lives outside them:
+
+| Owner | Holds |
+|---|---|
+| Packages | data: entities, identity, storage, bindings, lifecycle, writers, policies |
+| Deployment config | connections, providers, limits such as row and node caps, engine settings |
+| Backends, in Rust | capabilities: operators, functions, match modes, how each scope kind renders |
+| Compiler phases | decisions: routing, foreign key or edge, how to read the latest row, stage splits |
 
 The registry records each package's tier from its publisher, and the loader enforces it:
 
@@ -426,7 +447,7 @@ SC --> Q : ScopeSet
 Q -> C : security: render each read's policy\nwith its ScopeSet
 Q -> B : execute
 B --> Q : rows
-Q -> CK : Check(caller, read_merge_request, ids)
+Q -> CK : Check(caller, read_merge_request, keys)
 CK --> Q : allowed rows
 @enduml
 ```
@@ -442,13 +463,14 @@ pub trait Provider<Q: Query>: Send + Sync {
 
 pub struct Identify<'a> { pub request: &'a RequestContext }
 pub struct Scopes<'a> { pub caller: &'a Caller, pub scope: ScopeId, pub permission: PermissionId }
-pub struct Check<'a> { pub caller: &'a Caller, pub permission: PermissionId, pub object: EntityId, pub ids: &'a [RowId] }
+pub struct Check<'a> { pub caller: &'a Caller, pub permission: PermissionId, pub object: EntityId, pub keys: &'a [Key] }
 pub struct Credentials<'a> { pub caller: &'a Caller, pub service: ServiceId }
 
-pub enum ScopeSet { All, Keys(Vec<ScopeKey>), Subtrees(Vec<ScopeKey>) }
+pub enum ScopeSet { All, Keys(Vec<Key>), Subtrees(Vec<ScopePath>) }
+pub enum Key { Int(i64), Text(String), Uuid(Uuid), Composite(Vec<Key>) }
 ```
 
-`Identify` returns a `Caller`, `Scopes` a `ScopeSet`, `Check` the allowed rows, and `Credentials` the caller's sign-in for a delegated service.
+`Identify` returns a `Caller`, `Scopes` a `ScopeSet`, `Check` the allowed rows, and `Credentials` the caller's sign-in for a delegated service. Every ID that crosses the contract is a typed `Key`, so a provider never assumes integer IDs.
 A module implements the queries it answers, and a `Module` trait builds it from its options.
 The deployment config binds each provider name that packages use to a module, the way it binds store connections. It also names the one `Identify` provider.
 Each backend renders a `ScopeSet` its own way: `Subtrees` as a prefix filter, `Keys` as an `IN` list, `All` as no filter. A set over the key-set cap fails the query.
