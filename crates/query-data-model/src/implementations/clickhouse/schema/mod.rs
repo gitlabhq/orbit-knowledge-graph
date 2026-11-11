@@ -94,10 +94,7 @@ pub struct GraphTable {
 
 impl Schema {
     pub fn from_model(model: &Arc<Model>) -> Result<Self, DataModelError> {
-        model
-            .physical::<ClickHouse>(Catalog::<ClickHouse>::CONNECTION)?
-            .schema()
-            .cloned()
+        Catalog::<ClickHouse>::from_model(model)?.schema().cloned()
     }
 
     pub fn tables(&self) -> &[Table] {

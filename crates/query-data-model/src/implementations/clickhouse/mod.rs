@@ -29,16 +29,6 @@ impl RelationalBackend for ClickHouse {
 }
 
 impl Catalog<ClickHouse> {
-    pub const CONNECTION: &'static str = "main";
-
-    pub fn from_model(model: &Arc<Model>) -> Result<Self, DataModelError> {
-        model.physical(Self::CONNECTION)
-    }
-
-    pub fn embedded() -> Result<Self, DataModelError> {
-        Self::from_model(&Packages::embedded().load()?)
-    }
-
     pub fn versioned(packages: &Packages, table_prefix: &str) -> Result<Self, DataModelError> {
         let fragments = versioned(packages.fragments()?, table_prefix)?;
         Self::from_model(&Arc::new(Model::load(&fragments)?))

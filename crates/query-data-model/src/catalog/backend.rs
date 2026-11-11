@@ -11,7 +11,7 @@ use crate::implementations::{
 };
 use crate::plan::tracking::{Language, Plan};
 use crate::spec::{Block, Blocks, StorageFragment, Typed};
-use crate::{DataModelError, EntityId, GraphCatalog, PropertyId};
+use crate::{DataModelError, EntityId, GraphCatalog, Packages, PropertyId};
 
 /// A storage backend: the blocks its stores' fragments write, and the facts it resolves them
 /// into. A block the YAML omits reads as its type's default.
@@ -122,6 +122,32 @@ pub struct Catalog<B: StorageBackend> {
 }
 
 impl<B: StorageBackend> Catalog<B> {
+    /// The catalog of the one connection that holds the model's stores of this backend.
+    pub fn from_model(model: &Arc<Model>) -> Result<Self, DataModelError> {
+        let mut connections = model
+            .stores
+            .iter()
+            .filter(|store| store.kind == B::KIND)
+            .map(|store| store.connection.as_str());
+        let connection = connections
+            .next()
+            .ok_or_else(|| DataModelError::UnknownReference {
+                kind: "backend",
+                name: B::KIND.to_string(),
+            })?;
+        if let Some(other) = connections.find(|other| *other != connection) {
+            return Err(DataModelError::Invalid(format!(
+                "{} stores sit on connections {connection} and {other}",
+                B::KIND
+            )));
+        }
+        model.physical(connection)
+    }
+
+    pub fn embedded() -> Result<Self, DataModelError> {
+        Self::from_model(&Packages::embedded().load()?)
+    }
+
     pub fn model(&self) -> &Model {
         &self.model
     }
