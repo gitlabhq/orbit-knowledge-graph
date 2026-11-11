@@ -184,6 +184,7 @@ impl PipelineStage for MockAuthorizationStage {
         let authorizations: Vec<ResourceAuthorization> = checks
             .iter()
             .map(|check| ResourceAuthorization {
+                provider: check.provider.clone(),
                 resource_type: check.resource_type.clone(),
                 authorized: check.ids.iter().map(|id| (*id, true)).collect(),
             })

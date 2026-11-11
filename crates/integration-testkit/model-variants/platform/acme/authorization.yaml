@@ -1,0 +1,17 @@
+kind: authorization
+package: acme
+permissions: [read]
+scopes:
+  team: {kind: flat, provider: directory}
+  everyone: {kind: global, provider: directory}
+entities:
+  Folder:
+    scope: team
+    permission: read
+    enforce: {clickhouse: {scope_key: team_key}}
+    properties: {open: [id, name], hidden: [team_key]}
+
+  Person:
+    scope: everyone
+    permission: read
+    properties: {open: [id, name]}

@@ -1,0 +1,9 @@
+kind: graph
+package: acme.checked
+entities:
+  Document:
+    label: title
+    properties:
+      id: int64
+      title: string
+      team_key: string

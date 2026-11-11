@@ -10,7 +10,7 @@ use crate::proto::{
     ResourceToAuthorize as ProtoResourceToAuthorize, execute_query_message, redaction_exchange,
 };
 
-use super::{ResourceAuthorization, ResourceCheck};
+use super::ResourceCheck;
 
 #[derive(Debug)]
 pub enum RedactionExchangeError {
@@ -33,8 +33,15 @@ impl RedactionExchangeError {
     }
 }
 
+/// Rails's answer for one resource type, by id.
+#[derive(Debug, Clone)]
+pub struct RailsAuthorization {
+    pub resource_type: String,
+    pub authorized: std::collections::HashMap<i64, bool>,
+}
+
 pub struct RedactionExchangeResult {
-    pub authorizations: Vec<ResourceAuthorization>,
+    pub authorizations: Vec<RailsAuthorization>,
 }
 
 pub trait RedactionMessage: Sized + Send {
@@ -140,7 +147,7 @@ impl RedactionService {
         let authorizations = redaction_response
             .authorizations
             .into_iter()
-            .map(|a| ResourceAuthorization {
+            .map(|a| RailsAuthorization {
                 resource_type: a.resource_type,
                 authorized: a.authorized,
             })

@@ -41,7 +41,7 @@ pub struct CheckRequest {
     pub permission: String,
     /// The provider's name for the type of the checked objects.
     pub resource: String,
-    pub ids: Vec<i64>,
+    pub ids: Vec<Key>,
 }
 
 /// The caller's sign-in for a delegated service.
@@ -59,7 +59,7 @@ impl Query for Scopes {
 }
 
 impl Query for Check {
-    type Response = Vec<BTreeSet<i64>>;
+    type Response = Vec<BTreeSet<Key>>;
 }
 
 impl Query for Credentials {
@@ -123,7 +123,7 @@ impl fmt::Debug for Caller {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScopeSet {
     All,
-    Keys(Vec<ScopeKey>),
+    Keys(Vec<Key>),
     Subtrees(Vec<String>),
 }
 
@@ -137,10 +137,13 @@ impl ScopeSet {
     }
 }
 
+/// The key of a scope or an object, in the type its declaring property holds.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ScopeKey {
+pub enum Key {
     Int(i64),
     Text(String),
+    Uuid(String),
+    Composite(Vec<Key>),
 }
 
 /// A handle to the caller's sign-in; the delegated service holds the secret.

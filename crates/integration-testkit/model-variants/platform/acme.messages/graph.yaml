@@ -1,0 +1,9 @@
+kind: graph
+package: acme.messages
+entities:
+  Message:
+    label: text
+    properties:
+      id: string
+      text: string
+      team_key: string

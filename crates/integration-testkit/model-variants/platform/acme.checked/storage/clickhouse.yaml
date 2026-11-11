@@ -1,0 +1,11 @@
+kind: storage
+package: acme.checked
+store: acme
+entities:
+  Document:
+    table: acme_document
+    columns:
+      id: {immutable: true, backend: {type: Int64}}
+      title: {backend: {type: String}}
+      team_key: {backend: {type: String}}
+    access: {order: [id]}

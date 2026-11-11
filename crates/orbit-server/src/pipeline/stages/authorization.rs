@@ -4,7 +4,7 @@ use orbit_log_fields::info;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use orbit_authorization::{AuthError, Caller, CheckRequest};
+use orbit_authorization::{AuthError, Caller, CheckRequest, Key};
 
 use super::HydrationStage;
 use crate::authorization::Deployment;
@@ -74,19 +74,21 @@ async fn check(
         .server_extensions
         .get::<Caller>()
         .ok_or_else(|| missing("caller"))?;
-    let mut by_provider: BTreeMap<String, Vec<CheckRequest>> = BTreeMap::new();
+    let mut by_provider: BTreeMap<String, Vec<(CheckRequest, Vec<i64>)>> = BTreeMap::new();
     for resource in resources {
+        let request = CheckRequest {
+            permission: resource.ability,
+            resource: resource.resource_type,
+            ids: resource.ids.iter().copied().map(Key::Int).collect(),
+        };
         by_provider
             .entry(resource.provider)
             .or_default()
-            .push(CheckRequest {
-                permission: resource.ability,
-                resource: resource.resource_type,
-                ids: resource.ids,
-            });
+            .push((request, resource.ids));
     }
     let mut authorizations = Vec::new();
-    for (provider, requests) in by_provider {
+    for (provider, batch) in by_provider {
+        let (requests, ids): (Vec<CheckRequest>, Vec<Vec<i64>>) = batch.into_iter().unzip();
         let allowed = deployment
             .check(caller, &provider, requests.clone())
             .await
@@ -97,13 +99,13 @@ async fn check(
                 }
                 AuthError::NoScopes => PipelineError::NoEnabledNamespaces,
             })?;
-        for (request, allowed) in requests.into_iter().zip(allowed) {
+        for ((request, ids), allowed) in requests.into_iter().zip(ids).zip(allowed) {
             authorizations.push(ResourceAuthorization {
+                provider: provider.clone(),
                 resource_type: request.resource,
-                authorized: request
-                    .ids
+                authorized: ids
                     .into_iter()
-                    .map(|id| (id, allowed.contains(&id)))
+                    .map(|id| (id, allowed.contains(&Key::Int(id))))
                     .collect(),
             });
         }

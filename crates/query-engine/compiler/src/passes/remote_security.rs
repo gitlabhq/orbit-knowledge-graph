@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use orbit_authorization::{Grants, ScopeKey, ScopeSet};
+use orbit_authorization::{Grants, Key, ScopeSet};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::Model;
 use query_data_model::catalog::{Guard, Rule};
@@ -106,7 +106,7 @@ fn holds(set: &ScopeSet, path: &TraversalPath) -> bool {
             let roots: Vec<TraversalPath> = roots.iter().map(|root| root.as_str().into()).collect();
             path.is_within_scope(&roots.iter().collect::<Vec<_>>())
         }
-        ScopeSet::Keys(keys) => keys.contains(&ScopeKey::Text(path.as_str().to_string())),
+        ScopeSet::Keys(keys) => keys.contains(&Key::Text(path.as_str().to_string())),
     }
 }
 

@@ -1,0 +1,10 @@
+identify: gitlab_session
+providers:
+  gitlab_session:
+    module: gitlab.session
+    permissions: {read: reporter, read_security: security_manager}
+  rails: {module: gitlab.abilities}
+  slack:
+    module: fake.slack
+    handles: {"user:1": slack-sign-in-1}
+    readable: {}

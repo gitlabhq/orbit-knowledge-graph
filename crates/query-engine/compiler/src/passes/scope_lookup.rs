@@ -18,7 +18,7 @@ use serde_json::Value;
 
 use super::guards::scope_set;
 use super::remote_security::Namespaces;
-use super::security::scope_filter;
+use super::security::ScopeFilter;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::remote::{RemotePlan, Target};
 
@@ -139,7 +139,12 @@ fn lookup(
             ));
         }
     };
-    let set = scope_set(grants, graph.model(), guard.scope, guard.permission)?;
+    let filter = ScopeFilter::new(scope_set(
+        grants,
+        graph.model(),
+        guard.scope,
+        guard.permission,
+    )?)?;
     let shape = |what: &str| QueryError::Security(format!("the scope lookup {what}"));
     let table = |entity| {
         graph
@@ -199,7 +204,7 @@ fn lookup(
             let rows = rows.ok_or(RelationalError::Incomplete("a scope lookup"))?;
             let key = rows.qualified("k0", "id")?;
             let scope = rows.qualified(&steps[steps.len() - 1].alias, scope_column)?;
-            let mut conditions: Vec<Expr> = scope_filter(scope.expr(), set).into_iter().collect();
+            let mut conditions: Vec<Expr> = filter.on(scope.expr()).into_iter().collect();
             if let Some(keys) = &keys {
                 conditions.push(Expr::Binary {
                     op: BinaryOp::In,

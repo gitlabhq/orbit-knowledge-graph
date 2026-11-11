@@ -90,6 +90,7 @@ mod tests {
     #[tokio::test]
     async fn denied_rows_are_redacted() {
         let auth = vec![ResourceAuthorization {
+            provider: "rails".to_string(),
             resource_type: "project".to_string(),
             authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
         }];
