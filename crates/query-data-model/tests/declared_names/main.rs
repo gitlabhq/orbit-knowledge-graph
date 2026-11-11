@@ -1,0 +1,290 @@
+//! ADR 024 decision 1: no name a shipped package declares appears as a string literal in the
+//! non-test source of the query engine, indexer, migrations or server.
+
+mod collisions;
+mod lexer;
+mod modules;
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use query_data_model::implementations::clickhouse::ClickHouse;
+use query_data_model::{DuckDb, Packages};
+
+use crate::collisions::COLLISIONS;
+
+/// Every entity, relationship, table, store, connection, source and provider name, with its kind.
+fn declared() -> BTreeMap<String, &'static str> {
+    let model = Packages::embedded().load().unwrap();
+    let graph = model.graph();
+    let mut names = BTreeMap::new();
+    add(
+        &mut names,
+        "entity",
+        graph.entities().map(|e| e.name.as_str()),
+    );
+    add(
+        &mut names,
+        "relationship",
+        graph.relationships().map(|r| r.name.as_str()),
+    );
+    for store in model.stores() {
+        add(&mut names, "store", [store.name.as_str()]);
+        add(&mut names, "connection", [store.connection.as_str()]);
+        add(
+            &mut names,
+            "table",
+            store.sources().filter_map(|s| s.table.as_deref()),
+        );
+        let edges = store
+            .bindings()
+            .filter_map(|(variant, _, _)| store.edge_table(variant));
+        add(&mut names, "table", edges);
+        match store.kind.as_str() {
+            "clickhouse" => {
+                let catalog = model.physical::<ClickHouse>(&store.connection).unwrap();
+                let schema = catalog.schema().unwrap();
+                add(&mut names, "table", schema.table_names());
+                add(
+                    &mut names,
+                    "table",
+                    schema.dictionaries().iter().map(|d| d.name.as_str()),
+                );
+                add(
+                    &mut names,
+                    "table",
+                    schema.views().iter().map(|v| v.name.as_str()),
+                );
+                let refreshable = schema.refreshable_views().iter().map(|v| v.name.as_str());
+                add(&mut names, "table", refreshable);
+                add(
+                    &mut names,
+                    "table",
+                    schema.graph_tables().iter().map(|t| t.name.as_str()),
+                );
+            }
+            "duckdb" => {
+                let catalog = model.physical::<DuckDb>(&store.connection).unwrap();
+                add(
+                    &mut names,
+                    "table",
+                    catalog.tables().map(|t| t.name.as_str()),
+                );
+            }
+            _ => {}
+        }
+    }
+    let sources = model.sources();
+    for pipeline in sources.pipelines() {
+        let source = sources.data_source(pipeline);
+        add(&mut names, "source", [source.name.as_str()]);
+        add(&mut names, "connection", [source.connection.as_str()]);
+        add(
+            &mut names,
+            "table",
+            pipeline.tables.iter().map(String::as_str),
+        );
+        add(
+            &mut names,
+            "table",
+            pipeline.lookups.iter().map(|l| l.table.as_str()),
+        );
+    }
+    add(
+        &mut names,
+        "provider",
+        model.access().providers().into_iter().map(|(p, _)| p),
+    );
+    names
+}
+
+fn add<'a>(
+    names: &mut BTreeMap<String, &'static str>,
+    kind: &'static str,
+    found: impl IntoIterator<Item = &'a str>,
+) {
+    for name in found {
+        assert!(
+            word(name),
+            "declared {kind} {name} is not one identifier token"
+        );
+        names.insert(name.to_string(), kind);
+    }
+}
+
+fn word(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+}
+
+fn repository() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap()
+}
+
+/// Fails listing each `file:line: name (kind)` where a literal in `crates`, in a file `owned`
+/// accepts, names a declared name that no collision covers, and each collision that covers none.
+fn assert_no_declared_name(crates: &[&str], owned: impl Fn(&str) -> bool) {
+    let names = declared();
+    let repository = repository();
+    let mut hits = Vec::new();
+    let mut used = vec![false; COLLISIONS.len()];
+    for dir in crates {
+        for literal in modules::literals(&repository.join(dir)) {
+            let file = literal
+                .file
+                .strip_prefix(&repository)
+                .unwrap()
+                .to_string_lossy();
+            if !owned(&file) {
+                continue;
+            }
+            for (offset, token) in tokens(&literal.text) {
+                let Some(kind) = names.get(token) else {
+                    continue;
+                };
+                let covering = COLLISIONS
+                    .iter()
+                    .position(|collision| collision.covers(&file, token, &literal.text));
+                match covering {
+                    Some(index) => used[index] = true,
+                    None => {
+                        let line = literal.line + literal.text[..offset].matches('\n').count();
+                        hits.push(format!("{file}:{line}: {token} ({kind})"));
+                    }
+                }
+            }
+        }
+    }
+    let stale: Vec<String> = COLLISIONS
+        .iter()
+        .zip(used)
+        .filter(|(collision, used)| {
+            let scanned = crates.iter().any(|dir| collision.file.starts_with(dir));
+            !used && scanned && owned(collision.file)
+        })
+        .map(|(c, _)| format!("{}: {} in {:?} ({})", c.file, c.name, c.text, c.reason))
+        .collect();
+    assert!(
+        hits.is_empty() && stale.is_empty(),
+        "{} declared names appear as literals:\n{}\n{} collisions cover no literal:\n{}",
+        hits.len(),
+        hits.join("\n"),
+        stale.len(),
+        stale.join("\n")
+    );
+}
+
+/// The maximal runs of `[A-Za-z0-9_]` in `text`, with their byte offsets.
+fn tokens(text: &str) -> Vec<(usize, &str)> {
+    let mut found = Vec::new();
+    let mut start = None;
+    for (index, c) in text.char_indices().chain([(text.len(), ' ')]) {
+        match (c == '_' || c.is_ascii_alphanumeric(), start) {
+            (true, None) => start = Some(index),
+            (false, Some(open)) => {
+                found.push((open, &text[open..index]));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+const SOURCE_CATALOG: [&str; 2] = [
+    "crates/query-data-model/src/catalog/sources.rs",
+    "crates/query-data-model/src/spec/source.rs",
+];
+
+const QUERY_ENGINE: [&str; 3] = [
+    "crates/query-engine",
+    "crates/query-data-model",
+    "crates/orbit-authorization",
+];
+
+#[test]
+fn query_engine_names_no_declared_name() {
+    assert_no_declared_name(&QUERY_ENGINE, |file| !SOURCE_CATALOG.contains(&file));
+}
+
+#[test]
+#[ignore = "157 hits in the indexer and the source catalog, owned by the indexing side"]
+fn indexer_names_no_declared_name() {
+    assert_no_declared_name(&["crates/indexer", "crates/query-data-model"], |file| {
+        file.starts_with("crates/indexer/") || SOURCE_CATALOG.contains(&file)
+    });
+}
+
+#[test]
+#[ignore = "4 hits wait on declarations: the checkpoint tables, the code indexing tables, the siphon source"]
+fn migrations_name_no_declared_name() {
+    assert_no_declared_name(&["crates/orbit-migrations"], |_| true);
+}
+
+#[test]
+#[ignore = "2 hits wait on code indexing declarations: its project entity and its checkpoint table"]
+fn server_names_no_declared_name() {
+    assert_no_declared_name(&["crates/orbit-server/"], |_| true);
+}
+
+#[test]
+fn server_config_names_no_declared_name() {
+    assert_no_declared_name(&["crates/orbit-server-config"], |_| true);
+}
+
+const SAMPLE: &str = r####"//! "doc"
+#[cfg(test)]
+mod tests;
+mod kept;
+mod gone;
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename = "attribute")]
+struct S;
+const RAW: &str = r#"raw "quoted""#;
+#[cfg(any(test, feature = "testkit"))]
+fn gated() -> &'static str { "gated" }
+#[cfg(not(test))]
+const NOT_TEST: &str = "not test";
+/* "block /* nested */" */
+fn quote<'a>(_: &'a str) -> char { '"' }
+#[test]
+fn unit() { let _ = "unit"; }
+const LAST: &str = "line \
+continued";
+"####;
+
+#[test]
+fn scanner_reads_only_non_test_literals() {
+    let root = std::env::temp_dir().join(format!("declared-names-{}", std::process::id()));
+    let src = root.join("crate/src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(root.join("crate/Cargo.toml"), "").unwrap();
+    std::fs::write(src.join("lib.rs"), SAMPLE).unwrap();
+    std::fs::write(src.join("tests.rs"), r#"const T: &str = "tests";"#).unwrap();
+    std::fs::write(src.join("kept.rs"), r#"const K: &str = "kept";"#).unwrap();
+    std::fs::write(
+        src.join("gone.rs"),
+        "#![cfg(test)]\nconst G: &str = \"gone\";",
+    )
+    .unwrap();
+    let literals = modules::literals(&root);
+    std::fs::remove_dir_all(&root).unwrap();
+    let found: Vec<(String, usize)> = literals
+        .into_iter()
+        .map(|literal| (literal.text, literal.line))
+        .collect();
+    let expected = [
+        ("kept", 1),
+        ("attribute", 7),
+        ("raw \"quoted\"", 9),
+        ("not test", 13),
+        ("line \\\ncontinued", 18),
+    ];
+    let expected: Vec<(String, usize)> = expected
+        .into_iter()
+        .map(|(text, line)| (text.to_string(), line))
+        .collect();
+    assert_eq!(found, expected);
+}
