@@ -9,6 +9,7 @@ mod pagination;
 mod regression;
 mod response;
 
+use query_data_model::testkit::limits;
 use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
@@ -373,13 +374,8 @@ async fn assert_indexes_used(
 ) {
     let query = &compiled.base;
     let plan = ctx.explain_plan(query).await;
-    let ctes = subquery_statements(
-        raw,
-        data_model,
-        &grants_for(data_model, security),
-        query_data_model::testkit::limits(),
-    )
-    .expect("subqueries render");
+    let ctes = subquery_statements(raw, data_model, &grants_for(data_model, security), limits())
+        .expect("subqueries render");
     for ExpectedIndex { table, index } in expected {
         let mut cte_plans = Vec::new();
         let mut scans = Vec::new();
@@ -528,7 +524,7 @@ async fn compile_like_server(
 ) -> Result<Arc<CompiledQueryContext>, PipelineError> {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::clone(data_model));
-    server_extensions.insert(*query_data_model::testkit::limits());
+    server_extensions.insert(*limits());
     server_extensions.insert(claims_for(security));
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: query.to_owned(),
@@ -568,7 +564,7 @@ async fn execute_output(
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
     server_extensions.insert(Arc::clone(data_model));
-    server_extensions.insert(*query_data_model::testkit::limits());
+    server_extensions.insert(*limits());
     server_extensions.insert(claims_for(security));
     server_extensions.insert(resolver_registry);
 
@@ -1314,13 +1310,7 @@ mod tests {
                 "line 2, column",
             ),
         ] {
-            let error = compile(
-                raw,
-                &data_model,
-                &security,
-                query_data_model::testkit::limits(),
-            )
-            .unwrap_err();
+            let error = compile(raw, &data_model, &security, limits()).unwrap_err();
             let message = error.to_string();
             assert!(error.is_client_safe(), "{message}");
             assert!(message.contains("Orbit query syntax"), "{message}");

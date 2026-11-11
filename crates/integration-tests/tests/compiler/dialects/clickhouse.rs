@@ -6,13 +6,11 @@ use query_data_model::introspection::{
     IntrospectionScope::{All, Local},
     build_compact_schema_response,
 };
+use query_data_model::testkit::limits;
 
 fn gql_statement(query: &str) -> compiler::Result<query_data_model::surface::Statement> {
     let model = embedded_model();
-    let catalog = model
-        .model()
-        .logical(query_data_model::testkit::limits())
-        .as_admin();
+    let catalog = model.model().logical(limits()).as_admin();
     compiler::surface::parse(query, catalog)
 }
 
@@ -20,13 +18,7 @@ fn gql_statement(query: &str) -> compiler::Result<query_data_model::surface::Sta
 fn compile_to_ast_works() {
     let orbit_query = "MATCH (u:User {id: 1}) RETURN u.username LIMIT 10";
 
-    let compiled = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let compiled = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     assert!(compiled.base.sql.contains("LIMIT 11"));
     assert!(compiled.base.sql.contains("SELECT"));
 }
@@ -36,13 +28,7 @@ fn compile_to_ast_works() {
 fn traversal_query() {
     let orbit_query = "MATCH (n:Note {confidential: true})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username ORDER BY n.created_at DESC LIMIT 25";
 
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_edge"));
@@ -58,13 +44,7 @@ fn traversal_query() {
 fn bool_filter_value_is_preserved() {
     let orbit_query = "MATCH (n:Note {confidential: true}) RETURN n.confidential LIMIT 5";
 
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     assert!(has_param_value(
         &result.base.params,
         &serde_json::Value::Bool(true)
@@ -75,13 +55,7 @@ fn bool_filter_value_is_preserved() {
 fn aggregation_query() {
     let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id, .username}, count(n) AS note_count LIMIT 10";
 
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
@@ -91,13 +65,7 @@ fn aggregation_query() {
 #[test]
 fn gql_count_distinct_renders_distinct_aggregates() {
     let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id}, count(n) AS notes, count(DISTINCT n) AS distinct_notes, count(DISTINCT n.confidential) AS flags LIMIT 10";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
     assert_eq!(rendered.matches("countDistinct").count(), 2, "{rendered}");
     assert!(rendered.contains("AS notes"), "{rendered}");
@@ -107,13 +75,7 @@ fn gql_count_distinct_renders_distinct_aggregates() {
 #[test]
 fn group_by_property_truncate_month_wraps_column() {
     let orbit_query = "MATCH (u:Note {confidential: false}) RETURN date_trunc('month', u.created_at), count(u) AS n LIMIT 50";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("toDate32(toStartOfMonth(u.created_at))"),
@@ -132,13 +94,8 @@ fn group_by_property_truncate_all_units_compile() {
         let orbit_query = format!(
             "MATCH (u:Note {{id: 1}}) RETURN date_trunc('{unit}', u.created_at), count(u) AS n LIMIT 10"
         );
-        let result = compile(
-            &orbit_query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap_or_else(|e| panic!("compile failed for unit {unit}: {e:?}"));
+        let result = compile(&orbit_query, &embedded_model(), &test_ctx(), limits())
+            .unwrap_or_else(|e| panic!("compile failed for unit {unit}: {e:?}"));
         let rendered = result.base.render();
         // Sub-daily units cast to DateTime64, daily+ to Date32, so the key
         // crosses Arrow as a typed date/timestamp rather than a bare integer.
@@ -163,13 +120,7 @@ fn group_by_property_truncate_all_units_compile() {
 fn group_by_truncate_minute_without_selectivity_rejected() {
     let orbit_query =
         "MATCH (u:Note) RETURN date_trunc('minute', u.created_at), count(u) AS n LIMIT 10";
-    let err = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap_err();
+    let err = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap_err();
     let msg = format!("{err:?}");
     assert!(
         msg.contains("requires either node_ids") && msg.contains("minute"),
@@ -181,13 +132,7 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
 #[test]
 fn group_by_truncate_minute_with_node_ids_accepted() {
     let orbit_query = "MATCH (u:Note) WHERE u.id IN [1, 2] RETURN date_trunc('minute', u.created_at), count(u) AS n LIMIT 10";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     assert!(
         result
             .base
@@ -200,13 +145,7 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
 #[test]
 fn group_by_truncate_hour_with_property_filter_accepted() {
     let orbit_query = "MATCH (u:Note) WHERE u.created_at >= '2026-04-01T00:00:00Z' RETURN date_trunc('hour', u.created_at), count(u) AS n LIMIT 50";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     assert!(
         result
             .base
@@ -220,13 +159,7 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
 fn group_by_truncate_on_non_date_property_rejected() {
     let orbit_query =
         "MATCH (u:Note {id: 1}) RETURN date_trunc('month', u.confidential), count(u) AS n LIMIT 10";
-    let err = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap_err();
+    let err = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap_err();
     let msg = format!("{err:?}");
     assert!(
         msg.contains("requires a Date or DateTime property"),
@@ -238,13 +171,7 @@ fn group_by_truncate_on_non_date_property_rejected() {
 #[test]
 fn group_by_truncate_custom_alias_preserved() {
     let orbit_query = "MATCH (u:Note {id: 1}) RETURN date_trunc('month', u.created_at) AS bucket, count(u) AS n LIMIT 10";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS bucket"),
@@ -256,13 +183,7 @@ fn group_by_truncate_custom_alias_preserved() {
 fn path_finding_query() {
     let orbit_query = "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN p";
 
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -297,20 +218,15 @@ fn path_finding_depth_control() {
         shallow_orbit_query,
         &embedded_model(),
         &test_ctx(),
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap()
     .base
     .render();
-    let deep_sql = compile(
-        deep_orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap()
-    .base
-    .render();
+    let deep_sql = compile(deep_orbit_query, &embedded_model(), &test_ctx(), limits())
+        .unwrap()
+        .base
+        .render();
 
     assert!(
         shallow_sql.contains("forward AS"),
@@ -335,13 +251,7 @@ fn path_finding_depth_control() {
 fn neighbors_query() {
     let orbit_query = "MATCH (u:User {id: 100})--(n) RETURN n";
 
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_neighbor_node"));
@@ -367,15 +277,10 @@ fn neighbors_query() {
 fn neighbors_project_the_edge_path_only_when_it_is_the_neighbors_own() {
     let data_model = embedded_model();
     let render = |orbit_query: &str| {
-        compile(
-            orbit_query,
-            &data_model,
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap()
-        .base
-        .render()
+        compile(orbit_query, &data_model, &test_ctx(), limits())
+            .unwrap()
+            .base
+            .render()
     };
 
     let authored = render("MATCH (u:User {id: 1})-[:AUTHORED]-(n) RETURN u, n");
@@ -397,13 +302,7 @@ fn neighbors_project_the_edge_path_only_when_it_is_the_neighbors_own() {
 fn filter_operators() {
     let orbit_query = "MATCH (u:User) WHERE u.created_at >= '2024-01-01' AND u.state IN ['active', 'blocked'] AND u.username CONTAINS 'admin' RETURN u.username, u.state, u.created_at LIMIT 30";
 
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("LIMIT 1 BY"));
@@ -419,7 +318,7 @@ fn sql_injection_in_node_id() {
         r#"{"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --"}]}"#,
         &embedded_model(),
         &test_ctx(),
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
@@ -435,7 +334,7 @@ fn sql_injection_in_relationship() {
     }"#,
         &embedded_model(),
         &test_ctx(),
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
@@ -448,7 +347,7 @@ fn empty_node_id_rejected() {
             r#"{"query_type": "traversal", "nodes": [{"id": ""}]}"#,
             &embedded_model(),
             &test_ctx(),
-            query_data_model::testkit::limits(),
+            limits(),
         )
         .is_err()
     );
@@ -460,7 +359,7 @@ fn id_starting_with_number_rejected() {
         r#"{"query_type": "traversal", "nodes": [{"id": "123abc"}]}"#,
         &embedded_model(),
         &test_ctx(),
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
@@ -472,7 +371,7 @@ fn sql_injection_in_filter_property() {
         "MATCH (u:User {`foo; DROP TABLE--`: 'value'}) RETURN u",
         &embedded_model(),
         &test_ctx(),
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
@@ -482,13 +381,7 @@ fn sql_injection_in_filter_property() {
 #[test]
 fn valid_identifiers_produce_renderable_sql() {
     let query = "MATCH (user_node:User {id: 1})-[:AUTHORED]->(_private:Note), (CamelCase:Project {id: 1})-[:CONTAINS]->(_private), (user_node)-[:MEMBER_OF]->(node123:Group) RETURN user_node{.username}, _private{.confidential}, CamelCase{.name}, node123{.name}";
-    let result = compile(
-        query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
 
     assert!(!rendered.contains("{p"));
@@ -502,13 +395,7 @@ fn valid_identifiers_produce_renderable_sql() {
 #[test]
 fn multi_table_single_type_routes_to_default() {
     let orbit_query = "MATCH (u:User {id: 1})-[:AUTHORED]->(p:Project) RETURN u, p LIMIT 25";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge"),
@@ -523,13 +410,7 @@ fn multi_table_single_type_routes_to_default() {
 #[test]
 fn multi_table_code_edge_routes_to_code_table() {
     let orbit_query = "MATCH (f:File {id: 1})-[:DEFINES]->(d:Definition) RETURN f, d LIMIT 25";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -544,13 +425,7 @@ fn multi_table_code_edge_routes_to_code_table() {
 #[test]
 fn multi_table_wildcard_keeps_the_default_table_scan() {
     let orbit_query = "MATCH (u:User {id: 1})-->(p:Project) RETURN u, p LIMIT 25";
-    let compiled = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let compiled = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     assert!(compiled.base.render().contains("FROM gl_edge"));
 }
 
@@ -559,13 +434,7 @@ fn multi_table_wildcard_keeps_the_default_table_scan() {
 fn multi_table_mixed_types_scan_every_route() {
     let orbit_query =
         "MATCH (u:User {id: 1})-[:AUTHORED|DEFINES]->(p:Project) RETURN u, p LIMIT 25";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
     assert!(rendered.contains("FROM gl_code_edge"), "{rendered}");
     assert!(rendered.contains("FROM gl_edge"), "{rendered}");
@@ -578,13 +447,7 @@ fn multi_table_mixed_types_scan_every_route() {
 #[test]
 fn single_table_ontology_no_union() {
     let orbit_query = "MATCH (u:User {id: 1})-[:AUTHORED]->(p:Project) RETURN u, p LIMIT 25";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
     assert!(
         !rendered.contains("UNION ALL"),
@@ -596,13 +459,7 @@ fn single_table_ontology_no_union() {
 #[test]
 fn multi_table_path_finding_scans_all_tables() {
     let orbit_query = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|DEFINES*1..3]->(`end`:Definition {id: 100}) RETURN path";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
@@ -613,13 +470,7 @@ fn multi_table_path_finding_scans_all_tables() {
 #[test]
 fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
     let orbit_query = "MATCH (f:File)--(n) WHERE f.path CONTAINS 'labkit' RETURN n";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
 
     let gl_file_refs = rendered.matches("gl_file").count();
@@ -636,13 +487,7 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
 #[test]
 fn multi_table_neighbors_scans_all_tables() {
     let orbit_query = "MATCH (p:Project {id: 1})--(n) RETURN n";
-    let result = compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let result = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
@@ -655,15 +500,10 @@ use crate::compiler::setup::admin_ctx;
 const SCOPED_LOOKUP: &str = "FROM gl_project AS _orbit_scope WHERE";
 
 fn render_scoped(orbit_query: &str) -> String {
-    compile(
-        orbit_query,
-        &embedded_model(),
-        &admin_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap()
-    .base
-    .render()
+    compile(orbit_query, &embedded_model(), &admin_ctx(), limits())
+        .unwrap()
+        .base
+        .render()
 }
 
 #[test]
@@ -718,13 +558,7 @@ fn scoped_count_condition_excludes_the_scope_lookup() {
 fn cross_namespace_related_to_edge_scans_only_the_source_namespace() {
     let orbit_query = "MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE p.id = 1 RETURN p, wi.id, rel.id, rel.title LIMIT 100";
     let data_model = embedded_model();
-    let compiled = compile(
-        orbit_query,
-        &data_model,
-        &admin_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    let compiled = compile(orbit_query, &data_model, &admin_ctx(), limits()).unwrap();
     let sql = compiled.base.render();
 
     let related_scan = sql.split("FROM gl_edge AS _orbit_edge_1").nth(1).unwrap();
@@ -754,13 +588,7 @@ fn orbit_query_bounded_hops_and_relationship_filters() {
         "MATCH (a:User {id: 1})-[:MEMBER_OF*1..3 {}]->(b:Project) RETURN a, b",
     ];
     for orbit_query in cases {
-        compile(
-            orbit_query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     }
 }
 
@@ -778,13 +606,7 @@ fn orbit_query_id_selectors_preserve_additional_predicates() {
         "MATCH (u:User) WHERE (u.username CONTAINS 'abc' AND u.username CONTAINS 'def') RETURN u",
     ];
     for orbit_query in cases {
-        compile(
-            orbit_query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     }
 }
 
@@ -817,13 +639,7 @@ fn orbit_query_id_list_and_range_promote_independently() {
                 assert_eq!(anchor.range, Some((1, 3)), "{query}");
                 let id = |leaf: &compiler::logical::Leaf<'_>| matches!(leaf.left(), query_data_model::plan::logical::Expr::Property { property, .. } if logical.property_name(property) == "id");
                 assert!(!anchor.filters.iter().any(id), "{query}");
-                compile(
-                    &query,
-                    &embedded_model(),
-                    &context,
-                    query_data_model::testkit::limits(),
-                )
-                .unwrap();
+                compile(&query, &embedded_model(), &context, limits()).unwrap();
             }
         }
     }
@@ -832,26 +648,14 @@ fn orbit_query_id_list_and_range_promote_independently() {
 #[test]
 fn orbit_query_aggregate_functions_property_groups_and_ordering() {
     let orbit_query = "MATCH (u:Note) WHERE u.id IN [1, 2] RETURN u.confidential AS confidential, count(u) AS n, sum(u.id), avg(u.id), min(u.created_at), max(u.created_at) ORDER BY n DESC LIMIT 10";
-    compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
 }
 
 #[test]
 fn orbit_query_null_predicates_and_all_columns() {
     let orbit_query =
         "MATCH (u:User) WHERE u.created_at IS NOT NULL AND u.state IS NULL RETURN properties(u)";
-    compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
 }
 
 #[test]
@@ -864,13 +668,7 @@ fn orbit_query_m23_literals_and_comments() {
         "MATCH (u:User) WHERE u.created_at >= date('2024-01-01') RETURN u",
     ];
     for orbit_query in cases {
-        compile(
-            orbit_query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
     }
 }
 
@@ -900,13 +698,7 @@ fn orbit_query_rejects_aggregation_over_shortest_paths() {
     let data_model = embedded_model();
     let context = test_ctx();
     for gql in cases {
-        let error = compile(
-            gql,
-            &data_model,
-            &context,
-            query_data_model::testkit::limits(),
-        )
-        .expect_err(gql);
+        let error = compile(gql, &data_model, &context, limits()).expect_err(gql);
         assert!(
             matches!(&error, QueryError::Validation(_)),
             "{gql}: {error}"
@@ -940,21 +732,9 @@ fn orbit_query_rejects_neighbors_center_all_properties() {
         );
     }
     let query = "MATCH (center:User {id: 1})--(n) RETURN center, n";
-    compile(
-        query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    compile(query, &embedded_model(), &test_ctx(), limits()).unwrap();
     let query = "MATCH (center:User {id: 1})--(n) RETURN center.username, center.state, n";
-    compile(
-        query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    compile(query, &embedded_model(), &test_ctx(), limits()).unwrap();
 }
 
 #[test]
@@ -976,13 +756,8 @@ fn orbit_query_neighbors_accepts_the_endpoint_on_either_side() {
         ),
     ] {
         for query in [endpoint_first, center_first] {
-            compile(
-                query,
-                &data_model,
-                &ctx,
-                query_data_model::testkit::limits(),
-            )
-            .unwrap_or_else(|error| panic!("{query}: {error}"));
+            compile(query, &data_model, &ctx, limits())
+                .unwrap_or_else(|error| panic!("{query}: {error}"));
         }
     }
 }
@@ -993,13 +768,7 @@ fn orbit_query_rejects_more_than_one_sort_key() {
         "MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.updated_at DESC, mr.iid DESC",
         "MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.updated_at,mr.iid LIMIT 5",
     ] {
-        let error = compile(
-            query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .expect_err(query);
+        let error = compile(query, &embedded_model(), &test_ctx(), limits()).expect_err(query);
         assert!(
             matches!(error, QueryError::Validation(ref message) if message.contains("ORDER BY accepts one sort key")),
             "{query}: {error}"
@@ -1014,13 +783,7 @@ fn orbit_query_virtual_filter_equality_hydration_parity() {
         "MATCH (f:File {id: 1}) WHERE f.content = 'abc' RETURN f",
         "MATCH (f:File {id: 1, content: 'abc'}) RETURN f",
     ] {
-        let compiled = compile(
-            query,
-            &data_model,
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        let compiled = compile(query, &data_model, &test_ctx(), limits()).unwrap();
         let compiler::HydrationPlan::Static(templates) = compiled.hydration else {
             panic!("expected static hydration for {query}");
         };
@@ -1043,20 +806,14 @@ fn orbit_query_consecutive_match_clauses_compile_like_one_pattern() {
     let single = compile(
         "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}), (u:User)-[:AUTHORED]->(mr) WHERE mr.state = 'merged' AND u.username = 'a' RETURN mr.iid, u.username LIMIT 5",
         &data_model,
-        &ctx, query_data_model::testkit::limits(),
+        &ctx, limits(),
     )
     .unwrap();
     for query in [
         "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) MATCH (u:User)-[:AUTHORED]->(mr) WHERE mr.state = 'merged' AND u.username = 'a' RETURN mr.iid, u.username LIMIT 5",
         "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) WHERE mr.state = 'merged' MATCH (u:User)-[:AUTHORED]->(mr) WHERE u.username = 'a' RETURN mr.iid, u.username LIMIT 5",
     ] {
-        let compiled = compile(
-            query,
-            &data_model,
-            &ctx,
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        let compiled = compile(query, &data_model, &ctx, limits()).unwrap();
         assert_eq!(single.base.render(), compiled.base.render(), "{query}");
         assert_eq!(single.hydration, compiled.hydration, "{query}");
     }
@@ -1074,13 +831,7 @@ fn orbit_query_consecutive_match_clauses_compile_like_one_pattern() {
             "Orbit query syntax",
         ),
     ] {
-        let error = compile(
-            query,
-            &data_model,
-            &ctx,
-            query_data_model::testkit::limits(),
-        )
-        .expect_err(query);
+        let error = compile(query, &data_model, &ctx, limits()).expect_err(query);
         assert!(
             matches!(error, QueryError::Validation(ref message) if message.contains(expected)),
             "{query}: {error}"
@@ -1122,13 +873,7 @@ fn orbit_query_rejects_relationships_the_ontology_cannot_match() {
             "[IN_MILESTONE] declares a variable, not a relationship type; write [:IN_MILESTONE]",
         ),
     ] {
-        let error = compile(
-            query,
-            &data_model,
-            &ctx,
-            query_data_model::testkit::limits(),
-        )
-        .expect_err(query);
+        let error = compile(query, &data_model, &ctx, limits()).expect_err(query);
         assert!(
             matches!(error, QueryError::Validation(ref message) if message.contains(expected)),
             "{query}: {error}"
@@ -1143,22 +888,11 @@ fn orbit_query_rejects_relationships_the_ontology_cannot_match() {
         "MATCH (p:Project {id: 1})<-[R]-(mr:MergeRequest) RETURN count(mr)",
         "MATCH (mr:MergeRequest {id: 1})-[:IN_MILESTONE]->(m) RETURN m",
     ] {
-        compile(
-            query,
-            &data_model,
-            &ctx,
-            query_data_model::testkit::limits(),
-        )
-        .unwrap_or_else(|error| panic!("{query}: {error}"));
+        compile(query, &data_model, &ctx, limits())
+            .unwrap_or_else(|error| panic!("{query}: {error}"));
     }
     let reversed = "MATCH (mr:MergeRequest {id: 1})-[:AUTHORED]->(u:User) RETURN mr, u";
-    let error = compile(
-        reversed,
-        &data_model,
-        &ctx,
-        query_data_model::testkit::limits(),
-    )
-    .unwrap_err();
+    let error = compile(reversed, &data_model, &ctx, limits()).unwrap_err();
     assert!(error.to_string().contains("reverse the arrow"), "{error}");
 }
 
@@ -1173,13 +907,7 @@ fn orbit_query_undirected_relationships_require_neighbors() {
         "MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]-(p:Project) RETURN u, g, p",
         "MATCH (g:Group {id: 1})-[:MEMBER_OF]-(u:User) RETURN count(u)",
     ] {
-        let error = compile(
-            query,
-            &data_model,
-            &ctx,
-            query_data_model::testkit::limits(),
-        )
-        .expect_err(query);
+        let error = compile(query, &data_model, &ctx, limits()).expect_err(query);
         assert!(
             matches!(error, QueryError::Validation(ref message) if message.contains("undirected relationships are only supported for neighbors")),
             "{query}: {error}"
@@ -1191,13 +919,7 @@ fn orbit_query_undirected_relationships_require_neighbors() {
         "MATCH (g:Group {id: 1})-[:MEMBER_OF]-(n) RETURN n",
         "MATCH (g:Group {id: 1})--(n) RETURN n",
     ] {
-        compile(
-            query,
-            &data_model,
-            &ctx,
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        compile(query, &data_model, &ctx, limits()).unwrap();
     }
 }
 
@@ -1261,13 +983,8 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User {username: '\\uD800'}) RETURN u",
     ];
     for query in queries {
-        let error = compiler::compile(
-            query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .expect_err(query);
+        let error =
+            compiler::compile(query, &embedded_model(), &test_ctx(), limits()).expect_err(query);
         assert!(error.is_client_safe(), "{query}: {error}");
     }
 }
@@ -1284,13 +1001,7 @@ fn orbit_query_preserves_ontology_validation_and_security() {
         "MATCH (u:User {id: 1})-[:UNKNOWN_EDGE]->(p:Project) RETURN u, p",
     ];
     for orbit_query in cases {
-        compile(
-            orbit_query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap_err();
+        compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap_err();
     }
 }
 
@@ -1304,13 +1015,7 @@ fn orbit_query_nesting_guard_sees_through_escaped_names() {
     let error = gql_statement(&hidden).unwrap_err();
     assert!(error.to_string().contains("nesting is too deep"), "{error}");
     let orbit_query = "MATCH (`u`:`User` {`id`: 1}) RETURN `u` LIMIT 5";
-    compile(
-        orbit_query,
-        &embedded_model(),
-        &test_ctx(),
-        query_data_model::testkit::limits(),
-    )
-    .unwrap();
+    compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
 }
 
 #[test]
@@ -1328,15 +1033,7 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
         assert!(gql_statement(&query).is_err());
     }
     let query = "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u";
-    assert!(
-        compiler::compile(
-            query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits()
-        )
-        .is_err()
-    );
+    assert!(compiler::compile(query, &embedded_model(), &test_ctx(), limits()).is_err());
 }
 
 #[test]
@@ -1359,13 +1056,7 @@ fn orbit_query_schema_caps_reject() {
         "MATCH (u:User {id: 1}) RETURN ghost, count(u)",
     ];
     for orbit_query in cases {
-        compile(
-            orbit_query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap_err();
+        compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap_err();
     }
 
     let long_identifier = "a".repeat(65);
@@ -1375,18 +1066,12 @@ fn orbit_query_schema_caps_reject() {
         format!("MATCH (u:User {{username: '{long_string}'}}) RETURN u"),
     ];
     for orbit_query in &bounded {
-        compile(
-            orbit_query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap_err();
+        compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap_err();
     }
     compile(
         "MATCH (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:User {id: 1}) RETURN aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         &embedded_model(),
-        &test_ctx(), query_data_model::testkit::limits(),
+        &test_ctx(), limits(),
     )
     .unwrap();
 }
@@ -1398,12 +1083,7 @@ fn orbit_query_path_depth_caps() {
         let query = format!(
             "MATCH p = ANY SHORTEST (a:Project {{id: 1}})-[:CONTAINS*1..{depth}]->(b:Project {{id: 2}}) RETURN p"
         );
-        let result = compile(
-            &query,
-            &embedded_model(),
-            &ctx,
-            query_data_model::testkit::limits(),
-        );
+        let result = compile(&query, &embedded_model(), &ctx, limits());
         if (1..=3).contains(&depth) {
             result.unwrap();
         } else {
@@ -1459,22 +1139,10 @@ fn orbit_query_structural_caps_reject() {
     };
 
     for text in [chain(5), ids(500), repeated_predicates(10), rel_types(10)] {
-        compile(
-            &text,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        compile(&text, &embedded_model(), &test_ctx(), limits()).unwrap();
     }
     for text in [chain(6), ids(501), repeated_predicates(11), rel_types(11)] {
-        let error = compile(
-            &text,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap_err();
+        let error = compile(&text, &embedded_model(), &test_ctx(), limits()).unwrap_err();
         assert!(
             matches!(error, QueryError::Validation(_)),
             "{text}: {error}"
@@ -1505,21 +1173,9 @@ fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
             "RETURN mr.iid AS number ORDER BY number SKIP 5 LIMIT 5",
         ),
     ] {
-        let plain = compile(
-            &format!("{base} {plain}"),
-            &data_model,
-            &ctx,
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        let plain = compile(&format!("{base} {plain}"), &data_model, &ctx, limits()).unwrap();
         let query = format!("{base} {aliased}");
-        let aliased = compile(
-            &query,
-            &data_model,
-            &ctx,
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        let aliased = compile(&query, &data_model, &ctx, limits()).unwrap();
         assert_eq!(plain.base.render(), aliased.base.render(), "{query}");
         assert_eq!(plain.hydration, aliased.hydration, "{query}");
     }
@@ -1528,14 +1184,14 @@ fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
         "MATCH (center:WorkItem {id: 1})-->(n) RETURN center, n",
         &data_model,
         &ctx,
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap();
     let aliased = compile(
         "MATCH (center:WorkItem {id: 1})-->(n) RETURN center AS item, n",
         &data_model,
         &ctx,
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap();
     assert_eq!(plain.base.render(), aliased.base.render());
@@ -1550,13 +1206,7 @@ fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
         ("RETURN mr.iid ORDER BY missing", "or a property alias"),
     ] {
         let query = format!("{base} {query}");
-        let error = compile(
-            &query,
-            &data_model,
-            &ctx,
-            query_data_model::testkit::limits(),
-        )
-        .expect_err(&query);
+        let error = compile(&query, &data_model, &ctx, limits()).expect_err(&query);
         assert!(
             matches!(error, QueryError::Validation(ref message) if message.contains(expected)),
             "{query}: {error}"
@@ -1570,13 +1220,7 @@ fn orbit_query_repeated_node_projections_ignore_property_order() {
         let query = format!(
             "MATCH (u:User {{id: 1}})-[:AUTHORED]->(mr:MergeRequest) RETURN u{{.username, .name}} AS author, u{{{properties}}} AS owner, count(mr) AS mr_count"
         );
-        compile(
-            &query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        compile(&query, &embedded_model(), &test_ctx(), limits()).unwrap();
     }
 }
 
@@ -1587,13 +1231,7 @@ fn orbit_query_digit_string_ids_and_aggregated_identity_columns() {
         "MATCH (f:File) WHERE f.id IN [1, 2] RETURN f{.id, .content}, count(f) AS total LIMIT 5",
     ];
     for orbit_query in cases {
-        let compiled = compile(
-            orbit_query,
-            &embedded_model(),
-            &test_ctx(),
-            query_data_model::testkit::limits(),
-        )
-        .unwrap();
+        let compiled = compile(orbit_query, &embedded_model(), &test_ctx(), limits()).unwrap();
         assert!(!compiled.base.sql.contains("COUNT()") || compiled.base.sql.contains("GROUP BY"));
     }
 }
@@ -1604,7 +1242,7 @@ fn orbit_query_debug_and_dynamic_properties() {
         "MATCH (u:User {id: 1}) RETURN u DEBUG",
         &embedded_model(),
         &test_ctx(),
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap();
     assert!(compiled.debug);
@@ -1613,7 +1251,7 @@ fn orbit_query_debug_and_dynamic_properties() {
         "MATCH (g:Group {id: 100})--(n) RETURN g, properties(n)",
         &embedded_model(),
         &test_ctx(),
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap();
     assert_eq!(compiled.stats.dynamic_columns, DynamicColumnMode::All);
@@ -1621,7 +1259,7 @@ fn orbit_query_debug_and_dynamic_properties() {
     let compiled = compile(
         "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN properties(p)",
         &embedded_model(),
-        &test_ctx(), query_data_model::testkit::limits(),
+        &test_ctx(), limits(),
     )
     .unwrap();
     assert_eq!(compiled.stats.dynamic_columns, DynamicColumnMode::All);
@@ -1638,13 +1276,7 @@ fn orbit_query_optional_clauses_preserve_options() {
         ] {
             for debug in ["", " DEBUG"] {
                 let query = format!("MATCH (u:User {{id: 1}}) RETURN u{order}{limit}{debug}");
-                let compiled = compile(
-                    &query,
-                    &embedded_model(),
-                    &test_ctx(),
-                    query_data_model::testkit::limits(),
-                )
-                .unwrap();
+                let compiled = compile(&query, &embedded_model(), &test_ctx(), limits()).unwrap();
                 assert_eq!(compiled.debug, !debug.is_empty(), "{query}");
                 assert_eq!(compiled.stats.has_order_by, !order.is_empty(), "{query}");
                 assert_eq!(compiled.shape.skip, skip, "{query}");
@@ -1669,13 +1301,7 @@ fn orbit_query_debug_in_literals_and_comments_stays_data() {
     ] {
         for comment in ["", " /* DEBUG */", " // DEBUG"] {
             let query = format!("MATCH (u:User {{username: {literal}}}) RETURN u{comment}");
-            let compiled = compile(
-                &query,
-                &embedded_model(),
-                &test_ctx(),
-                query_data_model::testkit::limits(),
-            )
-            .unwrap();
+            let compiled = compile(&query, &embedded_model(), &test_ctx(), limits()).unwrap();
             assert!(!compiled.debug, "{query}");
             assert!(
                 has_param_value(&compiled.base.params, &serde_json::json!(value)),
@@ -1693,7 +1319,7 @@ fn orbit_query_reserved_skip_words_need_backticks() {
             "MATCH (offset:User {id: 1}) RETURN offset",
             &embedded_model(),
             &test_ctx(),
-            query_data_model::testkit::limits()
+            limits()
         )
         .is_err()
     );
@@ -1701,7 +1327,7 @@ fn orbit_query_reserved_skip_words_need_backticks() {
         "MATCH (`offset`:User {id: 1}) RETURN `offset`",
         &embedded_model(),
         &test_ctx(),
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap();
 }
@@ -1716,7 +1342,7 @@ fn gql_prepares_queries_and_scoped_schema() {
             &data_model,
             &ctx,
             All,
-            query_data_model::testkit::limits()
+            limits()
         ),
         Ok(PreparedStatement::Query(_))
     ));
@@ -1726,14 +1352,9 @@ fn gql_prepares_queries_and_scoped_schema() {
         (All, "CALL db.schema('MergeRequest')", Some("MergeRequest")),
         (Local, "CALL db.schema('File')", Some("File")),
     ] {
-        let PreparedStatement::Schema(response) = prepare(
-            call,
-            &data_model,
-            &ctx,
-            scope,
-            query_data_model::testkit::limits(),
-        )
-        .unwrap() else {
+        let PreparedStatement::Schema(response) =
+            prepare(call, &data_model, &ctx, scope, limits()).unwrap()
+        else {
             panic!("expected schema: {call}");
         };
         if let Some(name) = node {
@@ -1763,26 +1384,12 @@ fn gql_prepares_queries_and_scoped_schema() {
         (Local, "CALL db.schema('MergeRequest')"),
     ] {
         assert!(
-            prepare(
-                call,
-                &data_model,
-                &ctx,
-                scope,
-                query_data_model::testkit::limits()
-            )
-            .unwrap_err()
-            .is_client_safe()
+            prepare(call, &data_model, &ctx, scope, limits())
+                .unwrap_err()
+                .is_client_safe()
         );
     }
-    assert!(
-        compile(
-            "CALL db.schema()",
-            &data_model,
-            &ctx,
-            query_data_model::testkit::limits()
-        )
-        .is_err()
-    );
+    assert!(compile("CALL db.schema()", &data_model, &ctx, limits()).is_err());
 }
 
 #[test]
@@ -1791,7 +1398,7 @@ fn subquery_statements_carry_the_ctes_they_read() {
         "MATCH (f:File)-[:DEFINES]->(d:Definition) WHERE f.path ENDS WITH '.rb' RETURN * LIMIT 20",
         &embedded_model(),
         &test_ctx(),
-        query_data_model::testkit::limits(),
+        limits(),
     )
     .unwrap();
     assert!(

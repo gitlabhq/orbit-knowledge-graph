@@ -3,15 +3,11 @@ mod support;
 use query_data_model::Packages;
 use query_data_model::plan::logical::{ErrorClass, Expr, LogicalOperation, Projection};
 use query_data_model::surface::{SurfaceError, gql};
+use query_data_model::testkit::limits;
 
 fn plan(query: &str) -> Result<Vec<String>, SurfaceError> {
     let model = support::gitlab();
-    let statement = gql::parse(
-        query,
-        model
-            .logical(query_data_model::testkit::limits())
-            .as_admin(),
-    )?;
+    let statement = gql::parse(query, model.logical(limits()).as_admin())?;
     let plan = statement.plan;
     Ok(plan
         .nodes()
@@ -143,7 +139,7 @@ fn relationship_attributes_filter_inline_and_in_where() {
     let statement = gql::parse(
         "MATCH (f:File {project_id: 1})-[r:ON_BRANCH {branch: 'main'}]->(b:Branch) \
          WHERE r.project_id = 1 RETURN b",
-        model.logical(query_data_model::testkit::limits()),
+        model.logical(limits()),
     )
     .unwrap();
     let plan = statement.plan;
@@ -165,7 +161,7 @@ fn relationship_attributes_filter_inline_and_in_where() {
 
     let error = gql::parse(
         "MATCH (u:User {id: 1})-[r:AUTHORED]->(m:MergeRequest) WHERE r.branch = 'main' RETURN m",
-        model.logical(query_data_model::testkit::limits()),
+        model.logical(limits()),
     )
     .unwrap_err();
     assert_eq!(
@@ -180,7 +176,7 @@ fn a_match_declares_its_nodes_in_written_order() {
     let statement = gql::parse(
         "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest), (pipe:Pipeline), \
          (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe) RETURN *",
-        model.logical(query_data_model::testkit::limits()),
+        model.logical(limits()),
     )
     .unwrap();
     let plan = statement.plan;
