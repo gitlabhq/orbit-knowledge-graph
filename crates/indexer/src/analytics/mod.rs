@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use gitlab_client::GitlabClient;
 use orbit_analytics::{
-    AnalyticsTracker, ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker,
+    AnalyticsTracker, ComposedAnalyticsTracker, ConsentGate, GitlabInstanceWatch,
+    SnowplowAnalyticsTracker,
 };
 use orbit_log_fields::{info, warn};
 use orbit_server_config::{
@@ -62,16 +63,18 @@ impl IndexingAnalytics {
         if !self.is_enabled() {
             return None;
         }
-        let tracker = ConsentGate::new(
-            self.tracker
-                .clone()
-                .map(|t| Arc::new(t) as Arc<dyn AnalyticsTracker>),
-            self.local
-                .clone()
-                .map(|t| Arc::new(t) as Arc<dyn AnalyticsTracker>),
-            &self.config,
-            &self.instance,
-        );
+        let mut trackers: Vec<Arc<dyn AnalyticsTracker>> = Vec::new();
+        if let Some(tracker) = &self.tracker {
+            trackers.push(Arc::new(ConsentGate::new(
+                Arc::new(tracker.clone()),
+                &self.config,
+                &self.instance,
+            )));
+        }
+        if let Some(local) = &self.local {
+            trackers.push(Arc::new(local.clone()));
+        }
+        let tracker = ComposedAnalyticsTracker::new(trackers);
         Some(Box::new(SnowplowIndexingObserver::new(
             Arc::new(tracker),
             Arc::clone(&self.config),

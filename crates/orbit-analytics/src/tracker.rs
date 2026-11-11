@@ -92,6 +92,29 @@ impl AnalyticsTracker for SnowplowAnalyticsTracker {
     }
 }
 
+/// Sends each event to every tracker it holds.
+pub struct ComposedAnalyticsTracker {
+    trackers: Vec<Arc<dyn AnalyticsTracker>>,
+}
+
+impl ComposedAnalyticsTracker {
+    pub fn new(trackers: Vec<Arc<dyn AnalyticsTracker>>) -> Self {
+        Self { trackers }
+    }
+}
+
+impl AnalyticsTracker for ComposedAnalyticsTracker {
+    fn track(&self, event: StructuredEvent) {
+        let Some((last, rest)) = self.trackers.split_last() else {
+            return;
+        };
+        for tracker in rest {
+            tracker.track(event.clone());
+        }
+        last.track(event);
+    }
+}
+
 #[cfg(feature = "testkit")]
 pub struct InMemoryAnalyticsTracker {
     events: parking_lot::Mutex<Vec<StructuredEvent>>,

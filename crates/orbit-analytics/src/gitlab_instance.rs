@@ -68,25 +68,20 @@ impl GitlabInstanceWatch {
     }
 }
 
-/// Sends every event to the local collector, and to the GitLab collector only
-/// when `enabled` (or, when unset, the product usage data setting) allows it.
 pub struct ConsentGate {
-    tracker: Option<Arc<dyn AnalyticsTracker>>,
-    local: Option<Arc<dyn AnalyticsTracker>>,
+    tracker: Arc<dyn AnalyticsTracker>,
     enabled: Option<bool>,
     instance: GitlabInstanceWatch,
 }
 
 impl ConsentGate {
     pub fn new(
-        tracker: Option<Arc<dyn AnalyticsTracker>>,
-        local: Option<Arc<dyn AnalyticsTracker>>,
+        tracker: Arc<dyn AnalyticsTracker>,
         config: &AnalyticsConfig,
         instance: &GitlabInstanceWatch,
     ) -> Self {
         Self {
             tracker,
-            local,
             enabled: config.enabled,
             instance: instance.clone(),
         }
@@ -95,18 +90,11 @@ impl ConsentGate {
 
 impl AnalyticsTracker for ConsentGate {
     fn track(&self, event: StructuredEvent) {
-        let tracker = self.tracker.as_ref().filter(|_| {
-            self.enabled
-                .unwrap_or_else(|| self.instance.product_usage_data_enabled())
-        });
-        match (tracker, &self.local) {
-            (Some(tracker), Some(local)) => {
-                local.track(event.clone());
-                tracker.track(event);
-            }
-            (Some(tracker), None) => tracker.track(event),
-            (None, Some(local)) => local.track(event),
-            (None, None) => {}
+        let allowed = self
+            .enabled
+            .unwrap_or_else(|| self.instance.product_usage_data_enabled());
+        if allowed {
+            self.tracker.track(event);
         }
     }
 }
@@ -120,6 +108,7 @@ mod tests {
     use parking_lot::Mutex;
 
     use super::*;
+    use crate::ComposedAnalyticsTracker;
 
     #[derive(Default)]
     struct Recorder(Mutex<usize>);
@@ -152,13 +141,18 @@ mod tests {
         let gitlab = Arc::new(Recorder::default());
         let local = Arc::new(Recorder::default());
         // The default watch has no instance yet, so product usage data reads as off.
-        let gate = ConsentGate::new(
-            with_gitlab.then(|| gitlab.clone() as Arc<dyn AnalyticsTracker>),
-            with_local.then(|| local.clone() as Arc<dyn AnalyticsTracker>),
-            &config(enabled),
-            &GitlabInstanceWatch::default(),
-        );
-        gate.track(
+        let mut trackers: Vec<Arc<dyn AnalyticsTracker>> = Vec::new();
+        if with_gitlab {
+            trackers.push(Arc::new(ConsentGate::new(
+                gitlab.clone(),
+                &config(enabled),
+                &GitlabInstanceWatch::default(),
+            )));
+        }
+        if with_local {
+            trackers.push(local.clone());
+        }
+        ComposedAnalyticsTracker::new(trackers).track(
             StructuredEvent::builder("gkg", "gkg_query_executed")
                 .build()
                 .unwrap(),
