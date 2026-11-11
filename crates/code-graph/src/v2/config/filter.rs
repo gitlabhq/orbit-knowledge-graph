@@ -102,7 +102,11 @@ impl FileStreamHooks for CodeFilter {
         if self.max_file_size.is_some_and(|cap| file.size > cap) {
             return Some(self.record(file, SkipReason::Oversize, ContentClass::Unknown));
         }
-        if is_excluded_from_indexing(Path::new(&file.path)) {
+        let path = Path::new(&file.path);
+        if in_excluded_directory(path) {
+            return Some(self.record(file, SkipReason::ExcludedDirectory, ContentClass::Unknown));
+        }
+        if is_excluded_from_indexing(path) {
             return Some(self.record(file, SkipReason::ExcludedExtension, ContentClass::Unknown));
         }
         None
@@ -201,7 +205,8 @@ fn is_lfs_pointer(content: &[u8]) -> bool {
 /// The single denylist of files recorded as a bare node but never loaded or
 /// parsed: globs matched case-insensitively on the basename, grouped by line.
 /// Source (including tests), manifests, lockfiles, and dotfiles are absent so
-/// resolver inputs survive — this is the one place to add an exclusion.
+/// resolver inputs survive — file-name exclusions go here, directory-subtree
+/// exclusions in [`EXCLUDED_INDEXING_DIRS`].
 pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     // Raster + vector images.
     "*.{png,jpg,jpeg,gif,bmp,ico,webp,avif,tiff,tif,svg}",
@@ -228,6 +233,29 @@ static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
     }
     builder.build().expect("static excluded-indexing globset")
 });
+
+/// Directory names whose whole subtree is machine-generated content: recorded
+/// as bare nodes, never loaded or parsed. Matched case-insensitively on any
+/// path segment. `doc-locale`/`docs-locale` are GitLab's machine-translated
+/// documentation directories (see docs.gitlab.com documentation testing).
+pub const EXCLUDED_INDEXING_DIRS: &[&str] = &["doc-locale", "docs-locale"];
+
+fn in_excluded_directory(rel_path: &Path) -> bool {
+    let mut components = rel_path.components().peekable();
+    while let Some(component) = components.next() {
+        if components.peek().is_none() {
+            break;
+        }
+        if let std::path::Component::Normal(name) = component
+            && EXCLUDED_INDEXING_DIRS
+                .iter()
+                .any(|dir| name.eq_ignore_ascii_case(dir))
+        {
+            return true;
+        }
+    }
+    false
+}
 
 /// `true` when `rel_path` is on the [`EXCLUDED_INDEXING_GLOBS`] denylist. Match
 /// is case-insensitive, on the basename only. `false` means "load it"; resolver
@@ -379,7 +407,7 @@ mod tests {
             ),
             ("oversize.csv", oversize),
             (
-                "docs/lfs.md",
+                "docs/lfs.txt",
                 b"Pointers start with `version https://git-lfs.github.com/spec/v1`.\n".to_vec(),
             ),
         ] {
@@ -477,6 +505,30 @@ mod tests {
                 !is_excluded_from_indexing(&p(path)),
                 "should NOT be excluded: {path}"
             );
+        }
+    }
+
+    #[test]
+    fn excluded_directory_subtrees_settle_in_header() {
+        let mut f = filter();
+        for path in [
+            "docs-locale/ja/README.md",
+            "docs-locale/guide.md",
+            "doc-locale/ja-jp/user/project.md",
+            "nested/docs-locale/zh/setup.md",
+            "Docs-Locale/de/intro.md",
+        ] {
+            let (decision, label) = f.on_header(&entry(path, 100)).expect(path);
+            assert_eq!(decision, Decision::ListOnly, "{path}");
+            assert_eq!(label.skip, Some(SkipReason::ExcludedDirectory), "{path}");
+        }
+        for path in [
+            "docs-locale",
+            "docs/locale.md",
+            "my-docs-locale-notes/x.md",
+            "docs-locale.md",
+        ] {
+            assert_eq!(hd(f.on_header(&entry(path, 100))), None, "{path}");
         }
     }
 

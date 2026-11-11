@@ -1,4 +1,8 @@
 pub const EXCLUDE_LIKE: &[&str] = &[
+    "doc-locale/%",
+    "%/doc-locale/%",
+    "docs-locale/%",
+    "%/docs-locale/%",
     "spec/%",
     "%/spec/%",
     "ee/spec/%",
@@ -59,7 +63,7 @@ pub const EXCLUDE_REGEX: &[&str] = &[
 
 pub const DEFAULT_SOURCE_EXTS: &[&str] = &[
     "rs", "rb", "py", "js", "ts", "vue", "jsx", "tsx", "mjs", "cjs", "go", "java", "kt", "kts",
-    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake",
+    "scala", "cs", "cpp", "c", "h", "hpp", "swift", "php", "rake", "md", "markdown",
 ];
 
 /// Config formats whose definitions are searchable but carry no signature

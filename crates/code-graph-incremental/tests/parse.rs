@@ -83,7 +83,11 @@ fn every_configured_language_parses_when_classified_for_parsing() {
     for (lang, entry) in all_languages() {
         let repo = tempfile::tempdir().unwrap();
         let path = format!("a.{}", entry.extensions()[0]);
-        write_all(repo.path(), &[(&path, b"x")]);
+        let source: &[u8] = match lang {
+            SupportLang::Markdown => b"# x",
+            _ => b"x",
+        };
+        write_all(repo.path(), &[(&path, source)]);
         let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
 
         let parsed = parse_repo(&env, repo.path());

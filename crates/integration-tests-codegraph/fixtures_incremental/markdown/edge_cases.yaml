@@ -1,0 +1,98 @@
+name: "Markdown (incremental): section edge cases match across engines"
+
+fixtures:
+  - path: docs/guide.md
+    content: |
+      ---
+      title: Guide
+      ---
+
+      Guide
+      =====
+
+      ## Examples
+
+      a
+
+      ## Examples
+
+      b
+
+      ## **Bold** `code` heading ##
+
+      ## C# Basics
+
+      > ## Quoted
+
+      - ## Listed
+
+      Setext child
+      ------------
+
+      # Last
+
+tests:
+  - name: "every top-level heading is a Section"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Section'
+      RETURN d.fqn AS fqn, d.name AS name
+    assert:
+      - { row_count: 7 }
+      - { unique: fqn }
+
+  - name: "setext headings open sections and own the headings under them"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Section' AND d.name IN ['Guide', 'Setext child', 'Last']
+      RETURN d.fqn AS fqn, d.start_line AS start_line, d.end_line AS end_line, d.id AS id
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "guide#Guide", start_line: 5, end_line: 27 } }
+      - { row: { fqn: "guide#Guide#Setext child", start_line: 24, end_line: 27 } }
+      - { row: { fqn: "guide#Last", start_line: 27, end_line: 28 } }
+
+  - name: "duplicate sibling headings get suffixed fqns and keep their name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Examples'
+      RETURN d.fqn AS fqn
+    assert:
+      - { column_values: { field: fqn, values: ["guide#Guide#Examples", "guide#Guide#Examples-1"] } }
+
+  - name: "names drop inline markup and closing hashes"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Section'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row: { name: "Bold code heading", fqn: "guide#Guide#Bold code heading" } }
+      - { not: true, match: { field: name, pattern: "*#" } }
+
+  - name: "a hash in heading text is escaped in the fqn"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'C# Basics'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "guide#Guide#C\\# Basics" } }
+
+  - name: "headings in block quotes and list items are not sections"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['Quoted', 'Listed', 'title: Guide']
+      RETURN d.fqn AS fqn
+    assert:
+      - { empty: true }
+
+  # Both engines hash the same file path, fqn and byte span, so a namespace
+  # that switches engines keeps its Section ids.
+  - name: "section ids are the same in both engines"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Section' AND d.name IN ['Guide', 'Setext child', 'Last']
+      RETURN d.fqn AS fqn, d.id AS id, d.start_byte AS start_byte, d.end_byte AS end_byte
+    assert:
+      - { row: { fqn: "guide#Guide", id: 1250758734415101355, start_byte: 22, end_byte: 165 } }
+      - { row: { fqn: "guide#Guide#Setext child", id: 64834662884372573, start_byte: 138, end_byte: 165 } }
+      - { row: { fqn: "guide#Last", id: 4754349876057986655, start_byte: 165, end_byte: 172 } }

@@ -73,6 +73,12 @@ languages:
     extensions: [lua]
     grammar: tree-sitter-lua
 
+  markdown:
+    extensions: [md, markdown]
+    aliases: [md, markdown]
+    grammar: comrak
+    fqn_separator: "#"
+
   ocaml:
     extensions: [ml, mli]
     aliases: [ml, ocaml]

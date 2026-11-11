@@ -625,7 +625,9 @@ mod load_tests {
             };
             let lang = Lang::new();
             load_lang(yaml, &lang).unwrap_or_else(|e| panic!("{lang_id:?}: {e}"));
-            let _ = lang_id.ts_language();
+            if lang_id.uses_tree_sitter() {
+                let _ = lang_id.ts_language();
+            }
         }
         let _ = SupportLang::from_extension("py");
     }

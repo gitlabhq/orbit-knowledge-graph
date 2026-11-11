@@ -21,6 +21,7 @@ pub enum SupportLang {
     JavaScript,
     Kotlin,
     Lua,
+    Markdown,
     #[serde(rename = "ocaml")]
     OCaml,
     Php,
@@ -98,6 +99,7 @@ pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
         SupportLang::Lua => Some(include_str!("../langs/lua.yaml")),
         SupportLang::Swift => Some(include_str!("../langs/swift.yaml")),
         SupportLang::Zig => Some(include_str!("../langs/zig.yaml")),
+        SupportLang::Markdown => Some(include_str!("../langs/markdown.yaml")),
         _ => None,
     }
 }
@@ -154,6 +156,12 @@ impl SupportLang {
             .map_or_else(|| vec![self], |f| f.members.clone())
     }
 
+    /// Whether the language parses with a tree-sitter grammar; Markdown
+    /// parses with comrak instead.
+    pub fn uses_tree_sitter(&self) -> bool {
+        LANG_CONFIG.languages[self].grammar != COMRAK_GRAMMAR
+    }
+
     pub fn ts_language(&self) -> tree_sitter::Language {
         let entry = &LANG_CONFIG.languages[self];
         grammar_to_ts_language(&entry.grammar)
@@ -208,6 +216,8 @@ static DOTTED_EXTENSIONS: std::sync::LazyLock<std::collections::HashMap<&'static
         }
         m
     });
+
+const COMRAK_GRAMMAR: &str = "comrak";
 
 fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
     match grammar {
@@ -413,6 +423,11 @@ pub fn parse_with_sentinel(
     max_depth: usize,
 ) -> Result<(Tree, Option<Killed>), Killed> {
     sentinel.check()?;
+    if !support_lang.uses_tree_sitter() {
+        let tree = crate::markdown::parse(source, lang, label);
+        sentinel.check()?;
+        return Ok((tree, None));
+    }
     CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
         c.ensure(support_lang, lang);
