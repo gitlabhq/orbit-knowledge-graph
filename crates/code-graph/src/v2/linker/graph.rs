@@ -390,8 +390,8 @@ impl CodeGraph {
             self.indexes.by_name.insert(gdef.name, def_node);
 
             let fqn_str = self.strings.get(gdef.fqn).to_string();
-            if let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) {
-                let parent_id = self.strings.alloc(&fqn_str[..sep_pos]);
+            if let Some(parent_fqn) = parent_fqn(&fqn_str, gdef.fqn_sep) {
+                let parent_id = self.strings.alloc(parent_fqn);
                 self.indexes.nested.insert(parent_id, gdef.name, def_node);
             }
             definition_ranges.push((gdef.range, def_node));
@@ -410,10 +410,9 @@ impl CodeGraph {
 
         for (i, gdef) in graph_defs.iter().enumerate() {
             let fqn_str = self.strings.get(gdef.fqn);
-            let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) else {
+            let Some(parent_fqn) = parent_fqn(fqn_str, gdef.fqn_sep) else {
                 continue;
             };
-            let parent_fqn = &fqn_str[..sep_pos];
             for (j, parent_def) in graph_defs.iter().enumerate() {
                 if j != i
                     && self.strings.get(parent_def.fqn) == parent_fqn
@@ -1188,6 +1187,28 @@ impl Default for CodeGraph {
     }
 }
 
+/// The FQN without its last segment. A separator preceded by an odd run of
+/// backslashes is escaped text inside a segment (Markdown headings), except
+/// for PHP, whose separator is the backslash itself.
+fn parent_fqn<'a>(fqn: &'a str, separator: &str) -> Option<&'a str> {
+    if separator == "\\" {
+        return fqn.rsplit_once(separator).map(|(parent, _)| parent);
+    }
+    let mut end = fqn.len();
+    while let Some(position) = fqn[..end].rfind(separator) {
+        let backslashes = fqn[..position]
+            .bytes()
+            .rev()
+            .take_while(|&byte| byte == b'\\')
+            .count();
+        if backslashes % 2 == 0 {
+            return Some(&fqn[..position]);
+        }
+        end = position;
+    }
+    None
+}
+
 fn dir_to_string(dir: &Path) -> String {
     if dir.as_os_str().is_empty() {
         ".".to_string()
@@ -1367,6 +1388,17 @@ mod tests {
     use super::*;
     use crate::v2::config::Language;
     use crate::v2::types::*;
+
+    #[test]
+    fn parent_fqn_skips_escaped_separators() {
+        assert_eq!(
+            parent_fqn(r"guide#Guide#C\# Basics", "#"),
+            Some("guide#Guide")
+        );
+        assert_eq!(parent_fqn(r"guide#a\\#b", "#"), Some(r"guide#a\\"));
+        assert_eq!(parent_fqn(r"App\Models\User", "\\"), Some(r"App\Models"));
+        assert_eq!(parent_fqn(r"C\# Basics", "#"), None);
+    }
 
     fn build_graph(file_path: &str, defs: Vec<CanonicalDefinition>) -> CodeGraph {
         build_graph_multi(vec![(file_path, defs)])

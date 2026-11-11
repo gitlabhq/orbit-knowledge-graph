@@ -85,6 +85,27 @@ tests:
     assert:
       - { empty: true }
 
+  - name: "sections define their direct child sections"
+    query: |
+      MATCH (p:Definition)-[:DEFINES]->(c:Definition)
+      WHERE c.definition_type = 'Section'
+      RETURN p.fqn AS parent, c.fqn AS child
+    assert:
+      - { row_count: 5 }
+      - { row: { parent: "guide#Guide", child: "guide#Guide#Examples" } }
+      - { row: { parent: "guide#Guide", child: "guide#Guide#Examples-1" } }
+      - { row: { parent: "guide#Guide", child: "guide#Guide#Bold code heading" } }
+      - { row: { parent: "guide#Guide", child: "guide#Guide#C\\# Basics" } }
+      - { row: { parent: "guide#Guide", child: "guide#Guide#Setext child" } }
+
+  - name: "the file defines every section"
+    query: |
+      MATCH (f:File)-[:DEFINES]->(d:Definition)
+      WHERE d.definition_type = 'Section'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 7 }
+
   - name: "section ids are the same in both engines"
     query: |
       MATCH (d:Definition)
