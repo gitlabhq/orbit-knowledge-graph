@@ -203,7 +203,7 @@ Each layer names only the layers inside it, and the loader checks them from the 
 | Layer | Fragment | Names | Owns |
 |---|---|---|---|
 | 0 | graph | nothing | entities, their identity, properties, types, defaults; relationship variants, their cardinality and edge-owned attributes |
-| 1 | storage | the graph | tables, columns, storage types, immutable columns, access and statistics hints; a foreign key or an edge table for every variant, and its lifecycle |
+| 1 | storage | the graph | tables, columns, storage types, immutable columns, access and statistics hints; a foreign key or an edge table for every variant |
 | 1 | service | the graph | lookups for virtual properties |
 | 2 | authorization | the graph, backends, provider names | scope, permission, one policy per backend that stores the entity, checks by provider |
 | 2 | source | the graph | every writer: source tables, query templates, column map, or the code indexer; rows land in the tables storage binds |
@@ -219,16 +219,16 @@ Keys are typed, and nothing casts them:
 - A foreign key column has the type of the identity it points to. An edge table declares its endpoint ID columns, and a variant binds to it only when both endpoint identities match those types. An integration with string IDs declares its own edge table.
 - A `via` step or a join between different key types needs a declared relationship or a service lookup; the loader rejects a mismatch instead of casting.
 
-Storage also declares the lifecycle of what it keeps:
+Two rules of the model govern what the stores keep, and no fragment configures them:
 
-- The identity of a row is the entity's identity, not the physical key. A row that moves to another path tombstones its old row.
-- Each edge-table binding declares what a deleted endpoint does to its edges, such as `on_delete: tombstone`, and the indexing engine applies it in the same flow that tombstones the node. A binding without it fails the load.
+- A row's identity is its entity's identity, not its physical key. A row that moves to another path tombstones its old row.
+- A relationship exists only while both endpoints are live. When a writer tombstones a node, the indexing engine tombstones that node's edges in every edge table that binds a variant of it, in the same flow. A foreign key needs nothing, because it lives on the node's row.
 
 The four places that hold facts are fixed, and nothing lives outside them:
 
 | Owner | Holds |
 |---|---|
-| Packages | data: entities, identity, storage, bindings, lifecycle, writers, policies |
+| Packages | data: entities, identity, storage, bindings, writers, policies |
 | Deployment config | connections, providers, limits such as row and node caps, engine settings |
 | Backends, in Rust | capabilities: operators, functions, match modes, how each scope kind renders |
 | Compiler phases | decisions: routing, foreign key or edge, how to read the latest row, stage splits |

@@ -112,12 +112,12 @@ relationships:
   AUTHORED:
     User -> MergeRequest: {fk: {on: target, column: author_id}}
   APPROVED:
-    User -> MergeRequest: {edge_table: gl_edge, on_delete: tombstone}
+    User -> MergeRequest: {edge_table: gl_edge}
 ```
 
 `AUTHORED` is a foreign key: the `author_id` column on the `MergeRequest` row holds the author. `APPROVED` is many-to-many, so its rows live in an edge table. Every variant names one of the two, so a variant with no binding fails the load.
 
-An edge-table binding also declares its lifecycle. `on_delete: tombstone` means the indexing engine tombstones the edge in the same flow that tombstones either endpoint.
+An edge never outlives its endpoints. When a merge request is tombstoned, the indexing engine also tombstones its `APPROVED` rows in `gl_edge`, in the same flow, whichever pipeline wrote them. No fragment declares this, because the bindings already name every edge table that holds a merge request's edges.
 
 An edge table declares its endpoint ID columns with their types, in the store's engine block:
 
@@ -556,7 +556,6 @@ The loader collects every error, names its package, and fails once. A missing de
 - A relationship variant with no storage binding in the home store of its endpoints.
 - An entity without a declared `identity`, or an identity property that does not exist.
 - A foreign key column, `via` step or edge-table ID column whose type differs from the identity it points to. Nothing is cast.
-- An edge-table binding without `on_delete`.
 - A stored entity or edge-table variant with no writer, or with two.
 - A foreign key binding on a many-to-many variant, on the wrong side of a one-to-many variant, or on a column its table does not hold.
 - An edge table copy that names no property of that endpoint, or a graph attribute with no edge column.
