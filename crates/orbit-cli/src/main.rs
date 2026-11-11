@@ -656,6 +656,12 @@ enum Commands {
         #[arg(long)]
         no_index: bool,
 
+        /// Keep GitLab Duo and Claude Code on local Orbit: setup does not
+        /// contact GitLab, and their hooks print local-only instructions even
+        /// when signed in.
+        #[arg(long, env = "ORBIT_NO_GITLAB", value_parser = clap::builder::FalseyValueParser::new())]
+        no_gitlab: bool,
+
         /// What to install as the `orbit` skill. `wrapper` loads the real
         /// skill when the agent reads it. `full` writes the skill tree now,
         /// for agents that cannot run commands at that point; it needs the
@@ -692,6 +698,9 @@ enum Commands {
         /// Also point glab calls at Orbit's GitLab search and context; setup adds it when Orbit reaches GitLab.
         #[arg(long, hide = true)]
         gitlab: bool,
+
+        #[arg(long, hide = true, conflicts_with = "gitlab")]
+        no_gitlab: bool,
     },
     /// Sends one command event; every command runs it detached so none waits on telemetry.
     #[command(hide = true)]
@@ -794,9 +803,14 @@ async fn main() -> Result<()> {
     }
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
     match &cli.command {
-        Commands::HookGuard { kind, gitlab, .. } => {
+        Commands::HookGuard {
+            kind,
+            gitlab,
+            no_gitlab,
+            ..
+        } => {
             let started = Instant::now();
-            if commands::hook_guard::run(*kind, *gitlab) {
+            if commands::hook_guard::run(*kind, *gitlab, *no_gitlab) {
                 telemetry::spawn_detached_event(&subcommand_path(&matches), 0, started.elapsed());
             }
             return Ok(());
@@ -961,9 +975,13 @@ async fn dispatch(
             install,
             skip,
             no_index,
+            no_gitlab,
             skill,
             flags,
         } => {
+            if no_gitlab {
+                commands::setup::spec::keep_local();
+            }
             let components = commands::setup::Component::from_flags(&install, &skip)?;
             let agent_plugins = commands::setup::Component::AgentPlugins;
             let ask_agent_plugins =
@@ -1019,8 +1037,9 @@ async fn dispatch(
             graph_first: _,
             mode: _,
             gitlab,
+            no_gitlab,
         } => {
-            commands::hook_guard::run(kind, gitlab);
+            commands::hook_guard::run(kind, gitlab, no_gitlab);
             Ok(())
         }
         Commands::SendEvent { .. } | Commands::Refresh { .. } => Ok(()),
@@ -1551,6 +1570,39 @@ mod tests {
                 "{removed}"
             );
         }
+    }
+
+    #[test]
+    fn no_gitlab_keeps_setup_and_its_hooks_local() {
+        let Commands::Setup { no_gitlab, .. } =
+            Cli::parse_from(["orbit", "setup", "duo", "--no-gitlab"]).command
+        else {
+            panic!("expected setup");
+        };
+        assert!(no_gitlab);
+        let command = Cli::command();
+        let setup = command.find_subcommand("setup").unwrap();
+        let flag = setup
+            .get_arguments()
+            .find(|arg| arg.get_id() == "no_gitlab")
+            .unwrap();
+        assert_eq!(
+            flag.get_env(),
+            Some(std::ffi::OsStr::new("ORBIT_NO_GITLAB"))
+        );
+
+        assert!(matches!(
+            Cli::parse_from(["orbit", "hook-guard", "instructions", "--no-gitlab"]).command,
+            Commands::HookGuard {
+                no_gitlab: true,
+                gitlab: false,
+                ..
+            }
+        ));
+        assert!(
+            Cli::try_parse_from(["orbit", "hook-guard", "search", "--gitlab", "--no-gitlab"])
+                .is_err()
+        );
     }
 
     #[test]

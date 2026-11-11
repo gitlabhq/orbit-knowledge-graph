@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ontology::migrations::sha256_hex;
 use rust_embed::Embed;
@@ -160,14 +161,37 @@ fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> S
 static SESSION: LazyLock<crate::remote::server_schema::Session> =
     LazyLock::new(|| crate::remote::server_schema::session_start(Path::new(".")));
 
+static NO_GITLAB: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn keep_local() {
+    NO_GITLAB.store(true, Ordering::Relaxed);
+}
+
+pub(crate) fn keeps_local() -> bool {
+    NO_GITLAB.load(Ordering::Relaxed)
+}
+
 pub(crate) fn reaches_gitlab() -> bool {
-    SESSION.reachable
+    !keeps_local() && SESSION.reachable
+}
+
+pub(crate) fn hook_gitlab_arg() -> &'static str {
+    if keeps_local() {
+        " --no-gitlab"
+    } else if reaches_gitlab() {
+        " --gitlab"
+    } else {
+        ""
+    }
 }
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
 
-pub(crate) fn instructions_text(setup_reached_gitlab: bool) -> String {
+pub(crate) fn instructions_text(setup_reached_gitlab: bool, no_gitlab: bool) -> String {
+    if no_gitlab {
+        return render_instructions(launcher(), false, &Providers::new());
+    }
     let remote = SESSION.reachable || (setup_reached_gitlab && !SESSION.signed_in);
     render_instructions(launcher(), remote, &SESSION.providers)
 }

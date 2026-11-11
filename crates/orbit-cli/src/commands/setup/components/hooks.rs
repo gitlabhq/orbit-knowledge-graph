@@ -58,12 +58,13 @@ impl Installer for Hooks {
 }
 
 fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Result<()> {
+    let hook_gitlab = spec::hook_gitlab_arg();
     for merge in &agent.json_merges {
         let (path, label) = target.resolve(&merge.file)?;
         let entries: Vec<Value> = merge
             .entries
             .iter()
-            .map(substitute_tokens_in_json)
+            .map(|entry| substitute_tokens_in_json(entry, hook_gitlab))
             .collect();
         let mut root = json::read_object(&path)?;
         if !file_mentions(&path, &merge.marker) {
@@ -295,20 +296,21 @@ pub(super) fn remove_files<'a>(
     Ok(())
 }
 
-fn substitute_tokens_in_json(value: &Value) -> Value {
+fn substitute_tokens_in_json(value: &Value, hook_gitlab: &str) -> Value {
     match value {
-        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher()).replace(
-            "{{hook_gitlab}}",
-            if spec::reaches_gitlab() {
-                " --gitlab"
-            } else {
-                ""
-            },
-        )),
-        Value::Array(items) => Value::Array(items.iter().map(substitute_tokens_in_json).collect()),
+        Value::String(s) => Value::String(
+            s.replace("{{orbit}}", spec::launcher())
+                .replace("{{hook_gitlab}}", hook_gitlab),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| substitute_tokens_in_json(item, hook_gitlab))
+                .collect(),
+        ),
         Value::Object(map) => Value::Object(
             map.iter()
-                .map(|(k, v)| (k.clone(), substitute_tokens_in_json(v)))
+                .map(|(k, v)| (k.clone(), substitute_tokens_in_json(v, hook_gitlab)))
                 .collect(),
         ),
         other => other.clone(),
@@ -339,6 +341,32 @@ mod tests {
         assert!(retired.is_file());
         assert_eq!(report.outcomes.len(), 1);
         assert_eq!(report.outcomes[0].action, KEPT_RETIRED);
+    }
+
+    #[test]
+    fn no_gitlab_reaches_every_hook_guard_command_a_template_marks() {
+        let mut commands = Vec::new();
+        for agent in spec::agents() {
+            for merge in &agent.json_merges {
+                for entry in &merge.entries {
+                    if entry.to_string().contains("{{hook_gitlab}}") {
+                        let rendered = substitute_tokens_in_json(entry, " --no-gitlab");
+                        commands.push((agent.name.clone(), rendered.to_string()));
+                    }
+                }
+            }
+        }
+
+        let names: Vec<&str> = commands.iter().map(|(name, _)| name.as_str()).collect();
+        assert!(
+            names.contains(&"duo") && names.contains(&"claude"),
+            "{names:?}"
+        );
+        for (agent, rendered) in &commands {
+            assert!(rendered.contains("hook-guard"), "{agent}: {rendered}");
+            assert!(rendered.contains(" --no-gitlab\""), "{agent}: {rendered}");
+            assert!(!rendered.contains("{{"), "{agent}: {rendered}");
+        }
     }
 
     #[test]
