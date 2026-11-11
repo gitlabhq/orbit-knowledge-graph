@@ -13,19 +13,23 @@ pub struct Versioning {
     pub deleted: String,
 }
 
-/// What a relational store holds: its tables, where each variant's edges live, and the
-/// ClickHouse read paths, which stay empty on DuckDB.
+/// What a relational store holds: its tables and where each variant's edges live.
 #[derive(Debug)]
 pub struct RelationalStore {
     pub versioning: Option<Versioning>,
     pub shared_edge_table: Option<String>,
     pub tables: Vec<Table>,
+    edge_routes: Vec<Option<String>>,
+}
+
+/// The read paths a store declares beyond its tables, which only ClickHouse stores have.
+#[derive(Debug, Default)]
+pub struct ReadPaths {
     pub denormalized: DenormalizedCatalog,
     pub joins: Vec<MaterializedJoin>,
     pub high_fan_out: HashSet<EntityId>,
     pub path_lookups: HashMap<(EntityId, TraversalPathKind), TraversalPathLookup>,
     pub copies: Vec<(String, String)>,
-    edge_routes: Vec<Option<String>>,
 }
 
 impl RelationalFacts for RelationalStore {
@@ -113,11 +117,6 @@ impl RelationalStore {
             versioning,
             shared_edge_table,
             tables: Vec::new(),
-            denormalized: DenormalizedCatalog::default(),
-            joins: Vec::new(),
-            high_fan_out: HashSet::new(),
-            path_lookups: HashMap::new(),
-            copies: Vec::new(),
             edge_routes,
         }
     }

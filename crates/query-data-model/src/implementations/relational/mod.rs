@@ -13,7 +13,7 @@ mod tables;
 
 pub use capabilities::{Capabilities, CurrentRows, RelationalBackend};
 pub use catalog::RelationshipRoute;
-pub use store::{RelationalStore, Versioning, entity_layout};
+pub use store::{ReadPaths, RelationalStore, Versioning, entity_layout};
 pub use tables::{Column, Engine, Index, PathColumn, Projection, Table};
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -40,6 +40,10 @@ pub struct EdgeTableSpec {
 
 pub trait RelationalFacts {
     fn relational(&self) -> &RelationalStore;
+
+    fn read_paths(&self) -> Option<&ReadPaths> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

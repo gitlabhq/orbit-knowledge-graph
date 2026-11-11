@@ -213,7 +213,8 @@ where
     /// The copies of a table that store the same rows in another sort order.
     pub fn copies_of(&self, table: &str) -> Vec<&str> {
         self.stores()
-            .flat_map(|(_, facts)| &facts.relational().copies)
+            .filter_map(|(_, facts)| facts.read_paths())
+            .flat_map(|paths| &paths.copies)
             .filter(|(_, source)| source == table)
             .map(|(copy, _)| copy.as_str())
             .collect()
@@ -221,12 +222,13 @@ where
 
     pub fn joins(&self) -> impl Iterator<Item = &MaterializedJoin> {
         self.stores()
-            .flat_map(|(_, facts)| &facts.relational().joins)
+            .filter_map(|(_, facts)| facts.read_paths())
+            .flat_map(|paths| &paths.joins)
     }
 
     pub fn denormalized(&self, key: DenormalizedKey) -> Option<&DenormalizedProperty> {
         self.stores()
-            .find_map(|(_, facts)| facts.relational().denormalized.property(key))
+            .find_map(|(_, facts)| facts.read_paths()?.denormalized.property(key))
     }
 
     /// The home table of a property's entity and the column there that stores it.
@@ -255,7 +257,8 @@ where
 
     pub fn high_fan_out(&self, entity: EntityId) -> bool {
         self.home(entity)
-            .is_some_and(|(_, facts)| facts.relational().high_fan_out.contains(&entity))
+            .and_then(|(_, facts)| facts.read_paths())
+            .is_some_and(|paths| paths.high_fan_out.contains(&entity))
     }
 
     pub fn path_lookup(
@@ -265,7 +268,7 @@ where
     ) -> Option<&TraversalPathLookup> {
         self.home(entity)?
             .1
-            .relational()
+            .read_paths()?
             .path_lookups
             .get(&(entity, kind))
     }

@@ -5,7 +5,7 @@ use super::{
 use crate::DataType;
 use crate::catalog::{Diagnostics, StoreInput};
 use crate::implementations::clickhouse::ClickHouse;
-use crate::implementations::relational::RelationalStore;
+use crate::implementations::relational::{ReadPaths, RelationalStore};
 
 pub(super) struct Layout {
     pub columns: Vec<Column>,
@@ -18,6 +18,7 @@ pub(super) struct Layout {
 pub(in crate::implementations::clickhouse) fn resolve(
     input: &StoreInput<'_, ClickHouse>,
     relational: &mut RelationalStore,
+    paths: &mut ReadPaths,
     diagnostics: &mut Diagnostics,
 ) -> Option<Schema> {
     let package = input.store.package.as_str();
@@ -44,7 +45,7 @@ pub(in crate::implementations::clickhouse) fn resolve(
     resolver.edge_tables();
     resolver.joins();
     let created = resolver.tables.len();
-    resolver.copies(relational);
+    resolver.copies(paths);
     if creates {
         resolver.schema.tables = resolver.tables[..created].to_vec();
         resolver.auxiliary_tables();

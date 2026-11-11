@@ -4,7 +4,7 @@ use super::ClickHouse;
 use super::schema::{self, Schema};
 use super::spec::{ClickHouseOptions, ClickHouseSource, ColumnSpec};
 use crate::catalog::{Diagnostics, StorageBackend, StoreInput};
-use crate::implementations::relational::{RelationalFacts, RelationalStore};
+use crate::implementations::relational::{ReadPaths, RelationalFacts, RelationalStore};
 use crate::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
     MaterializedJoin, MaterializedNode, MaterializedRelationship, TraversalPathLookup,
@@ -37,6 +37,7 @@ impl IndexKind {
 #[derive(Debug)]
 pub struct ClickHouseStore {
     pub relational: RelationalStore,
+    pub read_paths: ReadPaths,
     schema: Option<Schema>,
 }
 
@@ -49,6 +50,10 @@ impl ClickHouseStore {
 impl RelationalFacts for ClickHouseStore {
     fn relational(&self) -> &RelationalStore {
         &self.relational
+    }
+
+    fn read_paths(&self) -> Option<&ReadPaths> {
+        Some(&self.read_paths)
     }
 }
 
@@ -73,18 +78,23 @@ impl StorageBackend for ClickHouse {
             &edge_tables,
             diagnostics,
         );
-        annotate_sources(&input, &mut relational, diagnostics);
-        resolve_denormalized(&input, &mut relational, diagnostics);
-        resolve_joins(&input, &mut relational, diagnostics);
-        let schema = schema::resolve(&input, &mut relational, diagnostics);
+        let mut read_paths = ReadPaths::default();
+        annotate_sources(&input, &mut read_paths, diagnostics);
+        resolve_denormalized(&input, &mut read_paths, diagnostics);
+        resolve_joins(&input, &mut read_paths, diagnostics);
+        let schema = schema::resolve(&input, &mut relational, &mut read_paths, diagnostics);
         relational.check_attribute_columns(&input, diagnostics);
-        ClickHouseStore { relational, schema }
+        ClickHouseStore {
+            relational,
+            read_paths,
+            schema,
+        }
     }
 }
 
 fn annotate_sources(
     input: &StoreInput<'_, ClickHouse>,
-    relational: &mut RelationalStore,
+    paths: &mut ReadPaths,
     diagnostics: &mut Diagnostics,
 ) {
     let graph = input.graph;
@@ -126,7 +136,7 @@ fn annotate_sources(
             .count()
             > 0;
         if fans_out {
-            relational.high_fan_out.insert(entity);
+            paths.high_fan_out.insert(entity);
         }
         for (kind, lookup) in &options.path_lookups {
             let property = diagnostics.require(
@@ -135,7 +145,7 @@ fn annotate_sources(
                 || format!("{name} path lookup key {} is not a property", lookup.key),
             );
             if let Some(property) = property {
-                relational.path_lookups.insert(
+                paths.path_lookups.insert(
                     (entity, *kind),
                     TraversalPathLookup {
                         table: lookup.table.clone(),
@@ -149,7 +159,7 @@ fn annotate_sources(
 
 fn resolve_denormalized(
     input: &StoreInput<'_, ClickHouse>,
-    relational: &mut RelationalStore,
+    paths: &mut ReadPaths,
     diagnostics: &mut Diagnostics,
 ) {
     let graph = input.graph;
@@ -201,12 +211,12 @@ fn resolve_denormalized(
                 nullable: spec.nullable,
             });
     }
-    relational.denormalized = DenormalizedCatalog::new(properties, declared);
+    paths.denormalized = DenormalizedCatalog::new(properties, declared);
 }
 
 fn resolve_joins(
     input: &StoreInput<'_, ClickHouse>,
-    relational: &mut RelationalStore,
+    paths: &mut ReadPaths,
     diagnostics: &mut Diagnostics,
 ) {
     let graph = input.graph;
@@ -290,7 +300,7 @@ fn resolve_joins(
         let Some(relationships) = relationships else {
             continue;
         };
-        relational.joins.push(MaterializedJoin {
+        paths.joins.push(MaterializedJoin {
             table: table.clone(),
             nodes,
             relationships,
