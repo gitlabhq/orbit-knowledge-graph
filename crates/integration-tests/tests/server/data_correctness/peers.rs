@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 
 use arrow::record_batch::RecordBatch;
 use compiler::dag::{Connections, Frontend, Rendered};
-use compiler::orbit_authorization::{Checks, Key};
+use compiler::orbit_authorization::Key;
 use duckdb_client::dag::DuckDbExecutor;
 use duckdb_client::{DuckDbClient, OpenMode};
-use integration_testkit::dag_fakes::{peer_packages, run_served};
+use integration_testkit::dag_fakes::{AllowedKeys, peer_packages, run_served};
 use integration_testkit::{TABLE_PREFIX, TestContext, t};
 use orbit_server::pipeline::graph_executors;
 use query_data_model::implementations::clickhouse::versioned;
@@ -112,7 +112,7 @@ impl Peers {
             &self.executors,
             query,
             &grants,
-            &Checks::default(),
+            &AllowedKeys::checks("merge_request", [Key::Int(2010), Key::Int(2011)]),
         )
         .await;
         match outcome {

@@ -309,11 +309,12 @@ pub(super) async fn a_head_under_none_keeps_the_files_its_via_chain_admits(ctx: 
     assert_eq!(strings(&none, "f_path"), Vec::<String>::new());
 }
 
-const DEEP: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, f.path ORDER BY mr.iid SKIP 200 LIMIT 50";
+const DEEP: &str = "MATCH (mr:MergeRequest {state: 'opened', title: 'bulk'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, f.path ORDER BY mr.iid SKIP 200 LIMIT 50";
 
 /// A merge request stage that would hand more rows than the key cap to the code stage fails the
 /// query instead of truncating it, a caller whose scope keeps it under the cap gets the exact
-/// page, and a caller who reads nothing gets an empty page. Adds 1,500 merge requests, so it
+/// page past row 200 (with the one extra row that tells pagination a next page exists), and a
+/// caller who reads nothing gets an empty page. Adds 1,500 merge requests, so it
 /// runs last on its context.
 pub(super) async fn a_deep_page_fails_past_the_stage_cap_instead_of_losing_rows(ctx: &TestContext) {
     for (offset, count, project, path) in
@@ -340,8 +341,7 @@ pub(super) async fn a_deep_page_fails_past_the_stage_cap_instead_of_losing_rows(
 
     let (_, narrow) = run(ctx, DEEP, &["1/100/1000/"], &[1000, 42]).await;
     let page = ints(&narrow, "mr_iid");
-    assert_eq!(page.len(), 50);
-    assert!(page.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert_eq!(page, (101_400..101_451).collect::<Vec<i64>>());
 
     let (_, none) = run(ctx, DEEP, &["1/101/"], &[1000, 42]).await;
     assert_eq!(ints(&none, "mr_iid"), Vec::<i64>::new());
