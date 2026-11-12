@@ -496,6 +496,7 @@ relationships:
     variants:
       Memory -> MergeRequest: {cardinality: many_to_many}
       Memory -> Project: {cardinality: many_to_many}
+    attributes: {traversal_path: string}
 ```
 
 ```yaml
@@ -517,6 +518,8 @@ relationships:
     permission: read
     enforce:
       clickhouse: {scope_key: traversal_path, of: own}
+    attributes:
+      hidden: [traversal_path]
 ```
 
 ```yaml
@@ -630,7 +633,7 @@ authorization:
     slack: {module: slack.sign_in, connection: data_extraction}
 ```
 
-GitLab's access levels appear only in the `gitlab.session` options. A deployment that loads its own packages, not the GitLab ones, binds other modules to the same contract:
+GitLab access levels appear only in the `gitlab.session` options. A deployment that loads its own packages, not the GitLab ones, binds other modules to the same contract:
 
 ```yaml
 authorization:

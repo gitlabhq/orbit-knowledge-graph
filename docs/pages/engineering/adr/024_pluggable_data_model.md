@@ -333,7 +333,7 @@ A relationship declares its own scope and permission, and each variant states wh
 | `holder` | the source; the target is the scope entity that holds it | `File -> Project` `IN_PROJECT` |
 | `own` | the edge's own key, which neither endpoint is known to share | `WorkItem -> WorkItem` links across projects |
 
-The planner reads `of:` for the security filter on an edge read and for the path bounds it pushes onto that read.
+The planner reads `of:` for the security filter on an edge read and for the path bounds it pushes onto that read. With `of: own`, the scope key is an attribute of the relationship, declared in the graph and given an access class like any property.
 
 ### 3. A new version goes live after its backfill
 
@@ -518,7 +518,7 @@ The same contract fits other authorization systems:
 | Cedar, as a check | the deployment's `Identify` | the deployment's `Scopes` | `is_authorized` per row, over the declared attributes |
 | OIDC groups | an OIDC token | the `groups` claim | none |
 
-GitLab's access levels live only in the GitLab module's options, which map each permission to a role. A `Scopes` answer is exact when the provider owns the grants, as GitLab paths, SpiceDB lookups and group claims do. An entity whose scope answer is not exact must declare a check.
+GitLab access levels live only in the options of the GitLab module, which map each permission to a role. A `Scopes` answer is exact when the provider owns the grants, as GitLab paths, SpiceDB lookups and group claims do. An entity whose scope answer is not exact must declare a check.
 
 ### 7. The same path for every backend
 
