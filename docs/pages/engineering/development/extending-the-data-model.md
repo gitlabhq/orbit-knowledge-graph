@@ -1,8 +1,6 @@
 # Extending the data model
 
-The [data model spike MR](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3346) is a reference implementation and is not meant to merge.
-This guide shows its packages and APIs, and it changes with the code.
-[ADR 024](../adr/024_pluggable_data_model.md) records the design and explains how it works.
+This guide shows the packages and APIs of the [data model spike MR](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3346), and it changes with the code. The MR is a reference implementation and is not meant to merge. [ADR 024](../adr/024_pluggable_data_model.md) records the design and explains how it works.
 
 Each extension writes only a package, a frontend or a backend:
 
@@ -17,9 +15,7 @@ Each extension writes only a package, a frontend or a backend:
 
 ## Add a GitLab entity
 
-An entity has one fragment of each kind it needs. These are the fragments for `MergeRequest` in `gitlab.code_review`.
-
-The graph fragment declares every property, with its type and its default value. It also declares the relationship variants the package adds, with their cardinality. It says nothing about columns or tables.
+An entity has one fragment of each kind it needs. The graph fragment declares every property and each relationship variant that the package adds. It names no columns or tables.
 
 ```yaml
 # packages/gitlab.code_review/graph.yaml
@@ -44,7 +40,7 @@ relationships:
     variants: {User -> MergeRequest: {cardinality: many_to_many}}
 ```
 
-The authorization fragment declares the entity's scope and the permission a read needs. `enforce` holds the policy for each backend that stores the entity. `checks` name a provider that checks the returned rows:
+The authorization fragment declares the entity's scope and the permission that a read needs. `enforce` holds the policy for each backend that stores the entity. Each entry in `checks` names a provider that checks the returned rows:
 
 ```yaml
 # packages/gitlab.code_review/authorization.yaml
@@ -72,9 +68,9 @@ relationships:
     enforce: {clickhouse: {scope_key: traversal_path, of: target}}
 ```
 
-The ClickHouse policy filters every `MergeRequest` read on the paths where the caller holds `read`. The `rails` check asks GitLab, in one batch, whether the caller can read each returned merge request, and it fails closed. Policies name graph properties and relationships, never columns.
+The ClickHouse policy limits every `MergeRequest` read to the paths where the caller holds `read`. The `rails` check asks GitLab in one batch whether the caller can read each returned merge request, and it fails closed. Policies name graph properties and relationships, never columns.
 
-`properties` puts every property in one access class. `open` properties are read and filtered freely, and `hidden` ones are never exposed. Each relationship declares its own scope and permission. `of: target` means the caller must hold the merge request's scope, wherever the user sits.
+`properties` puts every property in one access class. A query can read and filter `open` properties freely, and it never sees `hidden` ones. `of: target` means that the caller must hold the merge request's scope, wherever the user sits.
 
 The platform package declares the permissions and scope kinds that every package uses:
 
@@ -110,9 +106,9 @@ An entity without its own scope key reaches one through a relationship. A `Commi
       open: [id, sha, message, project_id]
 ```
 
-`IN_PROJECT` declares `of: holder`: the project is the scope entity that holds the commit.
+`of: holder` on `IN_PROJECT` makes the project that holds the commit the scope entity.
 
-The storage fragment lays it out in a store, and nothing in it is inferred. It names the table and lists every stored property as a column, with its storage type and whether it is immutable. Shared fields work on every backend. A `backend` block holds what only that backend understands, and that backend validates it.
+The storage fragment lays out the entity in a store. The loader infers nothing, so it catches a forgotten column before any query runs. Shared fields work on every backend. A `backend` block holds fields that only its backend understands and validates.
 
 ```yaml
 # packages/gitlab.code_review/storage/clickhouse.yaml
@@ -140,11 +136,15 @@ relationships:
     User -> MergeRequest: {edge_table: gl_edge}
 ```
 
-`AUTHORED` is a foreign key: the `author_id` column on the `MergeRequest` row holds the author. `APPROVED` is many-to-many, so its rows live in an edge table. Every variant names one of the two, so a variant with no binding fails the load.
+`access` says how queries use the columns, in terms that every backend understands. ClickHouse derives its skip indexes and sort key from it, so no package writes index or sort-key details. Column storage types stay explicit. The `backend` block overrides the derived indexes only where a platform package needs it to.
 
-An edge never outlives its endpoints. When a merge request is tombstoned, the indexing engine also tombstones its `APPROVED` rows in `gl_edge`, in the same flow, whichever pipeline wrote them. No fragment declares this, because the bindings already name every edge table that holds a merge request's edges.
+Every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. The planner reads the entity from that store by default. Every other store is partial and lists exactly the properties it holds. A live or code store holds no table. It lists the properties it serves, and its backend checks its own fields.
 
-An edge table declares its endpoint ID columns with their types, in the store's engine block:
+`AUTHORED` is a foreign key: the `author_id` column on the `MergeRequest` row holds the author. `APPROVED` is many-to-many, so its rows live in an edge table. Every variant binds to one of the two, or the load fails.
+
+An edge never outlives its endpoints. When the indexing engine tombstones a merge request, it also tombstones its `APPROVED` rows in `gl_edge` in the same flow, whichever pipeline wrote them. No fragment declares this, because the bindings already name every edge table that holds a merge request's edges.
+
+An edge table declares its endpoint ID columns and their types in the store's engine block:
 
 ```yaml
 engine:
@@ -160,11 +160,7 @@ engine:
 
 A variant binds to an edge table only when both endpoint identities match its ID column types. An integration whose entities have string IDs declares its own edge table with `String` columns.
 
-`access` says how the columns are queried, in terms every backend understands. ClickHouse turns it into its skip indexes and sort key, so no package writes index or sort-key details. Column storage types stay explicit. The `backend` block overrides the derived indexes only where a platform package needs to.
-
-Every stored entity marks exactly one store `complete: true`, even when it has only one. That store must list every property of the graph, or exclude it by name with `exclude: [...]`, and the planner reads the entity there by default. Another store is partial and lists exactly the properties it holds. The loader rejects a property that the complete store neither stores nor excludes. A relational store must also name its table and type every column. A live or code store holds no table: it lists the properties it serves, and its backend checks its own fields. A forgotten column fails at load, not at query time.
-
-The source fragment says where the indexer reads it from:
+The source fragment says where the indexer reads the entity from:
 
 ```yaml
 # packages/gitlab.code_review/sources/siphon.yaml
@@ -184,11 +180,11 @@ relationships:
       columns: {source: user_id, target: merge_request_id}
 ```
 
-A relationship that a foreign key carries needs no source entry. The indexer writes `author_id` with the merge request row, and the storage binding is enough. An edge-table variant such as `APPROVED` needs its own entry, because its rows come from their own table.
+A foreign key relationship such as `AUTHORED` needs only its storage binding, because the indexer writes `author_id` with the merge request row. An edge-table variant such as `APPROVED` needs its own source entry, because its rows come from their own table.
 
-A relationship can declare typed attributes in the graph when the data belongs to the edge itself, such as the access level of a membership. Queries filter and select them like properties, and storage binds each one to an edge column.
+A relationship can declare a typed attribute in the graph for data that belongs to the edge, such as the access level of a membership. Queries filter and select attributes like properties, and storage binds each one to an edge column.
 
-An edge table can also copy endpoint properties into its sort key, so a filter on an endpoint prunes the edge read. That is a storage choice, so the graph never sees it:
+An edge table can also copy endpoint properties into its sort key, so a filter on an endpoint prunes the edge read. The copy is a storage choice, and the graph never sees it:
 
 ```yaml
 # packages/gitlab.source_code/storage/clickhouse.yaml
@@ -201,7 +197,7 @@ relationships:
 
 A filter on `a.branch` in `(a)-[:CALLS]->(b)` then also filters the edge read on its `branch` column.
 
-Code entities have their own writer, the code indexer, declared like any other source:
+Every stored entity and every edge-table variant has exactly one declared writer. The code indexer writes the code entities, and its source fragment looks like any other:
 
 ```yaml
 # packages/gitlab.source_code/sources/code_indexer.yaml
@@ -212,13 +208,11 @@ entities: [Branch, Directory, File, Definition, ImportedSymbol]
 relationships: [CONTAINS, DEFINES, CALLS, IMPORTS]
 ```
 
-Every stored entity and every edge-table variant has exactly one declared writer.
-
-Publish the new package version to the registry. The registry diffs its storage against the active version, the indexing engine backfills the tables in scope, and the version goes live.
+Publish the new package version to the registry. The registry diffs its storage against the active version. The indexing engine then backfills the tables in scope, and the version goes live.
 
 ## Add an indexed third-party source
 
-An integration that lands rows in the data lake ships a package with graph, authorization, storage and source fragments. Jira issues use the graph store, like GitLab entities:
+An integration that lands rows in the data lake ships a package with graph, authorization, storage and source fragments. Jira issues live in the graph store, like GitLab entities:
 
 ```yaml
 # packages/integration.jira/sources/data_lake.yaml
@@ -236,7 +230,7 @@ Every row carries the `traversal_path` of the namespace that installed the integ
 
 ## Add a live third-party entity
 
-An entity can be fetched at query time instead of indexed. Its storage is a `live` store that holds no rows.
+An entity can be fetched at query time instead of indexed, so its `live` store holds no rows.
 
 ```yaml
 # packages/integration.slack/graph.yaml
@@ -329,7 +323,7 @@ relationships:
     SlackMessage -> SlackWorkspace: {fk: {on: source, column: workspace}}
 ```
 
-The workspaces themselves are indexed into the graph store from the integration's installation records, so `INSTALLED_IN` is a foreign key on a `SlackWorkspace` row:
+The workspaces live in the graph store, so `INSTALLED_IN` is a foreign key on a `SlackWorkspace` row:
 
 ```yaml
 # packages/integration.slack/storage/clickhouse.yaml
@@ -350,7 +344,7 @@ relationships:
     SlackWorkspace -> Group: {fk: {on: source, column: namespace_id}}
 ```
 
-The integration's data lake source writes the workspaces. The live store holds no rows, so `SlackMessage` needs no writer:
+The integration's data lake source writes the workspaces from its installation records. `SlackMessage` has no rows to write, so it needs no writer:
 
 ```yaml
 # packages/integration.slack/sources/data_lake.yaml
@@ -365,7 +359,7 @@ entities:
     columns: {id: workspace_id, name: workspace_name, namespace_id: namespace_id}
 ```
 
-The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit. The `access` hints say which filters the operation pushes down. A filter it cannot push down is a construction error.
+The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit. The `access` hints say which filters the operation pushes down, and any other filter is a construction error.
 
 ```cypher
 MATCH (m:SlackMessage)
@@ -383,7 +377,7 @@ let plan = live.build(|q| {
 let request = live.render(&plan);
 ```
 
-The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. Each workspace maps to the namespace that installed it. The `live` policy follows each message to the namespace that installed its workspace. The live backend then sends the request only for workspaces in namespaces where the caller holds `read`. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through the caller's sign-in.
+The `live` policy follows each message to the namespace that installed its workspace. The live backend sends the request only for workspaces in namespaces where the caller holds `read`. The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through that sign-in.
 
 ## Add a backend
 
@@ -427,9 +421,9 @@ pub trait Render: Catalog {
 }
 ```
 
-The builder plugs into shared tracking, which proves the structural facts of every call. The backend's own rules check the rest, such as which match modes an index supports.
+The builder uses shared tracking, which proves the structural facts of every call. The backend's own rules check the rest, such as which match modes an index supports.
 
-Orbit Next is a backend whose catalog speaks in repositories and structural matches. Its data lives on S3: the trigram index, the commit manifests and the code graph. The code indexing web servers read those objects and answer structural queries. Its storage fragment binds `File` to a store on the code indexing connection:
+Orbit Next is a backend whose catalog describes repositories and structural matches. Its data lives on S3: the trigram index, the commit manifests and the code graph. A storage fragment binds `File` to an Orbit Next store, and its `backend` block names the match modes that only Orbit Next understands:
 
 ```yaml
 # packages/gitlab.source_code/storage/orbit_code.yaml
@@ -449,7 +443,7 @@ entities:
       search: {content: [trigram, structural], path: [trigram]}
 ```
 
-`access` marks `path` and `content` as searchable. The `backend` block names the match modes that only Orbit Next understands.
+`access` marks `path` and `content` as searchable.
 
 A query for every call to `compile` in a project's Rust files plans into a code plan:
 
@@ -472,11 +466,11 @@ let plan = code.build(|q| {
 let request = code.render(&plan);
 ```
 
-The trigram prefilter is a planning decision: the planner takes the pattern's literal atoms and narrows the candidate files before the structural pass. The rendered request travels over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. `File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction.
+The planner adds the trigram prefilter: it takes the pattern's literal atoms and narrows the candidate files before the structural pass. The request goes over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. `File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction.
 
 ## Add a namespace overlay
 
-A namespace overlay is a package that loads only into one top-level namespace's model. Agent memory adds a `Memory` entity linked to the merge requests and projects it is about:
+A namespace overlay is a package that loads only into one top-level namespace's model. Its entities appear only in that namespace's catalogs, and that namespace's plans and caches carry their own model ID. The agent memory overlay adds a `Memory` entity:
 
 ```yaml
 # packages/overlay.agent_memory/graph.yaml
@@ -551,7 +545,7 @@ relationships:
     Memory -> Project: {edge_table: gl_memory_edge}
 ```
 
-`Memory` has string IDs and points at entities with integer IDs. So its edges live in their own table, with a `String` source column and an `Int64` target column. The agent memory API writes both:
+`Memory` has string IDs and points at entities with integer IDs, so its edges live in their own table. The agent memory API writes both:
 
 ```yaml
 # packages/overlay.agent_memory/sources/agent_api.yaml
@@ -584,9 +578,7 @@ relationships:
       clickhouse: {of: target}
 ```
 
-The graph must give `OWNS` one owner per todo. Storage decides whether the owner check reads a column or an edge. `OWNS` itself takes `of: target`: a caller sees the edge only when they may see the todo.
-
-Its entities appear only in that namespace's catalogs, and that namespace's plans and caches carry their own model ID.
+The graph must give `OWNS` one owner per todo, and storage decides whether the owner check reads a column or an edge. `OWNS` itself takes `of: target`, so a caller sees the edge only when they may see the todo.
 
 ## Add an authorization provider
 
@@ -611,7 +603,7 @@ pub trait Module: Sized {
 }
 ```
 
-The GitLab modules wrap what runs today:
+The GitLab modules wrap the Rails session and redaction calls that already exist:
 
 ```rust
 impl Provider<Identify<'_>> for GitLabSession { /* verify the session token Rails issues */ }
@@ -633,7 +625,7 @@ authorization:
     slack: {module: slack.sign_in, connection: data_extraction}
 ```
 
-GitLab access levels appear only in the `gitlab.session` options. A deployment that loads its own packages, not the GitLab ones, binds other modules to the same contract:
+GitLab access levels appear only in the `gitlab.session` options. A deployment that loads its own packages instead of the GitLab packages binds other modules to the same contract:
 
 ```yaml
 authorization:
@@ -644,7 +636,7 @@ authorization:
     cedar: {module: cedar, policies: "s3://example-authz/policies.cedar"}
 ```
 
-`spicedb` answers `Scopes` with `LookupResources` and `Check` with `CheckBulkPermissions`. `cedar` answers `Check` with `is_authorized` per row, over the graph properties the check lists in `attributes`. Storage maps those properties to columns, as it does for every policy. A row comes back only if every check on its entity allows it. Every provider fails closed.
+`spicedb` answers `Scopes` with `LookupResources` and `Check` with `CheckBulkPermissions`. `cedar` answers `Check` with `is_authorized` for each row, over the graph properties that the check lists in `attributes`. Storage maps those properties to columns, as it does for every policy. A row comes back only if every check on its entity allows it. Every provider fails closed.
 
 Tests use seeded fakes for each query, like the existing redaction mock.
 
@@ -656,7 +648,7 @@ A frontend parses text and builds a logical plan with the logical builder:
 let statement = frontend::gql::parse(text, model.logical())?;
 ```
 
-Name, type and connectivity errors are construction errors, so a frontend has no validation pass. It records intent, such as hop bounds or a skip, as data, and makes no planning decisions.
+Name, type and connectivity errors are construction errors, so a frontend has no validation pass. It records intent, such as hop bounds or a skip, as data and makes no planning decisions.
 
 ## Test it
 
@@ -683,26 +675,24 @@ physical:
 
 ### Load checks
 
-The loader collects every error, names its package, and fails once. A missing declaration is always an error, never a default:
+The loader collects every error with its package and fails once. A missing declaration is always a load error, never a default:
 
 - An unknown entity, property, relationship, variant, permission, scope, provider, field or template.
 - An entity or variant declared twice, or a second authorization entry.
-- An entity with no `id`, or no authorization entry.
-- A property that its complete store neither stores nor excludes. In a relational store, a column without a storage type or an entity without a table. Nothing is inferred.
-- An entity without `default_columns`.
+- An entity with no `id`, `identity`, `default_columns` or authorization entry, or with an `identity` property that does not exist.
+- A property that its complete store neither stores nor excludes. In a relational store, a column without a storage type or an entity without a table.
 - A property or relationship attribute with no access class, or with two.
 - A relationship without a scope, a permission, or an `of:` on each variant's policy.
-- A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none`, or checks by any provider. An integration package may declare only `Credentials` checks. A namespace overlay declares no checks, and its entities must be namespace- or user-scoped.
+- A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none` or checks by any provider. An integration package may declare only `Credentials` checks. A namespace overlay declares no checks, and its entities must be namespace- or user-scoped.
 - A backend that stores a non-global entity or a relationship but has no `enforce` entry for it.
 - A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.
-- A `via` chain that does not reach an entity holding the scope key, with one target per step.
+- A `via` chain that does not reach an entity that holds the scope key, or a step with more than one target.
 - An `enforce` entry of `none` with no `checks`, or an entity whose scope answer is not exact and that has no check.
 - A provider name the deployment does not bind, or one bound to a module that does not answer the query the check needs.
 - A user-scoped entity whose owner relationship does not reach `User`, or allows more than one owner per row.
 - A stored entity with no `complete: true`, or with two.
-- A relationship variant with no binding, or with two. A foreign key is bound in the store whose table holds the column, and an edge table in the store that declares it.
-- An entity without a declared `identity`, or an identity property that does not exist.
-- A foreign key column, `via` step or edge-table ID column whose type differs from the identity it points to. Nothing is cast.
+- A relationship variant with no binding, or with two. A foreign key binds in the store whose table holds the column, and an edge table binds in the store that declares it.
+- A foreign key column, `via` step or edge-table ID column whose type differs from the identity it points to. The loader casts nothing.
 - A stored entity or edge-table variant with no writer, or with two.
 - A foreign key binding on a many-to-many variant, on the wrong side of a one-to-many variant, or on a column its table does not hold.
 - An edge table copy that names no property of that endpoint, or a graph attribute with no edge column.
@@ -710,7 +700,5 @@ The loader collects every error, names its package, and fails once. A missing de
 
 ### Composition rules
 
-- A package cannot redeclare an entity that another package owns.
-- A package cannot add a second authorization entry for an entity, property or relationship.
-- A package can add variants to a platform relationship.
-- A package can bind more entities to a store that another package declares.
+- A package cannot redeclare an entity that another package owns, or add a second authorization entry for an entity, property or relationship.
+- A package can add variants to a platform relationship, and bind more entities to a store that another package declares.
