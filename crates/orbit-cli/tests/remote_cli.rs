@@ -1429,3 +1429,119 @@ fn a_plain_grep_searches_only_local_code() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("alpha_marker"));
     assert!(listener.accept().is_err(), "plain grep called GitLab");
 }
+
+#[test]
+fn workspace_graph_prints_the_whole_graph_with_the_working_tree_edits() {
+    let repo = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[
+            (
+                "print.h",
+                "void ether_if_print(int n);\nvoid lookup(int t);\n",
+            ),
+            (
+                "print-ether.c",
+                "#include \"print.h\"\nvoid ether_if_print(int n) { }\n",
+            ),
+            (
+                "print.c",
+                "#include \"print.h\"\nstatic void (*printers[])(int) = { ether_if_print };\nvoid lookup(int t) { printers[0](t); }\nint main(void) { lookup(1); return 0; }\n",
+            ),
+        ],
+    );
+    let data = tempfile::tempdir().expect("tempdir");
+    let orbit = |args: &[&str]| {
+        orbit_command(repo.path(), data.path(), "http://localhost:1", args)
+            .output()
+            .expect("run orbit binary")
+    };
+    let graph = |output: std::process::Output| -> serde_json::Value {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).expect("graph is JSON")
+    };
+    let first = graph(orbit(&["workspace", "graph"]));
+    assert_eq!(first["version"], 1);
+    let id = |g: &serde_json::Value, name: &str| -> String {
+        g["definitions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["name"] == name)
+            .unwrap_or_else(|| panic!("no definition {name}"))["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let has_edge = |g: &serde_json::Value, from: &str, to: &str, kind: &str| {
+        let (a, b) = (id(g, from), id(g, to));
+        g["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["source"] == a && e["target"] == b && e["kind"] == kind)
+    };
+    assert!(has_edge(&first, "main", "lookup", "CALLS"), "{first}");
+    assert!(
+        has_edge(&first, "printers", "ether_if_print", "USES_VALUE"),
+        "{first}"
+    );
+    assert!(
+        has_edge(&first, "lookup", "printers", "USES_VALUE"),
+        "{first}"
+    );
+    let table = first["definitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["name"] == "printers")
+        .unwrap();
+    assert_eq!(
+        table["start_line"].as_i64(),
+        Some(2),
+        "a table is placed at its line, not the file's start: {table}"
+    );
+    assert!(first["edited"].as_array().unwrap().is_empty(), "{first}");
+
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(
+        repo.path().join("print.c"),
+        "#include \"print.h\"\nstatic void (*printers[])(int) = { ether_if_print };\nvoid lookup(int t) { printers[0](t); }\nvoid later(void) { lookup(2); }\nint main(void) { later(); return 0; }\n",
+    )
+    .unwrap();
+    let edited = graph(orbit(&["workspace", "graph"]));
+    assert_eq!(edited["edited"], serde_json::json!(["print.c"]), "{edited}");
+    assert!(
+        has_edge(&edited, "main", "later", "CALLS"),
+        "the graph reflects the edit without an index run"
+    );
+    assert!(has_edge(&edited, "later", "lookup", "CALLS"), "{edited}");
+
+    let only = graph(orbit(&[
+        "workspace",
+        "graph",
+        "--kinds",
+        "Function",
+        "--edges",
+        "CALLS",
+    ]));
+    assert!(
+        only["definitions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| d["kind"] == "Function"),
+        "{only}"
+    );
+    assert!(
+        only["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["kind"] == "CALLS"),
+        "{only}"
+    );
+}

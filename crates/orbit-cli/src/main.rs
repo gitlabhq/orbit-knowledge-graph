@@ -4,6 +4,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod commands;
 mod database;
 mod descriptions;
+mod graph;
 mod list;
 mod remote;
 mod settings;
@@ -458,10 +459,35 @@ struct WorkspaceArgs {
     command: WorkspaceCommands,
 }
 
+/// Print the checkout's local graph as one JSON document: its definitions and the call and value edges
+/// between them, after bringing the index up to date with the working tree.
+///
+/// For tools that analyse the whole graph (reachability, comparing two trees in one repository). The
+/// document has a version and fixed fields; it does not depend on the database's tables.
+#[derive(Args, Debug, PartialEq)]
+struct GraphArgs {
+    /// Checkout to read; the current one by default.
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Read a specific revision DuckDB file.
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+
+    /// Definition kinds to include, comma separated. Default: callables, variables, constants, and types.
+    #[arg(long, value_delimiter = ',', value_name = "KIND")]
+    kinds: Vec<String>,
+
+    /// Edge kinds to include, comma separated. Default: CALLS,USES_VALUE,USES_TYPE.
+    #[arg(long, value_delimiter = ',', value_name = "KIND")]
+    edges: Vec<String>,
+}
+
 #[derive(Subcommand, Debug, PartialEq)]
 enum WorkspaceCommands {
     #[command(about = descriptions::short("index"))]
     Index(IndexArgs),
+    Graph(GraphArgs),
     Sql(SqlArgs),
     Schema(SchemaArgs),
     List(ListArgs),
@@ -1067,6 +1093,17 @@ async fn run_workspace(command: WorkspaceCommands) -> Result<()> {
             all: _,
             db,
         }) => sql::run(query, file, format, db, repo),
+        WorkspaceCommands::Graph(GraphArgs {
+            repo,
+            db,
+            kinds,
+            edges,
+        }) => graph::run(graph::Options {
+            repo,
+            db,
+            kinds,
+            edges,
+        }),
         WorkspaceCommands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
         WorkspaceCommands::List(ListArgs { format, db }) => list::run(format, db),
         WorkspaceCommands::Reset(ResetArgs { yes, dry_run }) => commands::reset::run(yes, dry_run),
