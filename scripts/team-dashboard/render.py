@@ -66,6 +66,18 @@ TEAM_WIDE_WINDOW = timedelta(days=7)
 BOT_RE = re.compile(r"(-|_)bot(_|$)|^service_account_")
 BLOCK_RE = re.compile(r"\{\{#(\w+)(?: limit=(\d+))?\}\}\n(.*?)\{\{/\1\}\}\n?", re.DOTALL)
 MIN_WRITE_INTERVAL = timedelta(minutes=15)
+BACKPORT_PROJECT = "gitlab-org/gitlab"
+BACKPORT_DEFAULT_BRANCH = "master"
+BUG_LABEL = "type::bug"
+CONTEXT_SYSTEMS_LABEL = "group::context-systems"
+BACKPORT_REQUIRED_LABEL = "backport::required"
+BACKPORT_LABELS = (BACKPORT_REQUIRED_LABEL, "backport::skip", "backport::complete")
+MAINTAINED_RELEASES = 3
+STABLE_BRANCH_RE = re.compile(r"\d+-\d+-stable(-ee)?")
+MAINTAINED_BRANCH_RE = re.compile(r"(\d+)-(\d+)-stable-ee")
+MILESTONE_VERSION_RE = re.compile(r"(\d+)\.(\d+)")
+MR_MENTION_RE = re.compile(r"mentioned in merge request ((?:[\w.-]+/)*[\w.-]+)?!(\d+)")
+COMMIT_MENTION_RE = re.compile(r"mentioned in commit (?:((?:[\w.-]+/)*[\w.-]+)@)?([0-9a-f]{7,40})")
 
 
 class DashboardError(Exception):
@@ -406,6 +418,153 @@ def team_wide_issues(api: Api, source: str, group: str, own_iid: int, now: datet
     return sorted(shared, key=lambda issue: (str(issue["updated_at"]), issue["web_url"]), reverse=True)
 
 
+def scoped_bug_merge_requests(api: Api, usernames: Sequence[str], labels: Sequence[str], filters: str) -> List[dict]:
+    """type::bug MRs to the default branch of the backport project, by the team or labelled group::context-systems."""
+    base = f"projects/{project_path(BACKPORT_PROJECT)}/merge_requests?target_branch={BACKPORT_DEFAULT_BRANCH}&{filters}"
+    required = [BUG_LABEL, *labels]
+    queries = [f"{base}&labels={quote(','.join([*required, CONTEXT_SYSTEMS_LABEL]), safe='')}"]
+    queries += [f"{base}&labels={quote(','.join(required), safe='')}&author_username={quote(username)}"
+                for username in usernames]
+    roster = set(usernames)
+    found: Dict[str, dict] = {}
+    for query in queries:
+        for mr in api.get_all(query):
+            mr_labels = mr.get("labels", [])
+            author = (mr.get("author") or {}).get("username")
+            if (
+                mr.get("target_branch") == BACKPORT_DEFAULT_BRANCH
+                and all(label in mr_labels for label in required)
+                and (author in roster or CONTEXT_SYSTEMS_LABEL in mr_labels)
+            ):
+                found[mr["web_url"]] = mr
+    return list(found.values())
+
+
+def oldest_maintained_release(api: Api) -> Tuple[int, int]:
+    """The oldest of the newest stable-ee branches; a fix can only be backported to releases older than its own.
+
+    A branch counts only once a release is tagged from it: the project also has test branches such as 99-4-stable-ee.
+    """
+    project = project_path(BACKPORT_PROJECT)
+    branches = api.get_all(f"projects/{project}/repository/branches?search=-stable-ee%24")
+    releases = sorted(
+        ((int(match.group(1)), int(match.group(2)))
+         for branch in branches
+         if (match := MAINTAINED_BRANCH_RE.fullmatch(str(branch.get("name", ""))))),
+        reverse=True,
+    )
+    maintained: List[Tuple[int, int]] = []
+    for major, minor in releases:
+        if api.get(f"projects/{project}/repository/tags?search={quote(f'^v{major}.{minor}.', safe='')}&per_page=1"):
+            maintained.append((major, minor))
+            if len(maintained) == MAINTAINED_RELEASES:
+                break
+    if not maintained:
+        raise DashboardError(f"{BACKPORT_PROJECT} has no released stable-ee branches")
+    return maintained[-1]
+
+
+def in_backport_policy(mr: dict, oldest_maintained: Tuple[int, int]) -> bool:
+    """Shipped after the oldest maintained release. A missing or non-version milestone counts, so nothing is missed."""
+    match = MILESTONE_VERSION_RE.fullmatch(str((mr.get("milestone") or {}).get("title", "")))
+    return not match or (int(match.group(1)), int(match.group(2))) > oldest_maintained
+
+
+def unlabelled_bug_merge_requests(api: Api, visibility: Visibility, usernames: Sequence[str],
+                                  oldest_maintained: Tuple[int, int]) -> List[dict]:
+    """Open non-draft and merged bug MRs in backport policy with no backport label."""
+    without = f"not%5Blabels%5D={quote(','.join(BACKPORT_LABELS), safe='')}"
+    found = [
+        *scoped_bug_merge_requests(api, usernames, (), f"state=opened&draft=no&{without}"),
+        *scoped_bug_merge_requests(api, usernames, (), f"state=merged&{without}"),
+    ]
+    return [
+        mr for mr in found
+        if not mr.get("draft")
+        and not set(BACKPORT_LABELS) & set(mr.get("labels", []))
+        and in_backport_policy(mr, oldest_maintained)
+        and visibility.path_if_public(int(mr["project_id"]))
+    ]
+
+
+def readable(api: Api, path: str, single: bool) -> List[dict]:
+    """The merge request or list at path; one the token cannot read (403, 404) is skipped."""
+    try:
+        return [api.get(path)] if single else api.get_all(path)
+    except DashboardError as error:
+        if error.status not in (403, 404):
+            raise
+        return []
+
+
+def is_backport(mr: dict, from_commit: bool) -> bool:
+    """A live stable-branch MR; a commit can also sit in unrelated draft MRs, so those do not count."""
+    return bool(
+        STABLE_BRANCH_RE.fullmatch(str(mr.get("target_branch", "")))
+        and mr.get("state") != "closed"
+        and "revert" not in str(mr.get("title", "")).lower()
+        and not (from_commit and mr.get("draft"))
+    )
+
+
+def backport_merge_requests(api: Api, mr: dict) -> List[dict]:
+    """Backports of the merge request, found through its "mentioned in merge request" and "mentioned in commit" notes."""
+    own_project = str(mr["project_id"])
+    found: Dict[str, dict] = {}
+    for note in api.get_all(f"projects/{own_project}/merge_requests/{mr['iid']}/notes"):
+        if not note.get("system"):
+            continue
+        body = str(note.get("body", ""))
+        if mention := MR_MENTION_RE.fullmatch(body):
+            project = project_path(mention.group(1)) if mention.group(1) else own_project
+            hits, from_commit = readable(api, f"projects/{project}/merge_requests/{mention.group(2)}", True), False
+        elif mention := COMMIT_MENTION_RE.fullmatch(body):
+            project = project_path(mention.group(1)) if mention.group(1) else own_project
+            hits = readable(api, f"projects/{project}/repository/commits/{mention.group(2)}/merge_requests", False)
+            from_commit = True
+        else:
+            continue
+        for hit in hits:
+            if is_backport(hit, from_commit):
+                found[hit["web_url"]] = hit
+    return list(found.values())
+
+
+def backport_progress(api: Api, visibility: Visibility, usernames: Sequence[str], oldest_maintained: Tuple[int, int]
+                      ) -> Tuple[List[dict], List[Tuple[dict, List[str]]]]:
+    """Merged backport::required MRs in backport policy with no backport yet, and those (in policy or not) whose
+    backports have all merged, with their public references."""
+    not_started: List[dict] = []
+    relabel: List[Tuple[dict, List[str]]] = []
+    for mr in scoped_bug_merge_requests(api, usernames, (BACKPORT_REQUIRED_LABEL,), "state=merged"):
+        if not visibility.path_if_public(int(mr["project_id"])):
+            continue
+        backports = backport_merge_requests(api, mr)
+        if not backports:
+            if in_backport_policy(mr, oldest_maintained):
+                not_started.append(mr)
+        elif all(backport.get("state") == "merged" for backport in backports):
+            references = [
+                f"{path}!{backport['iid']}" for backport in backports
+                if (path := visibility.path_if_public(int(backport["project_id"])))
+            ]
+            relabel.append((mr, references))
+    return not_started, relabel
+
+
+def merged_or_created(mr: dict) -> str:
+    """A merged MR's age counts from the merge."""
+    return str(mr.get("merged_at") or mr.get("created_at"))
+
+
+def bug_line(mr: dict, now: datetime, suffix: str = "") -> str:
+    return item_line(str(mr["web_url"]), merged_or_created(mr), now, suffix)
+
+
+def oldest_first(mr: dict) -> Tuple[str, str]:
+    return merged_or_created(mr), str(mr["web_url"])
+
+
 def region_without_timestamp(region: str) -> str:
     return UPDATED_RE.sub("", region)
 
@@ -456,12 +615,21 @@ def render_region(api: Api, args: argparse.Namespace, now: datetime) -> str:
     ]
     pinned = read_pinned(TEMPLATES / "dashboard-priority.txt")
     team_wide = team_wide_issues(api, args.source_project, args.team_group, args.issue, now)
+    usernames = team_usernames(api, args.team_group)
+    oldest_maintained = oldest_maintained_release(api)
+    unlabelled = sorted(unlabelled_bug_merge_requests(api, visibility, usernames, oldest_maintained), key=oldest_first)
+    not_started, relabel = backport_progress(api, visibility, usernames, oldest_maintained)
+    relabel.sort(key=lambda pair: oldest_first(pair[0]))
     blocks: Dict[str, List[str]] = {
         "priority": pinned_lines(api, visibility, args.source_project, pinned, now),
         "review": [merge_request_line(c, now) for c in review],
         "ready": [merge_request_line(c, now) for c in mergeable],
         "blocked": [merge_request_line(c, now, status_text(c.mr)) for c in blocked],
         "teamwide": [f"- {issue['web_url']}+" for issue in team_wide],
+        "backportsnotstarted": [bug_line(mr, now) for mr in sorted(not_started, key=oldest_first)],
+        "backportsmerged": [bug_line(mr, now, "backports: " + ", ".join(references) if references else "")
+                            for mr, references in relabel],
+        "unlabelledbugs": [bug_line(mr, now, "merged" if mr.get("state") == "merged" else "open") for mr in unlabelled],
         "bots": [merge_request_line(c, now, status_text(c.mr)) for c in candidates if is_bot(c)],
     }
     body = render_blocks((TEMPLATES / "dashboard.md").read_text(), blocks)

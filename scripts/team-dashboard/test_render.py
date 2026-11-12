@@ -25,8 +25,9 @@ SOURCE_PATH = "gitlab-org%2Forbit%2Fknowledge-graph"
 
 
 ISSUES_ROUTE = ("GET", f"{SOURCE_PATH}/issues?state=opened&assignee_username=")
-KG_ID, PUBLIC_ID, PRIVATE_ID, MEMBERS_ONLY_ID = 100, 200, 300, 400
+KG_ID, PUBLIC_ID, PRIVATE_ID, MEMBERS_ONLY_ID, GITLAB_ID = 100, 200, 300, 400, 500
 KG_PATH = "gitlab-org/orbit/knowledge-graph"
+BUGS_ROUTE = "gitlab-org%2Fgitlab/merge_requests?target_branch=master&"
 
 
 def merge_request(iid, title="Change", created="2026-10-01T00:00:00Z", labels=(), project_id=KG_ID,
@@ -85,6 +86,13 @@ class FakeApi:
             ("GET", f"projects/{PUBLIC_ID}"): project("gitlab-org/docs"),
             ("GET", f"projects/{PRIVATE_ID}"): project("someone/secret", "private"),
             ("GET", f"projects/{MEMBERS_ONLY_ID}"): project("gitlab-org/closed", merge_requests="private"),
+            ("GET", f"projects/{GITLAB_ID}"): project("gitlab-org/gitlab"),
+            ("GET", BUGS_ROUTE): [],
+            ("GET", "gitlab-org%2Fgitlab/repository/branches"): [
+                {"name": name} for name in ("19-3-stable-ee", "19-4-stable-ee", "19-5-stable-ee", "19-2-stable-ee",
+                                            "19-5-stable", "security-19-6-stable-ee", "99-4-stable-ee")],
+            ("GET", "gitlab-org%2Fgitlab/repository/tags?search="): [{"name": "v19.0.0-ee"}],
+            ("GET", "gitlab-org%2Fgitlab/repository/tags?search=%5Ev99.4."): [],
             ("GET", "members/all/1"): {"access_level": 30},
             ("GET", "/approvals"): approvals(),
             ISSUES_ROUTE: [],
@@ -230,7 +238,8 @@ class RenderTest(DashboardTestCase):
     def test_empty_sections_are_hidden(self):
         text = visible(self.region(FakeApi({})))
         for heading in ("## Priority", "## Ready for review", "## Ready to merge", "## Team-wide",
-                        "Approved, but blocked", "Bot MRs"):
+                        "Approved, but blocked", "Bot MRs", "## Backports not started",
+                        "## Relabel to backport::complete", "Bug MRs missing a backport label"):
             self.assertNotIn(heading, text)
         self.assertIn("0 ready for review · 0 ready to merge · 0 approved but blocked", text)
         self.assertNotIn("\n\n\n", text)
@@ -410,6 +419,153 @@ class RenderTest(DashboardTestCase):
         comment = text[text.index("<!--\n"):text.index("\n-->")]
         self.assertIn("untrusted input", comment)
         self.assertNotIn("-->", comment[4:])
+
+
+def bug(iid, state="merged", labels=(), target="master", merged="2026-10-20T00:00:00Z", project_id=GITLAB_ID,
+        milestone="19.6", **extra):
+    return merge_request(iid, labels=[dashboard.BUG_LABEL, *labels], project_id=project_id, state=state,
+                         target_branch=target, merged_at=merged if state == "merged" else None,
+                         milestone={"title": milestone} if milestone else None, **extra)
+
+
+def stable(iid, state="merged", branch="19-5-stable-ee", title="Backport of a fix", project_id=GITLAB_ID, draft=False):
+    return merge_request(iid, title, project_id=project_id, state=state, target_branch=branch, draft=draft)
+
+
+def system(body):
+    return {"system": True, "body": body}
+
+
+def notes_route(iid):
+    return ("GET", f"projects/{GITLAB_ID}/merge_requests/{iid}/notes")
+
+
+class BackportTest(DashboardTestCase):
+    REQUIRED = dashboard.BACKPORT_REQUIRED_LABEL
+
+    def api(self, routes):
+        return FakeApi({("GET", "groups/gitlab-org%2Forbit%2Fteam/members"): TEAM, **routes})
+
+    def test_bug_merge_requests_missing_a_backport_label(self):
+        opened = [
+            bug(1, state="opened", created="2026-10-10T00:00:00Z", author="a"),
+            bug(2, state="opened", labels=["backport::skip"], author="a"),
+            bug(3, state="opened", author="outsider"),
+            bug(4, state="opened", author="outsider", labels=[dashboard.CONTEXT_SYSTEMS_LABEL]),
+            bug(5, state="opened", author="a", target="19-5-stable-ee"),
+            bug(6, state="opened", author="a", project_id=PRIVATE_ID),
+            bug(7, state="opened", author="a", draft=True),
+        ]
+        merged = [bug(8, author="b", merged="2026-10-25T00:00:00Z"),
+                  bug(9, author="b", created="2026-09-01T00:00:00Z", merged="2026-10-05T00:00:00Z")]
+        api = self.api({("GET", BUGS_ROUTE + "state=opened"): opened,
+                        ("GET", BUGS_ROUTE + "state=merged&not"): merged})
+        section = block(visible(self.region(api)), "<details><summary>Bug MRs missing a backport label (4)")
+        order = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", section)]
+        self.assertEqual(order, [4, 9, 1, 8])
+        self.assertIn(f"- {url(4, GITLAB_ID)} · 30d · open", section)
+        self.assertIn(f"- {url(9, GITLAB_ID)} · 26d · merged", section)
+        without = "not%5Blabels%5D=backport%3A%3Arequired%2Cbackport%3A%3Askip%2Cbackport%3A%3Acomplete"
+        queries = [path for _, path, _ in api.calls if without in path]
+        self.assertEqual(len(queries), 2 * (1 + len(TEAM)))
+        self.assertTrue([path for path in queries if "state=opened&draft=no" in path])
+        self.assertTrue([path for path in queries if "state=merged&not" in path])
+        self.assertTrue([path for path in queries if "labels=type%3A%3Abug%2Cgroup%3A%3Acontext-systems" in path])
+        self.assertFalse([path for _, path, _ in api.calls if path.endswith("/notes")])
+
+    def test_backport_sections_follow_the_detected_backports(self):
+        required = [
+            bug(10, labels=[self.REQUIRED], author="a", merged="2026-10-01T00:00:00Z"),
+            bug(11, labels=[self.REQUIRED], author="a"),
+            bug(12, labels=[self.REQUIRED], author="a"),
+            bug(13, labels=[self.REQUIRED], author="a"),
+            bug(14, labels=[self.REQUIRED], author="a"),
+            bug(15, labels=[self.REQUIRED], author="a", merged="2026-10-10T00:00:00Z"),
+            bug(16, labels=[self.REQUIRED], author="a", target="19-5-stable-ee"),
+            bug(17, labels=[self.REQUIRED], author="a", project_id=PRIVATE_ID),
+        ]
+        commit, other_commit = "a" * 40, "b" * 40
+        api = self.api({
+            ("GET", BUGS_ROUTE + "state=merged&labels="): required,
+            notes_route(10): [{"system": False, "body": "mentioned in merge request !505"}],
+            notes_route(11): [system("mentioned in merge request !501"), system(f"mentioned in commit {commit}")],
+            notes_route(12): [system("mentioned in merge request !505")],
+            notes_route(13): [system("mentioned in merge request !506")],
+            notes_route(14): [system(f"mentioned in commit {other_commit}")],
+            notes_route(15): [system("mentioned in merge request gitlab-org/security/gitlab!9")],
+            ("GET", f"projects/{GITLAB_ID}/merge_requests/501"): stable(501),
+            ("GET", f"projects/{GITLAB_ID}/repository/commits/{commit}/merge_requests"): [
+                stable(502, branch="19-4-stable-ee"), stable(503, state="closed"), stable(504, branch="master"),
+                stable(501)],
+            ("GET", f"projects/{GITLAB_ID}/merge_requests/505"): stable(505, state="opened"),
+            ("GET", f"projects/{GITLAB_ID}/merge_requests/506"): stable(506, title="Revert the Orbit feature backports"),
+            ("GET", f"projects/{GITLAB_ID}/repository/commits/{other_commit}/merge_requests"): [
+                stable(507, state="opened", draft=True), stable(508, state="closed")],
+            ("GET", "gitlab-org%2Fsecurity%2Fgitlab/merge_requests/9"): stable(9, project_id=PRIVATE_ID),
+        })
+        text = visible(self.region(api))
+        not_started = block(text, "## Backports not started", "## Relabel")
+        relabel = block(text, "## Relabel to backport::complete", "<details>")
+        self.assertEqual([int(m) for m in re.findall(r"/merge_requests/(\d+)\+", not_started)], [10, 13, 14])
+        self.assertEqual([int(m) for m in re.findall(r"/merge_requests/(\d+)\+", relabel)], [15, 11])
+        self.assertIn(f"- {url(11, GITLAB_ID)} · 11d · backports: gitlab-org/gitlab!501, gitlab-org/gitlab!502\n",
+                      relabel + "\n")
+        self.assertIn(f"- {url(15, GITLAB_ID)} · 21d\n", relabel + "\n")
+        for hidden in (url(12, GITLAB_ID), url(16, GITLAB_ID), url(17, PRIVATE_ID), "security"):
+            self.assertNotIn(hidden, text)
+        noted = [path for _, path, _ in api.calls if path.endswith("/notes")]
+        self.assertEqual(sorted(noted), [f"projects/{GITLAB_ID}/merge_requests/{iid}/notes" for iid in range(10, 16)])
+
+    def test_only_merge_requests_after_the_oldest_maintained_release_are_flagged(self):
+        milestones = {20: "19.4", 21: "19.3", 22: None, 23: "Backlog", 24: "19.10", 25: "18.11", 26: "20.0", 27: "19.9"}
+        unlabelled = [bug(iid, author="a", milestone=title) for iid, title in milestones.items()]
+        required = [bug(iid + 10, labels=[self.REQUIRED], author="a", milestone=title) for iid, title in milestones.items()]
+        api = self.api({("GET", BUGS_ROUTE + "state=merged&not"): unlabelled,
+                        ("GET", BUGS_ROUTE + "state=merged&labels="): required,
+                        **{notes_route(mr["iid"]): [] for mr in required}})
+        api.routes[("GET", "gitlab-org%2Fgitlab/repository/branches")] = [
+            {"name": f"19-{minor}-stable-ee"} for minor in (2, 10, 9, 8)]
+        text = visible(self.region(api))
+        flagged = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", block(text, "Bug MRs missing"))]
+        not_started = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", block(text, "## Backports not started",
+                                                                                   "<details>"))]
+        self.assertEqual(sorted(flagged), [22, 23, 24, 26, 27])
+        self.assertEqual(sorted(not_started), [32, 33, 34, 36, 37])
+
+    def test_default_release_policy_skips_untagged_branches_and_keeps_releases_after_the_oldest_one(self):
+        milestones = {20: "19.4", 21: "19.3", 22: None, 23: "19.6"}
+        api = self.api({("GET", BUGS_ROUTE + "state=opened"): [
+            bug(iid, state="opened", author="a", milestone=title) for iid, title in milestones.items()]})
+        flagged = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", block(self.region(api), "Bug MRs missing"))]
+        self.assertEqual(sorted(flagged), [20, 22, 23])
+
+    def test_relabel_ignores_the_release_policy(self):
+        api = self.api({
+            ("GET", BUGS_ROUTE + "state=merged&labels="): [bug(10, labels=[self.REQUIRED], author="a", milestone="19.1")],
+            notes_route(10): [system("mentioned in merge request !501")],
+            ("GET", f"projects/{GITLAB_ID}/merge_requests/501"): stable(501, branch="19-0-stable-ee"),
+        })
+        self.assertIn(url(10, GITLAB_ID), block(self.region(api), "## Relabel to backport::complete"))
+
+    def test_no_stable_branches_aborts(self):
+        api = self.api({("GET", "gitlab-org%2Fgitlab/repository/branches"): [{"name": "master"}]})
+        with self.assertRaises(dashboard.DashboardError):
+            self.region(api)
+
+    def test_branches_without_a_release_tag_are_not_releases(self):
+        api = self.api({("GET", "gitlab-org%2Fgitlab/repository/tags?search="): []})
+        with self.assertRaises(dashboard.DashboardError):
+            self.region(api)
+
+    def test_mention_the_token_cannot_read_is_skipped(self):
+        def missing():
+            raise dashboard.DashboardError("GET failed", 404)
+        api = self.api({
+            ("GET", BUGS_ROUTE + "state=merged&labels="): [bug(10, labels=[self.REQUIRED], author="a")],
+            notes_route(10): [system("mentioned in merge request !501")],
+            ("GET", f"projects/{GITLAB_ID}/merge_requests/501"): missing,
+        })
+        self.assertIn(url(10, GITLAB_ID), block(self.region(api), "## Backports not started"))
 
 
 class VisibilityTest(DashboardTestCase):
@@ -738,7 +894,8 @@ class TemplateTest(unittest.TestCase):
         text = (dashboard.TEMPLATES / "dashboard.md").read_text()
         for name in ("updated", "counts"):
             self.assertIn("{{" + name + "}}", text)
-        for name in ("priority", "review", "ready", "blocked", "teamwide", "bots"):
+        for name in ("priority", "review", "ready", "blocked", "teamwide", "backportsnotstarted", "backportsmerged",
+                     "unlabelledbugs", "bots"):
             self.assertIn("{{#" + name, text)
         dashboard.guidance_block()
 

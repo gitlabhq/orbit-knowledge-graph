@@ -40,6 +40,32 @@ Open issues in this project assigned to three or more team members, updated in t
 {{items}}
 {{/teamwide}}
 
+{{#backportsnotstarted}}
+## Backports not started
+
+Merged `type::bug` merge requests in gitlab-org/gitlab labelled `backport::required`, with a milestone newer than the oldest maintained release (or none), and no open or merged stable-branch merge request that mentions them. Oldest merge first.
+
+{{items}}
+{{/backportsnotstarted}}
+
+{{#backportsmerged}}
+## Relabel to backport::complete
+
+Merged `backport::required` merge requests whose stable-branch backports have all merged. Check that every target version is covered, then relabel.
+
+{{items}}
+{{/backportsmerged}}
+
+{{#unlabelledbugs}}
+<details><summary>Bug MRs missing a backport label ({{count}})</summary>
+
+Open or merged `type::bug` merge requests to `master` in gitlab-org/gitlab, with a milestone newer than the oldest maintained release (or none), and none of `backport::required`, `backport::skip`, or `backport::complete`. Oldest first; merged ones age from the merge.
+
+{{items}}
+
+</details>
+{{/unlabelledbugs}}
+
 {{#bots}}
 <details><summary>Bot MRs ({{count}})</summary>
 
