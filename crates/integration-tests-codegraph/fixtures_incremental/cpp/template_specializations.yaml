@@ -26,6 +26,10 @@ fixtures:
       template<class T> bool Ord<T>::operator>(const Ord& o) const { return false; }
       template<class T> int Ord<T>::operator>>(int n) const { return n; }
       template<class T> T* Ptr<A<B>>::operator->() const { return p; }
+      template<> int Foo::mixed<std::vector<int>, std::string>(int a) { return a; }
+      template<> int Foo::member_type<std::vector<int>::value_type>(int a) { return a; }
+      template<> int Stack<int>::assign<std::vector<int>, std::string>(int a) { return a; }
+      template<class T> T* Nest<std::vector<int>>::operator->() const { return p; }
 
 tests:
   - name: "Explicit specialization of a free function template drops the template arguments"
@@ -41,7 +45,9 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Function'
-        AND d.name IN ['foo<int>', 'foo<char, 2>', 'ptr_spec<int>', 'empty_args<>', 'Stack<int>::emplace<int>', 'Foo::bar<int>', 'A::B::deep<int>',
+        AND d.name IN ['foo<int>', 'foo<char, 2>', 'ptr_spec<int>', 'empty_args<>', 'Stack<int>::emplace<int>',
+                       'Foo::mixed<std::vector<int>, std::string>', 'Foo::member_type<std::vector<int>::value_type>',
+                       'Stack<int>::assign<std::vector<int>, std::string>', 'Foo::bar<int>', 'A::B::deep<int>',
                        'Foo::ptr_member<int>', 'Foo::nested<std::vector<int>>',
                        'Foo::deeper<std::map<int, std::vector<int>>>']
       RETURN d.name AS name
@@ -115,6 +121,27 @@ tests:
       - { row_count: 2 }
       - { row: { name: "Ord<T>::operator>" } }
       - { row: { name: "Ord<T>::operator>>" } }
+
+  - name: "Arguments that contain :: after a nested list are dropped too"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+        AND d.name IN ['Foo::mixed', 'Foo::member_type', 'Stack<int>::assign']
+      RETURN d.name AS name
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "Foo::mixed" } }
+      - { row: { name: "Foo::member_type" } }
+      - { row: { name: "Stack<int>::assign" } }
+
+  - name: "Operator on a class template with nested qualifier arguments keeps them"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.file_path = 'members.cpp' AND d.name STARTS WITH 'Nest'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Nest<std::vector<int>>::operator->" } }
 
   - name: "Three-way comparison operator keeps its name"
     query: |
