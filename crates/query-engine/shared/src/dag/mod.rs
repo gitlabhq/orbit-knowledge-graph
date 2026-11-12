@@ -8,7 +8,7 @@ mod remote;
 mod rows;
 mod runner;
 
-pub use executor::{Executed, Executor, ExecutorError, Executors, NoRemoteChecks, RowChecks};
+pub use executor::{Executed, Executor, ExecutorError, Executors};
 pub use observer::{Event, KEY_SAMPLE, Observer, Recording, Silent, StageInfo};
 pub use rows::from_rows;
 pub use runner::{DagError, Outcome, Runner};

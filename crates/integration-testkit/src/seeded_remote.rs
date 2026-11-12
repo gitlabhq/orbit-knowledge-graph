@@ -3,13 +3,12 @@
 
 use std::collections::BTreeMap;
 
-use compiler::remote::Namespaces;
-use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::catalog::{ExecuteError, Row};
 use query_data_model::implementations::live::{DataExtraction, ExtractionRequest};
 use query_data_model::implementations::orbit_code::{
     CodeSearch, RequestField, StructuralSearchRequest,
 };
+use query_data_model::plan::live::Workspaces;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -162,10 +161,15 @@ impl DataExtraction for SeededDataExtraction {
             })
         };
         let limit = request.limit.map_or(usize::MAX, |limit| limit as usize);
-        Ok(request
-            .workspaces
-            .iter()
-            .filter_map(|workspace| self.workspaces.get(workspace))
+        let workspaces: Vec<&Workspace> = match &request.workspaces {
+            Workspaces::Any => self.workspaces.values().collect(),
+            Workspaces::Only(listed) => listed
+                .iter()
+                .filter_map(|workspace| self.workspaces.get(workspace))
+                .collect(),
+        };
+        Ok(workspaces
+            .into_iter()
             .flat_map(|workspace| &workspace.messages)
             .filter(visible)
             .filter(filtered)
@@ -187,31 +191,26 @@ impl DataExtraction for SeededDataExtraction {
     }
 }
 
-/// The traversal path of every seeded repository and workspace, as the lookup on the graph
+/// The traversal path of every seeded repository and workspace, as a lookup on the graph
 /// connection would resolve them.
-pub fn seeded_namespaces() -> Namespaces {
+pub struct SeededScopes {
+    pub repositories: BTreeMap<i64, String>,
+    pub workspaces: BTreeMap<String, String>,
+}
+
+pub fn seeded_scopes() -> SeededScopes {
     let code = SeededCodeSearch::from_seed_file();
     let live = SeededDataExtraction::from_seed_file();
-    Namespaces {
+    SeededScopes {
         repositories: code
             .repositories
             .iter()
-            .map(|(project, repository)| {
-                (
-                    *project,
-                    TraversalPath::new_unchecked(repository.traversal_path.as_str()),
-                )
-            })
+            .map(|(project, repository)| (*project, repository.traversal_path.clone()))
             .collect(),
         workspaces: live
             .workspaces
             .iter()
-            .map(|(workspace, seeded)| {
-                (
-                    workspace.clone(),
-                    TraversalPath::new_unchecked(seeded.traversal_path.as_str()),
-                )
-            })
+            .map(|(workspace, seeded)| (workspace.clone(), seeded.traversal_path.clone()))
             .collect(),
     }
 }

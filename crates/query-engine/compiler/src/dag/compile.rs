@@ -12,7 +12,7 @@ use crate::config::{self, CompilerCtx as _};
 use crate::error::{QueryError, Result};
 use crate::metrics::CountErr;
 use crate::passes::plan::remote::Target;
-use crate::passes::remote_security::Namespaces;
+use crate::passes::remote_security::Admitted;
 use crate::passes::result_contract::ResultContext;
 
 /// The relational connection a deployment plans GQL against.
@@ -41,11 +41,11 @@ pub struct Env<'a> {
     pub trace: bool,
 }
 
-/// What a stage reads before it plans, besides the key sets `bind` puts in its statement: the
-/// scope keys its remote reads resolved, and the result contexts of the stages the engine joins.
+/// What a stage reads before it plans, besides the key sets `bind` puts in its statement: what
+/// its remote reads' policies admit, and the result contexts of the stages the engine joins.
 #[derive(Debug, Default)]
 pub struct Inputs {
-    pub namespaces: Namespaces,
+    pub admitted: Option<Admitted>,
     pub contexts: Vec<(StageId, ResultContext)>,
 }
 
@@ -90,13 +90,13 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
             })
         }
         (Kind::Gql, Primary::DuckDb(catalog)) if relational => {
-            let mut ctx = config::GqlDuckdbCtx::new(limits, trace, Arc::clone(catalog));
+            let mut ctx = config::GqlDuckdbCtx::new(grants, limits, trace, Arc::clone(catalog));
             ctx.set_statement(produced(statement)?);
             config::run_gql_duckdb(&mut ctx).count_err()?;
             let emitted = trace_relational(trace, ctx.relational().as_ref());
             Ok(Compiled {
                 planned: ctx.take_planned().unwrap_or_default(),
-                proved: false,
+                proved: ctx.take_proved().unwrap_or_default(),
                 emitted,
                 request: Request::Query(Box::new(produced(ctx.take_output())?)),
             })
@@ -105,7 +105,9 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
             Some(Target::Code(code)) => {
                 let mut ctx = config::GqlOrbitCodeCtx::new(grants, limits, trace, Arc::clone(code));
                 ctx.set_statement(produced(statement)?);
-                ctx.set_namespaces(inputs.namespaces);
+                if let Some(admitted) = inputs.admitted.clone() {
+                    ctx.set_admitted(admitted);
+                }
                 config::run_gql_orbit_code(&mut ctx).count_err()?;
                 let emitted = trace.then(|| ctx.code().as_ref().map(describe)).flatten();
                 Ok(Compiled {
@@ -118,7 +120,9 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
             Some(Target::Live(live)) => {
                 let mut ctx = config::GqlLiveCtx::new(grants, limits, trace, Arc::clone(live));
                 ctx.set_statement(produced(statement)?);
-                ctx.set_namespaces(inputs.namespaces);
+                if let Some(admitted) = inputs.admitted.clone() {
+                    ctx.set_admitted(admitted);
+                }
                 config::run_gql_live(&mut ctx).count_err()?;
                 let emitted = trace.then(|| ctx.live().as_ref().map(describe)).flatten();
                 Ok(Compiled {

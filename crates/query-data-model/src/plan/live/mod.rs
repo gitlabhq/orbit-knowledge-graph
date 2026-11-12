@@ -43,6 +43,15 @@ impl Condition {
     }
 }
 
+/// The workspaces a call reads: every one the caller's own sign-in reaches, when only the
+/// entity's checks restrict its rows, or only these.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Workspaces {
+    Any,
+    Only(Vec<String>),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiveOperation {
     Call(Operation),
@@ -52,7 +61,7 @@ pub enum LiveOperation {
         from: Option<String>,
         to: Option<String>,
     },
-    Workspaces(Vec<String>),
+    Workspaces(Workspaces),
     Limit(u64),
     Select(Vec<Ref>),
 }

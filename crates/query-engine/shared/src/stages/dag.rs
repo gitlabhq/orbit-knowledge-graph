@@ -10,24 +10,27 @@ use compiler::{CompiledQueryContext, QueryError};
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 use query_data_model::{Catalog, ClickHouse};
 
-use crate::dag::{Executed, Executors, NoRemoteChecks, Outcome, RowChecks, Runner, Silent};
+use compiler::orbit_authorization::Checks;
+
+use crate::dag::{Executed, Executors, Outcome, Runner, Silent};
 use crate::types::{ExecutionOutput, QueryExecutionLog};
 
 /// The executors a deployment registers, the code and live connections it serves next to its
-/// relational one, and the provider that checks remote rows.
+/// relational one, and the providers that check each stage's rows.
 pub struct DagStage {
     pub executors: Executors,
     pub remotes: Remotes,
-    pub checks: Arc<dyn RowChecks>,
+    pub checks: Checks,
 }
 
 impl DagStage {
-    /// A deployment that serves its relational connection alone.
-    pub fn relational(executors: Executors) -> Self {
+    /// A deployment that serves its relational connection alone, checking rows through the
+    /// deployment's providers.
+    pub fn relational(executors: Executors, checks: Checks) -> Self {
         Self {
             executors,
             remotes: Remotes::default(),
-            checks: Arc::new(NoRemoteChecks),
+            checks,
         }
     }
 }
@@ -92,7 +95,7 @@ impl PipelineStage for DagStage {
             None => Source::Text(&ctx.query_json),
         };
         let mut silent = Silent;
-        let outcome = Runner::new(env, &self.executors, self.checks.as_ref(), &mut silent)
+        let outcome = Runner::new(env, &self.executors, &self.checks, &mut silent)
             .run(source)
             .await
             .map_err(PipelineError::from)

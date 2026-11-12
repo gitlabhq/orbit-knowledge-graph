@@ -1,4 +1,6 @@
-use super::{Condition, LiveError, LiveLanguage, LiveOperation, LivePlan, LiveValue, Operation};
+use super::{
+    Condition, LiveError, LiveLanguage, LiveOperation, LivePlan, LiveValue, Operation, Workspaces,
+};
 use crate::DataType;
 use crate::catalog::Catalog;
 use crate::implementations::live::Live;
@@ -133,14 +135,15 @@ impl<'c> LiveBuilder<'c> {
         self.apply(operation, vec![calls])
     }
 
-    pub fn workspaces(
-        &mut self,
-        calls: Calls,
-        workspaces: impl IntoIterator<Item = String>,
-    ) -> Result<Calls, LiveError> {
-        let mut workspaces: Vec<String> = workspaces.into_iter().collect();
-        workspaces.sort();
-        workspaces.dedup();
+    pub fn workspaces(&mut self, calls: Calls, workspaces: Workspaces) -> Result<Calls, LiveError> {
+        let workspaces = match workspaces {
+            Workspaces::Any => Workspaces::Any,
+            Workspaces::Only(mut listed) => {
+                listed.sort();
+                listed.dedup();
+                Workspaces::Only(listed)
+            }
+        };
         self.apply(LiveOperation::Workspaces(workspaces), vec![calls])
     }
 

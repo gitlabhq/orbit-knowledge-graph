@@ -3,42 +3,48 @@
 
 use arrow::record_batch::RecordBatch;
 use compiler::dag::Request;
-use compiler::remote::{Namespaces, RowCheck, Target, lookup};
+use compiler::dag::RowCheck;
+use compiler::remote::{Admitted, Namespaces, Target, lookup};
 use query_data_model::catalog::Row;
 use query_data_model::surface::Statement;
 use serde_json::Value;
 
-use super::executor::{Executed, ExecutorError, RowChecks};
+use compiler::orbit_authorization::{AuthError, Caller, CheckRequest, Checks};
+
+use super::executor::{Executed, ExecutorError};
 use super::rows;
 use super::runner::{DagError, Runner};
 
-/// Runs the scope lookup of a remote stage on the relational connection; none when the caller
-/// can read none of what it resolved, so the stage reads nothing.
-pub(super) async fn namespaces(
+/// Runs the scope lookups of a remote stage on the relational connection, and what its reads'
+/// policies then admit; none when they admit nothing, so the stage reads nothing.
+pub(super) async fn admitted(
     runner: &mut Runner<'_>,
     stage: compiler::dag::StageId,
     target: &Target,
     statement: &Statement,
-) -> Result<Option<Namespaces>, DagError> {
-    let compiler::dag::Primary::ClickHouse(graph) = runner.env.primary else {
-        return Ok(Some(Namespaces::default()));
-    };
-    let Some(lookup) = lookup(target, &statement.plan, graph, runner.env.grants)? else {
-        return Ok(Some(Namespaces::default()));
-    };
-    let columns = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
-    let request = Request::Lookup(lookup.clone());
-    runner.emit(|| super::observer::Event::Rendered {
-        stage,
-        requests: request.rendered(),
-    });
-    let executor = runner.executors.get(runner.env.primary.connection())?;
-    let executed = executor.execute(&request).await?;
-    let rows = json(&executed.batches, &columns)?;
-    let namespaces = compiler::remote::namespaces(&lookup, &rows)?;
+) -> Result<Option<Admitted>, DagError> {
     let grants = runner.env.grants;
-    let readable = compiler::remote::readable(target, &statement.plan, grants, &namespaces)?;
-    Ok(readable.then_some(namespaces))
+    let mut namespaces = Namespaces::default();
+    let lookups = match runner.env.primary {
+        compiler::dag::Primary::ClickHouse(graph) => {
+            lookup(target, &statement.plan, graph, grants)?
+        }
+        compiler::dag::Primary::DuckDb(_) => Vec::new(),
+    };
+    for lookup in lookups {
+        let columns = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
+        let request = Request::Lookup(lookup.clone());
+        runner.emit(|| super::observer::Event::Rendered {
+            stage,
+            requests: request.rendered(),
+        });
+        let executor = runner.executors.get(runner.env.primary.connection())?;
+        let executed = executor.execute(&request).await?;
+        let rows = json(&executed.batches, &columns)?;
+        compiler::remote::namespaces(&lookup, &rows, &mut namespaces)?;
+    }
+    let admitted = compiler::remote::admitted(target, &statement.plan, grants, &namespaces)?;
+    Ok((!admitted.is_empty()).then_some(admitted))
 }
 
 /// Lookup rows as JSON rows of their key and scope columns.
@@ -66,16 +72,27 @@ fn json(batches: &[RecordBatch], columns: &[String]) -> Result<Vec<Row>, Executo
     Ok(out)
 }
 
-/// Keeps the rows of a remote stage that every row check of its entity allows.
+/// Keeps the rows of a stage that every row check of its entities allows, asked of the providers
+/// the deployment binds.
 pub(super) async fn checked(
-    checks: &dyn RowChecks,
+    checks: &Checks,
+    caller: &Caller,
     row_checks: &[RowCheck],
     mut executed: Executed,
 ) -> Result<Executed, DagError> {
     for check in row_checks {
-        let keys = rows::checked_keys(&executed.batches, &check.field, check.kind)?;
-        let allowed = checks.allowed(check, keys.into_iter().collect()).await?;
-        executed.batches = rows::retain(executed.batches, &check.field, check.kind, &allowed)?;
+        let keys = rows::checked_keys(&executed.batches, &check.column, check.kind)?;
+        let request = CheckRequest {
+            permission: check.permission.clone(),
+            resource: check.resource.clone(),
+            ids: keys.into_iter().collect(),
+        };
+        let allowed = checks
+            .check(caller, &check.provider, vec![request])
+            .await
+            .map_err(|error: AuthError| ExecutorError(error.to_string()))?;
+        let allowed = allowed.into_iter().next().unwrap_or_default();
+        executed.batches = rows::retain(executed.batches, &check.column, check.kind, &allowed)?;
     }
     Ok(executed)
 }

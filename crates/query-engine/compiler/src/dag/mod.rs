@@ -115,6 +115,8 @@ pub struct KeyInput {
     pub columns: Vec<String>,
     pub binding: String,
     pub properties: Vec<String>,
+    /// The declared type of each key part, which the producer's rows are read as.
+    pub types: Vec<query_data_model::DataType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -135,6 +137,19 @@ pub struct Stage {
     /// Whether the stage's rows are the response: the response policy shapes them for the
     /// caller, where a stage that feeds others hands its rows on whole.
     pub response: bool,
+    /// The row checks the stage's rows go through before a later stage reads them.
+    pub checks: Vec<RowCheck>,
+}
+
+/// A row check a stage's rows go through, on the column that holds each row's key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowCheck {
+    pub provider: String,
+    pub permission: String,
+    pub resource: String,
+    pub column: String,
+    /// The type of the key the check reads from `column`.
+    pub kind: crate::KeyKind,
 }
 
 impl Stage {

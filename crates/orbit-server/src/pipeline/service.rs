@@ -106,13 +106,20 @@ impl QueryPipelineService {
             )),
         ]);
 
-        let dag = DagStage::relational(graph_executors(
-            Arc::clone(&self.client),
-            &schema.data_model,
-            "base",
-            correlation::log_comment_base(claims.user_id, &query.text, schema.migration_version),
-            query.settings,
-        ));
+        let dag = DagStage::relational(
+            graph_executors(
+                Arc::clone(&self.client),
+                &schema.data_model,
+                "base",
+                correlation::log_comment_base(
+                    claims.user_id,
+                    &query.text,
+                    schema.migration_version,
+                ),
+                query.settings,
+            ),
+            schema.authorization.checks().clone(),
+        );
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(Arc::clone(&schema.data_model));

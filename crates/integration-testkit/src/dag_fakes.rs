@@ -7,14 +7,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use compiler::dag::Request;
 use compiler::orbit_authorization::Key;
-use compiler::remote::{Resolves, RowCheck};
+use compiler::orbit_authorization::{Answers, AuthError, Check, Checks, Module, Need, Provider};
+use compiler::remote::Resolves;
 use query_data_model::catalog::Row;
 use query_data_model::implementations::live::DataExtraction;
 use query_data_model::implementations::orbit_code::{CodeSearch, RequestField};
-use query_engine::shared::dag::{Executed, Executor, ExecutorError, RowChecks, from_rows};
+use query_engine::shared::dag::{Executed, Executor, ExecutorError, from_rows};
 use serde_json::{Value, json};
 
-use crate::seeded_remote::{SeededCodeSearch, SeededDataExtraction, seeded_namespaces};
+use crate::seeded_remote::{SeededCodeSearch, SeededDataExtraction, seeded_scopes};
 
 fn unexpected(request: &Request) -> ExecutorError {
     ExecutorError(format!("this fake runs no {request:?}"))
@@ -94,7 +95,7 @@ impl Executor for SeededGraph {
                 batch(&self.0, &fields)
             }
             Request::Lookup(lookup) => {
-                let seeded = seeded_namespaces();
+                let seeded = seeded_scopes();
                 let row = |id: Value, path: &str| {
                     json!({compiler::remote::KEY: id, lookup.scope.as_str(): path})
                         .as_object()
@@ -121,16 +122,65 @@ impl Executor for SeededGraph {
     }
 }
 
-/// A Rails stand-in that allows the listed keys of every row check.
-pub struct AllowedKeys(pub BTreeSet<Key>);
+/// A Rails stand-in whose checks on `resource` allow the listed keys; it allows every key of any
+/// other resource.
+pub struct AllowedKeys {
+    pub resource: String,
+    pub allowed: BTreeSet<Key>,
+}
 
 #[async_trait]
-impl RowChecks for AllowedKeys {
-    async fn allowed(&self, _: &RowCheck, keys: Vec<Key>) -> Result<BTreeSet<Key>, ExecutorError> {
-        Ok(keys
+impl Provider<Check> for AllowedKeys {
+    async fn call(&self, query: Check) -> Result<Vec<BTreeSet<Key>>, AuthError> {
+        Ok(query
+            .requests
             .into_iter()
-            .filter(|key| self.0.contains(key))
+            .map(|request| {
+                let listed = request.resource == self.resource;
+                request
+                    .ids
+                    .into_iter()
+                    .filter(|key| !listed || self.allowed.contains(key))
+                    .collect()
+            })
             .collect())
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AllowedOptions {
+    pub resource: String,
+    pub allowed: Vec<i64>,
+}
+
+impl Module for AllowedKeys {
+    const KIND: &'static str = "fake.rails";
+    type Options = AllowedOptions;
+
+    fn build(options: AllowedOptions) -> Result<Self, AuthError> {
+        Ok(Self {
+            resource: options.resource,
+            allowed: options.allowed.into_iter().map(Key::Int).collect(),
+        })
+    }
+
+    fn answers(self: Arc<Self>, _: &[Need]) -> Result<Answers, AuthError> {
+        Ok(Answers {
+            check: Some(self),
+            ..Answers::default()
+        })
+    }
+}
+
+impl AllowedKeys {
+    /// The deployment's `rails` checks, which allow only `allowed` of `resource`.
+    pub fn checks(resource: &str, allowed: impl IntoIterator<Item = Key>) -> Checks {
+        let check = Self {
+            resource: resource.to_string(),
+            allowed: allowed.into_iter().collect(),
+        };
+        Checks::default().with("rails", Arc::new(check))
     }
 }
 
@@ -182,7 +232,7 @@ pub async fn run_dag(
     query: &str,
     grants: &compiler::orbit_authorization::Grants,
     user: &str,
-    checks: &dyn RowChecks,
+    checks: &Checks,
 ) -> (
     Vec<query_engine::shared::dag::Event>,
     Result<query_engine::shared::dag::Outcome, query_engine::shared::dag::DagError>,

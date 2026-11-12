@@ -9,7 +9,7 @@ use query_data_model::surface::Statement;
 use serde::Serialize;
 
 use super::KeyInput;
-use crate::error::{QueryError, Result};
+use crate::error::Result;
 
 /// The keys a producer stage returned for one key input.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -28,17 +28,6 @@ pub fn bind(
     limits: &QueryLimits,
     remotes: &[String],
 ) -> Result<Statement> {
-    for set in sets {
-        if set.keys.len() > limits.stage_keys {
-            return Err(QueryError::Validation(format!(
-                "stage {} returned {} keys for {}; a stage hands at most {} to the next",
-                set.input.from,
-                set.keys.len(),
-                set.input.binding,
-                limits.stage_keys
-            )));
-        }
-    }
     let limits = QueryLimits {
         in_values: limits.in_values.max(limits.stage_keys),
         pinned_ids: limits.pinned_ids.max(limits.stage_keys),
@@ -140,6 +129,10 @@ mod tests {
                 columns: vec!["project_id".into(), "path".into()],
                 binding: "f".into(),
                 properties: vec!["project_id".into(), "path".into()],
+                types: vec![
+                    query_data_model::DataType::Int,
+                    query_data_model::DataType::String,
+                ],
             },
             keys: vec![
                 Key::Composite(vec![Key::Int(42), Key::Text("src/a.rs".into())]),

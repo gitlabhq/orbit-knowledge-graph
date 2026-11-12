@@ -5,9 +5,10 @@ use std::sync::Arc;
 use clickhouse_client::ArrowClickHouseClient;
 use query_data_model::{Catalog, ClickHouse};
 use query_engine::compiler::dag::{Env, Primary, Remotes};
+use query_engine::compiler::orbit_authorization::Checks;
 use query_engine::compiler::{self, HydrationRequest};
 use query_engine::pipeline::{PipelineError, QueryPipelineContext};
-use query_engine::shared::dag::{DagError, Executed, Executors, NoRemoteChecks, Runner, Silent};
+use query_engine::shared::dag::{DagError, Executed, Executors, Runner, Silent};
 
 use super::execution::ClickHouseExecutor;
 use crate::pipeline::correlation;
@@ -62,7 +63,8 @@ pub(crate) async fn hydrate(
         trace: false,
     };
     let mut silent = Silent;
-    let mut runner = Runner::new(env, &executors, &NoRemoteChecks, &mut silent);
+    let checks = Checks::default();
+    let mut runner = Runner::new(env, &executors, &checks, &mut silent);
     runner.hydrate(request).await.map_err(|error| match error {
         DagError::Compile(error) => PipelineError::Compile {
             client_safe: false,

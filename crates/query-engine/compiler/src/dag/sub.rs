@@ -14,7 +14,8 @@ use super::cut::Group;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
 
-/// A stage reads at most the key cap of rows, plus one that proves the cap was passed.
+/// A stage reads at most the key cap of rows, plus one that proves the cap was passed; the runner
+/// fails a stage that returns that extra row.
 pub(super) fn plan(
     query: Query<'_>,
     group: &Group,

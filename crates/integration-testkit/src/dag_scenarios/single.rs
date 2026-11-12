@@ -1,8 +1,6 @@
 //! Queries one remote connection serves alone: a one-stage DAG whose stage runs the code or live
 //! sub-pipeline, after the scope lookup its read's `via` chain needs.
 
-use std::collections::BTreeSet;
-
 use compiler::dag::Rendered;
 use compiler::orbit_authorization::Key;
 use query_data_model::implementations::live::{ExtractionRequest, RequestFilter};
@@ -121,7 +119,7 @@ async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
         *live_request(&rendered),
         ExtractionRequest {
             operation: "search.messages".into(),
-            workspaces: vec!["T01".into()],
+            workspaces: query_data_model::plan::live::Workspaces::Only(vec!["T01".into()]),
             filters: vec![
                 RequestFilter {
                     field: "channel".into(),
@@ -145,7 +143,7 @@ async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
             json!({"m_author": "ann", "m_text": "deploy to staging at 5pm", "_orbit_m_id": "m1", "_orbit_m_type": "SlackMessage"})
         )]
     );
-    let checks = AllowedKeys(BTreeSet::new());
+    let checks = AllowedKeys::checks("project", []);
     let bob = run_with(SLACK, &caller("1/9970/"), Vec::new(), "bob", &checks).await;
     assert_eq!(bob.rows().len(), 2);
 }
@@ -177,7 +175,7 @@ async fn the_workspace_precondition_keeps_unreadable_namespaces_out_of_the_call(
     let everywhere = run(SLACK, &caller("1/"), Vec::new()).await;
     assert_eq!(
         live_request(&everywhere.rendered(0)).workspaces,
-        ["T01", "T02"]
+        query_data_model::plan::live::Workspaces::Only(vec!["T01".into(), "T02".into()])
     );
     assert_eq!(everywhere.rows().len(), 2);
 
@@ -240,10 +238,10 @@ async fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture(
 
 #[tokio::test]
 async fn code_rows_go_through_the_read_code_check() {
-    let none = AllowedKeys(BTreeSet::new());
+    let none = AllowedKeys::checks("project", []);
     let denied = run_with(CODE, &caller("1/9970/"), Vec::new(), "alice", &none).await;
     assert!(denied.rows().is_empty());
-    let only = AllowedKeys(BTreeSet::from([Key::Int(42)]));
+    let only = AllowedKeys::checks("project", [Key::Int(42)]);
     let allowed = run_with(CODE, &caller("1/9970/"), Vec::new(), "alice", &only).await;
     assert_eq!(allowed.rows().len(), 2);
 }

@@ -1,126 +1,163 @@
-//! The security phase for code and live plans: each read's guard becomes the request's own
-//! form of its scope restriction, then a check proves every read carries it.
+//! The security phase for code and live plans: what the policies of a stage's reads admit
+//! becomes the request's own form of its scope restriction, then a check proves every read
+//! carries it.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use orbit_authorization::{Grants, Key, ScopeSet};
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::Model;
-use query_data_model::catalog::{Catalog, Guard, Rule};
+use query_data_model::catalog::{Catalog, Rule};
 use query_data_model::implementations::live::Live;
 use query_data_model::implementations::orbit_code::OrbitCode;
 use query_data_model::plan::code::{CodeOperation, CodePlan};
-use query_data_model::plan::live::{LiveOperation, LivePlan};
-use query_data_model::plan::logical::LogicalPlan;
+use query_data_model::plan::live::{LiveOperation, LivePlan, Workspaces};
+use query_data_model::plan::logical::{LogicalOperation, LogicalPlan, LogicalType};
 use query_data_model::plan::tracking::{Language, NodeId, Plan};
+use query_data_model::{EntityId, Model};
 
 use super::guards::scope_set;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::remote::Target;
 
-/// The scope key of each repository and workspace a plan reads, resolved on the graph
-/// connection through the read's `via` chain before the request goes out.
+/// The scope key of each repository or workspace a stage reads, by the entity whose `via` chain
+/// resolved it on a relational connection before the request went out.
 #[derive(Debug, Clone, Default)]
-pub struct Namespaces {
-    pub repositories: BTreeMap<i64, TraversalPath>,
-    pub workspaces: BTreeMap<String, TraversalPath>,
+pub struct Namespaces(pub BTreeMap<EntityId, BTreeMap<Key, TraversalPath>>);
+
+/// What the policies of a stage's reads admit: every repository or workspace the request names,
+/// when only checks restrict its rows, or only these.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Admitted {
+    Named,
+    Only(BTreeSet<Key>),
 }
 
-/// Each repository read keeps the repositories whose scope key the caller can read.
+impl Admitted {
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Only(keys) if keys.is_empty())
+    }
+
+    fn intersect(self, keys: BTreeSet<Key>) -> Self {
+        match self {
+            Self::Named => Self::Only(keys),
+            Self::Only(kept) => Self::Only(kept.intersection(&keys).cloned().collect()),
+        }
+    }
+}
+
+/// Every entity a stage's logical plan reads; one it cannot name fails closed.
+pub fn read_entities(logical: &LogicalPlan) -> Result<Vec<EntityId>> {
+    let unnamed = || QueryError::Security("a remote stage reads nodes it cannot name".into());
+    let mut entities = Vec::new();
+    for node in logical.nodes() {
+        let entity = match logical.operation(node) {
+            LogicalOperation::Entities(entity) => *entity,
+            LogicalOperation::Follow { .. } => {
+                match logical.outputs(node).last().map(|to| logical.value(to)) {
+                    Some(LogicalType::Entity(entity)) => *entity,
+                    _ => return Err(unnamed()),
+                }
+            }
+            LogicalOperation::Neighbors { .. }
+            | LogicalOperation::Shortest { .. }
+            | LogicalOperation::Read(_)
+            | LogicalOperation::Union => return Err(unnamed()),
+            _ => continue,
+        };
+        if !entities.contains(&entity) {
+            entities.push(entity);
+        }
+    }
+    Ok(entities)
+}
+
+/// What every read of the stage admits: each `via` read keeps the keys whose scope the caller
+/// holds, a global read needs the permission somewhere, and a checked or trusted read leaves the
+/// rows to its checks.
+pub fn admitted(
+    target: &Target,
+    logical: &LogicalPlan,
+    grants: &Grants,
+    namespaces: &Namespaces,
+) -> Result<Admitted> {
+    let model = target.model();
+    let mut admitted = Admitted::Named;
+    for entity in read_entities(logical)? {
+        let guard = target
+            .guard(entity)
+            .ok_or_else(|| QueryError::Security("the read has no guard".into()))?;
+        let set = || scope_set(grants, model, guard.scope, guard.permission);
+        match &guard.rule {
+            Rule::Via(_) => {
+                let set = set()?;
+                let resolved = namespaces.0.get(&entity).ok_or_else(|| {
+                    QueryError::Security(format!(
+                        "no scope lookup resolved {}'s via chain",
+                        model.graph().entity(entity).name
+                    ))
+                })?;
+                let held = resolved
+                    .iter()
+                    .filter(|(_, path)| holds(set, path))
+                    .map(|(key, _)| key.clone())
+                    .collect();
+                admitted = admitted.intersect(held);
+            }
+            Rule::Global if set()?.is_empty() => admitted = Admitted::Only(BTreeSet::new()),
+            Rule::Global | Rule::Checked | Rule::Trusted => {}
+            Rule::Column(_) | Rule::Owner(_) => {
+                return Err(QueryError::Security(
+                    "a remote read is restricted through a via chain, its permission or its checks"
+                        .into(),
+                ));
+            }
+        }
+    }
+    Ok(admitted)
+}
+
+/// Each repository read keeps the repositories its policies admit.
 pub fn secure_code(
     code: &Catalog<OrbitCode>,
     plan: CodePlan,
-    grants: &Grants,
-    namespaces: &Namespaces,
+    admitted: &Admitted,
 ) -> Result<CodePlan> {
-    let mut allowed: HashMap<NodeId, Vec<i64>> = HashMap::new();
-    for node in plan.nodes() {
-        let CodeOperation::Repositories { index, projects } = plan.operation(node) else {
-            continue;
-        };
-        let set = admitted(code.model(), code.index_guard(*index), grants)?;
-        let keep = |project: &i64| match set {
-            None => true,
-            Some(set) => namespaces
-                .repositories
-                .get(project)
-                .is_some_and(|path| holds(set, path)),
-        };
-        allowed.insert(node, projects.iter().copied().filter(keep).collect());
-    }
     Ok(code.rebuild(plan, |q, step| {
+        let readable = match &step.operation {
+            CodeOperation::Repositories { projects, .. } => Some(
+                projects
+                    .iter()
+                    .copied()
+                    .filter(|project| match admitted {
+                        Admitted::Named => true,
+                        Admitted::Only(keys) => keys.contains(&Key::Int(*project)),
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        };
         let files = step.keep(q)?;
-        match allowed.remove(&step.node()) {
+        match readable {
             Some(projects) => q.restrict(files, projects),
             None => Ok(files),
         }
     })?)
 }
 
-/// Each call keeps the workspaces whose scope key the caller can read.
-pub fn secure_live(
-    live: &Catalog<Live>,
-    plan: LivePlan,
-    grants: &Grants,
-    namespaces: &Namespaces,
-) -> Result<LivePlan> {
-    let mut allowed: HashMap<NodeId, Vec<String>> = HashMap::new();
-    for node in plan.nodes() {
-        let LiveOperation::Call(operation) = plan.operation(node) else {
-            continue;
-        };
-        let set = admitted(live.model(), live.operation_guard(*operation), grants)?;
-        let workspaces = namespaces.workspaces.iter().filter(|(_, path)| match set {
-            None => true,
-            Some(set) => holds(set, path),
-        });
-        allowed.insert(node, workspaces.map(|(name, _)| name.clone()).collect());
-    }
+/// Each call reads the workspaces its policies admit.
+pub fn secure_live(live: &Catalog<Live>, plan: LivePlan, admitted: &Admitted) -> Result<LivePlan> {
+    let workspaces = match admitted {
+        Admitted::Named => Workspaces::Any,
+        Admitted::Only(keys) => Workspaces::Only(keys.iter().map(ToString::to_string).collect()),
+    };
     Ok(live.rebuild(plan, |q, step| {
+        let call = matches!(step.operation, LiveOperation::Call(_));
         let calls = step.keep(q)?;
-        match allowed.remove(&step.node()) {
-            Some(workspaces) => q.workspaces(calls, workspaces),
-            None => Ok(calls),
+        match call {
+            true => q.workspaces(calls, workspaces.clone()),
+            false => Ok(calls),
         }
     })?)
-}
-
-/// Whether the caller can read any repository or workspace the lookup resolved for the stage's
-/// read; a read only its checks restrict reads what its request names.
-pub fn readable(
-    target: &Target,
-    logical: &LogicalPlan,
-    grants: &Grants,
-    namespaces: &Namespaces,
-) -> Result<bool> {
-    let entity = super::scope_lookup::read_entity(logical)?;
-    let (set, paths): (_, Vec<&TraversalPath>) = match target {
-        Target::Code(code) => (
-            admitted(code.model(), code.guard(entity), grants)?,
-            namespaces.repositories.values().collect(),
-        ),
-        Target::Live(live) => (
-            admitted(live.model(), live.guard(entity), grants)?,
-            namespaces.workspaces.values().collect(),
-        ),
-    };
-    Ok(set.is_none_or(|set| paths.iter().any(|path| holds(set, path))))
-}
-
-/// The caller's scope set for a read's `via` policy; none for a read only its checks restrict.
-fn admitted<'g>(
-    model: &Model,
-    guard: Option<&Guard>,
-    grants: &'g Grants,
-) -> Result<Option<&'g ScopeSet>> {
-    let guard = guard.ok_or_else(|| QueryError::Security("the read has no guard".into()))?;
-    match guard.rule {
-        Rule::Via(_) => scope_set(grants, model, guard.scope, guard.permission).map(Some),
-        Rule::Checked => Ok(None),
-        _ => Err(QueryError::Security(
-            "a remote read is restricted through a via chain or its checks".into(),
-        )),
-    }
 }
 
 fn holds(set: &ScopeSet, path: &TraversalPath) -> bool {
@@ -170,4 +207,13 @@ fn guarded<L: Language>(
         }
     }
     Ok(())
+}
+
+impl Target {
+    pub fn model(&self) -> &Model {
+        match self {
+            Self::Code(code) => code.model(),
+            Self::Live(live) => live.model(),
+        }
+    }
 }

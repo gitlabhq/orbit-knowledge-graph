@@ -3,21 +3,23 @@
 //! remote read's own scope set.
 
 use orbit_authorization::Grants;
+use orbit_authorization::Key;
 use orbit_utils::query_types::SqlType;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::Hop;
 use query_data_model::catalog::{Guard, Rule};
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, JoinKind, ReadMode, Relation, RelationalError,
 };
 use query_data_model::implementations::relational::render::ParameterizedSql;
-use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
+use query_data_model::plan::logical::LogicalPlan;
 use query_data_model::plan::tracking::Declare;
 use query_data_model::{Catalog, Endpoint, EntityId};
 use serde_json::Value;
 
 use super::guards::scope_set;
-use super::remote_security::Namespaces;
+use super::remote_security::{Namespaces, read_entities};
 use super::security::ScopeFilter;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::remote::{Target, named_repositories};
@@ -33,80 +35,85 @@ pub enum Resolves {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopeLookup {
+    /// The entity whose `via` chain the lookup resolves.
+    pub entity: EntityId,
     pub resolves: Resolves,
     pub query: ParameterizedSql,
     /// The column that holds the scope key in the lookup rows.
     pub scope: String,
 }
 
-/// The lookup a remote stage's read needs, from the stage's logical plan with its key sets
-/// bound: the repositories it names, or every workspace; none for a checked read.
+/// The lookups a remote stage's reads need, from the stage's logical plan with its key sets
+/// bound: one per entity read through a `via` chain, of the repositories the plan names or of
+/// every workspace.
 pub fn lookup(
     target: &Target,
     logical: &LogicalPlan,
     graph: &Catalog<ClickHouse>,
     grants: &Grants,
-) -> Result<Option<ScopeLookup>> {
-    let entity = read_entity(logical)?;
-    let (resolves, guard, keys) = match target {
-        Target::Code(code) => {
-            let mut projects = named_repositories(logical, code)?;
-            projects.sort_unstable();
-            projects.dedup();
-            let keys = projects.into_iter().map(Value::from).collect();
-            (Resolves::Repositories, code.guard(entity), Some(keys))
-        }
-        Target::Live(live) => (Resolves::Workspaces, live.guard(entity), None),
-    };
-    let query = build(graph, guard, grants, keys)?;
-    Ok(query.map(|(query, scope)| ScopeLookup {
-        resolves,
-        query,
-        scope,
-    }))
+) -> Result<Vec<ScopeLookup>> {
+    let mut lookups = Vec::new();
+    for entity in read_entities(logical)? {
+        let Some(Guard {
+            rule: Rule::Via(hops),
+            ..
+        }) = target.guard(entity)
+        else {
+            continue;
+        };
+        let guard = target
+            .guard(entity)
+            .ok_or_else(|| QueryError::Security("the read has no guard".into()))?;
+        let (resolves, keys) = match target {
+            Target::Code(code) => {
+                let mut projects = named_repositories(logical, code)?;
+                projects.sort_unstable();
+                projects.dedup();
+                (
+                    Resolves::Repositories,
+                    Some(projects.into_iter().map(Value::from).collect()),
+                )
+            }
+            Target::Live(_) => (Resolves::Workspaces, None),
+        };
+        let (query, scope) = build(graph, guard, hops, grants, keys)?;
+        lookups.push(ScopeLookup {
+            entity,
+            resolves,
+            query,
+            scope,
+        });
+    }
+    Ok(lookups)
 }
 
-/// The entity a remote stage's read starts from, whose guard scopes the read.
-pub(crate) fn read_entity(logical: &LogicalPlan) -> Result<EntityId> {
-    logical
-        .nodes()
-        .find_map(|node| match logical.operation(node) {
-            LogicalOperation::Entities(entity) => Some(*entity),
-            _ => None,
-        })
-        .ok_or_else(|| QueryError::Validation("the query reads no entity".into()))
-}
-
-/// The lookup's rows, as the graph connection returned them, keyed by `key`.
+/// The lookup's rows, as the relational connection returned them, keyed by `key`.
 pub fn namespaces(
     lookup: &ScopeLookup,
     rows: &[query_data_model::catalog::Row],
-) -> Result<Namespaces> {
-    let mut namespaces = Namespaces::default();
+    namespaces: &mut Namespaces,
+) -> Result<()> {
+    let resolved = namespaces.0.entry(lookup.entity).or_default();
     for row in rows {
-        let scope = row
-            .get(&lookup.scope)
-            .and_then(Value::as_str)
-            .map(TraversalPath::from);
         let invalid = || {
             QueryError::Security(format!(
                 "a scope lookup row lacks {KEY} or {}",
                 lookup.scope
             ))
         };
-        let scope = scope.ok_or_else(invalid)?;
-        match lookup.resolves {
-            Resolves::Repositories => {
-                let key = row.get(KEY).and_then(Value::as_i64).ok_or_else(invalid)?;
-                namespaces.repositories.insert(key, scope);
-            }
-            Resolves::Workspaces => {
-                let key = row.get(KEY).and_then(Value::as_str).ok_or_else(invalid)?;
-                namespaces.workspaces.insert(key.to_string(), scope);
-            }
-        }
+        let scope = row
+            .get(&lookup.scope)
+            .and_then(Value::as_str)
+            .map(TraversalPath::from)
+            .ok_or_else(invalid)?;
+        let key = match (&lookup.resolves, row.get(KEY)) {
+            (Resolves::Repositories, Some(Value::Number(id))) => id.as_i64().map(Key::Int),
+            (Resolves::Workspaces, Some(Value::String(id))) => Some(Key::Text(id.clone())),
+            _ => None,
+        };
+        resolved.insert(key.ok_or_else(invalid)?, scope);
     }
-    Ok(namespaces)
+    Ok(())
 }
 
 /// One scan of the chain: its table and alias, and the columns that join it to the previous one.
@@ -117,23 +124,14 @@ struct Step {
 }
 
 /// The chain's first target, joined along the rest of the chain to the entity that holds the
-/// scope key, filtered to the caller's scope set for the remote read; none for a checked read.
+/// scope key, filtered to the caller's scope set for the remote read.
 fn build(
     graph: &Catalog<ClickHouse>,
-    guard: Option<&Guard>,
+    guard: &Guard,
+    hops: &[Hop],
     grants: &Grants,
     keys: Option<Vec<Value>>,
-) -> Result<Option<(ParameterizedSql, String)>> {
-    let guard = guard.ok_or_else(|| QueryError::Security("the read has no guard".into()))?;
-    let hops = match &guard.rule {
-        Rule::Via(hops) => hops,
-        Rule::Checked => return Ok(None),
-        _ => {
-            return Err(QueryError::Security(
-                "a remote read is scoped through a via chain or its checks".into(),
-            ));
-        }
-    };
+) -> Result<(ParameterizedSql, String)> {
     let filter = ScopeFilter::new(scope_set(
         grants,
         graph.model(),
@@ -231,5 +229,5 @@ fn build(
             q.select(rows, columns)
         })
         .map_err(|error| shape(&format!("cannot be built: {error}")))?;
-    Ok(Some((graph.render(&plan), scope_column.clone())))
+    Ok((graph.render(&plan), scope_column.clone()))
 }

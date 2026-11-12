@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use orbit_authorization::{Grants, Key, ScopeSet};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::Catalog;
-use query_data_model::implementations::clickhouse::ClickHouse;
+use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
-    BinaryOp, Expr, Function, Operation, Relational,
+    BinaryOp, Expr, Function, Operation, Relational, RelationalPlan,
 };
 use query_data_model::plan::tracking::{NodeId, Plan, Ref};
 use serde_json::Value;
@@ -19,9 +19,12 @@ use serde_json::Value;
 use super::guards::{scan, scope_set};
 use super::security::key_value;
 use crate::error::{QueryError, Result};
-use crate::passes::codegen::ClickHousePlan;
 
-pub fn verify(plan: &ClickHousePlan, catalog: &Catalog<ClickHouse>, grants: &Grants) -> Result<()> {
+pub fn verify<B: RelationalBackend>(
+    plan: &RelationalPlan<B>,
+    catalog: &Catalog<B>,
+    grants: &Grants,
+) -> Result<()> {
     let graph = &plan.plan;
     let consumers: HashMap<NodeId, NodeId> = graph
         .nodes()
@@ -73,8 +76,8 @@ enum Allowed<'g> {
     Keys(&'g [Key]),
 }
 
-fn join_filters<'p>(
-    graph: &'p Plan<Relational<ClickHouse>>,
+fn join_filters<'p, B: RelationalBackend>(
+    graph: &'p Plan<Relational<B>>,
     consumers: &HashMap<NodeId, NodeId>,
     scan: NodeId,
 ) -> Vec<&'p Expr> {
@@ -151,7 +154,10 @@ fn has_valid_filter(expr: &Expr, column: Ref, allowed: &Allowed<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use query_data_model::implementations::clickhouse::ClickHouse;
+
     use super::*;
+    use crate::passes::codegen::ClickHousePlan;
     use std::sync::{Arc, LazyLock};
 
     use orbit_utils::query_types::SqlType;

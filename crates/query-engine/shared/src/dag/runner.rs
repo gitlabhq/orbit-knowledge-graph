@@ -14,7 +14,9 @@ use compiler::dag::{
 use compiler::passes::result_contract::ResultContext;
 use compiler::{CompiledQueryContext, HydrationRequest, ParameterizedQuery, QueryError};
 
-use super::executor::{Executed, ExecutorError, Executors, RowChecks};
+use compiler::orbit_authorization::Checks;
+
+use super::executor::{Executed, ExecutorError, Executors};
 use super::observer::{Event, KEY_SAMPLE, Observer, StageInfo};
 use super::{remote, rows};
 
@@ -46,7 +48,7 @@ pub struct Outcome {
 pub struct Runner<'r> {
     pub env: Env<'r>,
     pub executors: &'r Executors,
-    pub checks: &'r dyn RowChecks,
+    pub checks: &'r Checks,
     pub observer: &'r mut dyn Observer,
     /// The stage the next hydration runs as.
     next: StageId,
@@ -56,7 +58,7 @@ impl<'r> Runner<'r> {
     pub fn new(
         mut env: Env<'r>,
         executors: &'r Executors,
-        checks: &'r dyn RowChecks,
+        checks: &'r Checks,
         observer: &'r mut dyn Observer,
     ) -> Self {
         env.trace = observer.enabled();
@@ -165,7 +167,7 @@ impl<'r> Runner<'r> {
         let mut sets = Vec::new();
         for input in stage.keys() {
             let produced = results.get(&input.from).map_or(&[][..], Vec::as_slice);
-            let keys = rows::keys(produced, &input.columns)?;
+            let keys = rows::keys(produced, &input.columns, &input.types)?;
             self.emit(|| Event::Keys {
                 from: input.from,
                 to: id,
@@ -197,31 +199,19 @@ impl<'r> Runner<'r> {
             if let Some(connection) = stage.connection.as_deref()
                 && let Some(target) = self.env.remotes.target(connection)
             {
-                match remote::namespaces(self, id, target, &bound).await? {
-                    Some(namespaces) => inputs.namespaces = namespaces,
+                match remote::admitted(self, id, target, &bound).await? {
+                    Some(admitted) => inputs.admitted = Some(admitted),
                     None => return Ok((None, Executed::default())),
                 }
             }
             stage.query = StageQuery::Gql(bound);
         }
-        let (connection, backend) = (stage.connection.clone(), stage.backend);
-        let remote_checks = match (
-            &stage.query,
-            self.env
-                .remotes
-                .target(connection.as_deref().unwrap_or_default()),
-        ) {
-            (StageQuery::Gql(statement), Some(_)) => {
-                compiler::remote::row_checks(&statement.plan, self.env.primary.model())?
-            }
-            _ => Vec::new(),
-        };
+        let (connection, backend, response) =
+            (stage.connection.clone(), stage.backend, stage.response);
+        let checks = std::mem::take(&mut stage.checks);
         let compiled = compile(stage, inputs, &self.env)?;
         self.trace(id, &compiled);
-        let trusted = backend == compiler::dag::Backend::Engine
-            || (backend == compiler::dag::Backend::DuckDb
-                && matches!(self.env.primary, compiler::dag::Primary::DuckDb(_)));
-        if !compiled.proved && !trusted {
+        if !compiled.proved && backend != compiler::dag::Backend::Engine {
             return Err(QueryError::Security(format!(
                 "stage {id} carries no proof that each read has its policy"
             ))
@@ -240,7 +230,16 @@ impl<'r> Runner<'r> {
                 .into());
             }
         };
-        let executed = remote::checked(self.checks, &remote_checks, executed).await?;
+        let rows: usize = executed.batches.iter().map(RecordBatch::num_rows).sum();
+        let cap = self.env.limits.stage_keys;
+        if !response && rows > cap {
+            return Err(QueryError::LimitExceeded(format!(
+                "stage {id} returned more than {cap} rows; a stage hands at most {cap} rows to the next"
+            ))
+            .into());
+        }
+        let executed =
+            remote::checked(self.checks, self.env.grants.caller(), &checks, executed).await?;
         if let Request::Query(query) = &compiled.request {
             contexts.push((id, query.base.result_context.clone()));
         }

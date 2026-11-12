@@ -15,6 +15,8 @@ pub struct EngineColumn {
 pub struct EngineJoin {
     pub left: Vec<EngineColumn>,
     pub right: Vec<EngineColumn>,
+    /// The declared type of each column pair's key.
+    pub types: Vec<query_data_model::DataType>,
 }
 
 /// What the engine stage computes over the other stages' rows: their joins, then the query's

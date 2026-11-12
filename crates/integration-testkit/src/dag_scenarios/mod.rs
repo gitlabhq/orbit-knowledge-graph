@@ -3,19 +3,20 @@
 
 mod heads;
 mod joins;
+mod policies;
 mod server;
 mod single;
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use compiler::dag::Rendered;
+use compiler::orbit_authorization::Checks;
 use compiler::orbit_authorization::{Grants, Key};
 use query_data_model::catalog::Row;
 use query_engine::pipeline::{AuthorizedPath, SecurityContext};
-use query_engine::shared::dag::{DagError, Event, Outcome, RowChecks};
+use query_engine::shared::dag::{DagError, Event, Outcome};
 use serde_json::Value;
 
 use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_model, run_dag};
@@ -99,7 +100,7 @@ async fn run_with(
     grants: &Grants,
     graph: Vec<Row>,
     user: &str,
-    checks: &dyn RowChecks,
+    checks: &Checks,
 ) -> Run {
     let graph = Arc::new(SeededGraph(graph));
     let (events, outcome) = run_dag(&dag_model(), graph, query, grants, user, checks).await;
@@ -108,7 +109,7 @@ async fn run_with(
 
 /// Runs a query as `alice`, whose code checks allow every seeded repository.
 async fn run(query: &str, grants: &Grants, graph: Vec<Row>) -> Run {
-    let checks = AllowedKeys(BTreeSet::from([Key::Int(42), Key::Int(77)]));
+    let checks = AllowedKeys::checks("project", [Key::Int(42), Key::Int(77)]);
     run_with(query, grants, graph, "alice", &checks).await
 }
 

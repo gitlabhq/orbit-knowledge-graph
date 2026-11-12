@@ -29,23 +29,32 @@ pub enum SearchMode {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CodeSource {
+    /// The property that names the repository each row is in, for an entity that reaches no
+    /// scope through a `via` chain, whose first step names the repository otherwise.
+    pub repository: Option<String>,
     #[serde(default)]
     pub search: IndexMap<String, Vec<SearchMode>>,
 }
 
-/// The search modes of each property of one entity.
-type Searched = Vec<(PropertyId, Vec<SearchMode>)>;
+/// One entity a code store indexes: the property its store declares names its repository, and
+/// the search modes of each searched property.
+#[derive(Debug)]
+struct Indexed {
+    entity: EntityId,
+    repository: Option<PropertyId>,
+    searched: Vec<(PropertyId, Vec<SearchMode>)>,
+}
 
 #[derive(Debug, Default)]
 pub struct CodeStore {
-    indexes: Vec<(EntityId, Searched)>,
+    indexes: Vec<Indexed>,
 }
 
 impl CodeStore {
     pub fn supports(&self, property: PropertyId, mode: SearchMode) -> bool {
         self.indexes
             .iter()
-            .flat_map(|(_, properties)| properties)
+            .flat_map(|indexed| &indexed.searched)
             .any(|(id, modes)| *id == property && modes.contains(&mode))
     }
 
@@ -53,10 +62,18 @@ impl CodeStore {
     pub fn structural(&self, entity: EntityId) -> Option<PropertyId> {
         self.indexes
             .iter()
-            .filter(|(indexed, _)| *indexed == entity)
-            .flat_map(|(_, properties)| properties)
+            .filter(|indexed| indexed.entity == entity)
+            .flat_map(|indexed| &indexed.searched)
             .find(|(_, modes)| modes.contains(&SearchMode::Structural))
             .map(|(property, _)| *property)
+    }
+
+    /// The property the store declares names the repository of each row of `entity`.
+    pub fn repository(&self, entity: EntityId) -> Option<PropertyId> {
+        self.indexes
+            .iter()
+            .find(|indexed| indexed.entity == entity)
+            .and_then(|indexed| indexed.repository)
     }
 }
 
@@ -75,6 +92,34 @@ impl StorageBackend for OrbitCode {
         check_unrelational(&input, diagnostics);
         for source in &input.entities {
             let name = &graph.entity(source.entity).name;
+            let repository = source.options.repository.as_deref().and_then(|property| {
+                let id = graph
+                    .property_id(source.entity, property)
+                    .filter(|id| input.store.column(*id).is_some());
+                diagnostics.require(id, source.package, || {
+                    format!("store {store_name} names unstored repository {name}.{property}")
+                })
+            });
+            let via = matches!(
+                input.store.guard(source.entity),
+                Some(crate::catalog::Guard {
+                    rule: crate::catalog::Rule::Via(_),
+                    ..
+                })
+            );
+            match (via, &source.options.repository) {
+                (true, Some(_)) => diagnostics.error(
+                    source.package,
+                    format!(
+                        "store {store_name} names a repository property for {name}, whose via chain names it"
+                    ),
+                ),
+                (false, None) => diagnostics.error(
+                    source.package,
+                    format!("store {store_name} names no repository property for {name}"),
+                ),
+                _ => {}
+            }
             let mut properties = Vec::new();
             for (property, modes) in &source.options.search {
                 let id = graph.property_id(source.entity, property);
@@ -96,7 +141,11 @@ impl StorageBackend for OrbitCode {
                     ),
                 );
             }
-            store.indexes.push((source.entity, properties));
+            store.indexes.push(Indexed {
+                entity: source.entity,
+                repository,
+                searched: properties,
+            });
         }
         store
     }

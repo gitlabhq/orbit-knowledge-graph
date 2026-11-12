@@ -5,11 +5,11 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use compiler::dag::{Env, Primary, Remotes, Request, Source};
-use compiler::orbit_authorization::{Caller, Grants};
+use compiler::orbit_authorization::{Caller, Checks, Grants};
 use orbit_server_config::QueryLimits;
 use query_data_model::{Catalog, DuckDb};
 use shared::dag::{
-    DagError, Executed, Executor, ExecutorError, Executors, NoRemoteChecks, Outcome, Runner, Silent,
+    DagError, Executed, Executor, ExecutorError, Executors, Outcome, Runner, Silent,
 };
 use shared::{QueryExecution, QueryExecutionStats};
 
@@ -83,6 +83,7 @@ pub fn run_local(
         trace: false,
     };
     let mut silent = Silent;
-    let mut runner = Runner::new(env, &executors, &NoRemoteChecks, &mut silent);
+    let checks = Checks::default();
+    let mut runner = Runner::new(env, &executors, &checks, &mut silent);
     futures::executor::block_on(runner.run(Source::Text(query)))
 }

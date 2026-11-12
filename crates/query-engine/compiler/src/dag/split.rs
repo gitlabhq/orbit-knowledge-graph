@@ -47,6 +47,7 @@ pub fn split<B: SqlBackend>(
                 query: StageQuery::Gql(statement),
                 inputs: Vec::new(),
                 response: true,
+                checks: Vec::new(),
             }],
             logical: Vec::new(),
         });

@@ -71,13 +71,7 @@ async fn run(
     );
     let executor: Arc<dyn Executor> = Arc::clone(executors.get(graph.connection()).unwrap());
     let grants = grants(&model, paths);
-    let checks = AllowedKeys(
-        allowed
-            .iter()
-            .copied()
-            .map(Key::Int)
-            .collect::<BTreeSet<_>>(),
-    );
+    let checks = AllowedKeys::checks("project", allowed.iter().copied().map(Key::Int));
     let (events, outcome) = run_dag(&model, executor, query, &grants, "alice", &checks).await;
     match outcome {
         Ok(Outcome { executed, .. }) => (events, executed.batches),
@@ -180,7 +174,10 @@ pub(super) async fn merge_requests_join_the_slack_messages_that_discuss_them(ctx
     let Some(Rendered::Live(call)) = remote_requests(&events, 1).pop() else {
         panic!("the Slack stage renders a call");
     };
-    assert_eq!(call.workspaces, ["T01", "T02"]);
+    assert_eq!(
+        call.workspaces,
+        query_data_model::plan::live::Workspaces::Only(vec!["T01".into(), "T02".into()])
+    );
     assert_eq!(
         pairs(&both),
         [

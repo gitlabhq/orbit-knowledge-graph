@@ -50,7 +50,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub relational: query_data_model::implementations::relational::plan::RelationalPlan<Self::Backend>,
         pub output: CompiledQueryContext,
         pub hydration_query: ParameterizedQuery,
-        pub namespaces: crate::remote::Namespaces,
+        pub admitted: crate::remote::Admitted,
         pub code: query_data_model::plan::code::CodePlan,
         pub live: query_data_model::plan::live::LivePlan,
         pub engine: query_data_model::plan::engine::EnginePlan,
@@ -157,8 +157,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [code, planned]
         }
         code::security {
-            reads_env: [grants, data_model]
-            reads_state: [namespaces]
+            reads_env: [data_model]
+            reads_state: [admitted]
             mutates: [code]
         }
         code::security_check {
@@ -176,8 +176,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [live, planned]
         }
         live::security {
-            reads_env: [grants, data_model]
-            reads_state: [namespaces]
+            reads_env: [data_model]
+            reads_state: [admitted]
             mutates: [live]
         }
         live::security_check {
@@ -238,20 +238,20 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         gql_duckdb {
             backend: query_data_model::DuckDb
-            env: [limits, trace]
-            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned]
-            phases: [plan, result_contract, paginate, materialize, codegen]
+            env: [grants, limits, trace]
+            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned, proved]
+            phases: [plan, result_contract, paginate, materialize, security, security_check, codegen]
         }
         gql_orbit_code {
             backend: query_data_model::implementations::orbit_code::OrbitCode
             env: [grants, limits, trace]
-            state: [statement, namespaces, code, planned, request, proved]
+            state: [statement, admitted, code, planned, request, proved]
             phases: [code::plan, code::security, code::security_check, code::render]
         }
         gql_live {
             backend: query_data_model::implementations::live::Live
             env: [grants, limits, trace]
-            state: [statement, namespaces, live, planned, request, proved]
+            state: [statement, admitted, live, planned, request, proved]
             phases: [live::plan, live::security, live::security_check, live::render]
         }
         gql_engine {
@@ -417,7 +417,7 @@ fn result_contract(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()
     Ok(())
 }
 
-fn security(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) -> Result<()> {
+fn security(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let model = ctx.data_model();
     let plan = security::apply_security_context(plan, model, ctx.grants())?;
@@ -436,9 +436,7 @@ fn paginate(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     Ok(())
 }
 
-fn security_check(
-    ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>,
-) -> Result<()> {
+fn security_check(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let model = ctx.data_model();
     security_check::verify(plan, model, ctx.grants())?;

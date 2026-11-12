@@ -5,8 +5,8 @@ use query_data_model::plan::tracking::Ref;
 
 use super::split::{Crossing, Place};
 use super::{
-    Backend, Dag, EngineColumn, EngineJoin, EngineNode, EngineQuery, Input, Remotes, Stage,
-    StageId, StageQuery,
+    Backend, Dag, EngineColumn, EngineJoin, EngineNode, EngineQuery, Input, Remotes, RowCheck,
+    Stage, StageId, StageQuery,
 };
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
@@ -43,22 +43,59 @@ impl Cut<'_> {
                 push(needed.entry(binding).or_default(), property);
             }
         }
+        let producers: Vec<usize> = self
+            .crossings
+            .iter()
+            .map(|crossing| {
+                let consumer = crossing.consumer(&order);
+                match crossing.groups {
+                    (producer, other) if other == consumer => producer,
+                    (_, producer) => producer,
+                }
+            })
+            .collect();
+        let mut checks: Vec<Vec<RowCheck>> = vec![Vec::new(); self.groups.len()];
         let mut nodes = Vec::new();
+        let graph = self.query.model.graph();
+        let access = self.query.model.access();
         for (index, group) in self.groups.iter().enumerate() {
-            let Place::Remote(remote) = group.place else {
-                continue;
+            let remote = match group.place {
+                Place::Remote(remote) => Some(&self.remotes.targets()[remote]),
+                Place::Primary => None,
             };
-            let target = &self.remotes.targets()[remote];
+            if remote.is_none() && !producers.contains(&index) {
+                continue;
+            }
             for binding in &group.bindings {
                 let Some(entity) = self.query.entity(*binding) else {
                     continue;
                 };
-                for check in &self.query.model.access().entity(entity).checks {
-                    if let query_data_model::catalog::Check::Rows { id, .. } = check {
-                        push(needed.entry(*binding).or_default(), *id);
+                for check in &access.entity(entity).checks {
+                    let query_data_model::catalog::Check::Rows {
+                        provider,
+                        permission,
+                        resource,
+                        id,
+                        ..
+                    } = check
+                    else {
+                        continue;
+                    };
+                    push(needed.entry(*binding).or_default(), *id);
+                    let check = RowCheck {
+                        provider: provider.clone(),
+                        permission: access.permission(*permission).name.clone(),
+                        resource: resource.clone(),
+                        column: self.column(stage(index), *binding, *id).column,
+                        kind: crate::KeyKind::of(graph.property(*id).data_type),
+                    };
+                    if !checks[index].contains(&check) {
+                        checks[index].push(check);
                     }
                 }
-                let graph = self.query.model.graph();
+                let Some(target) = remote else {
+                    continue;
+                };
                 let [identity] = graph.entity(entity).identity[..] else {
                     continue;
                 };
@@ -89,6 +126,7 @@ impl Cut<'_> {
         let mut stages = Vec::new();
         for (id, group) in order.iter().enumerate() {
             let (connection, backend) = self.backend(self.groups[*group].place);
+            let checks = std::mem::take(&mut checks[*group]);
             let inputs = self
                 .crossings
                 .iter()
@@ -110,6 +148,7 @@ impl Cut<'_> {
                 query: StageQuery::Gql(query_data_model::surface::Statement { plan, debug }),
                 inputs,
                 response: false,
+                checks,
             });
         }
         let joins = self
@@ -125,7 +164,12 @@ impl Cut<'_> {
                         })
                         .collect()
                 };
+                let graph = self.query.model.graph();
                 EngineJoin {
+                    types: consumer
+                        .iter()
+                        .map(|(_, property)| graph.property(*property).data_type)
+                        .collect(),
                     left: side(producer),
                     right: side(consumer),
                 }
@@ -152,6 +196,7 @@ impl Cut<'_> {
             query: StageQuery::Engine(engine, Box::new(response)),
             inputs,
             response: true,
+            checks: Vec::new(),
         });
         Ok(Dag {
             stages,

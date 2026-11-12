@@ -57,8 +57,8 @@ pub enum KeyKind {
 }
 
 impl KeyKind {
-    /// The loader admits only integer, string and uuid check keys.
-    pub(crate) fn of(data_type: DataType) -> Self {
+    /// The loader admits only integer, string and uuid keys.
+    pub fn of(data_type: DataType) -> Self {
         match data_type {
             DataType::Int => Self::Int,
             DataType::Uuid => Self::Uuid,
