@@ -159,7 +159,9 @@ pub fn write_source(path: &Path, name: &str, url: Option<&str>, team: Option<&st
         .context("sources must be a list")?;
     for source in sources.iter_mut() {
         if let Some(map) = source.as_object_mut() {
-            map.remove("token_command");
+            for retired in ["token_command", "refresh"] {
+                map.remove(retired);
+            }
         }
     }
     let position = sources.iter().position(|source| {
@@ -249,9 +251,11 @@ mod tests {
         write_source(&path, "grafana", Some("https://g/"), None).unwrap();
         write_source(&path, "slack", None, Some("T1")).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(!text.contains("token_command"), "{text}");
+        assert!(
+            !text.contains("token_command") && !text.contains("refresh"),
+            "{text}"
+        );
         let config = config::Config::load(&path).unwrap().unwrap();
-        assert_eq!(config.source("slack").unwrap().refresh.as_secs(), 300);
         assert_eq!(config.source("slack").unwrap().team.as_deref(), Some("T1"));
         assert_eq!(
             config.source("grafana").unwrap().base_url.as_deref(),

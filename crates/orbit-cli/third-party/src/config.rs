@@ -43,8 +43,6 @@ pub struct SetupSpec {
     pub title: String,
     pub token_help: String,
     #[serde(default)]
-    pub token_prefix: Option<String>,
-    #[serde(default)]
     pub asks_url: bool,
     #[serde(default)]
     pub url_help: Option<String>,
@@ -83,8 +81,6 @@ pub struct Entity {
     pub kind: String,
     #[serde(default)]
     pub description: String,
-    #[serde(default)]
-    pub fetch: Option<Fetch>,
     pub key: Vec<String>,
     pub label: String,
     #[serde(default)]
@@ -97,30 +93,41 @@ pub struct Entity {
     #[serde(default)]
     pub shows: Vec<String>,
     #[serde(default)]
-    pub live: Option<Live>,
+    pub list: Option<Request>,
     #[serde(default)]
-    pub get: Option<Get>,
+    pub search_api: Option<Search>,
     #[serde(default)]
-    pub named: BTreeMap<String, String>,
+    pub get: Option<Request>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Get {
+pub struct Request {
     pub path: String,
+    #[serde(default)]
     pub params: BTreeMap<String, String>,
     pub items: String,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<Cursor>,
+    #[serde(default = "Request::default_max_pages")]
+    pub max_pages: usize,
     #[serde(default)]
     pub key: Option<Vec<String>>,
     #[serde(default)]
     pub fields: BTreeMap<String, String>,
 }
 
+impl Request {
+    fn default_max_pages() -> usize {
+        10
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Live {
+pub struct Search {
     pub path: String,
     pub params: BTreeMap<String, String>,
     pub items: String,
@@ -134,36 +141,6 @@ pub struct Live {
     pub key: Option<Vec<String>>,
     #[serde(default)]
     pub fields: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Fetch {
-    #[serde(default)]
-    pub path: Option<String>,
-    #[serde(default)]
-    pub params: BTreeMap<String, String>,
-    pub items: String,
-    #[serde(default)]
-    pub for_each: Option<String>,
-    #[serde(default)]
-    pub within: Option<String>,
-    #[serde(default)]
-    pub cursor: Option<Cursor>,
-    #[serde(default)]
-    pub error: Option<String>,
-    #[serde(default = "Fetch::default_max_pages")]
-    pub max_pages: usize,
-    #[serde(default)]
-    pub max_parents: Option<usize>,
-    #[serde(default)]
-    pub parents_by: Option<String>,
-}
-
-impl Fetch {
-    fn default_max_pages() -> usize {
-        5
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -228,7 +205,7 @@ pub struct Link {
     pub via: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceYaml {
     name: String,
@@ -241,11 +218,11 @@ struct SourceYaml {
     #[serde(default)]
     team: Option<String>,
     #[serde(default)]
-    token_command: Option<String>,
-    #[serde(default)]
-    refresh: Option<String>,
-    #[serde(default)]
     description: Option<String>,
+    #[serde(default, rename = "refresh")]
+    _refresh: Option<serde::de::IgnoredAny>,
+    #[serde(default, rename = "token_command")]
+    _token_command: Option<serde::de::IgnoredAny>,
     #[serde(default)]
     auth: Option<Auth>,
     #[serde(default)]
@@ -266,29 +243,7 @@ pub struct Source {
     pub base_url: Option<String>,
     pub auth: Option<Auth>,
     pub team: Option<String>,
-    pub refresh: std::time::Duration,
     pub entities: IndexMap<String, Entity>,
-}
-
-pub const DEFAULT_REFRESH: std::time::Duration = std::time::Duration::from_secs(15 * 60);
-
-fn duration(text: &str) -> Result<std::time::Duration> {
-    let text = text.trim();
-    let split = text
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(text.len());
-    let (number, unit) = text.split_at(split);
-    let number: u64 = number
-        .parse()
-        .with_context(|| format!("refresh {text:?} needs a number, such as 15m"))?;
-    let seconds = match unit {
-        "s" => 1,
-        "m" | "" => 60,
-        "h" => 3600,
-        "d" => 86400,
-        _ => bail!("refresh {text:?}: use s, m, h, or d"),
-    };
-    Ok(std::time::Duration::from_secs(number * seconds))
 }
 
 #[derive(Debug, Clone)]
@@ -356,22 +311,17 @@ impl Config {
             .map(|(_, name, entity)| (name, entity))
     }
 
+    pub fn entity_in(&self, name: &str) -> Option<(&Source, &str, &Entity)> {
+        self.entities()
+            .find(|(_, entity, _)| entity.eq_ignore_ascii_case(name))
+    }
+
     pub fn kind(&self, source: &Source, kind: &str) -> Option<String> {
-        let lower = kind.to_ascii_lowercase();
-        [
-            Some(lower.as_str()),
-            lower.strip_suffix("es"),
-            lower.strip_suffix('s'),
-        ]
-        .into_iter()
-        .flatten()
-        .find_map(|candidate| {
-            source
-                .entities
-                .iter()
-                .find(|(_, entity)| entity.kind == candidate)
-                .map(|(name, _)| name.clone())
-        })
+        source
+            .entities
+            .iter()
+            .find(|(_, entity)| entity.kind == kind)
+            .map(|(name, _)| name.clone())
     }
 
     pub fn source(&self, name: &str) -> Option<&Source> {
@@ -380,12 +330,9 @@ impl Config {
             .find(|source| source.name.eq_ignore_ascii_case(name))
     }
 
-    pub fn stored_entities(&self) -> IndexMap<String, Entity> {
+    pub fn unique_entities(&self) -> IndexMap<String, Entity> {
         let mut out = IndexMap::new();
-        for (_, name, entity) in self
-            .entities()
-            .filter(|(_, _, entity)| entity.fetch.is_some())
-        {
+        for (_, name, entity) in self.entities() {
             out.entry(name.to_string())
                 .or_insert_with(|| entity.clone());
         }
@@ -470,53 +417,45 @@ impl Config {
                 "{name}: label {} is not a property",
                 entity.label
             );
-            for field in &entity.search {
-                ensure!(
-                    declared(field),
-                    "{name}: search field {field} is not a property"
-                );
+            for field in entity
+                .search
+                .iter()
+                .chain(&entity.shows)
+                .chain(&entity.newest)
+            {
+                ensure!(declared(field), "{name}: {field} is not a property");
             }
-            if let Some(field) = &entity.newest {
-                ensure!(
-                    entity.properties.contains_key(field),
-                    "{name}: newest {field} is not a property"
-                );
-            }
-            for shown in &entity.shows {
-                match shown.split_once('.') {
-                    Some((link, _)) => ensure!(
-                        entity.links.iter().any(|found| found.kind == link),
-                        "{name}: shows {shown} names no link {link}"
-                    ),
-                    None => ensure!(declared(shown), "{name}: shows {shown} is not a property"),
-                }
-            }
-            for (link, own) in &entity.named {
-                ensure!(
-                    entity.links.iter().any(|found| &found.kind == link),
-                    "{name}: named {link} names no link"
-                );
-                ensure!(
-                    entity.properties.contains_key(own),
-                    "{name}: named {own} is not a property"
-                );
-            }
-            if let Some(live) = &entity.live {
-                for field in live.fields.keys() {
+            ensure!(
+                entity.list.is_some() || entity.search_api.is_some(),
+                "{name}: needs list, search_api, or both"
+            );
+            for request in entity.list.iter().chain(&entity.get) {
+                for field in request.fields.keys() {
                     ensure!(
                         entity.properties.contains_key(field),
-                        "{name}: live field {field} is not a property"
+                        "{name}: field {field} is not a property"
                     );
                 }
-                for within in live.within.keys() {
+            }
+            if let Some(search) = &entity.search_api {
+                for field in search.fields.keys() {
+                    ensure!(
+                        entity.properties.contains_key(field),
+                        "{name}: search_api field {field} is not a property"
+                    );
+                }
+                for within in search.within.keys().chain(search.within_name.keys()) {
                     ensure!(
                         entity.links.iter().any(|link| &link.to == within),
-                        "{name}: live within {within} names no linked entity"
+                        "{name}: search_api within {within} names no linked entity"
                     );
                 }
                 ensure!(
-                    live.params.values().any(|value| value.contains("{query}")),
-                    "{name}: live params need {{query}}"
+                    search
+                        .params
+                        .values()
+                        .any(|value| value.contains("{query}")),
+                    "{name}: search_api params need {{query}}"
                 );
             }
             for link in &entity.links {
@@ -532,26 +471,6 @@ impl Config {
                         .all(|b| b.is_ascii_uppercase() || b == b'_'),
                     "{name}: link type {} must be UPPER_SNAKE",
                     link.kind
-                );
-            }
-            ensure!(
-                entity.fetch.is_some() || entity.live.is_some(),
-                "{name}: needs fetch, live, or both"
-            );
-            if let Some(fetch) = &entity.fetch {
-                for parent in fetch.for_each.iter().chain(&fetch.within) {
-                    ensure!(
-                        source
-                            .entities
-                            .get(parent)
-                            .is_some_and(|parent| parent.fetch.is_some()),
-                        "{name}: fetch parent {parent} is not a stored entity of {}",
-                        source.name
-                    );
-                }
-                ensure!(
-                    fetch.path.is_some() || fetch.within.is_some(),
-                    "{name}: fetch needs a path or within"
                 );
             }
         }
@@ -570,16 +489,6 @@ impl Config {
 }
 
 fn resolve(source: SourceYaml) -> Result<Source> {
-    if source.token_command.is_some() {
-        let env = source
-            .token_env
-            .clone()
-            .unwrap_or_else(|| format!("{}_TOKEN", source.name.to_ascii_uppercase()));
-        eprintln!(
-            "orbit: {}: token_command is no longer read; set {env} instead, and run `orbit auth {}` to drop the line",
-            source.name, source.name
-        );
-    }
     let mut definition = match &source.definition {
         Some(name) => builtin(name).with_context(|| {
             format!(
@@ -605,13 +514,8 @@ fn resolve(source: SourceYaml) -> Result<Source> {
         auth.get_or_insert_with(|| Auth::bearer(None))
             .set_token_env(env);
     }
-    let refresh = match &source.refresh {
-        Some(text) => duration(text).with_context(|| source.name.clone())?,
-        None => DEFAULT_REFRESH,
-    };
     Ok(Source {
         team: source.team,
-        refresh,
         description: source.description.unwrap_or(definition.description),
         base_url: source.url.or(definition.base_url),
         auth,
@@ -633,7 +537,7 @@ mod tests {
 
     fn entity(name: &str, properties: &str, extra: &str) -> String {
         format!(
-            "  - name: {name}\n    entities:\n      Thing:\n        type: thing\n        fetch: {{path: /t, items: /items}}\n        key: [/id]\n        label: name\n        properties: {{name: {{from: /name}}{properties}}}\n{extra}"
+            "  - name: {name}\n    entities:\n      Thing:\n        type: thing\n        list: {{path: /t, items: /items}}\n        key: [/id]\n        label: name\n        properties: {{name: {{from: /name}}{properties}}}\n{extra}"
         )
     }
 
@@ -646,8 +550,6 @@ mod tests {
             "/examples/third-party.yaml"
         ));
         assert_eq!(Config::load(example).unwrap().unwrap().sources.len(), 3);
-        assert_eq!(duration("2h").unwrap().as_secs(), 7200);
-        assert!(duration("soon").is_err());
     }
 
     #[test]
@@ -658,6 +560,13 @@ mod tests {
             (entity("Tools", "", ""), "lowercase"),
             (entity("tools", "", link), "unknown entity Nobody"),
             (entity("tools", ", group: {from: /g}", ""), "SQL keyword"),
+            (
+                entity("tools", "", "").replace(
+                    "list: {path: /t, items: /items}",
+                    "get: {path: /t, items: /items}",
+                ),
+                "needs list, search_api, or both",
+            ),
         ] {
             let found = parse(&sources).unwrap_err().to_string();
             assert!(found.contains(error), "{found}");

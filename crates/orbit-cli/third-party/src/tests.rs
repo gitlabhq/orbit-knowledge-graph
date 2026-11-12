@@ -54,6 +54,8 @@ fn reply(request: &str) -> String {
         "/slack/api/auth.test" => r#"{"ok": false, "error": "invalid_auth"}"#.to_string(),
         "/slack/api/users.conversations" => CHANNELS.to_string(),
         "/slack/api/users.list" => USERS.to_string(),
+        "/slack/api/conversations.info" if has("channel=C1") => r#"{"ok": true, "channel": {"id": "C1", "name": "team", "topic": {"value": "team chat"}}}"#.to_string(),
+        "/slack/api/conversations.info" => r#"{"ok": false, "error": "channel_not_found"}"#.to_string(),
         "/slack/api/conversations.replies" if has("channel=C7") && has("ts=1712000001.000100") => {
             r#"{"ok": true, "messages": [{"ts": "1712000001.000100", "user": "U9", "text": "db migration in a channel nobody synced", "reply_count": 2}]}"#.to_string()
         }
@@ -70,6 +72,7 @@ fn reply(request: &str) -> String {
         "/grafana/api/user" => return "HTTP/1.1 401 Unauthorized\r\nconnection: close\r\ncontent-length: 2\r\n\r\n{}".into(),
         "/sso/api/folders" => return "HTTP/1.1 302 Found\r\nlocation: https://accounts.google.com/o/oauth2/auth?client_id=x\r\nconnection: close\r\ncontent-length: 0\r\n\r\n".into(),
         "/grafana/api/folders" => FOLDERS.to_string(),
+        "/grafana/api/folders/f-web" => r#"{"uid": "f-web", "title": "Web"}"#.to_string(),
         "/grafana/api/search" => {
             let all: Vec<serde_json::Value> = serde_json::from_str(DASHBOARDS).unwrap();
             let text = query.split('&').find_map(|pair| pair.strip_prefix("query=")).unwrap_or_default().to_lowercase();
@@ -109,60 +112,27 @@ fn open(root: &std::path::Path, sources: &str) -> ThirdParty {
 
 fn both(base: &str) -> String {
     format!(
-        "  - {{name: slack, definition: slack, url: {base}/slack, auth: {{strategy: bearer, token_env: ORBIT_TEST_TOKEN_GOOD}}}}\n  - {{name: grafana, definition: grafana, url: {base}/grafana}}\n"
+        "  - {{name: slack, definition: slack, url: {base}/slack, auth: {{strategy: bearer, token_env: ORBIT_TEST_TOKEN_GOOD}}}}\n  - {{name: grafana, definition: grafana, url: {base}/grafana, auth: {{strategy: bearer, token_env: ORBIT_TEST_TOKEN_GOOD}}}}\n"
     )
 }
 
-async fn synced() -> (tempfile::TempDir, ThirdParty) {
+async fn connected() -> (tempfile::TempDir, ThirdParty) {
     let root = tempfile::tempdir().unwrap();
     let third_party = open(root.path(), &both(&serve().await));
-    let failed = third_party.ensure_fresh().await.unwrap().failed;
-    assert!(failed.is_empty(), "{failed:?}");
     (root, third_party)
-}
-
-fn counts(freshness: &Freshness) -> Vec<(&str, usize)> {
-    freshness
-        .synced
-        .iter()
-        .map(|(_, entity, count)| (entity.as_str(), *count))
-        .collect()
 }
 
 async fn grep(third_party: &ThirdParty, query: &str, within: &[&str]) -> Vec<String> {
     let (scope, rest) = third_party.scope(query);
     let mut scope = scope.unwrap_or_default();
-    for reference in within {
-        let target = third_party.parse_target(reference).unwrap();
-        match third_party.resolve_to_key(&target) {
-            Ok(key) => {
-                scope
-                    .within
-                    .push((target.source.clone(), third_party.resolve(&target).unwrap()));
-                scope
-                    .within_keys
-                    .push((target.source.clone(), target.entity.clone(), key));
-            }
-            Err(_) => scope.within_names.push((
-                target.source.clone(),
-                target.entity.clone(),
-                third_party.live_name(&target).unwrap(),
-            )),
-        }
-    }
-    let rest = if rest.trim().is_empty() {
-        ".".to_string()
-    } else {
-        rest
-    };
-    assert!(
-        third_party
-            .search_live(std::slice::from_ref(&rest), &mut scope)
-            .await
-            .is_empty()
-    );
-    let found = third_party.grep(&[rest], Some(&scope), 20).unwrap();
-    found
+    scope.within = within
+        .iter()
+        .map(|reference| third_party.parse_target(reference).unwrap())
+        .collect();
+    let grepped = third_party.grep(&[rest], &scope).await;
+    assert!(grepped.failed.is_empty(), "{:?}", grepped.failed);
+    grepped
+        .found
         .into_iter()
         .flat_map(|entity| entity.hits)
         .map(|hit| hit.reference)
@@ -170,53 +140,12 @@ async fn grep(third_party: &ThirdParty, query: &str, within: &[&str]) -> Vec<Str
 }
 
 #[tokio::test]
-async fn sync_fetches_every_entity_once_and_again_when_stale() {
-    let base = serve().await;
-    let root = tempfile::tempdir().unwrap();
-    let broken = "  - {name: broken, definition: grafana, url: http://127.0.0.1:1}\n";
-    let third_party = open(root.path(), &format!("{}{broken}", both(&base)));
-    assert_eq!(
-        third_party.staleness().unwrap().never,
-        ["slack", "grafana", "broken"]
-    );
-    let freshness = third_party.ensure_fresh().await.unwrap();
-    assert_eq!(freshness.failed.len(), 1, "{:?}", freshness.failed);
-    assert_eq!(
-        counts(&freshness),
-        [
-            ("SlackChannel", 2),
-            ("SlackUser", 2),
-            ("GrafanaFolder", 2),
-            ("GrafanaDashboard", 2),
-            ("GrafanaAlert", 3),
-        ]
-    );
-    assert_eq!(freshness.failed.len(), 1);
-    assert!(third_party.ensure_fresh().await.unwrap().synced.is_empty());
-
-    let third_party = open(
-        root.path(),
-        &format!(
-            "{}  - {{name: grafana, definition: grafana, url: {base}/grafana, refresh: 0s}}\n",
-            &both(&base)[..both(&base).find("  - {name: grafana").unwrap()]
-        ),
-    );
-    assert_eq!(third_party.staleness().unwrap().old, ["grafana"]);
-    store::forget(&ThirdParty::store_path_in(root.path()), "grafana", true).unwrap();
-    assert!(
-        grep(&third_party, "grafana:alert:web", &[])
-            .await
-            .is_empty()
-    );
-}
-
-#[tokio::test]
-async fn grep_scopes_by_source_and_type_and_reads_the_graph() {
-    let (_root, third_party) = synced().await;
+async fn grep_scopes_by_source_and_type_and_reads_each_source_live() {
+    let (root, third_party) = connected().await;
     let (scope, rest) = third_party.scope("slack:channel:nothing-matches");
     assert_eq!(
         scope.unwrap().picks,
-        [("slack".into(), Some("SlackChannel".into()))]
+        [("slack".into(), "SlackChannel".into())]
     );
     assert_eq!(rest, "nothing-matches");
     for code in [
@@ -231,7 +160,6 @@ async fn grep_scopes_by_source_and_type_and_reads_the_graph() {
     ] {
         assert_eq!(third_party.scope(code), (None, code.to_string()), "{code}");
     }
-
     assert_eq!(
         grep(&third_party, "slack:channel:deploy", &[]).await,
         ["slack:channel:C2"]
@@ -245,18 +173,23 @@ async fn grep_scopes_by_source_and_type_and_reads_the_graph() {
             .await
             .is_empty()
     );
+    let written: Vec<_> = std::fs::read_dir(root.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(written, [std::ffi::OsString::from(CONFIG_FILE)]);
 }
 
 #[tokio::test]
-async fn grep_searches_live_and_narrows_by_reference() {
-    let (_root, third_party) = synced().await;
-    let both = [
+async fn grep_narrows_a_search_by_reference() {
+    let (_root, third_party) = connected().await;
+    let found = [
         "slack:message:C1:1712345678.000100",
         "slack:message:C7:1712000001.000100",
     ];
     assert_eq!(
         grep(&third_party, "slack:message:migration", &[]).await,
-        both
+        found
     );
     assert_eq!(
         grep(
@@ -265,7 +198,7 @@ async fn grep_searches_live_and_narrows_by_reference() {
             &["slack:channel:#team"]
         )
         .await,
-        both[..1]
+        found[..1]
     );
     assert_eq!(
         grep(
@@ -274,21 +207,8 @@ async fn grep_searches_live_and_narrows_by_reference() {
             &["slack:user:carol"]
         )
         .await,
-        both[1..]
+        found[1..]
     );
-    assert!(third_party.store_path().exists());
-    let tables = duckdb_client::DuckDbClient::open(duckdb_client::OpenMode::ReadOnly(
-        third_party.store_path(),
-    ))
-    .unwrap()
-    .query_arrow("SELECT table_name FROM information_schema.tables")
-    .unwrap();
-    let tables = duckdb_client::string_column(&tables, "table_name");
-    assert!(
-        !tables.iter().any(|table| table.contains("message")),
-        "{tables:?}"
-    );
-
     assert_eq!(
         grep(&third_party, "grafana:dashboard:postgres", &[]).await,
         ["grafana:dashboard:d-db"]
@@ -297,51 +217,57 @@ async fn grep_searches_live_and_narrows_by_reference() {
         grep(&third_party, "grafana:dashboard:o", &["grafana:folder:Web"]).await,
         ["grafana:dashboard:d-web"]
     );
+    assert_eq!(
+        grep(
+            &third_party,
+            "grafana:alert:.",
+            &["grafana:dashboard:d-web"]
+        )
+        .await,
+        ["grafana:alert:a-web-errors", "grafana:alert:a-web-latency"]
+    );
 }
 
 #[tokio::test]
-async fn render_shows_live_hits_with_context_and_stored_ones_with_the_total() {
-    let (_root, third_party) = synced().await;
+async fn render_shows_where_who_when_and_the_total() {
+    let (_root, third_party) = connected().await;
     let (scope, rest) = third_party.scope("slack:message:migration");
-    let mut scope = scope.unwrap();
-    third_party
-        .search_live(std::slice::from_ref(&rest), &mut scope)
-        .await;
-    let text = render(&third_party.grep(&[rest], Some(&scope), 20).unwrap());
+    let grepped = third_party.grep(&[rest], &scope.unwrap()).await;
+    let text = render(&grepped.found);
     assert!(
-        text.starts_with("» slack\nslack:message:C1:1712345678.000100  #team · ada · 2024-04-05 19:34\n    web rollout stuck on the db migration\n"),
+        text.starts_with("» slack\nslack:message:C1:1712345678.000100  team · Ada · 2024-04-05 19:34\n    web rollout stuck on the db migration\n"),
         "{text}"
     );
-    assert!(
-        text.contains("slack:message:C7:1712000001.000100  #elsewhere · Carol"),
-        "{text}"
+    let mut found = Found {
+        source: "grafana".into(),
+        entity: "GrafanaFolder".into(),
+        hits: vec![Hit {
+            source: "grafana".into(),
+            entity: "GrafanaFolder".into(),
+            reference: "grafana:folder:web".into(),
+            label: "web".into(),
+            shown: Vec::new(),
+            matched: Vec::new(),
+        }],
+        total: 3,
+    };
+    assert_eq!(
+        render(std::slice::from_ref(&found)),
+        "» grafana\ngrafana:folder:web\n  1 of 3 folders shown; add words to narrow it\n"
     );
-    let (scope, rest) = third_party.scope("grafana:alert:.");
-    let text = render(&third_party.grep(&[rest], scope.as_ref(), 2).unwrap());
-    assert!(
-        text.ends_with("  2 of 3 alerts shown; add words to narrow it\n"),
-        "{text}"
-    );
+    found.total = 1;
+    found.hits[0].label = "Web".into();
+    assert_eq!(render(&[found]), "» grafana\ngrafana:folder:web  Web\n");
 }
 
 #[tokio::test]
-async fn context_reads_stored_entities_and_fetches_live_ones() {
-    let (_root, third_party) = synced().await;
+async fn context_fetches_one_entity_live_by_key_or_name_with_links() {
+    let (_root, third_party) = connected().await;
     let context = |reference: &str| {
         let target = third_party.parse_target(reference).unwrap();
         let third_party = &third_party;
-        async move { third_party.context_live(&target).await }
+        async move { third_party.context(&target).await }
     };
-    let text = context("grafana:dashboard:d-web").await.unwrap();
-    assert!(
-        text.starts_with("grafana:dashboard:d-web  Web overview\n"),
-        "{text}"
-    );
-    assert!(
-        text.contains("-[IN_FOLDER]-> folder (1)\n  grafana:folder:f-web  Web"),
-        "{text}"
-    );
-    assert!(text.contains("<-[ON_DASHBOARD]- alert (2)"), "{text}");
     for asked in [
         "slack:channel:C1",
         "slack:channel:#team",
@@ -367,27 +293,56 @@ async fn context_reads_stored_entities_and_fetches_live_ones() {
         "{text}"
     );
     assert!(text.contains("-[IN_CHANNEL]-> slack:channel:C7"), "{text}");
-    assert!(context("slack:message:C7:1").await.is_err());
-    assert_eq!(
-        context("slack:channel:nope").await.unwrap_err().to_string(),
-        "nothing synced is slack:channel:nope"
+    let text = context("grafana:folder:f-web").await.unwrap();
+    assert!(
+        text.contains("<-[IN_FOLDER]- dashboard (latest 1)"),
+        "{text}"
     );
-    assert!(third_party.parse_target("mr:42").is_none());
+    assert!(text.contains("<-[IN_FOLDER]- alert (latest 2)"), "{text}");
+    assert!(context("slack:message:C7:1").await.is_err());
+    assert!(
+        context("slack:channel:nope")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("has nothing at slack:channel:nope")
+    );
 }
 
 #[tokio::test]
-async fn query_runs_cypher_and_returns_only_what_it_asks_for() {
-    let (_root, third_party) = synced().await;
+async fn query_fetches_only_what_it_names_and_needs_a_filter_for_searched_entities() {
+    let (_root, third_party) = connected().await;
     let batches = third_party
         .query("MATCH (a:GrafanaAlert)-[:IN_FOLDER]->(f:GrafanaFolder) WHERE f.title = 'Web' RETURN a.title")
+        .await
         .unwrap();
-    let mut titles: Vec<String> = optional_strings(&batches, "a_title")
-        .into_iter()
-        .flatten()
-        .collect();
+    let mut titles = strings(&batches, "a_title");
     titles.sort();
     assert_eq!(titles, ["Web error rate high", "Web latency high"]);
     assert_eq!(batches[0].schema().fields().len(), 1);
+
+    let batches = third_party
+        .query("MATCH (m:SlackMessage)-[:IN_CHANNEL]->(c:SlackChannel) WHERE m.text CONTAINS 'migration' RETURN c.name")
+        .await
+        .unwrap();
+    assert_eq!(strings(&batches, "c_name"), ["team"]);
+    let batches = third_party
+        .query(
+            "MATCH (m:SlackMessage)-[:IN_CHANNEL]->(c:SlackChannel {name: 'team'}) RETURN m.text",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        strings(&batches, "m_text"),
+        ["web rollout stuck on the db migration"]
+    );
+
+    let error = third_party
+        .query("MATCH (m:SlackMessage) RETURN m.text")
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("needs a text filter"), "{error}");
     let (ours, theirs) = third_party.labels_in("MATCH (c:SlackChannel), (p:Project) RETURN c");
     assert_eq!(
         (ours, theirs),
@@ -396,11 +351,21 @@ async fn query_runs_cypher_and_returns_only_what_it_asks_for() {
             vec!["Project".to_string()]
         )
     );
-    assert!(
-        third_party
-            .query("MATCH (m:SlackMessage) RETURN m.text")
-            .is_err()
-    );
+}
+
+fn strings(batches: &[RecordBatch], name: &str) -> Vec<String> {
+    use arrow::array::{Array, StringArray};
+    batches
+        .iter()
+        .filter_map(|batch| batch.column_by_name(name))
+        .filter_map(|column| column.as_any().downcast_ref::<StringArray>().cloned())
+        .flat_map(|array| {
+            (0..array.len())
+                .filter(|i| !array.is_null(*i))
+                .map(|i| array.value(i).to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 #[tokio::test]
@@ -446,34 +411,57 @@ async fn verify_checks_tokens_and_lists_grid_workspaces() {
         )
     };
     let failed = open(root.path(), &grid(""))
-        .ensure_fresh()
+        .grep(
+            &[".".into()],
+            &Scope {
+                picks: vec![("slack".into(), "SlackChannel".into())],
+                within: Vec::new(),
+            },
+        )
         .await
-        .unwrap()
         .failed;
     assert!(failed[0].1.contains("missing_argument"), "{failed:?}");
-    assert!(
-        open(root.path(), &grid(", team: T1"))
-            .ensure_fresh()
-            .await
-            .unwrap()
-            .failed
-            .is_empty()
-    );
+    let grepped = open(root.path(), &grid(", team: T1"))
+        .grep(
+            &[".".into()],
+            &Scope {
+                picks: vec![("slack".into(), "SlackChannel".into())],
+                within: Vec::new(),
+            },
+        )
+        .await;
+    assert!(grepped.failed.is_empty(), "{:?}", grepped.failed);
 }
 
 #[tokio::test]
-async fn a_sign_in_redirect_fails_with_a_short_message() {
+async fn failures_say_why_without_a_url_dump() {
     let root = tempfile::tempdir().unwrap();
     let base = serve().await;
     let third_party = open(
         root.path(),
-        &format!("  - {{name: grafana, definition: grafana, url: {base}/sso}}\n"),
-    );
-    let failed = third_party.ensure_fresh().await.unwrap().failed;
-    assert!(
-        failed[0].1.ends_with(
-            "/api/folders redirected to accounts.google.com, so it wants a sign-in; check the token"
+        &format!(
+            "  - {{name: grafana, definition: grafana, url: {base}/sso, auth: {{strategy: bearer, token_env: ORBIT_TEST_TOKEN_GOOD}}}}\n  - {{name: slack, definition: slack, url: {base}/slack, auth: {{strategy: bearer, token_env: ORBIT_TEST_TOKEN_NEVER_SET}}}}\n"
         ),
-        "{failed:?}"
+    );
+    let failed = third_party
+        .grep(&[".".into()], &Scope::default())
+        .await
+        .failed;
+    let errors: Vec<&str> = failed.iter().map(|(_, error)| error.as_str()).collect();
+    assert!(
+        errors.iter().any(|error| error.ends_with(
+            "/api/folders redirected to accounts.google.com, so it wants a sign-in; check the token"
+        )),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("slack needs a token in ORBIT_TEST_TOKEN_NEVER_SET")),
+        "{errors:?}"
+    );
+    assert!(
+        !errors.iter().any(|error| error.contains("client_id")),
+        "{errors:?}"
     );
 }

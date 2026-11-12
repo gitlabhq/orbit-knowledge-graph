@@ -273,14 +273,6 @@ pub(crate) fn input(prompt: &str, hint: &str, initial: Option<&str>) -> Result<S
     Ok(field.interact::<String>()?.trim().to_string())
 }
 
-pub(crate) fn secret(prompt: &str) -> Result<String> {
-    Ok(cliclack::password(prompt)
-        .mask('•')
-        .interact()?
-        .trim()
-        .to_string())
-}
-
 pub(crate) fn success(message: impl Display) {
     let _ = cliclack::log::success(message);
 }

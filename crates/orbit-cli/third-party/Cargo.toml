@@ -15,7 +15,6 @@ compiler = { path = "../../query-engine/compiler" }
 duckdb-client = { path = "../../duckdb-client" }
 futures = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
-keyring = { workspace = true }
 ontology = { path = "../../ontology" }
 orbit-utils = { path = "../../utils" }
 regex = { workspace = true }

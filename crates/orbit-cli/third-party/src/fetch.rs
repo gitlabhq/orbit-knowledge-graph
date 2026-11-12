@@ -3,29 +3,13 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
-use crate::config::{Auth, Entity, Format, Source, Type};
-
-type Headers = Vec<(String, String)>;
+use crate::config::{Entity, Format, Source, Type};
 
 #[derive(Debug, Clone)]
 pub struct Record {
-    pub id: i64,
     pub key: String,
     pub properties: BTreeMap<String, Value>,
-    pub links: Vec<Link>,
-    pub raw: Value,
 }
-
-#[derive(Debug, Clone)]
-pub struct Link {
-    pub kind: String,
-    pub target_kind: String,
-    pub target_id: i64,
-}
-
-const PARENT_KEY: &str = "^key";
-
-const PARALLEL_FETCHES: usize = 8;
 
 pub struct Fetcher {
     http: reqwest::Client,
@@ -42,133 +26,134 @@ impl Fetcher {
         Ok(Self { http })
     }
 
-    pub async fn source(&self, source: &Source) -> Result<Vec<(String, Vec<Record>)>> {
-        let headers = auth(&source.name, source.auth.as_ref())
-            .with_context(|| format!("{}: getting the token", source.name))?;
-        let header = headers.as_slice();
-        let mut done: BTreeMap<String, Vec<Record>> = BTreeMap::new();
-        let mut order = Vec::new();
-        let mut pending: Vec<&String> = source
-            .entities
-            .iter()
-            .filter(|(_, entity)| entity.fetch.is_some())
-            .map(|(name, _)| name)
-            .collect();
-        while !pending.is_empty() {
-            let before = pending.len();
-            let mut next = Vec::new();
-            for name in pending {
-                let entity = &source.entities[name];
-                let parent = fetch(entity)
-                    .for_each
-                    .as_ref()
-                    .or(fetch(entity).within.as_ref());
-                match parent {
-                    Some(parent) if !done.contains_key(parent) => next.push(name),
-                    _ => {
-                        let parents = parent.map(|parent| done[parent].as_slice());
-                        let records = self
-                            .entity(source, header, name, entity, parents)
-                            .await
-                            .with_context(|| format!("{}: fetching {name}", source.name))?;
-                        done.insert(name.clone(), records);
-                        order.push(name.clone());
-                    }
-                }
-            }
-            if next.len() == before {
-                bail!("{}: fetch parents form a cycle", source.name);
-            }
-            pending = next;
-        }
-        Ok(order
-            .into_iter()
-            .map(|name| {
-                let records = done.remove(&name).unwrap_or_default();
-                (name, records)
-            })
-            .collect())
-    }
-
-    async fn entity(
-        &self,
-        source: &Source,
-        header: &[(String, String)],
-        name: &str,
-        entity: &Entity,
-        parents: Option<&[Record]>,
-    ) -> Result<Vec<Record>> {
-        use futures::stream::{self, StreamExt, TryStreamExt};
-        let scopes: Vec<Option<&Record>> = match parents {
-            Some(parents) => limit_parents(parents, entity)
-                .into_iter()
-                .map(Some)
-                .collect(),
-            None => vec![None],
-        };
-        let fetched: Vec<(Option<&Record>, Vec<Value>)> = stream::iter(scopes)
-            .map(|parent| async move {
-                let items = match (&fetch(entity).within, parent) {
-                    (Some(_), Some(parent)) => pointer_items(&parent.raw, &fetch(entity).items),
-                    _ => self.pages(source, header, entity, parent).await?,
-                };
-                anyhow::Ok((parent, items))
-            })
-            .buffered(PARALLEL_FETCHES)
-            .try_collect()
-            .await?;
-        let mut records = Vec::new();
-        for (parent, items) in fetched {
-            for item in items {
-                records.push(record(source, name, entity, parent, item)?);
-            }
-        }
-        Ok(records)
-    }
-
-    async fn pages(
-        &self,
-        source: &Source,
-        header: &[(String, String)],
-        entity: &Entity,
-        parent: Option<&Record>,
-    ) -> Result<Vec<Value>> {
-        let base = source
-            .base_url
-            .as_deref()
-            .with_context(|| format!("{} has no url", source.name))?
-            .trim_end_matches('/');
-        let fill = |text: &str| {
-            let text = match parent {
-                Some(parent) => text.replace("{key}", &parent.key),
-                None => text.to_string(),
-            };
-            text.replace("{team}", source.team.as_deref().unwrap_or_default())
-        };
-        let path = fill(fetch(entity).path.as_deref().unwrap_or_default());
-        let mut params: Vec<(String, String)> = fetch(entity)
-            .params
-            .iter()
-            .map(|(name, value)| (name.clone(), fill(value)))
-            .filter(|(_, value)| !value.is_empty())
-            .collect();
+    pub async fn list(&self, source: &Source, name: &str, entity: &Entity) -> Result<Vec<Record>> {
+        let request = entity
+            .list
+            .as_ref()
+            .with_context(|| format!("{name} has no list"))?;
+        let headers = headers(source)?;
+        let base = base(source)?;
+        let fill = |text: &str| fill(text, source, &[]);
+        let path = fill(&request.path);
+        let mut params = filled(&request.params, fill);
         let mut items = Vec::new();
-        for _ in 0..fetch(entity).max_pages.max(1) {
+        for _ in 0..request.max_pages.max(1) {
             let body = self
-                .get(base, &path, &params, header, fetch(entity).error.as_deref())
+                .get(base, &path, &params, &headers, request.error.as_deref())
                 .await?;
-            items.extend(pointer_items(&body, &fetch(entity).items));
-            let next = fetch(entity).cursor.as_ref().and_then(|cursor| {
+            items.extend(pointer_items(&body, &request.items));
+            let next = request.cursor.as_ref().and_then(|cursor| {
                 let next = body.pointer(&cursor.next)?.as_str()?;
                 (!next.is_empty()).then(|| (cursor.param.clone(), next.to_string()))
             });
             let Some((param, next)) = next else {
                 break;
             };
-            params.retain(|(name, _)| *name != param);
+            params.retain(|(found, _)| *found != param);
             params.push((param, next));
         }
-        Ok(items)
+        let shape = shaped(entity, request.key.as_ref(), &request.fields);
+        items
+            .into_iter()
+            .map(|item| record(name, &shape, &[], item))
+            .collect()
+    }
+
+    pub async fn search(
+        &self,
+        source: &Source,
+        name: &str,
+        entity: &Entity,
+        query: &str,
+        within: &[(String, String)],
+    ) -> Result<Vec<Record>> {
+        let search = entity
+            .search_api
+            .as_ref()
+            .with_context(|| format!("{name} has no search_api"))?;
+        let headers = headers(source)?;
+        let base = base(source)?;
+        let mut terms = vec![query.trim().to_string()];
+        let mut extra: Vec<(String, String)> = Vec::new();
+        for (to, value) in within {
+            let filter = match to.strip_suffix("#name") {
+                Some(to) => match search.within_name.get(to) {
+                    Some(filter) => filter.replace("{name}", value),
+                    None => continue,
+                },
+                None => match search.within.get(to) {
+                    Some(filter) => filter.replace("{key}", value),
+                    None => continue,
+                },
+            };
+            match filter.split_once('=') {
+                Some((param, value)) if !param.contains([' ', ':']) => {
+                    extra.push((param.to_string(), value.to_string()))
+                }
+                _ => terms.push(filter),
+            }
+        }
+        let text = terms
+            .into_iter()
+            .filter(|term| !term.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut params = filled(&search.params, |value| {
+            fill(value, source, &[]).replace("{query}", &text)
+        });
+        params.extend(extra);
+        let body = self
+            .get(
+                base,
+                &search.path,
+                &params,
+                &headers,
+                search.error.as_deref(),
+            )
+            .await?;
+        let shape = shaped(entity, search.key.as_ref(), &search.fields);
+        pointer_items(&body, &search.items)
+            .into_iter()
+            .map(|item| record(name, &shape, &[], item))
+            .collect()
+    }
+
+    pub async fn get_one(
+        &self,
+        source: &Source,
+        name: &str,
+        entity: &Entity,
+        key: &str,
+    ) -> Result<Option<Record>> {
+        let Some(request) = &entity.get else {
+            let all = self.list(source, name, entity).await?;
+            return Ok(all.into_iter().find(|record| record.key == key));
+        };
+        let headers = headers(source)?;
+        let base = base(source)?;
+        let parts: Vec<&str> = key.splitn(entity.key.len().max(1), ':').collect();
+        let fill = |text: &str| fill(text, source, &parts).replace("{key}", key);
+        let params = filled(&request.params, fill);
+        let body = self
+            .get(
+                base,
+                &fill(&request.path),
+                &params,
+                &headers,
+                request.error.as_deref(),
+            )
+            .await?;
+        let shape = shaped(entity, request.key.as_ref(), &request.fields);
+        let items = match body.pointer(&request.items) {
+            Some(Value::Array(items)) => items.clone(),
+            Some(item @ Value::Object(_)) => vec![item.clone()],
+            _ => Vec::new(),
+        };
+        items
+            .into_iter()
+            .map(|item| record(name, &shape, &parts, item))
+            .find(|found| found.as_ref().is_ok_and(|found| found.key == key))
+            .transpose()
     }
 
     async fn get(
@@ -176,11 +161,13 @@ impl Fetcher {
         base: &str,
         path: &str,
         params: &[(String, String)],
-        header: &[(String, String)],
+        headers: &[(String, String)],
         error: Option<&str>,
     ) -> Result<Value> {
-        let request =
-            crate::auth::apply(self.http.get(format!("{base}{path}")).query(params), header);
+        let request = crate::auth::apply(
+            self.http.get(format!("{base}{path}")).query(params),
+            headers,
+        );
         let response = request.send().await?;
         let status = response.status();
         if status.is_redirection() {
@@ -207,161 +194,53 @@ impl Fetcher {
         }
         Ok(body)
     }
-
-    pub async fn get_one(
-        &self,
-        source: &Source,
-        name: &str,
-        entity: &Entity,
-        key: &str,
-    ) -> Result<Option<Record>> {
-        let get = entity
-            .get
-            .as_ref()
-            .with_context(|| format!("{name} has no get"))?;
-        let header = auth(&source.name, source.auth.as_ref())
-            .with_context(|| format!("{}: getting the token", source.name))?;
-        let base = source
-            .base_url
-            .as_deref()
-            .with_context(|| format!("{} has no url", source.name))?
-            .trim_end_matches('/');
-        let parts: Vec<&str> = key.splitn(entity.key.len().max(1), ':').collect();
-        let fill = |text: &str| {
-            let mut text = text.replace("{key}", key);
-            for (index, part) in parts.iter().enumerate() {
-                text = text.replace(&format!("{{key.{index}}}"), part);
-            }
-            text.replace("{team}", source.team.as_deref().unwrap_or_default())
-        };
-        let params: Vec<(String, String)> = get
-            .params
-            .iter()
-            .map(|(param, value)| (param.clone(), fill(value)))
-            .filter(|(_, value)| !value.is_empty())
-            .collect();
-        let body = self
-            .get(
-                base,
-                &fill(&get.path),
-                &params,
-                &header,
-                get.error.as_deref(),
-            )
-            .await?;
-        let mut shape = entity.clone();
-        if let Some(key) = &get.key {
-            shape.key = key.clone();
-        }
-        for (field, from) in &get.fields {
-            if let Some(property) = shape.properties.get_mut(field) {
-                property.from = from.clone();
-            }
-        }
-        let asked = Record {
-            id: 0,
-            key: key.to_string(),
-            properties: BTreeMap::new(),
-            links: Vec::new(),
-            raw: Value::Null,
-        };
-        pointer_items(&body, &get.items)
-            .into_iter()
-            .map(|item| record(source, name, &shape, Some(&asked), item))
-            .find(|found| found.as_ref().is_ok_and(|found| found.key == key))
-            .transpose()
-    }
-
-    pub async fn search(
-        &self,
-        source: &Source,
-        name: &str,
-        entity: &Entity,
-        query: &str,
-        within: &[(String, String)],
-    ) -> Result<Vec<Record>> {
-        let live = entity
-            .live
-            .as_ref()
-            .with_context(|| format!("{name} has no live search"))?;
-        let header = auth(&source.name, source.auth.as_ref())
-            .with_context(|| format!("{}: getting the token", source.name))?;
-        let base = source
-            .base_url
-            .as_deref()
-            .with_context(|| format!("{} has no url", source.name))?
-            .trim_end_matches('/');
-        let mut terms = vec![query.trim().to_string()];
-        let mut extra: Vec<(String, String)> = Vec::new();
-        for (to, key) in within {
-            let filter = match to.ends_with("#name") {
-                true => key.clone(),
-                false => match live.within.get(to) {
-                    Some(filter) => filter.replace("{key}", key),
-                    None => continue,
-                },
-            };
-            match filter.split_once('=') {
-                Some((param, value)) if !param.contains([' ', ':']) => {
-                    extra.push((param.to_string(), value.to_string()))
-                }
-                _ => terms.push(filter),
-            }
-        }
-        let search = terms
-            .into_iter()
-            .filter(|term| !term.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut params: Vec<(String, String)> = live
-            .params
-            .iter()
-            .map(|(param, value)| {
-                let value = value
-                    .replace("{query}", &search)
-                    .replace("{team}", source.team.as_deref().unwrap_or_default());
-                (param.clone(), value)
-            })
-            .filter(|(_, value)| !value.is_empty())
-            .collect();
-        params.extend(extra);
-        let body = self
-            .get(base, &live.path, &params, &header, live.error.as_deref())
-            .await?;
-        let mut shape = entity.clone();
-        if let Some(key) = &live.key {
-            shape.key = key.clone();
-        }
-        for (field, from) in &live.fields {
-            if let Some(property) = shape.properties.get_mut(field) {
-                property.from = from.clone();
-            }
-        }
-        pointer_items(&body, &live.items)
-            .into_iter()
-            .map(|item| record(source, name, &shape, None, item))
-            .collect()
-    }
 }
 
-fn limit_parents<'a>(parents: &'a [Record], entity: &Entity) -> Vec<&'a Record> {
-    let mut chosen: Vec<&Record> = parents.iter().collect();
-    let Some(max) = fetch(entity).max_parents else {
-        return chosen;
-    };
-    if let Some(field) = &fetch(entity).parents_by {
-        let at = |record: &Record| record.properties.get(field).map(text).unwrap_or_default();
-        chosen.sort_by_key(|record| std::cmp::Reverse(at(record)));
-    }
-    chosen.truncate(max);
-    chosen
-}
-
-fn auth(source: &str, auth: Option<&Auth>) -> Result<Headers> {
-    match auth {
-        Some(auth) => auth.resolve(source),
+fn headers(source: &Source) -> Result<Vec<(String, String)>> {
+    match &source.auth {
+        Some(auth) => auth.resolve(&source.name),
         None => Ok(Vec::new()),
     }
+}
+
+fn base(source: &Source) -> Result<&str> {
+    Ok(source
+        .base_url
+        .as_deref()
+        .with_context(|| format!("{} has no url", source.name))?
+        .trim_end_matches('/'))
+}
+
+fn fill(text: &str, source: &Source, parts: &[&str]) -> String {
+    let mut text = text.replace("{team}", source.team.as_deref().unwrap_or_default());
+    for (index, part) in parts.iter().enumerate() {
+        text = text.replace(&format!("{{key.{index}}}"), part);
+    }
+    text
+}
+
+fn filled(
+    params: &BTreeMap<String, String>,
+    fill: impl Fn(&str) -> String,
+) -> Vec<(String, String)> {
+    params
+        .iter()
+        .map(|(param, value)| (param.clone(), fill(value)))
+        .filter(|(_, value)| !value.is_empty())
+        .collect()
+}
+
+fn shaped(entity: &Entity, key: Option<&Vec<String>>, fields: &BTreeMap<String, String>) -> Entity {
+    let mut shape = entity.clone();
+    if let Some(key) = key {
+        shape.key = key.clone();
+    }
+    for (field, from) in fields {
+        if let Some(property) = shape.properties.get_mut(field) {
+            property.from = from.clone();
+        }
+    }
+    shape
 }
 
 fn short(body: &Value) -> String {
@@ -375,12 +254,12 @@ fn pointer_items(value: &Value, pointer: &str) -> Vec<Value> {
     }
 }
 
-fn lookup(item: &Value, parent: Option<&Record>, pointer: &str) -> Option<Value> {
-    if pointer == PARENT_KEY {
-        return parent.map(|parent| Value::String(parent.key.clone()));
-    }
-    if let Some(index) = pointer.strip_prefix("^key.") {
-        let part = parent?.key.split(':').nth(index.parse().ok()?)?;
+fn lookup(item: &Value, parts: &[&str], pointer: &str) -> Option<Value> {
+    if let Some(index) = pointer
+        .strip_prefix("{key.")
+        .and_then(|rest| rest.strip_suffix('}'))
+    {
+        let part = parts.get(index.parse::<usize>().ok()?)?;
         return Some(Value::String(part.to_string()));
     }
     item.pointer(pointer)
@@ -388,7 +267,7 @@ fn lookup(item: &Value, parent: Option<&Record>, pointer: &str) -> Option<Value>
         .cloned()
 }
 
-fn text(value: &Value) -> String {
+pub(crate) fn text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
         Value::Array(items) => items.iter().map(text).collect::<Vec<_>>().join(", "),
@@ -396,55 +275,33 @@ fn text(value: &Value) -> String {
     }
 }
 
-fn record(
-    source: &Source,
-    name: &str,
-    entity: &Entity,
-    parent: Option<&Record>,
-    item: Value,
-) -> Result<Record> {
-    let parts: Vec<String> = entity
+fn record(name: &str, entity: &Entity, parts: &[&str], item: Value) -> Result<Record> {
+    let key_parts: Vec<String> = entity
         .key
         .iter()
         .map(|pointer| {
-            lookup(&item, parent, pointer)
-                .map(|v| text(&v))
+            lookup(&item, parts, pointer)
+                .map(|value| text(&value))
                 .unwrap_or_default()
         })
         .collect();
     anyhow::ensure!(
-        parts.iter().any(|part| !part.is_empty()),
+        key_parts.iter().any(|part| !part.is_empty()),
         "{name}: an item has no key at {:?}",
         entity.key
     );
-    let key = parts.join(":");
     let mut properties = BTreeMap::new();
     for (field, property) in &entity.properties {
-        let Some(value) = lookup(&item, parent, &property.from) else {
+        let Some(value) = lookup(&item, parts, &property.from) else {
             continue;
         };
         if let Some(value) = convert(&value, property.kind, property.format) {
             properties.insert(field.clone(), value);
         }
     }
-    let links = entity
-        .links
-        .iter()
-        .filter_map(|link| {
-            let target = properties.get(&link.via).map(text)?;
-            Some(Link {
-                kind: link.kind.clone(),
-                target_kind: link.to.clone(),
-                target_id: crate::store::id(&source.name, &link.to, &target),
-            })
-        })
-        .collect();
     Ok(Record {
-        id: crate::store::id(&source.name, name, &key),
-        key,
+        key: key_parts.join(":"),
         properties,
-        links,
-        raw: item,
     })
 }
 
@@ -480,13 +337,6 @@ fn timestamp(value: &Value, format: Format) -> Option<String> {
             .with_timezone(&chrono::Utc),
     };
     Some(at.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
-}
-
-fn fetch(entity: &Entity) -> &crate::config::Fetch {
-    entity
-        .fetch
-        .as_ref()
-        .expect("only stored entities are fetched")
 }
 
 #[cfg(test)]

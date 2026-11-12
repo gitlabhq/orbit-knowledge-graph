@@ -757,13 +757,7 @@ mod tests {
         assert!(!rendered.contains("- gitlab:"), "{rendered}");
     }
 
-    const UNLABELED: &[&str] = &[
-        "hook-guard",
-        "send-event",
-        "refresh",
-        "third-party-sync",
-        "auth",
-    ];
+    const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh", "auth"];
 
     #[derive(serde::Deserialize)]
     struct CallLabels {

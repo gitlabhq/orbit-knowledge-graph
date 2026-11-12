@@ -1,7 +1,5 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use serde::Deserialize;
-
-use crate::credentials::{self, TokenFrom};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "strategy", rename_all = "snake_case", deny_unknown_fields)]
@@ -10,12 +8,6 @@ pub enum AuthStrategy {
         #[serde(default)]
         token_env: Option<String>,
     },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Credential {
-    pub secret: String,
-    pub from: TokenFrom,
 }
 
 impl AuthStrategy {
@@ -41,9 +33,10 @@ impl AuthStrategy {
         }
     }
 
-    pub fn credential(&self, source: &str) -> Option<Credential> {
-        credentials::resolve(source, self.token_env())
-            .map(|(secret, from)| Credential { secret, from })
+    pub fn token(&self) -> Option<String> {
+        self.token_env()
+            .and_then(variable)
+            .filter(|token| !token.trim().is_empty())
     }
 
     pub fn headers(&self, secret: &str) -> Vec<(String, String)> {
@@ -55,17 +48,20 @@ impl AuthStrategy {
     }
 
     pub fn resolve(&self, source: &str) -> Result<Vec<(String, String)>> {
-        Ok(self
-            .credential(source)
-            .map(|credential| self.headers(&credential.secret))
-            .unwrap_or_default())
+        match self.token() {
+            Some(token) => Ok(self.headers(&token)),
+            None => bail!(
+                "{source} needs a token in {}",
+                self.token_env().unwrap_or("its token variable")
+            ),
+        }
     }
 
-    pub fn describe(&self, source: &str) -> String {
-        match self.credential(source).map(|credential| credential.from) {
-            Some(TokenFrom::Env) => format!("token from {}", self.token_env().unwrap_or_default()),
-            Some(TokenFrom::Keychain) => format!("token in the {}", credentials::STORE_NAME),
-            None => "no token".into(),
+    pub fn describe(&self) -> String {
+        let env = self.token_env().unwrap_or("no variable");
+        match self.token() {
+            Some(_) => format!("token from {env}"),
+            None => format!("{env} is not set"),
         }
     }
 }
@@ -80,28 +76,41 @@ pub fn apply(
     request
 }
 
+#[cfg(not(test))]
+fn variable(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+#[cfg(test)]
+fn variable(name: &str) -> Option<String> {
+    match name {
+        "ORBIT_TEST_TOKEN_GOOD" => Some("xoxb-good".into()),
+        "ORBIT_TEST_TOKEN_GRID" => Some("xoxe-grid".into()),
+        _ => std::env::var(name).ok(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn bearer_sends_one_header_and_rejects_other_shapes() {
+    fn bearer_reads_its_variable_and_rejects_other_shapes() {
         let auth: AuthStrategy =
             orbit_utils::yaml::from_str("strategy: bearer\ntoken_env: ORBIT_TEST_TOKEN_GOOD\n")
                 .unwrap();
         assert_eq!(
-            auth.resolve("auth-test").unwrap(),
+            auth.resolve("test").unwrap(),
             [("Authorization".to_string(), "Bearer xoxb-good".to_string())]
         );
-        assert_eq!(
-            auth.describe("auth-test"),
-            "token from ORBIT_TEST_TOKEN_GOOD"
-        );
+        assert_eq!(auth.describe(), "token from ORBIT_TEST_TOKEN_GOOD");
+        let unset = AuthStrategy::bearer(Some("ORBIT_TEST_TOKEN_NEVER_SET".into()));
         assert!(
-            AuthStrategy::bearer(Some("ORBIT_TEST_TOKEN_NEVER_SET".into()))
-                .resolve("auth-none")
-                .unwrap()
-                .is_empty()
+            unset
+                .resolve("test")
+                .unwrap_err()
+                .to_string()
+                .contains("ORBIT_TEST_TOKEN_NEVER_SET")
         );
         for text in [
             "strategy: cookie\n",

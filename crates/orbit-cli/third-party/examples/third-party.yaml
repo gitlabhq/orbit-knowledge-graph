@@ -1,13 +1,9 @@
 sources:
   - name: slack
     definition: slack
-    token_env: SLACK_TOKEN
-    refresh: 15m
   - name: grafana
     definition: grafana
     url: https://grafana.example.com
-    token_env: GRAFANA_TOKEN
-    refresh: 5m
   - name: incidents
     url: https://incidents.example.com
     token_env: INCIDENTS_TOKEN
@@ -15,7 +11,7 @@ sources:
       Incident:
         type: incident
         description: An incident from an internal service
-        fetch: {path: /incidents, params: {limit: "100"}, items: /incidents}
+        list: {path: /incidents, params: {limit: "100"}, items: /incidents}
         key: [/id]
         label: title
         search: [title, status, service]

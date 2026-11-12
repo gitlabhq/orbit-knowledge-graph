@@ -1,11 +1,10 @@
-description: Grafana folders, dashboards, and the alert rules on them
+description: Grafana folders, dashboards, and the alert rules on them, read live
 auth:
   strategy: bearer
   token_env: GRAFANA_TOKEN
 setup:
   title: Grafana
-  token_help: "A service account token with the Viewer role, from Administration > Users and access > Service accounts."
-  token_prefix: glsa_
+  token_help: "A service account token (glsa_…) with the Viewer role."
   asks_url: true
   url_help: "The Grafana server, such as https://dashboards.gitlab.net"
   verify:
@@ -15,27 +14,36 @@ entities:
   GrafanaFolder:
     type: folder
     description: A Grafana folder that holds dashboards and alert rules
-    fetch:
-      path: /api/folders
-      params: {limit: "1000"}
-      items: ""
     key: [/uid]
     label: title
     search: [title]
+    list:
+      path: /api/folders
+      params: {limit: "1000"}
+      items: ""
+    get:
+      path: "/api/folders/{key}"
+      items: ""
     properties:
       title: {from: /title}
       url: {from: /url}
   GrafanaDashboard:
     type: dashboard
     description: A Grafana dashboard
-    fetch:
-      path: /api/search
-      params: {type: dash-db, limit: "5000"}
-      items: ""
     key: [/uid]
     label: title
     search: [title, tags, folder_title]
-    shows: [IN_FOLDER.title]
+    shows: [folder_title]
+    list:
+      path: /api/search
+      params: {type: dash-db, limit: "5000"}
+      items: ""
+    search_api:
+      path: /api/search
+      params: {type: dash-db, query: "{query}", limit: "50"}
+      items: ""
+      within:
+        GrafanaFolder: "folderUIDs={key}"
     properties:
       title: {from: /title}
       tags: {from: /tags}
@@ -44,23 +52,20 @@ entities:
       folder_title: {from: /folderTitle}
     links:
       - {type: IN_FOLDER, to: GrafanaFolder, via: folder}
-    live:
-      path: /api/search
-      params: {type: dash-db, query: "{query}", limit: "50"}
-      items: ""
-      within:
-        GrafanaFolder: "folderUIDs={key}"
   GrafanaAlert:
     type: alert
     description: A Grafana alert rule
-    fetch:
-      path: /api/v1/provisioning/alert-rules
-      items: ""
     key: [/uid]
     label: title
     search: [title, summary, description, rule_group]
     newest: updated_at
-    shows: [IN_FOLDER.title, ON_DASHBOARD.title, updated_at]
+    shows: [rule_group, updated_at]
+    list:
+      path: /api/v1/provisioning/alert-rules
+      items: ""
+    get:
+      path: "/api/v1/provisioning/alert-rules/{key}"
+      items: ""
     properties:
       title: {from: /title}
       rule_group: {from: /ruleGroup}

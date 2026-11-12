@@ -678,7 +678,7 @@ enum Commands {
     },
     #[command(
         hide = true,
-        about = "Nightly: connect a third-party source such as Slack or Grafana so grep, context, and query can read it; without a source, list what is connected (needs ORBIT_NIGHTLY=1)"
+        about = "Nightly: connect a third-party source such as Slack or Grafana, reading its token from its variable such as SLACK_TOKEN; without a source, list what is connected (needs ORBIT_NIGHTLY=1)"
     )]
     Auth {
         #[arg(value_name = "SOURCE", value_parser = commands::third_party::source_name_parser())]
@@ -694,14 +694,6 @@ enum Commands {
 
         #[arg(
             long,
-            requires = "source",
-            conflicts_with = "logout",
-            help = "Read the token from stdin; otherwise the source's variable, such as SLACK_TOKEN, is used when set, or you are asked"
-        )]
-        token_stdin: bool,
-
-        #[arg(
-            long,
             value_name = "TEAM",
             requires = "source",
             conflicts_with = "logout",
@@ -713,7 +705,7 @@ enum Commands {
             long,
             requires = "source",
             conflicts_with = "url",
-            help = "Remove the source, its saved token, and its synced data"
+            help = "Remove the source from the third-party config"
         )]
         logout: bool,
     },
@@ -755,11 +747,6 @@ enum Commands {
 
         #[arg(long, value_name = "CODE", default_value_t = 0)]
         exit_code: i32,
-    },
-    #[command(hide = true, name = "third-party-sync")]
-    ThirdPartySync {
-        #[arg(long, value_name = "PATH")]
-        lock: PathBuf,
     },
     /// Refreshes edited files into the incremental graph; `grep` and `context` run it detached.
     #[command(hide = true)]
@@ -877,10 +864,6 @@ async fn main() -> Result<()> {
                 db.clone(),
                 files.clone(),
             );
-        }
-        Commands::ThirdPartySync { lock } => {
-            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-            return commands::third_party::background_sync(lock.clone()).await;
         }
         _ => {}
     }
@@ -1074,17 +1057,9 @@ async fn dispatch(
         Commands::Auth {
             source: Some(source),
             url,
-            token_stdin,
             team,
             ..
-        } => {
-            use commands::third_party::TokenInput;
-            let input = match token_stdin {
-                true => TokenInput::Given(commands::third_party::read_token_stdin()?),
-                false => TokenInput::Prompt,
-            };
-            commands::third_party::connect(&source, input, url, team).await
-        }
+        } => commands::third_party::connect(&source, url, team).await,
         Commands::Uninstall { agents, flags } => {
             let options = flags.to_options(
                 agents,
@@ -1116,9 +1091,7 @@ async fn dispatch(
             commands::hook_guard::run(kind, gitlab, no_gitlab);
             Ok(())
         }
-        Commands::SendEvent { .. } | Commands::Refresh { .. } | Commands::ThirdPartySync { .. } => {
-            Ok(())
-        }
+        Commands::SendEvent { .. } | Commands::Refresh { .. } => Ok(()),
         Commands::Query {
             query,
             file,
