@@ -243,6 +243,11 @@ async fn grep_narrows_a_search_by_reference() {
             "can be narrowed",
         ),
         ("slack:message:x", "slack:channel:C404", "has nothing at"),
+        (
+            "slack:message:migration",
+            "grafana:folder:f-web",
+            "one grep per source",
+        ),
     ] {
         let (scope, rest) = third_party.scope(query);
         let mut scope = scope.unwrap_or_default();
@@ -283,6 +288,8 @@ async fn render_shows_where_who_when_and_the_total() {
         render(std::slice::from_ref(&found)),
         "» grafana\ngrafana:folder:web\n  1 of 3 folders shown; add words to narrow it\n"
     );
+    found.total = GREP_LIMIT + 1;
+    assert!(render(std::slice::from_ref(&found)).contains("1 of more than 20 folders shown"));
     found.total = 1;
     found.hits[0].label = "Web".into();
     assert_eq!(render(&[found]), "» grafana\ngrafana:folder:web  Web\n");
@@ -365,6 +372,19 @@ async fn query_fetches_only_what_it_names_and_needs_a_filter_for_searched_entiti
         ["web rollout stuck on the db migration"]
     );
 
+    let batches = third_party
+        .query("MATCH (c:SlackChannel) RETURN c.name ORDER BY c.name LIMIT 1")
+        .await
+        .unwrap();
+    assert_eq!(strings(&batches, "c_name"), ["deploys"]);
+    let batches = third_party
+        .query("MATCH (m:SlackMessage) WHERE m.text CONTAINS 'migration' AND m.author_name = 'Carol' RETURN m.text SKIP 0 LIMIT 1")
+        .await
+        .unwrap();
+    assert_eq!(
+        strings(&batches, "m_text"),
+        ["db migration in a channel nobody synced"]
+    );
     for (query, expected) in [
         (
             "MATCH (m:SlackMessage) RETURN m.text",
@@ -377,6 +397,10 @@ async fn query_fetches_only_what_it_names_and_needs_a_filter_for_searched_entiti
         (
             "MATCH (m:SlackMessage)-[:IN_CHANNEL]->(c:SlackChannel) WHERE c.name STARTS WITH 'tea' RETURN m.text",
             "uses starts_with",
+        ),
+        (
+            "MATCH (a:SlackMessage)-[:IN_CHANNEL]->(c:SlackChannel)<-[:IN_CHANNEL]-(b:SlackMessage) WHERE a.text CONTAINS 'web' AND b.text CONTAINS 'migration' RETURN a.text",
+            "only once",
         ),
     ] {
         let error = third_party.query(query).await.unwrap_err().to_string();

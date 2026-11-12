@@ -183,6 +183,12 @@ impl ThirdParty {
         if entity.list.is_none() {
             return Ok(target.key.clone());
         }
+        if entity.get.is_some()
+            && looks_like_key(bare)
+            && let Ok(Some(record)) = fetcher.get_one(source, name, entity, bare).await
+        {
+            return Ok(record.key);
+        }
         let all = fetcher.list(source, name, entity).await?;
         if all.iter().any(|record| record.key == target.key) {
             return Ok(target.key.clone());
@@ -271,6 +277,16 @@ impl ThirdParty {
                     }) && self.narrows(source, name, entity, &scope.within)
             })
             .collect();
+        if let Some((source, _, _)) = within
+            .iter()
+            .find(|(found, _, _)| !wanted.iter().any(|(source, _, _)| &source.name == found))
+        {
+            grepped.failed.push((
+                source.clone(),
+                format!("nothing searched here can be narrowed by a {source} reference; run one grep per source"),
+            ));
+            return grepped;
+        }
         if wanted.is_empty() && !scope.within.is_empty() {
             grepped.failed.push((
                 "third-party".into(),
@@ -359,7 +375,14 @@ impl ThirdParty {
         let records = match &entity.search_api {
             Some(_) => {
                 fetcher
-                    .search(source, name, entity, query, within, Want::First(GREP_LIMIT))
+                    .search(
+                        source,
+                        name,
+                        entity,
+                        query,
+                        within,
+                        Want::First(GREP_LIMIT + 1),
+                    )
                     .await?
             }
             None => {
@@ -386,7 +409,10 @@ impl ThirdParty {
         if let Some(field) = &entity.newest {
             records.sort_by_key(|record| std::cmp::Reverse(value(record, field)));
         }
-        let total = records.len();
+        let total = match (&entity.search_api, records.len() > GREP_LIMIT) {
+            (Some(_), true) => GREP_LIMIT + 1,
+            _ => records.len(),
+        };
         let matchers = matchers(query);
         let hits = records
             .iter()
@@ -493,11 +519,13 @@ impl ThirdParty {
                         Want::First(CONTEXT_LINKS),
                     )
                     .await
+                    .map_err(|error| eprintln!("orbit: {}: {other_name}: {error:#}", source.name))
                     .unwrap_or_default(),
                 Some(_) => continue,
                 None => fetcher
                     .list(source, other_name, other)
                     .await
+                    .map_err(|error| eprintln!("orbit: {}: {other_name}: {error:#}", source.name))
                     .unwrap_or_default()
                     .into_iter()
                     .filter(|record| value(record, &link.via) == key)
@@ -547,38 +575,31 @@ impl ThirdParty {
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let fetcher = Fetcher::new()?;
         let mut loaded: BTreeMap<String, Vec<Record>> = BTreeMap::new();
+        let mut searched_once = std::collections::BTreeSet::new();
         for node in &compiled.input.nodes {
             let Some(label) = &node.entity else { continue };
             let Some((source, name, entity)) = self.config.entity_in(label) else {
                 continue;
             };
-            if loaded.contains_key(name) {
-                continue;
-            }
-            let records = match (&entity.search_api, &entity.list) {
-                (Some(_), _) => {
-                    let (text, within) = self.search_terms(&compiled.input, node, entity)?;
-                    let limit = compiled.input.limit as usize;
-                    let want = match compiled.input.aggregation.metrics.is_empty()
-                        && compiled.input.order_by.is_none()
-                    {
-                        true => Want::First(limit),
-                        false => Want::All,
-                    };
-                    let records = fetcher
-                        .search(source, name, entity, &text, &within, want)
-                        .await?;
-                    if want != Want::All && records.len() >= limit {
-                        eprintln!(
-                            "orbit: {name} is read through a live search, so these are its newest {limit} matches; add a filter or an aggregate to read them all"
+            match &entity.search_api {
+                Some(_) => {
+                    if !searched_once.insert(name.to_string()) {
+                        bail!(
+                            "{name} is read through a live search, so a query can match it only once; run one query per search"
                         );
                     }
-                    records
+                    let (text, within) = self.search_terms(&compiled.input, node, entity)?;
+                    let records = fetcher
+                        .search(source, name, entity, &text, &within, Want::All)
+                        .await?;
+                    loaded.insert(name.to_string(), records);
                 }
-                (None, Some(_)) => fetcher.list(source, name, entity).await?,
-                (None, None) => bail!("{name} cannot be read"),
-            };
-            loaded.insert(name.to_string(), records);
+                None if loaded.contains_key(name) => {}
+                None if entity.list.is_some() => {
+                    loaded.insert(name.to_string(), fetcher.list(source, name, entity).await?);
+                }
+                None => bail!("{name} cannot be read"),
+            }
         }
         let client = duckdb_client::DuckDbClient::open(duckdb_client::OpenMode::InMemoryArrow)?;
         client.initialize_schema(&compiler::generate_local_ddl(&ontology, ""))?;
@@ -593,7 +614,10 @@ impl ThirdParty {
         let batches = client
             .query_arrow(&sql)
             .with_context(|| format!("running {sql}"))?;
-        Ok(returned(query, batches))
+        Ok(returned(
+            query,
+            limited(batches, compiled.input.limit as usize),
+        ))
     }
 
     fn search_terms(
@@ -707,6 +731,20 @@ impl ThirdParty {
         }
         out
     }
+}
+
+fn limited(batches: Vec<RecordBatch>, limit: usize) -> Vec<RecordBatch> {
+    let mut left = limit;
+    let mut kept = Vec::new();
+    for batch in batches {
+        if left == 0 {
+            break;
+        }
+        let take = batch.num_rows().min(left);
+        left -= take;
+        kept.push(batch.slice(0, take));
+    }
+    kept
 }
 
 fn looks_like_key(text: &str) -> bool {
@@ -876,9 +914,16 @@ pub fn render(found: &[Found]) -> String {
                 .and_then(|hit| hit.reference.split(':').nth(1))
                 .unwrap_or(entity.entity.as_str());
             out.push_str(&format!(
-                "  {} of {} {kind}s shown; add words to narrow it\n",
+                "  {} of {}{} {kind}s shown; add words to narrow it\n",
                 entity.hits.len(),
-                entity.total,
+                match entity.total == GREP_LIMIT + 1 {
+                    true => "more than ",
+                    false => "",
+                },
+                match entity.total == GREP_LIMIT + 1 {
+                    true => GREP_LIMIT,
+                    false => entity.total,
+                },
             ));
         }
     }
