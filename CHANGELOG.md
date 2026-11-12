@@ -1,3 +1,19 @@
+## [1.4.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.3.0...v1.4.0) (2026-11-12)
+
+### Features
+
+* **orbit-cli:** grep any GitLab entity the server lists ([5887873](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/58878732018e7158f6f43a3f723b0e04bab2d27a)) by Aaron Algutifan
+
+### Fixes
+
+* **agent-plugins:** read the query of an orbit query --file - call ([9b160b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9b160b938fbdc4251aa7b03b7523ec0d100618f5)) by ANBUCHELVAN GANESAN CSE
+* **dev:** make the stale watch-lock takeover atomic ([88a5750](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/88a5750340b56f43836b41313e7b5789a3cd598d)) by Dmitry Gruzd
+
+### Other
+
+* add ADR 023 and the indexing engine docs ([896ff4e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/896ff4e0559dc9b4059d33f9ebf62f1ea19984fd)) by Jean-Gabriel Doyon
+* **adr:** add ADR 024 for a pluggable data model ([daafa42](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/daafa421e43389957602803f9515688cf5940e0d)) by Michael Usachenko
+
 ## [1.3.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.2.1...v1.3.0) (2026-11-11)
 
 ### Features
