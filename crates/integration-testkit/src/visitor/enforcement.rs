@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use query_engine::compiler::input::{Input, QueryType};
+use query_engine::formatters::GraphResponse;
 
 /// Some variants carry data from the AST (field name, edge type) so the
 /// enforcement is granular: a query with two filter fields or two
@@ -10,21 +11,13 @@ use query_engine::compiler::input::{Input, QueryType};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Requirement {
     OrderBy,
-    Filter {
-        field: String,
-    },
-    NodeIds,
+    Filter { field: String },
     PathFinding,
     Aggregation,
-    Relationship {
-        edge_type: String,
-    },
+    Relationship { edge_type: String },
     Neighbors,
     AggregationSort,
     Skip,
-    /// Always derived for `search`, `traversal`, and `neighbors` queries
-    /// to ensure no unexpected rows leak into the response.
-    NodeCount,
 }
 
 impl std::fmt::Display for Requirement {
@@ -34,7 +27,6 @@ impl std::fmt::Display for Requirement {
             Self::Filter { field } => {
                 write!(f, "Filter on '{field}' (call assert_filter for '{field}')")
             }
-            Self::NodeIds => write!(f, "NodeIds (query has node_ids — verify ID set)"),
             Self::PathFinding => write!(f, "PathFinding (call path_ids + path)"),
             Self::Aggregation => write!(f, "Aggregation (assert a property value on result)"),
             Self::Relationship { edge_type } => {
@@ -53,9 +45,34 @@ impl std::fmt::Display for Requirement {
                     "Skip (query has SKIP — call assert_node_count to verify page)"
                 )
             }
-            Self::NodeCount => {
-                write!(f, "NodeCount (call assert_node_count to verify total rows)")
+        }
+    }
+}
+
+impl Requirement {
+    /// Whether the response holds anything this requirement could check.
+    pub fn checkable(&self, input: &Input, response: &GraphResponse) -> bool {
+        let rows = response.rows.as_ref().map_or(0, Vec::len);
+        match self {
+            Self::OrderBy => response.nodes.len() >= 2,
+            Self::Filter { field } => {
+                input.query_type != QueryType::Aggregation
+                    && input.nodes.iter().any(|node| {
+                        node.filters.contains_key(field)
+                            && response.nodes.iter().any(|returned| {
+                                Some(&returned.entity_type) == node.entity.as_ref()
+                                    && returned.properties.get(field).is_some_and(|v| !v.is_null())
+                            })
+                    })
             }
+            Self::Relationship { edge_type } => response
+                .edges
+                .iter()
+                .any(|edge| &edge.edge_type == edge_type),
+            Self::Neighbors | Self::PathFinding => !response.edges.is_empty(),
+            Self::Aggregation => rows > 0,
+            Self::AggregationSort => rows >= 2,
+            Self::Skip => !response.nodes.is_empty(),
         }
     }
 }
@@ -80,13 +97,6 @@ impl QueryRequirements for Input {
             }
         }
 
-        // node_ids in path_finding defines endpoints, not a result filter.
-        if self.query_type != QueryType::PathFinding
-            && self.nodes.iter().any(|n| !n.node_ids.is_empty())
-        {
-            reqs.insert(Requirement::NodeIds);
-        }
-
         match self.query_type {
             QueryType::PathFinding => {
                 reqs.insert(Requirement::PathFinding);
@@ -96,16 +106,10 @@ impl QueryRequirements for Input {
             }
             QueryType::Neighbors => {
                 reqs.insert(Requirement::Neighbors);
-                reqs.insert(Requirement::NodeCount);
             }
-            QueryType::Traversal => {
-                reqs.insert(Requirement::NodeCount);
-            }
-            QueryType::Hydration => {}
+            QueryType::Traversal | QueryType::Hydration => {}
         }
 
-        // Traversal queries with joins produce edges the test must verify per type.
-        // Aggregation also uses relationships for joins but doesn't produce edges.
         if self.query_type == QueryType::Traversal {
             for rel in &self.relationships {
                 for edge_type in &rel.types {
@@ -161,22 +165,6 @@ impl AssertionTracker {
         }
     }
 
-    /// Mark every `Requirement::Filter { .. }` in the required set as
-    /// satisfied. Used by empty-result assertions where filter checks
-    /// are vacuously true.
-    pub(super) fn satisfy_all_filters(&self) {
-        let filters: Vec<Requirement> = self
-            .required
-            .iter()
-            .filter(|r| matches!(r, Requirement::Filter { .. }))
-            .cloned()
-            .collect();
-        let mut satisfied = self.satisfied.borrow_mut();
-        for f in filters {
-            satisfied.insert(f);
-        }
-    }
-
     fn unsatisfied(&self) -> HashSet<Requirement> {
         self.required
             .difference(&self.satisfied.borrow())
@@ -208,7 +196,7 @@ mod tests {
     use query_engine::compiler::input::parse_input;
 
     use crate::visitor::tests::{
-        make_node, make_path_edge, sample_aggregation_response,
+        make_edge, make_node, make_path_edge, sample_aggregation_response,
         sample_grouped_aggregation_response, sample_neighbors_response, sample_response,
         sample_search_response,
     };
@@ -227,8 +215,7 @@ mod tests {
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::OrderBy));
-        assert!(reqs.contains(&Requirement::NodeCount));
-        assert_eq!(reqs.len(), 2);
+        assert_eq!(reqs.len(), 1);
     }
 
     #[test]
@@ -242,8 +229,7 @@ mod tests {
         assert!(reqs.contains(&Requirement::Filter {
             field: "state".into()
         }));
-        assert!(reqs.contains(&Requirement::NodeCount));
-        assert_eq!(reqs.len(), 2);
+        assert_eq!(reqs.len(), 1);
     }
 
     #[test]
@@ -261,20 +247,6 @@ mod tests {
         assert!(reqs.contains(&Requirement::Filter {
             field: "user_type".into()
         }));
-        assert!(reqs.contains(&Requirement::NodeCount));
-        assert_eq!(reqs.len(), 3);
-    }
-
-    #[test]
-    fn requirements_from_search_with_node_ids() {
-        let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2]}],
-                "limit": 10}"#,
-        );
-        let reqs = input.requirements();
-        assert!(reqs.contains(&Requirement::NodeIds));
-        assert!(reqs.contains(&Requirement::NodeCount));
         assert_eq!(reqs.len(), 2);
     }
 
@@ -290,10 +262,6 @@ mod tests {
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::PathFinding));
-        assert!(
-            !reqs.contains(&Requirement::NodeIds),
-            "path_finding node_ids are endpoints, not result filters"
-        );
         assert_eq!(reqs.len(), 1);
     }
 
@@ -311,25 +279,6 @@ mod tests {
     }
 
     #[test]
-    fn requirements_from_plain_search_has_node_count() {
-        let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "limit": 10}"#,
-        );
-        let reqs = input.requirements();
-        assert_eq!(reqs, HashSet::from([Requirement::NodeCount]));
-    }
-
-    #[test]
-    fn requirements_from_default_input_has_node_count() {
-        assert_eq!(
-            Input::default().requirements(),
-            HashSet::from([Requirement::NodeCount])
-        );
-    }
-
-    #[test]
     fn requirements_from_traversal_with_single_relationship() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
@@ -344,8 +293,7 @@ mod tests {
         assert!(reqs.contains(&Requirement::Relationship {
             edge_type: "MEMBER_OF".into()
         }));
-        assert!(reqs.contains(&Requirement::NodeCount));
-        assert_eq!(reqs.len(), 2);
+        assert_eq!(reqs.len(), 1);
     }
 
     #[test]
@@ -370,8 +318,7 @@ mod tests {
         assert!(reqs.contains(&Requirement::Relationship {
             edge_type: "CONTAINS".into()
         }));
-        assert!(reqs.contains(&Requirement::NodeCount));
-        assert_eq!(reqs.len(), 3);
+        assert_eq!(reqs.len(), 2);
     }
 
     #[test]
@@ -406,9 +353,7 @@ mod tests {
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Neighbors));
-        assert!(reqs.contains(&Requirement::NodeIds));
-        assert!(reqs.contains(&Requirement::NodeCount));
-        assert_eq!(reqs.len(), 3);
+        assert_eq!(reqs.len(), 1);
     }
 
     #[test]
@@ -424,15 +369,6 @@ mod tests {
         assert!(reqs.contains(&Requirement::AggregationSort));
         assert!(reqs.contains(&Requirement::Aggregation));
         assert_eq!(reqs.len(), 2);
-    }
-
-    #[test]
-    fn for_query_plain_search_requires_node_count() {
-        let input = parse_test_input(
-            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}], "limit": 10}"#,
-        );
-        let view = ResponseView::for_query(&input, sample_search_response());
-        view.assert_node_count(2);
     }
 
     #[test]
@@ -483,21 +419,20 @@ mod tests {
                          "filters": {"username": "alice", "state": "active"}}],
                 "limit": 10}"#,
         );
-        let view = ResponseView::for_query(&input, sample_search_response());
+        let response = GraphResponse {
+            nodes: vec![make_node(
+                "User",
+                1,
+                &[
+                    ("username", serde_json::json!("alice")),
+                    ("state", serde_json::json!("active")),
+                ],
+            )],
+            ..sample_search_response()
+        };
+        let view = ResponseView::for_query(&input, response);
         view.assert_filter("User", "username", |n| n.prop_str("username").is_some());
         drop(view);
-    }
-
-    #[test]
-    fn for_query_node_ids_satisfied_by_node_ids() {
-        let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2]}],
-                "limit": 10}"#,
-        );
-        let view = ResponseView::for_query(&input, sample_search_response());
-        view.assert_node_count(2);
-        view.assert_node_ids("User", &[1, 2]);
     }
 
     #[test]
@@ -619,7 +554,11 @@ mod tests {
                 ],
                 "limit": 10}"#,
         );
-        let view = ResponseView::for_query(&input, sample_response());
+        let mut response = sample_response();
+        response
+            .edges
+            .push(make_edge("Group", 100, "Project", 1000, "CONTAINS"));
+        let view = ResponseView::for_query(&input, response);
         view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 101), (2, 100)]);
         drop(view);
     }
@@ -675,8 +614,7 @@ mod tests {
         input.skip = Some(5);
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Skip));
-        assert!(reqs.contains(&Requirement::NodeCount));
-        assert_eq!(reqs.len(), 2);
+        assert_eq!(reqs.len(), 1);
     }
 
     #[test]
@@ -689,18 +627,6 @@ mod tests {
         input.skip = Some(5);
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
-    }
-
-    #[test]
-    fn for_query_node_ids_satisfied_by_assert_node_ids() {
-        let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2]}],
-                "limit": 10}"#,
-        );
-        let view = ResponseView::for_query(&input, sample_search_response());
-        view.assert_node_count(2);
-        view.assert_node_ids("User", &[1, 2]);
     }
 
     #[test]
@@ -731,31 +657,6 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "unsatisfied assertion requirements")]
-    fn for_query_node_ids_not_satisfied_by_assert_node_count() {
-        let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2]}],
-                "limit": 10}"#,
-        );
-        let view = ResponseView::for_query(&input, sample_search_response());
-        view.assert_node_count(2);
-        drop(view);
-    }
-
-    #[test]
-    #[should_panic(expected = "NodeCount")]
-    fn for_query_panics_on_unsatisfied_node_count() {
-        let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "limit": 10}"#,
-        );
-        let view = ResponseView::for_query(&input, sample_search_response());
-        drop(view);
-    }
-
-    #[test]
-    #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_panics_on_unsatisfied_order() {
         let input = parse_test_input(
             r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}],
@@ -773,7 +674,15 @@ mod tests {
                 "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}}],
                 "limit": 10}"#,
         );
-        let view = ResponseView::for_query(&input, sample_search_response());
+        let response = GraphResponse {
+            nodes: vec![make_node(
+                "User",
+                1,
+                &[("state", serde_json::json!("active"))],
+            )],
+            ..sample_search_response()
+        };
+        let view = ResponseView::for_query(&input, response);
         drop(view);
     }
 
@@ -864,20 +773,11 @@ mod tests {
                 "aggregation_sort": "-c",
                 "limit": 10}"#,
         );
-        let view = ResponseView::for_query(&input, sample_aggregation_response());
-        view.assert_aggregation_value_i64("c", 2);
-        drop(view);
-    }
-
-    #[test]
-    #[should_panic(expected = "unsatisfied assertion requirements")]
-    fn for_query_panics_on_unsatisfied_node_ids() {
-        let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2]}],
-                "limit": 10}"#,
-        );
-        let view = ResponseView::for_query(&input, sample_search_response());
+        let mut response = sample_aggregation_response();
+        let rows = response.rows.as_mut().unwrap();
+        rows.push(rows[0].clone());
+        let view = ResponseView::for_query(&input, response);
+        view.assert_row_value_i64(0, "c", 2);
         drop(view);
     }
 
@@ -926,6 +826,40 @@ mod tests {
         view.skip_requirement(Requirement::Relationship {
             edge_type: "MEMBER_OF".into(),
         });
+    }
+
+    #[test]
+    fn requirements_the_response_cannot_check_are_dropped() {
+        let input = parse_test_input(
+            r#"{"query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "filters": {"state": "active"}},
+                    {"id": "g", "entity": "Group"}
+                ],
+                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+                "order_by": "u.id",
+                "limit": 10}"#,
+        );
+        drop(ResponseView::for_query(
+            &input,
+            GraphResponse {
+                nodes: vec![],
+                edges: vec![],
+                ..sample_response()
+            },
+        ));
+        drop(ResponseView::for_query(
+            &input,
+            GraphResponse {
+                nodes: vec![make_node(
+                    "User",
+                    1,
+                    &[("username", serde_json::json!("alice"))],
+                )],
+                edges: vec![],
+                ..sample_response()
+            },
+        ));
     }
 
     #[test]

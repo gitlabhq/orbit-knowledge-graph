@@ -1,3 +1,4 @@
+use query_engine::compiler::input::parse_input;
 use serde_json::{Value, json};
 
 use super::run_duckdb_dir;
@@ -48,6 +49,22 @@ fn rejects(query: Value, expect: &str, message: &str) {
     assert_panics(|| run_suite(query, expect), message);
 }
 
+#[test]
+fn plan_assertions_are_not_query_expectations() {
+    let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    for field in [
+        "sql_contains: [SELECT]",
+        "sql_not_contains: [DROP]",
+        "indexes_used: [{table: gl_definition, index: idx_name}]",
+        "compile_only: true",
+        "hydration: static",
+        "settings: {use_query_cache: 1}",
+        "skip_requirements: [node_ids]",
+    ] {
+        rejects(query.clone(), field, "unknown field");
+    }
+}
+
 fn assert_panics(assertion: impl FnOnce() + std::panic::UnwindSafe, message: &str) {
     let failure = std::panic::catch_unwind(assertion).expect_err("wrong expectation must fail");
     let actual = failure
@@ -58,6 +75,20 @@ fn assert_panics(assertion: impl FnOnce() + std::panic::UnwindSafe, message: &st
     assert!(
         actual.contains(message),
         "expected '{message}', got '{actual}'"
+    );
+}
+
+#[test]
+fn filtered_returned_nodes_require_a_filter_check() {
+    let query = json!({"gql": "MATCH (d:Definition) WHERE d.name STARTS WITH 'alp' RETURN d.name"});
+    run_suite(
+        query.clone(),
+        "nodes: {Definition: {filters: {name: {starts_with: alp}}}}",
+    );
+    rejects(query, "node_count: 1", "Filter on 'name'");
+    run_suite(
+        json!({"gql": "MATCH (d:Definition) WHERE d.name = 'none' RETURN d.name"}),
+        "node_count: 0",
     );
 }
 
@@ -124,12 +155,12 @@ fn exact_null_and_string_properties_do_not_accept_missing_or_other_types() {
     rejects(
         query.clone(),
         "nodes: {Definition: {ids: [1], rows: [{id: 1, missing: null}]}}",
-        "property 'missing' mismatch",
+        "Definition/1.missing expected null",
     );
     rejects(
         query,
         "nodes: {Definition: {ids: [1], rows: [{id: 1, name: 1}]}}",
-        "property 'name' expected 1",
+        "Definition/1.name expected 1",
     );
 }
 
@@ -194,7 +225,6 @@ fn repeated_aggregation_runs_check_row_values() {
 #[test]
 fn repeated_responses_reject_changes_that_individual_expectations_allow() {
     use crate::visitor::tests::sample_grouped_aggregation_response;
-    use query_engine::compiler::input::parse_input;
 
     let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
     let expect = orbit_utils::yaml::from_str("groups: {u: {entity: User, count: 2}}").unwrap();
@@ -253,14 +283,9 @@ fn page_expectations_reject_fields_that_are_not_executed() {
     let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
     for field in [
         "repeat_count: 2",
-        "sql_contains: [SELECT]",
-        "sql_not_contains: [DROP]",
-        "compile_only: true",
         "compile_error: true",
         "compile_error_contains: [error]",
         "compile_error_not_contains: [error]",
-        "hydration: none",
-        "indexes_used: [{table: gl_definition, index: name}]",
         "pages: [{}]",
         "all_pages: {page_count: 1}",
     ] {
@@ -273,28 +298,8 @@ fn page_expectations_reject_fields_that_are_not_executed() {
 }
 
 #[test]
-fn compile_only_rejects_runtime_expectations() {
-    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name"});
-    run_suite(query.clone(), "compile_only: true\nsql_contains: [SELECT]");
-    for field in [
-        "node_count: 4",
-        "repeat_count: 2",
-        "pages: [{node_count: 4}]",
-        "all_pages: {page_count: 1}",
-        "indexes_used: [{table: gl_definition, index: name}]",
-    ] {
-        rejects(
-            query.clone(),
-            &format!("compile_only: true\n{field}"),
-            "compile_only cannot be combined with runtime assertions",
-        );
-    }
-}
-
-#[test]
 fn empty_aggregation_requires_rows_and_column_metadata() {
     use crate::visitor::tests::sample_grouped_aggregation_response;
-    use query_engine::compiler::input::parse_input;
 
     let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
     let expect = orbit_utils::yaml::from_str("empty_aggregation: true").unwrap();
@@ -329,7 +334,6 @@ fn traversal_rejects_aggregation_and_path_assertions() {
 #[test]
 fn pagination_coverage_compares_typed_node_identities_without_excerpt_values() {
     use crate::visitor::tests::sample_search_response;
-    use query_engine::compiler::input::parse_input;
 
     let input =
         parse_input(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}"#).unwrap();
@@ -355,38 +359,32 @@ fn pagination_coverage_compares_typed_node_identities_without_excerpt_values() {
 fn numeric_metric_assertions_reject_numeric_strings() {
     use crate::visitor::ResponseView;
     use crate::visitor::tests::{sample_aggregation_response, sample_grouped_aggregation_response};
-    use query_engine::compiler::input::parse_input;
 
     for assertion in [
         (|view: &ResponseView| view.assert_row_value_i64(0, "c", 2)) as fn(&ResponseView),
         |view: &ResponseView| view.assert_aggregation_value_i64("c", 2),
     ] {
         let check = |metric: Value| {
-            let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
             let mut response = sample_aggregation_response();
             response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
-            assertion(&ResponseView::for_query(&input, response));
+            assertion(&ResponseView::new(response));
         };
         check(json!(2));
         assert_panics(|| check(json!("2")), "column 'c' is not an integer");
     }
 
     let check_group = |metric: Value| {
-        let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
         let mut response = sample_grouped_aggregation_response();
         response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
-        ResponseView::for_query(&input, response)
-            .assert_group_row_value_i64("u", "User", 1, "c", 2);
+        ResponseView::new(response).assert_group_row_value_i64("u", "User", 1, "c", 2);
     };
     check_group(json!(2));
     assert_panics(|| check_group(json!("2")), "column 'c' is not an integer");
 
     let check_average = |metric: Value| {
-        let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"avg":"u.id","as":"c"}]}"#).unwrap();
         let mut response = sample_grouped_aggregation_response();
         response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
-        ResponseView::for_query(&input, response)
-            .assert_group_row_value_f64("u", "User", 1, "c", 2.5);
+        ResponseView::new(response).assert_group_row_value_f64("u", "User", 1, "c", 2.5);
     };
     check_average(json!(2.5));
     assert_panics(|| check_average(json!("2.5")), "column 'c' is not a number");
