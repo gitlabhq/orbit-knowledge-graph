@@ -5,14 +5,24 @@
 
 ## Load order
 
-1. The embedded `config/default.yaml`. It declares every key, so a removed key stops startup.
+1. The embedded `config/default.yaml`. It declares every key, and the schema marks each one
+   required, so a removed key stops startup with a "value is required" error.
 2. One overlay file: `--config <path>`, or else `config/config.yaml` when it exists.
 3. Secret files under `/etc/secrets/`, for example `/etc/secrets/billing/quota/api_token`.
 
 The server reads only two environment variables: `RUST_LOG`, when `metrics.log_level` is
-unset, and `GKG_VERSION`. To add a setting, add the field to
-`crates/orbit-server-config/` and its value to `config/default.yaml`. For the local overlay
-files, see [local development](local-development.md).
+unset, and `GKG_VERSION`. For the local overlay files, see
+[local development](local-development.md).
+
+The loader merges the layers into one document. It rejects enum names and closed-section keys the
+schema does not declare, then decodes and validates the document, reporting every violation at once.
+
+To add a setting, add:
+
+- a field to `crates/orbit-server-config/proto/orbit/config/v1/config.proto`, marked
+  `(buf.validate.field).required = true` unless it is optional, then run `mise proto:config`
+- a field to the Rust struct in `crates/orbit-server-config/`, and its arm in `convert.rs`
+- its value in `config/default.yaml`
 
 ## Modes
 
