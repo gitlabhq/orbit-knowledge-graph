@@ -64,7 +64,7 @@ impl AuthStrategy {
     pub fn describe(&self, source: &str) -> String {
         match self.credential(source).map(|credential| credential.from) {
             Some(TokenFrom::Env) => format!("token from {}", self.token_env().unwrap_or_default()),
-            Some(TokenFrom::Keychain) => "token in the OS keychain".into(),
+            Some(TokenFrom::Keychain) => format!("token in the {}", credentials::STORE_NAME),
             None => "no token".into(),
         }
     }

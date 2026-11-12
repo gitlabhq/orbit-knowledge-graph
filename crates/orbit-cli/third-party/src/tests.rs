@@ -219,8 +219,15 @@ async fn grep_scopes_by_source_and_type_and_reads_the_graph() {
         [("slack".into(), Some("SlackChannel".into()))]
     );
     assert_eq!(rest, "nothing-matches");
-    assert_eq!(third_party.scope("slack:deploy:prod").1, "deploy:prod");
-    assert_eq!(third_party.scope("mr:deploy").0, None);
+    for code in [
+        "slack:deploy",
+        "slack: deploy",
+        "grafana:10.2",
+        "image: grafana:10.2",
+        "mr:deploy",
+    ] {
+        assert_eq!(third_party.scope(code), (None, code.to_string()), "{code}");
+    }
 
     assert_eq!(
         grep(&third_party, "slack:channels:deploy", &[]).await,

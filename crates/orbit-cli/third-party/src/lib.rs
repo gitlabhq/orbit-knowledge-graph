@@ -92,7 +92,13 @@ pub struct Found {
 pub struct Staleness {
     pub never: Vec<String>,
     pub old: Vec<String>,
+    pub failed: Vec<(String, String)>,
 }
+
+const RETRY_AFTER_FAILURE: i64 = 60;
+
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct Failures(BTreeMap<String, (i64, String)>);
 
 #[derive(Debug, Default)]
 pub struct Freshness {
@@ -141,23 +147,74 @@ impl ThirdParty {
 
     pub fn staleness(&self) -> Result<Staleness> {
         let Some(client) = self.reader()? else {
+            let failures = self.failures();
             return Ok(Staleness {
-                never: self.config.sources.iter().map(|s| s.name.clone()).collect(),
+                never: self
+                    .config
+                    .sources
+                    .iter()
+                    .filter(|source| {
+                        failures.0.get(&source.name).is_none_or(|(at, _)| {
+                            store::now().saturating_sub(*at) >= RETRY_AFTER_FAILURE
+                        })
+                    })
+                    .map(|source| source.name.clone())
+                    .collect(),
                 old: Vec::new(),
+                failed: failures
+                    .0
+                    .into_iter()
+                    .map(|(source, (_, error))| (source, error))
+                    .collect(),
             });
         };
         let now = store::now();
+        let failures = self.failures();
         let mut staleness = Staleness::default();
         for source in &self.config.sources {
+            let failed = failures.0.get(&source.name);
+            if let Some((_, error)) = failed {
+                staleness.failed.push((source.name.clone(), error.clone()));
+            }
+            let retry = failed.is_none_or(|(at, _)| now.saturating_sub(*at) >= RETRY_AFTER_FAILURE);
             match store::synced_at(&client, &source.name, &signature(source)).unwrap_or(None) {
-                None => staleness.never.push(source.name.clone()),
-                Some(at) if now.saturating_sub(at) >= source.refresh.as_secs() as i64 => {
+                None if retry => staleness.never.push(source.name.clone()),
+                Some(at) if retry && now.saturating_sub(at) >= source.refresh.as_secs() as i64 => {
                     staleness.old.push(source.name.clone())
                 }
-                Some(_) => {}
+                _ => {}
             }
         }
         Ok(staleness)
+    }
+
+    fn failures_path(&self) -> PathBuf {
+        self.store.with_file_name("failures.json")
+    }
+
+    fn failures(&self) -> Failures {
+        std::fs::read(self.failures_path())
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    /// Keeps each source's last sync failure until it syncs again, for commands to show.
+    pub fn record_failures(&self, freshness: &Freshness) {
+        let mut failures = self.failures();
+        for (source, _, _) in &freshness.synced {
+            failures.0.remove(source);
+        }
+        let now = store::now();
+        for (source, error) in &freshness.failed {
+            failures.0.insert(source.clone(), (now, error.clone()));
+        }
+        failures
+            .0
+            .retain(|source, _| self.config.source(source).is_some());
+        if let Ok(bytes) = serde_json::to_vec(&failures) {
+            let _ = std::fs::write(self.failures_path(), bytes);
+        }
     }
 
     pub async fn ensure_fresh(&self) -> Result<Freshness> {
@@ -219,14 +276,13 @@ impl ThirdParty {
                 continue;
             };
             let (kind, value) = value.split_once(':').unwrap_or((value, ""));
-            let (entity, value) = match self.config.kind(source, kind) {
-                Some(entity) => (Some(entity), value.to_string()),
-                None if value.is_empty() => (None, kind.to_string()),
-                None => (None, format!("{kind}:{value}")),
+            let Some(entity) = self.config.kind(source, kind) else {
+                rest.push(word.to_string());
+                continue;
             };
-            picks.push((source.name.clone(), entity));
+            picks.push((source.name.clone(), Some(entity)));
             if !value.is_empty() {
-                rest.push(value);
+                rest.push(value.to_string());
             }
         }
         let rest = rest.join(" ");
@@ -1017,7 +1073,10 @@ impl ThirdParty {
     pub fn schema_of(&self, only: &[String]) -> String {
         let mut out = String::new();
         for (source, name, entity) in self.config.entities() {
-            if !only.is_empty() && !only.iter().any(|wanted| wanted.eq_ignore_ascii_case(name)) {
+            if entity.fetch.is_none()
+                || (!only.is_empty()
+                    && !only.iter().any(|wanted| wanted.eq_ignore_ascii_case(name)))
+            {
                 continue;
             }
             out.push_str(&format!(

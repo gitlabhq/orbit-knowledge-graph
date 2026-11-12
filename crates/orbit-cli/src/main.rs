@@ -1126,9 +1126,7 @@ async fn dispatch(
         } => {
             let input = match (query, file) {
                 (Some(query), None) => {
-                    if response_format.is_none()
-                        && commands::third_party::query_locally(&query).await?
-                    {
+                    if commands::third_party::query_locally(&query, response_format).await? {
                         return Ok(());
                     }
                     remote::QueryInput::Text(query)

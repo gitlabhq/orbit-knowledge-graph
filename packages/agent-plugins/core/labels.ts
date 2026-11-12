@@ -19,7 +19,6 @@ export default {
     "skill": { "done": "Read Orbit guide", "running": "Reading Orbit guide" },
     "setup": { "done": "Set up Orbit", "running": "Setting up Orbit" },
     "uninstall": { "done": "Removed Orbit setup", "running": "Removing Orbit setup" },
-    "auth": { "done": "Checked Orbit sources", "running": "Checking Orbit sources" },
     "config get": { "done": "Read Orbit settings", "running": "Reading Orbit settings" },
     "config list": { "done": "Read Orbit settings", "running": "Reading Orbit settings" },
     "config set": { "done": "Changed Orbit settings", "running": "Changing Orbit settings" },

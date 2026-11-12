@@ -57,6 +57,9 @@ fn refresh(third_party: &ThirdParty) -> Vec<String> {
             return Vec::new();
         }
     };
+    for (source, error) in &staleness.failed {
+        eprintln!("orbit: {source} did not sync: {error}");
+    }
     if !staleness.never.is_empty() || !staleness.old.is_empty() {
         spawn_background_sync();
     }
@@ -138,11 +141,13 @@ pub(crate) async fn background_sync(lock: std::path::PathBuf) -> Result<()> {
         let Some(third_party) = configured() else {
             break;
         };
-        let synced = third_party
-            .ensure_fresh()
-            .await
-            .map(|freshness| !freshness.synced.is_empty())
-            .unwrap_or(false);
+        let synced = match third_party.ensure_fresh().await {
+            Ok(freshness) => {
+                third_party.record_failures(&freshness);
+                !freshness.synced.is_empty()
+            }
+            Err(_) => false,
+        };
         let _ = std::fs::write(&lock, b"");
         if !synced {
             break;
@@ -177,8 +182,8 @@ pub(crate) async fn grep(query: &str, paths: &mut Vec<String>) -> Result<Option<
         return Ok(None);
     }
     anyhow::ensure!(
-        paths.is_empty() || targets.is_empty(),
-        "grep searches either code paths or third-party references, not both: {}",
+        paths.is_empty(),
+        "a third-party grep takes references such as slack:channel:name, not code paths: {}",
         paths.join(" ")
     );
     let first = refresh(&third_party);
@@ -297,7 +302,10 @@ pub(crate) async fn context(targets: &mut Vec<String>) -> Result<Option<String>>
     Ok(Some(out.join("\n")))
 }
 
-pub(crate) async fn query_locally(query: &str) -> Result<bool> {
+pub(crate) async fn query_locally(
+    query: &str,
+    response_format: Option<crate::remote::ResponseFormat>,
+) -> Result<bool> {
     let Some(third_party) = configured() else {
         return Ok(false);
     };
@@ -315,11 +323,11 @@ pub(crate) async fn query_locally(query: &str) -> Result<bool> {
     let batches = third_party
         .query(query)
         .map_err(|error| explain(error, &first))?;
-    crate::sql_format::write(
-        std::io::stdout().lock(),
-        crate::sql_format::Format::Table,
-        &batches,
-    )?;
+    let format = match response_format {
+        Some(crate::remote::ResponseFormat::Raw) => crate::sql_format::Format::Json,
+        _ => crate::sql_format::Format::Table,
+    };
+    crate::sql_format::write(std::io::stdout().lock(), format, &batches)?;
     Ok(true)
 }
 
@@ -423,20 +431,25 @@ pub(crate) async fn connect(
         Some((_, name)) => name.clone(),
         None => verified.shows.clone(),
     };
-    match &env {
-        Some(_) => {
-            orbit_third_party::credentials::remove(name)?;
-        }
-        None => orbit_third_party::credentials::store(name, &token)?,
-    }
+    let saved = orbit_third_party::credentials::store(name, &token);
     orbit_third_party::setup::write_source(&path, name, url.as_deref(), team.as_deref())?;
     let who = match shown.is_empty() {
         true => String::new(),
         false => format!(" as {shown}"),
     };
-    let kept = match &env {
-        Some(env) => format!("each sync reads the token from {env}, nothing is saved"),
-        None => "the token is in the OS keychain".into(),
+    let kept = match (&saved, &env) {
+        (Ok(()), Some(env)) => format!(
+            "saved {env}'s token in the {}; {env} wins over it while it is set",
+            orbit_third_party::credentials::STORE_NAME
+        ),
+        (Ok(()), None) => format!(
+            "the token is in the {}",
+            orbit_third_party::credentials::STORE_NAME
+        ),
+        (Err(error), Some(env)) => {
+            format!("could not save the token ({error:#}); only shells with {env} set can reach it")
+        }
+        (Err(error), None) => return Err(anyhow::anyhow!("{error:#}")),
     };
     crate::tui::success(format!("Connected {}{who}; {kept}", spec.title));
     orbit_third_party::store::forget(&ThirdParty::store_path_in(&root), name, false)?;
@@ -580,11 +593,14 @@ pub(crate) async fn ask_to_connect() -> Result<()> {
             }
         })
         .collect();
-    let chosen = crate::tui::multiselect(
+    let chosen = match crate::tui::multiselect(
         "Connect third-party sources? grep, context, and query can then search them",
         &choices,
         &[],
-    )?;
+    ) {
+        Ok(chosen) => chosen,
+        Err(_) => return Ok(()),
+    };
     for name in chosen {
         if let Err(error) = connect(&name, TokenInput::Prompt, None, None).await {
             crate::tui::error(format!("{name}: {error:#}"));

@@ -2,6 +2,13 @@ use anyhow::{Context, Result};
 
 const SERVICE: &str = "gitlab-orbit-third-party";
 
+#[cfg(target_os = "macos")]
+pub const STORE_NAME: &str = "macOS Keychain";
+#[cfg(target_os = "windows")]
+pub const STORE_NAME: &str = "Windows Credential Manager";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub const STORE_NAME: &str = "kernel keyring until reboot";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenFrom {
     Env,
@@ -35,14 +42,25 @@ pub fn remove(source: &str) -> Result<bool> {
 }
 
 pub fn resolve(source: &str, env: Option<&str>) -> Option<(String, TokenFrom)> {
-    if let Some(token) = env
-        .and_then(|name| std::env::var(name).ok())
-        .filter(|token| !token.is_empty())
-    {
+    if let Some(token) = env.and_then(variable).filter(|token| !token.is_empty()) {
         return Some((token, TokenFrom::Env));
     }
     load(source)
         .ok()
         .flatten()
         .map(|token| (token, TokenFrom::Keychain))
+}
+
+#[cfg(not(test))]
+fn variable(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+#[cfg(test)]
+fn variable(name: &str) -> Option<String> {
+    match name {
+        "ORBIT_TEST_TOKEN_GOOD" => Some("xoxb-good".into()),
+        "ORBIT_TEST_TOKEN_GRID" => Some("xoxe-grid".into()),
+        _ => std::env::var(name).ok(),
+    }
 }
