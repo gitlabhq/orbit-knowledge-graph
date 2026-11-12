@@ -525,7 +525,9 @@ fn statement_macro(line: &str) -> bool {
     let word = line.trim();
     word.len() > 2
         && word.as_bytes()[0].is_ascii_uppercase()
-        && word.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        && word
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
         && word.contains('_')
 }
 

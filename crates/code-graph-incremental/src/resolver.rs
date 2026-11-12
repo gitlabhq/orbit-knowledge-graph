@@ -1584,7 +1584,10 @@ fn wildcard_uses<'a>(
         for reference in from
             .descendants()
             .filter(|node| node.is(C::Ref))
-            .filter(|node| node.enclosing(|n| n.is(C::Def)).is_some_and(|def| def.index() == from.index()))
+            .filter(|node| {
+                node.enclosing(|n| n.is(C::Def))
+                    .is_some_and(|def| def.index() == from.index())
+            })
         {
             let Some(target) = qualified(ctx, reference.sym(), &provided) else {
                 continue;
@@ -1592,7 +1595,8 @@ fn wildcard_uses<'a>(
             import(target, &mut edges);
             edges.push(Edge {
                 call_resolution: CallResolution::Reference,
-                ..call_edge(from, target, Some(reference.index())).resolved(Resolution::WildcardImport)
+                ..call_edge(from, target, Some(reference.index()))
+                    .resolved(Resolution::WildcardImport)
             });
         }
     }
