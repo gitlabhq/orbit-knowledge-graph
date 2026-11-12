@@ -1,0 +1,5 @@
+description: "Third-party ON_DASHBOARD link"
+variants:
+  - from_node: {type: GrafanaAlert, id: id}
+    to_node: {type: GrafanaDashboard, id: id}
+    description: "GrafanaAlert.dashboard names the GrafanaDashboard."

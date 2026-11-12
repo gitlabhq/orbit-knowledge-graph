@@ -1,0 +1,27 @@
+settings:
+  local_db:
+    entities:
+      - {name: SlackChannel}
+      - {name: SlackUser}
+      - {name: SlackMessage}
+      - {name: GrafanaFolder}
+      - {name: GrafanaDashboard}
+      - {name: GrafanaAlert}
+      - {name: MergeRequest}
+      - {name: WorkItem}
+domains:
+  third_party:
+    description: Data read live from third-party sources, nightly only and never indexed.
+    nodes:
+      SlackChannel: nodes/third_party/slack_channel.yaml
+      SlackUser: nodes/third_party/slack_user.yaml
+      SlackMessage: nodes/third_party/slack_message.yaml
+      GrafanaFolder: nodes/third_party/grafana_folder.yaml
+      GrafanaDashboard: nodes/third_party/grafana_dashboard.yaml
+      GrafanaAlert: nodes/third_party/grafana_alert.yaml
+edges:
+  IN_CHANNEL: edges/in_channel.yaml
+  AUTHORED_BY: edges/authored_by.yaml
+  IN_FOLDER: edges/in_folder.yaml
+  ON_DASHBOARD: edges/on_dashboard.yaml
+  MENTIONS: edges/mentions.yaml

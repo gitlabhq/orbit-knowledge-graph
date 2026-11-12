@@ -1,0 +1,32 @@
+node_type: GrafanaAlert
+domain: third_party
+description: "A Grafana alert rule"
+label: title
+destination_table: gl_tp_grafana_alert
+default_columns: [id, key, title, rule_group, updated_at]
+redaction: {resource_type: third_party, id_column: id, ability: read_third_party}
+properties:
+  id: {type: int64, source: id, nullable: false, description: "Orbit ID, a hash of the source and key."}
+  traversal_path: {type: string, source: traversal_path, nullable: true, hidden: true, description: ""}
+  key: {type: string, source: key, nullable: false, description: "The ID in the source system."}
+  source: {type: string, source: source, nullable: false, description: "The source it came from."}
+  title: {type: string, source: title, nullable: true, description: ""}
+  rule_group: {type: string, source: rule_group, nullable: true, description: ""}
+  summary: {type: string, source: summary, nullable: true, description: ""}
+  description: {type: string, source: description, nullable: true, description: ""}
+  updated_at: {type: timestamp, source: updated_at, nullable: true, description: ""}
+  folder: {type: string, source: folder, nullable: true, description: "UID of the GrafanaFolder it is in."}
+  dashboard: {type: string, source: dashboard, nullable: true, description: "UID of the GrafanaDashboard it is on."}
+storage:
+  columns:
+    - {name: id, type: "Int64"}
+    - {name: traversal_path, type: "Nullable(String)"}
+    - {name: key, type: "String"}
+    - {name: source, type: "String"}
+    - {name: title, type: "Nullable(String)"}
+    - {name: rule_group, type: "Nullable(String)"}
+    - {name: summary, type: "Nullable(String)"}
+    - {name: description, type: "Nullable(String)"}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))"}
+    - {name: folder, type: "Nullable(String)"}
+    - {name: dashboard, type: "Nullable(String)"}

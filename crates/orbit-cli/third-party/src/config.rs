@@ -76,16 +76,6 @@ pub enum Type {
     UnixTime,
 }
 
-impl Type {
-    pub(crate) fn ontology(self) -> &'static str {
-        match self {
-            Type::String => "string",
-            Type::Int => "int64",
-            Type::Timestamp | Type::UnixTime => "timestamp",
-        }
-    }
-}
-
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Property {

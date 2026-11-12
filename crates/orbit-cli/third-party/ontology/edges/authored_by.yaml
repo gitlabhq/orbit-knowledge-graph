@@ -1,0 +1,5 @@
+description: "Third-party AUTHORED_BY link"
+variants:
+  - from_node: {type: SlackMessage, id: id}
+    to_node: {type: SlackUser, id: id}
+    description: "SlackMessage.author names the SlackUser."

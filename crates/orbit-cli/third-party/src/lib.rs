@@ -7,13 +7,15 @@ use std::sync::{Arc, LazyLock, OnceLock};
 
 use anyhow::{Context, Result, bail};
 use arrow::array::RecordBatch;
-use compiler::input::{FilterOp, Input, InputFilter, InputNode};
+use compiler::input::{Input, InputNode};
 use ontology::Ontology;
 use regex::Regex;
 
 use config::{Entity, Source};
 use fetch::{Fetcher, Record, Want};
 
+pub use async_trait::async_trait;
+pub use compiler::input::{FilterOp, InputFilter};
 pub use config::Config;
 
 const GREP_LIMIT: usize = 20;
@@ -61,6 +63,31 @@ pub struct Grepped {
 
 type Within = Vec<(String, String)>;
 
+#[async_trait::async_trait]
+pub trait GitLab: Send + Sync {
+    async fn fetch(
+        &self,
+        label: &str,
+        filters: &std::collections::HashMap<String, Vec<InputFilter>>,
+        mentioned: &[String],
+    ) -> Result<Vec<(String, schema::Row)>>;
+}
+
+pub fn mentions(text: &str) -> Vec<(&'static str, String, i64)> {
+    static URL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"https://gitlab\.com/([\w.-]+(?:/[\w.-]+)+)/-/(merge_requests|issues|work_items)/(\d+)").expect("valid")
+    });
+    URL.captures_iter(text)
+        .filter_map(|found| {
+            let kind = match &found[2] {
+                "merge_requests" => "MergeRequest",
+                _ => "WorkItem",
+            };
+            Some((kind, found[1].to_string(), found[3].parse().ok()?))
+        })
+        .collect()
+}
+
 impl ThirdParty {
     pub fn from_env() -> Option<Self> {
         Self::new(Config::from_env(|name| std::env::var(name).ok()))
@@ -77,7 +104,7 @@ impl ThirdParty {
         if let Some(ontology) = self.ontology.get() {
             return Ok(Arc::clone(ontology));
         }
-        let built = schema::build(&self.config)?;
+        let built = schema::build()?;
         Ok(Arc::clone(self.ontology.get_or_init(|| built)))
     }
 
@@ -370,21 +397,28 @@ impl ThirdParty {
         (ours, theirs)
     }
 
-    pub async fn query(&self, query: &str) -> Result<Vec<RecordBatch>> {
+    pub async fn query(
+        &self,
+        query: &str,
+        gitlab: Option<&dyn GitLab>,
+    ) -> Result<Vec<RecordBatch>> {
         let ontology = self.ontology()?;
         let compiled = compiler::compile_local(query, compiler::Frontend::Gql, &ontology)
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let fetcher = Fetcher::new()?;
-        let mut loaded: BTreeMap<&str, Vec<Record>> = BTreeMap::new();
+        let mut rows: BTreeMap<String, Vec<schema::Row>> = BTreeMap::new();
+        let mut edges = Vec::new();
+        let mut mentioned: BTreeMap<&'static str, Vec<(String, i64)>> = BTreeMap::new();
+        let mut theirs = Vec::new();
         for node in &compiled.input.nodes {
-            let Some((source, name, entity)) = node
-                .entity
-                .as_deref()
-                .and_then(|label| self.config.entity(label))
-            else {
+            let Some(label) = node.entity.as_deref() else {
                 continue;
             };
-            let records = match (&entity.search_api, loaded.contains_key(name)) {
+            let Some((source, name, entity)) = self.config.entity(label) else {
+                theirs.push(node);
+                continue;
+            };
+            let records = match (&entity.search_api, rows.contains_key(name)) {
                 (Some(_), true) => bail!(
                     "{name} is read through a live search, so a query can match it only once; run one query per search"
                 ),
@@ -397,14 +431,47 @@ impl ThirdParty {
                 (None, true) => continue,
                 (None, false) => fetcher.list(source, name, entity).await?,
             };
-            loaded.insert(name, records);
+            let (found, links) = schema::rows(&source.name, name, entity, &records);
+            for (record, row) in records.iter().zip(&found) {
+                for (kind, path, iid) in mentions(&value(record, &entity.label)) {
+                    mentioned
+                        .entry(kind)
+                        .or_default()
+                        .push((format!("{path}#{iid}"), row.id));
+                }
+            }
+            rows.insert(name.to_string(), found);
+            edges.extend(links);
+        }
+        if !theirs.is_empty() {
+            let gitlab =
+                gitlab.context("this query names GitLab entities, so it needs a GitLab sign-in")?;
+            for node in theirs {
+                let label = node.entity.clone().unwrap_or_default();
+                let wanted = mentioned.get(label.as_str()).cloned().unwrap_or_default();
+                let refs: Vec<String> = wanted.iter().map(|(at, _)| at.clone()).collect();
+                let found = gitlab.fetch(&label, &node.filters, &refs).await?;
+                for (at, message) in &wanted {
+                    if let Some(row) = found.iter().find(|row| row.0 == *at) {
+                        edges.push(schema::Edge {
+                            from: (*message, "SlackMessage".into()),
+                            kind: "MENTIONS".into(),
+                            to: (row.1.id, label.clone()),
+                        });
+                    }
+                }
+                rows.entry(label)
+                    .or_default()
+                    .extend(found.into_iter().map(|(_, row)| row));
+            }
         }
         let client = duckdb_client::DuckDbClient::open(duckdb_client::OpenMode::InMemoryArrow)?;
-        client.initialize_schema(&compiler::generate_local_ddl(&ontology, ""))?;
-        for (name, records) in &loaded {
-            let (source, _, entity) = self.config.entity(name).expect("loaded entities exist");
-            schema::load(&client, &source.name, name, entity, records)?;
+        let ddl = compiler::generate_local_ddl(&ontology, "").replace(" NOT NULL", "");
+        client.initialize_schema(&ddl)?;
+        for (name, rows) in &rows {
+            schema::load(&client, &ontology, name, rows)?;
         }
+        schema::link(&client, &edges)?;
         let sql = compiled.base.render();
         let batches = client
             .query_arrow(&sql)

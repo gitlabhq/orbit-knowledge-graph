@@ -1,0 +1,5 @@
+description: "Third-party IN_CHANNEL link"
+variants:
+  - from_node: {type: SlackMessage, id: id}
+    to_node: {type: SlackChannel, id: id}
+    description: "SlackMessage.channel names the SlackChannel."

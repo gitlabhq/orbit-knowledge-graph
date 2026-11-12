@@ -11,7 +11,7 @@ const USERS: &str =
     r#"{"ok": true, "members": [{"id": "U1", "name": "ada"}, {"id": "U2", "name": "bot"}]}"#;
 const SEARCH: &str = r#"{"ok": true, "results": {"messages": [
   {"channel_id": "C1", "channel_name": "team", "message_ts": "1712345678.000100", "author_user_id": "U1", "author_name": "Ada", "content": "web rollout stuck on the db migration"},
-  {"channel_id": "C7", "channel_name": "elsewhere", "message_ts": "1712000001.000100", "author_user_id": "U9", "author_name": "Carol", "content": "db migration in a channel nobody synced"}]}}"#;
+  {"channel_id": "C7", "channel_name": "elsewhere", "message_ts": "1712000001.000100", "author_user_id": "U9", "author_name": "Carol", "content": "db migration in a channel nobody synced https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/42"}]}}"#;
 const FOLDERS: &str = r#"[{"uid": "f-web", "title": "Web"}, {"uid": "f-db", "title": "Database"}]"#;
 const DASHBOARDS: &str = r#"[
   {"uid": "d-web", "title": "Web overview", "tags": ["web", "slo"], "folderUid": "f-web", "folderTitle": "Web"},
@@ -221,7 +221,7 @@ const QUERIES: &[&str] = &[
     "MATCH (m:SlackMessage)-[:IN_CHANNEL]->(c:SlackChannel) WHERE m.text CONTAINS 'migration' RETURN c.name | team",
     "MATCH (m:SlackMessage)-[:IN_CHANNEL]->(c:SlackChannel {name: 'team'}) RETURN m.text | web rollout stuck on the db migration",
     "MATCH (c:SlackChannel) RETURN c.name ORDER BY c.name LIMIT 1 | deploys",
-    "MATCH (m:SlackMessage) WHERE m.text CONTAINS 'migration' AND m.author_name = 'Carol' RETURN m.text SKIP 0 LIMIT 1 | db migration in a channel nobody synced",
+    "MATCH (m:SlackMessage) WHERE m.text CONTAINS 'migration' AND m.author_name = 'Carol' RETURN m.text SKIP 0 LIMIT 1 | db migration in a channel nobody synced https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/42",
 ];
 
 const QUERY_ERRORS: &[&str] = &[
@@ -236,13 +236,13 @@ async fn query_reads_what_it_names_in_full_or_says_why_not() {
     let tp = connected().await;
     for case in QUERIES {
         let (query, expected) = case.split_once(" | ").unwrap();
-        let batches = tp.query(query).await.unwrap();
+        let batches = tp.query(query, None).await.unwrap();
         assert_eq!(batches[0].schema().fields().len(), 1, "{query}");
         assert_eq!(strings(&batches).join(", "), expected, "{query}");
     }
     for case in QUERY_ERRORS {
         let (query, expected) = case.split_once(" | ").unwrap();
-        let error = tp.query(query).await.unwrap_err().to_string();
+        let error = tp.query(query, None).await.unwrap_err().to_string();
         assert!(error.contains(expected), "{query}: {error}");
     }
     let labels = tp.labels_in("MATCH (c:SlackChannel), (p:Project) RETURN c");
@@ -290,4 +290,55 @@ async fn sources_come_from_env_and_failures_say_why() {
     let no_url = open(&base, "GRAFANA_TOKEN=g").unwrap();
     let failed = format!("{:?}", no_url.grep(".", &Scope::default()).await.failed);
     assert!(failed.contains("grafana needs GRAFANA_URL"), "{failed}");
+}
+
+struct FakeGitLab;
+
+#[async_trait::async_trait]
+impl GitLab for FakeGitLab {
+    async fn fetch(
+        &self,
+        label: &str,
+        _: &std::collections::HashMap<String, Vec<InputFilter>>,
+        mentioned: &[String],
+    ) -> Result<Vec<(String, schema::Row)>> {
+        assert_eq!(
+            (label, mentioned),
+            (
+                "MergeRequest",
+                &["gitlab-org/orbit/knowledge-graph#42".to_string()][..]
+            )
+        );
+        let values = BTreeMap::from([
+            ("iid".into(), 42.into()),
+            ("title".into(), "Fix the migration".into()),
+        ]);
+        Ok(vec![(
+            mentioned[0].clone(),
+            schema::Row { id: 9001, values },
+        )])
+    }
+}
+
+#[tokio::test]
+async fn mixed_queries_join_slack_messages_to_the_merge_requests_they_link() {
+    let tp = connected().await;
+    let query = "MATCH (m:SlackMessage)-[:MENTIONS]->(mr:MergeRequest) WHERE m.text CONTAINS 'migration' RETURN mr.title";
+    let batches = tp.query(query, Some(&FakeGitLab)).await.unwrap();
+    assert_eq!(strings(&batches), ["Fix the migration"]);
+    let error = tp.query(query, None).await.unwrap_err().to_string();
+    assert!(error.contains("needs a GitLab sign-in"), "{error}");
+    assert_eq!(
+        mentions(
+            "see https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/42 and https://gitlab.com/g/p/-/issues/7"
+        ),
+        [
+            (
+                "MergeRequest",
+                "gitlab-org/orbit/knowledge-graph".into(),
+                42
+            ),
+            ("WorkItem", "g/p".into(), 7)
+        ]
+    );
 }

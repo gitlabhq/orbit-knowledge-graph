@@ -1,0 +1,30 @@
+node_type: SlackMessage
+domain: third_party
+description: "A message posted in a Slack channel"
+label: text
+destination_table: gl_tp_slack_message
+default_columns: [id, key, text, channel_name, author_name, posted_at]
+redaction: {resource_type: third_party, id_column: id, ability: read_third_party}
+properties:
+  id: {type: int64, source: id, nullable: false, description: "Orbit ID, a hash of the source and key."}
+  traversal_path: {type: string, source: traversal_path, nullable: true, hidden: true, description: ""}
+  key: {type: string, source: key, nullable: false, description: "The ID in the source system."}
+  source: {type: string, source: source, nullable: false, description: "The source it came from."}
+  text: {type: string, source: text, nullable: true, description: ""}
+  channel: {type: string, source: channel, nullable: true, description: "Key of the SlackChannel it was posted in."}
+  channel_name: {type: string, source: channel_name, nullable: true, description: ""}
+  author: {type: string, source: author, nullable: true, description: "Key of the SlackUser who posted it."}
+  author_name: {type: string, source: author_name, nullable: true, description: ""}
+  posted_at: {type: timestamp, source: posted_at, nullable: true, description: ""}
+storage:
+  columns:
+    - {name: id, type: "Int64"}
+    - {name: traversal_path, type: "Nullable(String)"}
+    - {name: key, type: "String"}
+    - {name: source, type: "String"}
+    - {name: text, type: "Nullable(String)"}
+    - {name: channel, type: "Nullable(String)"}
+    - {name: channel_name, type: "Nullable(String)"}
+    - {name: author, type: "Nullable(String)"}
+    - {name: author_name, type: "Nullable(String)"}
+    - {name: posted_at, type: "Nullable(DateTime64(6, 'UTC'))"}

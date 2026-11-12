@@ -1,0 +1,8 @@
+description: "Third-party MENTIONS link"
+variants:
+  - from_node: {type: SlackMessage, id: id}
+    to_node: {type: MergeRequest, id: id}
+    description: "The message links to the merge request by URL."
+  - from_node: {type: SlackMessage, id: id}
+    to_node: {type: WorkItem, id: id}
+    description: "The message links to the issue by URL."

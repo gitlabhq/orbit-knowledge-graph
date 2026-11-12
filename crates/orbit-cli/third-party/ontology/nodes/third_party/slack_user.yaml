@@ -1,0 +1,24 @@
+node_type: SlackUser
+domain: third_party
+description: "A person in the Slack workspace"
+label: name
+destination_table: gl_tp_slack_user
+default_columns: [id, key, name, real_name, title]
+redaction: {resource_type: third_party, id_column: id, ability: read_third_party}
+properties:
+  id: {type: int64, source: id, nullable: false, description: "Orbit ID, a hash of the source and key."}
+  traversal_path: {type: string, source: traversal_path, nullable: true, hidden: true, description: ""}
+  key: {type: string, source: key, nullable: false, description: "The ID in the source system."}
+  source: {type: string, source: source, nullable: false, description: "The source it came from."}
+  name: {type: string, source: name, nullable: true, description: ""}
+  real_name: {type: string, source: real_name, nullable: true, description: ""}
+  title: {type: string, source: title, nullable: true, description: ""}
+storage:
+  columns:
+    - {name: id, type: "Int64"}
+    - {name: traversal_path, type: "Nullable(String)"}
+    - {name: key, type: "String"}
+    - {name: source, type: "String"}
+    - {name: name, type: "Nullable(String)"}
+    - {name: real_name, type: "Nullable(String)"}
+    - {name: title, type: "Nullable(String)"}

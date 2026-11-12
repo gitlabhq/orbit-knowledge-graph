@@ -1,0 +1,8 @@
+description: "Third-party IN_FOLDER link"
+variants:
+  - from_node: {type: GrafanaDashboard, id: id}
+    to_node: {type: GrafanaFolder, id: id}
+    description: "GrafanaDashboard.folder names the GrafanaFolder."
+  - from_node: {type: GrafanaAlert, id: id}
+    to_node: {type: GrafanaFolder, id: id}
+    description: "GrafanaAlert.folder names the GrafanaFolder."

@@ -1,0 +1,26 @@
+node_type: SlackChannel
+domain: third_party
+description: "A Slack channel you are a member of"
+label: name
+destination_table: gl_tp_slack_channel
+default_columns: [id, key, name, topic, purpose]
+redaction: {resource_type: third_party, id_column: id, ability: read_third_party}
+properties:
+  id: {type: int64, source: id, nullable: false, description: "Orbit ID, a hash of the source and key."}
+  traversal_path: {type: string, source: traversal_path, nullable: true, hidden: true, description: ""}
+  key: {type: string, source: key, nullable: false, description: "The ID in the source system."}
+  source: {type: string, source: source, nullable: false, description: "The source it came from."}
+  name: {type: string, source: name, nullable: true, description: "Channel name without the leading #."}
+  topic: {type: string, source: topic, nullable: true, description: ""}
+  purpose: {type: string, source: purpose, nullable: true, description: ""}
+  created_at: {type: timestamp, source: created_at, nullable: true, description: ""}
+storage:
+  columns:
+    - {name: id, type: "Int64"}
+    - {name: traversal_path, type: "Nullable(String)"}
+    - {name: key, type: "String"}
+    - {name: source, type: "String"}
+    - {name: name, type: "Nullable(String)"}
+    - {name: topic, type: "Nullable(String)"}
+    - {name: purpose, type: "Nullable(String)"}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))"}

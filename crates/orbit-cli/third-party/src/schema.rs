@@ -1,129 +1,71 @@
-use std::path::Path;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use ontology::Ontology;
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::config::{Config, Entity, Type};
+use crate::config::Entity;
 use crate::fetch::Record;
 
-const DOMAIN: &str = "third_party";
+const OVERLAY: &[(&str, &str)] = &[
+    ("schema.yaml", include_str!("../ontology/schema.yaml")),
+    (
+        "nodes/third_party/slack_channel.yaml",
+        include_str!("../ontology/nodes/third_party/slack_channel.yaml"),
+    ),
+    (
+        "nodes/third_party/slack_user.yaml",
+        include_str!("../ontology/nodes/third_party/slack_user.yaml"),
+    ),
+    (
+        "nodes/third_party/slack_message.yaml",
+        include_str!("../ontology/nodes/third_party/slack_message.yaml"),
+    ),
+    (
+        "nodes/third_party/grafana_folder.yaml",
+        include_str!("../ontology/nodes/third_party/grafana_folder.yaml"),
+    ),
+    (
+        "nodes/third_party/grafana_dashboard.yaml",
+        include_str!("../ontology/nodes/third_party/grafana_dashboard.yaml"),
+    ),
+    (
+        "nodes/third_party/grafana_alert.yaml",
+        include_str!("../ontology/nodes/third_party/grafana_alert.yaml"),
+    ),
+    (
+        "edges/in_channel.yaml",
+        include_str!("../ontology/edges/in_channel.yaml"),
+    ),
+    (
+        "edges/authored_by.yaml",
+        include_str!("../ontology/edges/authored_by.yaml"),
+    ),
+    (
+        "edges/in_folder.yaml",
+        include_str!("../ontology/edges/in_folder.yaml"),
+    ),
+    (
+        "edges/on_dashboard.yaml",
+        include_str!("../ontology/edges/on_dashboard.yaml"),
+    ),
+    (
+        "edges/mentions.yaml",
+        include_str!("../ontology/edges/mentions.yaml"),
+    ),
+];
 
-fn table(entity: &str) -> String {
-    format!("gl_tp_{}", snake(entity))
-}
-
-fn snake(name: &str) -> String {
-    let mut out = String::new();
-    for (index, c) in name.chars().enumerate() {
-        if c.is_ascii_uppercase() && index > 0 {
-            out.push('_');
-        }
-        out.push(c.to_ascii_lowercase());
-    }
-    out
-}
-
-fn columns(entity: &Entity) -> Vec<(&str, Type, &str)> {
-    let mut columns = vec![
-        ("id", Type::Int, "Orbit ID, a hash of the source and key."),
-        ("traversal_path", Type::String, ""),
-        ("key", Type::String, "The ID in the source system."),
-        ("source", Type::String, "The source it came from."),
-    ];
-    columns.extend(
-        entity.properties.iter().map(|(field, property)| {
-            (field.as_str(), property.kind, property.description.as_str())
-        }),
-    );
-    columns
-}
-
-fn node(name: &str, entity: &Entity) -> Value {
-    let mut properties = serde_json::Map::new();
-    let mut storage = Vec::new();
-    for (field, kind, description) in columns(entity) {
-        let required = matches!(field, "id" | "key" | "source");
-        properties.insert(
-            field.into(),
-            json!({"type": kind.ontology(), "source": field, "nullable": !required, "hidden": field == "traversal_path", "description": description}),
-        );
-        let column = match kind {
-            Type::String => "String",
-            Type::Int => "Int64",
-            Type::Timestamp | Type::UnixTime => "DateTime64(6, 'UTC')",
-        };
-        let column = match required {
-            true => column.to_string(),
-            false => format!("Nullable({column})"),
-        };
-        storage.push(json!({"name": field, "type": column}));
-    }
-    let mut defaults = vec!["id".to_string(), entity.label.clone()];
-    defaults.extend(
-        entity
-            .search
-            .iter()
-            .filter(|f| **f != entity.label)
-            .cloned(),
-    );
-    json!({
-        "node_type": name, "domain": DOMAIN, "description": entity.description, "label": entity.label,
-        "destination_table": table(name), "default_columns": defaults, "properties": properties, "storage": {"columns": storage},
-        "redaction": {"resource_type": "third_party", "id_column": "id", "ability": "read_third_party"},
-    })
-}
-
-pub fn build(config: &Config) -> Result<Arc<Ontology>> {
-    let base = Ontology::load_embedded().context("loading the embedded ontology")?;
+pub fn build() -> Result<Arc<Ontology>> {
     let dir = tempfile::tempdir()?;
-    let mut nodes = serde_json::Map::new();
-    let mut local = Vec::new();
-    let mut edges: indexmap::IndexMap<String, Vec<Value>> = indexmap::IndexMap::new();
-    for (_, name, entity) in config.entities() {
-        anyhow::ensure!(
-            base.get_node(name).is_none(),
-            "{name} is already a GitLab entity"
-        );
-        let path = format!("nodes/{DOMAIN}/{}.yaml", snake(name));
-        write(dir.path(), &path, &node(name, entity))?;
-        nodes.insert(name.into(), path.into());
-        local.push(json!({"name": name}));
-        for link in &entity.links {
-            edges.entry(link.kind.clone()).or_default().push(json!({
-                "from_node": {"type": name, "id": "id"},
-                "to_node": {"type": link.to, "id": "id"},
-                "description": format!("{name}.{} names the {}.", link.via, link.to),
-            }));
-        }
+    for (path, text) in OVERLAY {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().expect("overlay files sit in a directory"))?;
+        std::fs::write(full, text)?;
     }
-    let mut edge_files = serde_json::Map::new();
-    for (kind, variants) in edges {
-        let path = format!("edges/{}.yaml", kind.to_ascii_lowercase());
-        let mut file = json!({ "variants": variants });
-        if !base.has_edge(&kind) {
-            file["description"] = format!("Third-party {kind} link").into();
-        }
-        write(dir.path(), &path, &file)?;
-        edge_files.insert(kind, path.into());
-    }
-    let schema = json!({
-        "settings": {"local_db": {"entities": local}},
-        "domains": {DOMAIN: {"description": "Data read live from third-party sources.", "nodes": nodes}},
-        "edges": edge_files,
-    });
-    write(dir.path(), "schema.yaml", &schema)?;
     let ontology = Ontology::load_embedded_with_overlay(dir.path())
         .context("merging third-party entities into the ontology")?;
     Ok(Arc::new(ontology))
-}
-
-fn write(dir: &Path, path: &str, value: &Value) -> Result<()> {
-    let full = dir.join(path);
-    std::fs::create_dir_all(full.parent().expect("overlay files sit in a directory"))?;
-    std::fs::write(&full, orbit_utils::yaml::to_string(value)?)?;
-    Ok(())
 }
 
 fn id(source: &str, entity: &str, key: &str) -> i64 {
@@ -135,48 +77,98 @@ fn id(source: &str, entity: &str, key: &str) -> i64 {
     (hash & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
-pub fn load(
-    client: &duckdb_client::DuckDbClient,
+pub struct Row {
+    pub id: i64,
+    pub values: BTreeMap<String, Value>,
+}
+
+pub fn rows(
     source: &str,
     name: &str,
     entity: &Entity,
     records: &[Record],
-) -> Result<()> {
-    let columns = columns(entity);
-    let names: Vec<&str> = columns.iter().map(|(field, ..)| *field).collect();
-    let marks = vec!["?"; names.len()].join(", ");
-    let insert = format!(
-        "INSERT INTO {} ({}) VALUES ({marks})",
-        table(name),
-        names.join(", ")
-    );
+) -> (Vec<Row>, Vec<Edge>) {
+    let mut rows = Vec::new();
+    let mut edges = Vec::new();
     for record in records {
         let own = id(source, name, &record.key);
-        let row: Vec<Value> = names
-            .iter()
-            .map(|field| match *field {
-                "id" => own.into(),
-                "traversal_path" | "source" => source.into(),
-                "key" => record.key.clone().into(),
-                field => record.properties.get(field).cloned().unwrap_or(Value::Null),
-            })
-            .collect();
-        client.execute(&insert, &row)?;
+        let mut values = record.properties.clone();
+        values.insert("key".into(), record.key.clone().into());
+        values.insert("source".into(), source.into());
+        rows.push(Row { id: own, values });
         for link in &entity.links {
             if let Some(target) = record.properties.get(&link.via).map(crate::fetch::text) {
-                client.execute(
-                    "INSERT INTO gl_edge (source_id, source_kind, relationship_kind, target_id, target_kind, traversal_path) VALUES (?, ?, ?, ?, ?, ?)",
-                    &[
-                        own.into(),
-                        name.into(),
-                        link.kind.clone().into(),
-                        id(source, &link.to, &target).into(),
-                        link.to.clone().into(),
-                        source.into(),
-                    ],
-                )?;
+                edges.push(Edge {
+                    from: (own, name.into()),
+                    kind: link.kind.clone(),
+                    to: (id(source, &link.to, &target), link.to.clone()),
+                });
             }
         }
+    }
+    (rows, edges)
+}
+
+pub struct Edge {
+    pub from: (i64, String),
+    pub kind: String,
+    pub to: (i64, String),
+}
+
+pub fn load(
+    client: &duckdb_client::DuckDbClient,
+    ontology: &Ontology,
+    name: &str,
+    rows: &[Row],
+) -> Result<()> {
+    let node = ontology
+        .get_node(name)
+        .with_context(|| format!("{name} is not in the ontology"))?;
+    let excluded = ontology.local_entity_excludes(name).unwrap_or_default();
+    let names: Vec<&str> = node
+        .storage
+        .columns
+        .iter()
+        .map(|column| column.name.as_str())
+        .filter(|column| !excluded.iter().any(|excluded| excluded == column))
+        .collect();
+    for row in rows {
+        let present: Vec<&str> = names
+            .iter()
+            .copied()
+            .filter(|column| {
+                matches!(*column, "id" | "traversal_path") || row.values.contains_key(*column)
+            })
+            .collect();
+        let values: Vec<Value> = present
+            .iter()
+            .map(|column| match *column {
+                "id" => row.id.into(),
+                "traversal_path" => row
+                    .values
+                    .get(*column)
+                    .cloned()
+                    .unwrap_or_else(|| "0/".into()),
+                column => row.values[column].clone(),
+            })
+            .collect();
+        let marks = vec!["?"; present.len()].join(", ");
+        let insert = format!(
+            "INSERT INTO {} ({}) VALUES ({marks})",
+            node.destination_table,
+            present.join(", ")
+        );
+        client.execute(&insert, &values)?;
+    }
+    Ok(())
+}
+
+pub fn link(client: &duckdb_client::DuckDbClient, edges: &[Edge]) -> Result<()> {
+    for edge in edges {
+        client.execute(
+            "INSERT INTO gl_edge (source_id, source_kind, relationship_kind, target_id, target_kind, traversal_path) VALUES (?, ?, ?, ?, ?, '0/')",
+            &[edge.from.0.into(), edge.from.1.clone().into(), edge.kind.clone().into(), edge.to.0.into(), edge.to.1.clone().into()],
+        )?;
     }
     Ok(())
 }
