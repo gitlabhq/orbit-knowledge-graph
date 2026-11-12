@@ -454,18 +454,18 @@ struct ListArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(
     about = "Report code quality from the local graph (nightly; needs ORBIT_NIGHTLY=1).",
-    long_about = "Report code quality from the local code graph: dependency cycles between directories, coupling hotspots, and functions nothing references. With --diff, also shows the callers of each definition committed since BASE. With --gate, indexes BASE and exits 3 (errors exit 1) when the commits since BASE add a dependency inside a cycle, or a function nothing references. Nightly: set ORBIT_NIGHTLY=1."
+    long_about = "Report code quality from the local code graph: dependency cycles between directories, coupling hotspots, and functions nothing references. Layer rules in .gitlab/orbit-quality.yml (`layers:` entries with `name`, `from`, and `deny` or `allow_only` path globs) report forbidden dependencies. With --gate, indexes BASE and exits 3 (errors exit 1) when the commits since BASE add a layer violation, a dependency inside a cycle, or a function nothing references. Nightly: set ORBIT_NIGHTLY=1."
 )]
 struct QualityArgs {
     /// Rules to run (repeatable). Default: all of them.
     #[arg(value_enum, value_name = "RULE")]
     rules: Vec<commands::quality::Rule>,
 
-    /// Report the callers of definitions committed since BASE, such as `origin/main`. Uncommitted edits are not included.
+    /// Compare against BASE, such as `origin/main`, for --gate. Uncommitted edits are not included.
     #[arg(long, value_name = "BASE")]
     diff: Option<String>,
 
-    /// Exit 3 when the commits since BASE add a dependency inside a cycle, or a function nothing references. Indexes BASE in a temporary worktree to compare, following renames.
+    /// Exit 3 when the commits since BASE add a layer violation, a dependency inside a cycle, or a function nothing references. Indexes BASE in a temporary worktree to compare, following renames.
     #[arg(long, requires = "diff")]
     gate: bool,
 
