@@ -1,7 +1,5 @@
 # Adding data to GitLab Orbit — an agent's playbook
 
-**Warning:** This guide is stale. Read [`crates/indexer/AGENTS.md`](../../../../crates/indexer/AGENTS.md) before you change ontology pipelines.
-
 > Audience: a coding agent (Claude Code or similar) tasked with adding a new
 > **node** or **edge** to the Orbit graph. This is the end-to-end,
 > cross-repo workflow distilled from shipping the Package Registry + Container
@@ -206,37 +204,78 @@ YAML-driven; the indexer and query compiler are Rust.
 
 ### 5.1 Node YAML — `config/ontology/nodes/<domain>/<node>.yaml`
 
-Model it on the closest existing node (e.g. `nodes/packages/package.yaml`). Required pieces:
+Model it on the closest existing node. [`nodes/agents/agent_session.yaml`](../../../../config/ontology/nodes/agents/agent_session.yaml)
+is a small, complete example with a `.sql.j2` extract. [`nodes/packages/package.yaml`](../../../../config/ontology/nodes/packages/package.yaml)
+is one with a generated extract. [`config/schemas/ontology.schema.json`](../../../../config/schemas/ontology.schema.json)
+is the authority, and `mise ontology:validate` checks every file against it.
 
-- `node_type`, `domain`, `description`, `label`, `destination_table: gl_<node>`, `default_columns`.
+A node file has these top-level keys. `node_type`, `domain`, `description`, `label`, `destination_table`,
+`default_columns`, `style`, `properties` and `redaction` are required:
+
+- `node_type`, `domain`, `description` (200 characters at most), `label` (the property shown as the node's name), `destination_table: gl_<node>` and `default_columns`.
+- `style`: the size and color used by graph views.
 - `redaction: { resource_type: <type>, id_column: id, ability: <ability> }`: **must match the monolith registration** (Section 4).
-- `properties:` block: **every property needs a `description`** (CI-enforced). **`nullable` must match the siphon source column**. Don't mark a `NOT NULL` source nullable. Don't mark a `Nullable(...)` source `nullable: false` without a comment explaining the NULL→default coercion. Reviewers flag both directions.
-- `etl: { type: table, scope: namespaced, source: siphon_<table>, order_by: [traversal_path, id], edges: { project_id: { to: Project, as: IN_PROJECT, direction: outgoing } } }`.
-  - **Which edge mechanism to use:** the inline `edges:` block here is for edges derived from an **FK column on this node's own source table**. An example is `IN_PROJECT` from `project_id`. Use a **separate edge YAML (§5.2)** only for **join-table edges** (e.g. `DECLARES_DEPENDENCY` from `packages_dependency_links`), where the relationship lives in its own table.
-  - **How the ETL uses this (read before adding a mapping):** the `etl:` block declares an extraction plus a row-wise transform. The transform covers source columns → graph columns, FK-edge resolution, and type discriminators. Most nodes are a straight column projection. But some properties need a **mapping**: an Integer-to-Enum column, a computed value, or a non-trivial rename. Declare it here, so it does not fail at index time. See [SDLC indexing → ETL](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md#etl) (and the Integer-to-Enum mapping note in that doc) for how plans, transforms, and column mappings are derived from the ontology.
-- `storage:` block: `primary_key`, `columns`, `indexes`, `projections`. Copy the shape from the template node.
+- `properties:` block. A column-backed property needs `type`, `source` and `description`, and the schema enforces all three. **`nullable` must match the siphon source column.** Don't mark a `NOT NULL` source nullable. Don't mark a `Nullable(...)` source `nullable: false` without a comment that explains the NULL-to-default coercion. Reviewers flag both directions. Enum properties list their `values`. Namespaced nodes carry a hidden `traversal_path` property, and path-scoped nodes declare a `traversal_path_lookup` on `id`.
+- `indexer.reindex`: the datalake tables whose Siphon changes trigger a re-index of the namespace.
+- `pipelines:` the extract and transform that build the node (see below).
+- `storage:` the ClickHouse DDL: `primary_key`, `columns` with codecs, `indexes`, `projections` and table `settings`. Copy the shape from the template node.
+
+There is no top-level `etl:` block, and the schema rejects one. Each entry in `pipelines:` pairs an `extract` with a `transform`:
+
+```yaml
+pipelines:
+  - name: Package
+    extract:
+      type: clickhouse
+      tables: [siphon_packages_packages]
+      order_by: [traversal_path, package_type, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: id, kind: Package }
+          to: { field: project_id, kind: Project }
+          label: IN_PROJECT
+```
+
+- **`extract`:** `query: generated` builds the SQL from the declaration. It suits a single-table projection, and it also takes `fields`, `filter`, `lookups` and `partition_count`. Use `query: <name>.sql.j2` only for genuinely complex joins or materialized arrays. The template sits next to the YAML, as `agent_session.sql.j2` does. The indexer renders `{{version_column}}`, `{{deleted_column}}` and `{{watermark_column}}` in it. The "Extraction SQL" item in [`crates/indexer/AGENTS.md`](../../../../crates/indexer/AGENTS.md#before-writing-a-new-handler-reuse-existing-infra) has the full contract.
+- **`transform`:** `type: datafusion` is a row-wise projection of the extracted rows, and it is the default. `transform.edges` emits edges from an **FK column on this node's own source table**, for example `IN_PROJECT` from `project_id`. Each `label` must name an edge that declares a variant for that node pair (§5.2). Use a hand-written Rust transform only when SQL cannot express the graph shape. See [When a Rust transform is justified](../../../../crates/indexer/AGENTS.md#when-a-rust-transform-is-justified-adr-015).
+- Use a **separate edge pipeline (§5.2)** for **join-table edges**, such as `DECLARES_DEPENDENCY` from `packages_dependency_links`, where the relationship lives in its own table.
 
 ### 5.2 Edge YAML — `config/ontology/edges/<edge>.yaml`
 
-For a **join-table edge**, model on `edges/built_by.yaml`:
+An edge file declares the allowed source and target pairs (`variants`). It can also carry the pipelines that emit the edge.
+
+- **FK-derived edge** (the FK is a column on one node's table): add a variant to the edge file. Emit the edge from the node's `transform.edges` (§5.1). [`edges/in_project.yaml`](../../../../config/ontology/edges/in_project.yaml) holds one variant per node, each with an `fk_column`. Reuse `IN_PROJECT` for ownership and don't invent `HAS_X` edges.
+- **Join-table edge** (the relationship has its own table): the edge file also holds the extract. [`edges/built_by.yaml`](../../../../config/ontology/edges/built_by.yaml) emits `BUILT_BY` from two join tables, and [`edges/declares_dependency.yaml`](../../../../config/ontology/edges/declares_dependency.yaml) is the single-table form:
 
 ```yaml
 description: <Subject> <verbs> <object>
+table: gl_ci_edge                     # optional, see §5.3
 variants:
   - from_node: { type: <From>, id: id }
-    to_node:   { type: <To>,   id: id }
+    to_node: { type: <To>, id: id }
     scope: same_namespace
     description: "..."
-etl:
-  - scope: namespaced
-    source: siphon_<join_table>
-    order_by: [traversal_path, id]
-    from: { id: <from_fk_column>, type: <From> }
-    to:   { id: <to_fk_column>,   type: <To> }
+indexer:
+  reindex: [siphon_<join_table>]
+pipelines:
+  - name: <EDGE>_siphon_<join_table>_<To>
+    extract:
+      type: clickhouse
+      tables: [siphon_<join_table>]
+      fields: [<from_fk_column>, <to_fk_column>]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: <from_fk_column>, kind: <From> }
+          to: { field: <to_fk_column>, kind: <To> }
+          label: <EDGE>
 ```
 
-If either FK column is `Nullable` in the source, the ETL can emit null-target edges.
-Filter or document it (reviewers will ask). Prefer NOT-NULL join columns.
+A variant's `scope` is `namespace_anchor`, `same_namespace`, `prune_to_source` or `prune_to_target`. It tells the query compiler how a `traversal_path` crosses the edge, and `namespace_anchor` also requires an `fk_column`. If either FK column is `Nullable` in the source, the pipeline can emit null-target edges. Filter them or document it, because reviewers will ask. Prefer NOT-NULL join columns.
 
 Hot query shapes can be pre-joined by declaring a chain under `settings.denormalized_joins`
 in `schema.yaml` (see the [Denormalized joins](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/querying/graph_engine.md#denormalized-joins) section of the pre-rewrite graph engine doc).
@@ -251,30 +290,55 @@ Node/edge files are **NOT auto-discovered**. They're loaded from a registry in
 won't see your entity (you'll burn time wondering why `gl_<node>` never appears).
 
 ```yaml
-# under the matching domain:
+domains:
   <domain>:
     nodes:
       <ExistingNode>: nodes/<domain>/<existing>.yaml
       <NewNode>: nodes/<domain>/<new>.yaml     # ← add
-# in the edges: map:
 edges:
   …
   <NEW_EDGE>: edges/<new_edge>.yaml            # ← add
 ```
 
-### 5.4 Bump the schema version + regenerate DDL
+**Which edge table an edge lands in.** `gl_edge` is only the default (`settings.default_edge_table`). `settings.edge_tables` defines several tables: `gl_edge`, `gl_code_edge`, `gl_ci_edge`, `gl_sec_edge` and `gl_diff_edge`. The loader picks the table for each variant in this order, and the first match wins:
+
+1. `table:` on the variant.
+2. `table:` at the top level of the edge file.
+3. The edge table whose `domains:` list holds the domain of both endpoints, when both are in the same domain. For example, `gl_code_edge` lists `source_code`.
+4. `settings.default_edge_table`.
+
+So one edge kind can span several tables. `IN_PROJECT` sets `table:` per variant. If the table you need doesn't exist, add it under `settings.edge_tables` with its `sort_key`, `columns` and `storage`.
+
+### 5.4 Record the schema change: migration ledger and archive
+
+An ontology change that alters the generated DDL, an extract or a transform changes the fingerprint snapshot. It must ship with exactly one schema-version bump and a migration ledger entry. The dispatcher reads the entry to decide how much of the graph to rebuild or re-index. Don't edit the `schema:` pin in `config/versions.yaml` by hand.
 
 ```shell
-mise schema:bump              # bumps the `schema:` pin in config/versions.yaml, adds a ledger entry, re-snapshots fingerprints
-mise run schema:generate:ddl  # regenerates the DDL (do NOT hand-edit graph.sql)
+mise schema:bump              # derive the scope, bump the pin, write the ledger entry and the archive, re-snapshot
+mise run schema:generate:ddl  # regenerate the DDL (do NOT hand-edit the generated SQL)
+mise run schema:ledger:check  # confirm the ledger and snapshot match the ontology
 ```
 
-This rewrites `config/graph.sql` (ClickHouse) and `config/graph_local.sql`
-(DuckDB, for the local graph). Expect:
+`mise schema:bump` runs `cargo xtask migration-ledger bump` ([`crates/xtask/src/migration_ledger.rs`](../../../../crates/xtask/src/migration_ledger.rs)). It:
 
-- `config/graph.sql`: a new `CREATE TABLE … gl_<node>` block + the version stamp.
-- **Edges have no per-edge table**. They're rows in the shared `gl_edge` table, so a new edge produces *no* new `CREATE TABLE`. That's correct.
-- `config/graph_local.sql`: only the version-stamp line changes for SDLC nodes. The local/DuckDB graph doesn't contain the namespace-graph `gl_*` node tables (so `gl_<node>` being absent there is expected, same as `gl_package`).
+- derives the migration scope from the drift against the committed fingerprints in `config/schema-migrations.fingerprint.yaml`;
+- prepends an entry to `config/schema-migrations.yaml`, or amends the newest entry when your branch has already bumped past `origin/main`;
+- bumps `schema:` in `config/versions.yaml`;
+- writes the ontology archive `config/ontology-archives/v<N>.tar.gz`.
+
+Flags can only **widen** the derived scope: `--scope` (`*`, `sdlc`, `code` or `none`), `--entities`, `--note`, `--base`, `--amend` and `--new`. `--scope none` marks a change as output-neutral and requires a `--note` that certifies it. Use it only when the produced rows and tables are byte-identical.
+
+Each archive holds the ontology sources of one schema version, and the server embeds them. Commit the new archive, and never edit or relabel an existing one. [`config/ontology-archives/README.md`](../../../../config/ontology-archives/README.md) explains the retention rules.
+
+`mise run schema:generate:ddl` rewrites `config/graph.sql` and `config/graph_persistent.sql` (ClickHouse) and `config/graph_local.sql` (DuckDB, for the local graph). Expect:
+
+- `config/graph.sql`: a new `CREATE TABLE … gl_<node>` block for a new node, and the version stamp.
+- A new edge in an existing edge table produces no new `CREATE TABLE`, because edges are rows in that table (§5.3).
+- `config/graph_local.sql`: only the version stamp changes for SDLC nodes. The local graph holds no namespace-graph `gl_*` node tables, so `gl_<node>` is absent there.
+
+CI runs `scripts/checks/check-migration-ledger.sh` and `scripts/checks/check-ddl-freshness.sh`. The first fails when a fingerprint change lacks a `base + 1` bump, or when the entry under-declares the change. The second fails when a DDL file is stale.
+
+The "Schema migration" section of [`crates/indexer/AGENTS.md`](../../../../crates/indexer/AGENTS.md#schema-migration) owns how the dispatcher migrates, the re-index campaign and dead-version cleanup. Read it before you choose a scope, and don't copy it into this guide.
 
 > **`include_dir`/`rust_embed` gotcha:** the embedded ontology is read live from
 > `config/ontology` at runtime in debug builds, but only via the `schema.yaml`
