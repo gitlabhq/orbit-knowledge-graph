@@ -1,0 +1,13 @@
+<!-- Only lockdown-tests.sh loads this, into a throwaway server with no network. -->
+<clickhouse>
+    <users>
+        <default remove="remove"/>
+        <probe>
+            <no_password/>
+            <networks><ip>::1</ip><ip>127.0.0.1</ip></networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <grants><query>GRANT ALL ON *.*</query></grants>
+        </probe>
+    </users>
+</clickhouse>

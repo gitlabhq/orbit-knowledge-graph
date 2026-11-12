@@ -1,0 +1,17 @@
+<clickhouse>
+    <listen_host>0.0.0.0</listen_host>
+    <logger>
+        <level>warning</level>
+        <console>1</console>
+        <log remove="remove"/>
+        <errorlog remove="remove"/>
+    </logger>
+    <user_directories replace="replace">
+        <users_xml>
+            <path>users.xml</path>
+        </users_xml>
+    </user_directories>
+    <mysql_port remove="remove"/>
+    <postgresql_port remove="remove"/>
+    <interserver_http_port remove="remove"/>
+</clickhouse>

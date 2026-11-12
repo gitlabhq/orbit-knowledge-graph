@@ -1,0 +1,27 @@
+<clickhouse>
+    <profiles>
+        <demo_read>
+            <readonly>2</readonly>
+            <max_execution_time>30</max_execution_time>
+        </demo_read>
+    </profiles>
+    <users>
+        <default remove="remove"/>
+        <demo>
+            <password>orbit-demo-read</password>
+            <networks><ip>172.30.0.0/24</ip></networks>
+            <profile>demo_read</profile>
+            <quota>default</quota>
+            <grants><query>GRANT SELECT ON orbit_demo.*</query></grants>
+        </demo>
+        <seed>
+            <password>orbit-demo-seed</password>
+            <networks><ip>172.30.0.0/24</ip></networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT CREATE DATABASE, CREATE TABLE, DROP TABLE, TRUNCATE, INSERT, SELECT ON orbit_demo.*</query>
+            </grants>
+        </seed>
+    </users>
+</clickhouse>
