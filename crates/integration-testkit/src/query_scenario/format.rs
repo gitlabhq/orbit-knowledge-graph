@@ -112,7 +112,6 @@ pub struct QueryExpect {
     /// Run the query N times and assert all responses are identical.
     #[serde(default)]
     pub repeat_count: Option<usize>,
-    /// The compiler must reject the query. Plan-shape fixtures check the phase and message.
     #[serde(default)]
     pub rejected: bool,
     #[serde(default)]
