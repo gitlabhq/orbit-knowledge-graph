@@ -790,6 +790,7 @@ var labels_default = {
     index: { done: "Indexed repo", running: "Indexing repo" },
     sql: { done: "Queried local graph", running: "Querying local graph" },
     list: { done: "Listed repos", running: "Listing repos" },
+    quality: { done: "Checked code quality", running: "Checking code quality" },
     skills: { done: "Read Orbit guide", running: "Reading Orbit guide" },
     skill: { done: "Read Orbit guide", running: "Reading Orbit guide" },
     setup: { done: "Set up Orbit", running: "Setting up Orbit" },
