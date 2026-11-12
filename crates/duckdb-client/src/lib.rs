@@ -3,6 +3,7 @@ pub mod dag;
 mod error;
 mod helpers;
 mod params;
+mod s3;
 pub mod search;
 
 pub use client::{DuckDbClient, OpenMode};

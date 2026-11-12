@@ -26,6 +26,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+query-data-model = { path = "../query-data-model", features = ["testkit"] }
 tempfile = { workspace = true }
 
 [lints.rust]

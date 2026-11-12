@@ -13,7 +13,7 @@ const READ_ONLY_RETRIES: u32 = 5;
 const READ_ONLY_BACKOFF: Duration = Duration::from_millis(50);
 
 pub struct DuckDbClient {
-    conn: duckdb::Connection,
+    pub(crate) conn: duckdb::Connection,
 }
 
 /// DuckDB emits `IO Error: Could not set lock on file` when another
@@ -21,6 +21,17 @@ pub struct DuckDbClient {
 fn is_lock_error(e: &impl std::fmt::Display) -> bool {
     let msg = e.to_string().to_ascii_lowercase();
     msg.contains("could not set lock") || msg.contains("lock on file")
+}
+
+/// No extension installs or loads by itself, and no secret outlives the process.
+pub(crate) fn base_config(access_mode: duckdb::AccessMode) -> Result<duckdb::Config> {
+    duckdb::Config::default()
+        .access_mode(access_mode)
+        .and_then(|config| config.enable_autoload_extension(false))
+        .and_then(|config| config.with("autoinstall_known_extensions", "false"))
+        .and_then(|config| config.with("allow_community_extensions", "false"))
+        .and_then(|config| config.with("allow_persistent_secrets", "false"))
+        .map_err(|e| DuckDbError::Schema(e.to_string()))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -80,14 +91,7 @@ impl DuckDbClient {
         } else {
             duckdb::AccessMode::ReadWrite
         };
-        let config = duckdb::Config::default()
-            .access_mode(access_mode)
-            .and_then(|config| config.enable_autoload_extension(false))
-            .and_then(|config| config.with("autoinstall_known_extensions", "false"))
-            .and_then(|config| config.with("allow_community_extensions", "false"))
-            .and_then(|config| config.with("allow_persistent_secrets", "false"))
-            .map_err(|e| DuckDbError::Schema(e.to_string()))?;
-        let conn = duckdb::Connection::open_with_flags(path, config)?;
+        let conn = duckdb::Connection::open_with_flags(path, base_config(access_mode)?)?;
         let allowed = attachable_dir
             .map(|dir| {
                 format!(
