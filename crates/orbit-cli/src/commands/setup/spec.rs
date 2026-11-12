@@ -85,7 +85,7 @@ fn feature_on(features: &Features, name: &str, nightly: bool) -> bool {
     }
 }
 
-pub(super) fn nightly_enabled() -> bool {
+pub(crate) fn nightly_enabled() -> bool {
     std::env::var("ORBIT_NIGHTLY").is_ok_and(|value| {
         !matches!(
             value.trim().to_lowercase().as_str(),

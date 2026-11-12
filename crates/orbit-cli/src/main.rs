@@ -452,6 +452,60 @@ struct ListArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
+#[command(
+    about = "Report code quality from the local graph (nightly; needs ORBIT_NIGHTLY=1).",
+    long_about = "Report code quality from the local code graph: dependency cycles between directories, coupling hotspots, and functions nothing references. With --diff, also shows the callers of each definition committed since BASE. With --gate, indexes BASE and exits 3 (errors exit 1) when the commits since BASE add a dependency inside a cycle, or a function nothing references. Nightly: set ORBIT_NIGHTLY=1."
+)]
+struct QualityArgs {
+    /// Rules to run (repeatable). Default: all of them.
+    #[arg(value_enum, value_name = "RULE")]
+    rules: Vec<commands::quality::Rule>,
+
+    /// Report the callers of definitions committed since BASE, such as `origin/main`. Uncommitted edits are not included.
+    #[arg(long, value_name = "BASE")]
+    diff: Option<String>,
+
+    /// Exit 3 when the commits since BASE add a dependency inside a cycle, or a function nothing references. Indexes BASE in a temporary worktree to compare, following renames.
+    #[arg(long, requires = "diff")]
+    gate: bool,
+
+    /// Group files into modules by their first N directories instead of their own directory.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(1..))]
+    depth: Option<u16>,
+
+    /// Rows to show per section.
+    #[arg(long, default_value_t = 10)]
+    limit: usize,
+
+    /// Output format.
+    #[arg(long, short = 'F', value_enum, default_value = "text")]
+    format: commands::quality::Format,
+
+    /// Repository path (default: current directory).
+    #[arg(long, value_name = "PATH")]
+    repo: Option<PathBuf>,
+
+    /// Read a specific revision DuckDB file.
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
+impl QualityArgs {
+    fn into_options(self) -> commands::quality::Options {
+        commands::quality::Options {
+            rules: self.rules,
+            repo: self.repo,
+            db: self.db,
+            diff: self.diff,
+            gate: self.gate,
+            limit: self.limit,
+            depth: self.depth.map(usize::from),
+            format: self.format,
+        }
+    }
+}
+
+#[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("workspace"), long_about = descriptions::long("workspace"))]
 struct WorkspaceArgs {
     #[command(subcommand)]
@@ -628,6 +682,9 @@ enum Commands {
     Sql(SqlArgs),
     #[command(hide = true)]
     List(ListArgs),
+    /// Nightly: graph-based code quality report (cycles, hotspots, unreferenced code, blast radius).
+    #[command(hide = true)]
+    Quality(QualityArgs),
     #[command(name = "skills", alias = "skill")]
     Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
@@ -941,6 +998,7 @@ async fn dispatch(
             println!("{}", version::get());
             Ok(())
         }
+        Commands::Quality(args) => commands::quality::run(args.into_options()),
         Commands::Grep(args) => run_grep(*args).await,
         Commands::Context(args) => commands::context::run(args).await,
         Commands::Workspace(WorkspaceArgs { command }) => run_workspace(command).await,
