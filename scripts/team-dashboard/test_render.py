@@ -161,6 +161,22 @@ def block(text, start, end=None):
     return text[first:last]
 
 
+SECTION_START_RE = re.compile(r"^(?:## |<details><summary>)", re.MULTILINE)
+
+
+def section(text, heading):
+    """The visible region from `heading` up to the next section heading, so neither the guidance nor a later
+    section can satisfy an assertion."""
+    body = visible(text)
+    start = body.index(heading)
+    following = SECTION_START_RE.search(body, start + len(heading))
+    return body[start:following.start() if following else len(body)]
+
+
+def merge_request_iids(text):
+    return [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", text)]
+
+
 def issue(iid, assignees=("a", "b", "c"), updated="2026-10-30T00:00:00Z", labels=(), **extra):
     return {"iid": iid, "web_url": f"https://gitlab.com/kg/-/issues/{iid}", "updated_at": updated,
             "labels": list(labels), "assignees": [{"username": name} for name in assignees], **extra}
@@ -463,11 +479,10 @@ class BackportTest(DashboardTestCase):
                   bug(9, author="b", created="2026-09-01T00:00:00Z", merged="2026-10-05T00:00:00Z")]
         api = self.api({("GET", BUGS_ROUTE + "state=opened"): opened,
                         ("GET", BUGS_ROUTE + "state=merged&not"): merged})
-        section = block(visible(self.region(api)), "<details><summary>Bug MRs missing a backport label (4)")
-        order = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", section)]
-        self.assertEqual(order, [4, 9, 1, 8])
-        self.assertIn(f"- {url(4, GITLAB_ID)} · 30d · open", section)
-        self.assertIn(f"- {url(9, GITLAB_ID)} · 26d · merged", section)
+        unlabelled = section(self.region(api), "<details><summary>Bug MRs missing a backport label (4)")
+        self.assertEqual(merge_request_iids(unlabelled), [4, 9, 1, 8])
+        self.assertIn(f"- {url(4, GITLAB_ID)} · 30d · open", unlabelled)
+        self.assertIn(f"- {url(9, GITLAB_ID)} · 26d · merged", unlabelled)
         without = "not%5Blabels%5D=backport%3A%3Arequired%2Cbackport%3A%3Askip%2Cbackport%3A%3Acomplete"
         queries = [path for _, path, _ in api.calls if without in path]
         self.assertEqual(len(queries), 2 * (1 + len(TEAM)))
@@ -508,16 +523,16 @@ class BackportTest(DashboardTestCase):
                 stable(507, state="opened", draft=True), stable(508, state="closed")],
             ("GET", "gitlab-org%2Fsecurity%2Fgitlab/merge_requests/9"): stable(9, project_id=PRIVATE_ID),
         })
-        text = visible(self.region(api))
-        not_started = block(text, "## Backports not started", "## Relabel")
-        relabel = block(text, "## Relabel to backport::complete", "<details>")
-        self.assertEqual([int(m) for m in re.findall(r"/merge_requests/(\d+)\+", not_started)], [10, 13, 14])
-        self.assertEqual([int(m) for m in re.findall(r"/merge_requests/(\d+)\+", relabel)], [15, 11])
+        text = self.region(api)
+        not_started = section(text, "## Backports not started")
+        relabel = section(text, "## Relabel to backport::complete")
+        self.assertEqual(merge_request_iids(not_started), [10, 13, 14])
+        self.assertEqual(merge_request_iids(relabel), [15, 11])
         self.assertIn(f"- {url(11, GITLAB_ID)} · 11d · backports: gitlab-org/gitlab!501, gitlab-org/gitlab!502\n",
                       relabel + "\n")
         self.assertIn(f"- {url(15, GITLAB_ID)} · 21d\n", relabel + "\n")
         for hidden in (url(12, GITLAB_ID), url(16, GITLAB_ID), url(17, PRIVATE_ID), url(18, GITLAB_ID), "security"):
-            self.assertNotIn(hidden, text)
+            self.assertNotIn(hidden, visible(text))
         noted = [path for _, path, _ in api.calls if path.endswith("/notes")]
         self.assertEqual(sorted(noted), sorted(f"projects/{GITLAB_ID}/merge_requests/{iid}/notes" for iid in (*range(10, 16), 18)))
 
@@ -530,18 +545,15 @@ class BackportTest(DashboardTestCase):
                         **{notes_route(mr["iid"]): [] for mr in required}})
         api.routes[("GET", "gitlab-org%2Fgitlab/repository/branches")] = [
             {"name": f"19-{minor}-stable-ee"} for minor in (2, 10, 9, 8)]
-        text = visible(self.region(api))
-        flagged = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", block(text, "Bug MRs missing"))]
-        not_started = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", block(text, "## Backports not started",
-                                                                                   "<details>"))]
-        self.assertEqual(sorted(flagged), [22, 23, 24, 26, 27])
-        self.assertEqual(sorted(not_started), [32, 33, 34, 36, 37])
+        text = self.region(api)
+        self.assertEqual(sorted(merge_request_iids(section(text, "<details><summary>Bug MRs missing"))), [22, 23, 24, 26, 27])
+        self.assertEqual(sorted(merge_request_iids(section(text, "## Backports not started"))), [32, 33, 34, 36, 37])
 
     def test_default_release_policy_skips_untagged_branches_and_keeps_releases_after_the_oldest_one(self):
         milestones = {20: "19.4", 21: "19.3", 22: None, 23: "19.6"}
         api = self.api({("GET", BUGS_ROUTE + "state=opened"): [
             bug(iid, state="opened", author="a", milestone=title) for iid, title in milestones.items()]})
-        flagged = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", block(self.region(api), "Bug MRs missing"))]
+        flagged = merge_request_iids(section(self.region(api), "<details><summary>Bug MRs missing"))
         self.assertEqual(sorted(flagged), [20, 22, 23])
 
     def test_merged_without_a_version_milestone_must_merge_after_the_oldest_release(self):
@@ -555,7 +567,7 @@ class BackportTest(DashboardTestCase):
         opened = [bug(45, state="opened", author="a", milestone=None, created="2023-01-01T00:00:00Z")]
         routes = {("GET", BUGS_ROUTE + "state=merged&not"): list(mrs.values()), ("GET", BUGS_ROUTE + "state=opened"): opened}
         api = self.api(routes)
-        flagged = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", block(self.region(api), "Bug MRs missing"))]
+        flagged = merge_request_iids(section(self.region(api), "<details><summary>Bug MRs missing"))
         self.assertEqual(sorted(flagged), [41, 43, 44, 45])
         self.assertIn(("GET", "projects/gitlab-org%2Fgitlab/repository/tags/v19.3.0-ee", None), api.calls)
 
@@ -565,7 +577,7 @@ class BackportTest(DashboardTestCase):
         api = self.api({("GET", BUGS_ROUTE + "state=merged&not"): [
                             bug(40, author="a", milestone=None, merged="2020-01-01T00:00:00Z")],
                         ("GET", "gitlab-org%2Fgitlab/repository/tags/"): missing})
-        self.assertIn(url(40, GITLAB_ID), block(self.region(api), "Bug MRs missing"))
+        self.assertIn(url(40, GITLAB_ID), section(self.region(api), "<details><summary>Bug MRs missing"))
 
     def test_relabel_ignores_the_release_policy(self):
         api = self.api({
@@ -573,7 +585,7 @@ class BackportTest(DashboardTestCase):
             notes_route(10): [system("mentioned in merge request !501")],
             ("GET", f"projects/{GITLAB_ID}/merge_requests/501"): stable(501, branch="19-0-stable-ee"),
         })
-        self.assertIn(url(10, GITLAB_ID), block(self.region(api), "## Relabel to backport::complete"))
+        self.assertIn(url(10, GITLAB_ID), section(self.region(api), "## Relabel to backport::complete"))
 
     def test_no_stable_branches_aborts(self):
         api = self.api({("GET", "gitlab-org%2Fgitlab/repository/branches"): [{"name": "master"}]})
@@ -593,7 +605,7 @@ class BackportTest(DashboardTestCase):
             notes_route(10): [system("mentioned in merge request !501")],
             ("GET", f"projects/{GITLAB_ID}/merge_requests/501"): missing,
         })
-        self.assertIn(url(10, GITLAB_ID), block(self.region(api), "## Backports not started"))
+        self.assertIn(url(10, GITLAB_ID), section(self.region(api), "## Backports not started"))
 
 
 class VisibilityTest(DashboardTestCase):
