@@ -7,7 +7,9 @@ toc_hide: true
 
 ## Status
 
-Proposed. This ADR replaces the ontology as the source of truth for the query engine, the schema migrations and the indexer.
+Approved.
+
+This ADR replaces the ontology as the source of truth for the query engine, the schema migrations and the indexer.
 [ADR 000](000_clickhouse_graph_storage.md) is unchanged: ClickHouse remains the graph store.
 It works with [ADR 023](023_self_contained_indexing_engine.md), whose indexing engine backfills a new package version before it goes live.
 This ADR amends [ADR 017](017_clone_based_non_blocking_migrations.md) on two points.
