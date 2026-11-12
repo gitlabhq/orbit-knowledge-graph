@@ -158,6 +158,32 @@ test('the query is read from the command, quotes undone', () => {
   expect(queryOf('echo "glab orbit query \\"MATCH (n) RETURN n\\""')).toBe('')
 })
 
+test('the query of a --file - call is read from its heredoc envelope', () => {
+  const query = "MATCH (p:Project {full_path: 'a/b'})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN count(mr) AS n"
+  expect(queryOf(`orbit query --file - <<'EOF2'\n${JSON.stringify({ query })}\nEOF2`)).toBe(query)
+  expect(queryOf(`glab orbit query --response-format raw --file - <<EOF\n${JSON.stringify({ query })}\nEOF\n`)).toBe(query)
+  expect(queryOf(`orbit query --file - <<-EOF\n\t${JSON.stringify({ query })}\n\tEOF`)).toBe(query)
+})
+
+test('a --file - query is read from the heredoc of its own command', () => {
+  const users = JSON.stringify({ query: 'MATCH (u:User) RETURN u' })
+  const mrs = JSON.stringify({ query: 'MATCH (mr:MergeRequest) RETURN mr' })
+  expect(queryOf(`cat > notes.json <<'EOF'\n${users}\nEOF\norbit query --file - <<'EOF'\n${mrs}\nEOF`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`orbit query --file - <<'END-JSON'\n${mrs}\nEND-JSON`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`cat <<'EOF'\n${users}\nEOF\norbit query --file - < q.json`)).toBe('')
+  expect(queryOf(`cat > notes.json <<'EOF'\n${users}\nEOF\norbit query --file -`)).toBe('')
+  expect(queryOf(`orbit query --file - <<'EOF' < q.json\n${mrs}\nEOF`)).toBe('')
+  expect(queryOf(`orbit query --file - <<EOF\n${mrs}\n\tEOF`)).toBe('')
+})
+
+test('a --file call with no readable envelope has no query', () => {
+  expect(queryOf('orbit query --file -')).toBe('')
+  expect(queryOf('cat q.json | orbit query --file -')).toBe('')
+  expect(queryOf("orbit query --file - <<'EOF'\nnot json\nEOF")).toBe('')
+  expect(queryOf(`orbit query --file - <<'EOF'\n${JSON.stringify({ query: 7 })}\nEOF`)).toBe('')
+  expect(queryOf(`orbit query --file q.json <<'EOF'\n${JSON.stringify({ query: 'MATCH (n) RETURN n' })}\nEOF`)).toBe('')
+})
+
 test('the graph total sums every entity in every domain of graph-status', () => {
   const json = JSON.stringify({
     indexing: { state: 'READY' },
