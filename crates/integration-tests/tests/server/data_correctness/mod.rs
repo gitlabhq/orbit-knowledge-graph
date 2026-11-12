@@ -1,3 +1,4 @@
+mod dag;
 mod helpers;
 mod retained;
 
@@ -25,6 +26,12 @@ async fn data_correctness() {
         retained::long_node_text_is_excerpted_only_on_wide_pages,
         retained::path_finding_code_filtered_endpoints_stay_on_same_traversal_path,
     );
+}
+
+#[tokio::test]
+async fn data_correctness_dag() {
+    let ctx = data_correctness_context().await;
+    dag::query_4_searches_the_heads_clickhouse_returns(&ctx).await;
 }
 
 #[tokio::test]

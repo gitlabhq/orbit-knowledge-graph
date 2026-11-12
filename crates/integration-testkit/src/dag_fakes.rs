@@ -151,3 +151,53 @@ pub fn seeded_live(user: &str) -> Arc<dyn Executor> {
         user: user.to_string(),
     })
 }
+
+/// The embedded packages, the demo Slack package and the branch-head variant.
+pub fn dag_packages() -> query_data_model::Packages {
+    let heads = crate::authorization_variants::platform(&["orbit_next.heads"]);
+    query_data_model::testkit::with_demo().with(heads)
+}
+
+pub fn dag_model() -> Arc<query_data_model::Model> {
+    dag_packages().load().unwrap()
+}
+
+/// Runs a query through the DAG runner with `graph` on the relational connection and the seeded
+/// code and live fakes on theirs, signed in to the live service as `user`.
+pub async fn run_dag(
+    model: &Arc<query_data_model::Model>,
+    graph: Arc<dyn Executor>,
+    query: &str,
+    grants: &compiler::orbit_authorization::Grants,
+    user: &str,
+    checks: &dyn RowChecks,
+) -> (
+    Vec<query_engine::shared::dag::Event>,
+    Result<query_engine::shared::dag::Outcome, query_engine::shared::dag::DagError>,
+) {
+    use compiler::dag::{Backend, Env, Primary, Remotes, Source};
+    use query_data_model::{Catalog, ClickHouse};
+    let primary = Primary::ClickHouse(Arc::new(Catalog::<ClickHouse>::from_model(model).unwrap()));
+    let remotes = Remotes::all(model);
+    let mut executors =
+        query_engine::shared::dag::Executors::default().with(primary.connection(), graph);
+    for target in remotes.targets() {
+        let executor = match target.backend() {
+            Backend::OrbitCode => seeded_code(),
+            _ => seeded_live(user),
+        };
+        executors = executors.with(target.connection(), executor);
+    }
+    let env = Env {
+        primary: &primary,
+        remotes: &remotes,
+        grants,
+        limits: query_data_model::testkit::limits(),
+        trace: true,
+    };
+    let mut observer = query_engine::shared::dag::Recording::default();
+    let outcome = query_engine::shared::dag::Runner::new(env, &executors, checks, &mut observer)
+        .run(Source::Text(query))
+        .await;
+    (observer.0, outcome)
+}

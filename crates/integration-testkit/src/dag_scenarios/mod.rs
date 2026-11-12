@@ -10,29 +10,19 @@ use std::sync::Arc;
 
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
-use compiler::dag::{Env, Primary, Remotes, Rendered, Source};
+use compiler::dag::Rendered;
 use compiler::orbit_authorization::{Grants, Key};
 use query_data_model::catalog::Row;
-use query_data_model::testkit::limits;
-use query_data_model::{Catalog, ClickHouse, Model, testkit};
 use query_engine::pipeline::{AuthorizedPath, SecurityContext};
-use query_engine::shared::dag::{
-    DagError, Event, Executors, Outcome, Recording, RowChecks, Runner,
-};
+use query_engine::shared::dag::{DagError, Event, Outcome, RowChecks};
 use serde_json::Value;
 
-use crate::dag_fakes::{AllowedKeys, SeededGraph, seeded_code, seeded_live};
-
-/// The embedded packages, the demo Slack package and the branch-head variant.
-fn model() -> Arc<Model> {
-    let heads = crate::authorization_variants::platform(&["orbit_next.heads"]);
-    testkit::with_demo().with(heads).load().unwrap()
-}
+use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_model, run_dag};
 
 fn caller(path: &str) -> Grants {
     let session = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new(path, 20)]).unwrap();
     let config = orbit_server_config::AppConfig::embedded_defaults().authorization;
-    orbit_server::authorization::gitlab::session_grants(&config, &model(), session).unwrap()
+    orbit_server::authorization::gitlab::session_grants(&config, &dag_model(), session).unwrap()
 }
 
 /// One run: every event the observer recorded, and what the run returned.
@@ -111,33 +101,9 @@ async fn run_with(
     user: &str,
     checks: &dyn RowChecks,
 ) -> Run {
-    let model = model();
-    let primary = Primary::ClickHouse(Arc::new(Catalog::<ClickHouse>::from_model(&model).unwrap()));
-    let remotes = Remotes::all(&model);
-    let mut executors =
-        Executors::default().with(primary.connection(), Arc::new(SeededGraph(graph)));
-    for target in remotes.targets() {
-        let executor = match target.backend() {
-            compiler::dag::Backend::OrbitCode => seeded_code(),
-            _ => seeded_live(user),
-        };
-        executors = executors.with(target.connection(), executor);
-    }
-    let env = Env {
-        primary: &primary,
-        remotes: &remotes,
-        grants,
-        limits: limits(),
-        trace: true,
-    };
-    let mut observer = Recording::default();
-    let outcome = Runner::new(env, &executors, checks, &mut observer)
-        .run(Source::Text(query))
-        .await;
-    Run {
-        events: observer.0,
-        outcome,
-    }
+    let graph = Arc::new(SeededGraph(graph));
+    let (events, outcome) = run_dag(&dag_model(), graph, query, grants, user, checks).await;
+    Run { events, outcome }
 }
 
 /// Runs a query as `alice`, whose code checks allow every seeded repository.

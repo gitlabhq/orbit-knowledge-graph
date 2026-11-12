@@ -1,4 +1,18 @@
 repositories:
+  1000:
+    traversal_path: 1/100/1000/
+    matches:
+      - pattern: todo!($$$MSG)
+        language: rust
+        branch: feature-a
+        path: src/feature.rs
+        line: 7
+        captures: {MSG: "\"finish feature A\""}
+      - pattern: todo!($$$MSG)
+        language: rust
+        path: src/lib.rs
+        line: 1
+        captures: {MSG: "\"main branch\""}
   42:
     traversal_path: 1/9970/42/
     matches:
