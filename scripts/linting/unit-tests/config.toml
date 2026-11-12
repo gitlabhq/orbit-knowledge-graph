@@ -1,0 +1,17 @@
+include = ["crates/**/*.rs"]
+
+ignore = [
+  "crates/fuzz/**",
+  "crates/gitaly-protos/**",
+  "**/target/**",
+]
+
+min_reason = 10
+
+[patterns]
+test_attribute = '^\s*#\[(?:tokio::test|test|rstest)\b'
+attribute_or_comment = '^\s*(?:#\[|//)'
+function = '^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)'
+subtest_macro = '\brun_subtests(?:_shared)?!\s*\('
+subtest_name = '^\s*(?:\w+::)*(\w+)\s*,?\s*$'
+opt_in = '//\s*unit-test:(.*)'

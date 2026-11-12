@@ -224,10 +224,10 @@ run = [
 description = "Run clippy lint checks"
 
 [tasks."lint:unit-tests"]
-description = "Reject Rust test functions added without an opt-in reason"
+description = "Reject Rust tests without a // unit-test: opt-in reason"
 run = [
-  "uv run --quiet python -m unittest discover -s scripts/linting/unit-tests -p '*_test.py'",
-  "uv run --quiet scripts/linting/unit-tests/check.py --range ${UNIT_TESTS_BASE:-$(git merge-base origin/main HEAD)} HEAD",
+  "uv run --quiet --python '>=3.11' python -m unittest discover -s scripts/linting/unit-tests -p '*_test.py'",
+  "uv run --quiet scripts/linting/unit-tests/check.py",
 ]
 
 [tasks."lint:logs"]

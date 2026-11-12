@@ -1,22 +1,24 @@
-"""Reject Rust tests that a diff adds without a `// unit-test: <reason>` opt-in.
+#!/usr/bin/env -S uv run --quiet
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""Reject Rust tests without a `// unit-test: <reason>` opt-in.
 
-Usage: check.py --staged | check.py --range BASE HEAD
+Usage: check.py             check every file that config.toml includes
+       check.py FILE...     check these files, read from the git index
 """
 
 import re
 import subprocess
 import sys
+import tomllib
+from pathlib import Path
 
-TEST_ATTRIBUTE = re.compile(r"^\s*#\[(?:tokio::test|test|rstest)\b")
-ATTRIBUTE_OR_COMMENT = re.compile(r"^\s*(?:#\[|//)")
-FUNCTION = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)")
-SUBTESTS = re.compile(r"\brun_subtests(?:_shared)?!\s*\(")
-SUBTEST = re.compile(r"^\s*(?:\w+::)*(\w+)\s*,?\s*$")
-OPT_IN = re.compile(r"//\s*unit-test:(.*)")
-HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-MIN_REASON = 10
+CONFIG = tomllib.loads(Path(__file__).with_name("config.toml").read_text())
+PATTERNS = {name: re.compile(pattern) for name, pattern in CONFIG["patterns"].items()}
+MIN_REASON = CONFIG["min_reason"]
 
-GUIDANCE = """\
+GUIDANCE = f"""\
 Behavior tests belong in YAML: plan-shape fixtures for compiler output,
 data-correctness scenarios for query results, and indexer scenarios for indexing.
 
@@ -24,8 +26,8 @@ A Rust unit test is opt-in. Put this on the line above `fn`, with a reason:
 
     // unit-test: <why only a Rust test can check this>
 
-The reason must say why YAML cannot check the behavior. Do not restate the
-test name.
+The reason must be at least {MIN_REASON} characters and say why YAML cannot check
+the behavior. Do not restate the test name.
 
 Good reasons name mission-critical logic that YAML cannot reach, for example:
   - cryptography, such as token signing or constant-time comparison
@@ -41,103 +43,82 @@ def git(*args: str) -> str:
     ).stdout
 
 
-def added_lines(diff: str) -> dict[str, set[int]]:
-    added: dict[str, set[int]] = {}
-    path = None
-    line = 0
-    for text in diff.splitlines():
-        if text.startswith("+++ "):
-            path = text[6:] if text.startswith("+++ b/") else None
-            if path:
-                added.setdefault(path, set())
-        elif match := HUNK.match(text):
-            line = int(match.group(1))
-        elif path and text.startswith("+"):
-            added[path].add(line)
-            line += 1
-    return added
+def checked_files(files: list[str]) -> list[str]:
+    pathspecs = [f":(glob){glob}" for glob in CONFIG["include"]]
+    pathspecs += [f":(glob,exclude){glob}" for glob in CONFIG["ignore"]]
+    tracked = git("ls-files", "-z", "--", *pathspecs).split("\0")
+    selected = set(files) if files else None
+    return [path for path in tracked if path and (selected is None or path in selected)]
 
 
-def tests(lines: list[str]) -> list[tuple[str, int, set[int]]]:
+def tests(lines: list[str]) -> list[tuple[str, int, int]]:
     found = []
     for index, text in enumerate(lines):
-        if not TEST_ATTRIBUTE.match(text):
+        if not PATTERNS["test_attribute"].match(text):
             continue
         top = index
-        while top and ATTRIBUTE_OR_COMMENT.match(lines[top - 1]):
+        while top and PATTERNS["attribute_or_comment"].match(lines[top - 1]):
             top -= 1
         end = index
-        while end < len(lines) and not FUNCTION.match(lines[end]):
+        while end < len(lines) and not PATTERNS["function"].match(lines[end]):
             end += 1
         if end < len(lines):
-            name = FUNCTION.match(lines[end]).group(1)
-            found.append((name, top + 1, {index + 1, end + 1}))
+            found.append((PATTERNS["function"].match(lines[end]).group(1), top + 1, end + 1))
     return found
 
 
-def subtests(lines: list[str]) -> list[tuple[str, int, set[int]]]:
+def subtests(lines: list[str]) -> list[tuple[str, int, int]]:
     found = []
     for index, text in enumerate(lines):
-        if not SUBTESTS.search(text):
+        if not PATTERNS["subtest_macro"].search(text):
             continue
         depth = text.count("(") - text.count(")")
         line = index + 1
         while depth > 0 and line < len(lines):
             depth += lines[line].count("(") - lines[line].count(")")
-            name = SUBTEST.match(lines[line])
+            name = PATTERNS["subtest_name"].match(lines[line])
             if name and name.group(1) != "ctx":
                 top = line
                 while top and lines[top - 1].strip().startswith("//"):
                     top -= 1
-                found.append((name.group(1), top + 1, {line + 1}))
+                found.append((name.group(1), top + 1, line + 1))
             line += 1
     return found
 
 
 def reason(lines: list[str], top: int, end: int) -> str | None:
     for text in lines[top - 1 : end]:
-        if match := OPT_IN.search(text):
+        if match := PATTERNS["opt_in"].search(text):
             return match.group(1).strip()
     return None
 
 
-def check(path: str, lines: list[str], added: set[int]) -> tuple[list[str], list[str]]:
-    rejected, reasonless = [], []
-    for name, top, triggers in tests(lines) + subtests(lines):
-        if not added & triggers:
-            continue
-        end = max(triggers)
+def check(path: str, lines: list[str]) -> tuple[list[str], list[str]]:
+    rejected, short = [], []
+    for name, top, end in tests(lines) + subtests(lines):
         given = reason(lines, top, end)
         if given is None:
             rejected.append(f"{path}/{name}/{end}")
         elif len(given) < MIN_REASON:
-            reasonless.append(f"{path}/{name}/{end}")
-    return rejected, reasonless
+            short.append(f"{path}/{name}/{end}")
+    return rejected, short
 
 
-def main(args: list[str]) -> int:
-    if args == ["--staged"]:
-        diff_args, revision = ["--cached"], ""
-    elif len(args) == 3 and args[0] == "--range":
-        diff_args, revision = [args[1], args[2]], args[2]
-    else:
-        sys.exit(__doc__)
-    diff = git(
-        "diff", *diff_args, "-U0", "-M", "--no-color", "--no-ext-diff",
-        "--src-prefix=a/", "--dst-prefix=b/", "--diff-filter=AMR", "--", "crates/**/*.rs",
-    )
-    rejected, reasonless = [], []
-    for path, lines in added_lines(diff).items():
-        source = git("show", f"{revision}:{path}").splitlines()
-        found = check(path, source, lines)
+def main(files: list[str]) -> int:
+    rejected, short = [], []
+    for path in checked_files(files):
+        source = git("show", f":{path}") if files else Path(path).read_text()
+        found = check(path, source.splitlines())
         rejected += found[0]
-        reasonless += found[1]
-    if not rejected and not reasonless:
+        short += found[1]
+    if not rejected and not short:
         return 0
     if rejected:
-        print("tests rejected:", *sorted(rejected), sep="\n")
-    if reasonless:
-        print(f"\nopt-ins with a reason under {MIN_REASON} characters:", *sorted(reasonless), sep="\n")
+        print("tests rejected:", *rejected, sep="\n")
+    if short:
+        print(f"\nopt-ins with a reason under {MIN_REASON} characters:", *short, sep="\n")
+    count = len(rejected) + len(short)
+    print(f"\n{count} {'test needs' if count == 1 else 'tests need'} a YAML fixture or an opt-in.")
     print(f"\n{GUIDANCE}")
     return 1
 

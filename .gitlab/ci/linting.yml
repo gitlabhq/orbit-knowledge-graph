@@ -119,7 +119,4 @@ unit-test-opt-in:
     - .no-cargo-home-cache
   needs: []
   script:
-    - |
-      export UNIT_TESTS_BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
-      git cat-file -e "${UNIT_TESTS_BASE}^{commit}" 2>/dev/null || git fetch origin "$UNIT_TESTS_BASE" --depth=1
-      mise run lint:unit-tests
+    - mise run lint:unit-tests

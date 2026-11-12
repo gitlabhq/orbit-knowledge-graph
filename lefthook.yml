@@ -44,7 +44,7 @@ pre-commit:
       run: mise run lint:logs
       glob: "crates/**/*.rs"
     - name: unit-tests
-      run: mise exec -- uv run --quiet scripts/linting/unit-tests/check.py --staged
+      run: mise exec -- uv run --quiet scripts/linting/unit-tests/check.py {staged_files}
       glob: "crates/**/*.rs"
     - name: prose
       run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files}

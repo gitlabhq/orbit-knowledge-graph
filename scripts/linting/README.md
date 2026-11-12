@@ -21,7 +21,7 @@ folder so it can be removed as a unit (see *Removing the gates* below). Task #29
 | `comment_check_hook.sh` | Lefthook entry point: maps the checker's exit code 3 to a blocked commit and lets every other failure through. |
 | `comment_check_test.py` | Unit tests for the comment check (`mise run lint:comments:test`). |
 | `narration-comments.yml` | Lower-precision ast-grep-native fallback for the `block_label` half (see below). Committed for documentation / ast-grep-only setups; **not** the active gate. |
-| `unit-tests/` | Opt-in gate for Rust tests (`mise run lint:unit-tests`): `check.py` rejects tests that a diff adds without a `// unit-test:` reason. |
+| `unit-tests/` | Opt-in gate for Rust tests (`mise run lint:unit-tests`): `check.py` rejects any test without a `// unit-test:` reason. `config.toml` holds its patterns and paths. |
 
 ## Prose linter
 
@@ -133,11 +133,14 @@ Behavior tests belong in YAML: plan-shape fixtures check compiler output,
 data-correctness scenarios check query results, and indexer scenarios check
 indexing. A Rust unit test is opt-in, for logic that YAML cannot reach.
 
-`check.py` reads the Rust files that a diff changes under `crates/`. It flags a
-test whose `#[test]`, `#[tokio::test]`, or `#[rstest]` line or `fn` line is new,
-and a subtest name that a diff adds to a `run_subtests!` call. Existing tests
-pass. It takes `--staged` for a commit hook or `--range BASE HEAD` for CI, and
-it sets the git diff prefixes and path quoting itself.
+`check.py` flags every Rust test without an opt-in: a `#[test]`,
+`#[tokio::test]`, or `#[rstest]` function, and each subtest name in a
+`run_subtests!` call. With no arguments it checks every file that
+`config.toml` includes. Lefthook passes the staged files, which it reads from
+the git index. It uses only the Python standard library.
+
+`config.toml` holds the regexes, the minimum reason length, and the `include`
+and `ignore` globs. Change a pattern or a path there, not in the script.
 
 To keep a Rust test, put an opt-in on the line above its `fn`:
 

@@ -1,17 +1,14 @@
 import unittest
 
-from check import added_lines, check
+from check import check
 
 SOURCE = """\
 #[test]
-fn old_test() {}
-
-#[test]
-fn new_test() {}
+fn plain_test() {}
 
 #[tokio::test]
 #[serial]
-async fn new_async_test() {}
+async fn async_test() {}
 
 #[test]
 // unit-test: timing guarantee of a crypto primitive
@@ -25,65 +22,26 @@ async fn seed(ctx: &TestContext) {}
 
 run_subtests!(
     &ctx,
-    retained::old_subtest,
-    retained::new_subtest,
+    retained::plain_subtest,
     // unit-test: reads raw path rows before redaction
     retained::opted_in_subtest,
 );
 """.splitlines()
 
-DIFF = """\
-diff --git a/crates/x/old.rs b/crates/x/new.rs
-similarity index 90%
-rename from crates/x/old.rs
-rename to crates/x/new.rs
---- a/crates/x/old.rs
-+++ b/crates/x/new.rs
-@@ -3,0 +4,7 @@
-+#[test]
-+fn new_test() {}
-+
-+#[tokio::test]
-+#[serial]
-+async fn new_async_test() {}
-+
-@@ -10,0 +11,8 @@
-+#[test]
-+// unit-test: timing guarantee of a crypto primitive
-+fn opted_in() {}
-+
-+#[test]
-+// unit-test: crypto
-+fn short_reason() {}
-+
-@@ -18,0 +19 @@
-+async fn seed(ctx: &TestContext) {}
-@@ -22,0 +24,3 @@
-+    retained::new_subtest,
-+    // unit-test: reads raw path rows before redaction
-+    retained::opted_in_subtest,
-"""
-
 
 class CheckTest(unittest.TestCase):
-    def setUp(self):
-        self.added = added_lines(DIFF)
-
-    def test_renamed_files_keep_their_new_path_and_added_lines(self):
-        self.assertEqual(sorted(self.added), ["crates/x/new.rs"])
-        self.assertIn(5, self.added["crates/x/new.rs"])
-
-    def test_new_tests_and_subtests_need_an_opt_in(self):
-        rejected, _ = check("p.rs", SOURCE, self.added["crates/x/new.rs"])
-        self.assertEqual(rejected, ["p.rs/new_test/5", "p.rs/new_async_test/9", "p.rs/new_subtest/24"])
+    def test_every_test_without_an_opt_in_is_rejected(self):
+        rejected, _ = check("p.rs", SOURCE)
+        self.assertEqual(rejected, ["p.rs/plain_test/2", "p.rs/async_test/6", "p.rs/plain_subtest/20"])
 
     def test_short_reasons_are_reported_separately(self):
-        _, reasonless = check("p.rs", SOURCE, self.added["crates/x/new.rs"])
-        self.assertEqual(reasonless, ["p.rs/short_reason/17"])
+        _, short = check("p.rs", SOURCE)
+        self.assertEqual(short, ["p.rs/short_reason/14"])
 
-    def test_untouched_tests_and_helpers_pass(self):
-        rejected, reasonless = check("p.rs", SOURCE, set())
-        self.assertEqual((rejected, reasonless), ([], []))
+    def test_helpers_and_opted_in_tests_pass(self):
+        rejected, short = check("p.rs", SOURCE)
+        names = {entry.split("/")[1] for entry in rejected + short}
+        self.assertFalse(names & {"seed", "opted_in", "opted_in_subtest"})
 
 
 if __name__ == "__main__":
