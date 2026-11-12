@@ -164,6 +164,7 @@ impl ThirdParty {
                 failed: failures
                     .0
                     .into_iter()
+                    .filter(|(source, _)| self.config.source(source).is_some())
                     .map(|(source, (_, error))| (source, error))
                     .collect(),
             });
@@ -200,6 +201,37 @@ impl ThirdParty {
     }
 
     /// Keeps each source's last sync failure until it syncs again, for commands to show.
+    pub fn record_failure_all(&self, error: &str) {
+        let freshness = Freshness {
+            synced: Vec::new(),
+            failed: self
+                .config
+                .sources
+                .iter()
+                .map(|source| (source.name.clone(), error.to_string()))
+                .collect(),
+        };
+        self.record_failures(&freshness);
+    }
+
+    pub fn clear_failure(&self, source: &str) {
+        let mut failures = self.failures();
+        if failures.0.remove(source).is_some() {
+            self.write_failures(&failures);
+        }
+    }
+
+    fn write_failures(&self, failures: &Failures) {
+        let Ok(bytes) = serde_json::to_vec(failures) else {
+            return;
+        };
+        let path = self.failures_path();
+        let temporary = path.with_extension("json.tmp");
+        if std::fs::write(&temporary, bytes).is_ok() {
+            let _ = std::fs::rename(&temporary, &path);
+        }
+    }
+
     pub fn record_failures(&self, freshness: &Freshness) {
         let mut failures = self.failures();
         for (source, _, _) in &freshness.synced {
@@ -212,20 +244,23 @@ impl ThirdParty {
         failures
             .0
             .retain(|source, _| self.config.source(source).is_some());
-        if let Ok(bytes) = serde_json::to_vec(&failures) {
-            let _ = std::fs::write(self.failures_path(), bytes);
-        }
+        self.write_failures(&failures);
     }
 
     pub async fn ensure_fresh(&self) -> Result<Freshness> {
         let client = store::open(&self.store, &self.ontology)?;
         let now = store::now();
+        let failures = self.failures();
         let mut stale = Vec::new();
         for source in &self.config.sources {
             let signature = signature(source);
             let fresh = store::synced_at(&client, &source.name, &signature)?
                 .is_some_and(|at| now.saturating_sub(at) < source.refresh.as_secs() as i64);
-            if !fresh {
+            let backing_off = failures
+                .0
+                .get(&source.name)
+                .is_some_and(|(at, _)| now.saturating_sub(*at) < RETRY_AFTER_FAILURE);
+            if !fresh && !backing_off {
                 stale.push((source, signature));
             }
         }
@@ -271,12 +306,21 @@ impl ThirdParty {
                 rest.push(word.to_string());
                 continue;
             };
-            let Some(source) = self.config.source(name) else {
+            let Some(source) = self
+                .config
+                .sources
+                .iter()
+                .find(|source| source.name == name)
+            else {
                 rest.push(word.to_string());
                 continue;
             };
             let (kind, value) = value.split_once(':').unwrap_or((value, ""));
-            let Some(entity) = self.config.kind(source, kind) else {
+            let exact = source
+                .entities
+                .iter()
+                .find(|(_, entity)| entity.kind == kind);
+            let Some(entity) = exact.map(|(name, _)| name.clone()) else {
                 rest.push(word.to_string());
                 continue;
             };

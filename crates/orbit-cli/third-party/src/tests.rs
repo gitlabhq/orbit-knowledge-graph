@@ -225,12 +225,15 @@ async fn grep_scopes_by_source_and_type_and_reads_the_graph() {
         "grafana:10.2",
         "image: grafana:10.2",
         "mr:deploy",
+        "slack:users",
+        "Slack:Channel:deploy",
+        "grafana:alerts",
     ] {
         assert_eq!(third_party.scope(code), (None, code.to_string()), "{code}");
     }
 
     assert_eq!(
-        grep(&third_party, "slack:channels:deploy", &[]).await,
+        grep(&third_party, "slack:channel:deploy", &[]).await,
         ["slack:channel:C2"]
     );
     assert_eq!(

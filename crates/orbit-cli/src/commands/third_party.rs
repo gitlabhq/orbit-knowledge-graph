@@ -146,7 +146,10 @@ pub(crate) async fn background_sync(lock: std::path::PathBuf) -> Result<()> {
                 third_party.record_failures(&freshness);
                 !freshness.synced.is_empty()
             }
-            Err(_) => false,
+            Err(error) => {
+                third_party.record_failure_all(&format!("{error:#}"));
+                false
+            }
         };
         let _ = std::fs::write(&lock, b"");
         if !synced {
@@ -170,6 +173,10 @@ pub(crate) async fn grep(query: &str, paths: &mut Vec<String>) -> Result<Option<
         return Ok(None);
     };
     let (scope, rest) = third_party.scope(query);
+    anyhow::ensure!(
+        scope.is_none() || !rest.contains('|'),
+        "an OR across a third-party scope is not supported; run one grep per scope, such as `slack:message:a` and `grafana:dashboard:b`"
+    );
     let mut targets = Vec::new();
     paths.retain(|path| match third_party.parse_target(path) {
         Some(target) if !std::path::Path::new(path).exists() => {
@@ -324,8 +331,13 @@ pub(crate) async fn query_locally(
         .query(query)
         .map_err(|error| explain(error, &first))?;
     let format = match response_format {
+        None | Some(crate::remote::ResponseFormat::Llm) => crate::sql_format::Format::Table,
         Some(crate::remote::ResponseFormat::Raw) => crate::sql_format::Format::Json,
-        _ => crate::sql_format::Format::Table,
+        Some(crate::remote::ResponseFormat::Gql) => {
+            anyhow::bail!(
+                "third-party queries run locally and print llm (a table) or raw (JSON rows)"
+            )
+        }
     };
     crate::sql_format::write(std::io::stdout().lock(), format, &batches)?;
     Ok(true)
@@ -340,7 +352,14 @@ pub(crate) async fn print_schema(nodes: &[String]) -> Result<bool> {
             .iter()
             .all(|node| third_party.config.entity(node).is_some());
     if ours {
-        print!("{}", third_party.schema_of(nodes));
+        let text = third_party.schema_of(nodes);
+        anyhow::ensure!(
+            !text.is_empty(),
+            "{} {} searched and fetched live, not stored, so it has no schema to query",
+            nodes.join(", "),
+            if nodes.len() == 1 { "is" } else { "are" }
+        );
+        print!("{text}");
         return Ok(true);
     }
     if nodes.is_empty() {
@@ -432,6 +451,9 @@ pub(crate) async fn connect(
         None => verified.shows.clone(),
     };
     let saved = orbit_third_party::credentials::store(name, &token);
+    if let (Err(error), None) = (&saved, &env) {
+        anyhow::bail!("{error:#}");
+    }
     orbit_third_party::setup::write_source(&path, name, url.as_deref(), team.as_deref())?;
     let who = match shown.is_empty() {
         true => String::new(),
@@ -449,11 +471,12 @@ pub(crate) async fn connect(
         (Err(error), Some(env)) => {
             format!("could not save the token ({error:#}); only shells with {env} set can reach it")
         }
-        (Err(error), None) => return Err(anyhow::anyhow!("{error:#}")),
+        (Err(_), None) => unreachable!("checked before writing the source"),
     };
     crate::tui::success(format!("Connected {}{who}; {kept}", spec.title));
     orbit_third_party::store::forget(&ThirdParty::store_path_in(&root), name, false)?;
-    if ThirdParty::open(&root)?.is_some() {
+    if let Some(third_party) = ThirdParty::open(&root)? {
+        third_party.clear_failure(name);
         spawn_background_sync();
         crate::tui::success(format!(
             "Syncing {} in the background; grep, context, and query can read it in a few seconds",
@@ -564,6 +587,9 @@ fn pick_team(
 pub(crate) fn disconnect(name: &str) -> Result<()> {
     let root = crate::workspace::Workspace::default_root()?;
     let path = ThirdParty::config_path(&root);
+    if let Ok(Some(third_party)) = ThirdParty::open(&root) {
+        third_party.clear_failure(name);
+    }
     let in_config = orbit_third_party::setup::remove_source(&path, name)?;
     let in_keychain = orbit_third_party::credentials::remove(name)?;
     orbit_third_party::store::forget(&ThirdParty::store_path_in(&root), name, true)?;
@@ -599,7 +625,14 @@ pub(crate) async fn ask_to_connect() -> Result<()> {
         &[],
     ) {
         Ok(chosen) => chosen,
-        Err(_) => return Ok(()),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::Interrupted) =>
+        {
+            return Ok(());
+        }
+        Err(error) => return Err(error),
     };
     for name in chosen {
         if let Err(error) = connect(&name, TokenInput::Prompt, None, None).await {

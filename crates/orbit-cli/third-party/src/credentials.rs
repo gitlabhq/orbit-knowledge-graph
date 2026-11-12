@@ -7,7 +7,7 @@ pub const STORE_NAME: &str = "macOS Keychain";
 #[cfg(target_os = "windows")]
 pub const STORE_NAME: &str = "Windows Credential Manager";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub const STORE_NAME: &str = "kernel keyring until reboot";
+pub const STORE_NAME: &str = "kernel keyring, which drops it on reboot or after days unused";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenFrom {
