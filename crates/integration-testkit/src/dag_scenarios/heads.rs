@@ -71,6 +71,10 @@ async fn open_merge_requests_search_their_branch_heads_in_orbit_next() {
             columns: vec!["mr_project_id".into(), "mr_source_branch".into()],
             binding: "h".into(),
             properties: vec!["project_id".into(), "branch".into()],
+            types: vec![
+                query_data_model::DataType::Int,
+                query_data_model::DataType::String
+            ],
         })]
     );
     let keys = ran.events.iter().find_map(|event| match event {
@@ -167,6 +171,10 @@ async fn a_code_stage_feeds_composite_keys_into_a_clickhouse_stage() {
             columns: vec!["project_id".into(), "branch".into()],
             binding: "mr".into(),
             properties: vec!["project_id".into(), "source_branch".into()],
+            types: vec![
+                query_data_model::DataType::Int,
+                query_data_model::DataType::String
+            ],
         })]
     );
     let Rendered::Sql { sql, params } = &ran.rendered(1)[0] else {

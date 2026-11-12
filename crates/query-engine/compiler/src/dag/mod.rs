@@ -115,6 +115,8 @@ pub struct KeyInput {
     pub columns: Vec<String>,
     pub binding: String,
     pub properties: Vec<String>,
+    /// The declared type of each key part, which the producer's rows are read as.
+    pub types: Vec<query_data_model::DataType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

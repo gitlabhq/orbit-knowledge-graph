@@ -60,7 +60,8 @@ pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Engine>) -> Result<()> {
                 let right = q.rows(*stage, columns)?;
                 let mut on = Vec::new();
                 for join in &query.joins {
-                    for (left, other) in join.left.iter().zip(&join.right) {
+                    let pairs = join.left.iter().zip(&join.right).zip(&join.types);
+                    for ((left, other), data_type) in pairs {
                         let (near, far) = match (left.stage == *stage, other.stage == *stage) {
                             (false, true) => (left, other),
                             (true, false) => (other, left),
@@ -70,6 +71,7 @@ pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Engine>) -> Result<()> {
                             on.push((
                                 q.column(&rel, near.stage, &near.column)?,
                                 q.column(&right, far.stage, &far.column)?,
+                                *data_type,
                             ));
                         }
                     }

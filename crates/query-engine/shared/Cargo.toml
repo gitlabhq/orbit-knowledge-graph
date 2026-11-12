@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 types = { path = "../types" }
 compiler = { path = "../compiler" }
 query-data-model = { path = "../../query-data-model" }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

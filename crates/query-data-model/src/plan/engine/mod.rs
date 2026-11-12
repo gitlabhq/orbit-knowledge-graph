@@ -1,6 +1,7 @@
 //! The engine plan language: the query engine's own physical plan over the rows earlier stages
 //! of an execution DAG returned. It joins them, then applies the result columns, order and limit.
 
+use crate::DataType;
 use crate::catalog::ModelId;
 use crate::plan::logical::Order;
 use crate::plan::tracking::{
@@ -19,9 +20,10 @@ pub enum EngineOperation {
     Rows {
         stage: usize,
     },
-    /// The pairs of left and right rows whose columns are equal on every pair.
+    /// The pairs of left and right rows whose columns are equal on every pair, each pair read as
+    /// keys of its declared type.
     Join {
-        on: Vec<(Ref, Ref)>,
+        on: Vec<(Ref, Ref, DataType)>,
     },
     Select(Vec<Ref>),
     Order(Vec<(Ref, Order)>),
@@ -45,7 +47,7 @@ impl Language for EngineLanguage {
 
     fn references(operation: &mut EngineOperation, visit: &mut dyn FnMut(&mut Ref)) {
         match operation {
-            EngineOperation::Join { on } => on.iter_mut().for_each(|(left, right)| {
+            EngineOperation::Join { on } => on.iter_mut().for_each(|(left, right, _)| {
                 visit(left);
                 visit(right);
             }),
@@ -141,7 +143,12 @@ impl EngineBuilder {
         )
     }
 
-    pub fn join(&mut self, left: Rel, right: Rel, on: Vec<(Ref, Ref)>) -> Result<Rel, EngineError> {
+    pub fn join(
+        &mut self,
+        left: Rel,
+        right: Rel,
+        on: Vec<(Ref, Ref, DataType)>,
+    ) -> Result<Rel, EngineError> {
         if on.is_empty() {
             return Err(EngineError::EmptyJoin);
         }

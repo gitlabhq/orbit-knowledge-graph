@@ -164,7 +164,12 @@ impl Cut<'_> {
                         })
                         .collect()
                 };
+                let graph = self.query.model.graph();
                 EngineJoin {
+                    types: consumer
+                        .iter()
+                        .map(|(_, property)| graph.property(*property).data_type)
+                        .collect(),
                     left: side(producer),
                     right: side(consumer),
                 }

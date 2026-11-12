@@ -129,6 +129,10 @@ mod tests {
                 columns: vec!["project_id".into(), "path".into()],
                 binding: "f".into(),
                 properties: vec!["project_id".into(), "path".into()],
+                types: vec![
+                    query_data_model::DataType::Int,
+                    query_data_model::DataType::String,
+                ],
             },
             keys: vec![
                 Key::Composite(vec![Key::Int(42), Key::Text("src/a.rs".into())]),

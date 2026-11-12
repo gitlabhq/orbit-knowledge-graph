@@ -48,6 +48,7 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
             columns: vec!["mr_id".into()],
             binding: "m".into(),
             properties: vec!["merge_request_id".into()],
+            types: vec![query_data_model::DataType::Int],
         })]
     );
     assert_eq!(
@@ -309,6 +310,7 @@ async fn a_single_column_key_crosses_from_a_relational_store() {
             columns: vec!["i_message_id".into()],
             binding: "m".into(),
             properties: vec!["id".into()],
+            types: vec![query_data_model::DataType::String],
         })]
     );
     let call = ran

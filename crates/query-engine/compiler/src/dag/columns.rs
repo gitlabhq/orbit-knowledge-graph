@@ -86,7 +86,8 @@ impl Cut<'_> {
         let (producer, consumer) = crossing.sides(order, |binding| self.group(binding));
         let producer_group = self.group(producer[0].0);
         let binding = self.query.name(consumer[0].0).to_string();
-        let name = |property: PropertyId| self.query.model.graph().property(property).name.clone();
+        let graph = self.query.model.graph();
+        let name = |property: PropertyId| graph.property(property).name.clone();
         KeyInput {
             from: stage(producer_group),
             columns: producer
@@ -100,6 +101,10 @@ impl Cut<'_> {
             properties: consumer
                 .iter()
                 .map(|(_, property)| name(*property))
+                .collect(),
+            types: consumer
+                .iter()
+                .map(|(_, property)| graph.property(*property).data_type)
                 .collect(),
         }
     }

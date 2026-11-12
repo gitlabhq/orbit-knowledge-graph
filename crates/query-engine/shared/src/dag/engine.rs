@@ -6,10 +6,11 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, UInt32Array, new_null_array};
 use arrow::compute::{SortColumn, SortOptions, lexsort_to_indices, take};
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{DataType as ArrowType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use compiler::dag::StageId;
 use compiler::orbit_authorization::Key;
+use query_data_model::DataType;
 use query_data_model::plan::engine::{EngineOperation, EnginePlan};
 use query_data_model::plan::logical::Order;
 use query_data_model::plan::tracking::{NodeId, Ref};
@@ -48,17 +49,23 @@ fn failed(error: arrow::error::ArrowError) -> ExecutorError {
     ExecutorError(error.to_string())
 }
 
-/// The key of one row across join columns; a null part matches nothing.
-fn join_key(arrays: &[&ArrayRef], row: usize) -> Result<Option<Vec<Key>>, ExecutorError> {
+/// The key of one row across join columns, each read as its declared type; a null part matches
+/// nothing.
+fn join_key(
+    arrays: &[(&ArrayRef, DataType)],
+    row: usize,
+) -> Result<Option<Vec<Key>>, ExecutorError> {
     arrays
         .iter()
-        .map(|array| super::rows::scalar(array, row, compiler::KeyKind::Text))
+        .map(|(array, data_type)| {
+            super::rows::scalar(array, row, compiler::KeyKind::of(*data_type))
+        })
         .collect()
 }
 
 /// Text values cut to `chars` characters, each cut one followed by `suffix`.
 fn excerpt(array: &ArrayRef, chars: usize, suffix: &str) -> Result<ArrayRef, ExecutorError> {
-    let text = arrow::compute::cast(array, &DataType::Utf8).map_err(failed)?;
+    let text = arrow::compute::cast(array, &ArrowType::Utf8).map_err(failed)?;
     let text = text
         .as_any()
         .downcast_ref::<arrow::array::StringArray>()
@@ -104,7 +111,7 @@ pub fn run(
                                     ))
                                 })?
                             }
-                            None => new_null_array(&DataType::Null, 0),
+                            None => new_null_array(&ArrowType::Null, 0),
                         };
                         Ok((output, array))
                     })
@@ -118,12 +125,12 @@ pub fn run(
                 let (left, right) = (input(0)?, input(1)?);
                 let near = on
                     .iter()
-                    .map(|(left_key, _)| left.array(*left_key))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .map(|(left_key, _, data_type)| Ok((left.array(*left_key)?, *data_type)))
+                    .collect::<Result<Vec<_>, ExecutorError>>()?;
                 let far = on
                     .iter()
-                    .map(|(_, right_key)| right.array(*right_key))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .map(|(_, right_key, data_type)| Ok((right.array(*right_key)?, *data_type)))
+                    .collect::<Result<Vec<_>, ExecutorError>>()?;
                 let mut built: HashMap<Vec<Key>, Vec<u32>> = HashMap::new();
                 for row in 0..right.rows {
                     if let Some(key) = join_key(&far, row)? {

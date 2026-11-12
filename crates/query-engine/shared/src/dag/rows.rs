@@ -44,6 +44,14 @@ pub(super) fn scalar(
                 _ => Key::Text(text.value(0).to_string()),
             }
         }
+        DataType::FixedSizeBinary(16) if kind == KeyKind::Uuid => {
+            let bytes = array
+                .as_any()
+                .downcast_ref::<arrow::array::FixedSizeBinaryArray>()
+                .ok_or_else(unsupported)?;
+            let uuid = uuid::Uuid::from_slice(bytes.value(row)).map_err(|_| unsupported())?;
+            Key::Uuid(uuid.hyphenated().to_string())
+        }
         data_type if data_type.is_integer() => {
             let value = cast(&array.slice(row, 1), &DataType::Int64).map_err(|_| unsupported())?;
             let value = value
@@ -56,8 +64,13 @@ pub(super) fn scalar(
     }))
 }
 
-/// The key of each row across `columns`: one column's value, or a composite of several.
-fn row_keys(batch: &RecordBatch, columns: &[String]) -> Result<Vec<Option<Key>>, ExecutorError> {
+/// The key of each row across `columns`, each read as its declared type: one column's value, or
+/// a composite of several.
+fn row_keys(
+    batch: &RecordBatch,
+    columns: &[String],
+    types: &[query_data_model::DataType],
+) -> Result<Vec<Option<Key>>, ExecutorError> {
     let arrays = columns
         .iter()
         .map(|name| column(batch, name))
@@ -66,7 +79,8 @@ fn row_keys(batch: &RecordBatch, columns: &[String]) -> Result<Vec<Option<Key>>,
         .map(|row| {
             let parts = arrays
                 .iter()
-                .map(|array| scalar(array, row, KeyKind::Text))
+                .zip(types)
+                .map(|(array, data_type)| scalar(array, row, KeyKind::of(*data_type)))
                 .collect::<Result<Option<Vec<Key>>, _>>()?;
             Ok(parts.map(|mut parts| match parts.len() {
                 1 => parts.remove(0),
@@ -77,10 +91,14 @@ fn row_keys(batch: &RecordBatch, columns: &[String]) -> Result<Vec<Option<Key>>,
 }
 
 /// The distinct keys a stage's rows hold in `columns`, in key order.
-pub fn keys(batches: &[RecordBatch], columns: &[String]) -> Result<Vec<Key>, ExecutorError> {
+pub fn keys(
+    batches: &[RecordBatch],
+    columns: &[String],
+    types: &[query_data_model::DataType],
+) -> Result<Vec<Key>, ExecutorError> {
     let mut keys = BTreeSet::new();
     for batch in batches {
-        keys.extend(row_keys(batch, columns)?.into_iter().flatten());
+        keys.extend(row_keys(batch, columns, types)?.into_iter().flatten());
     }
     Ok(keys.into_iter().collect())
 }
@@ -176,4 +194,31 @@ pub fn column_keys(batch: &RecordBatch, name: &str) -> Result<Vec<Option<Key>>, 
     (0..batch.num_rows())
         .map(|row| scalar(array, row, KeyKind::Text))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use arrow::array::{ArrayRef, FixedSizeBinaryArray, StringArray};
+    use compiler::KeyKind;
+    use compiler::orbit_authorization::Key;
+
+    use super::scalar;
+
+    const UUID: &str = "61f0c404-5cb3-11e7-907b-a6006ad3dba0";
+
+    /// ClickHouse returns a UUID column as 16 bytes and a service returns it as text; both read
+    /// as the same typed key, so the engine joins them.
+    #[test]
+    fn a_uuid_key_reads_the_same_from_bytes_and_text() {
+        let bytes = uuid::Uuid::parse_str(UUID).unwrap().into_bytes();
+        let binary: ArrayRef =
+            Arc::new(FixedSizeBinaryArray::try_from_iter([bytes].into_iter()).unwrap());
+        let text: ArrayRef = Arc::new(StringArray::from(vec![UUID]));
+        let expected = Some(Key::Uuid(UUID.to_string()));
+        assert_eq!(scalar(&binary, 0, KeyKind::Uuid).unwrap(), expected);
+        assert_eq!(scalar(&text, 0, KeyKind::Uuid).unwrap(), expected);
+        assert!(scalar(&binary, 0, KeyKind::Text).is_err());
+    }
 }

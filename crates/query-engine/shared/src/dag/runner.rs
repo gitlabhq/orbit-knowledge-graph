@@ -167,7 +167,7 @@ impl<'r> Runner<'r> {
         let mut sets = Vec::new();
         for input in stage.keys() {
             let produced = results.get(&input.from).map_or(&[][..], Vec::as_slice);
-            let keys = rows::keys(produced, &input.columns)?;
+            let keys = rows::keys(produced, &input.columns, &input.types)?;
             self.emit(|| Event::Keys {
                 from: input.from,
                 to: id,
