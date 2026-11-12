@@ -2,8 +2,6 @@ cases:
   - name: Aggregation emits the authorized traversal path
     security: { paths: [1/100/] }
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","id_range":{"start":1,"end":10000},"columns":["name"]},{"id":"u","entity":"User"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"group_by":["g"],"aggregations":[{"count":"u","as":"member_count"}],"limit":10}
       gql: |
         MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
     logical: { expect: ["(Aggregate group g AS g, COUNT(u) AS member_count (_))"] }
@@ -17,8 +15,6 @@ cases:
   - name: Aggregation emits every authorized traversal path
     security: { paths: [1/100/, 1/102/] }
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","id_range":{"start":1,"end":10000},"columns":["name"]},{"id":"u","entity":"User"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"group_by":["g"],"aggregations":[{"count":"u","as":"member_count"}],"limit":10}
       gql: |
         MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
     logical: { expect: ["(Aggregate group g AS g, COUNT(u) AS member_count (_))"] }
@@ -33,8 +29,6 @@ cases:
   - name: Admin aggregation accepts an admin-only measure
     security: { admin: true }
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]},{"id":"g","entity":"Group","columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"group_by":["g"],"aggregations":[{"max":"u.is_admin","as":"has_admin"}],"limit":10}
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN g{.id, .name}, max(u.is_admin) AS has_admin LIMIT 10
     logical: { expect: ["(Aggregate group g AS g, MAX(u.is_admin) AS has_admin (_))"] }

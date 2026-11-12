@@ -14,5 +14,3 @@ cases:
             - AS mr FINAL
           not_contains:
             - tuple(mr.traversal_path, mr.id) IN
-    missing_frontends:
-      json: The original query scenario supplies only GQL.

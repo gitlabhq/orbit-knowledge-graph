@@ -2,9 +2,6 @@
 cases:
   - name: A renamed group does not resolve through its obsolete full path
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"g","entity":"Group","filters":{"full_path":"old"}}],
-         "relationships":[{"type":"CONTAINS","from":"p","to":"g","direction":"incoming"}],"aggregations":[{"count":"p","as":"c"}],"limit":10}
       gql: |
         MATCH (p:Project)<-[:CONTAINS]-(g:Group {full_path: 'old'}) RETURN count(p) AS c LIMIT 10
     security:

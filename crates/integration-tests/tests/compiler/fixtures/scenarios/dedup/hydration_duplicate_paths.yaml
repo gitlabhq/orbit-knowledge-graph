@@ -12,5 +12,3 @@ cases:
     physical:
       clickhouse:
         hydration: static
-    missing_frontends:
-      json: The original query scenario supplies only GQL.

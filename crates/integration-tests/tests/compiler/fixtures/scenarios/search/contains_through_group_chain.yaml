@@ -19,5 +19,3 @@ cases:
         indexes:
           - table: gl_merge_request
             name: idx_title_ngram
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
