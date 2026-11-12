@@ -51,6 +51,7 @@ pub fn split<B: SqlBackend>(
                 connection: Some(connection.to_string()),
                 query: StageQuery::Gql(statement),
                 inputs: Vec::new(),
+                response: true,
             }],
             logical: Vec::new(),
         });

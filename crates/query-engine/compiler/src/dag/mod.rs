@@ -124,6 +124,9 @@ pub struct Stage {
     pub connection: Option<String>,
     pub query: StageQuery,
     pub inputs: Vec<Input>,
+    /// Whether the stage's rows are the response: the response policy shapes them for the
+    /// caller, where a stage that feeds others hands its rows on whole.
+    pub response: bool,
 }
 
 impl Stage {

@@ -34,6 +34,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub limits: QueryLimits,
         pub remotes: crate::dag::Remotes,
         pub trace: bool,
+        pub response: bool,
     }
 
     state {
@@ -114,7 +115,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [relational]
         }
         response_policy {
-            reads_env: [data_model]
+            reads_env: [data_model, response]
             reads_state: [statement]
             mutates: [relational]
         }
@@ -227,7 +228,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         gql_clickhouse {
             backend: query_data_model::ClickHouse
-            env: [grants, limits, trace]
+            env: [grants, limits, trace, response]
             state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned, proved]
             phases: [tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
@@ -388,6 +389,9 @@ fn materialize(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
 }
 
 fn response_policy(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
+    if !*ctx.response() {
+        return Ok(());
+    }
     let plan = require(ctx.take_relational(), "relational")?;
     let model = ctx.data_model();
     let statement = require(ctx.statement().as_ref(), "statement")?;

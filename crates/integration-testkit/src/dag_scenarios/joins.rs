@@ -56,8 +56,10 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
     let Rendered::Sql { sql, .. } = &ran.rendered(0)[0] else {
         panic!("the merge request stage renders SQL");
     };
-    assert!(sql.starts_with("SELECT mr.iid AS mr_iid, "), "{sql}");
-    assert!(sql.contains(" AS mr_title, mr.id AS mr_id, "), "{sql}");
+    assert!(
+        sql.starts_with("SELECT mr.iid AS mr_iid, mr.title AS mr_title, mr.id AS mr_id, "),
+        "a stage that feeds the engine hands its text on whole: {sql}"
+    );
     assert!(sql.contains("startsWith(mr.traversal_path"), "{sql}");
     let call = ran
         .rendered(1)

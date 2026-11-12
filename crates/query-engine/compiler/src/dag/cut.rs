@@ -71,6 +71,7 @@ impl Cut<'_> {
                 connection: Some(connection),
                 query: StageQuery::Gql(query_data_model::surface::Statement { plan, debug }),
                 inputs,
+                response: false,
             });
         }
         let joins = self
@@ -110,6 +111,7 @@ impl Cut<'_> {
             connection: None,
             query: StageQuery::Engine(engine),
             inputs,
+            response: true,
         });
         Ok(Dag {
             stages,

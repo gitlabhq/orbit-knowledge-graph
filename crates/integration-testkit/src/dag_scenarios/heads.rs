@@ -83,6 +83,13 @@ async fn open_merge_requests_search_their_branch_heads_in_orbit_next() {
             Key::Composite(vec![Key::Int(77), Key::Text("fix-b".into())]),
         ])
     );
+    let Rendered::Sql { sql, .. } = &ran.rendered(0)[0] else {
+        panic!("the merge request stage renders SQL");
+    };
+    assert!(
+        sql.contains("mr.project_id AS mr_project_id, mr.source_branch AS mr_source_branch"),
+        "join keys are never excerpted: {sql}"
+    );
     assert_eq!(
         ops(&ran.plan(1, false)),
         [

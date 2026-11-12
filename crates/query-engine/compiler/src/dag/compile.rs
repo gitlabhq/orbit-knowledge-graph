@@ -89,7 +89,11 @@ fn produced<T>(value: Option<T>) -> Result<T> {
 }
 
 pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> {
-    let (kind, relational) = (stage.query_kind(), stage.backend.relational());
+    let (kind, relational, response) = (
+        stage.query_kind(),
+        stage.backend.relational(),
+        stage.response,
+    );
     if !inputs.composite.is_empty() && stage.backend != super::Backend::OrbitCode {
         return Err(QueryError::Validation(format!(
             "a {} stage reads single-column key sets; composite keys cross into {} stages",
@@ -106,7 +110,8 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
     let (grants, limits, trace) = (env.grants.clone(), *env.limits, env.trace);
     match (kind, env.primary) {
         (Kind::Gql, Primary::ClickHouse(catalog)) if relational => {
-            let mut ctx = config::GqlClickhouseCtx::new(grants, limits, trace, Arc::clone(catalog));
+            let mut ctx =
+                config::GqlClickhouseCtx::new(grants, limits, trace, response, Arc::clone(catalog));
             ctx.set_statement(produced(statement)?);
             config::run_gql_clickhouse(&mut ctx).count_err()?;
             let emitted = trace_relational(trace, ctx.relational().as_ref());
