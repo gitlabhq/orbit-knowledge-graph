@@ -66,7 +66,7 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
     };
     assert_eq!(
         sql,
-        "SELECT k0.id, k0.traversal_path FROM gl_project AS k0 FINAL WHERE (startsWith(k0.traversal_path, {p0:String}) AND k0.id IN {p1:Array(Int64)})"
+        "SELECT k0.id AS id, k0.traversal_path AS traversal_path FROM gl_project AS k0 FINAL WHERE (startsWith(k0.traversal_path, {p0:String}) AND k0.id IN {p1:Array(Int64)})"
     );
     assert_eq!(
         *code_request(&rendered),
@@ -115,7 +115,7 @@ async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
     };
     assert_eq!(
         sql,
-        "SELECT k0.id, k1.traversal_path FROM gl_slack_workspace AS k0 FINAL INNER JOIN gl_group AS k1 FINAL ON (k0.group_id = k1.id) WHERE startsWith(k1.traversal_path, {p0:String})"
+        "SELECT k0.id AS id, k1.traversal_path AS traversal_path FROM gl_slack_workspace AS k0 FINAL INNER JOIN gl_group AS k1 FINAL ON (k0.group_id = k1.id) WHERE startsWith(k1.traversal_path, {p0:String})"
     );
     assert_eq!(
         *live_request(&rendered),

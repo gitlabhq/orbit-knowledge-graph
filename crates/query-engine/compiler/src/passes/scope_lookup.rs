@@ -12,6 +12,7 @@ use query_data_model::implementations::relational::plan::{
 };
 use query_data_model::implementations::relational::render::ParameterizedSql;
 use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
+use query_data_model::plan::tracking::Declare;
 use query_data_model::{Catalog, Endpoint};
 use serde_json::Value;
 
@@ -219,7 +220,14 @@ fn lookup(
                 Some(condition) => q.filter(rows, condition)?,
                 None => rows,
             };
-            q.select(rows, vec![key, scope])
+            let (rows, columns) = q.compute(
+                rows,
+                vec![
+                    Declare::named(KEY, key.expr()),
+                    Declare::named(scope_column.as_str(), scope.expr()),
+                ],
+            )?;
+            q.select(rows, columns)
         })
         .map_err(|error| shape(&format!("cannot be built: {error}")))?;
     Ok(Some((graph.render(&plan), scope_column.clone())))

@@ -32,6 +32,7 @@ async fn data_correctness() {
 async fn data_correctness_dag() {
     let ctx = data_correctness_context().await;
     dag::query_4_searches_the_heads_clickhouse_returns(&ctx).await;
+    dag::merge_requests_join_the_slack_messages_that_discuss_them(&ctx).await;
 }
 
 #[tokio::test]
