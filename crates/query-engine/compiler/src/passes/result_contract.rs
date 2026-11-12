@@ -142,6 +142,8 @@ pub struct ResultContext {
     edges: Vec<EdgeMeta>,
     neighbors_center: Option<(String, orbit_authorization::Key)>,
     labels: HashMap<String, String>,
+    /// Nodes whose rows a remote stage already put through every check of their entity.
+    stage_checked: HashSet<String>,
 }
 
 impl ResultContext {
@@ -165,6 +167,17 @@ impl ResultContext {
                 type_column: redaction_type_column(alias),
             },
         );
+    }
+
+    /// A node of a remote stage, whose rows that stage put through every check of the entity
+    /// before the engine joined them.
+    pub fn add_stage_checked_node(&mut self, alias: &str, entity_type: &str) {
+        self.add_node(alias, entity_type);
+        self.stage_checked.insert(alias.to_string());
+    }
+
+    pub fn stage_checked(&self, alias: &str) -> bool {
+        self.stage_checked.contains(alias)
     }
 
     pub fn add_entity_auth(&mut self, entity_type: impl Into<String>, config: EntityAuthConfig) {

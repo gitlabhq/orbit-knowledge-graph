@@ -35,6 +35,7 @@ pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Engine>) -> Result<()> {
         .order
         .iter()
         .for_each(|(column, _)| use_column(column));
+    query.nodes.iter().for_each(|node| use_column(&node.id));
     for (stage, context) in contexts {
         for node in context.nodes() {
             use_column(&EngineColumn {
@@ -120,6 +121,17 @@ pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Engine>) -> R
             redacted.push((*stage, node.type_column.clone()));
         }
     }
+    let query = require(ctx.engine_query().as_ref(), "engine_query")?;
+    let mut remote = Vec::new();
+    let mut tags = Vec::new();
+    for node in &query.nodes {
+        result.add_stage_checked_node(&node.alias, &node.entity);
+        let added = result.get(&node.alias).ok_or_else(|| {
+            crate::error::QueryError::PipelineInvariant("a node was not added".into())
+        })?;
+        remote.push((added.id_column.clone(), node.id.clone()));
+        tags.push((added.type_column.clone(), node.entity.clone()));
+    }
     let plan = EngineBuilder::rebuild(ctx.data_model().id(), &plan, |q, step| {
         let EngineOperation::Select(selected) = &step.operation else {
             return step.keep(q);
@@ -136,7 +148,14 @@ pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Engine>) -> R
         for (stage, column) in &redacted {
             columns.push((column.clone(), q.column(&input, *stage, column)?));
         }
-        q.select(input, columns)
+        for (name, id) in &remote {
+            columns.push((name.clone(), q.column(&input, id.stage, &id.column)?));
+        }
+        let rows = q.select(input, columns)?;
+        match tags.is_empty() {
+            true => Ok(rows),
+            false => q.tag(rows, tags.clone()),
+        }
     })?;
     ctx.set_engine(plan);
     ctx.set_result_ctx(result);

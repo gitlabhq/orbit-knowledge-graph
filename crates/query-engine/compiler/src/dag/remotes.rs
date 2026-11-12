@@ -112,6 +112,17 @@ impl Target {
         }
     }
 
+    /// Whether the connection's rows carry `identity`, the one identity property of `entity`: a
+    /// live call returns the columns its store holds, a code search returns matches.
+    pub fn returns_identity(&self, entity: EntityId, identity: PropertyId) -> bool {
+        match self {
+            Self::Code(_) => false,
+            Self::Live(live) => live
+                .home(entity)
+                .is_some_and(|(store, _)| store.column(identity).is_some()),
+        }
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Code(_) => OrbitCode::KIND,

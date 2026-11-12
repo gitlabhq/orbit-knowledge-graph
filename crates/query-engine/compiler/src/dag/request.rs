@@ -6,20 +6,20 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::passes::codegen::{CompiledQueryContext, ParameterizedQuery};
-use crate::passes::result_contract::ResultContext;
 use crate::passes::scope_lookup::ScopeLookup;
 
 /// What one compiled stage asks its executor for.
 #[derive(Debug)]
 pub enum Request {
     Query(Box<CompiledQueryContext>),
-    Hydration(ParameterizedQuery),
+    Hydration(Box<ParameterizedQuery>),
     Lookup(Vec<ScopeLookup>),
     Code(StructuralSearchRequest),
     Live(ExtractionRequest),
+    /// The engine plan, and the compiled context of the response it produces.
     Engine {
         plan: EnginePlan,
-        result: ResultContext,
+        compiled: Box<CompiledQueryContext>,
     },
 }
 

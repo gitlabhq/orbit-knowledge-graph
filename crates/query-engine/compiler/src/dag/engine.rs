@@ -29,6 +29,16 @@ pub struct EngineQuery {
     pub skip: Option<u64>,
     /// The result columns that hold text, which the response policy excerpts.
     pub excerpted: Vec<String>,
+    /// The nodes of remote stages whose identity the stage returns, which the result carries
+    /// like the nodes of relational stages.
+    pub nodes: Vec<EngineNode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EngineNode {
+    pub alias: String,
+    pub entity: String,
+    pub id: EngineColumn,
 }
 
 fn orders<S: serde::Serializer>(

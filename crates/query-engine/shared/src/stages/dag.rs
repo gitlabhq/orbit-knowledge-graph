@@ -10,11 +10,26 @@ use compiler::{CompiledQueryContext, QueryError};
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 use query_data_model::{Catalog, ClickHouse};
 
-use crate::dag::{Executed, Executors, NoRemoteChecks, Outcome, Runner, Silent};
+use crate::dag::{Executed, Executors, NoRemoteChecks, Outcome, RowChecks, Runner, Silent};
 use crate::types::{ExecutionOutput, QueryExecutionLog};
 
+/// The executors a deployment registers, the code and live connections it serves next to its
+/// relational one, and the provider that checks remote rows.
 pub struct DagStage {
     pub executors: Executors,
+    pub remotes: Remotes,
+    pub checks: Arc<dyn RowChecks>,
+}
+
+impl DagStage {
+    /// A deployment that serves its relational connection alone.
+    pub fn relational(executors: Executors) -> Self {
+        Self {
+            executors,
+            remotes: Remotes::default(),
+            checks: Arc::new(NoRemoteChecks),
+        }
+    }
 }
 
 fn data_model(ctx: &QueryPipelineContext) -> Result<Arc<Catalog<ClickHouse>>, PipelineError> {
@@ -65,10 +80,9 @@ impl PipelineStage for DagStage {
         let grants = ctx.grants().inspect_err(|e| obs.record_error(e))?;
         let limits = ctx.limits().inspect_err(|e| obs.record_error(e))?;
         let primary = Primary::ClickHouse(Arc::clone(&data_model));
-        let remotes = Remotes::default();
         let env = Env {
             primary: &primary,
-            remotes: &remotes,
+            remotes: &self.remotes,
             grants,
             limits,
             trace: false,
@@ -78,18 +92,12 @@ impl PipelineStage for DagStage {
             None => Source::Text(&ctx.query_json),
         };
         let mut silent = Silent;
-        let outcome = Runner::new(env, &self.executors, &NoRemoteChecks, &mut silent)
+        let outcome = Runner::new(env, &self.executors, self.checks.as_ref(), &mut silent)
             .run(source)
             .await
             .map_err(PipelineError::from)
             .inspect_err(|e| obs.record_error(e))?;
-        let Outcome::Relational { compiled, executed } = outcome else {
-            let error = PipelineError::custom(
-                "a deployment that serves no remote connection runs one relational stage",
-            );
-            obs.record_error(&error);
-            return Err(error);
-        };
+        let Outcome { compiled, executed } = outcome;
         record(obs, &compiled, &executed, start);
         let result_context = compiled.base.result_context.clone();
         ctx.compiled = Some(compiled);

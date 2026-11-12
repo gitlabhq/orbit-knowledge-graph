@@ -106,19 +106,13 @@ impl QueryPipelineService {
             )),
         ]);
 
-        let dag = DagStage {
-            executors: graph_executors(
-                Arc::clone(&self.client),
-                &schema.data_model,
-                "base",
-                correlation::log_comment_base(
-                    claims.user_id,
-                    &query.text,
-                    schema.migration_version,
-                ),
-                query.settings,
-            ),
-        };
+        let dag = DagStage::relational(graph_executors(
+            Arc::clone(&self.client),
+            &schema.data_model,
+            "base",
+            correlation::log_comment_base(claims.user_id, &query.text, schema.migration_version),
+            query.settings,
+        ));
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(Arc::clone(&schema.data_model));
@@ -146,7 +140,9 @@ impl QueryPipelineService {
         // timed-out queries invisible to every metric.
         let pipeline = async {
             let route = PipelineRunner::start(&mut ctx, &mut obs)
-                .then(&RoutingStage)
+                .then(&RoutingStage {
+                    remotes: Default::default(),
+                })
                 .await?
                 .finish()
                 .ok_or_else(|| PipelineError::custom("RoutingStage produced no output"))

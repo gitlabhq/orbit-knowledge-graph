@@ -64,9 +64,10 @@ pub(super) async fn query_4_searches_the_heads_clickhouse_returns(ctx: &TestCont
         code.heads,
         [(1000, "feature-a".to_string()), (1000, "fix-b".to_string())]
     );
-    let Ok(Outcome::Rows { batches, .. }) = outcome else {
+    let Ok(Outcome { executed, .. }) = outcome else {
         panic!("query 4 failed: {outcome:?}");
     };
+    let batches = executed.batches;
     let rows: usize = batches.iter().map(|batch| batch.num_rows()).sum();
     assert_eq!(rows, 1);
     let paths = batches[0].column_by_name("f_path").unwrap();

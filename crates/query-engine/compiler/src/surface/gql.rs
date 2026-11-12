@@ -39,7 +39,15 @@ pub fn prepare(
     scope: IntrospectionScope,
     limits: &QueryLimits,
 ) -> Result<PreparedStatement> {
-    match route(raw, data_model, grants.caller().admin(), scope, limits)? {
+    let remotes = crate::dag::Remotes::default();
+    match route(
+        raw,
+        data_model,
+        &remotes,
+        grants.caller().admin(),
+        scope,
+        limits,
+    )? {
         RoutedStatement::Query(query) => compile_query(*query, data_model, grants, limits)
             .map(|compiled| PreparedStatement::Query(Box::new(compiled))),
         RoutedStatement::Schema(response) => Ok(PreparedStatement::Schema(response)),
@@ -49,12 +57,12 @@ pub fn prepare(
 pub fn route(
     raw: &str,
     data_model: &Catalog<ClickHouse>,
+    remotes: &crate::dag::Remotes,
     admin: bool,
     scope: IntrospectionScope,
     limits: &QueryLimits,
 ) -> Result<RoutedStatement> {
-    let remotes = crate::dag::Remotes::default();
-    let catalog = super::catalog(data_model, &remotes, limits, admin);
+    let catalog = super::catalog(data_model, remotes, limits, admin);
     match gql::route(raw, catalog)
         .map_err(QueryError::from)
         .count_err()?

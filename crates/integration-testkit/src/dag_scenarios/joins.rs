@@ -75,7 +75,7 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
     assert_eq!(
         ops(&ran.plan(2, true)),
         [
-            "Rows", "Rows", "Join", "Order", "Select", "Excerpt", "Limit"
+            "Rows", "Rows", "Join", "Order", "Select", "Tag", "Excerpt", "Limit"
         ]
     );
     let keys = ran.events.iter().find_map(|event| match event {
@@ -87,10 +87,10 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
         ran.rows(),
         [
             row(
-                json!({"mr_iid": 1, "mr_title": "Add feature A", "m_author": "ann", "m_text": "deploy to staging at 5pm", "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"})
+                json!({"mr_iid": 1, "mr_title": "Add feature A", "m_author": "ann", "m_text": "deploy to staging at 5pm", "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest", "_orbit_m_id": "m1", "_orbit_m_type": "SlackMessage"})
             ),
             row(
-                json!({"mr_iid": 2, "mr_title": "Fix bug B", "m_author": "ann", "m_text": "deploy memes", "_orbit_mr_id": 2001, "_orbit_mr_type": "MergeRequest"})
+                json!({"mr_iid": 2, "mr_title": "Fix bug B", "m_author": "ann", "m_text": "deploy memes", "_orbit_mr_id": 2001, "_orbit_mr_type": "MergeRequest", "_orbit_m_id": "m4", "_orbit_m_type": "SlackMessage"})
             ),
         ]
     );

@@ -162,6 +162,25 @@ pub fn dag_model() -> Arc<query_data_model::Model> {
     dag_packages().load().unwrap()
 }
 
+/// `graph` on the relational connection and the seeded code and live fakes on every served
+/// remote, signed in to the live service as `user`.
+pub fn dag_executors(
+    remotes: &compiler::dag::Remotes,
+    connection: &str,
+    graph: Arc<dyn Executor>,
+    user: &str,
+) -> query_engine::shared::dag::Executors {
+    let mut executors = query_engine::shared::dag::Executors::default().with(connection, graph);
+    for target in remotes.targets() {
+        let executor = match target.backend() {
+            compiler::dag::Backend::OrbitCode => seeded_code(),
+            _ => seeded_live(user),
+        };
+        executors = executors.with(target.connection(), executor);
+    }
+    executors
+}
+
 /// Runs a query through the DAG runner with `graph` on the relational connection and the seeded
 /// code and live fakes on theirs, signed in to the live service as `user`.
 pub async fn run_dag(
@@ -175,19 +194,11 @@ pub async fn run_dag(
     Vec<query_engine::shared::dag::Event>,
     Result<query_engine::shared::dag::Outcome, query_engine::shared::dag::DagError>,
 ) {
-    use compiler::dag::{Backend, Env, Primary, Remotes, Source};
+    use compiler::dag::{Env, Primary, Remotes, Source};
     use query_data_model::{Catalog, ClickHouse};
     let primary = Primary::ClickHouse(Arc::new(Catalog::<ClickHouse>::from_model(model).unwrap()));
     let remotes = Remotes::all(model);
-    let mut executors =
-        query_engine::shared::dag::Executors::default().with(primary.connection(), graph);
-    for target in remotes.targets() {
-        let executor = match target.backend() {
-            Backend::OrbitCode => seeded_code(),
-            _ => seeded_live(user),
-        };
-        executors = executors.with(target.connection(), executor);
-    }
+    let executors = dag_executors(&remotes, primary.connection(), graph, user);
     let env = Env {
         primary: &primary,
         remotes: &remotes,

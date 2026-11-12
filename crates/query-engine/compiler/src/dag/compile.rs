@@ -104,7 +104,7 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
     let connection = stage.connection.clone().unwrap_or_default();
     let (statement, engine) = match stage.query {
         StageQuery::Gql(statement) => (Some(statement), None),
-        StageQuery::Engine(query) => (None, Some(query)),
+        StageQuery::Engine(query, response) => (None, Some((query, response))),
         StageQuery::Hydration(_) => (None, None),
     };
     let (grants, limits, trace) = (env.grants.clone(), *env.limits, env.trace);
@@ -172,17 +172,34 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
                 Primary::DuckDb(catalog) => Arc::clone(catalog.shared_model()),
             };
             let mut ctx = config::GqlEngineCtx::new(limits, trace, shared);
-            ctx.set_engine_query(produced(engine)?);
+            let (query, response) = produced(engine)?;
+            ctx.set_engine_query(query);
             ctx.set_stage_contexts(inputs.contexts);
             config::run_gql_engine(&mut ctx).count_err()?;
             let plan = produced(ctx.take_engine())?;
+            let described = describe(&plan);
+            let compiled = crate::CompiledQueryContext {
+                query_type: crate::QueryType::Traversal,
+                base: crate::ParameterizedQuery {
+                    sql: described.join("\n"),
+                    params: Default::default(),
+                    result_context: produced(ctx.take_result_ctx())?,
+                    query_config: Default::default(),
+                    dialect: crate::SqlDialect::ClickHouse,
+                },
+                hydration: crate::HydrationPlan::None,
+                shape: response.shape,
+                stats: response.stats,
+                debug: response.debug,
+                has_virtual_columns: false,
+            };
             Ok(Compiled {
                 planned: ctx.take_planned().unwrap_or_default(),
                 proved: false,
-                emitted: if trace { describe(&plan) } else { Vec::new() },
+                emitted: if trace { described } else { Vec::new() },
                 request: Request::Engine {
                     plan,
-                    result: produced(ctx.take_result_ctx())?,
+                    compiled: Box::new(compiled),
                 },
             })
         }
@@ -213,7 +230,7 @@ impl Stage {
     fn query_kind(&self) -> Kind {
         match self.query {
             StageQuery::Gql(_) => Kind::Gql,
-            StageQuery::Engine(_) => Kind::Engine,
+            StageQuery::Engine(..) => Kind::Engine,
             StageQuery::Hydration(_) => Kind::Hydration,
         }
     }
@@ -277,7 +294,7 @@ pub fn compile_hydration(
         planned,
         proved: true,
         emitted,
-        request: Request::Hydration(query),
+        request: Request::Hydration(Box::new(query)),
     })
 }
 

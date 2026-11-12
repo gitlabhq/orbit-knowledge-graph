@@ -29,6 +29,8 @@ pub enum EngineOperation {
         rows: u64,
         skip: u64,
     },
+    /// Constant text columns, each a name and the value every row holds.
+    Tag(Vec<(String, String)>),
     /// Text columns cut to `chars` characters, with `suffix` after any that were cut.
     Excerpt {
         columns: Vec<Ref>,
@@ -50,7 +52,9 @@ impl Language for EngineLanguage {
             EngineOperation::Select(columns) => columns.iter_mut().for_each(visit),
             EngineOperation::Order(keys) => keys.iter_mut().for_each(|(key, _)| visit(key)),
             EngineOperation::Excerpt { columns, .. } => columns.iter_mut().for_each(visit),
-            EngineOperation::Rows { .. } | EngineOperation::Limit { .. } => {}
+            EngineOperation::Rows { .. }
+            | EngineOperation::Limit { .. }
+            | EngineOperation::Tag(_) => {}
         }
     }
 }
@@ -165,6 +169,16 @@ impl EngineBuilder {
 
     pub fn order(&mut self, rel: Rel, keys: Vec<(Ref, Order)>) -> Result<Rel, EngineError> {
         self.connect(EngineOperation::Order(keys), vec![rel], Outputs::preserve())
+    }
+
+    pub fn tag(&mut self, rel: Rel, columns: Vec<(String, String)>) -> Result<Rel, EngineError> {
+        let declared = columns.iter().map(|(name, _)| Declare::named(name, ()));
+        let declared: Vec<_> = declared.collect();
+        self.connect(
+            EngineOperation::Tag(columns),
+            vec![rel],
+            Outputs::extend(declared),
+        )
     }
 
     pub fn excerpt(

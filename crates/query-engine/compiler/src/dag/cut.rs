@@ -5,7 +5,8 @@ use query_data_model::plan::tracking::Ref;
 
 use super::split::{Crossing, Place};
 use super::{
-    Backend, Dag, EngineColumn, EngineJoin, EngineQuery, Input, Stage, StageId, StageQuery,
+    Backend, Dag, EngineColumn, EngineJoin, EngineNode, EngineQuery, Input, Remotes, Stage,
+    StageId, StageQuery,
 };
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
@@ -22,11 +23,12 @@ pub(super) struct Cut<'q> {
     /// The primary connection first, then each served remote.
     pub backends: Vec<(String, Backend)>,
     pub limits: &'q QueryLimits,
-    pub remotes: &'q [String],
+    pub remotes: &'q Remotes,
 }
 
 impl Cut<'_> {
-    pub fn dag(self, debug: bool) -> Result<Dag> {
+    pub fn dag(self, response: super::Response) -> Result<Dag> {
+        let debug = response.debug;
         let order = self.order()?;
         let stage = |group: usize| order.iter().position(|g| *g == group).unwrap_or_default();
         let group_of = |binding: Ref| {
@@ -39,6 +41,31 @@ impl Cut<'_> {
         for crossing in &self.crossings {
             for (binding, property) in crossing.pairs.iter().flat_map(|(a, b)| [*a, *b]) {
                 push(needed.entry(binding).or_default(), property);
+            }
+        }
+        let mut nodes = Vec::new();
+        for (index, group) in self.groups.iter().enumerate() {
+            let Place::Remote(remote) = group.place else {
+                continue;
+            };
+            let target = &self.remotes.targets()[remote];
+            for binding in &group.bindings {
+                let Some(entity) = self.query.entity(*binding) else {
+                    continue;
+                };
+                let graph = self.query.model.graph();
+                let [identity] = graph.entity(entity).identity[..] else {
+                    continue;
+                };
+                if !target.returns_identity(entity, identity) {
+                    continue;
+                }
+                push(needed.entry(*binding).or_default(), identity);
+                nodes.push(EngineNode {
+                    alias: self.query.name(*binding).to_string(),
+                    entity: graph.entity(entity).name.clone(),
+                    id: self.column(stage(index), *binding, identity),
+                });
             }
         }
         let mut engine_order = Vec::new();
@@ -64,7 +91,13 @@ impl Cut<'_> {
                 .map(|crossing| Input::Keys(self.keys(crossing, &order)))
                 .collect();
             let group = &self.groups[*group];
-            let plan = super::sub::plan(self.query, group, &needed, self.limits, self.remotes)?;
+            let plan = super::sub::plan(
+                self.query,
+                group,
+                &needed,
+                self.limits,
+                self.remotes.connections(),
+            )?;
             stages.push(Stage {
                 id,
                 backend,
@@ -104,13 +137,14 @@ impl Cut<'_> {
             order: engine_order,
             limit,
             skip,
+            nodes,
         };
         let inputs = (0..stages.len()).map(|from| Input::Rows { from }).collect();
         stages.push(Stage {
             id: stages.len(),
             backend: Backend::Engine,
             connection: None,
-            query: StageQuery::Engine(engine),
+            query: StageQuery::Engine(engine, Box::new(response)),
             inputs,
             response: true,
         });

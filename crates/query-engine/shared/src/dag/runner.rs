@@ -17,7 +17,6 @@ use compiler::{CompiledQueryContext, HydrationRequest, ParameterizedQuery, Query
 use super::executor::{Executed, ExecutorError, Executors, RowChecks};
 use super::observer::{Event, KEY_SAMPLE, Observer, StageInfo};
 use super::{remote, rows};
-use crate::types::QueryExecution;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DagError {
@@ -36,20 +35,12 @@ impl From<DagError> for pipeline::PipelineError {
     }
 }
 
-/// What a query returns once its stages ran.
+/// What a query returns once its stages ran: the compiled context of the stage whose rows are
+/// the response, a single relational stage or the engine stage, and those rows.
 #[derive(Debug)]
-pub enum Outcome {
-    /// One relational stage: its compiled query and rows, which hydration completes.
-    Relational {
-        compiled: Arc<CompiledQueryContext>,
-        executed: Executed,
-    },
-    /// The rows of the final engine or remote stage, with the result context of its output.
-    Rows {
-        batches: Vec<RecordBatch>,
-        result: Box<ResultContext>,
-        log: Vec<QueryExecution>,
-    },
+pub struct Outcome {
+    pub compiled: Arc<CompiledQueryContext>,
+    pub executed: Executed,
 }
 
 pub struct Runner<'r> {
@@ -140,19 +131,20 @@ impl<'r> Runner<'r> {
         }
         let (request, executed) = last
             .ok_or_else(|| QueryError::PipelineInvariant("a DAG has at least one stage".into()))?;
-        Ok(match request {
-            Some(Request::Query(compiled)) if single => Outcome::Relational {
-                compiled: Arc::from(compiled),
-                executed,
-            },
-            Some(Request::Engine { result, .. }) => Outcome::Rows {
+        let compiled = match request {
+            Some(Request::Query(compiled)) if single => compiled,
+            Some(Request::Engine { compiled, .. }) => compiled,
+            _ => {
+                return Err(QueryError::PipelineInvariant(
+                    "the last stage of a DAG is its response stage".into(),
+                )
+                .into());
+            }
+        };
+        Ok(Outcome {
+            compiled: Arc::from(compiled),
+            executed: Executed {
                 batches: executed.batches,
-                result: Box::new(result),
-                log,
-            },
-            _ => Outcome::Rows {
-                batches: executed.batches,
-                result: Box::default(),
                 log,
             },
         })
@@ -317,6 +309,6 @@ impl<'r> Runner<'r> {
             )
             .into());
         };
-        Ok((query, executed))
+        Ok((*query, executed))
     }
 }

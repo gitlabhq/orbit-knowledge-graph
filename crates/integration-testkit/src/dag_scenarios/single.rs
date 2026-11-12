@@ -136,13 +136,13 @@ async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
             ],
             window: None,
             limit: Some(1001),
-            fields: vec!["author".into(), "text".into()],
+            fields: vec!["author".into(), "text".into(), "id".into()],
         }
     );
     assert_eq!(
         ran.rows(),
         [row(
-            json!({"m_author": "ann", "m_text": "deploy to staging at 5pm"})
+            json!({"m_author": "ann", "m_text": "deploy to staging at 5pm", "_orbit_m_id": "m1", "_orbit_m_type": "SlackMessage"})
         )]
     );
     let checks = AllowedKeys(BTreeSet::new());

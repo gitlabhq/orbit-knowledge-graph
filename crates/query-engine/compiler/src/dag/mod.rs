@@ -15,7 +15,7 @@ mod sub;
 pub use compile::{
     Compiled, Env, Inputs, Primary, Source, compile, compile_hydration, heads, split_query,
 };
-pub use engine::{EngineColumn, EngineJoin, EngineQuery};
+pub use engine::{EngineColumn, EngineJoin, EngineNode, EngineQuery};
 pub use keys::{KeySet, bind};
 pub use remotes::Remotes;
 pub use request::{Rendered, Request, describe};
@@ -94,9 +94,17 @@ pub enum StageQuery {
     /// A logical plan over the bindings the stage's connection holds.
     Gql(Statement),
     /// The join of earlier stages' rows, with the query's result columns, order and limit.
-    Engine(EngineQuery),
+    Engine(EngineQuery, Box<Response>),
     /// The rows a hydration reads by key.
     Hydration(HydrationRequest),
+}
+
+/// What the engine stage's response reports about the query, from its top-level logical plan.
+#[derive(Debug)]
+pub struct Response {
+    pub shape: crate::passes::result_contract::ResultShape,
+    pub stats: crate::analytics::QueryStats,
+    pub debug: bool,
 }
 
 /// A key set an earlier stage returns, which this stage reads as an `IN` input before it

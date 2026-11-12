@@ -3,6 +3,7 @@
 
 mod heads;
 mod joins;
+mod server;
 mod single;
 
 use std::collections::BTreeSet;
@@ -80,8 +81,7 @@ impl Run {
 
     fn rows(self) -> Vec<Row> {
         match self.outcome {
-            Ok(Outcome::Rows { batches, .. }) => json_rows(&batches),
-            Ok(Outcome::Relational { executed, .. }) => json_rows(&executed.batches),
+            Ok(Outcome { executed, .. }) => json_rows(&executed.batches),
             Err(error) => panic!("the run failed: {error}"),
         }
     }

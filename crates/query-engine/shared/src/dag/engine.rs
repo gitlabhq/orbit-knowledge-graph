@@ -169,6 +169,23 @@ pub fn run(
                 let end = start.saturating_add(*rows as usize).min(table.rows);
                 table.take(&UInt32Array::from_iter_values(start as u32..end as u32))?
             }
+            EngineOperation::Tag(tags) => {
+                let table = input(0)?;
+                let outputs: Vec<Ref> = plan.outputs(node).collect();
+                let declared = &outputs[outputs.len() - tags.len()..];
+                let mut columns = table.columns.clone();
+                for (output, (_, value)) in declared.iter().zip(tags) {
+                    let constant: ArrayRef = Arc::new(arrow::array::StringArray::from(vec![
+                        value.as_str();
+                        table.rows
+                    ]));
+                    columns.push((*output, constant));
+                }
+                Table {
+                    columns,
+                    rows: table.rows,
+                }
+            }
             EngineOperation::Excerpt {
                 columns,
                 chars,

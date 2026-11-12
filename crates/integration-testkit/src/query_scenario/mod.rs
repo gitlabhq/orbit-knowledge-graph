@@ -535,7 +535,10 @@ async fn compile_like_server(
         phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
-    if let RoutingOutput::Schema(_) = RoutingStage.execute(&mut pipeline_ctx, &mut obs).await? {
+    let routing = RoutingStage {
+        remotes: Default::default(),
+    };
+    if let RoutingOutput::Schema(_) = routing.execute(&mut pipeline_ctx, &mut obs).await? {
         return Err(PipelineError::custom("schema calls are not graph queries"));
     }
     let parsed = pipeline_ctx
@@ -562,15 +565,13 @@ async fn execute_output(
     resolver_registry.register("gitaly", resolver as _);
 
     let client = Arc::new(ctx.create_client());
-    let dag = DagStage {
-        executors: graph_executors(
-            Arc::clone(&client),
-            data_model,
-            "base",
-            "gkg;scenario".into(),
-            Vec::new(),
-        ),
-    };
+    let dag = DagStage::relational(graph_executors(
+        Arc::clone(&client),
+        data_model,
+        "base",
+        "gkg;scenario".into(),
+        Vec::new(),
+    ));
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
     server_extensions.insert(Arc::clone(data_model));
@@ -587,10 +588,12 @@ async fn execute_output(
         phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
-    RoutingStage
-        .execute(&mut pipeline_ctx, &mut obs)
-        .await
-        .expect("the query should route");
+    RoutingStage {
+        remotes: Default::default(),
+    }
+    .execute(&mut pipeline_ctx, &mut obs)
+    .await
+    .expect("the query should route");
     let executed = dag
         .execute(&mut pipeline_ctx, &mut obs)
         .await
@@ -1189,7 +1192,7 @@ fn grants_for(
     .expect("the default deployment answers the scenario's session")
 }
 
-fn claims_for(security: &SecurityContext) -> Claims {
+pub(crate) fn claims_for(security: &SecurityContext) -> Claims {
     Claims {
         sub: "user:1".into(),
         iss: "gitlab".into(),

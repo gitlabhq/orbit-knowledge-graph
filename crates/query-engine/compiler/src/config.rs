@@ -197,7 +197,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         engine::result_contract {
             reads_env: [data_model]
-            reads_state: [stage_contexts]
+            reads_state: [engine_query, stage_contexts]
             mutates: [engine, result_ctx]
         }
         engine::response_policy {

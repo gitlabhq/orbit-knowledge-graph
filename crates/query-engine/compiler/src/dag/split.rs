@@ -73,9 +73,14 @@ pub fn split<B: SqlBackend>(
         crossings,
         backends: places_backends(primary.connection(), B::BACKEND, remotes),
         limits,
-        remotes: remotes.connections(),
+        remotes,
     };
-    cut.dag(statement.debug)
+    let response = super::Response {
+        shape: crate::passes::result_contract::ResultShape::new(query)?,
+        stats: crate::analytics::QueryStats::new(query, primary),
+        debug: statement.debug,
+    };
+    cut.dag(response)
 }
 
 fn places<B: SqlBackend>(
