@@ -15,7 +15,7 @@ use config::{Entity, Source};
 use fetch::{Fetcher, Record, Want};
 
 pub use async_trait::async_trait;
-pub use compiler::input::{Direction, FilterOp, InputFilter, InputNode};
+pub use compiler::input::{ColumnSelection, Direction, FilterOp, InputFilter, InputNode};
 pub use config::Config;
 
 const GREP_LIMIT: usize = 20;

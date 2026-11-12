@@ -219,7 +219,26 @@ impl orbit_third_party::GitLab for Remote {
             !wheres.is_empty(),
             "the GitLab part of a mixed query needs a filter, or a link from a Slack message"
         );
-        let mut returned: Vec<String> = part.nodes.iter().map(|node| node.id.clone()).collect();
+        let mut returned: Vec<String> = Vec::new();
+        for node in &part.nodes {
+            match &node.columns {
+                Some(orbit_third_party::ColumnSelection::List(columns)) if !columns.is_empty() => {
+                    returned.extend(columns.iter().map(|column| format!("{}.{column}", node.id)));
+                    returned.push(format!("{}.id", node.id));
+                }
+                _ => returned.push(node.id.clone()),
+            }
+        }
+        if part
+            .anchor
+            .as_ref()
+            .is_some_and(|(anchor, _)| part.nodes.iter().any(|node| &node.id == anchor))
+        {
+            let anchor = &part.anchor.as_ref().expect("checked").0;
+            returned.push(format!("{anchor}.iid"));
+        }
+        returned.sort();
+        returned.dedup();
         if part.anchor.is_some() {
             returned.push("anchor_project.full_path".into());
         }
