@@ -2,14 +2,6 @@
 cases:
   - name: token_match, all_tokens, and any_tokens each exclude one row regardless of case and prune granules with the text skip index
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
-                     "columns": ["title"],
-                     "filters": {"title": [{"token_match": "FIX"}, {"all_tokens": "LOGIN Crash"}, {"any_tokens": "URGENT ios"}]}}],
-          "limit": 10
-        }
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200
           AND token_match(mr.title, 'FIX') AND all_tokens(mr.title, 'LOGIN Crash') AND any_tokens(mr.title, 'URGENT ios')

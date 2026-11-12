@@ -17,8 +17,6 @@ cases:
             - wi.due_date = toDate32('1970-01-01')
           not_contains:
             - toDateTime64('1970-01-01
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
 
   - name: is_not_null_on_date
     query:
@@ -37,5 +35,3 @@ cases:
             - wi.due_date != toDate32('1970-01-01')
           not_contains:
             - toDateTime64('1970-01-01
-    missing_frontends:
-      json: The original query scenario supplies only GQL.

@@ -29,9 +29,9 @@ fn performance_queries() {
         assert_eq!(scenario.query.len(), 1, "{}", file.display());
         let query = scenario
             .query
-            .get("json")
-            .unwrap_or_else(|| panic!("{}: missing query.json", file.display()));
-        compile(query, Frontend::JsonDsl, &ontology, &security).unwrap_or_else(|error| {
+            .get("gql")
+            .unwrap_or_else(|| panic!("{}: missing query.gql", file.display()));
+        compile(query, Frontend::Gql, &ontology, &security).unwrap_or_else(|error| {
             panic!("{}: {}: {error}", file.display(), scenario.description)
         });
     }

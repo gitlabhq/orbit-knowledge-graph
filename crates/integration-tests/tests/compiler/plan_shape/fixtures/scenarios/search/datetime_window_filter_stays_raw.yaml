@@ -14,5 +14,3 @@ cases:
             - "mr.merged_at >= "
           not_contains:
             - nullIf
-    missing_frontends:
-      json: The original query scenario supplies only GQL.

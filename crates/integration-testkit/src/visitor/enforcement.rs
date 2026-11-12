@@ -738,14 +738,10 @@ mod tests {
     #[test]
     fn requirements_the_response_cannot_check_are_dropped() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "filters": {"state": "active"}},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "order_by": "u.id",
-                "limit": 10}"#,
+            r#"MATCH (u:User {state: 'active'})-[:MEMBER_OF]->(g:Group)
+                RETURN u, g
+                ORDER BY u.id
+                LIMIT 10"#,
         );
         drop(ResponseView::for_query(
             &input,

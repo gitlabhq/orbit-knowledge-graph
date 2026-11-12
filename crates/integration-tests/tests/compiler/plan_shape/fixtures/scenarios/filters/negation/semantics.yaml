@@ -16,8 +16,6 @@ cases:
             - (_orbit_edge_1.relationship_kind = 'IN_PROJECT')
             - NOT ((_orbit_edge_1.source_kind = 'MergeRequest') AND ((mr.state = 'opened') AND has(_orbit_edge_1.source_tags, 'state:opened')))
           not_contains: []
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
 
   - name: anchor_rewrite_last_relationship
     query:
@@ -34,8 +32,6 @@ cases:
           contains:
             - NOT ((_orbit_edge_1.source_kind = 'MergeRequest') AND has(_orbit_edge_1.source_tags, 'state:opened'))
           not_contains: []
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
 
   - name: not_fk_relationship_filter
     query:
@@ -52,8 +48,6 @@ cases:
           contains:
             - source_id != 2000
           not_contains: []
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
 
   - name: two_hop_edge_negation_reversed
     query:
@@ -71,5 +65,3 @@ cases:
             - (_orbit_edge_0.relationship_kind = 'MEMBER_OF')
             - (NOT ((_orbit_edge_0.source_id = 2) AND (g.visibility_level = 'public')))
           not_contains: []
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
