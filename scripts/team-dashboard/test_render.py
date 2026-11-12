@@ -92,6 +92,7 @@ class FakeApi:
                 {"name": name} for name in ("19-3-stable-ee", "19-4-stable-ee", "19-5-stable-ee", "19-2-stable-ee",
                                             "19-5-stable", "security-19-6-stable-ee", "99-4-stable-ee")],
             ("GET", "gitlab-org%2Fgitlab/repository/tags?search="): [{"name": "v19.0.0-ee"}],
+            ("GET", "gitlab-org%2Fgitlab/repository/tags/"): {"name": "v19.3.0-ee", "created_at": "2026-08-20T01:20:40.000Z"},
             ("GET", "gitlab-org%2Fgitlab/repository/tags?search=%5Ev99.4."): [],
             ("GET", "members/all/1"): {"access_level": 30},
             ("GET", "/approvals"): approvals(),
@@ -313,7 +314,9 @@ class RenderTest(DashboardTestCase):
             issue(1470),
         ]
         routes = {("GET", "groups/gitlab-org%2Forbit%2Fteam/members"): TEAM, ISSUES_ROUTE: issues}
-        text = self.region(FakeApi(routes))
+        api = FakeApi(routes)
+        text = self.region(api)
+        self.assertEqual(len([call for call in api.calls if "/members" in call[1]]), 1)
         teamwide = block(text, "## Team-wide")
         listed = [i for i in range(1, 7) if f"/issues/{i}+" in teamwide]
         self.assertEqual(listed, [1, 6])
@@ -483,6 +486,7 @@ class BackportTest(DashboardTestCase):
             bug(15, labels=[self.REQUIRED], author="a", merged="2026-10-10T00:00:00Z"),
             bug(16, labels=[self.REQUIRED], author="a", target="19-5-stable-ee"),
             bug(17, labels=[self.REQUIRED], author="a", project_id=PRIVATE_ID),
+            bug(18, labels=[self.REQUIRED], author="a"),
         ]
         commit, other_commit = "a" * 40, "b" * 40
         api = self.api({
@@ -493,6 +497,7 @@ class BackportTest(DashboardTestCase):
             notes_route(13): [system("mentioned in merge request !506")],
             notes_route(14): [system(f"mentioned in commit {other_commit}")],
             notes_route(15): [system("mentioned in merge request gitlab-org/security/gitlab!9")],
+            notes_route(18): [system("mentioned in merge request !501"), system("mentioned in merge request !505")],
             ("GET", f"projects/{GITLAB_ID}/merge_requests/501"): stable(501),
             ("GET", f"projects/{GITLAB_ID}/repository/commits/{commit}/merge_requests"): [
                 stable(502, branch="19-4-stable-ee"), stable(503, state="closed"), stable(504, branch="master"),
@@ -511,10 +516,10 @@ class BackportTest(DashboardTestCase):
         self.assertIn(f"- {url(11, GITLAB_ID)} · 11d · backports: gitlab-org/gitlab!501, gitlab-org/gitlab!502\n",
                       relabel + "\n")
         self.assertIn(f"- {url(15, GITLAB_ID)} · 21d\n", relabel + "\n")
-        for hidden in (url(12, GITLAB_ID), url(16, GITLAB_ID), url(17, PRIVATE_ID), "security"):
+        for hidden in (url(12, GITLAB_ID), url(16, GITLAB_ID), url(17, PRIVATE_ID), url(18, GITLAB_ID), "security"):
             self.assertNotIn(hidden, text)
         noted = [path for _, path, _ in api.calls if path.endswith("/notes")]
-        self.assertEqual(sorted(noted), [f"projects/{GITLAB_ID}/merge_requests/{iid}/notes" for iid in range(10, 16)])
+        self.assertEqual(sorted(noted), sorted(f"projects/{GITLAB_ID}/merge_requests/{iid}/notes" for iid in (*range(10, 16), 18)))
 
     def test_only_merge_requests_after_the_oldest_maintained_release_are_flagged(self):
         milestones = {20: "19.4", 21: "19.3", 22: None, 23: "Backlog", 24: "19.10", 25: "18.11", 26: "20.0", 27: "19.9"}
@@ -538,6 +543,29 @@ class BackportTest(DashboardTestCase):
             bug(iid, state="opened", author="a", milestone=title) for iid, title in milestones.items()]})
         flagged = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", block(self.region(api), "Bug MRs missing"))]
         self.assertEqual(sorted(flagged), [20, 22, 23])
+
+    def test_merged_without_a_version_milestone_must_merge_after_the_oldest_release(self):
+        mrs = {
+            40: bug(40, author="a", milestone=None, merged="2026-08-19T00:00:00Z"),
+            41: bug(41, author="a", milestone=None, merged="2026-08-21T00:00:00Z"),
+            42: bug(42, author="a", milestone="Backlog", merged="2023-05-01T00:00:00Z"),
+            43: bug(43, author="a", milestone="Backlog", merged="2026-09-01T00:00:00Z"),
+            44: bug(44, author="a", milestone="19.4", merged="2026-08-01T00:00:00Z"),
+        }
+        opened = [bug(45, state="opened", author="a", milestone=None, created="2023-01-01T00:00:00Z")]
+        routes = {("GET", BUGS_ROUTE + "state=merged&not"): list(mrs.values()), ("GET", BUGS_ROUTE + "state=opened"): opened}
+        api = self.api(routes)
+        flagged = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", block(self.region(api), "Bug MRs missing"))]
+        self.assertEqual(sorted(flagged), [41, 43, 44, 45])
+        self.assertIn(("GET", "projects/gitlab-org%2Fgitlab/repository/tags/v19.3.0-ee", None), api.calls)
+
+    def test_missing_release_tag_keeps_merged_merge_requests_without_a_milestone(self):
+        def missing():
+            raise dashboard.DashboardError("GET failed", 404)
+        api = self.api({("GET", BUGS_ROUTE + "state=merged&not"): [
+                            bug(40, author="a", milestone=None, merged="2020-01-01T00:00:00Z")],
+                        ("GET", "gitlab-org%2Fgitlab/repository/tags/"): missing})
+        self.assertIn(url(40, GITLAB_ID), block(self.region(api), "Bug MRs missing"))
 
     def test_relabel_ignores_the_release_policy(self):
         api = self.api({

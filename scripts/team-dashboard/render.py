@@ -371,10 +371,9 @@ def authored_merge_requests(api: Api, usernames: Sequence[str]) -> List[dict]:
     return found
 
 
-def candidate_merge_requests(api: Api, source: str, group: str) -> List[dict]:
+def candidate_merge_requests(api: Api, source: str, usernames: Sequence[str]) -> List[dict]:
     """Non-draft open MRs by direct team members, plus every one in the source project."""
     found: Dict[str, dict] = {}
-    usernames = team_usernames(api, group)
     if usernames:
         for mr in authored_merge_requests(api, usernames):
             found[mr["web_url"]] = mr
@@ -395,9 +394,9 @@ def pinned_lines(api: Api, visibility: Visibility, source: str, pinned, now: dat
     return lines
 
 
-def team_wide_issues(api: Api, source: str, group: str, own_iid: int, now: datetime) -> List[dict]:
+def team_wide_issues(api: Api, source: str, usernames: Sequence[str], own_iid: int, now: datetime) -> List[dict]:
     """Open source-project issues assigned to enough team members and updated recently, newest update first."""
-    roster = set(team_usernames(api, group))
+    roster = set(usernames)
     found: Dict[str, dict] = {}
     for username in sorted(roster):
         for issue in api.get_all(
@@ -440,8 +439,24 @@ def scoped_bug_merge_requests(api: Api, usernames: Sequence[str], labels: Sequen
     return list(found.values())
 
 
-def oldest_maintained_release(api: Api) -> Tuple[int, int]:
-    """The oldest of the newest stable-ee branches; a fix can only be backported to releases older than its own.
+@dataclass
+class BackportPolicy:
+    """A fix can only be backported to maintained releases older than its own."""
+    oldest_maintained: Tuple[int, int]
+    oldest_released_at: Optional[datetime]
+
+    def covers(self, mr: dict) -> bool:
+        """Shipped after the oldest maintained release, by milestone or, for a merged MR without a version milestone,
+        merged after that release was tagged. Anything else counts, so nothing is missed."""
+        match = MILESTONE_VERSION_RE.fullmatch(str((mr.get("milestone") or {}).get("title", "")))
+        if match:
+            return (int(match.group(1)), int(match.group(2))) > self.oldest_maintained
+        merged_at = parse_timestamp(str(mr.get("merged_at") or ""))
+        return not (merged_at and self.oldest_released_at) or merged_at > self.oldest_released_at
+
+
+def backport_policy(api: Api) -> BackportPolicy:
+    """The oldest of the newest stable-ee branches and when its X.Y.0 release was tagged.
 
     A branch counts only once a release is tagged from it: the project also has test branches such as 99-4-stable-ee.
     """
@@ -461,17 +476,15 @@ def oldest_maintained_release(api: Api) -> Tuple[int, int]:
                 break
     if not maintained:
         raise DashboardError(f"{BACKPORT_PROJECT} has no released stable-ee branches")
-    return maintained[-1]
-
-
-def in_backport_policy(mr: dict, oldest_maintained: Tuple[int, int]) -> bool:
-    """Shipped after the oldest maintained release. A missing or non-version milestone counts, so nothing is missed."""
-    match = MILESTONE_VERSION_RE.fullmatch(str((mr.get("milestone") or {}).get("title", "")))
-    return not match or (int(match.group(1)), int(match.group(2))) > oldest_maintained
+    major, minor = maintained[-1]
+    tags = readable(api, f"projects/{project}/repository/tags/v{major}.{minor}.0-ee", True)
+    tag = tags[0] if tags else {}
+    released = tag.get("created_at") or (tag.get("commit") or {}).get("committed_date")
+    return BackportPolicy(maintained[-1], parse_timestamp(str(released)) if released else None)
 
 
 def unlabelled_bug_merge_requests(api: Api, visibility: Visibility, usernames: Sequence[str],
-                                  oldest_maintained: Tuple[int, int]) -> List[dict]:
+                                  policy: BackportPolicy) -> List[dict]:
     """Open non-draft and merged bug MRs in backport policy with no backport label."""
     without = f"not%5Blabels%5D={quote(','.join(BACKPORT_LABELS), safe='')}"
     found = [
@@ -482,7 +495,7 @@ def unlabelled_bug_merge_requests(api: Api, visibility: Visibility, usernames: S
         mr for mr in found
         if not mr.get("draft")
         and not set(BACKPORT_LABELS) & set(mr.get("labels", []))
-        and in_backport_policy(mr, oldest_maintained)
+        and policy.covers(mr)
         and visibility.path_if_public(int(mr["project_id"]))
     ]
 
@@ -530,7 +543,7 @@ def backport_merge_requests(api: Api, mr: dict) -> List[dict]:
     return list(found.values())
 
 
-def backport_progress(api: Api, visibility: Visibility, usernames: Sequence[str], oldest_maintained: Tuple[int, int]
+def backport_progress(api: Api, visibility: Visibility, usernames: Sequence[str], policy: BackportPolicy
                       ) -> Tuple[List[dict], List[Tuple[dict, List[str]]]]:
     """Merged backport::required MRs in backport policy with no backport yet, and those (in policy or not) whose
     backports have all merged, with their public references."""
@@ -541,7 +554,7 @@ def backport_progress(api: Api, visibility: Visibility, usernames: Sequence[str]
             continue
         backports = backport_merge_requests(api, mr)
         if not backports:
-            if in_backport_policy(mr, oldest_maintained):
+            if policy.covers(mr):
                 not_started.append(mr)
         elif all(backport.get("state") == "merged" for backport in backports):
             references = [
@@ -598,9 +611,10 @@ def render_blocks(template: str, blocks: Dict[str, List[str]]) -> str:
 
 def render_region(api: Api, args: argparse.Namespace, now: datetime) -> str:
     visibility = Visibility(api)
+    usernames = team_usernames(api, args.team_group)
     candidates = float_labelled_first([
         candidate
-        for mr in candidate_merge_requests(api, args.source_project, args.team_group)
+        for mr in candidate_merge_requests(api, args.source_project, usernames)
         if (candidate := candidate_for(api, visibility, mr))
     ])
     humans = [c for c in candidates if not is_bot(c)]
@@ -614,11 +628,10 @@ def render_region(api: Api, args: argparse.Namespace, now: datetime) -> str:
         and (c.reviewers or READY_LABEL in c.mr.get("labels", []))
     ]
     pinned = read_pinned(TEMPLATES / "dashboard-priority.txt")
-    team_wide = team_wide_issues(api, args.source_project, args.team_group, args.issue, now)
-    usernames = team_usernames(api, args.team_group)
-    oldest_maintained = oldest_maintained_release(api)
-    unlabelled = sorted(unlabelled_bug_merge_requests(api, visibility, usernames, oldest_maintained), key=oldest_first)
-    not_started, relabel = backport_progress(api, visibility, usernames, oldest_maintained)
+    team_wide = team_wide_issues(api, args.source_project, usernames, args.issue, now)
+    policy = backport_policy(api)
+    unlabelled = sorted(unlabelled_bug_merge_requests(api, visibility, usernames, policy), key=oldest_first)
+    not_started, relabel = backport_progress(api, visibility, usernames, policy)
     relabel.sort(key=lambda pair: oldest_first(pair[0]))
     blocks: Dict[str, List[str]] = {
         "priority": pinned_lines(api, visibility, args.source_project, pinned, now),
