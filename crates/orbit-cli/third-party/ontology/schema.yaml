@@ -13,6 +13,9 @@ settings:
       - {name: Pipeline}
       - {name: Project}
       - {name: Note}
+      - {name: Job}
+      - {name: MergeRequestDiff}
+      - {name: MergeRequestDiffFile, exclude_properties: [binary, diff]}
 domains:
   third_party:
     description: Data read live from third-party sources, nightly only and never indexed.
