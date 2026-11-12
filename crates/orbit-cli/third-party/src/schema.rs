@@ -178,7 +178,6 @@ pub fn id(source: &str, entity: &str, key: &str) -> i64 {
     (hash & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
-/// Writes fetched records and their links into an in-memory graph for one query.
 pub fn load(
     client: &duckdb_client::DuckDbClient,
     source: &str,

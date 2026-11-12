@@ -164,7 +164,6 @@ impl ThirdParty {
         Ok((source, name.as_str(), entity))
     }
 
-    /// The key a target names: itself, or the one listed entity whose label matches it.
     pub async fn resolve_key(&self, fetcher: &Fetcher, target: &Target) -> Result<String> {
         let (source, name, entity) = self.source_and_entity(target)?;
         let bare = target.key.trim_start_matches(['#', '@']);
@@ -224,6 +223,14 @@ impl ThirdParty {
             .join(" ");
         let mut within: Vec<(String, String, String)> = Vec::new();
         for target in &scope.within {
+            if self.searches_by_name(target) {
+                within.push((
+                    target.source.clone(),
+                    format!("{}#name", target.entity),
+                    target.key.trim_start_matches(['#', '@']).to_string(),
+                ));
+                continue;
+            }
             match self.resolve_key(&fetcher, target).await {
                 Ok(key) => within.push((target.source.clone(), target.entity.clone(), key)),
                 Err(_) => within.push((
@@ -273,10 +280,29 @@ impl ThirdParty {
         grepped
     }
 
+    fn searches_by_name(&self, target: &Target) -> bool {
+        let Some(source) = self.config.source(&target.source) else {
+            return false;
+        };
+        let users_of = || {
+            source
+                .entities
+                .values()
+                .filter(|entity| entity.links.iter().any(|link| link.to == target.entity))
+        };
+        users_of().next().is_some()
+            && users_of().all(|entity| {
+                entity
+                    .search_api
+                    .as_ref()
+                    .is_some_and(|search| search.within_name.contains_key(&target.entity))
+            })
+    }
+
     fn narrows(&self, source: &Source, name: &str, entity: &Entity, within: &[Target]) -> bool {
         within.iter().any(|target| {
             target.source == source.name
-                && (target.entity == name
+                && ((target.entity == name && !self.searches_by_name(target))
                     || entity.links.iter().any(|link| link.to == target.entity))
         })
     }
@@ -465,8 +491,6 @@ impl ThirdParty {
         (ours, theirs)
     }
 
-    /// Runs Cypher over the third-party entities a query names, fetched live into an
-    /// in-memory graph that is gone when the query returns.
     pub async fn query(&self, query: &str) -> Result<Vec<RecordBatch>> {
         let compiled = compiler::compile_local(query, compiler::Frontend::Gql, &self.ontology)
             .map_err(|error| anyhow::anyhow!("{error}"))?;
@@ -506,8 +530,6 @@ impl ThirdParty {
         Ok(returned(query, batches))
     }
 
-    /// The search text and reference filters a query gives a searched entity, such as
-    /// `m.text CONTAINS 'deploy'` and a matched channel or user.
     fn search_terms(
         &self,
         input: &compiler::input::Input,
