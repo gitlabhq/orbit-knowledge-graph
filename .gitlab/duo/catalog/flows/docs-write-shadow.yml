@@ -1,0 +1,60 @@
+# docs-write-shadow: rollout stage 1 of the docs factory. Runs the gate and the
+# related stage on a feature MR and logs one summary line per run
+# (DOCS-WRITE SHADOW {...}) to the session. No model call, no GitLab write, no
+# branch: every API call is a GET. Setup: README.md in this folder.
+# Keep `setup` identical to docs-write.yml except for the step flag.
+version: v1
+environment: ambient
+components:
+  - name: setup
+    type: DeterministicStepComponent
+    tool_name: run_command
+    toolset: [run_command]
+    inputs:
+      - from: >-
+          SKILLS_REPO=gitlab-org/orbit/team/skills; SKILLS_REF=main;
+          D=.docs-write; rm -rf $D; mkdir -p $D/route; U="${GITLAB_BASE_URL:-https://gitlab.com}";
+          printf '#!/bin/sh\nexport LEFTHOOK=0\nexec uv run -q --no-project --python 3.12 python
+          .docs-write/skills/docs-write/scripts/flow_step.py "$@"\n' > $D/step;
+          if git -C "$D" init -q ts && git -C "$D/ts" fetch -q --depth 1
+          "https://${DUO_WORKFLOW_GIT_HTTP_USER:-oauth2}:${GITLAB_TOKEN}@${U#https://}/$SKILLS_REPO.git"
+          "$SKILLS_REF" >/dev/null 2>&1 && git -C "$D/ts" checkout -q FETCH_HEAD; then
+          echo "skills $SKILLS_REPO $SKILLS_REF at $(git -C $D/ts rev-parse --short HEAD)";
+          mv "$D/ts/skills" "$D/skills"; rm -rf "$D/ts"; sh $D/step gate --shadow --threshold 6;
+          else echo "skills fetch failed: the flow service account and the person who
+          triggered the run both need read access to $SKILLS_REPO"; fi
+        as: command
+        literal: true
+      - {from: "300", as: timeout, literal: true}
+    ui_log_events: [on_tool_execution_success, on_tool_execution_failed]
+  - name: read_gate
+    type: DeterministicStepComponent
+    tool_name: read_file
+    toolset: [read_file]
+    inputs:
+      - {from: .docs-write/route/needs_docs, as: file_path, literal: true}
+  - name: related
+    type: DeterministicStepComponent
+    tool_name: run_command
+    toolset: [run_command]
+    inputs:
+      - {from: sh .docs-write/step related --shadow, as: command, literal: true}
+      - {from: "300", as: timeout, literal: true}
+    ui_log_events: [on_tool_execution_success, on_tool_execution_failed]
+  - name: summary
+    type: DeterministicStepComponent
+    tool_name: run_command
+    toolset: [run_command]
+    inputs:
+      - {from: sh .docs-write/step shadow, as: command, literal: true}
+    ui_log_events: [on_tool_execution_success, on_tool_execution_failed]
+routers:
+  - {from: setup, to: read_gate}
+  - from: read_gate
+    condition:
+      input: "context:read_gate.tool_responses"
+      routes: {continue: related, default_route: summary}
+  - {from: related, to: summary}
+  - {from: summary, to: end}
+flow:
+  entry_point: setup
