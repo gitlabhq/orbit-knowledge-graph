@@ -7,6 +7,18 @@
 # Build and publish run on tag pipelines (`vX.Y.Z`) on the canonical project.
 # Linux builds and smoke tests also run on main when their inputs change.
 
+.local-cli-infra-retry:
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - runner_external_dependency_failure
+      - scheduler_failure
+      - api_failure
+      - stuck_or_timeout_failure
+      - no_updates_running
+      - stuck_pending_with_matching_runners
+
 .local-cli-release-rules:
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
@@ -36,6 +48,7 @@
     - .sccache-template
     - .no-cargo-home-cache
     - .local-cli-linux-rules
+    - .local-cli-infra-retry
   stage: build
   needs: []
   variables:
@@ -84,7 +97,9 @@ local-cli-build-linux-musl-arm64:
     LIBC: musl
 
 .local-cli-smoke-linux:
-  extends: .local-cli-linux-rules
+  extends:
+    - .local-cli-linux-rules
+    - .local-cli-infra-retry
   stage: build
   image: oraclelinux:8
   before_script:
@@ -119,6 +134,7 @@ local-cli-build-windows-amd64:
     - .sccache-template
     - .no-cargo-home-cache
     - .local-cli-release-rules
+    - .local-cli-infra-retry
   stage: build
   needs: []
   tags:
@@ -148,6 +164,7 @@ local-cli-build-windows-amd64:
 .local-cli-build-darwin:
   extends:
     - .local-cli-release-rules
+    - .local-cli-infra-retry
   stage: build
   image: macos-15-xcode-16
   tags:
@@ -186,6 +203,7 @@ local-cli-build-darwin-arm64:
 local-cli-code-sign:
   extends:
     - .local-cli-release-rules
+    - .local-cli-infra-retry
     - .google-oidc:auth
   stage: build
   image: ${CI_REGISTRY}/gitlab-com/gl-infra/common-ci-tasks-images/code-signer:1.3.0
