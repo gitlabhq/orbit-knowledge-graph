@@ -1,0 +1,105 @@
+//! Runs every query through the DAG runner: the top-level pipeline splits it into stages, and
+//! each stage compiles and runs on the executor the deployment registers for its connection.
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use compiler::dag::{Env, Primary, Remotes, Source};
+use compiler::gql::ParsedQuery;
+use compiler::{CompiledQueryContext, QueryError};
+use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use query_data_model::{Catalog, ClickHouse};
+
+use crate::dag::{Executed, Executors, NoRemoteChecks, Outcome, Runner, Silent};
+use crate::types::{ExecutionOutput, QueryExecutionLog};
+
+pub struct DagStage {
+    pub executors: Executors,
+}
+
+fn data_model(ctx: &QueryPipelineContext) -> Result<Arc<Catalog<ClickHouse>>, PipelineError> {
+    ctx.server_extensions
+        .get::<Arc<Catalog<ClickHouse>>>()
+        .cloned()
+        .ok_or_else(|| QueryError::PipelineInvariant("no data model in the pipeline".into()).into())
+}
+
+fn record(
+    obs: &mut dyn PipelineObserver,
+    compiled: &CompiledQueryContext,
+    executed: &Executed,
+    start: Instant,
+) {
+    let executing: Duration = executed
+        .log
+        .iter()
+        .map(|execution| Duration::from_secs_f64(execution.elapsed_ms / 1000.0))
+        .sum();
+    let query_type: &str = compiled.query_type.into();
+    obs.set_query_type(query_type);
+    obs.set_compiled(compiled);
+    obs.compiled(start.elapsed().saturating_sub(executing));
+    obs.executed(executing, executed.batches.len());
+    for execution in &executed.log {
+        obs.query_executed(
+            &execution.label,
+            execution.stats.read_rows,
+            execution.stats.read_bytes,
+            execution.stats.memory_usage,
+        );
+    }
+}
+
+impl PipelineStage for DagStage {
+    type Input = ();
+    type Output = ExecutionOutput;
+
+    async fn execute(
+        &self,
+        ctx: &mut QueryPipelineContext,
+        obs: &mut dyn PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
+        let start = Instant::now();
+        let parsed = ctx.phases.remove::<ParsedQuery>();
+        let data_model = data_model(ctx).inspect_err(|e| obs.record_error(e))?;
+        let grants = ctx.grants().inspect_err(|e| obs.record_error(e))?;
+        let limits = ctx.limits().inspect_err(|e| obs.record_error(e))?;
+        let primary = Primary::ClickHouse(Arc::clone(&data_model));
+        let remotes = Remotes::default();
+        let env = Env {
+            primary: &primary,
+            remotes: &remotes,
+            grants,
+            limits,
+            trace: false,
+        };
+        let source = match parsed {
+            Some(query) => Source::Parsed(query.statement),
+            None => Source::Text(&ctx.query_json),
+        };
+        let mut silent = Silent;
+        let outcome = Runner::new(env, &self.executors, &NoRemoteChecks, &mut silent)
+            .run(source)
+            .await
+            .map_err(PipelineError::from)
+            .inspect_err(|e| obs.record_error(e))?;
+        let Outcome::Relational { compiled, executed } = outcome else {
+            let error = PipelineError::custom(
+                "a deployment that serves no remote connection runs one relational stage",
+            );
+            obs.record_error(&error);
+            return Err(error);
+        };
+        record(obs, &compiled, &executed, start);
+        let result_context = compiled.base.result_context.clone();
+        ctx.compiled = Some(compiled);
+        ctx.phases
+            .get_or_insert_default::<QueryExecutionLog>()
+            .0
+            .extend(executed.log);
+        Ok(ExecutionOutput {
+            batches: executed.batches,
+            result_context,
+        })
+    }
+}

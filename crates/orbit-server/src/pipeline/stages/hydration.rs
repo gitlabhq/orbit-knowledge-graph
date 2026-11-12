@@ -2,11 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use clickhouse_client::ArrowClickHouseClient;
 use orbit_log_fields::warn;
 use query_engine::compiler::{
     HydrationArm, HydrationCompileOptions, HydrationPlan, HydrationRequest, QueryType,
-    compile_hydration,
 };
 
 use query_engine::pipeline::{
@@ -18,23 +16,13 @@ use query_engine::shared::content::{
     resolve_virtual_columns,
 };
 use query_engine::shared::hydration as hydration_helpers;
-use query_engine::shared::{
-    DebugQuery, HydrationOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
-};
+use query_engine::shared::{DebugQuery, HydrationOutput, QueryExecution, QueryExecutionLog};
 use query_engine::types::QueryResult;
-
-use crate::pipeline::correlation;
 
 #[derive(Clone)]
 pub struct HydrationStage;
 
 impl HydrationStage {
-    fn client(ctx: &QueryPipelineContext) -> Result<&Arc<ArrowClickHouseClient>, PipelineError> {
-        ctx.server_extensions
-            .get::<Arc<ArrowClickHouseClient>>()
-            .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
-    }
-
     /// Reads the key properties the row checks need that the base query did not return.
     pub async fn resolve_keys(
         ctx: &mut QueryPipelineContext,
@@ -121,9 +109,6 @@ impl HydrationStage {
         if arms.is_empty() {
             return Ok((HashMap::new(), Vec::new(), Vec::new()));
         }
-
-        let client = Self::client(ctx)?;
-
         let options = HydrationCompileOptions {
             dynamic: matches!(
                 ctx.compiled()?.query_type,
@@ -131,74 +116,22 @@ impl HydrationStage {
             ),
             path_segment_budget: Some(ctx.limits()?.hydration_path_segments),
         };
-
+        let request = HydrationRequest { arms, options };
+        let (query, executed) = super::dag::hydrate(ctx, request, kind).await?;
+        let debug = match ctx.compiled()?.debug {
+            true => vec![DebugQuery {
+                sql: query.sql.clone(),
+                rendered: query.render(),
+            }],
+            false => Vec::new(),
+        };
         let data_model = ctx
             .server_extensions
             .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
             .ok_or_else(|| PipelineError::custom("query data model missing"))?;
-        let compiled = compile_hydration(
-            HydrationRequest { arms, options },
-            data_model,
-            ctx.grants()?,
-            ctx.limits()?,
-        )
-        .map_err(|e| PipelineError::Compile {
-            client_safe: false,
-            reason: e.rejection_reason(),
-            message: e.to_string(),
-        })?;
-
-        let rendered_sql = compiled.render();
-        let debug = if ctx.compiled()?.debug {
-            vec![DebugQuery {
-                sql: compiled.sql.clone(),
-                rendered: rendered_sql.clone(),
-            }]
-        } else {
-            Vec::new()
-        };
-
-        let start = Instant::now();
-        let mut query = client.query(&compiled.sql);
-
-        let query_id = correlation::query_id(&format!("hydration-{kind}"));
-        query = query.with_setting("query_id", &query_id).with_setting(
-            "log_comment",
-            correlation::log_comment(Some(&format!("hydration:{kind}"))),
-        );
-        for (key, param) in &compiled.params {
-            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.data_type);
-        }
-        let (batches, summary) = query
-            .fetch_arrow_with_summary()
-            .await
-            .map_err(|e| PipelineError::Execution(e.to_string()))?;
-        let elapsed = start.elapsed();
-        let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
-
-        let stats = super::execution::apply_summary(
-            QueryExecutionStats {
-                result_rows,
-                elapsed_ns: elapsed.as_nanos() as u64,
-                ..Default::default()
-            },
-            summary.as_ref(),
-        );
-
-        let execution = QueryExecution {
-            label: format!("hydration:{kind}"),
-            rendered_sql,
-            query_id,
-            elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-            stats,
-            explain_plan: None,
-            explain_pipeline: None,
-            query_log: None,
-            processors: None,
-        };
-
-        let props = hydration_helpers::parse_hydration_batches(&batches, data_model.model())?;
-        Ok((props, debug, vec![execution]))
+        let props =
+            hydration_helpers::parse_hydration_batches(&executed.batches, data_model.model())?;
+        Ok((props, debug, executed.log))
     }
 }
 

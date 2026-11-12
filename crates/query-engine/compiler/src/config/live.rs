@@ -20,7 +20,7 @@ pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()> {
 }
 
 pub(super) fn security(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()> {
-    let plan = require(ctx.take_live(), "live")?;
+    let plan = require(ctx.take_live(), "live plan")?;
     let namespaces = require(ctx.namespaces().as_ref(), "namespaces")?;
     let plan = secure_live(ctx.data_model(), plan, ctx.grants(), namespaces)?;
     ctx.set_live(plan);
@@ -28,11 +28,11 @@ pub(super) fn security(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()>
 }
 
 pub(super) fn security_check(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()> {
-    check_live(require(ctx.live().as_ref(), "live")?)
+    check_live(require(ctx.live().as_ref(), "live plan")?)
 }
 
 pub(super) fn render(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()> {
-    let plan = require(ctx.live().as_ref(), "live")?;
+    let plan = require(ctx.live().as_ref(), "live plan")?;
     let request = ctx.data_model().render(plan)?;
     ctx.set_request(crate::dag::Request::Live(request));
     Ok(())

@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
 use clickhouse_client::ArrowClickHouseClient;
+use compiler::dag::Request;
 use pipeline::SecurityContext;
 use pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
     QueryPipelineContext, TypeMap,
 };
+use shared::dag::{Executed, Executor, ExecutorError, Executors};
 use shared::{
-    AuthorizationOutput, CompilationStage, ExecutionOutput, ExtractionOutput, ExtractionStage,
-    OutputStage, PipelineOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
+    AuthorizationOutput, DagStage, ExtractionOutput, ExtractionStage, OutputStage, PipelineOutput,
+    QueryExecution, QueryExecutionStats,
 };
 use types::ResourceAuthorization;
 
@@ -59,6 +61,12 @@ impl ProfilerPipelineService {
         server_extensions.insert(Arc::clone(&self.data_model));
         server_extensions.insert(self.limits);
 
+        let executor = ProfilerExecutor {
+            client: Arc::clone(&self.client),
+        };
+        let dag = DagStage {
+            executors: Executors::default().with(self.data_model.connection(), Arc::new(executor)),
+        };
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
             compiled: None,
@@ -72,9 +80,7 @@ impl ProfilerPipelineService {
         };
 
         let output = PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&CompilationStage)
-            .await?
-            .then(&ProfilerExecutor)
+            .then(&dag)
             .await?
             .then(&ExtractionStage)
             .await?
@@ -93,33 +99,27 @@ impl ProfilerPipelineService {
     }
 }
 
-struct ProfilerExecutor;
+/// Runs each stage's SQL with the profiler's log comment and keeps ClickHouse's summary.
+struct ProfilerExecutor {
+    client: Arc<ArrowClickHouseClient>,
+}
 
-impl PipelineStage for ProfilerExecutor {
-    type Input = ();
-    type Output = ExecutionOutput;
-
-    async fn execute(
-        &self,
-        ctx: &mut QueryPipelineContext,
-        obs: &mut dyn PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
+#[async_trait::async_trait]
+impl Executor for ProfilerExecutor {
+    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+        let Request::Query(compiled) = request else {
+            return Err(ExecutorError(format!(
+                "the profiler runs queries, not {request:?}"
+            )));
+        };
         let start = std::time::Instant::now();
-        let client = ctx
-            .server_extensions
-            .get::<Arc<ArrowClickHouseClient>>()
-            .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))?;
-        let compiled = ctx.compiled()?;
-        let result_context = compiled.base.result_context.clone();
-        let rendered_sql = compiled.base.render();
-
         let correlation_id = labkit::correlation::current();
         let log_comment = match &correlation_id {
             Some(id) => format!("gkg;profiler;correlation_id={id}"),
             None => "gkg;profiler".to_string(),
         };
-
-        let mut query = client
+        let mut query = self
+            .client
             .query(&compiled.base.sql)
             .with_setting("log_comment", &log_comment);
         for (key, param) in &compiled.base.params {
@@ -128,20 +128,14 @@ impl PipelineStage for ProfilerExecutor {
         let (batches, summary) = query
             .fetch_arrow_with_summary()
             .await
-            .map_err(|e| PipelineError::Execution(e.to_string()))
-            .inspect_err(|e| obs.record_error(e))?;
-
+            .map_err(|e| ExecutorError(e.to_string()))?;
         let elapsed = start.elapsed();
-        obs.executed(elapsed, batches.len());
         let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
-
-        let summary = summary.ok_or_else(|| {
-            PipelineError::Execution("missing X-ClickHouse-Summary header".into())
-        })?;
-
+        let summary =
+            summary.ok_or_else(|| ExecutorError("missing X-ClickHouse-Summary header".into()))?;
         let execution = QueryExecution {
             label: "base".into(),
-            rendered_sql,
+            rendered_sql: compiled.base.render(),
             query_id: String::new(),
             elapsed_ms: elapsed.as_secs_f64() * 1000.0,
             stats: QueryExecutionStats {
@@ -157,15 +151,9 @@ impl PipelineStage for ProfilerExecutor {
             query_log: None,
             processors: None,
         };
-
-        ctx.phases
-            .get_or_insert_default::<QueryExecutionLog>()
-            .0
-            .push(execution);
-
-        Ok(ExecutionOutput {
+        Ok(Executed {
             batches,
-            result_context,
+            log: vec![execution],
         })
     }
 }

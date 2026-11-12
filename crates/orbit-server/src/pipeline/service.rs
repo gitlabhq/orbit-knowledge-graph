@@ -18,21 +18,20 @@ use query_data_model::introspection::SchemaResponse;
 use query_engine::pipeline::{
     MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
-use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
+use query_engine::shared::{DagStage, ExtractionStage, OutputStage, PipelineOutput};
 
+use super::correlation;
 use super::helpers::send_query_result;
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, RoutingOutput,
-    RoutingStage, SecurityStage,
+    AuthorizationStage, HydrationStage, RedactionStage, RoutingOutput, RoutingStage, SecurityStage,
+    graph_executors,
 };
 
 pub struct RawQuery {
     pub text: String,
     pub settings: Vec<(String, String)>,
 }
-
-pub(crate) struct QuerySettings(pub Vec<(String, String)>);
 
 pub enum QueryServiceOutput {
     Graph(Box<PipelineOutput>),
@@ -107,6 +106,19 @@ impl QueryPipelineService {
             )),
         ]);
 
+        let dag = DagStage {
+            executors: graph_executors(
+                Arc::clone(&self.client),
+                &schema.data_model,
+                "base",
+                correlation::log_comment_base(
+                    claims.user_id,
+                    &query.text,
+                    schema.migration_version,
+                ),
+                query.settings,
+            ),
+        };
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(Arc::clone(&schema.data_model));
@@ -127,7 +139,6 @@ impl QueryPipelineService {
             server_extensions,
             phases: TypeMap::default(),
         };
-        ctx.phases.insert(QuerySettings(query.settings));
 
         // The timeout lives inside run_query so the observer is still alive
         // when it fires. Dropping the future from outside (the prior shape)
@@ -147,11 +158,7 @@ impl QueryPipelineService {
             let output = PipelineRunner::start(&mut ctx, &mut obs)
                 .then(&SecurityStage)
                 .await?
-                .then(&CompilationStage)
-                .await?
-                .then(&ClickHouseExecutor {
-                    migration_version: schema.migration_version,
-                })
+                .then(&dag)
                 .await?
                 .then(&ExtractionStage)
                 .await?

@@ -12,7 +12,7 @@ use compiler::dag::{
     split_query,
 };
 use compiler::passes::result_contract::ResultContext;
-use compiler::{CompiledQueryContext, HydrationRequest, QueryError};
+use compiler::{CompiledQueryContext, HydrationRequest, ParameterizedQuery, QueryError};
 
 use super::executor::{Executed, ExecutorError, Executors, RowChecks};
 use super::observer::{Event, KEY_SAMPLE, Observer, StageInfo};
@@ -25,6 +25,15 @@ pub enum DagError {
     Compile(#[from] QueryError),
     #[error(transparent)]
     Execute(#[from] ExecutorError),
+}
+
+impl From<DagError> for pipeline::PipelineError {
+    fn from(error: DagError) -> Self {
+        match error {
+            DagError::Compile(error) => error.into(),
+            DagError::Execute(error) => Self::Execution(error.0),
+        }
+    }
 }
 
 /// What a query returns once its stages ran.
@@ -239,14 +248,17 @@ impl<'r> Runner<'r> {
     }
 
     /// Runs the hydration stage of a relational query on the rows its checks kept.
-    pub async fn hydrate(&mut self, request: HydrationRequest) -> Result<Executed, DagError> {
+    pub async fn hydrate(
+        &mut self,
+        request: HydrationRequest,
+    ) -> Result<(ParameterizedQuery, Executed), DagError> {
         let id = self.next;
         self.next += 1;
         self.emit(|| Event::Started { stage: id });
         let started = Instant::now();
         let ran = self.hydration(id, request).await;
         match &ran {
-            Ok(executed) => {
+            Ok((_, executed)) => {
                 let count = executed.batches.iter().map(RecordBatch::num_rows).sum();
                 self.emit(|| Event::Rows { stage: id, count });
                 let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -267,14 +279,18 @@ impl<'r> Runner<'r> {
         &mut self,
         id: StageId,
         request: HydrationRequest,
-    ) -> Result<Executed, DagError> {
+    ) -> Result<(ParameterizedQuery, Executed), DagError> {
         let compiled = compiler::dag::compile_hydration(request, &self.env)?;
         self.trace(id, &compiled);
         let connection = self.env.primary.connection().to_string();
-        Ok(self
-            .executors
-            .get(&connection)?
-            .execute(&compiled.request)
-            .await?)
+        let executor = self.executors.get(&connection)?;
+        let executed = executor.execute(&compiled.request).await?;
+        let Request::Hydration(query) = compiled.request else {
+            return Err(QueryError::PipelineInvariant(
+                "the hydration stage compiled no hydration query".into(),
+            )
+            .into());
+        };
+        Ok((query, executed))
     }
 }

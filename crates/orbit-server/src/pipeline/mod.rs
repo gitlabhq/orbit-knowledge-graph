@@ -12,5 +12,5 @@ pub use metrics::OTelPipelineObserver;
 pub use service::{QueryPipelineService, QueryServiceOutput, RawQuery};
 pub use stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, RoutingOutput,
-    RoutingStage, SecurityStage,
+    RoutingStage, SecurityStage, graph_executors,
 };

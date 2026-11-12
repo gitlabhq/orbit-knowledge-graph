@@ -1,7 +1,7 @@
-mod compilation;
+mod dag;
 mod extraction;
 mod output;
 
-pub use compilation::CompilationStage;
+pub use dag::DagStage;
 pub use extraction::ExtractionStage;
 pub use output::OutputStage;

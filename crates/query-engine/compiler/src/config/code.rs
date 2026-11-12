@@ -20,7 +20,7 @@ pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Result<()
 }
 
 pub(super) fn security(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Result<()> {
-    let plan = require(ctx.take_code(), "code")?;
+    let plan = require(ctx.take_code(), "search plan")?;
     let namespaces = require(ctx.namespaces().as_ref(), "namespaces")?;
     let plan = secure_code(ctx.data_model(), plan, ctx.grants(), namespaces)?;
     ctx.set_code(plan);
@@ -28,11 +28,11 @@ pub(super) fn security(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Resul
 }
 
 pub(super) fn security_check(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Result<()> {
-    check_code(require(ctx.code().as_ref(), "code")?)
+    check_code(require(ctx.code().as_ref(), "search plan")?)
 }
 
 pub(super) fn render(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Result<()> {
-    let plan = require(ctx.code().as_ref(), "code")?;
+    let plan = require(ctx.code().as_ref(), "search plan")?;
     let request = ctx.data_model().render(plan)?;
     ctx.set_request(crate::dag::Request::Code(request));
     Ok(())
