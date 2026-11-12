@@ -1,0 +1,433 @@
+cases:
+  - name: return_column_rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 100}) RETURN g.name, g.traversal_path LIMIT 10
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name", "traversal_path"]}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: validate
+            json: json_dsl_parse
+          contains:
+            - traversal_path
+
+  - name: order_by_rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 100}) RETURN g ORDER BY g.traversal_path LIMIT 10
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}], "order_by": "g.traversal_path", "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+
+  - name: group_by_rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(u:User) RETURN g.traversal_path AS path, count(u) AS members LIMIT 10
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}, {"id": "u", "entity": "User"}], "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}], "group_by": ["g.traversal_path"], "aggregations": [{"count": "u", "as": "members"}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+          not_contains:
+            - 1/100/
+
+  - name: node_filter_rejected
+    query:
+      gql: |
+        MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/100/' RETURN p LIMIT 10
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"traversal_path": {"starts_with": "1/100/"}}}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: validate
+            json: json_dsl_parse
+          contains:
+            - traversal_path
+
+  - name: null_check_rejected
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE p.traversal_path IS NOT NULL RETURN p
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "filters": {"traversal_path": {"is_not_null": true}}}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: validate
+            json: json_dsl_parse
+          contains:
+            - traversal_path
+
+  - name: node_property_map_rejected
+    query:
+      gql: |
+        MATCH (p:Project {traversal_path: '1/100/1000/'}) RETURN p LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+          not_contains:
+            - 1/100/
+
+  - name: negated_node_filter_rejected
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path STARTS WITH '2/' RETURN p.id
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "not": {"traversal_path": {"starts_with": "2/"}}}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: validate
+            json: json_dsl_parse
+          contains:
+            - traversal_path
+          not_contains:
+            - 1/100/
+            - 2/
+
+  - name: relationship_filter_rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF {traversal_path: '1/100/'}]->(g:Group) RETURN u, g LIMIT 10
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "g", "entity": "Group"}], "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g", "filters": {"traversal_path": "1/100/"}}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - private edge column "traversal_path"
+
+  - name: negated_relationship_filter_rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[c:CONTAINS]->(p:Project) WHERE NOT c.traversal_path = '1/100/1000/' RETURN p.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - private edge column "traversal_path"
+          not_contains:
+            - 1/100/
+
+  - name: projection_rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 100}) RETURN g{.name, .traversal_path} LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+
+  - name: aggregate_rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 100}) RETURN count(g.traversal_path) AS n
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}], "aggregations": [{"count": "g.traversal_path", "as": "n"}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+
+  - name: id_property_rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "g", "entity": "Group", "node_ids": [100], "id_property": "traversal_path"}], "limit": 10}
+    missing_frontends:
+      gql: The source scenario supplies only JSON.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+
+  - name: equality_and_list_filters_rejected
+    query:
+      gql: |
+        MATCH (p:Project) WHERE p.traversal_path = '1/100/1000/' RETURN p LIMIT 10
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"traversal_path": {"in": ["1/100/1000/"]}}}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: validate
+            json: json_dsl_parse
+          contains:
+            - traversal_path
+          not_contains:
+            - 1/100/
+
+  - name: negated_in_scope_filter_rejected
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path STARTS WITH '1/100/1000/' RETURN p.id
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "not": {"traversal_path": "1/100/1000/"}}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: validate
+            json: json_dsl_parse
+          contains:
+            - traversal_path
+          not_contains:
+            - 1/100/
+
+  - name: negated_null_check_rejected
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path IS NULL RETURN p.id
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "not": {"traversal_path": {"is_null": true}}}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: validate
+            json: json_dsl_parse
+          contains:
+            - traversal_path
+
+  - name: double_negation_rejected
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE NOT NOT p.traversal_path STARTS WITH '2/' RETURN p.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+          not_contains:
+            - 1/100/
+            - 2/
+
+  - name: grouped_negation_rejected
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE NOT (p.traversal_path STARTS WITH '1/100/' AND p.name = 'x') RETURN p.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+          not_contains:
+            - 1/100/
+
+  - name: property_comparisons_rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE g.traversal_path = p.traversal_path RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+
+  - name: left_side_comparison_rejected
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE p.traversal_path = p.full_path RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+
+  - name: relationship_where_filter_rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:MEMBER_OF]->(g:Group) WHERE r.traversal_path = '1/100/' RETURN g LIMIT 10
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "g", "entity": "Group"}], "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g", "filters": {"traversal_path": {"in": ["1/100/"]}}}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - private edge column "traversal_path"
+          not_contains:
+            - 1/100/
+
+  - name: path_endpoint_filter_rejected
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (g:Group {id: 100})-[:CONTAINS*1..2]->(q:Project) WHERE q.traversal_path STARTS WITH '1/100/' RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+          not_contains:
+            - 1/100/
+
+  - name: neighbors_center_filter_rejected
+    query:
+      gql: |
+        MATCH (g:Group)-[]-(x) WHERE g.traversal_path = '1/100/' RETURN x
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - traversal_path
+          not_contains:
+            - 1/100/
+
+  - name: global_entity_filter_rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.traversal_path = '1/100/' RETURN u
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "filters": {"traversal_path": "1/100/"}}], "limit": 10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: validate
+            json: json_dsl_parse
+          contains:
+            - traversal_path
+          not_contains:
+            - 1/100/

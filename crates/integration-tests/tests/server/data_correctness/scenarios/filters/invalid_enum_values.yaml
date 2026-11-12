@@ -7,7 +7,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1, user_type: 'not_a_user_type'}) RETURN u LIMIT 10
     expect:
-      compile_error_contains: [not_a_user_type, "Valid values", human, project_bot]
+      rejected: true
 
   - name: unknown_integer
     description: A filter rejects an integer outside the property's declared enum values
@@ -17,7 +17,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1}) WHERE u.user_type = 999 RETURN u LIMIT 10
     expect:
-      compile_error_contains: ["999", "Valid values", human, project_bot]
+      rejected: true
 
   - name: unknown_in_value
     description: An IN filter rejects one label outside the property's declared enum values
@@ -27,7 +27,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1}) WHERE u.user_type IN ['human', 'not_a_user_type'] RETURN u LIMIT 10
     expect:
-      compile_error_contains: [not_a_user_type, "Valid values", human, project_bot]
+      rejected: true
 
   - name: negated_unknown_label
     description: A negated filter rejects a label outside the property's declared enum values, and the error
@@ -38,7 +38,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT u.user_type IN ['not_a_user_type'] RETURN u LIMIT 10
     expect:
-      compile_error_contains: [not_a_user_type, "Valid values", "0 (human)", "6 (project_bot)"]
+      rejected: true
 
   - name: declared_integer_key
     description: An integer-backed enum accepts a declared integer key and matches its label
@@ -90,7 +90,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1}) WHERE u.state = 0 RETURN u LIMIT 10
     expect:
-      compile_error_contains: ["0", "Valid values", active, blocked]
+      rejected: true
 
   - name: string_backed_unknown_label
     description: A string-backed enum rejects a label outside its declared values
@@ -100,7 +100,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1}) WHERE u.state = 'not_a_state' RETURN u LIMIT 10
     expect:
-      compile_error_contains: [not_a_state, "Valid values", active, blocked]
+      rejected: true
 
   - name: substring_matching_no_value
     description: A text operator on an enum rejects a pattern that no declared value can match, ignoring case
@@ -110,7 +110,7 @@ cases:
       gql: |
         MATCH (u:User {id: 1}) WHERE u.user_type STARTS WITH 'bot' RETURN u LIMIT 10
     expect:
-      compile_error_contains: ["no enum value starts with", "bot", "6 (project_bot)"]
+      rejected: true
 
   - name: comparison_within_one_domain
     description: Two enum fields with the same declared values compare by value

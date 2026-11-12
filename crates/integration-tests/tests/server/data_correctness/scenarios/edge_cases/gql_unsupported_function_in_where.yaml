@@ -5,5 +5,4 @@ query:
     MATCH (u:User) WHERE lower(u.username) = 'private-query-literal' RETURN u LIMIT 10
 
 expect:
-  compile_error: "function lower() is not supported: RETURN supports count"
-  compile_error_not_contains: ["private-query-literal"]
+  rejected: true

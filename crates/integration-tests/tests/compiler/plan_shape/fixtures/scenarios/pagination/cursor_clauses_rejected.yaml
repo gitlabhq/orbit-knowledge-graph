@@ -1,0 +1,13 @@
+cases:
+  - name: The removed PAGE ... AFTER cursor clauses no longer parse
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 AFTER 'token'
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - expected end of query, ASC or DESC, SKIP, LIMIT, or DEBUG

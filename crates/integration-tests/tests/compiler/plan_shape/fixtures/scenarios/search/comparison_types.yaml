@@ -1,0 +1,13 @@
+cases:
+  - name: Same-node property comparison checks operand types
+    query:
+      gql: |
+        MATCH (a:Definition {id: 12000}) WHERE a.id = a.name RETURN a.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - type mismatch

@@ -1,0 +1,271 @@
+cases:
+  - name: aggregation
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN type(r), count(mr) AS n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - grouping by relationship type is not supported yet
+
+  - name: conflict
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE type(r) = 'APPROVED' RETURN u, mr LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: normalize
+          contains:
+            - type(r) excludes every relationship type the pattern allows
+
+  - name: duplicate_column
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, type(r) AS mr LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - duplicate RETURN column name
+
+  - name: empty_list
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) IN [] RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - IN requires 1-100 values
+
+  - name: neighbors_alias
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})<-[r]-(n) RETURN g, n, type(r) AS kind
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - "kind: neighbors and path finding return one path column that shows each edge type"
+
+  - name: not_excludes_all
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest)
+        WHERE NOT type(r) IN ['AUTHORED', 'APPROVED']
+        RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: normalize
+          contains:
+            - type(r) excludes every relationship type the pattern allows
+
+  - name: not_group
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+        WHERE NOT (type(r) = 'PRIVATE_QUERY_TYPE' AND mr.state = 'opened')
+        RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - type(r) cannot be used inside a NOT group
+          not_contains:
+            - PRIVATE_QUERY_TYPE
+
+  - name: not_neighbors
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})<-[r]-(n) WHERE NOT type(r) IN ['MEMBER_OF'] RETURN g, n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - neighbors queries support NOT only on =, <>, IS NULL, and IS NOT NULL conditions
+
+  - name: on_node
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(u) = 'AUTHORED' RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - type() takes a relationship variable, such as r in -[r]->, but u is a node
+
+  - name: operator
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) STARTS WITH 'private-query-literal' RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - type(r) supports =, <>, or IN with relationship type names
+          not_contains:
+            - private-query-literal
+
+  - name: order_aggregation
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN mr.state, count(mr) AS n ORDER BY type(r)
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - ORDER BY type(r) is not supported in aggregations yet
+
+  - name: order_neighbors
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})<-[r]-(n) RETURN g, n ORDER BY type(r)
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - path finding and neighbors have fixed result ordering
+
+  - name: order_relationship_property
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN mr ORDER BY r.source_id LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - ORDER BY cannot sort by a relationship property; sort by a node property or by type(r)
+          not_contains:
+            - undefined node
+
+  - name: order_variable_length
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN u, g ORDER BY type(r) LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - r has a variable length and binds a list
+
+  - name: path_variable_length
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF|`CONTAINS`*1..3]->(`end`:Project {id: 1000}) RETURN p, type(r)
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - r has a variable length and binds a list
+
+  - name: return_variable_length
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN g, type(r) LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - r has a variable length and binds a list
+
+  - name: shared_foreign_key
+    query:
+      gql: |
+        MATCH (s:VulnerabilityScanner)-[r:SCANS|IN_PROJECT]->(p:Project {id: 1000})
+        RETURN s, p, type(r) LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: normalize
+          contains:
+            - SCANS|IN_PROJECT share one foreign key between VulnerabilityScanner and Project
+
+  - name: unsupported_position
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE mr.title = type(r) RETURN u, mr.title LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - "function type() is not supported: type() takes one relationship variable and works in WHERE type(r) = 'CLOSES'"
+
+  - name: variable_length
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r*1..2]->(p:Project) WHERE type(r) = 'MEMBER_OF' RETURN u, p LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - r has a variable length and binds a list
+
+  - name: variable_length_return
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN u, r, g LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - r has a variable length and binds a list

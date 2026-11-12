@@ -1,0 +1,14 @@
+cases:
+  - name: Each relationship must extend the connected pattern
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(n:Note), (p:Project)-[:CONTAINS]->(g:Group)
+        RETURN u, n, p, g
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - disconnected hops

@@ -1,0 +1,13 @@
+cases:
+  - name: GQL rejects incoming containment from a branch to its project
+    query:
+      gql: |
+        MATCH (p:Project {id: 7000})<-[:CONTAINS]-(b:Branch) RETURN count(b) AS c LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate_relationships
+          contains:
+            - CONTAINS goes from Project to Branch; reverse the arrow

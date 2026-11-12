@@ -1,0 +1,17 @@
+cases:
+  - name: A public query cannot request the internal hydration query type
+    query:
+      json: |
+        {
+          "query_type": "hydration",
+          "nodes": [{"id": "h", "entity": "User", "node_ids": [1]}],
+          "limit": 10
+        }
+    missing_frontends:
+      gql: The source scenario supplies only JSON.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          contains:
+            - '"hydration" is not an allowed value'

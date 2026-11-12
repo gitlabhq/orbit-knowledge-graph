@@ -1,0 +1,15 @@
+cases:
+  - name: An unsupported function in WHERE is named without echoing the compared literal
+    query:
+      gql: |
+        MATCH (u:User) WHERE lower(u.username) = 'private-query-literal' RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - "function lower() is not supported: RETURN supports count"
+          not_contains:
+            - private-query-literal

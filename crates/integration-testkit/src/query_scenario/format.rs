@@ -112,12 +112,9 @@ pub struct QueryExpect {
     /// Run the query N times and assert all responses are identical.
     #[serde(default)]
     pub repeat_count: Option<usize>,
+    /// The compiler must reject the query. Plan-shape fixtures check the phase and message.
     #[serde(default)]
-    pub compile_error: Option<CompileErrorExpect>,
-    #[serde(default)]
-    pub compile_error_contains: MessageExpect,
-    #[serde(default)]
-    pub compile_error_not_contains: MessageExpect,
+    pub rejected: bool,
     #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
@@ -274,6 +271,11 @@ pub struct AllPagesExpect {
 impl QueryExpect {
     pub fn validate_pages_exclusive(&self, scenario: &str) {
         let has_result_fields = self.has_result_assertions();
+        assert!(
+            !self.rejected
+                || !has_result_fields && self.repeat_count.is_none() && self.pages.is_empty(),
+            "{scenario}: a rejected query has no results, so it takes no other expectations"
+        );
         if self.pages.is_empty() {
             assert!(
                 self.all_pages.is_none(),
@@ -289,9 +291,7 @@ impl QueryExpect {
         for (index, page) in self.pages.iter().enumerate() {
             assert!(
                 page.repeat_count.is_none()
-                    && page.compile_error.is_none()
-                    && !page.compile_error_contains.is_configured()
-                    && !page.compile_error_not_contains.is_configured()
+                    && !page.rejected
                     && page.pages.is_empty()
                     && page.all_pages.is_none(),
                 "{scenario}: page {} supports only result assertions",
@@ -356,60 +356,6 @@ impl QueryExpect {
             })
             .sum();
         (total > 0).then_some(total)
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum CompileErrorExpect {
-    Flag(bool),
-    Substring(String),
-    PerFrontend(BTreeMap<String, String>),
-}
-
-impl CompileErrorExpect {
-    pub fn substring_for(&self, frontend_key: &str) -> Option<&str> {
-        match self {
-            Self::Flag(_) => None,
-            Self::Substring(sub) => Some(sub),
-            Self::PerFrontend(by_frontend) => Some(
-                by_frontend
-                    .get(frontend_key)
-                    .unwrap_or_else(|| panic!("compile_error missing frontend '{frontend_key}'"))
-                    .as_str(),
-            ),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum MessageExpect {
-    All(Vec<String>),
-    PerFrontend(BTreeMap<String, Vec<String>>),
-}
-
-impl Default for MessageExpect {
-    fn default() -> Self {
-        Self::All(Vec::new())
-    }
-}
-
-impl MessageExpect {
-    fn is_configured(&self) -> bool {
-        !matches!(self, Self::All(fragments) if fragments.is_empty())
-    }
-
-    pub fn for_frontend(&self, frontend_key: &str) -> &[String] {
-        match self {
-            Self::All(fragments) => fragments,
-            Self::PerFrontend(by_frontend) => by_frontend
-                .get(frontend_key)
-                .unwrap_or_else(|| {
-                    panic!("compile error message expectation missing frontend '{frontend_key}'")
-                })
-                .as_slice(),
-        }
     }
 }
 

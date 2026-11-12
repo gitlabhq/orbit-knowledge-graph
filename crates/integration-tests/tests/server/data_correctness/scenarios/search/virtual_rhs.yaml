@@ -5,4 +5,4 @@ query:
     MATCH (f:File {id: 13004}) WHERE f.content = f.name RETURN f.id
 
 expect:
-  compile_error: "property comparison cannot reference virtual column"
+  rejected: true

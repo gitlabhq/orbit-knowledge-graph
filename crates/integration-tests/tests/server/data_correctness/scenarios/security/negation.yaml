@@ -6,7 +6,7 @@ cases:
         MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
         WHERE NOT (mr.title = u.first_name AND mr.state = 'opened')
         RETURN mr.title LIMIT 10
-    expect: { compile_error: administrator }
+    expect: { rejected: true }
 
   - name: negation_admin_bypass_grouped
     description: A NOT group cannot filter on an administrator-only field
@@ -14,22 +14,21 @@ cases:
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT (u.username = 'alice' AND u.is_admin = true) RETURN u.id
     expect:
-      compile_error: administrator
-      compile_error_not_contains: [alice]
+      rejected: true
 
   - name: negation_admin_bypass_pushdown
     description: A complemented NOT cannot filter on an administrator-only field
     query:
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT u.is_admin = true RETURN u.id
-    expect: { compile_error: administrator }
+    expect: { rejected: true }
 
   - name: negation_admin_bypass_rhs
     description: A NOT group cannot compare against an administrator-only field on the same node
     query:
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT (u.username = u.first_name AND u.state = 'active') RETURN u.id
-    expect: { compile_error: administrator }
+    expect: { rejected: true }
 
   - name: negation_admin_context_allowed
     description: An administrator can use administrator-only fields under NOT
@@ -53,14 +52,14 @@ cases:
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"is_admin":{"in":[true]}}}],"limit":30}
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT u.is_admin IN [true] RETURN u.id
-    expect: { compile_error: administrator }
+    expect: { rejected: true }
 
   - name: negation_admin_rhs_pushdown
     description: A complemented NOT comparison cannot reference an administrator-only field on the same node
     query:
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT u.private_profile = u.is_admin RETURN u.id
-    expect: { compile_error: administrator }
+    expect: { rejected: true }
 
   - name: negation_cross_org_excludes
     description: |
@@ -189,7 +188,7 @@ cases:
         MATCH (u:User {id: 1})-[m:MEMBER_OF]->(g:Group)
         WHERE NOT (m.source_id = u.first_name AND g.id = 100)
         RETURN g.name LIMIT 10
-    expect: { compile_error: property comparisons involving relationships are unsupported }
+    expect: { rejected: true }
 
   - name: negation_scoped_neighbors_excludes
     description: "A complemented NOT on a neighbors center keeps the caller's scope"

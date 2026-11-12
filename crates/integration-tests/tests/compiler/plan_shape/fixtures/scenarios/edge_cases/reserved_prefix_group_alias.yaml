@@ -1,0 +1,21 @@
+cases:
+  - name: Group key names cannot use the internal column prefix
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id IN [2000, 2001] RETURN mr, mr.iid AS _orbit_mr_id, count(mr) AS n LIMIT 10
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]}],
+          "group_by": ["mr", {"key": "mr.iid", "as": "_orbit_mr_id"}],
+          "aggregations": [{"count": "mr", "as": "n"}],
+          "limit": 10
+        }
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: gql_parse
+            json: validate
+          contains:
+            - identifier "_orbit_mr_id" conflicts with reserved prefix "_orbit_"

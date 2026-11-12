@@ -5,7 +5,7 @@ use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
 use query_engine::shared::PipelineOutput;
 use serde_json::Value;
 
-use super::{QueryExpect, assert_gql_table, assert_response, format::CompileErrorExpect};
+use super::{QueryExpect, assert_gql_table, assert_response};
 
 static RESPONSE_SCHEMA: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(include_str!(concat!(
@@ -69,53 +69,14 @@ pub(super) fn assert_repeated_response(
 pub(super) fn assert_compilation(
     compiled: Result<Arc<CompiledQueryContext>, impl std::fmt::Display>,
     expect: &QueryExpect,
-    frontend: &str,
     label: &str,
 ) -> Option<Arc<CompiledQueryContext>> {
-    let contains = expect.compile_error_contains.for_frontend(frontend);
-    let not_contains = expect.compile_error_not_contains.for_frontend(frontend);
-    let substring = expect
-        .compile_error
-        .as_ref()
-        .and_then(|error| error.substring_for(frontend));
-    let expects_error = !matches!(
-        expect.compile_error,
-        None | Some(CompileErrorExpect::Flag(false))
-    ) || !contains.is_empty();
-    assert!(
-        expects_error || not_contains.is_empty(),
-        "{label}: compile_error_not_contains requires an expected compile error"
-    );
-    let compiled = match compiled {
-        Ok(compiled) => {
-            assert!(
-                !expects_error,
-                "{label}: expected compile error but got success"
-            );
-            compiled
-        }
-        Err(error) => {
-            assert!(expects_error, "{label}: unexpected compile error: {error}");
-            let message = error.to_string();
-            for fragment in substring
-                .into_iter()
-                .chain(contains.iter().map(String::as_str))
-            {
-                assert!(
-                    message.contains(fragment),
-                    "{label}: compile error '{message}' does not contain '{fragment}'"
-                );
-            }
-            for fragment in not_contains {
-                assert!(
-                    !message.contains(fragment),
-                    "{label}: compile error must not contain '{fragment}'\nerror: {message}"
-                );
-            }
-            return None;
-        }
-    };
-    Some(compiled)
+    match (compiled, expect.rejected) {
+        (Ok(compiled), false) => Some(compiled),
+        (Ok(_), true) => panic!("{label}: expected the compiler to reject the query"),
+        (Err(error), false) => panic!("{label}: unexpected compile error: {error}"),
+        (Err(_), true) => None,
+    }
 }
 
 pub(super) fn assert_output(

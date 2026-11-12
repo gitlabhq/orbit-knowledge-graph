@@ -1,0 +1,97 @@
+cases:
+  - name: above_maximum_rejected
+    query:
+      gql: |
+        MATCH (n:Note) WHERE n.noteable_id = 9223372036854775808 RETURN n
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 9223372036854775808}}]}
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: gql_parse
+            json: validate
+          contains:
+            - out of range for a signed 64-bit integer
+
+  - name: below_minimum_rejected
+    query:
+      gql: |
+        MATCH (n:Note) WHERE n.noteable_id = -9223372036854775809 RETURN n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - out of range for a signed 64-bit integer
+
+  - name: hexadecimal_above_maximum_rejected
+    query:
+      gql: |
+        MATCH (n:Note) WHERE n.noteable_id = 0xFFFFFFFFFFFFFFFF RETURN n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - out of range for a signed 64-bit integer
+
+  - name: octal_above_maximum_rejected
+    query:
+      gql: |
+        MATCH (n:Note) WHERE n.noteable_id = 0o1777777777777777777777 RETURN n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - out of range for a signed 64-bit integer
+
+  - name: list_element_above_maximum_rejected
+    query:
+      gql: |
+        MATCH (n:Note) WHERE n.noteable_id IN [2000, 18446744073709551615] RETURN n
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": {"in": [2000, 18446744073709551615]}}}]}
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: gql_parse
+            json: validate
+          contains:
+            - out of range for a signed 64-bit integer
+
+  - name: node_id_above_maximum_rejected
+    query:
+      gql: |
+        MATCH (n:Note {id: 9223372036854775808}) RETURN n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - out of range for a signed 64-bit integer
+
+  - name: enum_key_above_maximum_rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state = 18446744073709551615 RETURN mr
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": 18446744073709551615}}]}
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: gql_parse
+            json: validate
+          contains:
+            - out of range for a signed 64-bit integer

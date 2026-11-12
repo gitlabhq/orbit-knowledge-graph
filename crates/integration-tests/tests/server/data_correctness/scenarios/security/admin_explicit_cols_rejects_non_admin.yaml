@@ -14,4 +14,4 @@ query:
     MATCH (u:User {id: 1}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.is_admin, u.is_auditor LIMIT 10
 
 expect:
-  compile_error_contains: [is_admin, administrator]
+  rejected: true

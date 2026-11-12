@@ -1,0 +1,385 @@
+cases:
+  - name: boolean_operator_no_literal_echo
+    query:
+      gql: |
+        MATCH (u:User {id: 1})
+        WHERE u.username = 'private-query-literal' XOR u.id = 2
+        RETURN u
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - OR and XOR are not supported
+          not_contains:
+            - private-query-literal
+            - Orbit query syntax
+
+  - name: invalid_value_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE NOT wi.id IN ['bad'] RETURN wi.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - not an integer
+
+  - name: is_true_rejected_names_not
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE wi.confidential IS TRUE RETURN wi.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - expected NULL or NOT NULL
+          not_contains:
+            - expected Not
+            - Rule
+
+  - name: literal_comparison_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE 'private-query-literal' = 'private-query-literal' RETURN wi.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - each comparison starts with a property such as n.name
+          not_contains:
+            - private-query-literal
+
+  - name: negated_ids_need_anchor
+    query:
+      gql: |
+        MATCH (wi:WorkItem) WHERE NOT (wi.id IN [4000] AND wi.id >= 4000 AND wi.id <= 4010) RETURN wi.id
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","not":{"id":{"in":[4000],"gte":4000,"lte":4010}}}],"limit":30}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - or WHERE mr.project_id = 42 (NOT conditions do not count)
+
+  - name: negation_complement_entry_cap_rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 RETURN u
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - filter on "id" needs between 1 and 10 predicates
+
+  - name: negation_depth_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT wi.state = 'closed' RETURN wi.state
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - expression nesting is too deep
+
+  - name: negation_predicate_cap_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE NOT (wi.weight = 0 AND wi.weight = 1 AND wi.weight = 2 AND wi.weight = 3 AND wi.weight = 4 AND wi.weight = 5 AND wi.weight = 6 AND wi.weight = 7 AND wi.weight = 8 AND wi.weight = 9 AND wi.weight = 10 AND wi.weight = 11 AND wi.weight = 12 AND wi.weight = 13 AND wi.weight = 14 AND wi.weight = 15) RETURN wi.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - Query has 17 predicates; the maximum is 16 across the entire query
+          not_contains:
+            - wi.weight = 15
+
+  - name: not_group_literal_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE NOT ('private-query-literal' = 'x' AND wi.weight = 1) RETURN wi.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - each comparison starts with a property such as n.name
+          not_contains:
+            - private-query-literal
+
+  - name: not_group_neighbors_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000})-->(n)
+        WHERE NOT (wi.state = 'closed' AND wi.weight = 8)
+        RETURN n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - neighbors queries support NOT only on =, <>, IS NULL, and IS NOT NULL conditions
+
+  - name: not_group_path_rejected
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(g:Group)
+        WHERE g.id IN [100, 102] AND NOT g.visibility_level IN ['internal']
+        RETURN p
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,102],"not":{"visibility_level":{"in":["internal"]}}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - shortest paths support NOT only on =, <>, IS NULL, and IS NOT NULL conditions
+
+  - name: not_in_empty_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN []
+        RETURN wi.weight LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - IN requires 1-100 values
+
+  - name: not_in_operator_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.state NOT IN ['closed']
+        RETURN wi.state LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - write NOT n.property IN [...] to exclude values
+          not_contains:
+            - closed
+
+  - name: not_list_only_needs_anchor
+    query:
+      gql: |
+        MATCH (u:User) WHERE NOT u.id IN [1] RETURN u
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","not":{"id":{"in":[1]}}}],"limit":30}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - or WHERE mr.project_id = 42 (NOT conditions do not count)
+
+  - name: not_literal_comparison_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE NOT 'private-query-literal' = 'private-query-literal' RETURN wi.id
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{"1":"private-query-literal"}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: gql_parse
+            json: json_dsl_parse
+          contains:
+            gql:
+              - each comparison starts with a property such as n.name
+            json:
+              - does not match
+          not_contains:
+            - private-query-literal
+
+  - name: not_literal_left_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE NOT 'private-query-literal' < wi.title RETURN wi.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - each comparison starts with a property such as n.name
+          not_contains:
+            - private-query-literal
+
+  - name: not_neighbors_endpoint_rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(x)
+        WHERE NOT x.name IN ['private-query-literal']
+        RETURN x
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - neighbors requires one labeled center and an unfiltered, unlabeled endpoint at one hop
+          not_contains:
+            - undefined
+            - private-query-literal
+
+  - name: not_path_relationship_rejected
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (u:User {id: 1})-[r]->(g:Group {id: 100})
+        WHERE NOT r.source_id IN [1, 2]
+        RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - path finding supports outgoing paths starting at one hop, without relationship predicates
+          not_contains:
+            - undefined
+
+  - name: not_virtual_contains_rejected
+    query:
+      gql: |
+        MATCH (f:File {id: 13000})
+        WHERE NOT f.content CONTAINS 'secret'
+        RETURN f.name
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[13000],"not":{"content":{"contains":"secret"}},"columns":["name"]}],"limit":30}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - virtual columns cannot be used under NOT
+          not_contains:
+            - secret
+
+  - name: not_virtual_eq_rejected
+    query:
+      gql: |
+        MATCH (f:File {id: 13000})
+        WHERE NOT f.content = 'secret'
+        RETURN f.name
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - virtual column
+          not_contains:
+            - secret
+
+  - name: or_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id = 4000 OR wi.id = 4001
+        RETURN wi.state LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - OR and XOR are not supported; combine conditions with AND and NOT, or use IN [...] to match one of several values
+          not_contains:
+            - Orbit query syntax
+            - "4001"
+
+  - name: same_property_comparison_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE NOT wi.weight = wi.weight RETURN wi.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - every condition must compare a property of a matched node or relationship
+
+  - name: unknown_property_rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT (u.username = 'alice' AND u.missing = 'value') RETURN u.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - does not exist
+
+  - name: variable_edge_rejected
+    query:
+      gql: |
+        MATCH (a:Definition {id: 12000})-[calls:CALLS*1..2]->(b:Definition) WHERE NOT calls.source_id = 12000 RETURN b.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - relationship-list
+
+  - name: xor_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000})
+        WHERE NOT (wi.state = 'closed' XOR wi.weight = 3)
+        RETURN wi.state LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - OR and XOR are not supported
+          not_contains:
+            - Orbit query syntax
+            - closed

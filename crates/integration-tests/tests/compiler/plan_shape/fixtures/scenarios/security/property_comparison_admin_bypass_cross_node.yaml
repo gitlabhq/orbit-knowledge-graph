@@ -1,0 +1,15 @@
+cases:
+  - name: Cross-node property comparison cannot bypass admin-only restriction. A non-admin comparing a public field against an admin-only field via property-to-property syntax must be rejected.
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+        WHERE u.first_name <> mr.title
+        RETURN mr.title LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - administrator

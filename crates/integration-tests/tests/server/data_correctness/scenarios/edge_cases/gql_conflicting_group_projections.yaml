@@ -6,4 +6,4 @@ query:
     RETURN u{.username} AS author, u{.name} AS owner, count(mr) AS mr_count
 
 expect:
-  compile_error: "duplicate or overlapping node projection"
+  rejected: true

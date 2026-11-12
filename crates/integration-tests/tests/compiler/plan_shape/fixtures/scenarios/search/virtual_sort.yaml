@@ -1,0 +1,13 @@
+cases:
+  - name: Virtual properties cannot be ordered before hydration
+    query:
+      gql: |
+        MATCH (f:File {id: 13004}) RETURN f.id ORDER BY f.content
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - virtual

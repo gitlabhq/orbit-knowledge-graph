@@ -1,0 +1,26 @@
+cases:
+  - name: min_file_path_rejected
+    query:
+      gql: |
+        MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN min(f.path) AS v
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - aggregates are restricted to scalars
+
+  - name: max_definition_name_rejected
+    query:
+      gql: |
+        MATCH (d:Definition) WHERE d.project_id = 1000 RETURN max(d.name) AS v
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - aggregates are restricted to scalars

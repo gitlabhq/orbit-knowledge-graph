@@ -1,0 +1,33 @@
+cases:
+  - name: reporter_is_rejected
+    query:
+      gql: |
+        MATCH (v:Vulnerability)-[:HAS_NOTE]->(n:Note {id: 3000})
+        MATCH (v)-[:HAS_FINDING]->(f:VulnerabilityOccurrence)
+        WHERE f.id IN [90000, 90001]
+        RETURN count(v) AS n
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "v", "entity": "Vulnerability"},
+            {"id": "n", "entity": "Note", "node_ids": [3000]},
+            {"id": "f", "entity": "VulnerabilityOccurrence", "node_ids": [90000, 90001]}
+          ],
+          "relationships": [
+            {"type": "HAS_NOTE", "from": "v", "to": "n"},
+            {"type": "HAS_FINDING", "from": "v", "to": "f"}
+          ],
+          "aggregations": [{"count": "v", "as": "n"}]
+        }
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+      access_level: 20
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - requires access level 25

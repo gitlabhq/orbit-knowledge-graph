@@ -1,0 +1,143 @@
+cases:
+  - name: greater_than_rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state > 'opened' RETURN mr
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"gt": 1}}}]}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - enum values have no order
+
+  - name: greater_or_equal_rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state >= 3 RETURN mr
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"gte": "merged"}}}]}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - enum values have no order
+
+  - name: less_than_rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state < 'opened' RETURN mr
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"lt": "opened"}}}]}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - enum values have no order
+
+  - name: less_or_equal_rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state <= 'merged' RETURN mr
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"lte": 3}}}]}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - enum values have no order
+
+  - name: negated_ordering_rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE NOT mr.state > 'opened' RETURN mr
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - enum values have no order
+
+  - name: string_backed_enum_ordering_rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.state > 'active' RETURN u
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "filters": {"state": {"gt": "active"}}}]}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - enum values have no order
+
+  - name: min_rejected
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN p, min(mr.state) AS s
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}, {"id": "mr", "entity": "MergeRequest"}], "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}], "group_by": ["p"], "aggregations": [{"min": "mr.state", "as": "s"}]}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - because enum values have no order
+
+  - name: max_rejected
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN p, max(mr.state) AS s
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}, {"id": "mr", "entity": "MergeRequest"}], "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}], "group_by": ["p"], "aggregations": [{"max": "mr.state", "as": "s"}]}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - because enum values have no order
+
+  - name: ordering_between_enum_fields_rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE g.visibility_level < p.visibility_level RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - not <, >, <=, or >=
+
+  - name: comparison_across_enum_domains_rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) WHERE u.user_type = p.visibility_level RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - enums with different values
+
+  - name: inequality_across_enum_domains_rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) WHERE u.user_type <> p.visibility_level RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - enums with different values

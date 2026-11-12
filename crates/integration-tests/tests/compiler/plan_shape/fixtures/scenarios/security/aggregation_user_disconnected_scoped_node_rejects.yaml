@@ -1,0 +1,33 @@
+cases:
+  - name: Aggregation with User and declared-but-disconnected Group rejects because User scan would be unbounded
+    query:
+      gql: |
+        MATCH (u:User {email: 'target@example.com'}), (g:Group) RETURN g, count(u) AS hit LIMIT 1
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "filters": {"email": "target@example.com"}},
+            {"id": "g", "entity": "Group"}
+          ],
+          "group_by": ["g"],
+          "aggregations": [{"count": "u", "as": "hit"}],
+          "limit": 1
+        }
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: gql_parse
+            json: restrict
+          contains:
+            gql:
+              - one connected pattern
+            json:
+              - globally-scoped
+              - relationships
+          not_contains:
+            gql:
+              - target@example.com
+            json:
+              - target@example.com

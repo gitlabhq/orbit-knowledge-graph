@@ -1,0 +1,55 @@
+cases:
+  - name: endpoint_contradiction
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.target_kind = 'Group' RETURN p LIMIT 10
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[100]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","filters":{"target_kind":"Group"}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - '"Group" cannot match this pattern'
+            - "Valid values: Project"
+
+  - name: unknown_relationship_kind
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[r]->(p:Project) WHERE r.relationship_kind IN ['CONTAINS', 'NOT_A_KIND'] RETURN p LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - '"NOT_A_KIND" cannot match this pattern'
+            - CONTAINS
+
+  - name: relationship_kind_outside_pattern
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.relationship_kind = 'AUTHORED' RETURN p LIMIT 10
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[100]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","filters":{"relationship_kind":"AUTHORED"}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - '"AUTHORED" cannot match this pattern'
+            - "Valid values: CONTAINS"
+
+  - name: excluding_the_only_kind
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.relationship_kind <> 'CONTAINS' RETURN p LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - <> "CONTAINS" excludes the only value this pattern allows; remove the filter

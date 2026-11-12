@@ -7,7 +7,7 @@ cases:
       gql: |
         MATCH (n:Note) WHERE n.noteable_id = 9223372036854775808 RETURN n
     expect:
-      compile_error: out of range for a signed 64-bit integer
+      rejected: true
 
   - name: below_minimum_rejected
     description: An integer below the signed 64-bit minimum is rejected
@@ -15,7 +15,7 @@ cases:
       gql: |
         MATCH (n:Note) WHERE n.noteable_id = -9223372036854775809 RETURN n
     expect:
-      compile_error: out of range for a signed 64-bit integer
+      rejected: true
 
   - name: hexadecimal_above_maximum_rejected
     description: A hexadecimal literal above the signed 64-bit maximum is rejected
@@ -23,7 +23,7 @@ cases:
       gql: |
         MATCH (n:Note) WHERE n.noteable_id = 0xFFFFFFFFFFFFFFFF RETURN n
     expect:
-      compile_error: out of range for a signed 64-bit integer
+      rejected: true
 
   - name: octal_above_maximum_rejected
     description: An octal literal above the signed 64-bit maximum is rejected
@@ -31,7 +31,7 @@ cases:
       gql: |
         MATCH (n:Note) WHERE n.noteable_id = 0o1777777777777777777777 RETURN n
     expect:
-      compile_error: out of range for a signed 64-bit integer
+      rejected: true
 
   - name: list_element_above_maximum_rejected
     description: Every IN element must fit in a signed 64-bit integer
@@ -41,7 +41,7 @@ cases:
       gql: |
         MATCH (n:Note) WHERE n.noteable_id IN [2000, 18446744073709551615] RETURN n
     expect:
-      compile_error: out of range for a signed 64-bit integer
+      rejected: true
 
   - name: node_id_above_maximum_rejected
     description: A node id above the signed 64-bit maximum is rejected
@@ -49,7 +49,7 @@ cases:
       gql: |
         MATCH (n:Note {id: 9223372036854775808}) RETURN n
     expect:
-      compile_error: out of range for a signed 64-bit integer
+      rejected: true
 
   - name: enum_key_above_maximum_rejected
     description: An enum key above the signed 64-bit maximum is rejected
@@ -59,7 +59,7 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state = 18446744073709551615 RETURN mr
     expect:
-      compile_error: out of range for a signed 64-bit integer
+      rejected: true
 
   - name: range_bounds_execute
     description: The signed 64-bit maximum and minimum are accepted and match nothing

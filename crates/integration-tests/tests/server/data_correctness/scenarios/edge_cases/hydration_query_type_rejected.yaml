@@ -9,4 +9,4 @@ query:
     }
 
 expect:
-  compile_error: '"hydration" is not an allowed value'
+  rejected: true

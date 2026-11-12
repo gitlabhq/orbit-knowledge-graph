@@ -1,0 +1,14 @@
+cases:
+  - name: Reusing a node to close a cycle is rejected before planning
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(n:Note), (n)<-[:AUTHORED]-(u)
+        RETURN u, n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - cycles are unsupported

@@ -1,0 +1,178 @@
+cases:
+  - name: aggregation_negation_oracle_boolean
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.resolved_on_default_branch = true RETURN p{.id, .name}, count(v) AS c LIMIT 10
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"resolved_on_default_branch":{"ne":true}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+      access_level: 20
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - requires access level 25
+
+  - name: aggregation_negation_oracle_complement_twin
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT NOT v.severity = 'critical' RETURN p{.id, .name}, count(v) AS c LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+      access_level: 20
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - requires access level 25
+
+  - name: aggregation_negation_oracle_enum_ne
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'critical' RETURN p{.id, .name}, count(v) AS c LIMIT 10
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"severity":{"ne":"critical"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+      access_level: 20
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - requires access level 25
+
+  - name: aggregation_negation_oracle_enum_not_in
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity IN ['critical', 'high'] RETURN p{.id, .name}, count(v) AS c LIMIT 10
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"severity":{"in":["critical","high"]}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+      access_level: 20
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - requires access level 25
+
+  - name: aggregation_negation_oracle_id_split
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.id < 8001 RETURN p{.id, .name}, count(v) AS c LIMIT 10
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"id":{"lt":8001}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+      access_level: 20
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - requires access level 25
+
+  - name: aggregation_negation_oracle_id_window
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT (v.id >= 8000 AND v.id <= 8001) RETURN p{.id, .name}, count(v) AS c LIMIT 10
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"id":{"gte":8000,"lte":8001}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+      access_level: 20
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - requires access level 25
+
+  - name: aggregation_negation_oracle_null_check
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.detected_at IS NULL RETURN p{.id, .name}, count(v) AS c LIMIT 10
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"detected_at":{"is_not_null":true}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+      access_level: 20
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - requires access level 25
+
+  - name: aggregation_negation_oracle_property_grouping
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'low' RETURN v.severity, count(v) AS vuln_count LIMIT 10
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"severity":{"ne":"low"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["v.severity"],"aggregations":[{"count":"v","as":"vuln_count"}],"limit":10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+      access_level: 20
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - requires access level 25
+
+  - name: aggregation_negation_oracle_sql_drops_reporter
+    query:
+      gql: |
+        MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 AND NOT (v.severity = 'critical' AND v.state = 'detected') RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - requires access level 25
+
+  - name: aggregation_negation_oracle_title_token
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT token_match(v.title, 'SQLi') RETURN p{.id, .name}, count(v) AS c LIMIT 10
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"title":{"token_match":"SQLi"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+      access_level: 20
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - text matching and ordering require grouping by "v"

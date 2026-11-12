@@ -1,0 +1,16 @@
+cases:
+  - name: DISTINCT is accepted only inside count()
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN sum(DISTINCT mr.iid) AS total
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - DISTINCT works only inside count()

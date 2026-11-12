@@ -1,0 +1,102 @@
+cases:
+  - name: text_prefix_on_ungrouped_node_rejected
+    query:
+      gql: |
+        MATCH (w:WorkItem {id: 4001}) WHERE w.title STARTS WITH 'Fix a' RETURN count(w) AS n
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4001],"filters":{"title":{"starts_with":"Fix a"}}}],"aggregations":[{"count":"w","as":"n"}]}
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - text matching and ordering require grouping by "w"
+
+  - name: text_contains_on_ungrouped_node_rejected
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.title CONTAINS 'auth' RETURN g, count(w) AS n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - text matching and ordering require grouping by "w"
+
+  - name: negated_text_match_on_ungrouped_node_rejected
+    query:
+      gql: |
+        MATCH (w:WorkItem {id: 4001}) WHERE NOT w.description CONTAINS 'login' RETURN count(w) AS n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - text matching and ordering require grouping by "w"
+
+  - name: text_ordering_on_ungrouped_node_rejected
+    query:
+      gql: |
+        MATCH (w:WorkItem {id: 4001}) WHERE w.title < 'G' RETURN count(w) AS n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - text matching and ordering require grouping by "w"
+
+  - name: cross_node_text_ordering_rejected
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.title > l.title RETURN count(w) AS n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - text matching and ordering require grouping by "w"
+
+  - name: cross_node_text_ordering_rhs_rejected
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.title > l.title RETURN w, count(l) AS n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    security:
+      org_id: 1
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - text matching and ordering require grouping by "l"

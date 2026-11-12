@@ -1,0 +1,14 @@
+cases:
+  - name: Repeated node properties cannot silently overwrite the original selector
+    query:
+      gql: |
+        MATCH (u:User {id: 1}), (u {id: 2})
+        RETURN u
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - declare a node's properties once

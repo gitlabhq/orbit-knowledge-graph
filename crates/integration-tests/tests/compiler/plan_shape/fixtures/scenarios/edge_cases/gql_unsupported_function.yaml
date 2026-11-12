@@ -1,0 +1,13 @@
+cases:
+  - name: An unsupported function in RETURN is named and the error lists the supported functions
+    query:
+      gql: |
+        MATCH (m:MergeRequest)-[r]->(w:WorkItem) WHERE w.id = 1 RETURN m.id, labels(w) LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - "function labels() is not supported: RETURN supports count, sum, avg, min, max, date_trunc, properties, and type"

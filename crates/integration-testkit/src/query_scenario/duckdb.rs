@@ -64,7 +64,7 @@ fn run_step(
         let expect = &step.expect;
         expect.validate_pages_exclusive(&label);
         let compiled = compile_local(query, frontend, ontology).map(Arc::new);
-        let Some(compiled) = assert_compilation(compiled, expect, key, &label) else {
+        let Some(compiled) = assert_compilation(compiled, expect, &label) else {
             continue;
         };
         if expect.pages.is_empty() {
@@ -72,7 +72,7 @@ fn run_step(
             let baseline = assert_output(&output, frontend, expect, &label);
             for run in 2..=repeat_count(expect, &label) {
                 let compiled = compile_local(query, frontend, ontology).map(Arc::new);
-                let compiled = assert_compilation(compiled, expect, key, &label)
+                let compiled = assert_compilation(compiled, expect, &label)
                     .expect("repeated query should compile");
                 let output = execute(database, &compiled, &label);
                 let response = assert_output(&output, frontend, expect, &label);

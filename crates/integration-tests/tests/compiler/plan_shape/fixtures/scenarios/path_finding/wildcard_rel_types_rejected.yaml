@@ -1,0 +1,91 @@
+cases:
+  - name: untyped_path_rejected
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[*1..3]->(`end`:Project {id: 1004}) RETURN p
+      json: |
+        {"query_type": "path_finding", "nodes": [{"id": "start", "entity": "User", "node_ids": [1]}, {"id": "end", "entity": "Project", "node_ids": [1004]}], "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["*"]}}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - shortest paths require named relationship types
+
+  - name: legacy_shortest_path_hint_names_a_type
+    query:
+      gql: |
+        MATCH p = shortestPath((start:User {id: 1})-[*1..3]->(`end`:Project {id: 1004})) RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - -[:CONTAINS*1..3]->
+
+  - name: negated_type_condition_rejected
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE NOT type(r) = 'CONTAINS' RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - shortest paths require named relationship types
+
+  - name: not_equal_type_condition_rejected
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE type(r) <> 'CONTAINS' RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - shortest paths require named relationship types
+
+  - name: wildcard_mixed_with_names_rejected
+    query:
+      json: |
+        {"query_type": "path_finding", "nodes": [{"id": "start", "entity": "User", "node_ids": [1]}, {"id": "end", "entity": "Project", "node_ids": [1004]}], "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["*", "MEMBER_OF"]}}
+    missing_frontends:
+      gql: The source scenario supplies only JSON.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - cannot be combined with named types
+
+  - name: relationship_wildcard_mixed_with_names_rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "g", "entity": "Group"}], "relationships": [{"type": ["MEMBER_OF", "*"], "from": "u", "to": "g"}]}
+    missing_frontends:
+      gql: The source scenario supplies only JSON.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - cannot be combined with named types
+
+  - name: neighbors_wildcard_mixed_with_names_rejected
+    query:
+      json: |
+        {"query_type": "neighbors", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}], "neighbors": {"direction": "outgoing", "rel_types": ["*", "MEMBER_OF"]}}
+    missing_frontends:
+      gql: The source scenario supplies only JSON.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - cannot be combined with named types

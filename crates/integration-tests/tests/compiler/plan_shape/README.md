@@ -43,6 +43,23 @@ Common targets have aliases, declared in one table in
 
 An alias and an explicit phase entry cannot set the same state field.
 
+`rejected` checks that the pipeline rejects the query, at which phase, and with
+which message:
+
+```yaml
+physical:
+  clickhouse:
+    rejected:
+      phase: validate
+      contains: ["enum values have no order"]
+      not_contains: [private-query-literal]
+```
+
+`phase`, `contains`, and `not_contains` each take one value for both frontends,
+or a map with `json` and `gql` keys. A fixture can still check state fields at
+phases that run before the rejection. Data-correctness scenarios keep a
+`rejected: true` smoke check for each of these queries.
+
 A phase key must name a phase of that pipeline, and each state field must be one
 the phase writes. The runner rejects other keys. Each state field has one
 contract:

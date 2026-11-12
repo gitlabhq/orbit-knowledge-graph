@@ -18,3 +18,100 @@ cases:
             - gl_group AS g WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _orbit_relation_
             - LIMIT 1 BY g.traversal_path, g.id) AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')])) AND (g._deleted = false))
           not_contains: []
+
+  - name: negation_admin_bypass_cross_node
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+        WHERE NOT (mr.title = u.first_name AND mr.state = 'opened')
+        RETURN mr.title LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - administrator
+
+  - name: negation_admin_bypass_grouped
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT (u.username = 'alice' AND u.is_admin = true) RETURN u.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - administrator
+          not_contains:
+            - alice
+
+  - name: negation_admin_bypass_pushdown
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT u.is_admin = true RETURN u.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - administrator
+
+  - name: negation_admin_bypass_rhs
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT (u.username = u.first_name AND u.state = 'active') RETURN u.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - administrator
+
+  - name: negation_admin_leaf
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT u.is_admin IN [true] RETURN u.id
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"is_admin":{"in":[true]}}}],"limit":30}
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - administrator
+
+  - name: negation_admin_rhs_pushdown
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT u.private_profile = u.is_admin RETURN u.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - administrator
+
+  - name: negation_relationship_rhs_rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[m:MEMBER_OF]->(g:Group)
+        WHERE NOT (m.source_id = u.first_name AND g.id = 100)
+        RETURN g.name LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - property comparisons involving relationships are unsupported

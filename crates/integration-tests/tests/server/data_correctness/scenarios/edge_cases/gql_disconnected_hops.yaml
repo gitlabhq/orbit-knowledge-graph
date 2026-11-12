@@ -6,4 +6,4 @@ query:
     RETURN u, n, p, g
 
 expect:
-  compile_error: "disconnected hops"
+  rejected: true

@@ -1,0 +1,13 @@
+cases:
+  - name: Self-loop aggregation binds both edge endpoints to the same node
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","filters":{"name":"audit_caller"}}],"relationships":[{"type":"CALLS","from":"a","to":"a"}],"aggregations":[{"count":"a","as":"n"}]}
+    missing_frontends:
+      gql: The source scenario supplies only JSON.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - relationship endpoints must use different node aliases

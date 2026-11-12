@@ -1,0 +1,20 @@
+cases:
+  - name: Non-admin order_by on admin-only field rejects at compile
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.is_admin DESC LIMIT 10
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+          "order_by": "-u.is_admin",
+          "limit": 10
+        }
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - is_admin
+            - order_by
+            - administrator

@@ -1,0 +1,23 @@
+cases:
+  - name: A node ID cannot form a column name with the internal column prefix
+    query:
+      gql: |
+        MATCH (_orbit:MergeRequest)-[:IN_PROJECT]->(project:Project) WHERE project.id = 1000 RETURN project{.name}, _orbit{.project_id} LIMIT 10
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "project", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+            {"id": "_orbit", "entity": "MergeRequest", "columns": ["project_id"]}
+          ],
+          "relationships": [{"type": "IN_PROJECT", "from": "_orbit", "to": "project"}],
+          "limit": 10
+        }
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: gql_parse
+            json: validate
+          contains:
+            - identifier "_orbit" conflicts with reserved prefix "_orbit_"

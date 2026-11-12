@@ -60,6 +60,8 @@ fn plan_assertions_are_not_query_expectations() {
         "hydration: static",
         "settings: {use_query_cache: 1}",
         "skip_requirements: [node_ids]",
+        "compile_error: true",
+        "compile_error_contains: [error]",
     ] {
         rejects(query.clone(), field, "unknown field");
     }
@@ -126,26 +128,20 @@ fn typed_edges_check_endpoint_types_and_keep_pair_support() {
 }
 
 #[test]
-fn compile_errors_require_all_fragments_and_frontend_configuration() {
-    let query = json!({"gql": "CREATE (d:Definition)"});
-    run_suite(
-        query.clone(),
-        "compile_error_contains: {gql: ['Orbit query syntax', 'line 1, column 1']}\ncompile_error_not_contains: [CREATE]",
+fn rejected_matches_the_compiler_and_takes_no_other_expectations() {
+    let invalid = json!({"gql": "CREATE (d:Definition)"});
+    run_suite(invalid.clone(), "rejected: true");
+    rejects(invalid, "rejected: false", "unexpected compile error");
+    let valid = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    rejects(
+        valid.clone(),
+        "rejected: true",
+        "expected the compiler to reject the query",
     );
     rejects(
-        query.clone(),
-        "compile_error: true\ncompile_error_contains: ['Orbit query syntax', impossible-message]",
-        "does not contain 'impossible-message'",
-    );
-    rejects(
-        query.clone(),
-        "compile_error: {json: error}",
-        "compile_error missing frontend 'gql'",
-    );
-    rejects(
-        query,
-        "compile_error: true\ncompile_error_not_contains: {json: []}",
-        "expectation missing frontend 'gql'",
+        valid,
+        "rejected: true\nnode_count: 1",
+        "takes no other expectations",
     );
 }
 
@@ -283,9 +279,7 @@ fn page_expectations_reject_fields_that_are_not_executed() {
     let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
     for field in [
         "repeat_count: 2",
-        "compile_error: true",
-        "compile_error_contains: [error]",
-        "compile_error_not_contains: [error]",
+        "rejected: true",
         "pages: [{}]",
         "all_pages: {page_count: 1}",
     ] {

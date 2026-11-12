@@ -346,9 +346,7 @@ only IDs and the relationship type.
 
 | Field | Type | Description |
 |---|---|---|
-| `compile_error` | bool / string / {frontend: string} | Expect compile failure |
-| `compile_error_contains` | [string] / {frontend: [string]} | Error must contain every listed fragment |
-| `compile_error_not_contains` | [string] / {frontend: [string]} | Error must NOT contain |
+| `rejected` | bool | The compiler must reject the query. A rejected scenario takes no other expectations. Plan-shape fixtures check the phase and message |
 
 **Pagination:**
 

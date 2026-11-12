@@ -1,0 +1,13 @@
+cases:
+  - name: IN over an empty list is rejected, because it compares no value with the property
+    query:
+      gql: |
+        MATCH (wi:WorkItem) WHERE wi.weight IN [] RETURN wi.weight LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - IN requires 1-100 values

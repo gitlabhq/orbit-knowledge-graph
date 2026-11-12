@@ -10,7 +10,7 @@ cases:
       gql: |
         MATCH (f:File {id: 13000}) RETURN f.name, f.traversal_path
     expect:
-      compile_error: traversal_path
+      rejected: true
 
   - name: order_by_rejected
     description: Local and remote queries cannot sort by traversal_path
@@ -20,7 +20,7 @@ cases:
       gql: |
         MATCH (f:File {id: 13000}) RETURN f ORDER BY f.traversal_path
     expect:
-      compile_error: traversal_path
+      rejected: true
 
   - name: group_by_rejected
     description: Local and remote aggregations cannot group by traversal_path
@@ -30,7 +30,7 @@ cases:
       gql: |
         MATCH (f:File {id: 13000})-[:DEFINES]->(d:Definition) RETURN f.traversal_path AS path, count(d) AS n
     expect:
-      compile_error: traversal_path
+      rejected: true
 
   - name: node_filter_rejected
     description: Local and remote queries cannot filter on traversal_path
@@ -40,8 +40,7 @@ cases:
       gql: |
         MATCH (f:File) WHERE f.traversal_path = '1/100/1000/' RETURN f
     expect:
-      compile_error: traversal_path
-      compile_error_not_contains: [1/100/]
+      rejected: true
 
   - name: negated_filter_rejected
     description: Local and remote queries cannot negate a traversal_path condition
@@ -51,8 +50,7 @@ cases:
       gql: |
         MATCH (f:File {id: 13000}) WHERE NOT f.traversal_path STARTS WITH '1/100/' RETURN f
     expect:
-      compile_error: traversal_path
-      compile_error_not_contains: [1/100/]
+      rejected: true
 
   - name: relationship_filter_rejected
     description: Local and remote relationships cannot filter on traversal_path
@@ -62,8 +60,7 @@ cases:
       gql: |
         MATCH (f:File {id: 13000})-[r:DEFINES]->(d:Definition) WHERE r.traversal_path = '1/100/1000/' RETURN d
     expect:
-      compile_error: private edge column "traversal_path"
-      compile_error_not_contains: [1/100/]
+      rejected: true
 
   - name: property_comparison_rejected
     description: Local and remote queries cannot compare traversal_path with another property
@@ -71,7 +68,7 @@ cases:
       gql: |
         MATCH (f:File {id: 13000})-[:DEFINES]->(d:Definition) WHERE f.traversal_path = d.traversal_path RETURN d
     expect:
-      compile_error: traversal_path
+      rejected: true
 
   - name: default_columns_leave_it_out
     description: Default columns on local and remote queries leave out traversal_path

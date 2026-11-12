@@ -1,0 +1,49 @@
+cases:
+  - name: admin_bypass_filter
+    query:
+      gql: |
+        MATCH (u:User)-[r]->(g:Group {id: 100})
+        WHERE type(r) = 'MEMBER_OF' AND u.is_admin = true
+        RETURN u.username LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - administrator
+
+  - name: not_unknown_name_no_echo
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+        WHERE NOT type(r) IN ['AUTHORED', 'NOPE_PRIVATE_TYPE']
+        RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - type() names a relationship type that the schema does not have
+          not_contains:
+            - NOPE_PRIVATE_TYPE
+
+  - name: unknown_name_no_echo
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+        WHERE type(r) = 'NOPE_PRIVATE_TYPE'
+        RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - type() names a relationship type that the schema does not have; relationship type names are uppercase and case-sensitive
+          not_contains:
+            - NOPE_PRIVATE_TYPE

@@ -1,0 +1,22 @@
+cases:
+  - name: User-only aggregation rejection happens before SQL compile so backing table and filter values are not leaked
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.email = 'victim@example.com' RETURN count(u) AS oracle LIMIT 1
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [{
+            "id": "u", "entity": "User",
+            "filters": {"email": "victim@example.com"}
+          }],
+          "aggregations": [{"count": "u", "as": "oracle"}],
+          "limit": 1
+        }
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          not_contains:
+            - v2_gl_user
+            - victim@example.com

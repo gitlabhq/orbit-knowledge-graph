@@ -9,4 +9,4 @@ query:
     RETURN count(mr) AS n
 
 expect:
-  compile_error: "only supported in traversal"
+  rejected: true

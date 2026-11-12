@@ -1,0 +1,111 @@
+cases:
+  - name: unknown_label
+    query:
+      gql: |
+        MATCH (u:User {id: 1, user_type: 'not_a_user_type'}) RETURN u LIMIT 10
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":"not_a_user_type"}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - not_a_user_type
+            - Valid values
+            - human
+            - project_bot
+
+  - name: unknown_integer
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.user_type = 999 RETURN u LIMIT 10
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":999}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - "999"
+            - Valid values
+            - human
+            - project_bot
+
+  - name: unknown_in_value
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.user_type IN ['human', 'not_a_user_type'] RETURN u LIMIT 10
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":{"in":["human","not_a_user_type"]}}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - not_a_user_type
+            - Valid values
+            - human
+            - project_bot
+
+  - name: negated_unknown_label
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT u.user_type IN ['not_a_user_type'] RETURN u LIMIT 10
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":{"ne":"not_a_user_type"}}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - not_a_user_type
+            - Valid values
+            - 0 (human)
+            - 6 (project_bot)
+
+  - name: string_backed_integer
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.state = 0 RETURN u LIMIT 10
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"state":0}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - "0"
+            - Valid values
+            - active
+            - blocked
+
+  - name: string_backed_unknown_label
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.state = 'not_a_state' RETURN u LIMIT 10
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"state":"not_a_state"}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - not_a_state
+            - Valid values
+            - active
+            - blocked
+
+  - name: substring_matching_no_value
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.user_type STARTS WITH 'bot' RETURN u LIMIT 10
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":{"starts_with":"bot"}}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          contains:
+            - no enum value starts with
+            - bot
+            - 6 (project_bot)

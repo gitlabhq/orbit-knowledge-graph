@@ -1,0 +1,24 @@
+cases:
+  - name: The unknown-filter error lists filterable fields without the hidden traversal_path field
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE p.no_such_field = 'x' RETURN p.name LIMIT 10
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "p", "entity": "Project", "filters": {"no_such_field": "x"}, "node_ids": [1000]}],
+          "limit": 10
+        }
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: validate
+            json: json_dsl_parse
+          contains:
+            gql:
+              - "Valid fields: id, "
+            json:
+              - "Valid values: id, "
+          not_contains:
+            - traversal_path

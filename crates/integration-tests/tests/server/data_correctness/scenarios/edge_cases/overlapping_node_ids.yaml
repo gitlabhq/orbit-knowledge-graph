@@ -15,4 +15,4 @@ query:
     MATCH (mr:MergeRequest {id: 2000})-[:HAS_DIFF]->(mr_diff:MergeRequestDiff) RETURN mr.title, mr_diff.state LIMIT 10
 
 expect:
-  compile_error: 'node ids "mr" and "mr_diff" overlap'
+  rejected: true

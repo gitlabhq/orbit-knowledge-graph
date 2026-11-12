@@ -1,0 +1,25 @@
+cases:
+  - name: Aggregation names cannot use the internal column prefix
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1000 RETURN p, max(mr.iid) AS _orbit_p_id LIMIT 10
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest"},
+            {"id": "p", "entity": "Project", "node_ids": [1000]}
+          ],
+          "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+          "group_by": ["p"],
+          "aggregations": [{"max": "mr.iid", "as": "_orbit_p_id"}],
+          "limit": 10
+        }
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            gql: gql_parse
+            json: validate
+          contains:
+            - identifier "_orbit_p_id" conflicts with reserved prefix "_orbit_"

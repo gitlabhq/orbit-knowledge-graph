@@ -1,0 +1,19 @@
+cases:
+  - name: Aggregation on User alone rejects at compile for non-admin because User has no traversal_path
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN count(u) AS cnt LIMIT 10
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+          "aggregations": [{"count": "u", "as": "cnt"}],
+          "limit": 10
+        }
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          contains:
+            - traversal_path
+            - aggregation

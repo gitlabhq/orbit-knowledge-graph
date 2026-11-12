@@ -12,7 +12,7 @@ cases:
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.resolved_on_default_branch = true RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
-      compile_error_contains: ["requires access level 25"]
+      rejected: true
 
   - name: aggregation_negation_oracle_complement_twin
     description: The positive twin of the severity NOT is also empty, so the pair never reveals the total
@@ -25,7 +25,7 @@ cases:
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT NOT v.severity = 'critical' RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
-      compile_error_contains: ["requires access level 25"]
+      rejected: true
 
   - name: aggregation_negation_oracle_enum_ne
     description: A complemented NOT on Vulnerability severity is no oracle for a Reporter
@@ -40,7 +40,7 @@ cases:
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'critical' RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
-      compile_error_contains: ["requires access level 25"]
+      rejected: true
 
   - name: aggregation_negation_oracle_enum_not_in
     description: NOT IN on Vulnerability severity is no oracle for a Reporter
@@ -55,7 +55,7 @@ cases:
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity IN ['critical', 'high'] RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
-      compile_error_contains: ["requires access level 25"]
+      rejected: true
 
   - name: aggregation_negation_oracle_guest_code
     description: A Guest-only caller gets no rows for a NOT aggregation over code definitions
@@ -84,7 +84,7 @@ cases:
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.id < 8001 RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
-      compile_error_contains: ["requires access level 25"]
+      rejected: true
 
   - name: aggregation_negation_oracle_id_window
     description: A negated ID window is no binary-search oracle for a Reporter
@@ -99,7 +99,7 @@ cases:
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT (v.id >= 8000 AND v.id <= 8001) RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
-      compile_error_contains: ["requires access level 25"]
+      rejected: true
 
   - name: aggregation_negation_oracle_mixed_roles
     description: With Reporter and Developer paths, a NOT on severity counts only the Developer-scoped vulnerability
@@ -137,7 +137,7 @@ cases:
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.detected_at IS NULL RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
-      compile_error_contains: ["requires access level 25"]
+      rejected: true
 
   - name: aggregation_negation_oracle_property_grouping
     description: A property-grouped NOT on Vulnerability severity returns no rows for a Reporter
@@ -152,7 +152,7 @@ cases:
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'low' RETURN v.severity, count(v) AS vuln_count LIMIT 10
     expect:
-      compile_error_contains: ["requires access level 25"]
+      rejected: true
 
   - name: aggregation_negation_oracle_reporter_code_control
     description: A Reporter gets the real count for the Guest code-definition NOT aggregation
@@ -205,7 +205,7 @@ cases:
       gql: |
         MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 AND NOT (v.severity = 'critical' AND v.state = 'detected') RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
     expect:
-      compile_error_contains: ["requires access level 25"]
+      rejected: true
 
   - name: aggregation_negation_oracle_title_token
     description: NOT on a Vulnerability title token is no oracle for a Reporter
@@ -220,7 +220,7 @@ cases:
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT token_match(v.title, 'SQLi') RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
-      compile_error: text matching and ordering require grouping by "v"
+      rejected: true
 
   - name: role_scoped_negation_aggregation
     description: A matching grouped negation cannot bypass the vulnerability role requirement

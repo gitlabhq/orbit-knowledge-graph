@@ -1,0 +1,47 @@
+cases:
+  - name: not_empty_object_rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{}}],"limit":10}
+    missing_frontends:
+      gql: The source scenario supplies only JSON.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          contains:
+            - has less than 1 property at /nodes/0/not
+
+  - name: not_schema_error_no_echo
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "not": "private-type-literal"}, {"id": "wi", "entity": "WorkItem", "not": {"f0": "private-count-literal-0", "f1": "private-count-literal-1", "f2": "private-count-literal-2", "f3": "private-count-literal-3", "f4": "private-count-literal-4", "f5": "private-count-literal-5", "f6": "private-count-literal-6", "f7": "private-count-literal-7", "f8": "private-count-literal-8", "f9": "private-count-literal-9", "state": {"bogus": "private-oneof-literal"}, "title": {"contains": "private-long-literalxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}, "filters": {"state": {"bogus": "private-filter-literal"}}}], "relationships": [{"type": "AUTHORED", "from": "u", "to": "wi"}], "limit": 30}
+    missing_frontends:
+      gql: The source scenario supplies only JSON.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          contains:
+            - has more than 10 properties at /nodes/1/not
+          not_contains:
+            - private-type-literal
+            - private-count-literal
+            - private-oneof-literal
+            - private-long-literal
+            - private-filter-literal
+
+  - name: not_unknown_property_rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"missing":"private-query-literal"}}],"limit":30}
+    missing_frontends:
+      gql: The source scenario supplies only JSON.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          contains:
+            - missing
+          not_contains:
+            - private-query-literal

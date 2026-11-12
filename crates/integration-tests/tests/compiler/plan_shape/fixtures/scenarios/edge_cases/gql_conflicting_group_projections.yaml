@@ -1,0 +1,14 @@
+cases:
+  - name: Two output aliases for one node cannot request different property sets
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+        RETURN u{.username} AS author, u{.name} AS owner, count(mr) AS mr_count
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - duplicate or overlapping node projection

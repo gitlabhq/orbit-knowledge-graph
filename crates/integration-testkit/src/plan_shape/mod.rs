@@ -25,8 +25,81 @@ struct Scenario {
     query: BTreeMap<String, String>,
     missing_frontends: BTreeMap<String, String>,
     physical: BTreeMap<String, BTreeMap<String, StateAssertions>>,
+    rejected: BTreeMap<String, Rejection>,
     hydration: Option<HydrationSetup>,
     security: Option<SecurityOverride>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Rejection {
+    phase: PerFrontend<String>,
+    #[serde(default)]
+    contains: PerFrontend<Vec<String>>,
+    #[serde(default)]
+    not_contains: PerFrontend<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PerFrontend<T> {
+    All(T),
+    Each(BTreeMap<String, T>),
+}
+
+impl<T: Default> Default for PerFrontend<T> {
+    fn default() -> Self {
+        Self::All(T::default())
+    }
+}
+
+impl<T> PerFrontend<T> {
+    fn get(&self, frontend: &str) -> Result<&T, String> {
+        match self {
+            Self::All(value) => Ok(value),
+            Self::Each(values) => values
+                .get(frontend)
+                .ok_or_else(|| format!("rejected has no {frontend} entry")),
+        }
+    }
+}
+
+impl Rejection {
+    fn check(&self, frontend: &str, phase: &str, error: &str, label: &str) -> Vec<String> {
+        let (expected, contains, not_contains) = match (
+            self.phase.get(frontend),
+            self.contains.get(frontend),
+            self.not_contains.get(frontend),
+        ) {
+            (Ok(phase), Ok(contains), Ok(not_contains)) => (phase, contains, not_contains),
+            (Err(error), ..) | (_, Err(error), _) | (.., Err(error)) => {
+                return vec![format!("{label}: {error}")];
+            }
+        };
+        let mut failures = Vec::new();
+        if phase != expected {
+            failures.push(format!(
+                "{label}: rejected at {phase}, expected {expected}: {error}"
+            ));
+        }
+        for fragment in contains
+            .iter()
+            .filter(|fragment| !error.contains(fragment.as_str()))
+        {
+            failures.push(format!(
+                "{label}: rejection '{error}' does not contain '{fragment}'"
+            ));
+        }
+        for fragment in not_contains
+            .iter()
+            .filter(|fragment| error.contains(fragment.as_str()))
+        {
+            failures.push(format!(
+                "{label}: rejection '{error}' contains '{fragment}'"
+            ));
+        }
+        failures
+    }
 }
 
 #[derive(Deserialize)]
@@ -49,7 +122,15 @@ impl TryFrom<RawScenario> for Scenario {
     fn try_from(raw: RawScenario) -> Result<Self, String> {
         let hydration = raw.hydration.is_some();
         let mut physical = BTreeMap::new();
-        for (backend, entries) in raw.physical {
+        let mut rejected = BTreeMap::new();
+        for (backend, mut entries) in raw.physical {
+            if let Some(rejection) = entries.remove("rejected") {
+                rejected.insert(
+                    backend.clone(),
+                    serde_json::from_value(rejection)
+                        .map_err(|error| format!("{backend}.rejected: {error}"))?,
+                );
+            }
             let phases = aliases::resolve(&backend, hydration, raw.logical.as_ref(), entries)?
                 .into_iter()
                 .map(|(phase, state)| {
@@ -66,6 +147,7 @@ impl TryFrom<RawScenario> for Scenario {
             query: raw.query,
             missing_frontends: raw.missing_frontends,
             physical,
+            rejected,
             hydration: raw.hydration,
             security: raw.security,
         })
@@ -405,7 +487,10 @@ fn check(scenario: &Scenario, models: &Models, path: &Path) -> Vec<String> {
                 path.display(),
                 scenario.name.as_deref().unwrap_or("unnamed")
             );
-            if phases.is_empty() || phases.values().any(|state| state.fields().next().is_none()) {
+            let rejection = scenario.rejected.contains_key(backend);
+            if (phases.is_empty() && !rejection)
+                || phases.values().any(|state| state.fields().next().is_none())
+            {
                 failures.push(format!(
                     "{label}: every phase needs at least one state field assertion"
                 ));
@@ -439,6 +524,8 @@ fn check_pipeline(
     };
     let observe = Expectations {
         phases,
+        rejection: scenario.rejected.get(backend),
+        frontend: language,
         index_exists: &index_exists,
         label,
     };
@@ -524,6 +611,8 @@ fn hydration_input(
 
 struct Expectations<'a> {
     phases: &'a BTreeMap<String, StateAssertions>,
+    rejection: Option<&'a Rejection>,
+    frontend: &'a str,
     index_exists: &'a dyn Fn(&str, &str) -> bool,
     label: &'a str,
 }
@@ -542,14 +631,51 @@ impl Expectations<'_> {
         let result = run(&mut ctx, &mut |phase, ctx| {
             failures.extend(self.check_phase(phase, ctx))
         });
-        if let Err(error) = result {
-            failures.push(format!("{}: {error}", self.label));
+        match (result, self.rejection) {
+            (Ok(()), Some(_)) => {
+                failures.push(format!(
+                    "{}: expected a rejection, but the query compiled",
+                    self.label
+                ));
+            }
+            (Err(error), Some(rejection)) => failures.extend(rejection.check(
+                self.frontend,
+                ctx.current_phase(),
+                &error.to_string(),
+                self.label,
+            )),
+            (Err(error), None) => failures.push(format!("{}: {error}", self.label)),
+            (Ok(()), None) => {}
         }
         failures
     }
 
     fn unknown_targets(&self, table: &PhaseTable) -> Vec<String> {
         let mut failures = Vec::new();
+        let position = |phase: &str| table.iter().position(|(name, _)| *name == phase);
+        if let Some(rejection) = self.rejection {
+            match rejection
+                .phase
+                .get(self.frontend)
+                .map(|phase| (phase, position(phase)))
+            {
+                Ok((_, Some(rejected_at))) => {
+                    for phase in self.phases.keys() {
+                        if position(phase).is_some_and(|at| at >= rejected_at) {
+                            failures.push(format!(
+                                "{}.{phase}: phase {phase} does not run after the rejection",
+                                self.label
+                            ));
+                        }
+                    }
+                }
+                Ok((phase, None)) => failures.push(format!(
+                    "{}: rejection phase {phase} does not run in this pipeline",
+                    self.label
+                )),
+                Err(error) => failures.push(format!("{}: {error}", self.label)),
+            }
+        }
         for (phase, state) in self.phases {
             let Some((_, mutates)) = table.iter().find(|(name, _)| name == phase) else {
                 let known: Vec<_> = table.iter().map(|(name, _)| *name).collect();
@@ -940,6 +1066,81 @@ fn aliases_resolve_to_state_fields_and_reject_double_targets() {
         .is_err()
     );
     assert!(parse("{duckdb: {final_ast: {expect: ['(_)']}}}").is_err());
+}
+
+#[test]
+fn rejections_check_the_phase_and_message() {
+    let directory = tempfile::tempdir().unwrap();
+    let case = |name: &str, gql: &str, rejected: &str| {
+        format!(
+            "  - name: {name}\n    query: {{gql: '{gql}'}}\n    missing_frontends: {{json: GQL only}}\n    physical:\n      clickhouse:\n{rejected}"
+        )
+    };
+    let cases = [
+        case(
+            "right",
+            "CREATE (u:User)",
+            "        rejected: {phase: gql_parse, contains: [Orbit query syntax], not_contains: [CREATE]}\n",
+        ),
+        case(
+            "wrong phase",
+            "CREATE (u:User)",
+            "        rejected: {phase: validate}\n",
+        ),
+        case(
+            "missing fragment",
+            "CREATE (u:User)",
+            "        rejected: {phase: gql_parse, contains: [absent-fragment]}\n",
+        ),
+        case(
+            "compiles",
+            "MATCH (u:User {id: 1}) RETURN u",
+            "        rejected: {phase: validate}\n",
+        ),
+        case(
+            "after rejection",
+            "CREATE (u:User)",
+            "        rejected: {phase: gql_parse}\n        emitted: {expect: ['(_)']}\n",
+        ),
+    ];
+    std::fs::write(
+        directory.path().join("rejections.yaml"),
+        format!("cases:\n{}", cases.join("\n")),
+    )
+    .unwrap();
+
+    let failures = check_dir(
+        directory.path(),
+        Arc::new(ontology::Ontology::new().with_nodes(["User"])),
+    )
+    .unwrap_err();
+
+    let failed = |name: &str, message: &str| {
+        failures.iter().any(|failure| {
+            failure.contains(&format!("{name} [gql/clickhouse]")) && failure.contains(message)
+        })
+    };
+    assert!(
+        !failures
+            .iter()
+            .any(|failure| failure.contains("right [gql"))
+    );
+    assert!(failed(
+        "wrong phase",
+        "rejected at gql_parse, expected validate"
+    ));
+    assert!(failed(
+        "missing fragment",
+        "does not contain 'absent-fragment'"
+    ));
+    assert!(failed(
+        "compiles",
+        "expected a rejection, but the query compiled"
+    ));
+    assert!(failed(
+        "after rejection",
+        "does not run after the rejection"
+    ));
 }
 
 #[test]

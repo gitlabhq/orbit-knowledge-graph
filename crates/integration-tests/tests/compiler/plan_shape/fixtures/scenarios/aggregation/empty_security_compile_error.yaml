@@ -1,0 +1,26 @@
+cases:
+  - name: Empty traversal_paths rejects at compile time
+    query:
+      gql: |
+        MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["g"],
+          "aggregations": [{"count": "u", "as": "member_count"}],
+          "limit": 10
+        }
+    security:
+      org_id: 1
+      paths: []
+    physical:
+      clickhouse:
+        rejected:
+          phase: security
+          contains:
+            - traversal_path

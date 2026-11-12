@@ -1,0 +1,13 @@
+cases:
+  - name: Relationship RETURN aliases cannot use the internal column prefix
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, type(r) AS _orbit_e0_kind, mr LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          contains:
+            - identifier "_orbit_e0_kind" conflicts with reserved prefix "_orbit_"
