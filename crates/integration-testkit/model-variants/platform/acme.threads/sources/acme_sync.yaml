@@ -1,0 +1,6 @@
+kind: source
+package: acme.threads
+source: acme_sync
+entities: [Thread, Post]
+relationships:
+  REPLIES_TO: [Post -> Thread]
