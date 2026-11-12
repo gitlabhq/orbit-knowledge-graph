@@ -45,6 +45,12 @@ fixtures:
       }
 
       void
+      first_printer(int t)
+      {
+      	printers[0].f(t);
+      }
+
+      void
       run_local(void)
       {
       	void (*fp)(int);
@@ -65,6 +71,7 @@ fixtures:
     content: |
       #include "print.h"
       static void (*link_printers[])(int) = { llc_if_print };
+      void link_lookup(int t) { link_printers[0](t); }
 
 tests:
   - name: "a table of function pointers is a definition"
@@ -116,12 +123,14 @@ tests:
       - { row_count: 1 }
       - { row: { function: llc_if_print, file: print-llc.c } }
 
-  - name: "a function that walks the table refers to it"
+  - name: "a function that walks or indexes the table refers to it"
     query: |
       MATCH (r:Definition)-[:USES_VALUE]->(t:Definition)
       WHERE t.name = 'printers'
       RETURN r.name AS reader
+      ORDER BY reader
     assert:
+      - { row: { reader: first_printer } }
       - { row: { reader: lookup } }
 
   - name: "an assignment still binds the pointer, so its call resolves"
@@ -132,3 +141,13 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: sll_if_print } }
+
+  - name: "a table is placed at its own line, not at the start of the file"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['printers', 'hook']
+      RETURN d.name AS name, d.start_line AS start_line
+      ORDER BY name
+    assert:
+      - { row: { name: hook, start_line: 18 } }
+      - { row: { name: printers, start_line: 12 } }

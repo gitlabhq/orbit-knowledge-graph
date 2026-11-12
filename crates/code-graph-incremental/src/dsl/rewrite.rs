@@ -15,6 +15,9 @@ pub(crate) struct Placement {
     pub(crate) mv: bool,
     pub(crate) target: NodeId,
     moved: rustc_hash::FxHashSet<NodeId>,
+    /// The matched node is the file's root, so a labelled node built under it should not claim the
+    /// whole file as its span.
+    pub(crate) target_is_container: bool,
 }
 
 impl Placement {
@@ -23,6 +26,7 @@ impl Placement {
             mv,
             target,
             moved: Default::default(),
+            target_is_container: false,
         }
     }
 
@@ -174,7 +178,21 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                     tf.apply_sym(t, lang, src, edge_ctx)
                 }
             };
-            let src = *t.node(pl.target);
+            // A labelled node (`@$N $N`) stands for its capture. When the rule matched an ancestor
+            // that holds much more than that capture, such as the translation unit around one C
+            // declaration, the node takes the capture's span rather than the ancestor's.
+            let mut src = *t.node(pl.target);
+            let mut span = span;
+            if *labelled
+                && let Text::From(slot, _) = text
+                && let Some(&cap) = caps[*slot as usize].first()
+            {
+                let c = *t.node(cap);
+                if !c.synth && c.start >= span.0 && c.end <= span.1 && pl.target_is_container {
+                    src = c;
+                    span = (c.start, c.end);
+                }
+            }
             let at = t.append(
                 parent,
                 Node {
@@ -413,7 +431,8 @@ fn apply_structure(
     };
     match &r.out {
         Out::Replace(p, tag_entries, tag_on) => {
-            let pl = Placement::new(r.unique.is_none(), target);
+            let mut pl = Placement::new(r.unique.is_none(), target);
+            pl.target_is_container = target.parent(&t.storage.0).is_none();
             let built = build_template(t, &fill, p, pl);
             let first = built.first().copied();
             if let (Some((pat, kind, nslots)), Some(new_root)) = (&r.unique, first) {
