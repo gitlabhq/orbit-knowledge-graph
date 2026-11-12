@@ -14,7 +14,9 @@ use compiler::dag::{
 use compiler::passes::result_contract::ResultContext;
 use compiler::{CompiledQueryContext, HydrationRequest, ParameterizedQuery, QueryError};
 
-use super::executor::{Executed, ExecutorError, Executors, RowChecks};
+use compiler::orbit_authorization::Checks;
+
+use super::executor::{Executed, ExecutorError, Executors};
 use super::observer::{Event, KEY_SAMPLE, Observer, StageInfo};
 use super::{remote, rows};
 
@@ -46,7 +48,7 @@ pub struct Outcome {
 pub struct Runner<'r> {
     pub env: Env<'r>,
     pub executors: &'r Executors,
-    pub checks: &'r dyn RowChecks,
+    pub checks: &'r Checks,
     pub observer: &'r mut dyn Observer,
     /// The stage the next hydration runs as.
     next: StageId,
@@ -56,7 +58,7 @@ impl<'r> Runner<'r> {
     pub fn new(
         mut env: Env<'r>,
         executors: &'r Executors,
-        checks: &'r dyn RowChecks,
+        checks: &'r Checks,
         observer: &'r mut dyn Observer,
     ) -> Self {
         env.trace = observer.enabled();
@@ -249,7 +251,13 @@ impl<'r> Runner<'r> {
             ))
             .into());
         }
-        let executed = remote::checked(self.checks, &remote_checks, executed).await?;
+        let executed = remote::checked(
+            self.checks,
+            self.env.grants.caller(),
+            &remote_checks,
+            executed,
+        )
+        .await?;
         if let Request::Query(query) = &compiled.request {
             contexts.push((id, query.base.result_context.clone()));
         }

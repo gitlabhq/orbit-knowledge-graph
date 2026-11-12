@@ -1,11 +1,9 @@
 //! A query across connections through the server's own stages: routing against the served
 //! remotes, the DAG stage, redaction, hydration, and the graph, TOON and GQL formatters.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use compiler::dag::Remotes;
-use compiler::orbit_authorization::Key;
 use orbit_server::pipeline::{HydrationStage, RoutingStage};
 use orbit_server::redaction::QueryResult;
 use query_data_model::testkit::limits;
@@ -16,15 +14,71 @@ use query_engine::shared::{DagStage, PipelineOutput, RedactionOutput};
 use serde_json::json;
 
 use super::{caller, row};
-use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_executors, dag_model};
+use crate::authorization_variants::{deployment, registry};
+use crate::dag_fakes::{SeededGraph, dag_executors, dag_model};
 use crate::mock_redaction::MockRedactionService;
 
 const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, mr.title, m.author, m.text ORDER BY mr.iid LIMIT 10";
 
+/// The server's DAG stage over the seeded fakes, checking rows through the providers the `dag`
+/// deployment binds: its `rails` checks allow project 42 only.
+fn served_stage(model: &Arc<query_data_model::Model>, graph: Arc<SeededGraph>) -> DagStage {
+    let catalog = Catalog::<ClickHouse>::from_model(model).unwrap();
+    let remotes = Remotes::all(model);
+    let bound =
+        orbit_server::authorization::Deployment::bind(&deployment("dag"), model, &registry())
+            .expect("the dag deployment binds the DAG model");
+    DagStage {
+        executors: dag_executors(&remotes, catalog.connection(), graph, "alice"),
+        remotes,
+        checks: bound.checks().clone(),
+    }
+}
+
+fn context(model: &Arc<query_data_model::Model>, query: &str) -> QueryPipelineContext {
+    let catalog = Arc::new(Catalog::<ClickHouse>::from_model(model).unwrap());
+    let mut server_extensions = TypeMap::default();
+    server_extensions.insert(catalog);
+    server_extensions.insert(*limits());
+    let session = query_engine::pipeline::SecurityContext::new_with_roles(
+        1,
+        vec![query_engine::pipeline::AuthorizedPath::new("1/9970/", 20)],
+    )
+    .unwrap();
+    server_extensions.insert(crate::query_scenario::claims_for(&session));
+    QueryPipelineContext {
+        query_json: query.to_string(),
+        compiled: None,
+        security_context: None,
+        grants: Some(caller("1/9970/")),
+        server_extensions,
+        phases: TypeMap::default(),
+    }
+}
+
+/// A code stage's `read_code` check runs through the deployment's `rails` provider in the
+/// server's own DAG stage, so rows of a project it denies never come back.
+#[tokio::test]
+async fn the_server_checks_remote_rows_through_the_deployments_providers() {
+    let model = dag_model();
+    let dag = served_stage(&model, Arc::new(SeededGraph(Vec::new())));
+    let query = "MATCH (f:File) WHERE f.project_id IN [42, 77] AND f.content MATCHES ast('compile($$$ARGS)', 'rust') RETURN f.project_id, f.path LIMIT 20";
+    let mut ctx = context(&model, query);
+    let mut obs = NoOpObserver;
+    RoutingStage {
+        remotes: dag.remotes.clone(),
+    }
+    .execute(&mut ctx, &mut obs)
+    .await
+    .expect("the query routes against the served remotes");
+    let executed = dag.execute(&mut ctx, &mut obs).await.expect("the DAG runs");
+    let rows = super::json_rows(&executed.batches);
+    let projects: Vec<&serde_json::Value> = rows.iter().map(|row| &row["f_project_id"]).collect();
+    assert_eq!(projects, [&json!(42), &json!(42)]);
+}
+
 async fn served_output() -> PipelineOutput {
     let model = dag_model();
-    let catalog = Arc::new(Catalog::<ClickHouse>::from_model(&model).unwrap());
-    let remotes = Remotes::all(&model);
     let graph = Arc::new(SeededGraph(vec![
         row(
             json!({"mr_iid": 1, "mr_title": "Add feature A", "mr_id": 2000, "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),
@@ -33,33 +87,15 @@ async fn served_output() -> PipelineOutput {
             json!({"mr_iid": 2, "mr_title": "Fix bug B", "mr_id": 2001, "_orbit_mr_id": 2001, "_orbit_mr_type": "MergeRequest"}),
         ),
     ]));
-    let dag = DagStage {
-        executors: dag_executors(&remotes, catalog.connection(), graph, "alice"),
-        remotes: remotes.clone(),
-        checks: Arc::new(AllowedKeys(BTreeSet::from([Key::Int(42)]))),
-    };
-    let mut server_extensions = TypeMap::default();
-    server_extensions.insert(Arc::clone(&catalog));
-    server_extensions.insert(*limits());
-    let session = query_engine::pipeline::SecurityContext::new_with_roles(
-        1,
-        vec![query_engine::pipeline::AuthorizedPath::new("1/9970/", 20)],
-    )
-    .unwrap();
-    server_extensions.insert(crate::query_scenario::claims_for(&session));
-    let mut ctx = QueryPipelineContext {
-        query_json: DISCUSSED.to_string(),
-        compiled: None,
-        security_context: None,
-        grants: Some(caller("1/9970/")),
-        server_extensions,
-        phases: TypeMap::default(),
-    };
+    let dag = served_stage(&model, graph);
+    let mut ctx = context(&model, DISCUSSED);
     let mut obs = NoOpObserver;
-    RoutingStage { remotes }
-        .execute(&mut ctx, &mut obs)
-        .await
-        .expect("the query routes against the served remotes");
+    RoutingStage {
+        remotes: dag.remotes.clone(),
+    }
+    .execute(&mut ctx, &mut obs)
+    .await
+    .expect("the query routes against the served remotes");
     let executed = dag.execute(&mut ctx, &mut obs).await.expect("the DAG runs");
     let compiled = ctx
         .compiled

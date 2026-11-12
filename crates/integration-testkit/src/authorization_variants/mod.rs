@@ -47,4 +47,5 @@ pub fn registry() -> Registry {
         .with::<fakes::Zanzibar>()
         .with::<fakes::Cedar>()
         .with::<slack::SlackSignIn>()
+        .with::<crate::dag_fakes::AllowedKeys>()
 }

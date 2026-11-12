@@ -8,7 +8,9 @@ use query_data_model::catalog::Row;
 use query_data_model::surface::Statement;
 use serde_json::Value;
 
-use super::executor::{Executed, ExecutorError, RowChecks};
+use compiler::orbit_authorization::{AuthError, Caller, CheckRequest, Checks};
+
+use super::executor::{Executed, ExecutorError};
 use super::rows;
 use super::runner::{DagError, Runner};
 
@@ -66,15 +68,26 @@ fn json(batches: &[RecordBatch], columns: &[String]) -> Result<Vec<Row>, Executo
     Ok(out)
 }
 
-/// Keeps the rows of a remote stage that every row check of its entity allows.
+/// Keeps the rows of a stage that every row check of its entities allows, asked of the providers
+/// the deployment binds.
 pub(super) async fn checked(
-    checks: &dyn RowChecks,
+    checks: &Checks,
+    caller: &Caller,
     row_checks: &[RowCheck],
     mut executed: Executed,
 ) -> Result<Executed, DagError> {
     for check in row_checks {
         let keys = rows::checked_keys(&executed.batches, &check.field, check.kind)?;
-        let allowed = checks.allowed(check, keys.into_iter().collect()).await?;
+        let request = CheckRequest {
+            permission: check.permission.clone(),
+            resource: check.resource.clone(),
+            ids: keys.into_iter().collect(),
+        };
+        let allowed = checks
+            .check(caller, &check.provider, vec![request])
+            .await
+            .map_err(|error: AuthError| ExecutorError(error.to_string()))?;
+        let allowed = allowed.into_iter().next().unwrap_or_default();
         executed.batches = rows::retain(executed.batches, &check.field, check.kind, &allowed)?;
     }
     Ok(executed)

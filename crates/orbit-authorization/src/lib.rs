@@ -237,6 +237,45 @@ pub trait Module: Sized + Send + Sync + 'static {
     fn answers(self: Arc<Self>, needs: &[Need]) -> Result<Answers, AuthError>;
 }
 
+/// The `Check` providers a deployment binds, by the provider names packages use.
+#[derive(Clone, Default)]
+pub struct Checks(BTreeMap<String, Arc<dyn Provider<Check>>>);
+
+impl Checks {
+    #[must_use]
+    pub fn with(mut self, provider: impl Into<String>, check: Arc<dyn Provider<Check>>) -> Self {
+        self.0.insert(provider.into(), check);
+        self
+    }
+
+    /// The rows each request allows, asked of the provider the checks name, in one batch.
+    pub async fn check(
+        &self,
+        caller: &Caller,
+        provider: &str,
+        requests: Vec<CheckRequest>,
+    ) -> Result<Vec<BTreeSet<Key>>, AuthError> {
+        let checker = self
+            .0
+            .get(provider)
+            .ok_or_else(|| AuthError::Invalid(format!("no provider {provider} answers Check")))?;
+        let asked = requests.len();
+        let allowed = checker
+            .call(Check {
+                caller: caller.clone(),
+                requests,
+            })
+            .await?;
+        if allowed.len() != asked {
+            return Err(AuthError::Invalid(format!(
+                "provider {provider} answered {} of {asked} checks",
+                allowed.len()
+            )));
+        }
+        Ok(allowed)
+    }
+}
+
 /// The `Scopes` answers for one request, by scope and permission.
 #[derive(Debug, Clone)]
 pub struct Grants {

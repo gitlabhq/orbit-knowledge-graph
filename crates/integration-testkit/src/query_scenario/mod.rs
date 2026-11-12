@@ -565,13 +565,16 @@ async fn execute_output(
     resolver_registry.register("gitaly", resolver as _);
 
     let client = Arc::new(ctx.create_client());
-    let dag = DagStage::relational(graph_executors(
-        Arc::clone(&client),
-        data_model,
-        "base",
-        "gkg;scenario".into(),
-        Vec::new(),
-    ));
+    let dag = DagStage::relational(
+        graph_executors(
+            Arc::clone(&client),
+            data_model,
+            "base",
+            "gkg;scenario".into(),
+            Vec::new(),
+        ),
+        Default::default(),
+    );
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
     server_extensions.insert(Arc::clone(data_model));

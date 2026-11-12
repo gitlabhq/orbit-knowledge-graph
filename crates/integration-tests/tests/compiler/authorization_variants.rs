@@ -284,12 +284,14 @@ async fn a_check_answers_string_keyed_rows_with_text_keys() {
         ids: text(&["m1", "m2", "m3"]),
     };
     let allowed = deployment
+        .checks()
         .check(&alice, "slack", vec![request.clone()])
         .await
         .unwrap();
     assert_eq!(allowed, [BTreeSet::from_iter(text(&["m1", "m3"]))]);
     let (bob, _) = signed_in(&deployment, "bob", &["team-c"]).await;
     let allowed = deployment
+        .checks()
         .check(&bob, "slack", vec![request])
         .await
         .unwrap();

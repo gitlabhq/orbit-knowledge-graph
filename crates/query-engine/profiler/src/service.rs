@@ -65,7 +65,7 @@ impl ProfilerPipelineService {
             client: Arc::clone(&self.client),
         };
         let executors = Executors::default().with(self.data_model.connection(), Arc::new(executor));
-        let dag = DagStage::relational(executors);
+        let dag = DagStage::relational(executors, Default::default());
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
             compiled: None,

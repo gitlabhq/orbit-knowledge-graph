@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use orbit_authorization::{
-    Answers, AuthError, Caller, Check, CheckRequest, Credential, Credentials, Grants, Identify,
-    Key, Module, Need, Provider, Request, ScopeKind, Scopes,
+    Answers, AuthError, Caller, Checks, Credential, Credentials, Grants, Identify, Module, Need,
+    Provider, Request, ScopeKind, Scopes,
 };
 use orbit_server_config::AuthorizationConfig;
 use query_data_model::Model;
@@ -46,7 +46,7 @@ impl Registry {
 pub struct Deployment {
     identify: Arc<dyn Provider<Identify>>,
     needs: Vec<(Need, Arc<dyn Provider<Scopes>>)>,
-    checks: BTreeMap<String, Arc<dyn Provider<Check>>>,
+    checks: Checks,
     credentials: BTreeMap<String, Arc<dyn Provider<Credentials>>>,
 }
 
@@ -124,7 +124,7 @@ impl Deployment {
                 None => {}
             }
         }
-        let mut checks = BTreeMap::new();
+        let mut checks = Checks::default();
         let mut credentials = BTreeMap::new();
         for (name, used) in &uses {
             let Some((_, built)) = answers.get(name) else {
@@ -132,9 +132,7 @@ impl Deployment {
             };
             if used.contains(&ProviderUse::Check) {
                 match &built.check {
-                    Some(check) => {
-                        checks.insert(name.to_string(), Arc::clone(check));
-                    }
+                    Some(check) => checks = checks.with(*name, Arc::clone(check)),
                     None => missing(name, "Check", &mut errors),
                 }
             }
@@ -178,24 +176,9 @@ impl Deployment {
         Ok(grants)
     }
 
-    /// The rows each request allows, asked of the provider the checks name.
-    pub async fn check(
-        &self,
-        caller: &Caller,
-        provider: &str,
-        requests: Vec<CheckRequest>,
-    ) -> Result<Vec<BTreeSet<Key>>, AuthError> {
-        let checker = self
-            .checks
-            .get(provider)
-            .ok_or_else(|| AuthError::Invalid(format!("no provider {provider} answers Check")))?;
-        let allowed = checker
-            .call(Check {
-                caller: caller.clone(),
-                requests,
-            })
-            .await?;
-        Ok(allowed)
+    /// The row checks of every provider the packages name.
+    pub fn checks(&self) -> &Checks {
+        &self.checks
     }
 
     /// The caller's sign-in for a delegated service, from the provider a check names.

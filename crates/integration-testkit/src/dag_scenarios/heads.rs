@@ -2,8 +2,6 @@
 //! heads to Orbit Next, which searches only those heads; the engine joins both sides. `Head` has
 //! a composite identity, so the key set that crosses the stage is composite.
 
-use std::collections::BTreeSet;
-
 use compiler::dag::{Backend, Input, KeyInput, Rendered};
 use compiler::orbit_authorization::Key;
 use query_engine::shared::dag::Event;
@@ -196,7 +194,7 @@ async fn a_code_stage_feeds_composite_keys_into_a_clickhouse_stage() {
 /// `read_code` check runs on its rows.
 #[tokio::test]
 async fn the_files_at_a_head_go_through_their_read_code_check() {
-    let denied = AllowedKeys(BTreeSet::from([Key::Int(77)]));
+    let denied = AllowedKeys::checks([Key::Int(77)]);
     let ran = run_with(
         QUERY_4,
         &caller("1/9970/"),

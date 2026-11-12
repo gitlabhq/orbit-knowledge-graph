@@ -9,7 +9,7 @@ use query_data_model::surface::Statement;
 use serde::Serialize;
 
 use super::KeyInput;
-use crate::error::{QueryError, Result};
+use crate::error::Result;
 
 /// The keys a producer stage returned for one key input.
 #[derive(Debug, Clone, PartialEq, Serialize)]
