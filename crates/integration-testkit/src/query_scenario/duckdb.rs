@@ -1,12 +1,12 @@
 use query_data_model::testkit::limits;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
 use query_data_model::{Catalog, DuckDb};
-use query_engine::compiler::{CompiledQueryContext, compile_local, generate_local_ddl};
+use query_engine::compiler::{compile_local, generate_local_ddl};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::shared::PipelineOutput;
 
@@ -33,16 +33,27 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
         let directory = tempfile::tempdir().expect("temporary DuckDB directory");
         let database = DuckDbClient::open(&directory.path().join("scenario.duckdb"))
             .unwrap_or_else(|e| panic!("{name}: open DuckDB: {e}"));
+        let database = Arc::new(Mutex::new(database));
         database
+            .lock()
+            .expect("the scenario database")
             .initialize_schema(&generate_local_ddl(&data_model, ""))
             .unwrap_or_else(|e| panic!("{name}: local DDL: {e}"));
         let (config, steps) = scenario.into_steps();
-        seed_local(&database, [&base, &config.extra_seed], &name);
+        seed_local(
+            &database.lock().expect("the scenario database"),
+            [&base, &config.extra_seed],
+            &name,
+        );
         if config.skip.is_some() {
             continue;
         }
         for (index, step) in steps.iter().enumerate() {
-            seed_local(&database, [&step.seed], &name);
+            seed_local(
+                &database.lock().expect("the scenario database"),
+                [&step.seed],
+                &name,
+            );
             run_step(
                 &database,
                 &data_model,
@@ -56,7 +67,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
 }
 
 fn run_step(
-    database: &DuckDbClient,
+    database: &Arc<Mutex<DuckDbClient>>,
     data_model: &Arc<Catalog<DuckDb>>,
     step: &QueryStep,
     name: &str,
@@ -66,20 +77,17 @@ fn run_step(
     let expect = &step.expect;
     expect.validate_pages_exclusive(&label);
     let compiled = compile_local(query, data_model, limits()).map(Arc::new);
-    let Some(compiled) = assert_compilation(compiled, expect, &label) else {
+    if assert_compilation(compiled, expect, &label).is_none() {
         return;
-    };
+    }
     if expect.compile_only {
         return;
     }
     if expect.pages.is_empty() {
-        let output = execute(database, &compiled, &label);
+        let output = execute(database, data_model, query, &label);
         let baseline = assert_output(&output, expect, &label);
         for run in 2..=repeat_count(expect, &label) {
-            let compiled = compile_local(query, data_model, limits()).map(Arc::new);
-            let compiled = assert_compilation(compiled, expect, &label)
-                .expect("repeated query should compile");
-            let output = execute(database, &compiled, &label);
+            let output = execute(database, data_model, query, &label);
             let response = assert_output(&output, expect, &label);
             assert_repeated_response(&baseline, &response, run, &label);
         }
@@ -88,11 +96,10 @@ fn run_step(
     let mut collected = PageCollection::default();
     for (index, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", index + 1);
-        let compiled = Arc::new(
-            compile_local(&page_query(query, index), data_model, limits())
-                .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}")),
-        );
-        let output = execute(database, &compiled, &page_label);
+        let paged = page_query(query, index);
+        compile_local(&paged, data_model, limits())
+            .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}"));
+        let output = execute(database, data_model, &paged, &page_label);
         let response = assert_output(&output, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
@@ -106,7 +113,7 @@ fn run_step(
                 compile_local(&query, data_model, limits())
                     .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}")),
             );
-            let output = execute(database, &compiled, &label);
+            let output = execute(database, data_model, &query, &label);
             assert_pagination(&output, &label);
             let response =
                 validate_response(&compiled.stats, GraphFormatter.format(&output), &label);
@@ -115,18 +122,21 @@ fn run_step(
     }
 }
 
+/// Runs the query as the local deployment does: a one-stage DAG on the DuckDB executor.
 fn execute(
-    database: &DuckDbClient,
-    compiled: &Arc<CompiledQueryContext>,
+    database: &Arc<Mutex<DuckDbClient>>,
+    data_model: &Arc<Catalog<DuckDb>>,
+    query: &str,
     label: &str,
 ) -> PipelineOutput {
+    let outcome = duckdb_client::dag::run_local(database, data_model, query, limits())
+        .unwrap_or_else(|error| panic!("{label}: {error}"));
+    let compiled = outcome.compiled;
     let sql = compiled.base.render();
-    let batches = database
-        .query_arrow(&sql)
-        .unwrap_or_else(|error| panic!("{label}: {error}\n{sql}"));
+    let batches = outcome.executed.batches;
     let query_result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
     pipeline_output(
-        compiled,
+        &compiled,
         query_result,
         0,
         compiled.base.result_context.clone(),

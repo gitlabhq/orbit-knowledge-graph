@@ -217,6 +217,7 @@ fn check(
         tests: tests.to_vec(),
         steps: Vec::new(),
     };
+    let db = Arc::new(std::sync::Mutex::new(db));
     (displayed.state, run_suite(&suite, &db, data_model, true))
 }
 
