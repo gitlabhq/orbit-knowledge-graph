@@ -142,6 +142,13 @@ impl From<LiveError> for QueryError {
     }
 }
 
+/// The engine plan is built from a DAG the split already checked, so its errors are invariants.
+impl From<query_data_model::plan::engine::EngineError> for QueryError {
+    fn from(error: query_data_model::plan::engine::EngineError) -> Self {
+        Self::PipelineInvariant(error.to_string())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, strum::IntoStaticStr, strum::EnumIter)]
 #[strum(serialize_all = "snake_case")]
 pub enum RejectionReason {

@@ -19,7 +19,12 @@ pub fn restrict_hydration(
     for arm in &request.arms {
         let query = Query::new(&arm.plan, logical);
         for binding in query.bindings() {
-            super::readable(binding.entity, model, grants)?;
+            super::readable(
+                binding.entity,
+                model,
+                &crate::dag::Remotes::default(),
+                grants,
+            )?;
         }
         let expanded = query.selected().into_iter().all(|projection| {
             !matches!(

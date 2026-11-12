@@ -11,8 +11,7 @@ use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, JoinKind, ReadMode, Relation, RelationalError,
 };
 use query_data_model::implementations::relational::render::ParameterizedSql;
-use query_data_model::plan::code::CodeOperation;
-use query_data_model::plan::live::LiveOperation;
+use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
 use query_data_model::{Catalog, Endpoint};
 use serde_json::Value;
 
@@ -20,7 +19,7 @@ use super::guards::scope_set;
 use super::remote_security::Namespaces;
 use super::security::ScopeFilter;
 use crate::error::{QueryError, Result};
-use crate::passes::plan::remote::{RemotePlan, Target};
+use crate::passes::plan::remote::{Target, named_repositories};
 
 pub const KEY: &str = "id";
 
@@ -39,46 +38,38 @@ pub struct ScopeLookup {
     pub scope: String,
 }
 
+/// The lookup a remote stage's read needs, from the stage's logical plan with its key sets
+/// bound: the repositories it names, or every workspace.
 pub fn lookups(
     target: &Target,
-    plan: &RemotePlan,
+    logical: &LogicalPlan,
     graph: &Catalog<ClickHouse>,
     grants: &Grants,
 ) -> Result<Vec<ScopeLookup>> {
-    let mut lookups = Vec::new();
-    match (target, plan) {
-        (Target::Code(code), RemotePlan::Code(plan)) => {
-            for node in plan.nodes() {
-                if let CodeOperation::Repositories { index, projects } = plan.operation(node) {
-                    let keys: Vec<Value> = projects.iter().map(|id| Value::from(*id)).collect();
-                    let query = lookup(graph, code.index_guard(*index), grants, Some(keys))?;
-                    lookups.extend(query.map(|(query, scope)| ScopeLookup {
-                        resolves: Resolves::Repositories,
-                        query,
-                        scope,
-                    }));
-                }
-            }
+    let entity = logical
+        .nodes()
+        .find_map(|node| match logical.operation(node) {
+            LogicalOperation::Entities(entity) => Some(*entity),
+            _ => None,
+        })
+        .ok_or_else(|| QueryError::Validation("the query reads no entity".into()))?;
+    let (resolves, guard, keys) = match target {
+        Target::Code(code) => {
+            let projects = named_repositories(logical, code)?;
+            let keys = projects.into_iter().map(Value::from).collect();
+            (Resolves::Repositories, code.guard(entity), Some(keys))
         }
-        (Target::Live(live), RemotePlan::Live(plan)) => {
-            for node in plan.nodes() {
-                if let LiveOperation::Call(operation) = plan.operation(node) {
-                    let query = lookup(graph, live.operation_guard(*operation), grants, None)?;
-                    lookups.extend(query.map(|(query, scope)| ScopeLookup {
-                        resolves: Resolves::Workspaces,
-                        query,
-                        scope,
-                    }));
-                }
-            }
-        }
-        _ => {
-            return Err(QueryError::PipelineInvariant(
-                "the plan does not match its target".into(),
-            ));
-        }
-    }
-    Ok(lookups)
+        Target::Live(live) => (Resolves::Workspaces, live.guard(entity), None),
+    };
+    let query = lookup(graph, guard, grants, keys)?;
+    Ok(query
+        .map(|(query, scope)| ScopeLookup {
+            resolves,
+            query,
+            scope,
+        })
+        .into_iter()
+        .collect())
 }
 
 /// The rows of each lookup, as the graph connection returned them, keyed by `key`.

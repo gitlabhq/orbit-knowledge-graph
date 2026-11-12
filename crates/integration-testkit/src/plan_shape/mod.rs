@@ -217,7 +217,13 @@ fn check<B: SqlBackend>(
     let label = format!("{}: {} [{backend}]", path.display(), scenario.name);
     let catalog = model.model().logical(limits()).as_admin();
     let parsed = compiler::surface::parse(raw, catalog).and_then(|statement| {
-        let plan = normalize::normalize(statement.plan, catalog.model(), model, limits())?;
+        let plan = normalize::normalize(
+            statement.plan,
+            catalog.model(),
+            model,
+            &Default::default(),
+            limits(),
+        )?;
         Ok(query_data_model::surface::Statement { plan, ..statement })
     });
     let statement = match parsed {

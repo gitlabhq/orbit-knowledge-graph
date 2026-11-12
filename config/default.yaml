@@ -227,6 +227,7 @@ query:
     path_anchor_span: 500
     path_anchor_rows: 500
     hydration_rows: 1000
+    stage_keys: 1000
     hydration_path_segments: 2000
     in_subquery_index_values: 1000000
     path_finding_max_execution_time: 15

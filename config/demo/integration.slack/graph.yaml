@@ -8,6 +8,7 @@ entities:
     properties:
       id: {type: string}
       workspace: {type: string}
+      merge_request_id: {type: int64}
       channel: {type: string}
       author: {type: string}
       text: {type: string}
@@ -25,3 +26,4 @@ entities:
 relationships:
   IN_WORKSPACE: {variants: {SlackMessage -> SlackWorkspace: {cardinality: many_to_one}}}
   INSTALLED_IN: {variants: {SlackWorkspace -> Group: {cardinality: many_to_one}}}
+  DISCUSSES: {variants: {SlackMessage -> MergeRequest: {cardinality: many_to_one}}}

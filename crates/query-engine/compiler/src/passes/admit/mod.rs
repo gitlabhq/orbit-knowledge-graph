@@ -20,12 +20,20 @@ use crate::logical::anchors::Anchor;
 pub fn admit(
     query: Query<'_>,
     model: &Catalog<impl SqlBackend>,
+    remotes: &crate::dag::Remotes,
     limits: &QueryLimits,
     selectivity: bool,
 ) -> Result<()> {
+    let searched =
+        |structural: &query_data_model::plan::logical::Structural| match structural.target {
+            Expr::Property { binding, property } => query
+                .entity(binding)
+                .is_some_and(|entity| remotes.searching(entity, property).is_some()),
+            _ => false,
+        };
     if query
         .operations()
-        .any(|(_, operation)| matches!(operation, LogicalOperation::Structural(_)))
+        .any(|(_, operation)| matches!(operation, LogicalOperation::Structural(structural) if !searched(structural)))
     {
         return Err(QueryError::Validation(format!(
             "structural matches run on an {} connection, not in SQL",

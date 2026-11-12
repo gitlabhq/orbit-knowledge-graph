@@ -9418,6 +9418,7 @@ dependencies = [
  "query-data-model",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "types",
 ]

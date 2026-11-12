@@ -56,6 +56,8 @@ pub struct QueryLimits {
     pub path_anchor_rows: u32,
     /// Rows one dynamic hydration or key lookup reads per entity.
     pub hydration_rows: usize,
+    /// Keys one stage of an execution DAG hands to the next; a larger set fails the query.
+    pub stage_keys: usize,
     /// Traversal path segments one hydration read binds before it widens to parent paths.
     pub hydration_path_segments: usize,
     /// ClickHouse `use_index_for_in_with_subqueries_max_values` for queries with shared or membership reads.

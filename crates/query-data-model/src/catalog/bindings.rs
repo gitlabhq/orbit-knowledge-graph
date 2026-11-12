@@ -372,11 +372,12 @@ pub(super) fn check(
                 store.source(variant.source).is_some() && on(&store.connection, variant.target);
             match store.binding(variant.id) {
                 Some(binding) => {
+                    let tableless = store.sources().all(|source| source.table.is_none());
                     let joins = binding.fk.as_ref().is_none_or(|key| {
                         let referenced = key
                             .foreign_key
                             .referenced_entity(variant.source, variant.target);
-                        on(&store.connection, referenced)
+                        tableless || on(&store.connection, referenced)
                     }) && (store.edge_table(variant.id).is_none()
                         || on(&store.connection, variant.target));
                     if !joins {

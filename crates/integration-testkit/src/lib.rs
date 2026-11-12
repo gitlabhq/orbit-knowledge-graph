@@ -2,11 +2,12 @@ mod assertions;
 pub mod authorization_variants;
 pub mod cli;
 mod context;
+pub mod dag_fakes;
+#[cfg(test)]
+mod dag_scenarios;
 pub mod mock_redaction;
 pub mod plan_shape;
 pub mod query_scenario;
-#[cfg(test)]
-mod remote_scenarios;
 pub mod scenario;
 mod seed;
 pub mod seeded_remote;
@@ -28,6 +29,7 @@ pub(crate) fn test_stats(query: &str) -> query_engine::compiler::QueryStats {
         statement.plan,
         catalog.model(),
         &model,
+        &Default::default(),
         query_data_model::testkit::limits(),
     )
     .unwrap();

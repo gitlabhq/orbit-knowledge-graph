@@ -53,7 +53,8 @@ pub fn route(
     scope: IntrospectionScope,
     limits: &QueryLimits,
 ) -> Result<RoutedStatement> {
-    let catalog = super::catalog(data_model, limits, admin);
+    let remotes = crate::dag::Remotes::default();
+    let catalog = super::catalog(data_model, &remotes, limits, admin);
     match gql::route(raw, catalog)
         .map_err(QueryError::from)
         .count_err()?
@@ -71,8 +72,14 @@ pub fn compile_query(
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    let stage =
-        crate::split_statement(query.statement, data_model, grants, limits)?.into_single()?;
+    let stage = crate::split(
+        crate::dag::Source::Parsed(query.statement),
+        data_model,
+        &crate::dag::Remotes::default(),
+        grants,
+        limits,
+    )?
+    .into_single()?;
     crate::compile_stage(stage, data_model, grants, limits)
 }
 

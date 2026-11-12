@@ -1,4 +1,5 @@
 pub mod content;
+pub mod dag;
 pub mod hydration;
 pub mod stages;
 mod types;

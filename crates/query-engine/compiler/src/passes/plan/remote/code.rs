@@ -20,7 +20,7 @@ enum Returned {
 /// Literal atoms shorter than a trigram cannot narrow the candidate files.
 const TRIGRAM: usize = 3;
 
-pub(super) fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<CodePlan> {
+pub fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<CodePlan> {
     let graph = code.graph();
     let mut entity = None;
     let mut projects = Vec::new();
@@ -89,6 +89,25 @@ pub(super) fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<C
             .collect::<std::result::Result<Vec<Field>, _>>()?;
         q.select(hits, fields)
     })?)
+}
+
+/// The repositories a code plan names: the conditions on its entity's repository key.
+pub fn named_repositories(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<Vec<i64>> {
+    let mut entity = None;
+    let mut projects = Vec::new();
+    for node in logical.nodes() {
+        match logical.operation(node) {
+            LogicalOperation::Entities(id) => entity = Some(*id),
+            LogicalOperation::Filter(predicate) => {
+                projects.extend(repositories(
+                    predicate,
+                    entity.and_then(|entity| anchor(code, entity)),
+                )?);
+            }
+            _ => {}
+        }
+    }
+    Ok(projects)
 }
 
 /// The foreign key on the entity that names its repository: the first step of its `via` chain.

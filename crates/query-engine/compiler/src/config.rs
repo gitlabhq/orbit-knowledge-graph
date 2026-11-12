@@ -20,6 +20,10 @@ use crate::types::QueryType;
 use orbit_authorization::Grants;
 use query_data_model::surface::Statement;
 
+mod code;
+mod engine;
+mod live;
+
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
     opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))
 }
@@ -28,6 +32,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
     env {
         pub grants: Grants,
         pub limits: QueryLimits,
+        pub remotes: crate::dag::Remotes,
+        pub trace: bool,
     }
 
     state {
@@ -43,39 +49,47 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub relational: query_data_model::implementations::relational::plan::RelationalPlan<Self::Backend>,
         pub output: CompiledQueryContext,
         pub hydration_query: ParameterizedQuery,
+        pub namespaces: crate::remote::Namespaces,
+        pub code: query_data_model::plan::code::CodePlan,
+        pub live: query_data_model::plan::live::LivePlan,
+        pub engine: query_data_model::plan::engine::EnginePlan,
+        pub engine_query: crate::dag::EngineQuery,
+        pub stage_contexts: Vec<(crate::dag::StageId, ResultContext)>,
+        pub planned: Vec<String>,
+        pub request: crate::dag::Request,
     }
 
     phases {
         gql_parse {
-            reads_env: [grants, data_model, limits]
+            reads_env: [grants, data_model, limits, remotes]
             mutates: [raw, statement]
         }
         gql_parse_trusted {
-            reads_env: [data_model, limits]
+            reads_env: [data_model, limits, remotes]
             mutates: [raw, statement]
         }
         gql_parse_local {
-            reads_env: [data_model, limits]
+            reads_env: [data_model, limits, remotes]
             mutates: [raw, statement]
         }
         admit {
-            reads_env: [data_model, limits]
+            reads_env: [data_model, limits, remotes]
             reads_state: [statement]
         }
         admit_local {
-            reads_env: [data_model, limits]
+            reads_env: [data_model, limits, remotes]
             reads_state: [statement]
         }
         split_stages {
-            reads_env: [data_model]
+            reads_env: [data_model, remotes, limits, trace]
             mutates: [statement, dag]
         }
         normalize {
-            reads_env: [data_model, limits]
+            reads_env: [data_model, limits, remotes]
             mutates: [statement]
         }
         restrict {
-            reads_env: [data_model, grants]
+            reads_env: [data_model, grants, remotes]
             reads_state: [statement]
         }
         restrict_hydration {
@@ -88,9 +102,9 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [tp_bounds]
         }
         plan {
-            reads_env: [data_model, limits]
+            reads_env: [data_model, limits, trace]
             reads_state: [statement, tp_bounds, hydration]
-            mutates: [relational, plan_metadata]
+            mutates: [relational, plan_metadata, planned]
         }
         paginate {
             reads_env: [data_model]
@@ -134,43 +148,112 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [statement, hydration]
             mutates: [relational, result_ctx, query_config, hydration_plan, output, hydration_query]
         }
+        code::plan {
+            reads_env: [data_model, trace]
+            reads_state: [statement]
+            mutates: [code, planned]
+        }
+        code::security {
+            reads_env: [grants, data_model]
+            reads_state: [namespaces]
+            mutates: [code]
+        }
+        code::security_check {
+            reads_state: [code]
+        }
+        code::render {
+            reads_env: [data_model]
+            reads_state: [code]
+            mutates: [request]
+        }
+        live::plan {
+            reads_env: [data_model, trace]
+            reads_state: [statement]
+            mutates: [live, planned]
+        }
+        live::security {
+            reads_env: [grants, data_model]
+            reads_state: [namespaces]
+            mutates: [live]
+        }
+        live::security_check {
+            reads_state: [live]
+        }
+        live::render {
+            reads_env: [data_model]
+            reads_state: [live]
+            mutates: [request]
+        }
+        engine::plan {
+            reads_env: [data_model, trace]
+            reads_state: [engine_query, stage_contexts]
+            mutates: [engine, planned]
+        }
+        engine::result_contract {
+            reads_env: [data_model]
+            reads_state: [stage_contexts]
+            mutates: [engine, result_ctx]
+        }
+        engine::paginate {
+            reads_env: [data_model]
+            reads_state: [engine_query]
+            mutates: [engine]
+        }
     }
 
     pipelines {
         gql_query {
             backend: query_data_model::ClickHouse
-            env: [grants, limits]
+            env: [grants, limits, remotes, trace]
             state: [raw, statement, dag]
             phases: [gql_parse, normalize, restrict, admit, split_stages]
         }
         gql_local {
             backend: query_data_model::DuckDb
-            env: [limits]
+            env: [limits, remotes, trace]
             state: [raw, statement, dag]
             phases: [gql_parse_local, normalize, admit_local, split_stages]
         }
         gql_check {
             backend: query_data_model::ClickHouse
-            env: [limits]
+            env: [limits, remotes]
             state: [raw, statement]
             phases: [gql_parse_trusted, normalize, admit]
         }
         gql_clickhouse {
             backend: query_data_model::ClickHouse
-            env: [grants, limits]
-            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            env: [grants, limits, trace]
+            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned]
             phases: [tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         gql_duckdb {
             backend: query_data_model::DuckDb
-            env: [limits]
-            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output]
+            env: [limits, trace]
+            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned]
             phases: [plan, result_contract, paginate, materialize, codegen]
+        }
+        gql_orbit_code {
+            backend: query_data_model::implementations::orbit_code::OrbitCode
+            env: [grants, limits, trace]
+            state: [statement, namespaces, code, planned, request]
+            phases: [code::plan, code::security, code::security_check, code::render]
+        }
+        gql_live {
+            backend: query_data_model::implementations::live::Live
+            env: [grants, limits, trace]
+            state: [statement, namespaces, live, planned, request]
+            phases: [live::plan, live::security, live::security_check, live::render]
+        }
+        gql_engine {
+            backend: crate::dag::Engine
+            env: [limits, trace]
+            state: [engine_query, stage_contexts, engine, result_ctx, planned]
+            phases: [engine::plan, engine::result_contract, engine::paginate]
         }
         hydration_clickhouse {
             backend: query_data_model::ClickHouse
-            env: [grants, limits]
-            state: [tp_bounds, hydration, plan_metadata, query_config, relational, hydration_query]
+            env: [grants, limits, trace]
+            state: [tp_bounds, hydration, plan_metadata, query_config, relational, hydration_query, planned]
             phases: [restrict_hydration, plan, settings, security, security_check, codegen]
         }
     }
@@ -182,7 +265,7 @@ fn parse<C: CompilerCtx<Backend: SqlBackend>>(
     all_columns: bool,
 ) -> Result<()> {
     if let Some(raw) = ctx.take_raw() {
-        let catalog = surface::catalog(ctx.data_model(), ctx.limits(), admin);
+        let catalog = surface::catalog(ctx.data_model(), ctx.remotes(), ctx.limits(), admin);
         let catalog = match all_columns {
             true => catalog.with_all_columns(),
             false => catalog,
@@ -210,7 +293,7 @@ fn admit_with(ctx: &mut impl CompilerCtx<Backend: SqlBackend>, selectivity: bool
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let model = ctx.data_model();
     let query = crate::logical::Query::new(&statement.plan, model.model());
-    admit::admit(query, model, ctx.limits(), selectivity)
+    admit::admit(query, model, ctx.remotes(), ctx.limits(), selectivity)
 }
 
 fn admit(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
@@ -223,15 +306,25 @@ fn admit_local(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
 
 fn split_stages(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     let statement = require(ctx.take_statement(), "statement")?;
-    let dag = crate::dag::split(statement, ctx.data_model())?;
-    ctx.set_dag(dag);
+    let logical = match *ctx.trace() {
+        true => crate::dag::describe(&statement.plan),
+        false => Vec::new(),
+    };
+    let dag = crate::dag::split(statement, ctx.data_model(), ctx.remotes(), ctx.limits())?;
+    ctx.set_dag(crate::dag::Dag { logical, ..dag });
     Ok(())
 }
 
 fn normalize(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     let statement = require(ctx.take_statement(), "statement")?;
     let model = ctx.data_model();
-    let plan = normalize::normalize(statement.plan, model.model(), model, ctx.limits())?;
+    let plan = normalize::normalize(
+        statement.plan,
+        model.model(),
+        model,
+        ctx.remotes(),
+        ctx.limits(),
+    )?;
     ctx.set_statement(Statement { plan, ..statement });
     Ok(())
 }
@@ -239,7 +332,13 @@ fn normalize(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
 fn restrict(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let model = ctx.data_model();
-    restrict::restrict(&statement.plan, model.model(), model, ctx.grants())
+    restrict::restrict(
+        &statement.plan,
+        model.model(),
+        model,
+        ctx.remotes(),
+        ctx.grants(),
+    )
 }
 
 fn restrict_hydration(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
@@ -268,6 +367,9 @@ fn plan(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     };
     let planned =
         crate::passes::plan::plan(request, ctx.tp_bounds().as_ref(), model, ctx.limits())?;
+    if *ctx.trace() {
+        ctx.set_planned(crate::dag::describe(&planned.plan.plan));
+    }
     ctx.set_relational(planned.plan);
     ctx.set_plan_metadata(planned.metadata);
     Ok(())

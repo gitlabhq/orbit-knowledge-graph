@@ -30,12 +30,15 @@ pub struct Operation {
 pub enum Condition {
     Equals { field: Ref, value: Literal },
     Contains { field: Ref, text: String },
+    OneOf { field: Ref, values: Vec<Literal> },
 }
 
 impl Condition {
     fn field(&mut self) -> &mut Ref {
         match self {
-            Self::Equals { field, .. } | Self::Contains { field, .. } => field,
+            Self::Equals { field, .. }
+            | Self::Contains { field, .. }
+            | Self::OneOf { field, .. } => field,
         }
     }
 }

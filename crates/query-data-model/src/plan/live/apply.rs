@@ -50,6 +50,13 @@ impl LiveBuilder<'_> {
                         Condition::Contains { field, .. } => {
                             self.pushed(&self.field(*field)?, true, "contains")?
                         }
+                        Condition::OneOf { field, values } => {
+                            let field = self.field(*field)?;
+                            self.pushed(&field, false, "a key set")?;
+                            for value in values {
+                                Self::typed(&field, value)?;
+                            }
+                        }
                     }
                 }
                 Ok(Outputs::preserve())

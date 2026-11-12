@@ -157,6 +157,11 @@ impl<B: StorageBackend> Catalog<B> {
         &self.model
     }
 
+    /// The model, for callers that keep it past this catalog.
+    pub fn shared_model(&self) -> &Arc<Model> {
+        &self.model
+    }
+
     pub fn graph(&self) -> &GraphCatalog {
         self.model.graph()
     }

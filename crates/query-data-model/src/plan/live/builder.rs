@@ -24,6 +24,14 @@ impl Field {
         Conditions(vec![condition])
     }
 
+    pub fn one_of(&self, values: impl IntoIterator<Item = Literal>) -> Conditions {
+        let condition = Condition::OneOf {
+            field: self.output,
+            values: values.into_iter().collect(),
+        };
+        Conditions(vec![condition])
+    }
+
     pub fn contains(&self, text: impl Into<String>) -> Conditions {
         let condition = Condition::Contains {
             field: self.output,

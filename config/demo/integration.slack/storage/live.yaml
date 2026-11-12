@@ -10,13 +10,14 @@ entities:
     columns:
       id: {immutable: true}
       workspace: {immutable: true}
+      merge_request_id: {immutable: true}
       channel: {}
       author: {}
       text: {}
       sent_at: {}
     backend:
       operation: search.messages
-      filters: [channel, author, sent_at]
+      filters: [channel, author, sent_at, merge_request_id]
       text: text
   SlackWorkspace:
     columns:
@@ -27,3 +28,5 @@ entities:
 relationships:
   IN_WORKSPACE:
     SlackMessage -> SlackWorkspace: {fk: {on: source, column: workspace}}
+  DISCUSSES:
+    SlackMessage -> MergeRequest: {fk: {on: source, column: merge_request_id}}

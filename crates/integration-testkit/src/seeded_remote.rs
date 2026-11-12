@@ -129,6 +129,10 @@ impl DataExtraction for SeededDataExtraction {
                 let field = message.get(&filter.field);
                 match filter.op {
                     "contains" => text(field).contains(text(Some(&filter.value))),
+                    "in" => filter
+                        .value
+                        .as_array()
+                        .is_some_and(|values| field.is_some_and(|field| values.contains(field))),
                     _ => field == Some(&filter.value),
                 }
             })

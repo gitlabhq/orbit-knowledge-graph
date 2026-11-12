@@ -10,6 +10,7 @@ pub struct LogicalCatalog<'m> {
     model: &'m Model,
     admin: bool,
     connection: Option<&'m str>,
+    remotes: &'m [String],
     limits: &'m QueryLimits,
     all_columns: bool,
 }
@@ -20,6 +21,7 @@ impl Model {
             model: self,
             admin: false,
             connection: None,
+            remotes: &[],
             limits,
             all_columns: false,
         }
@@ -71,12 +73,23 @@ impl<'m> LogicalCatalog<'m> {
         }
     }
 
+    /// Whether the deployment serves code or live connections, whose stages the engine joins to
+    /// the relational one.
+    pub fn serves_remotes(self) -> bool {
+        !self.remotes.is_empty()
+    }
+
+    /// Also reads the stores of the code and live connections the deployment serves.
+    #[must_use]
+    pub fn with_remotes(self, remotes: &'m [String]) -> Self {
+        Self { remotes, ..self }
+    }
+
     fn stores(self) -> impl Iterator<Item = &'m Store> {
-        let connection = self.connection;
-        self.model
-            .stores()
-            .iter()
-            .filter(move |store| Some(store.connection.as_str()) == connection)
+        self.model.stores().iter().filter(move |store| {
+            Some(store.connection.as_str()) == self.connection
+                || self.remotes.contains(&store.connection)
+        })
     }
 
     pub(super) fn realized(self, entity: EntityId, property: PropertyId) -> bool {

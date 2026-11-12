@@ -25,7 +25,7 @@ const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
 fn restrict(gql: &str, ctx: &Grants) -> Result<()> {
     let model = MODEL.model();
     let statement = surface::parse(gql, model.logical(crate::testkit::limits()).as_admin())?;
-    super::restrict(&statement.plan, model, &*MODEL, ctx)
+    super::restrict(&statement.plan, model, &*MODEL, &Default::default(), ctx)
 }
 
 fn restricted(gql: &str) -> String {
