@@ -2,141 +2,120 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use async_trait::async_trait;
 use clickhouse_client::{ArrowClickHouseClient, QuerySummary};
 
-use query_engine::pipeline::{
-    PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
-};
-use query_engine::shared::{
-    ExecutionOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
-};
+use query_engine::compiler::dag::Request;
+use query_engine::shared::dag::{Executed, Executor, ExecutorError};
+use query_engine::shared::{QueryExecution, QueryExecutionStats};
 
 use crate::pipeline::correlation;
-use crate::pipeline::service::QuerySettings;
 
-struct PreparedQuery {
-    sql: String,
-    params: HashMap<String, orbit_utils::query_types::ParamValue>,
-    rendered_sql: String,
-    query_id: String,
-    http_settings: Vec<(String, String)>,
-}
-
-#[derive(Clone)]
+/// The ClickHouse executor the server registers for its graph connection. `label` names the
+/// stage in query ids, log comments and the execution log.
 pub struct ClickHouseExecutor {
-    pub migration_version: u32,
+    pub client: Arc<ArrowClickHouseClient>,
+    pub label: String,
+    pub log_comment: String,
+    pub settings: Vec<(String, String)>,
 }
 
-impl PipelineStage for ClickHouseExecutor {
-    type Input = ();
-    type Output = ExecutionOutput;
+struct Statement<'a> {
+    sql: &'a str,
+    params: &'a HashMap<String, orbit_utils::query_types::ParamValue>,
+    rendered: String,
+}
 
-    async fn execute(
-        &self,
-        ctx: &mut QueryPipelineContext,
-        obs: &mut dyn PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
-        let start = Instant::now();
-        let client = ctx
-            .server_extensions
-            .get::<Arc<ArrowClickHouseClient>>()
-            .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
-            .inspect_err(|e| obs.record_error(e))?;
-
-        let user_id = ctx
-            .server_extensions
-            .get::<crate::auth::Claims>()
-            .map(|c| c.user_id)
-            .unwrap_or(0);
-        let log_comment =
-            correlation::log_comment_base(user_id, &ctx.query_json, self.migration_version);
-
-        let (prepared, result_context) = {
-            let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
-            let query_id = correlation::query_id("base");
-            let mut http_settings = vec![
-                ("query_id".to_string(), query_id.clone()),
-                ("log_comment".to_string(), log_comment),
-            ];
-            if let Some(QuerySettings(settings)) = ctx.phases.get::<QuerySettings>() {
-                http_settings.extend(settings.iter().cloned());
+#[async_trait]
+impl Executor for ClickHouseExecutor {
+    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+        let statements: Vec<Statement<'_>> = match request {
+            Request::Query(compiled) => vec![Statement {
+                sql: &compiled.base.sql,
+                params: &compiled.base.params,
+                rendered: compiled.base.render(),
+            }],
+            Request::Hydration(query) => vec![Statement {
+                sql: &query.sql,
+                params: &query.params,
+                rendered: query.render(),
+            }],
+            Request::Lookup(lookups) => lookups
+                .iter()
+                .map(|lookup| Statement {
+                    sql: &lookup.query.sql,
+                    params: &lookup.query.parameters,
+                    rendered: lookup.query.sql.clone(),
+                })
+                .collect(),
+            other => {
+                return Err(ExecutorError(format!(
+                    "the ClickHouse connection runs SQL, not {other:?}"
+                )));
             }
-            let prepared = PreparedQuery {
-                sql: compiled.base.sql.clone(),
-                params: compiled.base.params.clone(),
-                rendered_sql: compiled.base.render(),
-                http_settings,
-                query_id,
-            };
-            (prepared, compiled.base.result_context.clone())
         };
-
-        let (batches, execution) = execute_query(client, &prepared, start)
-            .await
-            .inspect_err(|e| obs.record_error(e))?;
-
-        let elapsed = start.elapsed();
-        obs.executed(elapsed, batches.len());
-        obs.query_executed(
-            "base",
-            execution.stats.read_rows,
-            execution.stats.read_bytes,
-            execution.stats.memory_usage,
-        );
-
-        ctx.phases
-            .get_or_insert_default::<QueryExecutionLog>()
-            .0
-            .push(execution);
-
-        Ok(ExecutionOutput {
-            batches,
-            result_context,
-        })
+        let mut executed = Executed::default();
+        for statement in statements {
+            let (batches, execution) = self.run(&statement).await?;
+            let concatenated = match batches.first() {
+                Some(first) if matches!(request, Request::Lookup(_)) => {
+                    vec![
+                        arrow::compute::concat_batches(&first.schema(), &batches)
+                            .map_err(|error| ExecutorError(error.to_string()))?,
+                    ]
+                }
+                _ => batches,
+            };
+            executed.batches.extend(concatenated);
+            executed.log.push(execution);
+        }
+        Ok(executed)
     }
 }
 
-async fn execute_query(
-    client: &ArrowClickHouseClient,
-    prepared: &PreparedQuery,
-    start: Instant,
-) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), PipelineError> {
-    let mut query = client
-        .query(&prepared.sql)
-        .with_settings(prepared.http_settings.clone());
-    for (key, param) in prepared.params.iter() {
-        query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.data_type);
+impl ClickHouseExecutor {
+    async fn run(
+        &self,
+        statement: &Statement<'_>,
+    ) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), ExecutorError> {
+        let start = Instant::now();
+        let query_id = correlation::query_id(&self.label.replace(':', "-"));
+        let mut query = self
+            .client
+            .query(statement.sql)
+            .with_setting("query_id", &query_id)
+            .with_setting("log_comment", &self.log_comment)
+            .with_settings(self.settings.clone());
+        for (key, param) in statement.params {
+            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.data_type);
+        }
+        let (batches, summary) = query
+            .fetch_arrow_with_summary()
+            .await
+            .map_err(|error| ExecutorError(error.to_string()))?;
+        let elapsed = start.elapsed();
+        let result_rows = batches.iter().map(|batch| batch.num_rows()).sum::<usize>() as u64;
+        let stats = apply_summary(
+            QueryExecutionStats {
+                result_rows,
+                elapsed_ns: elapsed.as_nanos() as u64,
+                ..Default::default()
+            },
+            summary.as_ref(),
+        );
+        let execution = QueryExecution {
+            label: self.label.clone(),
+            rendered_sql: statement.rendered.clone(),
+            query_id,
+            elapsed_ms: elapsed.as_secs_f64() * 1000.0,
+            stats,
+            explain_plan: None,
+            explain_pipeline: None,
+            query_log: None,
+            processors: None,
+        };
+        Ok((batches, execution))
     }
-    let (batches, summary) = query
-        .fetch_arrow_with_summary()
-        .await
-        .map_err(|e| PipelineError::Execution(e.to_string()))?;
-
-    let elapsed = start.elapsed();
-    let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
-
-    let stats = apply_summary(
-        QueryExecutionStats {
-            result_rows,
-            elapsed_ns: elapsed.as_nanos() as u64,
-            ..Default::default()
-        },
-        summary.as_ref(),
-    );
-
-    let execution = QueryExecution {
-        label: "base".into(),
-        rendered_sql: prepared.rendered_sql.clone(),
-        query_id: prepared.query_id.clone(),
-        elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-        stats,
-        explain_plan: None,
-        explain_pipeline: None,
-        query_log: None,
-        processors: None,
-    };
-
-    Ok((batches, execution))
 }
 
 /// Stats come from the `X-ClickHouse-Summary` HTTP header.

@@ -24,7 +24,9 @@ use std::sync::LazyLock;
 
 pub type ClickHousePlan = RelationalPlan<ClickHouse>;
 /// A relational backend the compiler plans for and renders SQL through.
-pub trait SqlBackend: RelationalBackend + Send + Sync {
+pub trait SqlBackend:
+    RelationalBackend + crate::dag::StageBackend<Catalog = Catalog<Self>> + Send + Sync
+{
     const DIALECT: SqlDialect;
 
     fn render(catalog: &Catalog<Self>, plan: &RelationalPlan<Self>) -> ParameterizedSql;

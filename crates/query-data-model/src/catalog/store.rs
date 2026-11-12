@@ -22,7 +22,8 @@ pub struct Source {
     /// The store holds or excludes every property, and plans read the entity here.
     pub complete: bool,
     pub table: Option<String>,
-    pub key: String,
+    /// The columns of the entity's identity, one per part.
+    pub key: Vec<String>,
     pub path_column: Option<String>,
     pub access: AccessHints<Resolved>,
 }
@@ -107,10 +108,20 @@ impl Store {
             })
     }
 
-    /// The foreign key a plan can join on; a discriminated key is not one.
+    /// The foreign key a plan can join on; a discriminated or composite key is not one.
     pub fn foreign_key(&self, variant: RelationshipVariantId) -> Option<ForeignKey> {
         let key = self.binding(variant)?.fk.as_ref()?;
-        key.discriminator.is_none().then_some(key.foreign_key)
+        (key.discriminator.is_none() && key.composite.is_empty()).then_some(key.foreign_key)
+    }
+
+    /// The holder and the column pairs of a key on a composite identity, which only the engine
+    /// joins on, between stages.
+    pub fn composite_key(
+        &self,
+        variant: RelationshipVariantId,
+    ) -> Option<(Endpoint, &[(PropertyId, PropertyId)])> {
+        let key = self.binding(variant)?.fk.as_ref()?;
+        (!key.composite.is_empty()).then_some((key.foreign_key.holder, key.composite.as_slice()))
     }
 
     /// The edge table a variant's rows live in, or the one derived from its foreign key.

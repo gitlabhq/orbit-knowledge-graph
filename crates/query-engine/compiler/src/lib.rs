@@ -40,6 +40,7 @@ pub mod tp_bounds;
 pub mod types;
 
 pub mod config;
+pub mod dag;
 pub mod logical;
 pub mod passes;
 pub mod remote;
@@ -82,17 +83,61 @@ use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
-fn finish<C: config::CompilerCtx>(
-    ctx: &mut C,
-    run: impl FnOnce(&mut C) -> Result<()>,
+fn output<T>(produced: Option<T>) -> Result<T> {
+    produced.ok_or_else(|| {
+        error::QueryError::PipelineInvariant("pipeline did not produce output".into())
+    })
+}
+
+/// The top-level pipeline on ClickHouse: parse, normalize, restrict, admit, split into stages.
+pub fn split(
+    source: dag::Source<'_>,
+    data_model: &Arc<Catalog<ClickHouse>>,
+    remotes: &dag::Remotes,
+    grants: &Grants,
+    limits: &QueryLimits,
+) -> Result<dag::Dag> {
+    let primary = dag::Primary::ClickHouse(Arc::clone(data_model));
+    let env = dag::Env {
+        primary: &primary,
+        remotes,
+        grants,
+        limits,
+        trace: false,
+    };
+    dag::split_query(source, &env)
+}
+
+fn statement(stage: dag::Stage) -> Result<query_data_model::surface::Statement> {
+    match stage.query {
+        dag::StageQuery::Gql(statement) => Ok(statement),
+        _ => Err(error::QueryError::PipelineInvariant(
+            "the stage plans from no statement".into(),
+        )),
+    }
+}
+
+fn clickhouse_stage(
+    stage: dag::Stage,
+    data_model: &Arc<Catalog<ClickHouse>>,
+    grants: &Grants,
+    limits: &QueryLimits,
+) -> Result<config::GqlClickhouseCtx> {
+    let mut ctx =
+        config::GqlClickhouseCtx::new(grants.clone(), *limits, false, true, Arc::clone(data_model));
+    ctx.set_statement(statement(stage)?);
+    config::run_gql_clickhouse(&mut ctx).count_err()?;
+    Ok(ctx)
+}
+
+/// The `(gql, clickhouse)` stage sub-pipeline, from tp_bounds through codegen.
+pub fn compile_stage(
+    stage: dag::Stage,
+    data_model: &Arc<Catalog<ClickHouse>>,
+    grants: &Grants,
+    limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    run(ctx)
-        .and_then(|()| {
-            ctx.take_output().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
-            })
-        })
-        .count_err()
+    output(clickhouse_stage(stage, data_model, grants, limits)?.take_output())
 }
 
 /// Each CTE body of the compiled ClickHouse plan as a statement tests can EXPLAIN.
@@ -102,15 +147,20 @@ pub fn subquery_statements(
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<Vec<passes::codegen::SubqueryStatement>> {
-    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), *limits, Arc::clone(data_model));
-    ctx.set_raw(raw.to_string());
-    config::run_clickhouse_gql(&mut ctx)?;
-    let plan = ctx.relational().as_ref().ok_or_else(|| {
-        error::QueryError::PipelineInvariant("pipeline did not produce a plan".into())
-    })?;
+    let stage = split(
+        dag::Source::Text(raw),
+        data_model,
+        &dag::Remotes::default(),
+        grants,
+        limits,
+    )?
+    .into_single()?;
+    let ctx = clickhouse_stage(stage, data_model, grants, limits)?;
+    let plan = output(ctx.relational().as_ref())?;
     Ok(passes::codegen::subquery_statements(plan, data_model))
 }
 
+/// Compiles a query that reads the ClickHouse connection alone: its one stage.
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     raw: &str,
@@ -118,9 +168,15 @@ pub fn compile(
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), *limits, Arc::clone(data_model));
-    ctx.set_raw(raw.to_string());
-    finish(&mut ctx, config::run_clickhouse_gql)
+    let stage = split(
+        dag::Source::Text(raw),
+        data_model,
+        &dag::Remotes::default(),
+        grants,
+        limits,
+    )?
+    .into_single()?;
+    compile_stage(stage, data_model, grants, limits)
 }
 
 /// Compile a graph query into DuckDB SQL for local execution.
@@ -132,16 +188,31 @@ pub fn compile_local(
     data_model: &Arc<Catalog<DuckDb>>,
     limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    let mut c = config::DuckdbGqlCtx::new(*limits, Arc::clone(data_model));
-    c.set_raw(raw.to_string());
-    finish(&mut c, config::run_duckdb_gql)
+    let mut top = config::GqlLocalCtx::new(
+        *limits,
+        dag::Remotes::default(),
+        false,
+        Arc::clone(data_model),
+    );
+    top.set_raw(raw.to_string());
+    let stage = config::run_gql_local(&mut top)
+        .and_then(|()| output(top.take_dag()))
+        .and_then(dag::Dag::into_single)
+        .and_then(statement)
+        .count_err()?;
+    let mut ctx = config::GqlDuckdbCtx::new(*limits, false, Arc::clone(data_model));
+    ctx.set_statement(stage);
+    config::run_gql_duckdb(&mut ctx)
+        .and_then(|()| output(ctx.take_output()))
+        .count_err()
 }
 
 /// Parse and admit a query without a caller, as startup checks of shipped queries do.
 pub fn check(raw: &str, data_model: &Arc<Catalog<ClickHouse>>, limits: &QueryLimits) -> Result<()> {
-    let mut ctx = config::CheckGqlCtx::new(*limits, Arc::clone(data_model));
+    let mut ctx =
+        config::GqlCheckCtx::new(*limits, dag::Remotes::default(), Arc::clone(data_model));
     ctx.set_raw(raw.to_string());
-    config::run_check_gql(&mut ctx).count_err()
+    config::run_gql_check(&mut ctx).count_err()
 }
 
 /// The grants of a caller that holds every permission of the model on `roots`, for tools and
@@ -164,25 +235,43 @@ pub fn uniform_grants(model: &query_data_model::Model, admin: bool, roots: &[&st
     grants
 }
 
-/// Compile a hydration request into ClickHouse SQL: restrict, plan, settings, security, render.
+/// The `(hydration, clickhouse)` stage sub-pipeline: restrict, plan, settings, security, security
+/// check, codegen.
 pub fn compile_hydration(
-    mut request: HydrationRequest,
+    request: HydrationRequest,
     data_model: &Arc<Catalog<ClickHouse>>,
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<ParameterizedQuery> {
+    hydration_stage(request, data_model, grants, limits, false).map(|(query, _, _)| query)
+}
+
+/// The hydration stage's query, with its planned and emitted plans when traced.
+pub(crate) fn hydration_stage(
+    mut request: HydrationRequest,
+    data_model: &Arc<Catalog<ClickHouse>>,
+    grants: &Grants,
+    limits: &QueryLimits,
+    trace: bool,
+) -> Result<(ParameterizedQuery, Vec<String>, Vec<String>)> {
     for arm in &mut request.arms {
         arm.scope_on(data_model);
     }
-    let mut ctx = config::ChHydrationCtx::new(grants.clone(), *limits, Arc::clone(data_model));
+    let mut ctx =
+        config::HydrationClickhouseCtx::new(grants.clone(), *limits, trace, Arc::clone(data_model));
     ctx.set_hydration(request);
-    config::run_ch_hydration(&mut ctx)
-        .and_then(|()| {
-            ctx.take_hydration_query().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
-            })
-        })
-        .count_err()
+    config::run_hydration_clickhouse(&mut ctx).count_err()?;
+    if ctx.take_proved() != Some(true) {
+        return Err(error::QueryError::Security(
+            "the hydration stage carries no proof that each read has its policy".into(),
+        ));
+    }
+    let emitted = match (trace, ctx.relational()) {
+        (true, Some(plan)) => dag::describe(&plan.plan),
+        _ => Vec::new(),
+    };
+    let planned = ctx.take_planned().unwrap_or_default();
+    Ok((output(ctx.take_hydration_query())?, planned, emitted))
 }
 
 #[cfg(test)]

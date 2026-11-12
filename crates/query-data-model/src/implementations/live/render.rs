@@ -63,6 +63,11 @@ impl Render for Catalog<Live> {
                             op: "contains",
                             value: Value::from(text.as_str()),
                         },
+                        Condition::OneOf { field, values } => RequestFilter {
+                            field: name(*field),
+                            op: "in",
+                            value: Value::Array(values.iter().map(Value::from).collect()),
+                        },
                     }))
                 }
                 LiveOperation::Window { field, from, to } => {

@@ -21,6 +21,7 @@ use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::{EntityId, Model};
 
+use crate::dag::Remotes;
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
 use crate::logical::Query;
@@ -31,12 +32,13 @@ pub fn restrict(
     plan: &LogicalPlan,
     logical: &Model,
     model: &Catalog<impl SqlBackend>,
+    remotes: &Remotes,
     grants: &Grants,
 ) -> Result<()> {
     let query = Query::new(plan, logical);
     let entities = entities(query);
     for (_, entity) in &entities {
-        readable(*entity, model, grants)?;
+        readable(*entity, model, remotes, grants)?;
     }
     let admin = grants.caller().admin();
     if !admin && query.kind() == Kind::Aggregation {
@@ -57,10 +59,12 @@ fn entities(query: Query<'_>) -> Vec<(Ref, EntityId)> {
 pub(super) fn readable(
     entity: EntityId,
     model: &Catalog<impl SqlBackend>,
+    remotes: &Remotes,
     grants: &Grants,
 ) -> Result<()> {
     let name = &model.graph().entity(entity).name;
-    let guard = model.guard(entity).ok_or_else(|| {
+    let remote = || remotes.holding(entity)?.guard(entity);
+    let guard = model.guard(entity).or_else(remote).ok_or_else(|| {
         QueryError::Security(format!(
             "{name} has no guard on connection {}",
             model.connection()

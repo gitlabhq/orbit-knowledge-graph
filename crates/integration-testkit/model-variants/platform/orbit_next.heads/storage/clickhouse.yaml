@@ -1,0 +1,6 @@
+kind: storage
+package: orbit_next.heads
+store: graph
+relationships:
+  SOURCE_HEAD:
+    MergeRequest -> Head: {fk: {on: source, column: [project_id, source_branch]}}

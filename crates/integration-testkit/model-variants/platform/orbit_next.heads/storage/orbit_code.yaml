@@ -1,0 +1,14 @@
+kind: storage
+package: orbit_next.heads
+store: code
+entities:
+  Head:
+    complete: true
+    columns:
+      project_id: {immutable: true}
+      branch: {immutable: true}
+relationships:
+  HEAD_FILE:
+    Head -> File: {fk: {on: target, column: [project_id, branch]}}
+  HEAD_IN:
+    Head -> Project: {fk: {on: source, column: project_id}}

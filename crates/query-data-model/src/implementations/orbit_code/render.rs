@@ -8,6 +8,8 @@ use crate::plan::code::{CodeError, CodeLanguage, CodeOperation, CodePlan, CodeVa
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StructuralSearchRequest {
     pub repositories: Vec<i64>,
+    /// The branch heads to search, as (repository, branch); empty searches each default branch.
+    pub heads: Vec<(i64, String)>,
     pub languages: Vec<String>,
     pub trigrams: Vec<String>,
     pub pattern: String,
@@ -22,6 +24,7 @@ pub enum RequestField {
     Line,
     Capture(String),
     Repository(String),
+    Branch(String),
 }
 
 impl Render for Catalog<OrbitCode> {
@@ -40,7 +43,7 @@ impl Render for Catalog<OrbitCode> {
                     .collect(),
             });
         };
-        let (mut languages, mut trigrams) = (Vec::new(), Vec::new());
+        let (mut languages, mut trigrams, mut heads) = (Vec::new(), Vec::new(), Vec::new());
         let (mut pattern, mut limit) = (None, None::<u64>);
         for node in plan.nodes() {
             match plan.operation(node) {
@@ -52,6 +55,7 @@ impl Render for Catalog<OrbitCode> {
                         .map(|language| <&str>::from(*language).to_string()),
                 ),
                 CodeOperation::Prefilter(atoms) => trigrams.extend(atoms.iter().cloned()),
+                CodeOperation::Branches(branches) => heads.extend(branches.iter().cloned()),
                 CodeOperation::Structural(matched) => pattern = Some(matched.text().to_string()),
                 CodeOperation::Top(count) => {
                     limit = Some(limit.map_or(*count, |limit| limit.min(*count)))
@@ -60,6 +64,12 @@ impl Render for Catalog<OrbitCode> {
             }
         }
         let repositories = repositories.filter(|repositories| !repositories.is_empty());
+        let readable = |head: &(i64, String)| {
+            repositories
+                .as_ref()
+                .is_some_and(|kept| kept.contains(&head.0))
+        };
+        heads.retain(readable);
         let fields = plan
             .outputs(plan.root())
             .map(|output| {
@@ -69,11 +79,13 @@ impl Render for Catalog<OrbitCode> {
                     CodeValue::Line => RequestField::Line,
                     CodeValue::Capture => RequestField::Capture(name.to_string()),
                     CodeValue::Repository => RequestField::Repository(name.to_string()),
+                    CodeValue::Branch => RequestField::Branch(name.to_string()),
                 }
             })
             .collect();
         Ok(StructuralSearchRequest {
             repositories: repositories.ok_or(CodeError::NoReadableRepository)?,
+            heads,
             languages,
             trigrams,
             pattern: pattern.ok_or(CodeError::Incomplete("a structural pattern"))?,

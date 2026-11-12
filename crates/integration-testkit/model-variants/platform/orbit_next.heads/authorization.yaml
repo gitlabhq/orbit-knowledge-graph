@@ -1,0 +1,15 @@
+kind: authorization
+package: orbit_next.heads
+entities:
+  Head:
+    scope: namespace
+    permission: read
+    enforce: {orbit_code: {scope_key: {via: HEAD_IN}}}
+    properties: {open: [project_id, branch]}
+relationships:
+  SOURCE_HEAD:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
+  HEAD_FILE: {scope: namespace, permission: read, enforce: {}}
+  HEAD_IN: {scope: namespace, permission: read, enforce: {}}

@@ -13,6 +13,7 @@ orbit-arrow = { path = "../../utils/arrow" }
 pipeline = { path = "../pipeline" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 types = { path = "../types" }
 compiler = { path = "../compiler" }
 query-data-model = { path = "../../query-data-model" }

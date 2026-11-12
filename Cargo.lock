@@ -7480,6 +7480,7 @@ name = "query-profiler"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
  "clickhouse-client",
  "compiler",
@@ -9418,6 +9419,7 @@ dependencies = [
  "query-data-model",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "types",
 ]

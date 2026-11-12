@@ -14,6 +14,7 @@ const BACKEND: &str = Live::KIND;
 enum Pushed {
     Equals(PropertyId, Literal),
     Contains(PropertyId, String),
+    OneOf(PropertyId, Vec<Literal>),
 }
 
 #[derive(Default)]
@@ -23,7 +24,7 @@ struct Window {
     to: Option<String>,
 }
 
-pub(super) fn plan(logical: &LogicalPlan, live: &Catalog<Live>) -> Result<LivePlan> {
+pub fn plan(logical: &LogicalPlan, live: &Catalog<Live>) -> Result<LivePlan> {
     let graph = live.graph();
     let mut entity = None;
     let mut pushed = Vec::new();
@@ -65,6 +66,9 @@ pub(super) fn plan(logical: &LogicalPlan, live: &Catalog<Live>) -> Result<LivePl
             let next = match condition {
                 Pushed::Equals(property, value) => calls.field(name(*property))?.eq(value.clone()),
                 Pushed::Contains(property, text) => calls.field(name(*property))?.contains(text),
+                Pushed::OneOf(property, values) => {
+                    calls.field(name(*property))?.one_of(values.iter().cloned())
+                }
             };
             filters = Some(match filters {
                 Some(all) => all.and(next),
@@ -144,6 +148,9 @@ fn conditions(predicate: &Predicate, pushed: &mut Vec<Pushed>, window: &mut Wind
                 matching: Matching::Contains,
                 needle,
             } => pushed.push(Pushed::Contains(property(left)?, needle.clone())),
+            Predicate::In { left, values } => {
+                pushed.push(Pushed::OneOf(property(left)?, values.clone()))
+            }
             _ => return Err(unsupported(BACKEND, "push down this condition")),
         }
     }

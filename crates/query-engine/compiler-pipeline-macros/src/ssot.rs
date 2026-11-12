@@ -17,7 +17,7 @@ struct Field {
 }
 
 struct PhaseDecl {
-    name: Ident,
+    name: syn::Path,
     reads_env: Vec<Ident>,
     reads_state: Vec<Ident>,
     mutates: Vec<Ident>,
@@ -28,7 +28,7 @@ struct PipelineDecl {
     backend: Type,
     env: Vec<Ident>,
     state: Vec<Ident>,
-    run: Vec<Ident>,
+    run: Vec<syn::Path>,
 }
 
 struct CompilerCtxInput {
@@ -49,6 +49,28 @@ fn parse_ident_list(input: ParseStream) -> Result<Vec<Ident>> {
         }
     }
     Ok(idents)
+}
+
+fn parse_path_list(input: ParseStream) -> Result<Vec<syn::Path>> {
+    let content;
+    bracketed!(content in input);
+    let mut paths = Vec::new();
+    while !content.is_empty() {
+        paths.push(content.call(syn::Path::parse_mod_style)?);
+        if !content.is_empty() {
+            content.parse::<Token![,]>()?;
+        }
+    }
+    Ok(paths)
+}
+
+/// A phase's name in grants: its function path, segments joined by `::`.
+fn path_name(path: &syn::Path) -> String {
+    path.segments
+        .iter()
+        .map(|segment| segment.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("::")
 }
 
 fn parse_fields(input: ParseStream) -> Result<Vec<Field>> {
@@ -72,7 +94,7 @@ fn parse_fields(input: ParseStream) -> Result<Vec<Field>> {
 
 impl Parse for PhaseDecl {
     fn parse(input: ParseStream) -> Result<Self> {
-        let name: Ident = input.parse()?;
+        let name = input.call(syn::Path::parse_mod_style)?;
         let content;
         braced!(content in input);
         let mut reads_env = Vec::new();
@@ -118,7 +140,7 @@ impl Parse for PipelineDecl {
                 "backend" => backend = Some(content.parse::<Type>()?),
                 "env" => env = parse_ident_list(&content)?,
                 "state" => state = parse_ident_list(&content)?,
-                "phases" | "run" => run = parse_ident_list(&content)?,
+                "phases" | "run" => run = parse_path_list(&content)?,
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -242,7 +264,7 @@ fn phases_with_access(phases: &[PhaseDecl], field: &Ident) -> Vec<String> {
                 || p.reads_state.contains(field)
                 || p.mutates.contains(field)
         })
-        .map(|p| p.name.to_string())
+        .map(|p| path_name(&p.name))
         .collect()
 }
 
@@ -250,7 +272,7 @@ fn phases_with_mutate(phases: &[PhaseDecl], field: &Ident) -> Vec<String> {
     phases
         .iter()
         .filter(|p| p.mutates.contains(field))
-        .map(|p| p.name.to_string())
+        .map(|p| path_name(&p.name))
         .collect()
 }
 
@@ -267,8 +289,8 @@ pub fn generate(input: TokenStream) -> TokenStream {
     }
 
     trait_sigs.push(quote! {
-        type Backend: crate::passes::codegen::SqlBackend;
-        fn data_model(&self) -> &query_data_model::Catalog<Self::Backend>;
+        type Backend: crate::dag::StageBackend;
+        fn data_model(&self) -> &<Self::Backend as crate::dag::StageBackend>::Catalog;
         fn current_phase(&self) -> &'static str;
         fn set_current_phase(&mut self, phase: &'static str);
     });
@@ -323,8 +345,8 @@ pub fn generate(input: TokenStream) -> TokenStream {
                 quote! { #n: #ty }
             })
             .collect();
-        let model_param =
-            quote! { data_model: std::sync::Arc<query_data_model::Catalog<#backend_ty>> };
+        let catalog_ty = quote! { <#backend_ty as crate::dag::StageBackend>::Catalog };
+        let model_param = quote! { data_model: std::sync::Arc<#catalog_ty> };
         let env_names: Vec<_> = pipeline.env.iter().collect();
         let state_names: Vec<_> = pipeline.state.iter().collect();
 
@@ -334,14 +356,14 @@ pub fn generate(input: TokenStream) -> TokenStream {
             .phases
             .iter()
             .filter(|phase| phase.reads_env.iter().any(|field| field == "data_model"))
-            .map(|phase| phase.name.to_string())
+            .map(|phase| path_name(&phase.name))
             .collect();
         let model_arms: Vec<_> = model_phases.iter().map(|phase| quote! { #phase }).collect();
         let model_allowed = model_phases.join(", ");
         trait_impls.push(quote! {
             type Backend = #backend_ty;
 
-            fn data_model(&self) -> &query_data_model::Catalog<Self::Backend> {
+            fn data_model(&self) -> &<Self::Backend as crate::dag::StageBackend>::Catalog {
                 if !self.current_phase.is_empty() {
                     assert!(
                         matches!(self.current_phase, #(#model_arms)|*),
@@ -469,7 +491,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
             .run
             .iter()
             .map(|phase_name| {
-                let phase_str = phase_name.to_string();
+                let phase_str = path_name(phase_name);
                 quote! {
                     ctx.set_current_phase(#phase_str);
                     #phase_name(ctx)?;
@@ -479,7 +501,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
 
         out.extend(quote! {
             pub struct #ctx_name {
-                pub data_model: std::sync::Arc<query_data_model::Catalog<#backend_ty>>,
+                pub data_model: std::sync::Arc<#catalog_ty>,
                 #(#env_fields,)*
                 #(#state_fields,)*
                 current_phase: &'static str,

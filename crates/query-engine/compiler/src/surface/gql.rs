@@ -7,7 +7,6 @@ use query_data_model::surface::Statement;
 use query_data_model::surface::gql::{self, Routed};
 use query_data_model::{Catalog, ClickHouse, Model};
 
-use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
 use crate::{CompiledQueryContext, QueryError, Result};
 use orbit_authorization::Grants;
@@ -40,7 +39,15 @@ pub fn prepare(
     scope: IntrospectionScope,
     limits: &QueryLimits,
 ) -> Result<PreparedStatement> {
-    match route(raw, data_model, grants.caller().admin(), scope, limits)? {
+    let remotes = crate::dag::Remotes::default();
+    match route(
+        raw,
+        data_model,
+        &remotes,
+        grants.caller().admin(),
+        scope,
+        limits,
+    )? {
         RoutedStatement::Query(query) => compile_query(*query, data_model, grants, limits)
             .map(|compiled| PreparedStatement::Query(Box::new(compiled))),
         RoutedStatement::Schema(response) => Ok(PreparedStatement::Schema(response)),
@@ -50,11 +57,12 @@ pub fn prepare(
 pub fn route(
     raw: &str,
     data_model: &Catalog<ClickHouse>,
+    remotes: &crate::dag::Remotes,
     admin: bool,
     scope: IntrospectionScope,
     limits: &QueryLimits,
 ) -> Result<RoutedStatement> {
-    let catalog = super::catalog(data_model, limits, admin);
+    let catalog = super::catalog(data_model, remotes, limits, admin);
     match gql::route(raw, catalog)
         .map_err(QueryError::from)
         .count_err()?
@@ -72,9 +80,15 @@ pub fn compile_query(
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseGqlCtx::new(grants.clone(), *limits, Arc::clone(data_model));
-    ctx.set_statement(query.statement);
-    crate::finish(&mut ctx, config::run_clickhouse_gql)
+    let stage = crate::split(
+        crate::dag::Source::Parsed(query.statement),
+        data_model,
+        &crate::dag::Remotes::default(),
+        grants,
+        limits,
+    )?
+    .into_single()?;
+    crate::compile_stage(stage, data_model, grants, limits)
 }
 
 fn resolve_schema(

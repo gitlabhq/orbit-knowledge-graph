@@ -22,6 +22,8 @@ pub enum CodeValue {
     Path,
     Line,
     Capture,
+    /// The branch whose head a match is at.
+    Branch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +34,12 @@ pub struct Index {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodeOperation {
-    Repositories { index: Index, projects: Vec<i64> },
+    Repositories {
+        index: Index,
+        projects: Vec<i64>,
+    },
+    /// The branch heads the search runs at, each a repository and a branch name.
+    Branches(Vec<(i64, String)>),
     Restrict(Vec<i64>),
     Languages(Vec<Language>),
     Prefilter(Vec<String>),

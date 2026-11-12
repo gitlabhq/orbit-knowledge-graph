@@ -1434,6 +1434,12 @@
           "format": "uint",
           "minimum": 0
         },
+        "stage_keys": {
+          "description": "Keys one stage of an execution DAG hands to the next; a larger set fails the query.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
         "hydration_path_segments": {
           "description": "Traversal path segments one hydration read binds before it widens to parent paths.",
           "type": "integer",
@@ -1485,6 +1491,7 @@
         "path_anchor_span",
         "path_anchor_rows",
         "hydration_rows",
+        "stage_keys",
         "hydration_path_segments",
         "in_subquery_index_values",
         "path_finding_max_execution_time",

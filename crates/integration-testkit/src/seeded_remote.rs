@@ -30,6 +30,13 @@ struct SeededMatch {
     path: String,
     line: u64,
     captures: BTreeMap<String, String>,
+    /// The branch whose head holds the match; every repository indexes `main`.
+    #[serde(default = "main")]
+    branch: String,
+}
+
+fn main() -> String {
+    "main".to_string()
 }
 
 #[derive(Deserialize)]
@@ -61,6 +68,13 @@ impl CodeSearch for SeededCodeSearch {
                 repository.matches.iter().map(move |found| (project, found))
             })
             .filter(|(_, found)| found.pattern == request.pattern)
+            .filter(|(project, found)| {
+                request.heads.is_empty()
+                    || request
+                        .heads
+                        .iter()
+                        .any(|(head, branch)| head == project && *branch == found.branch)
+            })
             .filter(|(_, found)| {
                 request.languages.is_empty() || request.languages.contains(&found.language)
             });
@@ -77,6 +91,9 @@ impl CodeSearch for SeededCodeSearch {
                         }
                         RequestField::Line => ("line".to_string(), Value::from(found.line)),
                         RequestField::Repository(name) => (name.clone(), Value::from(project)),
+                        RequestField::Branch(name) => {
+                            (name.clone(), Value::from(found.branch.as_str()))
+                        }
                         RequestField::Capture(name) => {
                             (name.clone(), found.captures.get(name).cloned().into())
                         }
@@ -129,6 +146,10 @@ impl DataExtraction for SeededDataExtraction {
                 let field = message.get(&filter.field);
                 match filter.op {
                     "contains" => text(field).contains(text(Some(&filter.value))),
+                    "in" => filter
+                        .value
+                        .as_array()
+                        .is_some_and(|values| field.is_some_and(|field| values.contains(field))),
                     _ => field == Some(&filter.value),
                 }
             })

@@ -20,7 +20,12 @@ enum Returned {
 /// Literal atoms shorter than a trigram cannot narrow the candidate files.
 const TRIGRAM: usize = 3;
 
-pub(super) fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<CodePlan> {
+/// `heads` are the branch heads an earlier stage handed this one, each a repository and a branch.
+pub fn plan(
+    logical: &LogicalPlan,
+    code: &Catalog<OrbitCode>,
+    heads: &[(i64, String)],
+) -> Result<CodePlan> {
     let graph = code.graph();
     let mut entity = None;
     let mut projects = Vec::new();
@@ -30,6 +35,16 @@ pub(super) fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<C
     for node in logical.nodes() {
         match logical.operation(node) {
             LogicalOperation::Entities(id) => entity = Some(*id),
+            LogicalOperation::Follow { relationships, .. } => {
+                let to = logical
+                    .outputs(node)
+                    .last()
+                    .and_then(|to| match logical.value(to) {
+                        query_data_model::plan::logical::LogicalType::Entity(to) => Some(*to),
+                        _ => None,
+                    });
+                entity = Some(at_heads(code, entity, relationships, to, heads)?);
+            }
             LogicalOperation::Filter(predicate) => {
                 let anchor = entity.and_then(|entity| anchor(code, entity));
                 projects.extend(repositories(predicate, anchor)?);
@@ -72,7 +87,17 @@ pub(super) fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<C
         .collect();
     Ok(code.build(|q| {
         let index = code.index(&store, &graph.entity(entity).name)?;
-        let files = q.repositories(index, projects)?;
+        let files = q.repositories(
+            index,
+            projects
+                .iter()
+                .copied()
+                .chain(heads.iter().map(|(project, _)| *project)),
+        )?;
+        let files = match heads.is_empty() {
+            true => files,
+            false => q.branches(files, heads.iter().cloned())?,
+        };
         let files = q.languages(files, [*language])?;
         let files = match atoms.is_empty() {
             true => files,
@@ -89,6 +114,25 @@ pub(super) fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<C
             .collect::<std::result::Result<Vec<Field>, _>>()?;
         q.select(hits, fields)
     })?)
+}
+
+/// The repositories a code plan names: the conditions on its entity's repository key.
+pub fn named_repositories(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<Vec<i64>> {
+    let mut entity = None;
+    let mut projects = Vec::new();
+    for node in logical.nodes() {
+        match logical.operation(node) {
+            LogicalOperation::Entities(id) => entity = Some(*id),
+            LogicalOperation::Filter(predicate) => {
+                projects.extend(repositories(
+                    predicate,
+                    entity.and_then(|entity| anchor(code, entity)),
+                )?);
+            }
+            _ => {}
+        }
+    }
+    Ok(projects)
 }
 
 /// The foreign key on the entity that names its repository: the first step of its `via` chain.
@@ -175,5 +219,40 @@ fn select(
     match returned {
         Returned::Field(name) => hits.field(name),
         Returned::Capture(name) => hits.capture(name),
+    }
+}
+
+/// A step from the entity whose branch heads an earlier stage handed in to the files at those
+/// heads: the target holds a composite key on the source's identity.
+fn at_heads(
+    code: &Catalog<OrbitCode>,
+    from: Option<EntityId>,
+    relationships: &[query_data_model::RelationshipId],
+    to: Option<EntityId>,
+    heads: &[(i64, String)],
+) -> Result<EntityId> {
+    let (Some(from), Some(to), [relationship]) = (from, to, relationships) else {
+        return Err(unsupported(BACKEND, "follow this relationship"));
+    };
+    let keyed = code
+        .graph()
+        .variants()
+        .filter(|variant| variant.relationship == *relationship)
+        .filter(|variant| variant.source == from && variant.target == to)
+        .any(|variant| {
+            code.model()
+                .composite_key(variant.id)
+                .is_some_and(|(holder, _)| holder == Endpoint::Target)
+        });
+    match (keyed, heads.is_empty()) {
+        (true, false) => Ok(to),
+        (true, true) => Err(unsupported(
+            BACKEND,
+            "search branch heads no earlier stage named",
+        )),
+        (false, _) => Err(unsupported(
+            BACKEND,
+            "follow a relationship that keys no branch head",
+        )),
     }
 }

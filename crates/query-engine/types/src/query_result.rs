@@ -490,11 +490,12 @@ impl QueryResult {
         let ctx = &self.ctx;
         for row in self.rows.iter_mut().filter(|row| row.authorized) {
             let statics = ctx.nodes().all(|node| {
-                row.get_type(node).is_some_and(|entity| {
-                    allows(ctx.entity_checks(entity), authorizations, |check| {
-                        row.check_key(node, check)
+                ctx.stage_checked(&node.alias)
+                    || row.get_type(node).is_some_and(|entity| {
+                        allows(ctx.entity_checks(entity), authorizations, |check| {
+                            row.check_key(node, check)
+                        })
                     })
-                })
             });
             let dynamics = row.dynamic_nodes.iter().all(|node_ref| {
                 allows(

@@ -25,7 +25,7 @@ use query_engine::pipeline::{
     Realm, SecurityContext, TypeMap,
 };
 use query_engine::shared::content::ColumnResolverRegistry;
-use query_engine::shared::{CompilationStage, PipelineOutput, RedactionOutput};
+use query_engine::shared::{DagStage, PipelineOutput, RedactionOutput};
 use response::{
     assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
     validate_response,
@@ -44,7 +44,7 @@ pub use format::{
 };
 
 use orbit_server::auth::{Claims, SourceType, TraversalPathClaim};
-use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
+use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage, graph_executors};
 use orbit_server::redaction::QueryResult;
 
 /// Parse all YAML scenario files under `root` without executing them.
@@ -98,7 +98,7 @@ pub async fn run_query(
     let compiled = compile_like_server(query, &data_model, security)
         .await
         .expect("query should compile");
-    let output = execute_output(ctx, &compiled, &data_model, security, redaction).await;
+    let output = execute_output(ctx, query, &data_model, security, redaction).await;
     assert_pagination(&output, "run_query");
     let response = validate_response(&compiled.stats, GraphFormatter.format(&output), "run_query");
     ResponseView::for_query(&compiled.stats, response)
@@ -338,7 +338,7 @@ async fn run_query_step(
         return;
     }
 
-    let output = execute_output(ctx, &compiled, data_model, security, redaction).await;
+    let output = execute_output(ctx, query, data_model, security, redaction).await;
     let baseline = assert_output(&output, expect, label);
     let count = repeat_count(expect, label);
     for run in 2..=count {
@@ -355,7 +355,7 @@ async fn run_query_step(
             )
             .await;
         }
-        let output = execute_output(ctx, &compiled, data_model, security, redaction).await;
+        let output = execute_output(ctx, query, data_model, security, redaction).await;
         let rerun = assert_output(&output, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
     }
@@ -490,11 +490,11 @@ async fn run_pages(
         let page_label = format!("{label} page {}", i + 1);
         let query_str = page_query(base_query, i);
 
-        let compiled = compile_like_server(&query_str, data_model, security)
+        compile_like_server(&query_str, data_model, security)
             .await
             .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}"));
 
-        let output = execute_output(ctx, &compiled, data_model, security, redaction).await;
+        let output = execute_output(ctx, &query_str, data_model, security, redaction).await;
         let response = assert_output(&output, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
@@ -508,7 +508,7 @@ async fn run_pages(
             let compiled = compile_like_server(&query, data_model, security)
                 .await
                 .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
-            let output = execute_output(ctx, &compiled, data_model, security, redaction).await;
+            let output = execute_output(ctx, &query, data_model, security, redaction).await;
             assert_pagination(&output, label);
             let response =
                 validate_response(&compiled.stats, GraphFormatter.format(&output), label);
@@ -535,32 +535,43 @@ async fn compile_like_server(
         phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
-    if let RoutingOutput::Schema(_) = RoutingStage.execute(&mut pipeline_ctx, &mut obs).await? {
+    let routing = RoutingStage {
+        remotes: Default::default(),
+    };
+    if let RoutingOutput::Schema(_) = routing.execute(&mut pipeline_ctx, &mut obs).await? {
         return Err(PipelineError::custom("schema calls are not graph queries"));
     }
-    CompilationStage
-        .execute(&mut pipeline_ctx, &mut obs)
-        .await?;
-    pipeline_ctx
-        .compiled
-        .ok_or_else(|| PipelineError::custom("CompilationStage produced no query"))
+    let parsed = pipeline_ctx
+        .phases
+        .remove::<query_engine::compiler::gql::ParsedQuery>()
+        .ok_or_else(|| PipelineError::custom("RoutingStage parsed no query"))?;
+    let grants = grants_for(data_model, security);
+    query_engine::compiler::gql::compile_query(parsed, data_model, &grants, limits())
+        .map(Arc::new)
+        .map_err(PipelineError::from)
 }
 
+/// Runs the query the way the server does: routing, then the DAG runner on the test
+/// ClickHouse, then the caller's checks and the hydration stage.
 async fn execute_output(
     ctx: &TestContext,
-    compiled: &Arc<CompiledQueryContext>,
+    query: &str,
     data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> PipelineOutput {
-    let batches = ctx.query_parameterized(&compiled.base).await;
-    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
-
     let resolver = Arc::new(SeededColumnResolver::from_seed_file());
     let mut resolver_registry = ColumnResolverRegistry::new();
     resolver_registry.register("gitaly", resolver as _);
 
     let client = Arc::new(ctx.create_client());
+    let dag = DagStage::relational(graph_executors(
+        Arc::clone(&client),
+        data_model,
+        "base",
+        "gkg;scenario".into(),
+        Vec::new(),
+    ));
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
     server_extensions.insert(Arc::clone(data_model));
@@ -569,13 +580,30 @@ async fn execute_output(
     server_extensions.insert(resolver_registry);
 
     let mut pipeline_ctx = QueryPipelineContext {
-        query_json: String::new(),
-        compiled: Some(Arc::clone(compiled)),
+        query_json: query.to_owned(),
+        compiled: None,
         security_context: Some(security.clone()),
         grants: Some(grants_for(data_model, security)),
         server_extensions,
         phases: TypeMap::default(),
     };
+    let mut obs = NoOpObserver;
+    RoutingStage {
+        remotes: Default::default(),
+    }
+    .execute(&mut pipeline_ctx, &mut obs)
+    .await
+    .expect("the query should route");
+    let executed = dag
+        .execute(&mut pipeline_ctx, &mut obs)
+        .await
+        .expect("the DAG should run");
+    let compiled = pipeline_ctx
+        .compiled
+        .clone()
+        .expect("the DAG compiled the query");
+    let mut result =
+        QueryResult::from_batches(&executed.batches, &executed.result_context).unwrap();
 
     HydrationStage::resolve_keys(&mut pipeline_ctx, &mut result)
         .await
@@ -588,7 +616,6 @@ async fn execute_output(
         query_result: result,
         redacted_count,
     });
-    let mut obs = NoOpObserver;
 
     let hydration_output = HydrationStage
         .execute(&mut pipeline_ctx, &mut obs)
@@ -596,7 +623,7 @@ async fn execute_output(
         .expect("hydration should succeed");
 
     pipeline_output(
-        compiled,
+        &compiled,
         hydration_output.query_result,
         hydration_output.redacted_count,
         hydration_output.result_context,
@@ -1165,7 +1192,7 @@ fn grants_for(
     .expect("the default deployment answers the scenario's session")
 }
 
-fn claims_for(security: &SecurityContext) -> Claims {
+pub(crate) fn claims_for(security: &SecurityContext) -> Claims {
     Claims {
         sub: "user:1".into(),
         iss: "gitlab".into(),

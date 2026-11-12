@@ -161,6 +161,17 @@ impl<'c> CodeBuilder<'c> {
         self.apply(CodeOperation::Restrict(readable), vec![files])
     }
 
+    pub fn branches(
+        &mut self,
+        files: Matches,
+        heads: impl IntoIterator<Item = (i64, String)>,
+    ) -> Result<Matches, CodeError> {
+        let mut heads: Vec<(i64, String)> = heads.into_iter().collect();
+        heads.sort();
+        heads.dedup();
+        self.apply(CodeOperation::Branches(heads), vec![files])
+    }
+
     pub fn languages(
         &mut self,
         files: Matches,

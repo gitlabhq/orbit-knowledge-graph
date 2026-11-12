@@ -1,23 +1,14 @@
-//! Compiles a GQL query for a connection that is not SQL into its backend's request:
-//! parse, plan, security, security check, render.
-
-use std::sync::Arc;
+//! The pieces of code and live stages the DAG runner reads: the served targets, the scope
+//! lookups their reads need, and the row checks their rows go through.
 
 use query_data_model::Model;
-use query_data_model::catalog::Render;
-use query_data_model::implementations::live::ExtractionRequest;
-use query_data_model::implementations::orbit_code::StructuralSearchRequest;
 use query_data_model::plan::logical::LogicalPlan;
-use serde::Serialize;
 
-pub use crate::passes::plan::remote::{RemotePlan, Target, plan};
-pub use crate::passes::remote_security::{Namespaces, check, secure};
+pub use crate::passes::plan::remote::{RemotePlan, Target};
+pub use crate::passes::remote_security::Namespaces;
 
-pub use crate::passes::scope_lookup::{Resolves, ScopeLookup, lookups, namespaces};
+pub use crate::passes::scope_lookup::{KEY, Resolves, ScopeLookup, lookups, namespaces};
 
-use crate::error::{QueryError, Result};
-use orbit_authorization::Grants;
-use orbit_server_config::QueryLimits;
 use query_data_model::catalog::{Check, Row};
 use query_data_model::plan::logical::LogicalOperation;
 
@@ -85,48 +76,4 @@ fn row_key(kind: crate::KeyKind, value: &serde_json::Value) -> Option<orbit_auth
         (crate::KeyKind::Uuid, serde_json::Value::String(id)) => Some(Key::Uuid(id.clone())),
         _ => None,
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "backend", rename_all = "snake_case")]
-pub enum RemoteRequest {
-    Code(StructuralSearchRequest),
-    Live(ExtractionRequest),
-}
-
-pub fn parse(
-    raw: &str,
-    model: &Model,
-    grants: &Grants,
-    limits: &QueryLimits,
-) -> Result<LogicalPlan> {
-    let catalog = match grants.caller().admin() {
-        true => model.logical(limits).as_admin(),
-        false => model.logical(limits),
-    };
-    Ok(query_data_model::surface::gql::parse(raw, catalog)?.plan)
-}
-
-pub fn render(target: &Target, plan: &RemotePlan) -> Result<RemoteRequest> {
-    match (target, plan) {
-        (Target::Code(code), RemotePlan::Code(plan)) => Ok(RemoteRequest::Code(code.render(plan)?)),
-        (Target::Live(live), RemotePlan::Live(plan)) => Ok(RemoteRequest::Live(live.render(plan)?)),
-        _ => Err(QueryError::PipelineInvariant(
-            "the plan does not match its target".into(),
-        )),
-    }
-}
-
-pub fn compile(
-    raw: &str,
-    model: &Arc<Model>,
-    grants: &Grants,
-    namespaces: &Namespaces,
-    limits: &QueryLimits,
-) -> Result<RemoteRequest> {
-    let logical = parse(raw, model, grants, limits)?;
-    let (target, planned) = plan(&logical, model)?;
-    let emitted = secure(&target, planned, grants, namespaces)?;
-    check(&emitted)?;
-    render(&target, &emitted)
 }

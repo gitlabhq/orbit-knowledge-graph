@@ -224,7 +224,7 @@ fn one_query_can_join_stores_on_the_same_connection() {
         [("graph", "gl_linear_issue"), ("lake", "linear_tickets")]
     );
     let lake = catalog.store("lake").unwrap();
-    assert_eq!(lake.source(issue).unwrap().key, "ticket_id");
+    assert_eq!(lake.source(issue).unwrap().key, ["ticket_id"]);
     assert_eq!(lake.column(body), Some("ticket_body"));
 
     let relates = graph
@@ -1369,5 +1369,44 @@ fn an_engine_table_role_is_held_by_one_table() {
             .iter()
             .any(|error| error.ends_with("both hold the PlanProgress role")),
         "{errors:?}"
+    );
+}
+
+/// Two variants keyed on the same composite columns reach different entities, and a composite
+/// key carries no type value to tell them apart.
+#[test]
+fn variants_on_the_same_composite_key_columns_clash() {
+    let mut sources = Packages::embedded().sources().clone();
+    let files = [
+        (
+            "overlay/package.yaml",
+            "kind: package\nname: overlay\nrequires: [gitlab, gitlab.core, gitlab.code_review, gitlab.source_code]\n",
+        ),
+        (
+            "overlay/graph.yaml",
+            "kind: graph\npackage: overlay\nentities:\n  Head:\n    identity: [project_id, branch]\n    label: branch\n    default_columns: [project_id, branch]\n    properties: {project_id: int64, branch: string}\n  Tip:\n    identity: [project_id, branch]\n    label: branch\n    default_columns: [project_id, branch]\n    properties: {project_id: int64, branch: string}\nrelationships:\n  SOURCE_HEAD: {variants: {MergeRequest -> Head: {cardinality: many_to_one}}}\n  SOURCE_TIP: {variants: {MergeRequest -> Tip: {cardinality: many_to_one}}}\n",
+        ),
+        (
+            "overlay/authorization.yaml",
+            "kind: authorization\npackage: overlay\nentities:\n  Head: {scope: namespace, permission: read, enforce: {orbit_code: none}, checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}], properties: {open: [project_id, branch]}}\n  Tip: {scope: namespace, permission: read, enforce: {orbit_code: none}, checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}], properties: {open: [project_id, branch]}}\nrelationships:\n  SOURCE_HEAD: {scope: namespace, permission: read, enforce: {clickhouse: {scope_key: traversal_path, of: source}}}\n  SOURCE_TIP: {scope: namespace, permission: read, enforce: {clickhouse: {scope_key: traversal_path, of: source}}}\n",
+        ),
+        (
+            "overlay/storage/orbit_code.yaml",
+            "kind: storage\npackage: overlay\nstore: code\nentities:\n  Head: {complete: true, columns: {project_id: {immutable: true}, branch: {immutable: true}}}\n  Tip: {complete: true, columns: {project_id: {immutable: true}, branch: {immutable: true}}}\n",
+        ),
+        (
+            "overlay/storage/clickhouse.yaml",
+            "kind: storage\npackage: overlay\nstore: graph\nrelationships:\n  SOURCE_HEAD:\n    MergeRequest -> Head: {fk: {on: source, column: [project_id, source_branch]}}\n  SOURCE_TIP:\n    MergeRequest -> Tip: {fk: {on: source, column: [project_id, source_branch]}}\n",
+        ),
+    ];
+    for (path, text) in files {
+        sources.insert(path.into(), text.into());
+    }
+    let errors = spec_errors(Packages::new(query_data_model::Tier::Platform, sources).load());
+    assert_eq!(
+        errors,
+        [
+            "overlay: store graph keys SOURCE_HEAD(MergeRequest -> Head) and SOURCE_TIP(MergeRequest -> Tip) on project_id, source_branch without distinct type values"
+        ]
     );
 }

@@ -38,6 +38,16 @@ impl CodeBuilder<'_> {
                     ),
                 )),
             },
+            CodeOperation::Branches(heads) => {
+                Self::files(inputs, "a branch restriction")?;
+                match heads.is_empty() {
+                    true => Err(CodeError::Incomplete("at least one branch head")),
+                    false => Ok(Outputs::extend([Declare::named(
+                        "branch",
+                        CodeValue::Branch,
+                    )])),
+                }
+            }
             CodeOperation::Restrict(readable) => {
                 Self::files(inputs, "a repository restriction")?;
                 preserve(readable.is_empty(), CodeError::NoReadableRepository)

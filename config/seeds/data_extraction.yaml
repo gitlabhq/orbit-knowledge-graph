@@ -3,12 +3,14 @@ workspaces:
     traversal_path: 1/9970/
     messages:
       - id: m1
+        merge_request_id: 2000
         channel: orbit-dev
         author: ann
         text: deploy to staging at 5pm
         sent_at: "2026-11-02T17:00:00Z"
         visible_to: [alice, bob]
       - id: m2
+        merge_request_id: 2000
         channel: orbit-dev
         author: ben
         text: rolled back the deploy, see the private incident channel
@@ -21,6 +23,7 @@ workspaces:
         sent_at: "2026-11-03T12:00:00Z"
         visible_to: [alice, bob]
       - id: m4
+        merge_request_id: 2001
         channel: random
         author: ann
         text: deploy memes
@@ -30,6 +33,7 @@ workspaces:
     traversal_path: 1/555/
     messages:
       - id: m5
+        merge_request_id: 2000
         channel: orbit-dev
         author: dee
         text: deploy uses the production keys

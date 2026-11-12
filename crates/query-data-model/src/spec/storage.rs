@@ -212,7 +212,8 @@ pub struct EdgeIndex {
 #[serde(deny_unknown_fields)]
 pub struct KeySpec {
     pub on: Endpoint,
-    pub column: String,
+    /// One column, or one per part of a composite identity, in identity order.
+    pub column: OneOrMany,
     pub type_column: Option<String>,
     pub type_value: Option<OneOrMany>,
 }
@@ -223,6 +224,9 @@ pub struct KeySpec {
 pub struct Key {
     pub foreign_key: ForeignKey,
     pub discriminator: Option<Discriminator>,
+    /// Every holder column and the identity property it matches, for a key on a composite
+    /// identity; empty for a key on one column.
+    pub composite: Vec<(PropertyId, PropertyId)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

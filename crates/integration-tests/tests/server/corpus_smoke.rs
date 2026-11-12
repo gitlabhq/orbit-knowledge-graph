@@ -25,7 +25,7 @@ use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use integration_testkit::load_seed;
 use orbit_server::auth::Claims;
-use orbit_server::pipeline::{ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage};
+use orbit_server::pipeline::{HydrationStage, RedactionStage, SecurityStage, graph_executors};
 use orbit_server::redaction::ResourceAuthorization;
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
@@ -34,7 +34,7 @@ use query_engine::pipeline::{
 use query_engine::shared::PipelineOutput;
 use query_engine::shared::content::{ColumnResolver, ColumnResolverRegistry};
 use query_engine::shared::{
-    AuthorizationOutput, CompilationStage, ExtractionOutput, ExtractionStage, OutputStage,
+    AuthorizationOutput, DagStage, ExtractionOutput, ExtractionStage, OutputStage,
 };
 use serde::Deserialize;
 
@@ -101,10 +101,9 @@ impl PipelineStage for AuthorizeAllStage {
     }
 }
 
-const PIPELINE_STAGES: [&str; 8] = [
+const PIPELINE_STAGES: [&str; 7] = [
     "security",
-    "compilation",
-    "execution",
+    "dag",
     "extraction",
     "authorization",
     "redaction",
@@ -374,24 +373,36 @@ async fn run_pipeline(
 async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, PipelineError> {
     let [
         security,
-        compilation,
-        execution,
+        dag,
         extraction,
         authorization,
         redaction,
         hydration,
         output,
     ] = PIPELINE_STAGES;
-    let executor = ClickHouseExecutor {
-        migration_version: *orbit_migrations::version::SCHEMA_VERSION,
-    };
+    let missing = || PipelineError::custom("the smoke context lacks its client or model");
+    let client = ctx
+        .server_extensions
+        .get::<Arc<clickhouse_client::ArrowClickHouseClient>>()
+        .cloned()
+        .ok_or_else(missing)?;
+    let model = ctx
+        .server_extensions
+        .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
+        .cloned()
+        .ok_or_else(missing)?;
+    let stage = DagStage::relational(graph_executors(
+        client,
+        &model,
+        "base",
+        "gkg;corpus_smoke".into(),
+        Vec::new(),
+    ));
     let mut obs = NoOpObserver;
     PipelineRunner::start(ctx, &mut obs)
         .then(&Traced(security, &SecurityStage))
         .await?
-        .then(&Traced(compilation, &CompilationStage))
-        .await?
-        .then(&Traced(execution, &executor))
+        .then(&Traced(dag, &stage))
         .await?
         .then(&Traced(extraction, &ExtractionStage))
         .await?
