@@ -1,0 +1,30 @@
+table: gl_edge
+rows:
+  - {traversal_path: 1/100/, source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: ["state:active"], target_tags: []}
+  - {traversal_path: 1/100/, source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: ["state:active"], target_tags: []}
+  - {traversal_path: 1/100/, source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: ["state:active"], target_tags: []}
+  - {traversal_path: 1/200/, source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 200, target_kind: Group, source_tags: ["state:active"], target_tags: []}
+  - {traversal_path: 1/100/1000/, source_id: 100, source_kind: Group, relationship_kind: CONTAINS, target_id: 1000, target_kind: Project, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1001/, source_id: 100, source_kind: Group, relationship_kind: CONTAINS, target_id: 1001, target_kind: Project, source_tags: [], target_tags: []}
+  - {traversal_path: 1/200/2000/, source_id: 200, source_kind: Group, relationship_kind: CONTAINS, target_id: 2000, target_kind: Project, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1000/, source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 3000, target_kind: MergeRequest, source_tags: ["state:active"], target_tags: ["state:opened"]}
+  - {traversal_path: 1/100/1000/, source_id: 4, source_kind: User, relationship_kind: AUTHORED, target_id: 3001, target_kind: MergeRequest, source_tags: ["state:active"], target_tags: ["state:opened"]}
+  - {traversal_path: 1/100/1001/, source_id: 4, source_kind: User, relationship_kind: AUTHORED, target_id: 3002, target_kind: MergeRequest, source_tags: ["state:active"], target_tags: ["state:opened"]}
+  - {traversal_path: 1/100/1000/, source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 3003, target_kind: MergeRequest, source_tags: ["state:active"], target_tags: ["state:merged"]}
+  - {traversal_path: 1/100/1001/, source_id: 4, source_kind: User, relationship_kind: AUTHORED, target_id: 3004, target_kind: MergeRequest, source_tags: ["state:active"], target_tags: ["state:opened"]}
+  - {traversal_path: 1/200/2000/, source_id: 3, source_kind: User, relationship_kind: AUTHORED, target_id: 3005, target_kind: MergeRequest, source_tags: ["state:active"], target_tags: ["state:opened"]}
+  - {traversal_path: 1/100/1000/, source_id: 3000, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["state:opened"], target_tags: []}
+  - {traversal_path: 1/100/1000/, source_id: 3001, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["state:opened"], target_tags: []}
+  - {traversal_path: 1/100/1001/, source_id: 3002, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1001, target_kind: Project, source_tags: ["state:opened"], target_tags: []}
+  - {traversal_path: 1/100/1001/, source_id: 3004, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1001, target_kind: Project, source_tags: ["state:opened"], target_tags: []}
+  - {traversal_path: 1/200/2000/, source_id: 3005, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 2000, target_kind: Project, source_tags: ["state:opened"], target_tags: []}
+  - {traversal_path: 1/100/1000/, source_id: 4, source_kind: User, relationship_kind: REVIEWER, target_id: 3000, target_kind: MergeRequest, source_tags: ["state:active"], target_tags: ["state:opened"]}
+  - {traversal_path: 1/100/1001/, source_id: 1, source_kind: User, relationship_kind: REVIEWER, target_id: 3004, target_kind: MergeRequest, source_tags: ["state:active"], target_tags: ["state:opened"]}
+  - {traversal_path: 1/100/1000/, source_id: 3000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 5000, target_kind: Note, source_tags: ["state:opened"], target_tags: []}
+  - {traversal_path: 1/100/1000/, source_id: 3001, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 5001, target_kind: Note, source_tags: ["state:opened"], target_tags: []}
+  - {traversal_path: 1/100/1001/, source_id: 3002, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 5002, target_kind: Note, source_tags: ["state:opened"], target_tags: []}
+  - {traversal_path: 1/100/1001/, source_id: 3004, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 5003, target_kind: Note, source_tags: ["state:opened"], target_tags: []}
+  - {traversal_path: 1/100/1000/, source_id: 4, source_kind: User, relationship_kind: AUTHORED, target_id: 5000, target_kind: Note, source_tags: ["state:active"], target_tags: []}
+  - {traversal_path: 1/100/1000/, source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 5001, target_kind: Note, source_tags: ["state:active"], target_tags: []}
+  - {traversal_path: 1/100/1001/, source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 5002, target_kind: Note, source_tags: ["state:active"], target_tags: []}
+  - {traversal_path: 1/100/1001/, source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 5003, target_kind: Note, source_tags: ["state:active"], target_tags: []}

@@ -1,0 +1,64 @@
+:root {
+  --bg: #0f1420; --panel: #161d2c; --line: #2a3448; --text: #dbe3f0; --muted: #8b97ad;
+  --blue: #3b82f6; --amber: #f59e0b; --violet: #a78bfa; --green: #22c55e; --red: #ef4444;
+  font: 13px/1.45 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+header { display: flex; gap: 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+h1 { font-size: 16px; margin: 0 16px 0 0; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
+main { display: grid; grid-template-columns: 330px 1fr 470px; height: calc(100vh - 47px); }
+section { padding: 0 14px 14px; overflow: auto; border-right: 1px solid var(--line); }
+select, textarea, button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+select { padding: 4px 6px; max-width: 360px; }
+textarea { width: 100%; padding: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; resize: vertical; }
+button { padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--blue); }
+#run { margin-top: 8px; background: var(--blue); border-color: var(--blue); color: white; }
+.check { color: var(--muted); }
+#status { color: var(--muted); margin-left: auto; }
+#status.error { color: var(--red); }
+ul#examples { list-style: none; padding: 0; margin: 0; }
+#examples li { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; cursor: pointer; }
+#examples li:hover { border-color: var(--blue); }
+#examples li small { display: block; color: var(--muted); }
+.muted { color: var(--muted); }
+svg#dag { width: 100%; height: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+#legend { color: var(--muted); margin-top: 6px; display: flex; gap: 6px; align-items: center; }
+#legend .hint { margin-left: auto; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid; }
+.swatch.relational { border-color: var(--blue); }
+.swatch.remote { border-color: var(--violet); }
+.swatch.engine { border-color: var(--amber); }
+.stage rect { fill: #1d2638; stroke-width: 1.5px; rx: 8px; }
+.stage { cursor: pointer; }
+.stage.relational rect { stroke: var(--blue); }
+.stage.remote rect { stroke: var(--violet); }
+.stage.engine rect { stroke: var(--amber); }
+.stage.waiting { opacity: .45; }
+.stage.running rect { fill: #24324d; stroke-width: 3px; animation: pulse 0.8s ease-in-out infinite alternate; }
+.stage.done rect { fill: #183026; }
+.stage.failed rect { fill: #3a1a1d; stroke: var(--red); }
+.stage.selected rect { stroke-dasharray: 5 3; stroke-width: 3px; }
+@keyframes pulse { from { stroke-opacity: 1; } to { stroke-opacity: .35; } }
+.stage text { fill: var(--text); font-size: 12px; }
+.stage text.title { font-weight: 600; font-size: 13px; }
+.stage text.sub { fill: var(--muted); font-size: 11px; }
+.edge path { fill: none; stroke: #55627a; stroke-width: 1.5px; }
+.edge.flowing path { stroke: var(--green); stroke-width: 2.5px; }
+.edge.empty path { stroke: var(--red); stroke-dasharray: 4 3; }
+.edge text { fill: var(--text); font-size: 11px; }
+.edge rect { fill: var(--bg); stroke: var(--line); rx: 4px; }
+marker path { fill: #55627a; }
+nav#tabs button { margin: 0 4px 6px 0; padding: 3px 9px; font-size: 12px; }
+nav#tabs button.active { border-color: var(--amber); color: var(--amber); }
+pre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px; white-space: pre-wrap; word-break: break-word; font: 11.5px/1.45 ui-monospace, Menlo, monospace; }
+.table table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.table th, .table td { border: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+.table th { color: var(--muted); font-weight: 600; background: var(--panel); }
+.kv { display: grid; grid-template-columns: 140px 1fr; gap: 2px 10px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.added { color: var(--green); }
+.error-text { color: var(--red); }

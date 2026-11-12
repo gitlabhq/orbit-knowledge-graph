@@ -32,6 +32,7 @@ rule:
 ignores:
   - crates/orbit-cli/**
   - crates/xtask/**
+  - crates/orbit-demo/**
   - crates/query-engine/profiler/**
   - crates/code-graph/treesitter-visit/src/bin/**
   # Debug tracer that only integration tests turn on.

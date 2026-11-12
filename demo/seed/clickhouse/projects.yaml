@@ -1,0 +1,5 @@
+table: gl_project
+rows:
+  - {id: 1000, name: api, full_path: acme/api, visibility_level: private, traversal_path: 1/100/1000/}
+  - {id: 1001, name: web, full_path: acme/web, visibility_level: private, traversal_path: 1/100/1001/}
+  - {id: 2000, name: billing, full_path: globex/billing, visibility_level: private, traversal_path: 1/200/2000/}

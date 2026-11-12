@@ -44,6 +44,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `orbit-cli/graphql` | Typed GitLab GraphQL queries, checked at compile time against the vendored GitLab schema |
 | `integration-testkit` | Shared ClickHouse service helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), indexer scenario runner (`scenario`), plan-shape runner (`plan_shape`), `GKG_TEST_ONTOLOGY_OVERLAY` loader, CLI test harness (`cli` module) |
+| `orbit-demo` | Loopback-only demo of the query engine: runs GQL through the DAG runner on seeded ClickHouse and loopback fakes of Orbit Next and Slack, and streams each stage to a page. Never a dependency of `orbit-server` |
 | `integration-tests` | Test binaries: `local` (compiler, plan shape), `server_containers`, `indexer_containers`, `cli`, and `billing_boundary`. See [Testing](../testing/README.md) |
 | `integration-tests-codegraph` | YAML suites for `code-graph` (`fixtures/`) and `code-graph-incremental` (`fixtures_incremental/`); `build.rs` generates one test per suite |
 | `fuzz` | Bolero fuzz targets for the JSON and GQL query frontends, code parsers, and indexer messages |

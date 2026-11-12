@@ -1,0 +1,9 @@
+table: gl_code_edge
+rows:
+  - {traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 9000, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1000/, project_id: 1000, branch: feature-auth, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 9001, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1000/, project_id: 1000, branch: fix-rate, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 9002, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1001/, project_id: 1001, branch: main, source_id: 1001, source_kind: Project, relationship_kind: CONTAINS, target_id: 9003, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1001/, project_id: 1001, branch: dark-mode, source_id: 1001, source_kind: Project, relationship_kind: CONTAINS, target_id: 9004, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/200/2000/, project_id: 2000, branch: main, source_id: 2000, source_kind: Project, relationship_kind: CONTAINS, target_id: 9005, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/200/2000/, project_id: 2000, branch: invoice-export, source_id: 2000, source_kind: Project, relationship_kind: CONTAINS, target_id: 9006, target_kind: Branch, source_tags: [], target_tags: []}

@@ -1,0 +1,49 @@
+gitlab:
+  identify: gitlab_session
+  providers:
+    gitlab_session:
+      module: gitlab.session
+      permissions: {read: reporter, read_security: security_manager}
+    rails:
+      module: fake.zanzibar
+      relations: {}
+      allowed:
+        "user:1": [1000, 1001, 2000, 3000, 3001, 3002, 3003, 3004, 3005]
+        "user:2": [1001, 3002]
+    slack:
+      module: fake.slack
+      handles: {"user:1": maria, "user:2": gus}
+      readable: {}
+
+zanzibar:
+  identify: oidc
+  providers:
+    oidc: {module: fake.oidc}
+    gitlab_session:
+      module: fake.zanzibar
+      relations: {zed: [1/100/1000/, 1/200/2000/, 1/200/]}
+      allowed: {}
+    rails:
+      module: fake.zanzibar
+      relations: {}
+      allowed: {zed: [1000, 3000, 3001, 3005]}
+    slack:
+      module: fake.slack
+      handles: {zed: zed}
+      readable: {}
+
+callers:
+  maintainer:
+    deployment: gitlab
+    label: Maria, maintainer of Acme (GitLab session)
+    user_id: 1
+    paths: [{path: 1/100/, access_level: 40}]
+  guest:
+    deployment: gitlab
+    label: Gus, guest of Acme and reporter on acme/web (GitLab session)
+    user_id: 2
+    paths: [{path: 1/100/, access_level: 10}, {path: 1/100/1001/, access_level: 20}]
+  zanzibar:
+    deployment: zanzibar
+    label: Zed, related to acme/api and Globex (Zanzibar-style provider)
+    subject: zed

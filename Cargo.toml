@@ -39,6 +39,7 @@ members = [
   "crates/orbit-cli/graphql",
   "crates/xtask",
   "crates/integration-testkit",
+  "crates/orbit-demo",
   "crates/integration-tests-codegraph",
   "crates/named-queries",
   "crates/nats-client",

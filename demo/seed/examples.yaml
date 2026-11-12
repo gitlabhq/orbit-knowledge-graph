@@ -1,0 +1,23 @@
+- title: "Query 4: open merge requests, their branch heads in Orbit Next, joined in the engine"
+  caller: maintainer
+  query: >-
+    MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
+    WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust')
+    RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20
+- title: Merge requests and the Slack messages that discuss them
+  caller: maintainer
+  query: >-
+    MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage)
+    RETURN mr.iid, mr.title, m.author, m.text ORDER BY mr.iid LIMIT 10
+- title: Code search bounded by the projects the caller can read
+  caller: guest
+  query: >-
+    MATCH (f:File) WHERE f.project_id IN [1000, 1001, 2000]
+    AND f.content MATCHES ast('todo!($$$MSG)', 'rust')
+    RETURN f.project_id, f.path, match.MSG LIMIT 20
+- title: Neighbors of a tombstoned merge request whose edges are still live
+  caller: maintainer
+  query: MATCH (mr:MergeRequest)--(n) WHERE mr.id = 3004 RETURN mr, n LIMIT 50
+- title: Neighbors of a live merge request, for contrast
+  caller: maintainer
+  query: MATCH (mr:MergeRequest)--(n) WHERE mr.id = 3000 RETURN mr, n LIMIT 50

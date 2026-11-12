@@ -1,0 +1,4 @@
+table: gl_group
+rows:
+  - {id: 100, name: Acme, full_path: acme, visibility_level: private, traversal_path: 1/100/}
+  - {id: 200, name: Globex, full_path: globex, visibility_level: private, traversal_path: 1/200/}

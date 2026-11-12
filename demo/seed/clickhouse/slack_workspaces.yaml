@@ -1,0 +1,4 @@
+table: gl_slack_workspace
+rows:
+  - {id: T01, name: acme-eng, group_id: 100, traversal_path: 1/100/}
+  - {id: T02, name: globex-ops, group_id: 200, traversal_path: 1/200/}

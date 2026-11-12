@@ -1,0 +1,10 @@
+page_port: 8484
+clickhouse:
+  url: http://127.0.0.1:18123
+  database: orbit_demo
+  reader: {user: demo, password: orbit-demo-read}
+  seeder: {user: seed, password: orbit-demo-seed}
+providers:
+  orbit_next: http://127.0.0.1:18201
+  slack: http://127.0.0.1:18202
+seed: ../../demo/seed

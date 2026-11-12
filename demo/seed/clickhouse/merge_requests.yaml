@@ -1,0 +1,10 @@
+table: gl_merge_request
+rows:
+  - {id: 3000, iid: 1, title: Add token scopes, state: opened, source_branch: feature-auth, target_branch: main, project_id: 1000, author_id: 1, traversal_path: 1/100/1000/}
+  - {id: 3001, iid: 2, title: Fix the rate limiter, state: opened, source_branch: fix-rate, target_branch: main, project_id: 1000, author_id: 4, traversal_path: 1/100/1000/}
+  - {id: 3002, iid: 1, title: Dark mode, state: opened, source_branch: dark-mode, target_branch: main, project_id: 1001, author_id: 4, traversal_path: 1/100/1001/}
+  - {id: 3003, iid: 3, title: Split the router, state: merged, source_branch: split-router, target_branch: main, project_id: 1000, author_id: 1, merged_at: "2026-10-20 12:00:00", traversal_path: 1/100/1000/}
+  - {id: 3005, iid: 1, title: Invoice export, state: opened, source_branch: invoice-export, target_branch: main, project_id: 2000, author_id: 3, traversal_path: 1/200/2000/}
+  # 3004 was deleted: its tombstone carries a later _version than the live row, and its edges stay live.
+  - {id: 3004, iid: 2, title: Legacy theme switcher, state: opened, source_branch: legacy-theme, target_branch: main, project_id: 1001, author_id: 4, traversal_path: 1/100/1001/, _version: "2026-11-01 00:00:00"}
+  - {id: 3004, iid: 2, title: Legacy theme switcher, state: opened, source_branch: legacy-theme, target_branch: main, project_id: 1001, author_id: 4, traversal_path: 1/100/1001/, _version: "2026-11-05 00:00:00", _deleted: true}

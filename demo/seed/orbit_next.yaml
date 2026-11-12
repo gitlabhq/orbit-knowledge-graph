@@ -1,0 +1,69 @@
+repositories:
+  1000:
+    traversal_path: 1/100/1000/
+    branches:
+      main:
+        - path: src/lib.rs
+          content: |
+            pub mod auth;
+            pub mod limiter;
+
+            pub fn serve() {
+                todo!("wire the server")
+            }
+        - path: src/auth.rs
+          content: |
+            pub fn check(token: &str) -> bool {
+                !token.is_empty()
+            }
+      feature-auth:
+        - path: src/auth.rs
+          content: |
+            pub fn check(token: &str, scope: &str) -> bool {
+                todo!("check the token scope")
+            }
+      fix-rate:
+        - path: src/limiter.rs
+          content: |
+            pub struct Limiter { burst: u32 }
+
+            impl Limiter {
+                pub fn allow(&mut self) -> bool {
+                    todo!("tune the burst size")
+                }
+            }
+  1001:
+    traversal_path: 1/100/1001/
+    branches:
+      main:
+        - path: web/theme.rs
+          content: |
+            pub fn palette() -> [u32; 2] {
+                [0xffffff, 0x000000]
+            }
+        - path: web/sidebar.rs
+          content: |
+            pub fn render() -> String {
+                todo!("render the sidebar")
+            }
+      dark-mode:
+        - path: web/theme.rs
+          content: |
+            pub fn palette(dark: bool) -> [u32; 2] {
+                todo!("pick the contrast ratio")
+            }
+  2000:
+    traversal_path: 1/200/2000/
+    branches:
+      main:
+        - path: src/invoice.rs
+          content: |
+            pub fn total(cents: &[i64]) -> i64 {
+                todo!("sum with overflow checks")
+            }
+      invoice-export:
+        - path: src/export.rs
+          content: |
+            pub fn export(rows: &[i64]) -> String {
+                todo!("round to cents")
+            }

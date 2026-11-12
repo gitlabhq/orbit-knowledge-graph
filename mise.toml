@@ -146,6 +146,18 @@ description = "Check logical input and selected physical plans against YAML fixt
 run = "cargo nextest run -p integration-tests-codegraph --no-capture"
 description = "Run code-graph and code-graph-incremental YAML suites with OpenCypher-like checks (no Docker)"
 
+[tasks.demo]
+run = "crates/orbit-demo/scripts/clickhouse.sh && cargo run -q -p orbit-demo"
+description = "Start the query engine demo on loopback (ClickHouse in the orbit-demo colima VM)"
+
+[tasks."demo:setup"]
+run = "crates/orbit-demo/scripts/setup.sh"
+description = "Restart the orbit-demo colima VM with its pinned flags and pull the demo images by digest"
+
+[tasks."test:demo"]
+run = "crates/orbit-demo/scripts/clickhouse.sh && cargo test -p orbit-demo && crates/orbit-demo/scripts/lockdown-tests.sh"
+description = "Run the demo's tests and prove each layer of its network lockdown"
+
 [tasks."test:cli"]
 run = "cargo build -p orbit-cli && cargo nextest run --test cli --test outside_repository --no-fail-fast"
 description = "Run CLI integration tests — concurrency, worktrees (no Docker)"

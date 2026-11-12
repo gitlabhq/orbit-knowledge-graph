@@ -1,0 +1,46 @@
+workspaces:
+  T01:
+    traversal_path: 1/100/
+    messages:
+      - id: m1
+        workspace: T01
+        merge_request_id: 3000
+        channel: api-dev
+        author: ann
+        text: token scopes are ready for review
+        sent_at: "2026-11-02T17:00:00Z"
+        visible_to: [maria, zed]
+      - id: m2
+        workspace: T01
+        merge_request_id: 3000
+        channel: api-incidents
+        author: maria
+        text: the old tokens leaked scopes, keep this private
+        sent_at: "2026-11-02T18:00:00Z"
+        visible_to: [maria]
+      - id: m3
+        workspace: T01
+        merge_request_id: 3002
+        channel: web-dev
+        author: gus
+        text: dark mode screenshots are in the thread
+        sent_at: "2026-11-03T09:00:00Z"
+        visible_to: [maria, gus]
+      - id: m4
+        workspace: T01
+        channel: random
+        author: ann
+        text: lunch at noon?
+        sent_at: "2026-11-03T12:00:00Z"
+        visible_to: [maria, gus, zed]
+  T02:
+    traversal_path: 1/200/
+    messages:
+      - id: m5
+        workspace: T02
+        merge_request_id: 3005
+        channel: billing
+        author: zed
+        text: invoice export rounds per line, not per total
+        sent_at: "2026-11-04T10:00:00Z"
+        visible_to: [zed]

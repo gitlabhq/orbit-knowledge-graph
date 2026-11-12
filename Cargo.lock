@@ -5996,6 +5996,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-demo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow 60.1.0",
+ "async-trait",
+ "axum",
+ "clickhouse-client",
+ "compiler",
+ "futures",
+ "integration-testkit",
+ "orbit-authorization",
+ "orbit-migrations",
+ "orbit-server",
+ "orbit-server-config",
+ "orbit-utils",
+ "query-data-model",
+ "query-engine",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "orbit-fuzz"
 version = "0.1.0"
 dependencies = [

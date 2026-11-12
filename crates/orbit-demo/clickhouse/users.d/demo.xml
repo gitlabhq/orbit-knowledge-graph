@@ -12,7 +12,10 @@
             <networks><ip>172.30.0.0/24</ip></networks>
             <profile>demo_read</profile>
             <quota>default</quota>
-            <grants><query>GRANT SELECT ON orbit_demo.*</query></grants>
+            <grants>
+                <query>GRANT SELECT ON orbit_demo.*</query>
+                <query>GRANT SELECT ON orbit_demo_test.*</query>
+            </grants>
         </demo>
         <seed>
             <password>orbit-demo-seed</password>
@@ -21,6 +24,7 @@
             <quota>default</quota>
             <grants>
                 <query>GRANT CREATE DATABASE, CREATE TABLE, DROP TABLE, TRUNCATE, INSERT, SELECT ON orbit_demo.*</query>
+                <query>GRANT CREATE DATABASE, CREATE TABLE, DROP TABLE, TRUNCATE, INSERT, SELECT ON orbit_demo_test.*</query>
             </grants>
         </seed>
     </users>

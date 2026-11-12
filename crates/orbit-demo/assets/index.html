@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Orbit query engine demo</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/vendor/cytoscape.min.js" defer></script>
+  <script src="/assets/dag.js" defer></script>
+  <script src="/assets/panels.js" defer></script>
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Orbit query engine</h1>
+    <label>Caller <select id="caller"></select></label>
+    <label class="check"><input type="checkbox" id="slow" checked> Step through events</label>
+    <button id="reload" type="button">Reload seed</button>
+    <span id="status">Loading</span>
+  </header>
+  <main>
+    <section id="left">
+      <h2>Examples</h2>
+      <ul id="examples"></ul>
+      <h2>GQL</h2>
+      <textarea id="query" spellcheck="false" rows="9"></textarea>
+      <button id="run" type="button">Run query</button>
+      <h2>Caller grants</h2>
+      <div id="grants" class="muted">Run a query to sign in.</div>
+    </section>
+    <section id="center">
+      <h2>Execution DAG</h2>
+      <svg id="dag" role="img" aria-label="The stage DAG of the last query"></svg>
+      <div id="legend">
+        <span class="swatch relational"></span> relational
+        <span class="swatch remote"></span> remote
+        <span class="swatch engine"></span> query engine
+        <span class="hint">Click a stage for its plans, request, security and rows.</span>
+      </div>
+      <h2>Final rows <span id="count" class="muted"></span></h2>
+      <div id="rows" class="table"></div>
+    </section>
+    <section id="right">
+      <h2 id="title">Logical plan</h2>
+      <nav id="tabs"></nav>
+      <div id="detail"></div>
+    </section>
+  </main>
+</body>
+</html>

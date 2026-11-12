@@ -1,0 +1,32 @@
+[package]
+name = "orbit-demo"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "orbit-demo"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+arrow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+clickhouse-client = { path = "../clickhouse-client" }
+compiler = { path = "../query-engine/compiler" }
+futures = { workspace = true }
+integration-testkit = { path = "../integration-testkit" }
+orbit-authorization = { path = "../orbit-authorization" }
+orbit-migrations = { path = "../orbit-migrations" }
+orbit-server = { path = "../orbit-server" }
+orbit-server-config = { path = "../orbit-server-config" }
+orbit-utils = { path = "../utils" }
+query-data-model = { path = "../query-data-model", features = ["testkit"] }
+query-engine = { path = "../query-engine" }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
