@@ -85,7 +85,7 @@ fn feature_on(features: &Features, name: &str, nightly: bool) -> bool {
     }
 }
 
-pub(super) fn nightly_enabled() -> bool {
+pub(crate) fn nightly_enabled() -> bool {
     std::env::var("ORBIT_NIGHTLY").is_ok_and(|value| {
         !matches!(
             value.trim().to_lowercase().as_str(),
@@ -142,7 +142,10 @@ fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> S
     }
     let entities = providers
         .iter()
-        .filter(|(_, entities)| remote && !entities.is_empty())
+        .filter(|(name, entities)| {
+            !entities.is_empty()
+                && (remote || name.as_str() != crate::remote::server_schema::PROVIDER)
+        })
         .map(|(name, entities)| format!("- {name}: {}", entities.join(", ")))
         .collect::<Vec<_>>();
     let entities = match entities.is_empty() {
@@ -189,11 +192,14 @@ static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
 
 pub(crate) fn instructions_text(setup_reached_gitlab: bool, no_gitlab: bool) -> String {
+    let third_party = crate::commands::third_party::providers();
     if no_gitlab {
-        return render_instructions(launcher(), false, &Providers::new());
+        return render_instructions(launcher(), false, &third_party);
     }
     let remote = SESSION.reachable || (setup_reached_gitlab && !SESSION.signed_in);
-    render_instructions(launcher(), remote, &SESSION.providers)
+    let mut providers = SESSION.providers.clone();
+    providers.extend(third_party);
+    render_instructions(launcher(), remote, &providers)
 }
 
 pub(crate) fn search_nudge_text() -> &'static str {
@@ -722,14 +728,36 @@ mod tests {
         let rendered = render_instructions(GLAB_LAUNCHER, true, &providers);
         assert!(
             rendered.ends_with(
-                "for `glab orbit query` and `glab orbit grep gitlab:type:words`:\n- gitlab: Widget"
+                "for `glab orbit query` and `glab orbit grep provider:type:words`:\n- gitlab: Widget"
             ),
             "{rendered}"
         );
         assert!(!render_instructions(GLAB_LAUNCHER, false, &providers).contains("Widget"));
     }
 
-    const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh"];
+    #[test]
+    fn third_party_providers_show_with_or_without_gitlab() {
+        let providers = Providers::from([
+            ("gitlab".into(), vec!["Project".into()]),
+            (
+                "slack".into(),
+                vec!["SlackChannel".into(), "SlackUser".into()],
+            ),
+        ]);
+        let rendered = render_instructions(DIRECT_LAUNCHER, true, &providers);
+        assert!(
+            rendered.ends_with("\n- gitlab: Project\n- slack: SlackChannel, SlackUser"),
+            "{rendered}"
+        );
+        let rendered = render_instructions(DIRECT_LAUNCHER, false, &providers);
+        assert!(
+            rendered.ends_with("\n- slack: SlackChannel, SlackUser"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("- gitlab:"), "{rendered}");
+    }
+
+    const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh", "third-party-sync"];
 
     #[derive(serde::Deserialize)]
     struct CallLabels {

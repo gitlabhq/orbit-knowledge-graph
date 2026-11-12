@@ -73,6 +73,20 @@ pub(crate) async fn run(
         true => query,
         false => query.map(|query| or_word(&query)),
     };
+    if let Some(query) = query.as_deref()
+        && options.output == Output::Lines
+        && !options.invert
+        && !options.fixed
+        && let Some(text) = crate::commands::third_party::grep(query, &mut paths).await?
+    {
+        return match text {
+            Some(text) => {
+                print!("{text}");
+                Ok(())
+            }
+            None => Err(NoMatches.into()),
+        };
+    }
     let sections = qualifier::apply(query, &mut options, &mut paths);
     let budget = crate::remote::grep::Budget::default();
     let mut found = false;

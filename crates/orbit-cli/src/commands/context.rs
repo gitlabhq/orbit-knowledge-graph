@@ -68,6 +68,14 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
             _ => joined.push(target.clone()),
         }
     }
+    let third_party = crate::commands::third_party::context(&mut joined).await?;
+    if let Some(text) = &third_party {
+        print!("{text}");
+        if joined.is_empty() {
+            return Ok(());
+        }
+        println!();
+    }
     for target in &joined {
         if is_current_ci(target) {
             current_ci = true;

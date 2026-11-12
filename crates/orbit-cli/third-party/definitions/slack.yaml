@@ -1,0 +1,109 @@
+description: Slack workspace channels, messages, and people
+base_url: https://slack.com
+auth:
+  strategy: bearer
+  token_env: SLACK_TOKEN
+setup:
+  title: Slack
+  token_help: "A bot token (xoxb-…) from a Slack app with the channels:read, channels:history, and users:read scopes."
+  token_prefix: xoxb-
+  verify:
+    path: /api/auth.test
+    ok: /ok
+    error: /error
+    shows: /team
+  team:
+    when: /is_enterprise_install
+    path: /api/auth.teams.list
+    items: /teams
+    id: /id
+    name: /name
+entities:
+  SlackChannel:
+    type: channel
+    description: A Slack channel you are a member of
+    fetch:
+      path: /api/users.conversations
+      params: {limit: "200", types: "public_channel,private_channel", exclude_archived: "true", team_id: "{team}"}
+      items: /channels
+      cursor: {param: cursor, next: /response_metadata/next_cursor}
+      error: /error
+    key: [/id]
+    label: name
+    search: [name, topic, purpose]
+    properties:
+      name: {from: /name, description: "Channel name without the leading #."}
+      topic: {from: /topic/value}
+      purpose: {from: /purpose/value}
+      members: {type: int, from: /num_members}
+      created_at: {type: timestamp, from: /created, format: unix}
+  SlackUser:
+    type: user
+    description: A person in the Slack workspace
+    fetch:
+      path: /api/users.list
+      params: {limit: "200", team_id: "{team}"}
+      items: /members
+      cursor: {param: cursor, next: /response_metadata/next_cursor}
+      error: /error
+    key: [/id]
+    label: name
+    search: [name, real_name, title]
+    properties:
+      name: {from: /name}
+      real_name: {from: /real_name}
+      title: {from: /profile/title}
+      email: {from: /profile/email}
+  SlackMessage:
+    type: message
+    description: A message posted in a Slack channel, read live and never stored
+    key: [/channel_id, /message_ts]
+    label: text
+    search: [text]
+    newest: posted_at
+    shows: [IN_CHANNEL.name, AUTHORED_BY.name, posted_at]
+    named:
+      IN_CHANNEL: channel_name
+      AUTHORED_BY: author_name
+    get:
+      path: /api/conversations.replies
+      params: {channel: "{key.0}", ts: "{key.1}", limit: "1", inclusive: "true"}
+      items: /messages
+      error: /error
+      key: ["^key.0", /ts]
+      fields:
+        text: /text
+        channel: "^key.0"
+        author: /user
+        posted_at: /ts
+        replies: /reply_count
+    live:
+      path: /api/assistant.search.context
+      params: {query: "{query}", limit: "20", sort: timestamp, channel_types: "public_channel,private_channel,mpim,im"}
+      items: /results/messages
+      error: /error
+      within:
+        SlackChannel: "in:<#{key}>"
+        SlackUser: "from:<@{key}>"
+      within_name:
+        SlackChannel: "in:#{name}"
+        SlackUser: "from:@{name}"
+      fields:
+        text: /content
+        channel: /channel_id
+        author: /author_user_id
+        posted_at: /message_ts
+        replies: /reply_count
+        channel_name: /channel_name
+        author_name: /author_name
+    properties:
+      text: {from: /content}
+      channel: {from: /channel_id}
+      author: {from: /author_user_id}
+      posted_at: {type: timestamp, from: /message_ts, format: unix}
+      channel_name: {from: /channel_name, description: "The channel's name when the search saw it."}
+      author_name: {from: /author_name, description: "The author's display name when the search saw it."}
+      replies: {type: int, from: /reply_count}
+    links:
+      - {type: IN_CHANNEL, to: SlackChannel, via: channel}
+      - {type: AUTHORED_BY, to: SlackUser, via: author}

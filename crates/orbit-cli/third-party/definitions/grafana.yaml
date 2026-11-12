@@ -1,0 +1,76 @@
+description: Grafana folders, dashboards, and the alert rules on them
+auth:
+  strategy: bearer
+  token_env: GRAFANA_TOKEN
+setup:
+  title: Grafana
+  token_help: "A service account token with the Viewer role, from Administration > Users and access > Service accounts."
+  token_prefix: glsa_
+  asks_url: true
+  url_help: "The Grafana server, such as https://dashboards.gitlab.net"
+  verify:
+    path: /api/user
+    shows: /login
+entities:
+  GrafanaFolder:
+    type: folder
+    description: A Grafana folder that holds dashboards and alert rules
+    fetch:
+      path: /api/folders
+      params: {limit: "1000"}
+      items: ""
+    key: [/uid]
+    label: title
+    search: [title]
+    properties:
+      title: {from: /title}
+      url: {from: /url}
+  GrafanaDashboard:
+    type: dashboard
+    description: A Grafana dashboard
+    fetch:
+      path: /api/search
+      params: {type: dash-db, limit: "5000"}
+      items: ""
+    key: [/uid]
+    label: title
+    search: [title, tags, folder_title]
+    shows: [IN_FOLDER.title]
+    properties:
+      title: {from: /title}
+      tags: {from: /tags}
+      url: {from: /url}
+      folder: {from: /folderUid, description: UID of the GrafanaFolder it is in.}
+      folder_title: {from: /folderTitle}
+    links:
+      - {type: IN_FOLDER, to: GrafanaFolder, via: folder}
+    live:
+      path: /api/search
+      params: {type: dash-db, query: "{query}", limit: "50"}
+      items: ""
+      within:
+        GrafanaFolder: "folderUIDs={key}"
+  GrafanaAlert:
+    type: alert
+    description: A Grafana alert rule
+    fetch:
+      path: /api/v1/provisioning/alert-rules
+      items: ""
+    key: [/uid]
+    label: title
+    search: [title, summary, description, rule_group]
+    newest: updated_at
+    shows: [IN_FOLDER.title, ON_DASHBOARD.title, updated_at]
+    properties:
+      title: {from: /title}
+      rule_group: {from: /ruleGroup}
+      summary: {from: /annotations/summary}
+      description: {from: /annotations/description}
+      runbook_url: {from: /annotations/runbook_url}
+      paused: {type: bool, from: /isPaused}
+      updated_at: {type: timestamp, from: /updated}
+      folder: {from: /folderUID, description: UID of the GrafanaFolder it is in.}
+      dashboard: {from: "/annotations/__dashboardUid__", description: UID of the GrafanaDashboard it is on.}
+    links:
+      - {type: IN_FOLDER, to: GrafanaFolder, via: folder}
+      - {type: ON_DASHBOARD, to: GrafanaDashboard, via: dashboard}

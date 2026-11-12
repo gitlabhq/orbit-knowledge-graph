@@ -1,0 +1,27 @@
+[package]
+name = "orbit-third-party"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arrow = { workspace = true }
+chrono = { workspace = true }
+compiler = { path = "../../query-engine/compiler" }
+duckdb-client = { path = "../../duckdb-client" }
+futures = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
+keyring = { workspace = true }
+ontology = { path = "../../ontology" }
+orbit-utils = { path = "../../utils" }
+regex = { workspace = true }
+reqwest = { workspace = true }
+rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }

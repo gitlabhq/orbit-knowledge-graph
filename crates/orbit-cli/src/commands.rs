@@ -10,3 +10,4 @@ pub(crate) mod index;
 pub(crate) mod relations;
 pub(crate) mod reset;
 pub(crate) mod setup;
+pub(crate) mod third_party;
