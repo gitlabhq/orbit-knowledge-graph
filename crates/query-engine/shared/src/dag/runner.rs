@@ -89,6 +89,10 @@ impl<'r> Runner<'r> {
                     backend: stage.backend,
                     connection: stage.connection.clone(),
                     inputs: stage.inputs.clone(),
+                    logical: match &stage.query {
+                        StageQuery::Gql(statement) => compiler::dag::describe(&statement.plan),
+                        StageQuery::Engine(..) | StageQuery::Hydration(_) => Vec::new(),
+                    },
                 })
                 .collect();
             self.observer.event(Event::Split { stages });

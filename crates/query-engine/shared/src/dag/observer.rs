@@ -13,6 +13,8 @@ pub struct StageInfo {
     pub backend: Backend,
     pub connection: Option<String>,
     pub inputs: Vec<Input>,
+    /// The stage's logical sub-plan; the engine stage plans from its inputs, so it has none.
+    pub logical: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

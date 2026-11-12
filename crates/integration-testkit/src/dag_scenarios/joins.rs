@@ -166,6 +166,30 @@ async fn the_observer_sees_each_stage_in_order() {
 }
 
 #[tokio::test]
+async fn the_split_carries_each_stages_logical_sub_plan() {
+    let ran = run(MENTIONS, &caller("1/9970/"), open_merge_requests()).await;
+    let split = ran
+        .events
+        .iter()
+        .find_map(|event| match event {
+            Event::Split { stages } => Some(stages.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let logical: Vec<Vec<&str>> = split.iter().map(|stage| ops(&stage.logical)).collect();
+    assert_eq!(
+        logical,
+        [
+            vec!["Entities", "Filter", "Select", "Limit"],
+            vec!["Entities", "Select", "Limit"],
+            vec![],
+        ]
+    );
+    assert!(split[0].logical[0].ends_with("-> [mr]"));
+    assert!(split[1].logical[0].ends_with("-> [m]"));
+}
+
+#[tokio::test]
 async fn an_empty_key_set_skips_the_stage_that_reads_it() {
     let ran = run(MENTIONS, &caller("1/9970/"), Vec::new()).await;
     assert!(ran.rendered(1).is_empty());
