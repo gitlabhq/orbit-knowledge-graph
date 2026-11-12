@@ -3,7 +3,7 @@ providers:
   gitlab_session:
     module: gitlab.session
     permissions: {read: reporter, read_security: security_manager}
-  rails: {module: fake.rails, allowed: [42]}
+  rails: {module: fake.rails, resource: project, allowed: [42]}
   slack:
     module: fake.slack
     handles: {}

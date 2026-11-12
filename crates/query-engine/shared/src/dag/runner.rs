@@ -208,17 +208,7 @@ impl<'r> Runner<'r> {
         }
         let (connection, backend, response) =
             (stage.connection.clone(), stage.backend, stage.response);
-        let remote_checks = match (
-            &stage.query,
-            self.env
-                .remotes
-                .target(connection.as_deref().unwrap_or_default()),
-        ) {
-            (StageQuery::Gql(statement), Some(_)) => {
-                compiler::remote::row_checks(&statement.plan, self.env.primary.model())?
-            }
-            _ => Vec::new(),
-        };
+        let checks = std::mem::take(&mut stage.checks);
         let compiled = compile(stage, inputs, &self.env)?;
         self.trace(id, &compiled);
         let trusted = backend == compiler::dag::Backend::Engine
@@ -251,13 +241,8 @@ impl<'r> Runner<'r> {
             ))
             .into());
         }
-        let executed = remote::checked(
-            self.checks,
-            self.env.grants.caller(),
-            &remote_checks,
-            executed,
-        )
-        .await?;
+        let executed =
+            remote::checked(self.checks, self.env.grants.caller(), &checks, executed).await?;
         if let Request::Query(query) = &compiled.request {
             contexts.push((id, query.base.result_context.clone()));
         }

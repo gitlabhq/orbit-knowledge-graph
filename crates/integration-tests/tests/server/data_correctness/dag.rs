@@ -71,7 +71,7 @@ async fn run(
     );
     let executor: Arc<dyn Executor> = Arc::clone(executors.get(graph.connection()).unwrap());
     let grants = grants(&model, paths);
-    let checks = AllowedKeys::checks(allowed.iter().copied().map(Key::Int));
+    let checks = AllowedKeys::checks("project", allowed.iter().copied().map(Key::Int));
     let (events, outcome) = run_dag(&model, executor, query, &grants, "alice", &checks).await;
     match outcome {
         Ok(Outcome { executed, .. }) => (events, executed.batches),

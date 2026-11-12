@@ -122,8 +122,12 @@ impl Executor for SeededGraph {
     }
 }
 
-/// A Rails stand-in that allows the listed keys of every row check.
-pub struct AllowedKeys(pub BTreeSet<Key>);
+/// A Rails stand-in whose checks on `resource` allow the listed keys; it allows every key of any
+/// other resource.
+pub struct AllowedKeys {
+    pub resource: String,
+    pub allowed: BTreeSet<Key>,
+}
 
 #[async_trait]
 impl Provider<Check> for AllowedKeys {
@@ -132,10 +136,11 @@ impl Provider<Check> for AllowedKeys {
             .requests
             .into_iter()
             .map(|request| {
+                let listed = request.resource == self.resource;
                 request
                     .ids
                     .into_iter()
-                    .filter(|key| self.0.contains(key))
+                    .filter(|key| !listed || self.allowed.contains(key))
                     .collect()
             })
             .collect())
@@ -145,6 +150,7 @@ impl Provider<Check> for AllowedKeys {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AllowedOptions {
+    pub resource: String,
     pub allowed: Vec<i64>,
 }
 
@@ -153,7 +159,10 @@ impl Module for AllowedKeys {
     type Options = AllowedOptions;
 
     fn build(options: AllowedOptions) -> Result<Self, AuthError> {
-        Ok(Self(options.allowed.into_iter().map(Key::Int).collect()))
+        Ok(Self {
+            resource: options.resource,
+            allowed: options.allowed.into_iter().map(Key::Int).collect(),
+        })
     }
 
     fn answers(self: Arc<Self>, _: &[Need]) -> Result<Answers, AuthError> {
@@ -165,9 +174,13 @@ impl Module for AllowedKeys {
 }
 
 impl AllowedKeys {
-    /// The deployment's `rails` checks, answered by this stand-in.
-    pub fn checks(keys: impl IntoIterator<Item = Key>) -> Checks {
-        Checks::default().with("rails", Arc::new(Self(keys.into_iter().collect())))
+    /// The deployment's `rails` checks, which allow only `allowed` of `resource`.
+    pub fn checks(resource: &str, allowed: impl IntoIterator<Item = Key>) -> Checks {
+        let check = Self {
+            resource: resource.to_string(),
+            allowed: allowed.into_iter().collect(),
+        };
+        Checks::default().with("rails", Arc::new(check))
     }
 }
 

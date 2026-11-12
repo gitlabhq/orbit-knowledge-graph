@@ -16,10 +16,10 @@ const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]-
 fn open_merge_requests() -> Vec<query_data_model::catalog::Row> {
     vec![
         row(
-            json!({"mr_iid": 1, "mr_project_id": 42, "mr_source_branch": "feature-a", "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),
+            json!({"mr_iid": 1, "mr_id": 2000, "mr_project_id": 42, "mr_source_branch": "feature-a", "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),
         ),
         row(
-            json!({"mr_iid": 2, "mr_project_id": 77, "mr_source_branch": "fix-b", "_orbit_mr_id": 2001, "_orbit_mr_type": "MergeRequest"}),
+            json!({"mr_iid": 2, "mr_id": 2001, "mr_project_id": 77, "mr_source_branch": "fix-b", "_orbit_mr_id": 2001, "_orbit_mr_type": "MergeRequest"}),
         ),
     ]
 }
@@ -194,7 +194,7 @@ async fn a_code_stage_feeds_composite_keys_into_a_clickhouse_stage() {
 /// `read_code` check runs on its rows.
 #[tokio::test]
 async fn the_files_at_a_head_go_through_their_read_code_check() {
-    let denied = AllowedKeys::checks([Key::Int(77)]);
+    let denied = AllowedKeys::checks("project", [Key::Int(77)]);
     let ran = run_with(
         QUERY_4,
         &caller("1/9970/"),

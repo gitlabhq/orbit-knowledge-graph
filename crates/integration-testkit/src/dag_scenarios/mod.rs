@@ -108,7 +108,7 @@ async fn run_with(
 
 /// Runs a query as `alice`, whose code checks allow every seeded repository.
 async fn run(query: &str, grants: &Grants, graph: Vec<Row>) -> Run {
-    let checks = AllowedKeys::checks([Key::Int(42), Key::Int(77)]);
+    let checks = AllowedKeys::checks("project", [Key::Int(42), Key::Int(77)]);
     run_with(query, grants, graph, "alice", &checks).await
 }
 

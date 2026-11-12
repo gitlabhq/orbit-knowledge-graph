@@ -3,7 +3,8 @@
 
 use arrow::record_batch::RecordBatch;
 use compiler::dag::Request;
-use compiler::remote::{Namespaces, RowCheck, Target, lookup};
+use compiler::dag::RowCheck;
+use compiler::remote::{Namespaces, Target, lookup};
 use query_data_model::catalog::Row;
 use query_data_model::surface::Statement;
 use serde_json::Value;
@@ -77,7 +78,7 @@ pub(super) async fn checked(
     mut executed: Executed,
 ) -> Result<Executed, DagError> {
     for check in row_checks {
-        let keys = rows::checked_keys(&executed.batches, &check.field, check.kind)?;
+        let keys = rows::checked_keys(&executed.batches, &check.column, check.kind)?;
         let request = CheckRequest {
             permission: check.permission.clone(),
             resource: check.resource.clone(),
@@ -88,7 +89,7 @@ pub(super) async fn checked(
             .await
             .map_err(|error: AuthError| ExecutorError(error.to_string()))?;
         let allowed = allowed.into_iter().next().unwrap_or_default();
-        executed.batches = rows::retain(executed.batches, &check.field, check.kind, &allowed)?;
+        executed.batches = rows::retain(executed.batches, &check.column, check.kind, &allowed)?;
     }
     Ok(executed)
 }

@@ -7,7 +7,8 @@ use query_engine::shared::dag::Event;
 use serde_json::json;
 
 use super::single::ops;
-use super::{caller, row, run};
+use super::{caller, row, run, run_with};
+use crate::dag_fakes::AllowedKeys;
 
 const MENTIONS: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, mr.title, m.author, m.text ORDER BY mr.iid LIMIT 10";
 
@@ -187,6 +188,46 @@ async fn the_split_carries_each_stages_logical_sub_plan() {
     );
     assert!(split[0].logical[0].ends_with("-> [mr]"));
     assert!(split[1].logical[0].ends_with("-> [m]"));
+}
+
+/// The merge request stage's `read_merge_request` check runs before its keys reach the Slack
+/// stage, so the live service never sees the key of a merge request the caller cannot read, and
+/// a caller who can read none sends no call.
+#[tokio::test]
+async fn a_producers_row_checks_run_before_its_keys_cross_the_boundary() {
+    let keys = |ran: &super::Run| {
+        ran.events
+            .iter()
+            .find_map(|event| match event {
+                Event::Keys { sample, .. } => Some(sample.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let one = AllowedKeys::checks("merge_request", [Key::Int(2000)]);
+    let ran = run_with(
+        MENTIONS,
+        &caller("1/9970/"),
+        open_merge_requests(),
+        "alice",
+        &one,
+    )
+    .await;
+    assert_eq!(keys(&ran), [Key::Int(2000)]);
+    let rows = ran.rows();
+    assert!(rows.iter().all(|row| row["mr_iid"] == 1), "{rows:?}");
+
+    let none = AllowedKeys::checks("merge_request", []);
+    let ran = run_with(
+        MENTIONS,
+        &caller("1/9970/"),
+        open_merge_requests(),
+        "alice",
+        &none,
+    )
+    .await;
+    assert!(ran.rendered(1).is_empty());
+    assert!(ran.rows().is_empty());
 }
 
 #[tokio::test]
