@@ -4,20 +4,20 @@
 
 mod columns;
 mod compile;
+mod connections;
 mod cut;
 mod engine;
 mod keys;
-mod remotes;
 mod request;
 mod split;
 mod sub;
 
 pub use compile::{
-    Compiled, Env, Inputs, Primary, Source, compile, compile_hydration, split_query,
+    Compiled, Env, Frontend, Inputs, Source, compile, compile_hydration, split_query,
 };
+pub use connections::{Connections, Peer};
 pub use engine::{EngineColumn, EngineJoin, EngineNode, EngineQuery};
 pub use keys::{KeySet, bind};
-pub use remotes::Remotes;
 pub use request::{Rendered, Request, describe};
 pub use split::split;
 

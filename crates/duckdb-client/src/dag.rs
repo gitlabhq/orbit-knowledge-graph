@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use compiler::dag::{Env, Primary, Remotes, Request, Source};
+use compiler::dag::{Connections, Env, Frontend, Peer, Request, Source};
 use compiler::orbit_authorization::{Caller, Checks, Grants};
 use orbit_server_config::QueryLimits;
 use query_data_model::{Catalog, DuckDb};
@@ -15,7 +15,8 @@ use shared::{QueryExecution, QueryExecutionStats};
 
 use crate::DuckDbClient;
 
-/// Runs each relational stage's SQL on one local database.
+/// Runs each relational stage's SQL, and each scope lookup a remote stage needs, on one local
+/// database.
 pub struct DuckDbExecutor {
     pub client: Arc<Mutex<DuckDbClient>>,
 }
@@ -23,13 +24,23 @@ pub struct DuckDbExecutor {
 #[async_trait]
 impl Executor for DuckDbExecutor {
     async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
-        let Request::Query(compiled) = request else {
-            return Err(ExecutorError(format!(
-                "DuckDB runs queries, not {request:?}"
-            )));
+        let sql = match request {
+            Request::Query(compiled) => compiled.base.render(),
+            Request::Lookup(lookup) => compiler::ParameterizedQuery {
+                sql: lookup.query.sql.clone(),
+                params: lookup.query.parameters.clone(),
+                result_context: Default::default(),
+                query_config: Default::default(),
+                dialect: compiler::SqlDialect::DuckDb,
+            }
+            .render(),
+            other => {
+                return Err(ExecutorError(format!(
+                    "DuckDB runs queries and lookups, not {other:?}"
+                )));
+            }
         };
         let start = std::time::Instant::now();
-        let sql = compiled.base.render();
         let client = self
             .client
             .lock()
@@ -72,12 +83,12 @@ pub fn run_local(
         client: Arc::clone(client),
     };
     let executors = Executors::default().with(data_model.connection(), Arc::new(executor));
-    let primary = Primary::DuckDb(Arc::clone(data_model));
-    let remotes = Remotes::default();
+    let frontend = Frontend::Local(Arc::clone(data_model));
+    let connections = Connections::new(vec![Peer::DuckDb(Arc::clone(data_model))]);
     let grants = Grants::new(Caller::new("local", true, ()));
     let env = Env {
-        primary: &primary,
-        remotes: &remotes,
+        frontend: &frontend,
+        connections: &connections,
         grants: &grants,
         limits,
         trace: false,

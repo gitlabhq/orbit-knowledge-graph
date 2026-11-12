@@ -8,7 +8,6 @@ use orbit_utils::query_types::SqlType;
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::Hop;
 use query_data_model::catalog::{Guard, Rule};
-use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, JoinKind, ReadMode, Relation, RelationalError,
 };
@@ -21,7 +20,9 @@ use serde_json::Value;
 use super::guards::scope_set;
 use super::remote_security::{Namespaces, read_entities};
 use super::security::ScopeFilter;
+use crate::dag::{Connections, Peer};
 use crate::error::{QueryError, Result};
+use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::remote::{Target, named_repositories};
 
 pub const KEY: &str = "id";
@@ -37,6 +38,8 @@ pub enum Resolves {
 pub struct ScopeLookup {
     /// The entity whose `via` chain the lookup resolves.
     pub entity: EntityId,
+    /// The relational connection that stores the chain, which runs the lookup.
+    pub connection: String,
     pub resolves: Resolves,
     pub query: ParameterizedSql,
     /// The column that holds the scope key in the lookup rows.
@@ -45,11 +48,11 @@ pub struct ScopeLookup {
 
 /// The lookups a remote stage's reads need, from the stage's logical plan with its key sets
 /// bound: one per entity read through a `via` chain, of the repositories the plan names or of
-/// every workspace.
+/// every workspace, on the relational connection that stores the chain.
 pub fn lookup(
     target: &Target,
     logical: &LogicalPlan,
-    graph: &Catalog<ClickHouse>,
+    connections: &Connections,
     grants: &Grants,
 ) -> Result<Vec<ScopeLookup>> {
     let mut lookups = Vec::new();
@@ -76,9 +79,31 @@ pub fn lookup(
             }
             Target::Live(_) => (Resolves::Workspaces, None),
         };
-        let (query, scope) = build(graph, guard, hops, grants, keys)?;
+        let first = hops
+            .first()
+            .ok_or_else(|| QueryError::Security("the scope lookup has an empty via chain".into()))?
+            .to;
+        let built = connections.peers().iter().find_map(|peer| {
+            let built = match peer {
+                Peer::ClickHouse(catalog) if peer.holds(first) => {
+                    build(catalog, guard, hops, grants, keys.clone())
+                }
+                Peer::DuckDb(catalog) if peer.holds(first) => {
+                    build(catalog, guard, hops, grants, keys.clone())
+                }
+                _ => return None,
+            };
+            Some(built.map(|built| (peer.connection(), built)))
+        });
+        let (connection, (query, scope)) = built.ok_or_else(|| {
+            QueryError::Security(format!(
+                "no served relational connection stores {}'s via chain",
+                target.model().graph().entity(entity).name
+            ))
+        })??;
         lookups.push(ScopeLookup {
             entity,
+            connection: connection.to_string(),
             resolves,
             query,
             scope,
@@ -125,8 +150,8 @@ struct Step {
 
 /// The chain's first target, joined along the rest of the chain to the entity that holds the
 /// scope key, filtered to the caller's scope set for the remote read.
-fn build(
-    graph: &Catalog<ClickHouse>,
+fn build<B: SqlBackend>(
+    graph: &Catalog<B>,
     guard: &Guard,
     hops: &[Hop],
     grants: &Grants,
@@ -229,5 +254,5 @@ fn build(
             q.select(rows, columns)
         })
         .map_err(|error| shape(&format!("cannot be built: {error}")))?;
-    Ok((graph.render(&plan), scope_column.clone()))
+    Ok((B::render(graph, &plan), scope_column.clone()))
 }

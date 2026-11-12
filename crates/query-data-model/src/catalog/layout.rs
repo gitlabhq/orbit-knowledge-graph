@@ -113,6 +113,7 @@ impl Store {
             sources: (0..graph.entities().count()).map(|_| None).collect(),
             columns: vec![None; graph.properties().count()],
             excluded: HashSet::new(),
+            searched: HashSet::new(),
             bindings: vec![None; graph.variants().count()],
             declared: HashSet::new(),
             guards: vec![None; graph.entities().count()],

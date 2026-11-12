@@ -11,6 +11,12 @@ use crate::surface;
 static MODEL: LazyLock<Catalog<ClickHouse>> =
     LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
 
+static CONNECTIONS: LazyLock<crate::dag::Connections> = LazyLock::new(|| {
+    crate::graph_only(&std::sync::Arc::new(
+        Catalog::<ClickHouse>::embedded().unwrap(),
+    ))
+});
+
 fn normalized(gql: &str) -> Result<LogicalPlan, QueryError> {
     let model = MODEL.model();
     let statement = surface::parse(gql, model.logical(crate::testkit::limits()).as_admin())?;
@@ -18,7 +24,7 @@ fn normalized(gql: &str) -> Result<LogicalPlan, QueryError> {
         statement.plan,
         model,
         &*MODEL,
-        &Default::default(),
+        &CONNECTIONS,
         crate::testkit::limits(),
     )
 }

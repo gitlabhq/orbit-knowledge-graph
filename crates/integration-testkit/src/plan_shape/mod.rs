@@ -221,7 +221,7 @@ fn check<B: SqlBackend>(
             statement.plan,
             catalog.model(),
             model,
-            &Default::default(),
+            &compiler::dag::Connections::single(model),
             limits(),
         )?;
         Ok(query_data_model::surface::Statement { plan, ..statement })

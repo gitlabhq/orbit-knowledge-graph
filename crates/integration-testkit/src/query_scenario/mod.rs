@@ -535,9 +535,7 @@ async fn compile_like_server(
         phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
-    let routing = RoutingStage {
-        remotes: Default::default(),
-    };
+    let routing = RoutingStage::default();
     if let RoutingOutput::Schema(_) = routing.execute(&mut pipeline_ctx, &mut obs).await? {
         return Err(PipelineError::custom("schema calls are not graph queries"));
     }
@@ -591,12 +589,10 @@ async fn execute_output(
         phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
-    RoutingStage {
-        remotes: Default::default(),
-    }
-    .execute(&mut pipeline_ctx, &mut obs)
-    .await
-    .expect("the query should route");
+    RoutingStage::default()
+        .execute(&mut pipeline_ctx, &mut obs)
+        .await
+        .expect("the query should route");
     let executed = dag
         .execute(&mut pipeline_ctx, &mut obs)
         .await

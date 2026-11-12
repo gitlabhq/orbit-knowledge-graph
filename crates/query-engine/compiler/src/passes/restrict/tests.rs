@@ -10,6 +10,12 @@ use orbit_authorization::Grants;
 static MODEL: LazyLock<Catalog<ClickHouse>> =
     LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
 
+static CONNECTIONS: LazyLock<crate::dag::Connections> = LazyLock::new(|| {
+    crate::graph_only(&std::sync::Arc::new(
+        Catalog::<ClickHouse>::embedded().unwrap(),
+    ))
+});
+
 const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
     "email",
     "first_name",
@@ -25,7 +31,7 @@ const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
 fn restrict(gql: &str, ctx: &Grants) -> Result<()> {
     let model = MODEL.model();
     let statement = surface::parse(gql, model.logical(crate::testkit::limits()).as_admin())?;
-    super::restrict(&statement.plan, model, &*MODEL, &Default::default(), ctx)
+    super::restrict(&statement.plan, model, &*MODEL, &CONNECTIONS, ctx)
 }
 
 fn restricted(gql: &str) -> String {

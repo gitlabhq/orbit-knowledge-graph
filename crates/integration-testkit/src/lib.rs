@@ -29,7 +29,7 @@ pub(crate) fn test_stats(query: &str) -> query_engine::compiler::QueryStats {
         statement.plan,
         catalog.model(),
         &model,
-        &Default::default(),
+        &compiler::dag::Connections::single(&model),
         query_data_model::testkit::limits(),
     )
     .unwrap();

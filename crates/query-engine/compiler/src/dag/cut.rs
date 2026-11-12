@@ -5,8 +5,8 @@ use query_data_model::plan::tracking::Ref;
 
 use super::split::{Crossing, Place};
 use super::{
-    Backend, Dag, EngineColumn, EngineJoin, EngineNode, EngineQuery, Input, Remotes, RowCheck,
-    Stage, StageId, StageQuery,
+    Backend, Connections, Dag, EngineColumn, EngineJoin, EngineNode, EngineQuery, Input, Peer,
+    RowCheck, Stage, StageId, StageQuery,
 };
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
@@ -20,10 +20,8 @@ pub(super) struct Cut<'q> {
     pub query: Query<'q>,
     pub groups: Vec<Group>,
     pub crossings: Vec<Crossing>,
-    /// The primary connection first, then each served remote.
-    pub backends: Vec<(String, Backend)>,
     pub limits: &'q QueryLimits,
-    pub remotes: &'q Remotes,
+    pub connections: &'q Connections,
 }
 
 impl Cut<'_> {
@@ -59,10 +57,7 @@ impl Cut<'_> {
         let graph = self.query.model.graph();
         let access = self.query.model.access();
         for (index, group) in self.groups.iter().enumerate() {
-            let remote = match group.place {
-                Place::Remote(remote) => Some(&self.remotes.targets()[remote]),
-                Place::Primary => None,
-            };
+            let remote = self.peer(group.place).remote();
             if remote.is_none() && !producers.contains(&index) {
                 continue;
             }
@@ -125,7 +120,8 @@ impl Cut<'_> {
         }
         let mut stages = Vec::new();
         for (id, group) in order.iter().enumerate() {
-            let (connection, backend) = self.backend(self.groups[*group].place);
+            let peer = self.peer(self.groups[*group].place);
+            let (connection, backend) = (peer.connection().to_string(), peer.backend());
             let checks = std::mem::take(&mut checks[*group]);
             let inputs = self
                 .crossings
@@ -139,7 +135,7 @@ impl Cut<'_> {
                 group,
                 &needed,
                 self.limits,
-                self.remotes.connections(),
+                self.connections.names(),
             )?;
             stages.push(Stage {
                 id,
@@ -204,11 +200,8 @@ impl Cut<'_> {
         })
     }
 
-    fn backend(&self, place: Place) -> (String, Backend) {
-        match place {
-            Place::Primary => self.backends[0].clone(),
-            Place::Remote(index) => self.backends[index + 1].clone(),
-        }
+    fn peer(&self, place: Place) -> &Peer {
+        &self.connections.peers()[place]
     }
 
     /// The name of the column a stage returns a binding's property in.
@@ -223,7 +216,7 @@ impl Cut<'_> {
             .groups
             .iter()
             .find(|group| group.bindings.contains(&binding));
-        let relational = group.is_some_and(|group| self.backend(group.place).1.relational());
+        let relational = group.is_some_and(|group| self.peer(group.place).remote().is_none());
         EngineColumn {
             stage,
             column: match relational {
@@ -234,7 +227,7 @@ impl Cut<'_> {
     }
 
     /// Stages run from the bounded side of each crossing: a stage whose own bindings carry a
-    /// condition reads first, and the relational connection reads first between equals.
+    /// condition reads first, and a relational connection reads first between equals.
     fn order(&self) -> Result<Vec<usize>> {
         let bounded = |group: &Group| {
             self.query
@@ -248,7 +241,8 @@ impl Cut<'_> {
         };
         let rank = |index: usize| {
             let group = &self.groups[index];
-            (!bounded(group), group.place != Place::Primary, index)
+            let remote = self.peer(group.place).remote().is_some();
+            (!bounded(group), remote, index)
         };
         let root = (0..self.groups.len())
             .min_by_key(|index| rank(*index))

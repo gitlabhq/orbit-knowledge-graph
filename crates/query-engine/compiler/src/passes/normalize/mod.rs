@@ -16,7 +16,7 @@ use query_data_model::plan::logical::{
 use query_data_model::plan::tracking::{Ref, Step};
 use query_data_model::{Direction, Model, RelationshipId};
 
-use crate::dag::Remotes;
+use crate::dag::Connections;
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
 use kinds::Narrowed;
@@ -25,21 +25,21 @@ pub fn normalize(
     plan: LogicalPlan,
     model: &Model,
     data: &Catalog<impl SqlBackend>,
-    remotes: &Remotes,
+    connections: &Connections,
     limits: &QueryLimits,
 ) -> Result<LogicalPlan> {
     let query = Query::new(&plan, model);
-    available(query, data, remotes)?;
+    available(query, connections)?;
     let narrowed = kinds::narrowed(query)?;
     shared_keys(query, &narrowed, data)?;
     let catalog = model.logical(limits).as_admin();
     Ok(catalog.rebuild(plan, |q, step| rewrite(q, step, &narrowed, model))?)
 }
 
-fn available(query: Query<'_>, data: &Catalog<impl SqlBackend>, remotes: &Remotes) -> Result<()> {
+fn available(query: Query<'_>, connections: &Connections) -> Result<()> {
     let entities = query.plan.nodes().flat_map(|node| query.plan.outputs(node));
     for entity in entities.filter_map(|output| query.entity(output)) {
-        if data.table_of(entity).is_none() && remotes.holding(entity).is_none() {
+        if connections.holding(entity).is_none() {
             let entity = &query.model.graph().entity(entity).name;
             return Err(QueryError::AllowlistRejected(format!(
                 "entity '{entity}' is not available in this data model"

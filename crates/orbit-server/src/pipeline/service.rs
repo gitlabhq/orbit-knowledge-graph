@@ -147,9 +147,7 @@ impl QueryPipelineService {
         // timed-out queries invisible to every metric.
         let pipeline = async {
             let route = PipelineRunner::start(&mut ctx, &mut obs)
-                .then(&RoutingStage {
-                    remotes: Default::default(),
-                })
+                .then(&RoutingStage::default())
                 .await?
                 .finish()
                 .ok_or_else(|| PipelineError::custom("RoutingStage produced no output"))

@@ -4,7 +4,7 @@ use query_data_model::introspection::{IntrospectionScope, SchemaResponse};
 use query_data_model::{Catalog, ClickHouse};
 
 use crate::auth::Claims;
-use query_engine::compiler::dag::Remotes;
+use query_engine::compiler::dag::{Connections, Peer};
 use query_engine::compiler::gql::RoutedStatement;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -15,11 +15,10 @@ pub enum RoutingOutput {
     Schema(SchemaResponse),
 }
 
-/// Parses against the relational connection and the code and live connections the deployment
-/// serves.
-#[derive(Clone)]
+/// Parses against the graph connection and the connections the deployment serves next to it.
+#[derive(Clone, Default)]
 pub struct RoutingStage {
-    pub remotes: Remotes,
+    pub peers: Vec<Peer>,
 }
 
 impl RoutingStage {
@@ -31,10 +30,15 @@ impl RoutingStage {
         let claims = ctx.server_extensions.get::<Claims>().ok_or_else(|| {
             PipelineError::Security("Claims not found in server_extensions".into())
         })?;
+        let connections = Connections::new(
+            std::iter::once(Peer::ClickHouse(Arc::clone(data_model)))
+                .chain(self.peers.iter().cloned())
+                .collect(),
+        );
         Ok(query_engine::compiler::gql::route(
             &ctx.query_json,
             data_model,
-            &self.remotes,
+            &connections,
             claims.admin,
             IntrospectionScope::All,
             ctx.limits()?,

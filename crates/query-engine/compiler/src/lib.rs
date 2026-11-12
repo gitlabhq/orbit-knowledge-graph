@@ -89,23 +89,29 @@ fn output<T>(produced: Option<T>) -> Result<T> {
     })
 }
 
-/// The top-level pipeline on ClickHouse: parse, normalize, restrict, admit, split into stages.
+/// The server's top-level pipeline over its graph connection alone: parse, normalize,
+/// restrict, admit, split into stages.
 pub fn split(
     source: dag::Source<'_>,
     data_model: &Arc<Catalog<ClickHouse>>,
-    remotes: &dag::Remotes,
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<dag::Dag> {
-    let primary = dag::Primary::ClickHouse(Arc::clone(data_model));
+    let frontend = dag::Frontend::Server(Arc::clone(data_model));
+    let connections = graph_only(data_model);
     let env = dag::Env {
-        primary: &primary,
-        remotes,
+        frontend: &frontend,
+        connections: &connections,
         grants,
         limits,
         trace: false,
     };
     dag::split_query(source, &env)
+}
+
+/// A deployment that serves its graph connection alone.
+pub fn graph_only(data_model: &Arc<Catalog<ClickHouse>>) -> dag::Connections {
+    dag::Connections::new(vec![dag::Peer::ClickHouse(Arc::clone(data_model))])
 }
 
 fn statement(stage: dag::Stage) -> Result<query_data_model::surface::Statement> {
@@ -147,14 +153,7 @@ pub fn subquery_statements(
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<Vec<passes::codegen::SubqueryStatement>> {
-    let stage = split(
-        dag::Source::Text(raw),
-        data_model,
-        &dag::Remotes::default(),
-        grants,
-        limits,
-    )?
-    .into_single()?;
+    let stage = split(dag::Source::Text(raw), data_model, grants, limits)?.into_single()?;
     let ctx = clickhouse_stage(stage, data_model, grants, limits)?;
     let plan = output(ctx.relational().as_ref())?;
     Ok(passes::codegen::subquery_statements(plan, data_model))
@@ -168,14 +167,7 @@ pub fn compile(
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    let stage = split(
-        dag::Source::Text(raw),
-        data_model,
-        &dag::Remotes::default(),
-        grants,
-        limits,
-    )?
-    .into_single()?;
+    let stage = split(dag::Source::Text(raw), data_model, grants, limits)?.into_single()?;
     compile_stage(stage, data_model, grants, limits)
 }
 
@@ -187,12 +179,8 @@ pub fn compile_local(
     data_model: &Arc<Catalog<DuckDb>>,
     limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    let mut top = config::GqlLocalCtx::new(
-        *limits,
-        dag::Remotes::default(),
-        false,
-        Arc::clone(data_model),
-    );
+    let connections = dag::Connections::new(vec![dag::Peer::DuckDb(Arc::clone(data_model))]);
+    let mut top = config::GqlLocalCtx::new(*limits, connections, false, Arc::clone(data_model));
     top.set_raw(raw.to_string());
     let stage = config::run_gql_local(&mut top)
         .and_then(|()| output(top.take_dag()))
@@ -209,8 +197,7 @@ pub fn compile_local(
 
 /// Parse and admit a query without a caller, as startup checks of shipped queries do.
 pub fn check(raw: &str, data_model: &Arc<Catalog<ClickHouse>>, limits: &QueryLimits) -> Result<()> {
-    let mut ctx =
-        config::GqlCheckCtx::new(*limits, dag::Remotes::default(), Arc::clone(data_model));
+    let mut ctx = config::GqlCheckCtx::new(*limits, graph_only(data_model), Arc::clone(data_model));
     ctx.set_raw(raw.to_string());
     config::run_gql_check(&mut ctx).count_err()
 }

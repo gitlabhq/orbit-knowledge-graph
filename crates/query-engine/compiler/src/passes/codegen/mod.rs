@@ -3,6 +3,8 @@
 
 pub mod ddl;
 
+use std::sync::Arc;
+
 use orbit_server_config::QueryConfig;
 use query_data_model::implementations::duckdb::render::type_name;
 use query_data_model::implementations::relational::RelationalBackend;
@@ -30,6 +32,9 @@ pub trait SqlBackend:
     const DIALECT: SqlDialect;
 
     fn render(catalog: &Catalog<Self>, plan: &RelationalPlan<Self>) -> ParameterizedSql;
+
+    /// The connection a catalog of this backend serves, as a stage peer.
+    fn peer(catalog: Arc<Catalog<Self>>) -> crate::dag::Peer;
 }
 
 impl SqlBackend for ClickHouse {
@@ -38,6 +43,10 @@ impl SqlBackend for ClickHouse {
     fn render(catalog: &Catalog<Self>, plan: &ClickHousePlan) -> ParameterizedSql {
         catalog.render(plan)
     }
+
+    fn peer(catalog: Arc<Catalog<Self>>) -> crate::dag::Peer {
+        crate::dag::Peer::ClickHouse(catalog)
+    }
 }
 
 impl SqlBackend for DuckDb {
@@ -45,6 +54,10 @@ impl SqlBackend for DuckDb {
 
     fn render(catalog: &Catalog<Self>, plan: &RelationalPlan<DuckDb>) -> ParameterizedSql {
         catalog.render(plan)
+    }
+
+    fn peer(catalog: Arc<Catalog<Self>>) -> crate::dag::Peer {
+        crate::dag::Peer::DuckDb(catalog)
     }
 }
 

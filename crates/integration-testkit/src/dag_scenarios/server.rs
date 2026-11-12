@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use compiler::dag::Remotes;
 use orbit_server::pipeline::{HydrationStage, RoutingStage};
 use orbit_server::redaction::QueryResult;
 use query_data_model::testkit::limits;
@@ -23,14 +22,13 @@ const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]
 /// The server's DAG stage over the seeded fakes, checking rows through the providers the `dag`
 /// deployment binds: its `rails` checks allow project 42 only.
 fn served_stage(model: &Arc<query_data_model::Model>, graph: Arc<SeededGraph>) -> DagStage {
-    let catalog = Catalog::<ClickHouse>::from_model(model).unwrap();
-    let remotes = Remotes::all(model);
+    let (_, connections) = crate::dag_fakes::dag_connections(model);
     let bound =
         orbit_server::authorization::Deployment::bind(&deployment("dag"), model, &registry())
             .expect("the dag deployment binds the DAG model");
     DagStage {
-        executors: dag_executors(&remotes, catalog.connection(), graph, "alice"),
-        remotes,
+        executors: dag_executors(&connections, graph, "alice"),
+        peers: connections.peers()[1..].to_vec(),
         checks: bound.checks().clone(),
     }
 }
@@ -66,7 +64,7 @@ async fn the_server_checks_remote_rows_through_the_deployments_providers() {
     let mut ctx = context(&model, query);
     let mut obs = NoOpObserver;
     RoutingStage {
-        remotes: dag.remotes.clone(),
+        peers: dag.peers.clone(),
     }
     .execute(&mut ctx, &mut obs)
     .await
@@ -91,7 +89,7 @@ async fn served_output() -> PipelineOutput {
     let mut ctx = context(&model, DISCUSSED);
     let mut obs = NoOpObserver;
     RoutingStage {
-        remotes: dag.remotes.clone(),
+        peers: dag.peers.clone(),
     }
     .execute(&mut ctx, &mut obs)
     .await
