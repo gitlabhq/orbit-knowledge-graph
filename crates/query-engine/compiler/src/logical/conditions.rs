@@ -54,6 +54,7 @@ impl Leaf<'_> {
             | Predicate::In { left, .. }
             | Predicate::Text { left, .. }
             | Predicate::Null { left, .. } => *left,
+            Predicate::InTuple { left, .. } => left[0],
             Predicate::And(_) | Predicate::Not(_) => unreachable!("polarized leaves are leaves"),
         }
     }

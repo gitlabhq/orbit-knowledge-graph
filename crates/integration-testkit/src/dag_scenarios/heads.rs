@@ -132,3 +132,59 @@ async fn open_merge_requests_search_their_branch_heads_in_orbit_next() {
         }))]
     );
 }
+
+const HEADS_TO_MERGE_REQUESTS: &str = "MATCH (f:File)<-[:HEAD_FILE]-(h:Head)<-[:SOURCE_HEAD]-(mr:MergeRequest) WHERE f.project_id = 42 AND f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path ORDER BY f.path LIMIT 20";
+
+#[tokio::test]
+async fn a_code_stage_feeds_composite_keys_into_a_clickhouse_stage() {
+    let ran = run(
+        HEADS_TO_MERGE_REQUESTS,
+        &caller("1/9970/"),
+        open_merge_requests(),
+    )
+    .await;
+    if let Err(error) = &ran.outcome {
+        panic!("the reversed query failed: {error}");
+    }
+    let split = ran
+        .events
+        .iter()
+        .find_map(|event| match event {
+            Event::Split { stages } => Some(stages.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
+    assert_eq!(
+        backends,
+        [Backend::OrbitCode, Backend::ClickHouse, Backend::Engine]
+    );
+    assert_eq!(
+        split[1].inputs,
+        [Input::Keys(KeyInput {
+            from: 0,
+            columns: vec!["project_id".into(), "branch".into()],
+            binding: "mr".into(),
+            properties: vec!["project_id".into(), "source_branch".into()],
+        })]
+    );
+    let Rendered::Sql { sql, params } = &ran.rendered(1)[0] else {
+        panic!("the merge request stage renders SQL");
+    };
+    assert!(
+        sql.contains("(mr.project_id, mr.source_branch) IN (({p"),
+        "composite keys render as tuple IN: {sql}"
+    );
+    let values: Vec<&serde_json::Value> = params.iter().map(|(_, value)| value).collect();
+    assert!(values.contains(&&json!("feature-a")) && values.contains(&&json!("main")));
+    assert_eq!(
+        ran.rows(),
+        [row(json!({
+            "mr_iid": 1,
+            "h_branch": "feature-a",
+            "f_path": "src/auth.rs",
+            "_orbit_mr_id": 2000,
+            "_orbit_mr_type": "MergeRequest",
+        }))]
+    );
+}

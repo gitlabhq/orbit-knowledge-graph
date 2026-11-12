@@ -112,6 +112,38 @@ pub(crate) fn filter<B: RelationalBackend>(
             let values = values.iter().map(Value::from).collect();
             in_list::<B>(value, data_type, values).expect("validated non-empty IN list")
         }
+        Predicate::InTuple { left, values } => {
+            if f.tuple.len() != left.len() {
+                return Err(RelationalError::Incomplete(
+                    "a stored column for each tuple part",
+                ));
+            }
+            let columns = f
+                .tuple
+                .iter()
+                .map(|(name, _)| col(scope, &column.source, name))
+                .collect::<Built<Vec<_>>>()?;
+            let tuple = |literals: &Vec<query_data_model::plan::logical::Literal>| {
+                Expr::List(
+                    literals
+                        .iter()
+                        .zip(&f.tuple)
+                        .map(|(literal, (_, data_type))| {
+                            param::<B>(parameter_type(data_type.as_ref()), literal.into())
+                        })
+                        .collect(),
+                )
+            };
+            let left = Expr::List(columns);
+            match &values[..] {
+                [one] => eq(left, tuple(one)),
+                _ => binary(
+                    BinaryOp::In,
+                    left,
+                    Expr::List(values.iter().map(tuple).collect()),
+                ),
+            }
+        }
         Predicate::Text {
             matching, needle, ..
         } => {

@@ -31,7 +31,12 @@ impl CodeBuilder<'_> {
             CodeOperation::Repositories { projects, index } => match projects.is_empty() {
                 true => Err(CodeError::NoRepositories),
                 false => Ok(Outputs::extend(
-                    std::iter::once(Declare::named("path", CodeValue::Path)).chain(
+                    [
+                        Declare::named("path", CodeValue::Path),
+                        Declare::named("branch", CodeValue::Branch),
+                    ]
+                    .into_iter()
+                    .chain(
                         self.catalog
                             .repository_key(*index)
                             .map(|key| Declare::named(key, CodeValue::Repository)),
@@ -42,10 +47,7 @@ impl CodeBuilder<'_> {
                 Self::files(inputs, "a branch restriction")?;
                 match heads.is_empty() {
                     true => Err(CodeError::Incomplete("at least one branch head")),
-                    false => Ok(Outputs::extend([Declare::named(
-                        "branch",
-                        CodeValue::Branch,
-                    )])),
+                    false => Ok(Outputs::preserve()),
                 }
             }
             CodeOperation::Restrict(readable) => {

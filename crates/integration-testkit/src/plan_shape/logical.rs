@@ -222,6 +222,18 @@ impl Render<'_> {
                 let values: Vec<String> = values.iter().map(|value| self.literal(value)).collect();
                 format!("{} IN [{}]", self.expr(*left), values.join(", "))
             }
+            Predicate::InTuple { left, values } => {
+                let left: Vec<String> = left.iter().map(|expr| self.expr(*expr)).collect();
+                let values: Vec<String> = values
+                    .iter()
+                    .map(|tuple| {
+                        let parts: Vec<String> =
+                            tuple.iter().map(|value| self.literal(value)).collect();
+                        format!("({})", parts.join(", "))
+                    })
+                    .collect();
+                format!("({}) IN [{}]", left.join(", "), values.join(", "))
+            }
             Predicate::Text {
                 left,
                 matching,
