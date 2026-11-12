@@ -17,7 +17,7 @@ entities:
       sent_at: {}
     backend:
       operation: search.messages
-      filters: [channel, author, sent_at, merge_request_id]
+      filters: [id, channel, author, sent_at, merge_request_id]
       text: text
   SlackWorkspace:
     columns:

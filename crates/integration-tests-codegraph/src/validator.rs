@@ -1,9 +1,8 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
-use compiler::compile_local;
 use duckdb_client::DuckDbClient;
 use orbit_arrow::ArrowUtils;
 use query_data_model::{Catalog, DuckDb, GraphCatalog};
@@ -24,7 +23,7 @@ pub struct Failure {
 /// their assertions.
 pub fn run_suite(
     suite: &TestSuite,
-    client: &DuckDbClient,
+    client: &Arc<Mutex<DuckDbClient>>,
     data_model: &Arc<Catalog<DuckDb>>,
     probe_skipped: bool,
 ) -> Vec<Failure> {
@@ -42,8 +41,10 @@ pub fn run_suite(
     failures
 }
 
-fn undeclared_edges(client: &DuckDbClient, graph: &GraphCatalog) -> Vec<Failure> {
+fn undeclared_edges(client: &Arc<Mutex<DuckDbClient>>, graph: &GraphCatalog) -> Vec<Failure> {
     let batches = client
+        .lock()
+        .expect("the fixture database")
         .query_arrow(
             "SELECT DISTINCT relationship_kind, source_kind, target_kind FROM gl_edge ORDER BY ALL",
         )
@@ -74,7 +75,7 @@ fn undeclared_edges(client: &DuckDbClient, graph: &GraphCatalog) -> Vec<Failure>
 
 fn run_test(
     test: &TestCase,
-    client: &DuckDbClient,
+    client: &Arc<Mutex<DuckDbClient>>,
     data_model: &Arc<Catalog<DuckDb>>,
 ) -> Vec<Failure> {
     if test.debug {
@@ -110,7 +111,7 @@ fn run_test(
 /// longer runs or needs a LIMIT fails the suite while it stays skipped.
 fn probe_test(
     test: &TestCase,
-    client: &DuckDbClient,
+    client: &Arc<Mutex<DuckDbClient>>,
     data_model: &Arc<Catalog<DuckDb>>,
 ) -> Vec<Failure> {
     test.all_queries()
@@ -122,7 +123,7 @@ fn probe_test(
 
 fn execute_cypher(
     cypher: &str,
-    client: &DuckDbClient,
+    client: &Arc<Mutex<DuckDbClient>>,
     data_model: &Arc<Catalog<DuckDb>>,
 ) -> anyhow::Result<(RecordBatch, bool)> {
     let (clean_query, aliases) = rewrite_query(cypher);
@@ -130,14 +131,15 @@ fn execute_cypher(
         eprintln!("  ALIASES: {aliases:?}");
         eprintln!("  REWRITTEN: {clean_query}");
     }
-    let compiled = compile_local(
-        &clean_query,
+    let outcome = duckdb_client::dag::run_local(
+        client,
         data_model,
+        &clean_query,
         query_data_model::testkit::limits(),
     )?;
-    let sql = compiled.base.render();
-    eprintln!("  SQL: {sql}");
-    let batches = client.query_arrow(&sql)?;
+    let compiled = outcome.compiled;
+    eprintln!("  SQL: {}", compiled.base.render());
+    let batches = outcome.executed.batches;
     let batch = if batches.is_empty() {
         let schema = Arc::new(arrow::datatypes::Schema::empty());
         RecordBatch::new_empty(schema)
@@ -231,7 +233,7 @@ fn apply_aliases(batch: RecordBatch, aliases: &[(String, String, String)]) -> Re
         .unwrap_or_else(|e| panic!("apply_aliases failed: {e}"))
 }
 
-fn dump_datasets(client: &DuckDbClient, data_model: &Arc<Catalog<DuckDb>>) {
+fn dump_datasets(client: &Arc<Mutex<DuckDbClient>>, data_model: &Arc<Catalog<DuckDb>>) {
     let debug_queries = [
         (
             "Definitions",
@@ -258,7 +260,7 @@ fn run_query(
     label: &str,
     severity: Severity,
     block: &QueryBlock,
-    client: &DuckDbClient,
+    client: &Arc<Mutex<DuckDbClient>>,
     data_model: &Arc<Catalog<DuckDb>>,
 ) -> Result<RecordBatch, Vec<Failure>> {
     match execute_cypher(&block.query, client, data_model) {
@@ -286,7 +288,7 @@ fn run_query_block(
     label: &str,
     severity: Severity,
     block: &QueryBlock,
-    client: &DuckDbClient,
+    client: &Arc<Mutex<DuckDbClient>>,
     data_model: &Arc<Catalog<DuckDb>>,
 ) -> Vec<Failure> {
     let batch = match run_query(label, severity, block, client, data_model) {

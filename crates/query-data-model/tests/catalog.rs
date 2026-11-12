@@ -246,24 +246,49 @@ fn one_query_can_join_stores_on_the_same_connection() {
         "merge_request_id"
     );
 }
+#[test]
+fn a_foreign_key_may_reference_an_entity_on_another_connection() {
+    let model = load_with(&["gitlab", "integration.linear"], |name, yaml| {
+        if name == "integration.linear/storage/clickhouse.lake.yaml" {
+            yaml.replace("connection: main", "connection: lake")
+        } else {
+            yaml
+        }
+    })
+    .unwrap();
+    let relates = model.relationship("RELATES_TO").unwrap();
+    let variant = model
+        .graph()
+        .variants()
+        .find(|variant| variant.relationship == relates)
+        .unwrap();
+    let key = model.foreign_key(variant.id).unwrap();
+    assert_eq!(
+        model.graph().property(key.property).name,
+        "merge_request_id"
+    );
+    let lake = model
+        .stores()
+        .iter()
+        .find(|store| store.name == "lake")
+        .unwrap();
+    assert_eq!(lake.connection, "lake");
+}
 
 #[test]
-fn a_foreign_key_must_join_within_its_connection() {
+fn a_foreign_key_references_an_entity_some_store_holds() {
     let errors = spec_errors(load_with(
         &["gitlab", "integration.linear"],
-        |name, yaml| {
-            if name == "integration.linear/storage/clickhouse.lake.yaml" {
-                yaml.replace("connection: main", "connection: lake")
-            } else {
-                yaml
-            }
+        |name, yaml| match name {
+            "gitlab/storage/clickhouse.yaml" => yaml.replace("  MergeRequest:\n", "  Unbound:\n"),
+            _ => yaml,
         },
     ));
-    assert_eq!(
-        errors,
-        [
-            "integration.linear: store lake binds RELATES_TO(LinearIssue -> MergeRequest), whose other endpoint is not on connection lake"
-        ]
+    assert!(
+        errors.iter().any(|error| error.ends_with(
+            "binds RELATES_TO(LinearIssue -> MergeRequest), but no store holds MergeRequest"
+        )),
+        "{errors:?}"
     );
 }
 

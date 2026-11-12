@@ -111,6 +111,11 @@ pub enum Predicate {
         left: Expr,
         values: Vec<Literal>,
     },
+    /// The tuple of `left` values is one of `values`, each a tuple in the same order.
+    InTuple {
+        left: Vec<Expr>,
+        values: Vec<Vec<Literal>>,
+    },
     Text {
         left: Expr,
         matching: Matching,
@@ -136,6 +141,7 @@ impl Predicate {
             Self::In { left, .. } | Self::Text { left, .. } | Self::Null { left, .. } => {
                 left.references(visit)
             }
+            Self::InTuple { left, .. } => left.iter_mut().for_each(|left| left.references(visit)),
             Self::And(all) => all
                 .iter_mut()
                 .for_each(|predicate| predicate.references(visit)),
@@ -154,6 +160,7 @@ impl Predicate {
             | Self::In { left, .. }
             | Self::Text { left, .. }
             | Self::Null { left, .. } => vec![*left],
+            Self::InTuple { left, .. } => left.clone(),
             Self::And(all) => all.iter().flat_map(Self::exprs).collect(),
             Self::Not(inner) => inner.exprs(),
         }
@@ -162,7 +169,7 @@ impl Predicate {
     pub fn operator(&self) -> Option<Operator> {
         Some(match self {
             Self::Compare { comparison, .. } => (*comparison).into(),
-            Self::In { .. } => Operator::In,
+            Self::In { .. } | Self::InTuple { .. } => Operator::In,
             Self::Text { matching, .. } => (*matching).into(),
             Self::Null { null: true, .. } => Operator::IsNull,
             Self::Null { null: false, .. } => Operator::IsNotNull,

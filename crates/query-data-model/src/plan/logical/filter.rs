@@ -26,6 +26,23 @@ pub(super) fn predicate(
             let typed = filterable(model, construction, *left)?;
             values.iter().try_for_each(|value| literal(&typed, value))
         }
+        Predicate::InTuple { left, values } => {
+            let typed = left
+                .iter()
+                .map(|left| filterable(model, construction, *left))
+                .collect::<Result<Vec<_>, _>>()?;
+            values.iter().try_for_each(|tuple| {
+                if tuple.len() != typed.len() {
+                    return Err(PlanError::shape(
+                        "every tuple of a tuple IN has one value per column",
+                    ));
+                }
+                typed
+                    .iter()
+                    .zip(tuple)
+                    .try_for_each(|(typed, value)| literal(typed, value))
+            })
+        }
         Predicate::Compare {
             left,
             comparison,

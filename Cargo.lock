@@ -3120,12 +3120,17 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow 60.1.0",
+ "async-trait",
+ "compiler",
  "duckdb",
+ "futures",
  "orbit-authorization",
  "orbit-search",
+ "orbit-server-config",
  "orbit-utils",
  "query-data-model",
  "serde_json",
+ "shared",
  "tempfile",
  "thiserror 2.0.18",
 ]

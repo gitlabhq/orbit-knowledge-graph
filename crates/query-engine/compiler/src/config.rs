@@ -58,7 +58,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub stage_contexts: Vec<(crate::dag::StageId, ResultContext)>,
         pub planned: Vec<String>,
         pub request: crate::dag::Request,
-        pub heads: Vec<(i64, String)>,
         pub proved: bool,
     }
 
@@ -154,7 +153,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         code::plan {
             reads_env: [data_model, trace]
-            reads_state: [statement, heads]
+            reads_state: [statement]
             mutates: [code, planned]
         }
         code::security {
@@ -246,7 +245,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         gql_orbit_code {
             backend: query_data_model::implementations::orbit_code::OrbitCode
             env: [grants, limits, trace]
-            state: [statement, namespaces, code, planned, request, heads, proved]
+            state: [statement, namespaces, code, planned, request, proved]
             phases: [code::plan, code::security, code::security_check, code::render]
         }
         gql_live {

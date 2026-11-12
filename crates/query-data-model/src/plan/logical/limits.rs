@@ -38,6 +38,7 @@ pub(super) fn in_values(
 fn in_lists(predicate: &Predicate, max: usize) -> Result<(), PlanError> {
     match predicate {
         Predicate::In { values, .. } => at_most("an IN list", values.len(), max),
+        Predicate::InTuple { values, .. } => at_most("a tuple IN list", values.len(), max),
         Predicate::And(all) => all.iter().try_for_each(|inner| in_lists(inner, max)),
         Predicate::Not(inner) => in_lists(inner, max),
         _ => Ok(()),

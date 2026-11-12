@@ -177,18 +177,8 @@ impl<'r> Runner<'r> {
         if sets.iter().any(|set| set.keys.is_empty()) {
             return Ok((None, Executed::default()));
         }
-        let composite: Vec<KeySet> = sets
-            .iter()
-            .filter(|set| set.input.properties.len() > 1)
-            .cloned()
-            .collect();
-        let heads = match stage.backend {
-            compiler::dag::Backend::OrbitCode => compiler::dag::heads(&composite)?,
-            _ => Vec::new(),
-        };
         let mut inputs = Inputs {
             contexts: contexts.clone(),
-            composite,
             ..Inputs::default()
         };
         if let StageQuery::Gql(statement) = stage.query {
@@ -203,7 +193,7 @@ impl<'r> Runner<'r> {
             if let Some(connection) = stage.connection.as_deref()
                 && let Some(target) = self.env.remotes.target(connection)
             {
-                inputs.namespaces = remote::namespaces(self, id, target, &bound, &heads).await?;
+                inputs.namespaces = remote::namespaces(self, id, target, &bound).await?;
             }
             stage.query = StageQuery::Gql(bound);
         }

@@ -43,6 +43,8 @@ pub struct BoundFilter {
     pub unique: bool,
     pub immutable: bool,
     pub null_as_epoch: NullAsEpoch,
+    /// Every stored column and type a tuple IN reads, in tuple order; empty for any other leaf.
+    pub tuple: Vec<(String, Option<query_data_model::DataType>)>,
 }
 
 impl BoundFilter {
@@ -67,6 +69,7 @@ impl BoundFilter {
                 ..
             }
             | Leaf::In { .. } => high || self.text_indexed,
+            Leaf::InTuple { .. } => high,
             Leaf::Compare { .. } | Leaf::Null { .. } => high,
             Leaf::And(_) | Leaf::Not(_) => false,
         }
@@ -153,6 +156,19 @@ pub fn bind_filter(
         }
     };
     let (property_id, data_type) = metadata.unwrap_or_default();
+    let tuple = match &leaf {
+        Leaf::InTuple { left, .. } => left
+            .iter()
+            .filter_map(|expr| match expr {
+                query_data_model::plan::logical::Expr::Property { property, .. } => Some((
+                    model.column(*property)?.to_string(),
+                    Some(graph.property(*property).data_type),
+                )),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
     BoundFilter {
         leaf,
         rhs,
@@ -180,6 +196,7 @@ pub fn bind_filter(
                 .filter(|_| property_id.is_some_and(|property| model.null_as_epoch(property))),
             rhs: None,
         },
+        tuple,
     }
 }
 
