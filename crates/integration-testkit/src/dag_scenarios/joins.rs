@@ -71,7 +71,10 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(call.workspaces, ["T01"]);
+    assert_eq!(
+        call.workspaces,
+        query_data_model::plan::live::Workspaces::Only(vec!["T01".into()])
+    );
     assert_eq!(call.filters[0].op, "in");
     assert_eq!(call.filters[0].value, json!([2000, 2001]));
     assert_eq!(

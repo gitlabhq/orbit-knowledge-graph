@@ -1,5 +1,5 @@
 //! The `(gql, orbit_code)` stage phases: plan a code search, restrict its repositories to the
-//! caller's, prove every repository read carries the restriction, render the request.
+//! ones its policies admit, prove every repository read carries the restriction, render the request.
 
 use query_data_model::catalog::Render;
 use query_data_model::implementations::orbit_code::OrbitCode;
@@ -21,8 +21,8 @@ pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Result<()
 
 pub(super) fn security(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Result<()> {
     let plan = require(ctx.take_code(), "search plan")?;
-    let namespaces = require(ctx.namespaces().as_ref(), "namespaces")?;
-    let plan = secure_code(ctx.data_model(), plan, ctx.grants(), namespaces)?;
+    let admitted = require(ctx.admitted().as_ref(), "admitted")?;
+    let plan = secure_code(ctx.data_model(), plan, admitted)?;
     ctx.set_code(plan);
     Ok(())
 }

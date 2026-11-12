@@ -6,7 +6,7 @@ pub use builder::{CodeBuilder, Field, Matches, Trigrams};
 pub use pattern::{Language, Pattern};
 
 use crate::EntityId;
-use crate::catalog::{Catalog, Guard};
+use crate::catalog::Catalog;
 use crate::implementations::orbit_code::OrbitCode;
 use crate::plan::tracking::{self, Declared, Each, Plan, Ref, Rejected, Step};
 
@@ -17,7 +17,7 @@ pub type CodePlan = Plan<CodeLanguage>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeValue {
-    /// The repository a match is in, named after the key its `via` chain starts from.
+    /// The repository a match is in, named after the property the code store declares.
     Repository,
     Path,
     Line,
@@ -136,17 +136,22 @@ impl Catalog<OrbitCode> {
 
     /// The key that names a match's repository: the foreign key the read's `via` chain starts
     /// from; none for a read only its checks restrict.
-    pub fn repository_key(&self, index: Index) -> Option<&str> {
-        let crate::catalog::Rule::Via(hops) = &self.index_guard(index)?.rule else {
-            return None;
-        };
-        let key = self.model().foreign_key(hops.first()?.variant)?;
-        (key.holder == crate::Endpoint::Source)
-            .then(|| self.graph().property(key.property).name.as_str())
+    /// The property that names the repository of each row of `entity`: the one its store
+    /// declares, or the foreign key its `via` chain starts from.
+    pub fn repository(&self, entity: EntityId) -> Option<crate::PropertyId> {
+        let (store, facts) = self.home(entity)?;
+        match &store.guard(entity)?.rule {
+            crate::catalog::Rule::Via(hops) => {
+                let key = self.model().foreign_key(hops.first()?.variant)?;
+                (key.holder == crate::Endpoint::Source).then_some(key.property)
+            }
+            _ => facts.repository(entity),
+        }
     }
 
-    pub fn index_guard(&self, index: Index) -> Option<&Guard> {
-        self.model().stores()[index.store].guard(index.entity)
+    pub fn repository_key(&self, index: Index) -> Option<&str> {
+        let property = self.repository(index.entity)?;
+        Some(self.graph().property(property).name.as_str())
     }
 
     pub fn build<'c>(

@@ -119,7 +119,7 @@ async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
         *live_request(&rendered),
         ExtractionRequest {
             operation: "search.messages".into(),
-            workspaces: vec!["T01".into()],
+            workspaces: query_data_model::plan::live::Workspaces::Only(vec!["T01".into()]),
             filters: vec![
                 RequestFilter {
                     field: "channel".into(),
@@ -175,7 +175,7 @@ async fn the_workspace_precondition_keeps_unreadable_namespaces_out_of_the_call(
     let everywhere = run(SLACK, &caller("1/"), Vec::new()).await;
     assert_eq!(
         live_request(&everywhere.rendered(0)).workspaces,
-        ["T01", "T02"]
+        query_data_model::plan::live::Workspaces::Only(vec!["T01".into(), "T02".into()])
     );
     assert_eq!(everywhere.rows().len(), 2);
 

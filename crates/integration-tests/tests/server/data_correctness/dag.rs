@@ -174,7 +174,10 @@ pub(super) async fn merge_requests_join_the_slack_messages_that_discuss_them(ctx
     let Some(Rendered::Live(call)) = remote_requests(&events, 1).pop() else {
         panic!("the Slack stage renders a call");
     };
-    assert_eq!(call.workspaces, ["T01", "T02"]);
+    assert_eq!(
+        call.workspaces,
+        query_data_model::plan::live::Workspaces::Only(vec!["T01".into(), "T02".into()])
+    );
     assert_eq!(
         pairs(&both),
         [

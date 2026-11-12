@@ -6,7 +6,7 @@ use query_data_model::implementations::orbit_code::{
     OrbitCode, RequestField, StructuralSearchRequest,
 };
 use query_data_model::plan::code::{CodeError, CodeOperation, Language, Pattern, Trigrams};
-use query_data_model::plan::live::{LiveError, LiveOperation};
+use query_data_model::plan::live::{LiveError, LiveOperation, Workspaces};
 use query_data_model::plan::logical::{LogicalOperation, PlanError};
 use query_data_model::plan::tracking::Rejected;
 use query_data_model::surface::{SurfaceError, gql};
@@ -184,7 +184,7 @@ fn a_live_plan_renders_an_extraction_request() {
                 messages,
                 channel.eq("orbit-dev").and(text.contains("deploy")),
             )?;
-            let messages = q.workspaces(messages, ["T01".to_string()])?;
+            let messages = q.workspaces(messages, Workspaces::Only(vec!["T01".to_string()]))?;
             let messages = q.limit(messages, 20)?;
             q.select(messages, [author, text])
         })
@@ -204,7 +204,7 @@ fn a_live_plan_renders_an_extraction_request() {
         live.render(&plan).unwrap(),
         ExtractionRequest {
             operation: "search.messages".into(),
-            workspaces: vec!["T01".into()],
+            workspaces: Workspaces::Only(vec!["T01".into()]),
             filters: vec![
                 RequestFilter {
                     field: "channel".into(),
@@ -251,7 +251,7 @@ fn a_filter_the_operation_cannot_push_down_is_a_construction_error() {
     ));
     let nobody = live.build(|q| {
         let messages = q.call(operation)?;
-        q.workspaces(messages, [])
+        q.workspaces(messages, Workspaces::Only(Vec::new()))
     });
     assert_eq!(nobody.unwrap_err(), LiveError::NoWorkspace);
 }
@@ -319,4 +319,45 @@ fn a_via_step_whose_key_type_differs_from_the_target_id_fails_the_load() {
     ] {
         assert!(error.contains(expected), "{error}");
     }
+}
+
+#[test]
+fn a_code_store_names_the_repository_of_an_entity_no_via_chain_scopes() {
+    let model = model();
+    let code = model.physical::<OrbitCode>("code_indexing").unwrap();
+    let file = model.graph().entity_id("File").unwrap();
+    let repository = code.repository(file).unwrap();
+    assert_eq!(model.graph().property(repository).name, "project_id");
+
+    let load = |policy: &str, backend: &str| {
+        let mut sources = Packages::embedded().sources().clone();
+        let access = sources
+            .get_mut("gitlab.source_code/authorization.yaml")
+            .unwrap();
+        *access = access.replace("orbit_code: {scope_key: {via: IN_PROJECT}}", policy);
+        let storage = sources
+            .get_mut("gitlab.source_code/storage/orbit_code.yaml")
+            .unwrap();
+        *storage = storage.replace("    backend:\n", &format!("    backend:\n{backend}"));
+        Packages::new(Tier::Platform, sources).load()
+    };
+    let declared = load("orbit_code: none", "      repository: project_id\n").unwrap();
+    let code = declared.physical::<OrbitCode>("code_indexing").unwrap();
+    assert_eq!(code.repository(file), Some(repository));
+    let error = |result: Result<Arc<Model>, query_data_model::DataModelError>| {
+        result.unwrap_err().to_string()
+    };
+    let missing = error(load("orbit_code: none", ""));
+    assert!(
+        missing.contains("store code names no repository property for File"),
+        "{missing}"
+    );
+    let twice = error(load(
+        "orbit_code: {scope_key: {via: IN_PROJECT}}",
+        "      repository: project_id\n",
+    ));
+    assert!(
+        twice.contains("store code names a repository property for File, whose via chain names it"),
+        "{twice}"
+    );
 }

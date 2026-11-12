@@ -2,6 +2,6 @@
 //! lookups their reads need.
 
 pub use crate::passes::plan::remote::{RemotePlan, Target};
-pub use crate::passes::remote_security::{Namespaces, readable};
+pub use crate::passes::remote_security::{Admitted, Namespaces, admitted};
 
 pub use crate::passes::scope_lookup::{KEY, Resolves, ScopeLookup, lookup, namespaces};

@@ -71,7 +71,9 @@ impl LiveBuilder<'_> {
                 }
                 Ok(Outputs::preserve())
             }
-            LiveOperation::Workspaces(workspaces) if workspaces.is_empty() => {
+            LiveOperation::Workspaces(super::Workspaces::Only(workspaces))
+                if workspaces.is_empty() =>
+            {
                 Err(LiveError::NoWorkspace)
             }
             LiveOperation::Limit(0) => Err(LiveError::EmptyLimit),

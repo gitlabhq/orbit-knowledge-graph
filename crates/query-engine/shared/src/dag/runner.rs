@@ -199,8 +199,8 @@ impl<'r> Runner<'r> {
             if let Some(connection) = stage.connection.as_deref()
                 && let Some(target) = self.env.remotes.target(connection)
             {
-                match remote::namespaces(self, id, target, &bound).await? {
-                    Some(namespaces) => inputs.namespaces = namespaces,
+                match remote::admitted(self, id, target, &bound).await? {
+                    Some(admitted) => inputs.admitted = Some(admitted),
                     None => return Ok((None, Executed::default())),
                 }
             }

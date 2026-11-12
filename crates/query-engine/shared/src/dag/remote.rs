@@ -4,7 +4,7 @@
 use arrow::record_batch::RecordBatch;
 use compiler::dag::Request;
 use compiler::dag::RowCheck;
-use compiler::remote::{Namespaces, Target, lookup};
+use compiler::remote::{Admitted, Namespaces, Target, lookup};
 use query_data_model::catalog::Row;
 use query_data_model::surface::Statement;
 use serde_json::Value;
@@ -15,33 +15,36 @@ use super::executor::{Executed, ExecutorError};
 use super::rows;
 use super::runner::{DagError, Runner};
 
-/// Runs the scope lookup of a remote stage on the relational connection; none when the caller
-/// can read none of what it resolved, so the stage reads nothing.
-pub(super) async fn namespaces(
+/// Runs the scope lookups of a remote stage on the relational connection, and what its reads'
+/// policies then admit; none when they admit nothing, so the stage reads nothing.
+pub(super) async fn admitted(
     runner: &mut Runner<'_>,
     stage: compiler::dag::StageId,
     target: &Target,
     statement: &Statement,
-) -> Result<Option<Namespaces>, DagError> {
-    let compiler::dag::Primary::ClickHouse(graph) = runner.env.primary else {
-        return Ok(Some(Namespaces::default()));
-    };
-    let Some(lookup) = lookup(target, &statement.plan, graph, runner.env.grants)? else {
-        return Ok(Some(Namespaces::default()));
-    };
-    let columns = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
-    let request = Request::Lookup(lookup.clone());
-    runner.emit(|| super::observer::Event::Rendered {
-        stage,
-        requests: request.rendered(),
-    });
-    let executor = runner.executors.get(runner.env.primary.connection())?;
-    let executed = executor.execute(&request).await?;
-    let rows = json(&executed.batches, &columns)?;
-    let namespaces = compiler::remote::namespaces(&lookup, &rows)?;
+) -> Result<Option<Admitted>, DagError> {
     let grants = runner.env.grants;
-    let readable = compiler::remote::readable(target, &statement.plan, grants, &namespaces)?;
-    Ok(readable.then_some(namespaces))
+    let mut namespaces = Namespaces::default();
+    let lookups = match runner.env.primary {
+        compiler::dag::Primary::ClickHouse(graph) => {
+            lookup(target, &statement.plan, graph, grants)?
+        }
+        compiler::dag::Primary::DuckDb(_) => Vec::new(),
+    };
+    for lookup in lookups {
+        let columns = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
+        let request = Request::Lookup(lookup.clone());
+        runner.emit(|| super::observer::Event::Rendered {
+            stage,
+            requests: request.rendered(),
+        });
+        let executor = runner.executors.get(runner.env.primary.connection())?;
+        let executed = executor.execute(&request).await?;
+        let rows = json(&executed.batches, &columns)?;
+        compiler::remote::namespaces(&lookup, &rows, &mut namespaces)?;
+    }
+    let admitted = compiler::remote::admitted(target, &statement.plan, grants, &namespaces)?;
+    Ok((!admitted.is_empty()).then_some(admitted))
 }
 
 /// Lookup rows as JSON rows of their key and scope columns.

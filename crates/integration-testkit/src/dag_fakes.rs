@@ -15,7 +15,7 @@ use query_data_model::implementations::orbit_code::{CodeSearch, RequestField};
 use query_engine::shared::dag::{Executed, Executor, ExecutorError, from_rows};
 use serde_json::{Value, json};
 
-use crate::seeded_remote::{SeededCodeSearch, SeededDataExtraction, seeded_namespaces};
+use crate::seeded_remote::{SeededCodeSearch, SeededDataExtraction, seeded_scopes};
 
 fn unexpected(request: &Request) -> ExecutorError {
     ExecutorError(format!("this fake runs no {request:?}"))
@@ -95,7 +95,7 @@ impl Executor for SeededGraph {
                 batch(&self.0, &fields)
             }
             Request::Lookup(lookup) => {
-                let seeded = seeded_namespaces();
+                let seeded = seeded_scopes();
                 let row = |id: Value, path: &str| {
                     json!({compiler::remote::KEY: id, lookup.scope.as_str(): path})
                         .as_object()
