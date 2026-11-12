@@ -57,15 +57,6 @@ impl Peer {
         }
     }
 
-    pub fn shared_model(&self) -> &Arc<Model> {
-        match self {
-            Self::ClickHouse(catalog) => catalog.shared_model(),
-            Self::DuckDb(catalog) => catalog.shared_model(),
-            Self::Remote(Target::Code(code)) => code.shared_model(),
-            Self::Remote(Target::Live(live)) => live.shared_model(),
-        }
-    }
-
     pub fn remote(&self) -> Option<&Target> {
         match self {
             Self::Remote(target) => Some(target),
@@ -102,16 +93,6 @@ impl Peer {
             Self::DuckDb(catalog) => complete(catalog.source(entity)),
             Self::Remote(Target::Code(code)) => complete(code.source(entity)),
             Self::Remote(Target::Live(live)) => complete(live.source(entity)),
-        }
-    }
-
-    /// Whether the connection's rows carry `identity`, the one identity property of `entity`: a
-    /// relational stage and a live call return the columns their store holds, a code search
-    /// returns matches.
-    pub fn returns_identity(&self, entity: EntityId, identity: PropertyId) -> bool {
-        match self {
-            Self::ClickHouse(_) | Self::DuckDb(_) => true,
-            Self::Remote(target) => target.returns_identity(entity, identity),
         }
     }
 }
@@ -152,12 +133,6 @@ impl Connections {
             .map(|connection| Peer::of(model, connection))
             .collect::<Result<_, _>>()?;
         Ok(Self::new(peers))
-    }
-
-    /// These connections, then `others`.
-    #[must_use]
-    pub fn with(&self, others: &Connections) -> Self {
-        Self::new(self.peers.iter().chain(others.peers()).cloned().collect())
     }
 
     pub fn peers(&self) -> &[Peer] {
