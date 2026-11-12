@@ -12,6 +12,7 @@
     max: 2
     when:
       - runner_system_failure
+      - runner_interrupted
       - runner_external_dependency_failure
       - scheduler_failure
       - api_failure
