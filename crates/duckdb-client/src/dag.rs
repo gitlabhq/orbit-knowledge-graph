@@ -61,11 +61,23 @@ impl Executor for DuckDbExecutor {
 }
 
 /// Runs `query` through the DAG runner on the local database: local mode trusts its data, so
-/// the caller holds no grants and no remote connection is served.
+/// the caller is an administrator with no scope answers.
 pub fn run_local(
     client: &Arc<Mutex<DuckDbClient>>,
     data_model: &Arc<Catalog<DuckDb>>,
     query: &str,
+    limits: &QueryLimits,
+) -> Result<Outcome, DagError> {
+    let grants = Grants::new(Caller::new("local", true, ()));
+    futures::executor::block_on(run(client, data_model, query, &grants, limits))
+}
+
+/// Runs `query` as the caller of `grants` on one DuckDB connection, with no remote served.
+pub async fn run(
+    client: &Arc<Mutex<DuckDbClient>>,
+    data_model: &Arc<Catalog<DuckDb>>,
+    query: &str,
+    grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<Outcome, DagError> {
     let executor = DuckDbExecutor {
@@ -74,16 +86,15 @@ pub fn run_local(
     let executors = Executors::default().with(data_model.connection(), Arc::new(executor));
     let primary = Primary::DuckDb(Arc::clone(data_model));
     let remotes = Remotes::default();
-    let grants = Grants::new(Caller::new("local", true, ()));
     let env = Env {
         primary: &primary,
         remotes: &remotes,
-        grants: &grants,
+        grants,
         limits,
         trace: false,
     };
     let mut silent = Silent;
     let checks = Checks::default();
     let mut runner = Runner::new(env, &executors, &checks, &mut silent);
-    futures::executor::block_on(runner.run(Source::Text(query)))
+    runner.run(Source::Text(query)).await
 }
