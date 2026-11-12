@@ -28,7 +28,9 @@ pub(super) fn security(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()>
 }
 
 pub(super) fn security_check(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()> {
-    check_live(require(ctx.live().as_ref(), "live plan")?)
+    check_live(require(ctx.live().as_ref(), "live plan")?)?;
+    ctx.set_proved(true);
+    Ok(())
 }
 
 pub(super) fn render(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()> {

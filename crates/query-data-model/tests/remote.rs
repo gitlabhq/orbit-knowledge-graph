@@ -73,6 +73,7 @@ fn a_code_plan_renders_a_structural_search_request() {
         code.render(&plan).unwrap(),
         StructuralSearchRequest {
             repositories: vec![42],
+            heads: vec![],
             languages: vec!["rust".into()],
             trigrams: vec!["compile".into()],
             pattern: "compile($$$ARGS)".into(),

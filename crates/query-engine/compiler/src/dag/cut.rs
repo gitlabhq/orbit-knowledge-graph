@@ -22,6 +22,7 @@ pub(super) struct Cut<'q> {
     /// The primary connection first, then each served remote.
     pub backends: Vec<(String, Backend)>,
     pub limits: &'q QueryLimits,
+    pub remotes: &'q [String],
 }
 
 impl Cut<'_> {
@@ -62,7 +63,8 @@ impl Cut<'_> {
                 .filter(|crossing| crossing.consumer(&order) == *group)
                 .map(|crossing| Input::Keys(self.keys(crossing, &order)))
                 .collect();
-            let plan = super::sub::plan(self.query, &self.groups[*group], &needed, self.limits)?;
+            let group = &self.groups[*group];
+            let plan = super::sub::plan(self.query, group, &needed, self.limits, self.remotes)?;
             stages.push(Stage {
                 id,
                 backend,

@@ -46,7 +46,9 @@ impl Executor for CodeExecutor {
             .map(|field| match field {
                 RequestField::Path => "path".to_string(),
                 RequestField::Line => "line".to_string(),
-                RequestField::Capture(name) | RequestField::Repository(name) => name.clone(),
+                RequestField::Capture(name)
+                | RequestField::Repository(name)
+                | RequestField::Branch(name) => name.clone(),
             })
             .collect();
         batch(&rows, &fields)

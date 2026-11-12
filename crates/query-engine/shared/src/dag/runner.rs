@@ -185,16 +185,33 @@ impl<'r> Runner<'r> {
         if sets.iter().any(|set| set.keys.is_empty()) {
             return Ok((None, Executed::default()));
         }
+        let composite: Vec<KeySet> = sets
+            .iter()
+            .filter(|set| set.input.properties.len() > 1)
+            .cloned()
+            .collect();
+        let heads = match stage.backend {
+            compiler::dag::Backend::OrbitCode => compiler::dag::heads(&composite)?,
+            _ => Vec::new(),
+        };
         let mut inputs = Inputs {
             contexts: contexts.clone(),
+            composite,
             ..Inputs::default()
         };
         if let StageQuery::Gql(statement) = stage.query {
-            let bound = bind(statement, &sets, self.env.primary.model(), self.env.limits)?;
+            let remotes = self.env.remotes.connections();
+            let bound = bind(
+                statement,
+                &sets,
+                self.env.primary.model(),
+                self.env.limits,
+                remotes,
+            )?;
             if let Some(connection) = stage.connection.as_deref()
                 && let Some(target) = self.env.remotes.target(connection)
             {
-                inputs.namespaces = remote::namespaces(self, id, target, &bound).await?;
+                inputs.namespaces = remote::namespaces(self, id, target, &bound, &heads).await?;
             }
             stage.query = StageQuery::Gql(bound);
         }
@@ -212,6 +229,15 @@ impl<'r> Runner<'r> {
         };
         let compiled = compile(stage, inputs, &self.env)?;
         self.trace(id, &compiled);
+        let trusted = backend == compiler::dag::Backend::Engine
+            || (backend == compiler::dag::Backend::DuckDb
+                && matches!(self.env.primary, compiler::dag::Primary::DuckDb(_)));
+        if !compiled.proved && !trusted {
+            return Err(QueryError::Security(format!(
+                "stage {id} carries no proof that each read has its policy"
+            ))
+            .into());
+        }
         let executed = match (&compiled.request, &connection) {
             (Request::Engine { plan, .. }, _) => Executed {
                 batches: vec![super::engine::run(plan, results)?],

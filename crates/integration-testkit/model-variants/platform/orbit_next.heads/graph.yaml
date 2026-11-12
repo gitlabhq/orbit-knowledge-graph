@@ -1,0 +1,14 @@
+kind: graph
+package: orbit_next.heads
+entities:
+  Head:
+    identity: [project_id, branch]
+    label: branch
+    default_columns: [project_id, branch]
+    properties:
+      project_id: int64
+      branch: string
+relationships:
+  SOURCE_HEAD: {variants: {MergeRequest -> Head: {cardinality: many_to_one}}}
+  HEAD_FILE: {variants: {Head -> File: {cardinality: one_to_many}}}
+  HEAD_IN: {variants: {Head -> Project: {cardinality: many_to_one}}}

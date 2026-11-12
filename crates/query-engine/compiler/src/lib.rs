@@ -261,6 +261,11 @@ pub(crate) fn hydration_stage(
         config::HydrationClickhouseCtx::new(grants.clone(), *limits, trace, Arc::clone(data_model));
     ctx.set_hydration(request);
     config::run_hydration_clickhouse(&mut ctx).count_err()?;
+    if ctx.take_proved() != Some(true) {
+        return Err(error::QueryError::Security(
+            "the hydration stage carries no proof that each read has its policy".into(),
+        ));
+    }
     let emitted = match (trace, ctx.relational()) {
         (true, Some(plan)) => dag::describe(&plan.plan),
         _ => Vec::new(),

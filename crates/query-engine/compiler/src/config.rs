@@ -57,6 +57,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub stage_contexts: Vec<(crate::dag::StageId, ResultContext)>,
         pub planned: Vec<String>,
         pub request: crate::dag::Request,
+        pub heads: Vec<(i64, String)>,
+        pub proved: bool,
     }
 
     phases {
@@ -142,6 +144,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         security_check {
             reads_env: [grants, data_model]
             reads_state: [relational]
+            mutates: [proved]
         }
         codegen {
             reads_env: [data_model]
@@ -150,7 +153,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         code::plan {
             reads_env: [data_model, trace]
-            reads_state: [statement]
+            reads_state: [statement, heads]
             mutates: [code, planned]
         }
         code::security {
@@ -160,6 +163,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         code::security_check {
             reads_state: [code]
+            mutates: [proved]
         }
         code::render {
             reads_env: [data_model]
@@ -178,6 +182,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         live::security_check {
             reads_state: [live]
+            mutates: [proved]
         }
         live::render {
             reads_env: [data_model]
@@ -223,7 +228,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         gql_clickhouse {
             backend: query_data_model::ClickHouse
             env: [grants, limits, trace]
-            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned]
+            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned, proved]
             phases: [tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         gql_duckdb {
@@ -235,13 +240,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
         gql_orbit_code {
             backend: query_data_model::implementations::orbit_code::OrbitCode
             env: [grants, limits, trace]
-            state: [statement, namespaces, code, planned, request]
+            state: [statement, namespaces, code, planned, request, heads, proved]
             phases: [code::plan, code::security, code::security_check, code::render]
         }
         gql_live {
             backend: query_data_model::implementations::live::Live
             env: [grants, limits, trace]
-            state: [statement, namespaces, live, planned, request]
+            state: [statement, namespaces, live, planned, request, proved]
             phases: [live::plan, live::security, live::security_check, live::render]
         }
         gql_engine {
@@ -253,7 +258,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         hydration_clickhouse {
             backend: query_data_model::ClickHouse
             env: [grants, limits, trace]
-            state: [tp_bounds, hydration, plan_metadata, query_config, relational, hydration_query, planned]
+            state: [tp_bounds, hydration, plan_metadata, query_config, relational, hydration_query, planned, proved]
             phases: [restrict_hydration, plan, settings, security, security_check, codegen]
         }
     }
@@ -428,7 +433,9 @@ fn security_check(
 ) -> Result<()> {
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let model = ctx.data_model();
-    security_check::verify(plan, model, ctx.grants())
+    security_check::verify(plan, model, ctx.grants())?;
+    ctx.set_proved(true);
+    Ok(())
 }
 
 fn hydrate_plan(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) -> Result<()> {

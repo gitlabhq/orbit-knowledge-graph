@@ -193,28 +193,31 @@ impl Store {
             }
         }
         let access = self.access(entity, name, &spec.access, package, graph, diagnostics);
-        let identity = match graph.entity(entity).identity.as_slice() {
-            [] => return None,
-            [identity] => *identity,
-            _ => {
-                diagnostics.error(
-                    package,
-                    format!(
-                        "store {} keys rows by one column, but {name} has a composite identity",
-                        self.name
-                    ),
-                );
-                return None;
-            }
-        };
-        let key = diagnostics.require(self.column(identity), package, || {
-            format!(
-                "store {} does not store {name}.{}, its identity",
-                self.name,
-                graph.property(identity).name
-            )
-        })?;
-        let key = key.to_string();
+        let identity = graph.entity(entity).identity.clone();
+        if identity.is_empty() {
+            return None;
+        }
+        if identity.len() > 1 && spec.table.is_some() {
+            diagnostics.error(
+                package,
+                format!(
+                    "store {} keys table rows by one column, but {name} has a composite identity",
+                    self.name
+                ),
+            );
+            return None;
+        }
+        let mut key = Vec::new();
+        for part in identity {
+            let column = diagnostics.require(self.column(part), package, || {
+                format!(
+                    "store {} does not store {name}.{}, its identity",
+                    self.name,
+                    graph.property(part).name
+                )
+            })?;
+            key.push(column.to_string());
+        }
         let path_column = spec
             .path_column
             .clone()

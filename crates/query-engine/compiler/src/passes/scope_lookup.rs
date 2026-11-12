@@ -43,6 +43,7 @@ pub struct ScopeLookup {
 pub fn lookups(
     target: &Target,
     logical: &LogicalPlan,
+    heads: &[(i64, String)],
     graph: &Catalog<ClickHouse>,
     grants: &Grants,
 ) -> Result<Vec<ScopeLookup>> {
@@ -55,7 +56,10 @@ pub fn lookups(
         .ok_or_else(|| QueryError::Validation("the query reads no entity".into()))?;
     let (resolves, guard, keys) = match target {
         Target::Code(code) => {
-            let projects = named_repositories(logical, code)?;
+            let mut projects = named_repositories(logical, code)?;
+            projects.extend(heads.iter().map(|(project, _)| *project));
+            projects.sort_unstable();
+            projects.dedup();
             let keys = projects.into_iter().map(Value::from).collect();
             (Resolves::Repositories, code.guard(entity), Some(keys))
         }

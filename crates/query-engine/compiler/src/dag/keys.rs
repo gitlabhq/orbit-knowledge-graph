@@ -19,12 +19,14 @@ pub struct KeySet {
 }
 
 /// Binds each key set into the stage's logical plan as an `IN` filter on its binding, right
-/// where the plan binds it, so the stage's planner reads the keys before it plans.
+/// where the plan binds it, so the stage's planner reads the keys before it plans. A composite
+/// key set stays out of the logical plan: the stage's planner reads it as an input.
 pub fn bind(
     statement: Statement,
     sets: &[KeySet],
     model: &Model,
     limits: &QueryLimits,
+    remotes: &[String],
 ) -> Result<Statement> {
     for set in sets {
         if set.keys.len() > limits.stage_keys {
@@ -48,7 +50,7 @@ pub fn bind(
         .flat_map(|node| statement.plan.outputs(node))
         .filter_map(|output| Some((output, statement.plan.name(output)?.to_string())))
         .collect();
-    let catalog = model.logical(&limits).as_admin();
+    let catalog = model.logical(&limits).as_admin().with_remotes(remotes);
     let plan = catalog.rebuild(statement.plan, |q, step| {
         let binds = matches!(
             step.operation,
@@ -60,16 +62,16 @@ pub fn bind(
             .and_then(|output| names.get(output))
             .cloned();
         let mut rows = step.keep(q)?;
-        for set in sets
+        for (set, property) in sets
             .iter()
-            .filter(|set| binds && bound.as_ref() == Some(&set.input.binding))
+            .filter_map(|set| match &set.input.properties[..] {
+                [property] if binds && bound.as_ref() == Some(&set.input.binding) => {
+                    Some((set, property))
+                }
+                _ => None,
+            })
         {
             let binding = rows.binding(&set.input.binding)?;
-            let [property] = &set.input.properties[..] else {
-                return Err(query_data_model::plan::logical::PlanError::shape(
-                    "a composite key set pins one binding's key columns together",
-                ));
-            };
             let values = set
                 .keys
                 .iter()

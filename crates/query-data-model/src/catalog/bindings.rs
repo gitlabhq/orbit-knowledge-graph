@@ -137,13 +137,24 @@ impl Store {
                 format!("{label} {what} {written} is not a column of {holder_name}")
             })
         };
-        let property = column(&key.column, "foreign key", diagnostics)?;
+        let columns = key.column.values();
+        let properties = columns
+            .iter()
+            .map(|written| column(written, "foreign key", diagnostics))
+            .collect::<Option<Vec<PropertyId>>>()?;
         let discriminator = match (&key.type_column, &key.type_value) {
             (None, None) => None,
-            (Some(written), Some(values)) => Some(Discriminator {
+            (Some(written), Some(values)) if properties.len() == 1 => Some(Discriminator {
                 column: column(written, "type column", diagnostics)?,
                 values: values.values().to_vec(),
             }),
+            (Some(_), Some(_)) => {
+                diagnostics.error(
+                    package,
+                    format!("{label} composite foreign key cannot carry a type column"),
+                );
+                return None;
+            }
             _ => {
                 diagnostics.error(
                     package,
@@ -157,39 +168,52 @@ impl Store {
             Endpoint::Target => Endpoint::Source,
         };
         let referenced = variant.endpoint(other);
-        let referenced_key = match graph.entity(referenced).identity.as_slice() {
-            [identity] => Some(*identity),
-            _ => None,
-        };
-        let referenced_key = diagnostics.require(referenced_key, package, || {
-            format!(
-                "{label} references {}, which has no single identity property",
-                graph.entity(referenced).name
-            )
-        })?;
-        let (held, id) = (
-            graph.property(property).data_type,
-            graph.property(referenced_key).data_type,
-        );
-        if held != id {
+        let identity = &graph.entity(referenced).identity;
+        if identity.len() != properties.len() {
             diagnostics.error(
                 package,
                 format!(
-                    "{label} foreign key {} is {held:?} but {}.{} is {id:?}; keys are never cast",
-                    key.column,
+                    "{label} names {} key columns, but {} has {} identity properties",
+                    properties.len(),
                     graph.entity(referenced).name,
-                    graph.property(referenced_key).name
+                    identity.len()
                 ),
             );
             return None;
         }
+        for ((property, written), referenced_key) in properties.iter().zip(columns).zip(identity) {
+            let (held, id) = (
+                graph.property(*property).data_type,
+                graph.property(*referenced_key).data_type,
+            );
+            if held != id {
+                diagnostics.error(
+                    package,
+                    format!(
+                        "{label} foreign key {written} is {held:?} but {}.{} is {id:?}; keys are never cast",
+                        graph.entity(referenced).name,
+                        graph.property(*referenced_key).name
+                    ),
+                );
+                return None;
+            }
+        }
+        let pairs: Vec<(PropertyId, PropertyId)> = properties
+            .iter()
+            .copied()
+            .zip(identity.iter().copied())
+            .collect();
         Some(Key {
             foreign_key: ForeignKey {
                 holder: key.on,
-                property,
-                referenced_key,
+                property: properties[0],
+                referenced_key: identity[0],
             },
             discriminator,
+            composite: match pairs.len() {
+                1 => Vec::new(),
+                _ => pairs,
+            },
         })
     }
 }
@@ -200,7 +224,8 @@ fn check_shared_keys(graph: &GraphCatalog, store: &Store, diagnostics: &mut Diag
     let keys: Vec<(&RelationshipVariant, &str, &Key)> = store
         .bindings()
         .filter_map(|(variant, package, binding)| {
-            Some((graph.variant(variant), package, binding.fk.as_ref()?))
+            let key = binding.fk.as_ref().filter(|key| key.composite.is_empty())?;
+            Some((graph.variant(variant), package, key))
         })
         .collect();
     for (index, (variant, package, key)) in keys.iter().enumerate() {
@@ -377,7 +402,7 @@ pub(super) fn check(
                         let referenced = key
                             .foreign_key
                             .referenced_entity(variant.source, variant.target);
-                        tableless || on(&store.connection, referenced)
+                        tableless || !key.composite.is_empty() || on(&store.connection, referenced)
                     }) && (store.edge_table(variant.id).is_none()
                         || on(&store.connection, variant.target));
                     if !joins {

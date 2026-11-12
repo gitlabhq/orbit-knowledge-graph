@@ -77,6 +77,7 @@ pub fn split<B: SqlBackend>(
         crossings,
         backends: places_backends(primary.connection(), B::BACKEND, remotes),
         limits,
+        remotes: remotes.connections(),
     };
     cut.dag(statement.debug)
 }
@@ -190,20 +191,29 @@ fn crossing(query: Query<'_>, step: Step<'_>, groups: (usize, usize)) -> Result<
     let [relationship] = step.relationships else {
         return Err(unjoinable());
     };
-    let key = graph
+    let (endpoint, keys) = graph
         .variants()
         .filter(|variant| variant.relationship == *relationship)
         .filter(|variant| Some(variant.source) == source_entity)
         .filter(|variant| Some(variant.target) == target_entity)
-        .find_map(|variant| query.model.foreign_key(variant.id))
+        .find_map(|variant| match query.model.foreign_key(variant.id) {
+            Some(key) => Some((key.holder, vec![(key.property, key.referenced_key)])),
+            None => query
+                .model
+                .composite_key(variant.id)
+                .map(|(holder, pairs)| (holder, pairs.to_vec())),
+        })
         .filter(|_| step.range.max == 1)
         .ok_or_else(unjoinable)?;
-    let (holder, referenced) = match key.holder {
+    let (holder, referenced) = match endpoint {
         Endpoint::Source => (source, target),
         Endpoint::Target => (target, source),
     };
     Ok(Crossing {
         groups,
-        pairs: vec![((holder, key.property), (referenced, key.referenced_key))],
+        pairs: keys
+            .into_iter()
+            .map(|(held, key)| ((holder, held), (referenced, key)))
+            .collect(),
     })
 }

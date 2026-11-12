@@ -2,6 +2,17 @@ repositories:
   42:
     traversal_path: 1/9970/42/
     matches:
+      - pattern: todo!($$$MSG)
+        language: rust
+        branch: feature-a
+        path: src/auth.rs
+        line: 12
+        captures: {MSG: "\"check the token scope\""}
+      - pattern: todo!($$$MSG)
+        language: rust
+        path: src/main.rs
+        line: 3
+        captures: {MSG: "\"wire the server\""}
       - pattern: compile($$$ARGS)
         language: rust
         path: crates/query-engine/compiler/src/lib.rs

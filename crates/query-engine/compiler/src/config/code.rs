@@ -11,7 +11,8 @@ use crate::passes::remote_security::{check_code, secure_code};
 
 pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Result<()> {
     let statement = require(ctx.statement().as_ref(), "statement")?;
-    let planned = plan_code(&statement.plan, ctx.data_model())?;
+    let heads = require(ctx.heads().as_ref(), "heads")?;
+    let planned = plan_code(&statement.plan, ctx.data_model(), heads)?;
     if *ctx.trace() {
         ctx.set_planned(crate::dag::describe(&planned));
     }
@@ -28,7 +29,9 @@ pub(super) fn security(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Resul
 }
 
 pub(super) fn security_check(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Result<()> {
-    check_code(require(ctx.code().as_ref(), "search plan")?)
+    check_code(require(ctx.code().as_ref(), "search plan")?)?;
+    ctx.set_proved(true);
+    Ok(())
 }
 
 pub(super) fn render(ctx: &mut impl CompilerCtx<Backend = OrbitCode>) -> Result<()> {

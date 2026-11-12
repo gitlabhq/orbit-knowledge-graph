@@ -20,13 +20,18 @@ pub(super) fn plan(
     group: &Group,
     needed: &HashMap<Ref, Vec<PropertyId>>,
     limits: &QueryLimits,
+    remotes: &[String],
 ) -> Result<LogicalPlan> {
     let rows = limits.stage_keys as u64 + 1;
     let limits = QueryLimits {
         max_rows: limits.max_rows.max(rows),
         ..*limits
     };
-    let catalog = query.model.logical(&limits).as_admin();
+    let catalog = query
+        .model
+        .logical(&limits)
+        .as_admin()
+        .with_remotes(remotes);
     let graph = query.model.graph();
     let entity_name = |binding: Ref| -> Result<&str> {
         query

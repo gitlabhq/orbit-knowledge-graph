@@ -134,6 +134,16 @@ impl Model {
             .find_map(|store| store.foreign_key(variant))
     }
 
+    /// The composite key some store binds the variant to.
+    pub fn composite_key(
+        &self,
+        variant: crate::RelationshipVariantId,
+    ) -> Option<(crate::Endpoint, &[(PropertyId, PropertyId)])> {
+        self.stores
+            .iter()
+            .find_map(|store| store.composite_key(variant))
+    }
+
     /// Whether some store binds a variant to this property as its foreign key.
     pub fn holds_foreign_key(&self, property: PropertyId) -> bool {
         self.stores.iter().any(|store| {

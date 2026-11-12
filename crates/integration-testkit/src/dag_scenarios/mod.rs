@@ -1,6 +1,7 @@
 //! ADR 024 execution DAGs end to end over the seeded fakes: GQL text, the logical plan, the
 //! stage split, each stage's planned, emitted and rendered plan, and the rows the engine returns.
 
+mod heads;
 mod joins;
 mod single;
 
@@ -22,8 +23,10 @@ use serde_json::Value;
 
 use crate::dag_fakes::{AllowedKeys, SeededGraph, seeded_code, seeded_live};
 
+/// The embedded packages, the demo Slack package and the branch-head variant.
 fn model() -> Arc<Model> {
-    testkit::with_demo().load().unwrap()
+    let heads = crate::authorization_variants::platform(&["orbit_next.heads"]);
+    testkit::with_demo().with(heads).load().unwrap()
 }
 
 fn caller(path: &str) -> Grants {

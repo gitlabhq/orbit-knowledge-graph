@@ -72,6 +72,7 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
         *code_request(&rendered),
         StructuralSearchRequest {
             repositories: vec![42],
+            heads: vec![],
             languages: vec!["rust".into()],
             trigrams: vec!["compile".into()],
             pattern: "compile($$$ARGS)".into(),

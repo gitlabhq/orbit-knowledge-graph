@@ -18,11 +18,12 @@ pub(super) async fn namespaces(
     stage: compiler::dag::StageId,
     target: &Target,
     statement: &Statement,
+    heads: &[(i64, String)],
 ) -> Result<Namespaces, DagError> {
     let compiler::dag::Primary::ClickHouse(graph) = runner.env.primary else {
         return Ok(Namespaces::default());
     };
-    let lookups = lookups(target, &statement.plan, graph, runner.env.grants)?;
+    let lookups = lookups(target, &statement.plan, heads, graph, runner.env.grants)?;
     if lookups.is_empty() {
         return Ok(Namespaces::default());
     }

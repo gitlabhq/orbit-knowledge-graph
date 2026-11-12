@@ -125,7 +125,7 @@ fn one_query_can_join_stores_on_the_same_connection() {
         [("graph", "gl_linear_issue"), ("lake", "linear_tickets")]
     );
     let lake = catalog.store("lake").unwrap();
-    assert_eq!(lake.source(issue).unwrap().key, "ticket_id");
+    assert_eq!(lake.source(issue).unwrap().key, ["ticket_id"]);
     assert_eq!(lake.column(body), Some("ticket_body"));
 
     let relates = graph

@@ -47,11 +47,39 @@ pub struct Env<'a> {
 pub struct Inputs {
     pub namespaces: Namespaces,
     pub contexts: Vec<(StageId, ResultContext)>,
+    /// Key sets on composite keys, which only a code stage reads, as branch heads.
+    pub composite: Vec<super::KeySet>,
+}
+
+/// Each composite key as the (repository, branch) head a code search runs at.
+pub fn heads(sets: &[super::KeySet]) -> Result<Vec<(i64, String)>> {
+    use orbit_authorization::Key;
+    let mut heads = Vec::new();
+    for key in sets.iter().flat_map(|set| &set.keys) {
+        match key {
+            Key::Composite(parts) => match &parts[..] {
+                [Key::Int(project), Key::Text(branch)] => heads.push((*project, branch.clone())),
+                _ => {
+                    return Err(QueryError::Validation(format!(
+                        "a structural search runs at (repository, branch) heads, not {key}"
+                    )));
+                }
+            },
+            _ => {
+                return Err(QueryError::Validation(format!(
+                    "a structural search runs at (repository, branch) heads, not {key}"
+                )));
+            }
+        }
+    }
+    Ok(heads)
 }
 
 #[derive(Debug)]
 pub struct Compiled {
     pub planned: Vec<String>,
+    /// Whether the stage's security check proved every read carries its policy.
+    pub proved: bool,
     pub emitted: Vec<String>,
     pub request: Request,
 }
@@ -62,6 +90,13 @@ fn produced<T>(value: Option<T>) -> Result<T> {
 
 pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> {
     let (kind, relational) = (stage.query_kind(), stage.backend.relational());
+    if !inputs.composite.is_empty() && stage.backend != super::Backend::OrbitCode {
+        return Err(QueryError::Validation(format!(
+            "a {} stage reads single-column key sets; composite keys cross into {} stages",
+            <&str>::from(stage.backend),
+            <&str>::from(super::Backend::OrbitCode)
+        )));
+    }
     let connection = stage.connection.clone().unwrap_or_default();
     let (statement, engine) = match stage.query {
         StageQuery::Gql(statement) => (Some(statement), None),
@@ -77,6 +112,7 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
             let emitted = trace_relational(trace, ctx.relational().as_ref());
             Ok(Compiled {
                 planned: ctx.take_planned().unwrap_or_default(),
+                proved: ctx.take_proved().unwrap_or_default(),
                 emitted,
                 request: Request::Query(Box::new(produced(ctx.take_output())?)),
             })
@@ -88,6 +124,7 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
             let emitted = trace_relational(trace, ctx.relational().as_ref());
             Ok(Compiled {
                 planned: ctx.take_planned().unwrap_or_default(),
+                proved: false,
                 emitted,
                 request: Request::Query(Box::new(produced(ctx.take_output())?)),
             })
@@ -97,10 +134,12 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
                 let mut ctx = config::GqlOrbitCodeCtx::new(grants, limits, trace, Arc::clone(code));
                 ctx.set_statement(produced(statement)?);
                 ctx.set_namespaces(inputs.namespaces);
+                ctx.set_heads(heads(&inputs.composite)?);
                 config::run_gql_orbit_code(&mut ctx).count_err()?;
                 let emitted = trace.then(|| ctx.code().as_ref().map(describe)).flatten();
                 Ok(Compiled {
                     planned: ctx.take_planned().unwrap_or_default(),
+                    proved: ctx.take_proved().unwrap_or_default(),
                     emitted: emitted.unwrap_or_default(),
                     request: produced(ctx.take_request())?,
                 })
@@ -113,6 +152,7 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
                 let emitted = trace.then(|| ctx.live().as_ref().map(describe)).flatten();
                 Ok(Compiled {
                     planned: ctx.take_planned().unwrap_or_default(),
+                    proved: ctx.take_proved().unwrap_or_default(),
                     emitted: emitted.unwrap_or_default(),
                     request: produced(ctx.take_request())?,
                 })
@@ -133,6 +173,7 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
             let plan = produced(ctx.take_engine())?;
             Ok(Compiled {
                 planned: ctx.take_planned().unwrap_or_default(),
+                proved: false,
                 emitted: if trace { describe(&plan) } else { Vec::new() },
                 request: Request::Engine {
                     plan,
@@ -229,6 +270,7 @@ pub fn compile_hydration(
         crate::hydration_stage(request, catalog, env.grants, env.limits, env.trace)?;
     Ok(Compiled {
         planned,
+        proved: true,
         emitted,
         request: Request::Hydration(query),
     })
