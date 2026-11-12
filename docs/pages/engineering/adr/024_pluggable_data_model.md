@@ -9,10 +9,10 @@ toc_hide: true
 
 Proposed. This ADR replaces the ontology as the source of truth for the query engine, the schema migrations and the indexer.
 [ADR 000](000_clickhouse_graph_storage.md) is unchanged: ClickHouse remains the graph store.
-It works with [ADR 023](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3333), whose indexing engine backfills a new package version before it goes live.
+It works with [ADR 023](023_self_contained_indexing_engine.md), whose indexing engine backfills a new package version before it goes live.
 This ADR amends [ADR 017](017_clone_based_non_blocking_migrations.md) on two points.
 The migration scope is derived from the package diff, as a floor that a ledger entry can widen but never narrow.
-A shared edge table no longer widens the scope to full: it is cloned intact, and only in-scope writers are re-run and swept.
+A shared edge table no longer widens the scope to full: it is cloned intact, and only its in-scope variants are re-written and swept.
 
 ## Date
 
@@ -626,6 +626,6 @@ The ontology would stay the source of truth, with the same mixed concerns and th
 - [MR !1967: ontology graph and reachability](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1967)
 - [ADR 000: ClickHouse graph storage](000_clickhouse_graph_storage.md)
 - [ADR 017: Clone-based non-blocking schema migrations](017_clone_based_non_blocking_migrations.md)
-- [ADR 023: A self-contained engine for indexing work](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3333)
+- [ADR 023: A self-contained engine for indexing work](023_self_contained_indexing_engine.md)
 - [Orbit Code Indexing v2 with Object Store](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/16)
 - [Support third-party data sources in Orbit](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/20)

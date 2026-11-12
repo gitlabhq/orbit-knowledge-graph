@@ -1,3 +1,66 @@
+## [1.3.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.2.1...v1.3.0) (2026-11-11)
+
+### Features
+
+* **analytics:** count Orbit queries by source type, use orbit in key paths ([579845b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/579845bc9576eb9d5853b9825e1a32b131e8a1c6)) by Ankit Panchal
+* **analytics:** send events to a local collector on self-managed ([74e4746](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/74e4746105f6a5cabc0e379a9dc490735a1df15a)) by Ankit Panchal
+* **cli:** add setup --no-gitlab to keep agent hooks local ([c234751](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c234751a29a37f31f7923a73f371006a211e8f8c)) by Dmitry Gruzd
+
+### Fixes
+
+* **agent-plugins:** skip flag values in the orbit sql detail ([2f32aa3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2f32aa320834717a6d621b1c556c9a4b820dd9ac)) by ANBUCHELVAN GANESAN CSE
+* **code-graph-incremental:** make a bare default() transform fire on empty text ([813c3e6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/813c3e6f023bdb013afac69116da365b45a7e549)) by Dmitry Gruzd
+* **setup:** load Orbit instructions for Claude Code from a settings SessionStart hook ([47ca7ea](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/47ca7ea60758e25292b6fa4c0ca01b2bc551abaf)) by Aaron Algutifan
+
+### Performance
+
+* **indexer:** partition the Finding initial load ([4479895](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/447989565c2fd392441cd2074512fd62e6ccbe23)) by Bohdan Parkhomchuk
+
+### Other
+
+* **deps:** refresh Rust lockfile and nested js-yaml ([803912e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/803912ea3b15168985c1f8cd4ba6c857c0dcbf0d)) by Dmitry Gruzd
+* **deps:** turn off unused default features ([9cba822](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9cba82203e3d6f550fd7d8c6d2823868cd4915c9)) by Michael Usachenko
+* **lint:** let rumdl enforce MD055 and MD056 for doc tables ([a71b4b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a71b4b931e37c905fc0e2679f0a543a770675490)) by Brendan Lynch
+* **setup:** document the GitLab Orbit agent plugins ([968eece](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/968eeceed15f7b9940f20b2a132d612bc3469c99)) by Gabriel Engel
+* **setup:** put MANDATORY on each Orbit hook instruction bullet ([925f825](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/925f825e34959f12e36d82f9627ae171fe483b4f)) by Dmitry Gruzd
+
+## [1.2.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.2.0...v1.2.1) (2026-11-10)
+
+### Fixes
+
+* **setup:** give the Duo session hook setup's remote decision ([11fb5b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/11fb5b921fa6594ea2462069997e7b6b1f5a94f8)) by Dmitry Gruzd
+* **setup:** give the generated Claude marketplace a description ([0cd066f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0cd066ff2a1744c7a6b3f1801b78a72ebb81effc)) by ANBUCHELVAN GANESAN CSE
+
+## [1.2.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.1.0...v1.2.0) (2026-11-10)
+
+### Features
+
+* **agent-plugins-nightly:** add the nightly output guard behind ORBIT_NIGHTLY ([78a49c9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/78a49c93ee0456e663d0bb6f3e57ccefcd089291)) by Dmitry Gruzd
+* **agent-plugins:** show Orbit calls in Pi on the stable channel ([9019d58](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9019d584c10bdb66ccd2c75a255a2452e6a68c51)) by Dmitry Gruzd
+* **analytics:** add Service Ping metric definitions for Orbit events ([3ee2e08](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3ee2e087baf63095ebecfbd2b2db9b5c51056699)) by Ankit Panchal
+* **orbit-cli:** list the GitLab server's entities in session-start instructions ([710ad77](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/710ad77fd199f07bf98b30e92deae8ef17fcd51a)) by Aaron Algutifan
+* **server:** send default columns and text_searchable in the structured schema ([edaef37](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/edaef37c1dcd8f29a083a1969816c3f91a36989f)) by Aaron Algutifan
+* **setup:** ask about the agent plugins with a picker ([24e30d9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/24e30d96ee12169efd9fdd8b82be488fb3a32752)) by Gabriel Engel
+* **setup:** load Orbit instructions from each agent's plugin or hook ([07f5633](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/07f5633a5116878f0d3cb4c2ff7abc5b4a7b7d47)) by Aaron Algutifan
+* **team-dashboard:** float priority and severity labelled MRs to the top ([b0d69e1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b0d69e1cd6629cb67d111ef71f8185e365db6ab9)) by Dmitry Gruzd
+
+### Fixes
+
+* **agent-plugins:** count raw JSON aggregation results ([d8292c4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d8292c4d677817afbdcb595d394f67af54f476c5)) by ANBUCHELVAN GANESAN CSE
+* **agent-plugins:** skip the value of long orbit grep flags ([3627837](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3627837f77128180244d16578b052de474436244)) by ANBUCHELVAN GANESAN CSE
+* **ci:** assign doc principles sync MRs to z_painter ([4c44dd7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4c44dd703eff60a1f6ab6143adb75445fe37f193)) by Zachary Painter
+* **ci:** run scheduled pipelines on release commits ([a04045e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a04045e72c82b0cf995eeba52b2b78aba054682f)) by Dmitry Gruzd
+* **orbit-cli:** give a slow GitLab the full session-start timeout ([5713792](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5713792a1b992b15d433487ab539c3d06d213fdd)) by Aaron Algutifan
+
+### Other
+
+* **deps:** drop dependency features that no codepaths use ([57a9ba4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/57a9ba46a853e94a166d29d7d5f768919c1b7931)) by Michael Usachenko
+* **orbit:** document rate limits, query limits, and the SLA ([4ce7aba](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4ce7aba0a38717d51bfcbda2ca4c965c70b988a8)) by Gabriel Engel
+* **security:** ignore agent state and scan for inline passwords ([c0fbdde](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c0fbddeeb821a8b95075554fc7b5c4cbd3dcb5f5)) by Michael Usachenko
+* **setup:** describe how each agent loads the Orbit instructions ([9dcb50a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9dcb50ac99ec2620dd55472c8dfde0e694cf55da)) by Aaron Algutifan
+* **skill:** add an Orbit skill for the package and container registry ([ff42ffa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ff42ffa6c5512f84cc3d27e57ef3226c0918e68f)) by Tim Rizzi
+* **skill:** fix Artifact Registry and package-host answers ([63c8b7d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/63c8b7d11bea9bb06d29695be9f6a0b0857c39e7)) by Tim Rizzi
+
 ## [1.1.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.0.0...v1.1.0) (2026-11-06)
 
 ### Features

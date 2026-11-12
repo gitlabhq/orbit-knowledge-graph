@@ -18,6 +18,7 @@ pub(crate) type Providers = BTreeMap<String, Vec<String>>;
 
 #[derive(Default)]
 pub(crate) struct Session {
+    pub(crate) signed_in: bool,
     pub(crate) reachable: bool,
     pub(crate) providers: Providers,
 }
@@ -30,8 +31,14 @@ struct Cached {
 }
 
 pub(crate) fn session_start(dir: &Path) -> Session {
-    let Ok(client) = OrbitClient::from_env_in(dir) else {
-        return Session::default();
+    let signed_in = Session {
+        signed_in: true,
+        ..Session::default()
+    };
+    let client = match OrbitClient::from_env_in_if_signed_in(dir) {
+        Ok(Some(client)) => client,
+        Ok(None) => return Session::default(),
+        Err(_) => return signed_in,
     };
     let scope = client.get_host().ok().and_then(|host| {
         super::origin::project(dir)
@@ -44,7 +51,7 @@ pub(crate) fn session_start(dir: &Path) -> Session {
         .as_ref()
         .is_some_and(|cached| now().saturating_sub(cached.fetched_at) < TTL.as_secs());
     let Some(fetched) = block_on_short(ask(client, scope, !fresh)) else {
-        return Session::default();
+        return signed_in;
     };
     let cached = cached.map(|cached| cached.providers);
     let providers = match fresh {
@@ -56,6 +63,7 @@ pub(crate) fn session_start(dir: &Path) -> Session {
         }
     };
     Session {
+        signed_in: true,
         reachable: true,
         providers,
     }

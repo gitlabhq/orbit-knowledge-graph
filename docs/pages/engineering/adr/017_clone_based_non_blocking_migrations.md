@@ -9,7 +9,8 @@ toc_hide: true
 
 Accepted
 
-Amended by [ADR 024](024_pluggable_data_model.md): the scope is derived from the package diff, and a shared edge table is cloned intact and swept per writer instead of widening to full.
+Amended by [ADR 023](023_self_contained_indexing_engine.md): campaigns replace checkpoint seeding and the checkpoint promotion gate.
+Amended by [ADR 024](024_pluggable_data_model.md): the scope is derived from the package diff, and a shared edge table is cloned intact and swept per variant instead of widening to full.
 
 ## Date
 

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ontology::migrations::sha256_hex;
 use rust_embed::Embed;
@@ -160,18 +161,39 @@ fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> S
 static SESSION: LazyLock<crate::remote::server_schema::Session> =
     LazyLock::new(|| crate::remote::server_schema::session_start(Path::new(".")));
 
-static RENDERED_INSTRUCTIONS: LazyLock<String> =
-    LazyLock::new(|| render_instructions(launcher(), SESSION.reachable, &SESSION.providers));
+static NO_GITLAB: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn keep_local() {
+    NO_GITLAB.store(true, Ordering::Relaxed);
+}
+
+pub(crate) fn keeps_local() -> bool {
+    NO_GITLAB.load(Ordering::Relaxed)
+}
 
 pub(crate) fn reaches_gitlab() -> bool {
-    SESSION.reachable
+    !keeps_local() && SESSION.reachable
+}
+
+pub(crate) fn hook_gitlab_arg() -> &'static str {
+    if keeps_local() {
+        " --no-gitlab"
+    } else if reaches_gitlab() {
+        " --gitlab"
+    } else {
+        ""
+    }
 }
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
 
-pub(crate) fn instructions_text() -> &'static str {
-    &RENDERED_INSTRUCTIONS
+pub(crate) fn instructions_text(setup_reached_gitlab: bool, no_gitlab: bool) -> String {
+    if no_gitlab {
+        return render_instructions(launcher(), false, &Providers::new());
+    }
+    let remote = SESSION.reachable || (setup_reached_gitlab && !SESSION.signed_in);
+    render_instructions(launcher(), remote, &SESSION.providers)
 }
 
 pub(crate) fn search_nudge_text() -> &'static str {
@@ -248,6 +270,7 @@ impl PluginSpec {
     ) -> Vec<(String, Vec<u8>)> {
         let marketplace = serde_json::json!({
             "name": marketplace,
+            "description": "GitLab Orbit for Claude Code",
             "owner": { "name": "GitLab" },
             "plugins": [{ "name": self.name, "source": format!("./{}", self.name) }],
         });
@@ -567,16 +590,6 @@ impl Agent {
     pub(super) fn has_ui(self) -> bool {
         self.plugin.is_some() || self.ui_files(true).next().is_some()
     }
-
-    /// The component whose files make the agent load the Orbit instructions: the Claude Code
-    /// plugin, or the hook files and extensions of the other agents.
-    pub(super) fn instructions_component(self) -> super::Component {
-        if self.plugin.is_some() {
-            super::Component::AgentPlugins
-        } else {
-            super::Component::Hooks
-        }
-    }
 }
 
 pub(super) fn agents() -> impl Iterator<Item = Agent> {
@@ -661,9 +674,15 @@ mod tests {
                 let rendered = render_instructions(launcher, remote, &Providers::new());
                 assert!(rendered.contains(expected), "{launcher}: {rendered}");
                 assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
-                assert_eq!(rendered.matches("MANDATORY").count(), 1, "{launcher}");
+                assert_eq!(
+                    rendered.matches("MANDATORY").count(),
+                    if remote { 4 } else { 2 },
+                    "{launcher}"
+                );
                 for phrase in [
-                    "MANDATORY: use these instead of grep, rg, or reading files",
+                    &format!(
+                        "MANDATORY: `{launcher} grep` must be used for search instead of grep and rg."
+                    ),
                     "Ignores case, `_`, `-`",
                     "`a|b` OR",
                     "Batch all reads and searches you can name",
@@ -681,7 +700,7 @@ mod tests {
                 );
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
                 assert_eq!(rendered.contains("`branch:`"), remote, "{launcher}");
-                let budget = if remote { 250 } else { 75 };
+                let budget = if remote { 255 } else { 80 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
@@ -852,6 +871,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(marketplace["name"], plugin.marketplace.as_str());
+        assert!(
+            marketplace["description"]
+                .as_str()
+                .is_some_and(|description| !description.is_empty()),
+            "claude plugin validate --strict rejects a marketplace without a description"
+        );
         assert_eq!(marketplace["plugins"][0]["name"], plugin.name.as_str());
         assert!(
             marketplace["plugins"][0]["source"]
@@ -914,6 +939,20 @@ mod tests {
         assert!(nightly["hooks"].is_object());
         assert_eq!(claude_hooks(both, false), nightly);
         assert_eq!(claude_hooks(nightly_only, false), stable);
+    }
+
+    #[test]
+    fn the_stable_channel_ships_no_output_guard_and_pi_shows_orbit_calls() {
+        assert!(claude_feature_paths(&FEATURES, false).is_empty());
+        assert!(claude_hooks(&FEATURES, false).get("hooks").is_none());
+        let pi = agent_named("pi").unwrap();
+        let stable: Vec<_> = pi.ui_files_with(&FEATURES, true, false).collect();
+        assert!(stable.iter().all(|file| file.feature.is_none()));
+        assert!(
+            stable
+                .iter()
+                .any(|file| file.path.project == ".pi/extensions/orbit-ui/index.js")
+        );
     }
 
     #[test]
@@ -1038,7 +1077,11 @@ mod tests {
         let opencode = read_embedded_text("opencode_plugin.js", false);
         assert!(opencode.contains("experimental.chat.system.transform"));
         assert!(opencode.contains(r#""hook-guard", "instructions""#));
-        for name in ["codex", "duo"] {
+        for (name, suffix) in [
+            ("claude", "hook-guard instructions{{hook_gitlab}}"),
+            ("codex", "hook-guard instructions"),
+            ("duo", "hook-guard instructions{{hook_gitlab}}"),
+        ] {
             let agent = agent_named(name).unwrap();
             let session = agent
                 .json_merges
@@ -1048,11 +1091,10 @@ mod tests {
             assert!(
                 session.entries[0]["hooks"][0]["command"]
                     .as_str()
-                    .is_some_and(|command| command.ends_with("hook-guard instructions")),
+                    .is_some_and(|command| command.ends_with(suffix)),
                 "{name}"
             );
         }
-        assert!(agent_named("claude").unwrap().plugin.is_some());
     }
 
     #[test]

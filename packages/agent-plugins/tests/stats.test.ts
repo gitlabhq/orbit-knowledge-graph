@@ -21,6 +21,28 @@ test('the raw JSON format counts nodes and edges', () => {
   expect(parseResponse(text)).toMatchObject({ nodes: 2, edges: 1, byEntity: { User: 2 } })
 })
 
+const rawAggregation = (body: object) => JSON.stringify({ result: { query_type: 'aggregation', nodes: [], edges: [], ...body } })
+
+test('a grouped raw JSON aggregation counts its rows instead of reading as an empty traversal', () => {
+  const text = rawAggregation({
+    columns: [{ name: 'n', function: 'count', target: 'mr' }],
+    group_columns: [{ name: 'mr_state', kind: 'property', node: 'mr', property: 'state' }],
+    rows: [{ mr_state: 'merged', n: 2450 }, { mr_state: 'closed', n: 690 }, { mr_state: 'opened', n: 76 }],
+  })
+  expect(parseResponse(text)).toMatchObject({ kind: 'aggregation', grouped: true, nodes: 0, aggregated: 3216 })
+})
+
+test('an ungrouped raw JSON aggregation leaves out a DISTINCT count', () => {
+  const text = rawAggregation({
+    columns: [
+      { name: 'count_mr', function: 'count', target: 'mr' },
+      { name: 'count_distinct_mr_author_id', function: 'count', target: 'mr', property: 'author_id' },
+    ],
+    rows: [{ count_mr: 3222, count_distinct_mr_author_id: 111 }],
+  })
+  expect(parseResponse(text)).toMatchObject({ kind: 'aggregation', grouped: false, aggregated: 3222, counted: [{ target: 'mr', total: 3222 }] })
+})
+
 test('an aggregation counts the nodes its count columns cover', () => {
   const text = [
     'query_type: aggregation',
