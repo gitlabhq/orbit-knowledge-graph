@@ -38,6 +38,23 @@ pub fn load_with(
     packages(names, edit).load()
 }
 
+/// The embedded packages and the `config/demo` packages, each file passed through `edit`.
+pub fn demo(edit: impl Fn(&str, String) -> String) -> Result<Arc<Model>, DataModelError> {
+    let edited = |packages: &Packages, tier| {
+        let sources = packages
+            .sources()
+            .iter()
+            .map(|(name, yaml)| (name.clone(), edit(name, yaml.clone())))
+            .collect();
+        Packages::new(tier, sources)
+    };
+    let root = Path::new(env!("ORBIT_CONFIG_DIR")).join("demo");
+    let demo = Packages::read_dir(&root, Tier::Integration).unwrap();
+    edited(&Packages::embedded(), Tier::Platform)
+        .with(edited(&demo, Tier::Integration))
+        .load()
+}
+
 pub fn gitlab() -> Model {
     Arc::try_unwrap(load_with(&["gitlab"], |_, yaml| yaml).unwrap()).unwrap()
 }

@@ -1,0 +1,79 @@
+kind: graph
+package: integration.jira
+domain: plan
+entities:
+  JiraProject:
+    description: A Jira project on an Atlassian site, mapped to one GitLab project.
+    identity: id
+    label: name
+    default_columns: [id, key, name]
+    properties:
+      id: {type: string, description: Jira's numeric project ID.}
+      key: {type: string, description: The project key.}
+      name: {type: string}
+      cloud_id: {type: uuid, description: The Atlassian site that hosts the project.}
+      project_id: {type: int64, description: The GitLab project the Jira project maps to.}
+      traversal_path: {type: string}
+
+  JiraIssue:
+    description: A Jira issue, linked to the merge request that develops it.
+    identity: id
+    label: summary
+    default_columns: [id, key, summary, status, status_category]
+    properties:
+      id: {type: string, description: Jira's numeric issue ID.}
+      key: {type: string, description: The issue key.}
+      summary: {type: string}
+      status: {type: string, description: The workflow status name.}
+      status_category:
+        type: enum
+        values: {0: new, 1: indeterminate, 2: done}
+      jira_project_id: {type: string}
+      assignee_id: {type: string?}
+      merge_request_id: {type: int64?, description: The merge request in the issue's development panel.}
+      created_at: {type: timestamp}
+      traversal_path: {type: string}
+
+  JiraUser:
+    description: An Atlassian account.
+    identity: account_id
+    label: display_name
+    default_columns: [account_id, display_name]
+    properties:
+      account_id: {type: string, description: Atlassian account ID.}
+      display_name: {type: string}
+      traversal_path: {type: string}
+
+  JiraComment:
+    description: A comment on a Jira issue.
+    identity: id
+    label: body
+    default_columns: [id, body, created_at]
+    properties:
+      id: {type: string}
+      issue_id: {type: string}
+      author_id: {type: string}
+      body: {type: string}
+      created_at: {type: timestamp}
+      traversal_path: {type: string}
+  GitLabRef:
+    description: A reference to GitLab work found in a Jira issue's text.
+    identity: id
+    label: url
+    default_columns: [id, kind, project_path, iid, url]
+    properties:
+      id: {type: string}
+      kind: {type: string, description: The kind of GitLab object the reference names.}
+      project_path: {type: string}
+      iid: {type: int64?}
+      url: {type: string}
+      issue_id: {type: string, description: The Jira issue whose text holds the reference.}
+      traversal_path: {type: string}
+relationships:
+  IN_JIRA_PROJECT: {variants: {JiraIssue -> JiraProject: {cardinality: many_to_one}}}
+  MAPPED_TO: {variants: {JiraProject -> Project: {cardinality: many_to_one}}}
+  DEVELOPED_IN: {variants: {JiraIssue -> MergeRequest: {cardinality: many_to_one}}}
+  ASSIGNED_TO: {variants: {JiraIssue -> JiraUser: {cardinality: many_to_one}}}
+  COMMENTS_ON: {variants: {JiraComment -> JiraIssue: {cardinality: many_to_one}}}
+  WRITTEN_BY: {variants: {JiraComment -> JiraUser: {cardinality: many_to_one}}}
+  CITES: {variants: {JiraIssue -> GitLabRef: {cardinality: one_to_many}}}

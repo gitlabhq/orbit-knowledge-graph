@@ -198,7 +198,7 @@ fn shared_bodies_are_reused_and_scoped() {
 #[test]
 fn handles_from_another_plan_or_snapshot_are_rejected() {
     let model = load(&["gitlab"]);
-    let other = load(&["gitlab", "integration.linear"]);
+    let other = load(&["gitlab", "tenant.agent_memory"]);
     let catalog = model.logical(limits());
     let requests = catalog.entity("MergeRequest").unwrap();
     let foreign = other.logical(limits()).entity("MergeRequest").unwrap();

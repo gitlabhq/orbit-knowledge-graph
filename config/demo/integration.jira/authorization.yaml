@@ -1,0 +1,70 @@
+kind: authorization
+package: integration.jira
+entities:
+  JiraProject:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path}}
+    properties:
+      open: [id, key, name, cloud_id, project_id]
+      hidden: [traversal_path]
+
+  JiraIssue:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path}}
+    properties:
+      open: [id, key, summary, status, status_category, jira_project_id, assignee_id, merge_request_id, created_at]
+      hidden: [traversal_path]
+
+  JiraUser:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path}}
+    properties:
+      open: [account_id, display_name]
+      hidden: [traversal_path]
+
+  JiraComment:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path}}
+    properties:
+      open: [id, issue_id, author_id, body, created_at]
+      hidden: [traversal_path]
+  GitLabRef:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path}}
+    properties:
+      open: [id, kind, project_path, iid, url, issue_id]
+      hidden: [traversal_path]
+relationships:
+  IN_JIRA_PROJECT:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}
+  MAPPED_TO:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}
+  DEVELOPED_IN:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}
+  ASSIGNED_TO:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}
+  COMMENTS_ON:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}
+  WRITTEN_BY:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}
+  CITES:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: target}}

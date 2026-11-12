@@ -1,0 +1,80 @@
+kind: storage
+package: integration.jira
+store: jira
+engine:
+  kind: duckdb
+  connection: jira_lake
+  path_column: traversal_path
+entities:
+  JiraProject:
+    complete: true
+    table: jira_project
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      key: {backend: {type: VARCHAR}}
+      name: {backend: {type: VARCHAR}}
+      cloud_id: {immutable: true, backend: {type: UUID}}
+      project_id: {backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {filter: [id, key, project_id], order: [id]}
+  JiraIssue:
+    complete: true
+    table: jira_issue
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      key: {backend: {type: VARCHAR}}
+      summary: {backend: {type: VARCHAR}}
+      status: {selectivity: low, backend: {type: VARCHAR}}
+      status_category: {stored_as_text: true, backend: {type: VARCHAR}}
+      jira_project_id: {backend: {type: VARCHAR}}
+      assignee_id: {backend: {type: VARCHAR}}
+      merge_request_id: {backend: {type: BIGINT}}
+      created_at: {immutable: true, backend: {type: TIMESTAMP}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {filter: [id, key, merge_request_id], text: [summary], order: [id]}
+  JiraUser:
+    complete: true
+    table: jira_user
+    columns:
+      account_id: {immutable: true, backend: {type: VARCHAR}}
+      display_name: {backend: {type: VARCHAR}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {filter: [account_id], order: [account_id]}
+  JiraComment:
+    complete: true
+    table: jira_comment
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      issue_id: {immutable: true, backend: {type: VARCHAR}}
+      author_id: {immutable: true, backend: {type: VARCHAR}}
+      body: {backend: {type: VARCHAR}}
+      created_at: {immutable: true, backend: {type: TIMESTAMP}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {filter: [id, issue_id], order: [id]}
+  GitLabRef:
+    complete: true
+    table: jira_gitlab_ref
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      kind: {immutable: true, selectivity: low, backend: {type: VARCHAR}}
+      project_path: {immutable: true, backend: {type: VARCHAR}}
+      iid: {immutable: true, backend: {type: BIGINT}}
+      url: {immutable: true, backend: {type: VARCHAR}}
+      issue_id: {immutable: true, backend: {type: VARCHAR}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {filter: [id, issue_id, project_path], order: [id]}
+relationships:
+  IN_JIRA_PROJECT:
+    JiraIssue -> JiraProject: {fk: {on: source, column: jira_project_id}}
+  MAPPED_TO:
+    JiraProject -> Project: {fk: {on: source, column: project_id}}
+  DEVELOPED_IN:
+    JiraIssue -> MergeRequest: {fk: {on: source, column: merge_request_id}}
+  ASSIGNED_TO:
+    JiraIssue -> JiraUser: {fk: {on: source, column: assignee_id}}
+  COMMENTS_ON:
+    JiraComment -> JiraIssue: {fk: {on: source, column: issue_id}}
+  WRITTEN_BY:
+    JiraComment -> JiraUser: {fk: {on: source, column: author_id}}
+  CITES:
+    JiraIssue -> GitLabRef: {fk: {on: target, column: issue_id}}

@@ -1,3 +1,0 @@
-kind: package
-name: integration.linear
-requires: [gitlab]
