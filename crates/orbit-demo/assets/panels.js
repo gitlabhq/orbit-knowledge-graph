@@ -69,7 +69,8 @@
       case "Security": {
         const lookups = s.rendered.filter((r) => r.kind === "sql" && s.backend !== "clickhouse");
         const parts = [heading("Operations the emitted plan adds"), pre([...added(s)])];
-        parts.push(heading("Row checks on this stage's remote rows"), table(sub.row_checks || []));
+        const checks = s.checks.map((c) => ({ provider: c.provider, permission: c.permission, resource: c.resource, field: c.field, asked: JSON.stringify(c.asked), allowed: JSON.stringify(c.allowed) }));
+        parts.push(heading("Row checks the stage's remote rows went through"), table(checks));
         if (lookups.length) parts.push(heading("Scope lookups on the relational connection"), ...lookups.flatMap(request));
         parts.push(heading("Caller scope answers"), table(run.grants));
         return parts;

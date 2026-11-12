@@ -9,6 +9,8 @@ use orbit_demo::lockdown::CSP;
 use serde_json::{Value, json};
 use support::{checked, exchange, get, post};
 
+const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, mr.title, m.author, m.text ORDER BY mr.iid LIMIT 10";
+
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
 async fn events(page: SocketAddr, caller: &str, query: &str) -> Vec<Value> {
@@ -46,6 +48,10 @@ fn kinds(events: &[Value]) -> Vec<String> {
 }
 
 fn paths(events: &[Value]) -> Vec<String> {
+    column(events, "f_path")
+}
+
+fn column(events: &[Value], name: &str) -> Vec<String> {
     let done = events
         .iter()
         .find(|event| event["event"] == "done")
@@ -54,7 +60,7 @@ fn paths(events: &[Value]) -> Vec<String> {
         .as_array()
         .unwrap()
         .iter()
-        .map(|row| row["f_path"].as_str().unwrap().to_string())
+        .map(|row| row[name].as_str().unwrap().to_string())
         .collect();
     paths.sort();
     paths
@@ -72,7 +78,6 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
         kinds(&ran),
         [
             "caller",
-            "stages",
             "logical",
             "split",
             "started 0",
@@ -88,6 +93,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
             "planned 1",
             "emitted 1",
             "rendered 1",
+            "check",
             "rows 1",
             "samples 1",
             "finished 1",
@@ -145,6 +151,26 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
         paths(&events(page, "guest", QUERY_4).await),
         ["web/theme.rs"]
     );
+    let zanzibar = events(page, "zanzibar", QUERY_4).await;
+    assert_eq!(paths(&zanzibar), ["src/auth.rs", "src/limiter.rs"]);
+    let check = zanzibar
+        .iter()
+        .find(|event| event["event"] == "check")
+        .unwrap();
+    assert_eq!(
+        (&check["provider"], &check["permission"], &check["field"]),
+        (&json!("rails"), &json!("read_code"), &json!("project_id"))
+    );
+    let sub_plan = &split["stages"][1]["logical"];
+    assert!(
+        sub_plan.as_array().is_some_and(|plan| !plan.is_empty()),
+        "{sub_plan}"
+    );
+
+    let discussed = events(page, "maintainer", DISCUSSED).await;
+    assert_eq!(column(&discussed, "m_text").len(), 3, "{discussed:?}");
+    let guest = events(page, "guest", DISCUSSED).await;
+    assert_eq!(column(&guest, "m_text"), Vec::<String>::new());
 
     let host = format!("127.0.0.1:{}", page.port());
     let index = exchange(page, &get("/", &host, "")).await;

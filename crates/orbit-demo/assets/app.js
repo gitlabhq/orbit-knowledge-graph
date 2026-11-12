@@ -13,7 +13,7 @@ function fresh() {
 function stage(id) {
   let found = run.stages.find((s) => s.id === id);
   if (!found) {
-    found = { id, backend: "clickhouse", connection: "main", status: "waiting", rendered: [], samples: [], keys: [], hydration: true };
+    found = { id, backend: "clickhouse", connection: "main", status: "waiting", rendered: [], samples: [], keys: [], checks: [], hydration: true };
     run.stages.push(found);
     const last = run.stages.filter((s) => s.id < id && !s.hydration).pop();
     if (last) run.edges.push({ id: `e${last.id}-${id}`, from: last.id, to: id, kind: "rows", label: "rows: checked ids" });
@@ -30,17 +30,18 @@ function edgeLabel(edge) {
 function apply(event) {
   switch (event.event) {
     case "caller": run.grants = event.grants; break;
-    case "stages": for (const s of event.stages) run.subplans[s.stage] = s; break;
+    case "check": stage(run.current).checks.push(event); break;
     case "logical": run.logical = event.plan; break;
     case "split":
       for (const info of event.stages) {
-        run.stages.push({ ...info, status: "waiting", rendered: [], samples: [], keys: [] });
+        run.stages.push({ ...info, status: "waiting", rendered: [], samples: [], keys: [], checks: [] });
+        run.subplans[info.id] = { plan: info.logical };
         for (const input of info.inputs) {
           run.edges.push({ id: `e${input.from}-${info.id}-${input.kind}`, from: input.from, to: info.id, kind: input.kind, properties: input.properties || [] });
         }
       }
       break;
-    case "started": stage(event.stage).status = "running"; break;
+    case "started": run.current = event.stage; stage(event.stage).status = "running"; break;
     case "planned": stage(event.stage).planned = event.plan; markRows(event.stage, event.plan); break;
     case "emitted": stage(event.stage).emitted = event.plan; break;
     case "rendered": stage(event.stage).rendered.push(...event.requests); break;

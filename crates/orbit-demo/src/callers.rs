@@ -17,6 +17,9 @@ use query_data_model::Model;
 use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 use query_engine::shared::dag::{ExecutorError, RowChecks};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+use crate::run::RunLog;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -117,18 +120,21 @@ impl Session {
         Ok(credential.handle)
     }
 
-    pub fn checks(&self) -> DeploymentChecks {
+    pub fn checks(&self, log: Arc<RunLog>) -> DeploymentChecks {
         DeploymentChecks {
             deployment: Arc::clone(&self.deployment),
             caller: self.caller.clone(),
+            log,
         }
     }
 }
 
-/// Answers each remote row check with the provider the check names, as the caller.
+/// Answers each remote row check with the provider the check names, as the caller, and logs
+/// what each check was asked and allowed.
 pub struct DeploymentChecks {
     deployment: Arc<Deployment>,
     caller: Caller,
+    log: Arc<RunLog>,
 }
 
 #[async_trait]
@@ -138,16 +144,28 @@ impl RowChecks for DeploymentChecks {
         check: &RowCheck,
         keys: Vec<Key>,
     ) -> Result<BTreeSet<Key>, ExecutorError> {
+        let asked = keys.clone();
         let request = CheckRequest {
             permission: check.permission.clone(),
             resource: check.resource.clone(),
             ids: keys,
         };
-        let mut allowed = self
+        let allowed = self
             .deployment
             .check(&self.caller, &check.provider, vec![request])
             .await
-            .map_err(|error| ExecutorError(error.to_string()))?;
-        Ok(allowed.pop().unwrap_or_default())
+            .map_err(|error| ExecutorError(error.to_string()))?
+            .pop()
+            .unwrap_or_default();
+        self.log.push(json!({
+            "event": "check",
+            "provider": check.provider,
+            "permission": check.permission,
+            "resource": check.resource,
+            "field": check.field,
+            "asked": asked,
+            "allowed": allowed,
+        }));
+        Ok(allowed)
     }
 }
