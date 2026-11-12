@@ -196,6 +196,31 @@ async fn an_empty_key_set_skips_the_stage_that_reads_it() {
     assert!(ran.rows().is_empty());
 }
 
+/// A stage that returns more rows than the key cap fails, even when many rows share a key, so
+/// no later page loses rows past the cap.
+#[tokio::test]
+async fn a_stage_over_the_row_cap_fails_however_few_keys_it_holds() {
+    let merge_requests = |count: i64| -> Vec<query_data_model::catalog::Row> {
+        (0..count)
+            .map(|n| {
+                let id = 5000 + n % 500;
+                row(
+                    json!({"mr_iid": n, "mr_title": "t", "mr_id": id, "_orbit_mr_id": id, "_orbit_mr_type": "MergeRequest"}),
+                )
+            })
+            .collect()
+    };
+    let error = run(MENTIONS, &caller("1/9970/"), merge_requests(1001))
+        .await
+        .error();
+    assert_eq!(
+        error,
+        "limit exceeded: stage 0 returned more than 1000 rows; a stage hands at most 1000 rows to the next"
+    );
+    let ran = run(MENTIONS, &caller("1/9970/"), merge_requests(1000)).await;
+    assert!(ran.outcome.is_ok());
+}
+
 #[tokio::test]
 async fn joined_text_is_excerpted_like_a_single_stage_response() {
     let title = "a".repeat(200_000);

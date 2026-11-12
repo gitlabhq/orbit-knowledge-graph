@@ -204,7 +204,8 @@ impl<'r> Runner<'r> {
             }
             stage.query = StageQuery::Gql(bound);
         }
-        let (connection, backend) = (stage.connection.clone(), stage.backend);
+        let (connection, backend, response) =
+            (stage.connection.clone(), stage.backend, stage.response);
         let remote_checks = match (
             &stage.query,
             self.env
@@ -240,6 +241,14 @@ impl<'r> Runner<'r> {
                 .into());
             }
         };
+        let rows: usize = executed.batches.iter().map(RecordBatch::num_rows).sum();
+        let cap = self.env.limits.stage_keys;
+        if !response && rows > cap {
+            return Err(QueryError::LimitExceeded(format!(
+                "stage {id} returned more than {cap} rows; a stage hands at most {cap} rows to the next"
+            ))
+            .into());
+        }
         let executed = remote::checked(self.checks, &remote_checks, executed).await?;
         if let Request::Query(query) = &compiled.request {
             contexts.push((id, query.base.result_context.clone()));

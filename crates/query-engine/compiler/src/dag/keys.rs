@@ -28,17 +28,6 @@ pub fn bind(
     limits: &QueryLimits,
     remotes: &[String],
 ) -> Result<Statement> {
-    for set in sets {
-        if set.keys.len() > limits.stage_keys {
-            return Err(QueryError::Validation(format!(
-                "stage {} returned {} keys for {}; a stage hands at most {} to the next",
-                set.input.from,
-                set.keys.len(),
-                set.input.binding,
-                limits.stage_keys
-            )));
-        }
-    }
     let limits = QueryLimits {
         in_values: limits.in_values.max(limits.stage_keys),
         pinned_ids: limits.pinned_ids.max(limits.stage_keys),
