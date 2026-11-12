@@ -1337,3 +1337,66 @@ fn misconfigured_url_reports_its_own_reason_for_another_skill() {
         stderr(&output)
     );
 }
+
+#[test]
+fn grep_searches_any_server_entity_through_graph_queries() {
+    let schema = r#"{"data":{"orbit":{"schema":{
+        "nodes":{"nodes":[
+          {"name":"Pipeline","properties":{"nodes":[
+            {"name":"id","textSearchable":false,"defaultColumn":true},
+            {"name":"ref","textSearchable":true,"defaultColumn":true},
+            {"name":"sha","textSearchable":true,"defaultColumn":false}]}},
+          {"name":"Vulnerability","properties":{"nodes":[
+            {"name":"title","textSearchable":null,"defaultColumn":null}]}}]},
+        "edges":{"nodes":[{"name":"IN_PROJECT","endpoints":{"nodes":[
+          {"source":{"name":"Pipeline"},"target":{"name":"Project"}}]}}]}}}}}"#;
+    let project = r#"{"data":{"project":{"id":"gid://gitlab/Project/7"},"group":null}}"#;
+    let hit = r#"{"result":{"nodes":[{"type":"Pipeline","id":"42","ref":"main"}]}}"#;
+    let rejected = Reply {
+        status: 400,
+        reason: "Bad Request",
+        etag: None,
+        body: r#"{"code":"compile_error","message":"schema violation: search pattern must be at least 3 characters, got 2"}"#.to_string(),
+    };
+    let mut replies: Vec<Reply> = [schema, project, hit, hit, project, hit, hit, project]
+        .into_iter()
+        .map(ok_reply)
+        .collect();
+    replies.extend([rejected.clone(), rejected]);
+    let (url, server) = mock_server(replies);
+    let (cache, dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let grep = |query: &str| {
+        hermetic_orbit(&cache, &["grep", query])
+            .current_dir(dir.path())
+            .env("ORBIT_DATA_DIR", cache.path())
+            .env("ORBIT_API_BASE_URL", &url)
+            .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+            .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+            .output()
+            .unwrap()
+    };
+    let found = grep("gitlab:pipeline:main repo:g/p");
+    assert_eq!(
+        String::from_utf8_lossy(&found.stdout),
+        "GitLab Pipeline \"main\" in 127.0.0.1/g/p:\nPipeline[42] ref=main\n",
+        "{}",
+        stderr(&found)
+    );
+    let unknown = grep("gitlab:vulnerability:main repo:g/p");
+    assert!(
+        stderr(&unknown).contains("needs GitLab 19.6"),
+        "{}",
+        stderr(&unknown)
+    );
+    assert_eq!(grep("gitlab:pipeline:main repo:g/p").stdout, found.stdout);
+    let short = grep("gitlab:pipeline:ab repo:g/p");
+    assert_eq!(
+        stderr(&short),
+        "orbit: not searched: \"ab\" (search pattern must be at least 3 characters, got 2)\n"
+    );
+    let paths = request_paths(&server.join().unwrap());
+    assert_eq!(
+        paths.iter().filter(|path| *path == "/api/graphql").count(),
+        4
+    );
+}

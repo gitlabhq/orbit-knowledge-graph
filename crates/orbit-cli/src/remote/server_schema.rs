@@ -13,8 +13,25 @@ use super::error::RemoteError;
 
 const TTL: Duration = Duration::from_secs(15 * 60);
 const SCHEMA_WAIT: Duration = Duration::from_secs(3);
+const FORMAT: u32 = 3;
+pub(crate) const PROVIDER: &str = "gitlab";
 
 pub(crate) type Providers = BTreeMap<String, Vec<String>>;
+pub(crate) type Entities = BTreeMap<String, Entity>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum Anchor {
+    Edge,
+    Column,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Entity {
+    pub(crate) searchable: Option<Vec<String>>,
+    pub(crate) columns: Vec<String>,
+    pub(crate) anchor: Anchor,
+}
 
 #[derive(Default)]
 pub(crate) struct Session {
@@ -23,11 +40,50 @@ pub(crate) struct Session {
     pub(crate) providers: Providers,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 struct Cached {
+    format: u32,
     identity: String,
     fetched_at: u64,
     providers: Providers,
+    #[serde(default)]
+    entities_fetched_at: u64,
+    #[serde(default)]
+    entities: Entities,
+}
+
+pub(crate) fn cached_entity_names(dir: &Path) -> Vec<String> {
+    let Ok(client) = OrbitClient::from_env_in(dir) else {
+        return Vec::new();
+    };
+    let identity = ontology::migrations::sha256_hex(&client.identity());
+    read_cache(&identity)
+        .map(|cached| {
+            let mut names: Vec<String> = cached.providers.into_values().flatten().collect();
+            names.extend(cached.entities.into_keys());
+            names
+        })
+        .unwrap_or_default()
+}
+
+pub(crate) fn cached_entities(client: &OrbitClient) -> Option<Entities> {
+    let identity = ontology::migrations::sha256_hex(&client.identity());
+    read_cache(&identity)
+        .filter(|cached| fresh(cached.entities_fetched_at) && !cached.entities.is_empty())
+        .map(|cached| cached.entities)
+}
+
+pub(crate) fn remember_entities(client: &OrbitClient, entities: &Entities) {
+    let identity = ontology::migrations::sha256_hex(&client.identity());
+    let mut cached = read_cache(&identity).unwrap_or_default();
+    cached.entities_fetched_at = now();
+    cached.entities = entities.clone();
+    cached.identity = identity;
+    write(cached);
+}
+
+fn fresh(at: u64) -> bool {
+    now().saturating_sub(at) < TTL.as_secs()
 }
 
 pub(crate) fn session_start(dir: &Path) -> Session {
@@ -49,16 +105,21 @@ pub(crate) fn session_start(dir: &Path) -> Session {
     let cached = read_cache(&identity);
     let fresh = cached
         .as_ref()
-        .is_some_and(|cached| now().saturating_sub(cached.fetched_at) < TTL.as_secs());
+        .is_some_and(|cached| fresh(cached.fetched_at));
     let Some(fetched) = block_on_short(ask(client, scope, !fresh)) else {
         return signed_in;
     };
-    let cached = cached.map(|cached| cached.providers);
-    let providers = match fresh {
-        true => cached.unwrap_or_default(),
-        false => {
-            let providers = fetched.or(cached).unwrap_or_default();
-            write_cache(identity, &providers);
+    let providers = match (fresh, cached) {
+        (true, cached) => cached.map(|cached| cached.providers).unwrap_or_default(),
+        (false, cached) => {
+            let mut cached = cached.unwrap_or_default();
+            if let Some(fetched) = fetched {
+                cached.providers = fetched;
+            }
+            cached.identity = identity;
+            cached.fetched_at = now();
+            let providers = cached.providers.clone();
+            write(cached);
             providers
         }
     };
@@ -174,10 +235,10 @@ fn providers(data: &SessionStart) -> Option<Providers> {
             entities.push(name.to_string());
         }
     }
-    (!entities.is_empty()).then(|| BTreeMap::from([("gitlab".to_string(), entities)]))
+    (!entities.is_empty()).then(|| BTreeMap::from([(PROVIDER.to_string(), entities)]))
 }
 
-fn is_name(name: &str) -> bool {
+pub(crate) fn is_name(name: &str) -> bool {
     name.len() <= 48
         && name.starts_with(|c: char| c.is_ascii_uppercase())
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
@@ -195,18 +256,14 @@ fn read_cache(identity: &str) -> Option<Cached> {
     let text = std::fs::read(cache_path(identity)?).ok()?;
     serde_json::from_slice::<Cached>(&text)
         .ok()
-        .filter(|cached| cached.identity == identity)
+        .filter(|cached| cached.format == FORMAT && cached.identity == identity)
 }
 
-fn write_cache(identity: String, providers: &Providers) {
-    let Some(path) = cache_path(&identity) else {
+fn write(mut cached: Cached) {
+    let Some(path) = cache_path(&cached.identity) else {
         return;
     };
-    let cached = Cached {
-        identity,
-        fetched_at: now(),
-        providers: providers.clone(),
-    };
+    cached.format = FORMAT;
     if let (Some(parent), Ok(body)) = (path.parent(), serde_json::to_vec(&cached)) {
         let _ = std::fs::create_dir_all(parent);
         let _ = std::fs::write(path, body);
