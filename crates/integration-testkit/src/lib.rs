@@ -5,9 +5,11 @@ mod context;
 pub mod dag_fakes;
 #[cfg(test)]
 mod dag_scenarios;
+pub mod lake;
 pub mod mock_redaction;
 pub mod plan_shape;
 pub mod query_scenario;
+pub mod s3;
 pub mod scenario;
 mod seed;
 pub mod seeded_remote;

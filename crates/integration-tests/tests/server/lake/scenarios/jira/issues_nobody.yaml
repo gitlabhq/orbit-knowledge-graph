@@ -1,0 +1,10 @@
+description: A caller whose group holds no Jira rows reads nothing
+
+config:
+  security: nobody
+
+query: |
+  MATCH (i:JiraIssue) RETURN i.key, i.summary LIMIT 20
+
+expect:
+  node_count: 0

@@ -165,6 +165,11 @@ run = "./scripts/dev/run-container-tests.sh --all-features --test server_contain
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, redaction, graph formatter)"
 
+[tasks."test:integration:lake"]
+run = "./scripts/dev/run-container-tests.sh -p integration-tests --test server_containers --no-fail-fast --retries 0 -E 'test(lake)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run the DuckDB-over-S3 lake tests on a RustFS container, without --all-features so DuckDB loads the official extensions"
+
 [tasks."test:integration:overlay"]
 run = "GKG_TEST_MODEL_OVERLAY={{arg(name='overlay')}} ./scripts/dev/run-container-tests.sh --all-features --test server_containers --test indexer_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(denormalized_tables_match_their_source_join)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }

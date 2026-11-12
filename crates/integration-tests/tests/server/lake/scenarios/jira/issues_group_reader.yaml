@@ -1,0 +1,17 @@
+description: A group reader sees the group's issues and is denied the private group and the user scope
+
+config:
+  security: group
+
+query: |
+  MATCH (i:JiraIssue) RETURN i.key, i.summary ORDER BY i.key LIMIT 20
+
+expect:
+  node_count: 2
+  nodes:
+    JiraIssue:
+      count: 2
+      order: [10100, 10101]
+      rows:
+        - { id: "10100", key: ORB-1, summary: Fix the login redirect }
+        - { id: "10101", key: ORB-2 }

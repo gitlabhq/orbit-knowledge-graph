@@ -1,0 +1,18 @@
+description: A status category filter reads the enum label the Parquet rows store, at the latest version
+
+config:
+  security: org
+
+query: |
+  MATCH (i:JiraIssue {status_category: 'done'}) RETURN i.key, i.status_category ORDER BY i.key LIMIT 20
+
+expect:
+  node_count: 1
+  nodes:
+    JiraIssue:
+      count: 1
+      order: [10100]
+      filters:
+        status_category: done
+      rows:
+        - { id: "10100", key: ORB-1 }

@@ -1,0 +1,23 @@
+description: A comment joins the issue it comments on inside the caller's group only
+
+config:
+  security: group
+
+query: |
+  MATCH (c:JiraComment)-[:COMMENTS_ON]->(i:JiraIssue) RETURN c.body, i.key ORDER BY i.key LIMIT 20
+
+expect:
+  node_count: 2
+  nodes:
+    JiraComment:
+      count: 1
+      rows:
+        - { id: "20000", body: Fixed in the linked merge request }
+    JiraIssue:
+      count: 1
+      order: [10100]
+      rows:
+        - { id: "10100", key: ORB-1 }
+  edges:
+    COMMENTS_ON:
+      - [20000, 10100]

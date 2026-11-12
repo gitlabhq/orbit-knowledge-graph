@@ -4,6 +4,7 @@
 
 mod duckdb;
 mod format;
+mod lake;
 mod pagination;
 #[cfg(test)]
 mod regression;
@@ -36,12 +37,14 @@ use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
 use crate::visitor::{NodeExt, Requirement, ResponseView, int};
 use crate::{SeededColumnResolver, collect_subtest_results, load_data_model};
+use query_engine::compiler::orbit_authorization::Key;
 
 pub use duckdb::run_duckdb_dir;
 pub use format::{
     PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, QueryStep, RedactionConfig,
     ScenarioConfig, SecurityOverride,
 };
+pub use lake::run_lake_dir;
 
 use orbit_server::auth::{Claims, SourceType, TraversalPathClaim};
 use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage, graph_executors};
@@ -78,7 +81,7 @@ pub async fn load_yaml_seed(ctx: &TestContext, presets_dir: &str, name: &str) {
     crate::scenario::seed::apply_seed(ctx, &seed, &Default::default(), &columns, name).await;
 }
 
-fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
+pub fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
     let path = presets_dir.join("seed.yaml");
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("seed presets at {}: {e}", path.display()));
@@ -710,23 +713,28 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             );
         }
         for row in &ne.rows {
-            let id = row
-                .get("id")
-                .and_then(|v| v.as_i64())
-                .unwrap_or_else(|| panic!("{label}: node {entity} row missing integer 'id'"));
+            let id = match row.get("id") {
+                Some(serde_json::Value::Number(id)) if id.is_i64() => {
+                    Key::Int(id.as_i64().unwrap())
+                }
+                Some(serde_json::Value::String(id)) => {
+                    id.parse::<i64>().map_or(Key::Text(id.clone()), Key::Int)
+                }
+                _ => panic!("{label}: node {entity} row has no integer or string 'id'"),
+            };
             let prop_count = row.keys().filter(|k| *k != "id").count();
             assert!(
                 prop_count > 0,
                 "{label}: node {entity}/{id} row has no property assertions (only 'id')"
             );
             let found = view
-                .find_node(entity, id)
+                .find_node_by_key(entity, &id)
                 .unwrap_or_else(|| panic!("{label}: node {entity}/{id} not found"));
             for (prop, expected) in row {
                 if prop == "id" {
                     continue;
                 }
-                assert_property(found, prop, expected, entity, id, label);
+                assert_property(found, prop, expected, entity, &id, label);
             }
         }
         for prop in &ne.prop_present {
@@ -1100,7 +1108,7 @@ fn assert_property(
     prop: &str,
     expected: &serde_json::Value,
     entity: &str,
-    id: i64,
+    id: &Key,
     label: &str,
 ) {
     match expected {

@@ -1,0 +1,19 @@
+description: An org reader sees every live Jira issue at its latest version; the tombstoned ORB-3 never shows
+
+config:
+  security: org
+
+query: |
+  MATCH (i:JiraIssue) RETURN i.key, i.summary ORDER BY i.key LIMIT 20
+
+expect:
+  node_count: 4
+  nodes:
+    JiraIssue:
+      count: 4
+      order: [10300, 10100, 10101, 10200]
+      rows:
+        - { id: "10300", key: ME-1, summary: Renew my laptop }
+        - { id: "10100", key: ORB-1, summary: Fix the login redirect }
+        - { id: "10101", key: ORB-2, summary: Flaky deploy job }
+        - { id: "10200", key: SEC-1, summary: Rotate the TLS keys }

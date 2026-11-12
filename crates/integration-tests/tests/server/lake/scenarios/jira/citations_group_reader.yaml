@@ -1,0 +1,22 @@
+description: An issue cites the GitLab references found in its text, inside the caller's scope
+
+config:
+  security: group
+
+query: |
+  MATCH (i:JiraIssue)-[:CITES]->(r:GitLabRef) RETURN i.key, r.url ORDER BY i.key LIMIT 20
+
+expect:
+  node_count: 2
+  nodes:
+    JiraIssue:
+      count: 1
+      order: [10100]
+      rows:
+        - { id: "10100", key: ORB-1 }
+    GitLabRef:
+      count: 1
+      rows:
+        - { id: ref-1, url: "https://gitlab.example.com/public-group/public-project/-/merge_requests/1" }
+  edge_count:
+    CITES: 1
