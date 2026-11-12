@@ -9,13 +9,14 @@ exists to break the dependency cycle: it depends on `orbit-server`, `compiler`, 
 ```plaintext
 tests/
   local.rs              # local binary (no Docker)
+  plan_shape.rs         # plan_shape binary (plan-shape fixtures, no Docker)
   server_containers.rs  # server container tests
   indexer_containers.rs # indexer container tests
   cli.rs                # cli binary (the orbit binary as a subprocess)
   billing_boundary.rs   # billing_boundary binary (orbit-billing dependents)
   common/               # shared helpers
   canary/               # TestContext canary
-  compiler/             # compiler, dialect, named query, and plan-shape tests
+  compiler/             # compiler, dialect, and named query tests; plan-shape fixtures in compiler/plan_shape/
   indexer/              # indexer tests; indexer scenarios in indexer/scenarios/
   server/               # server tests; query scenarios in server/data_correctness/scenarios/
   fixtures/             # CLI fixtures
@@ -24,6 +25,7 @@ tests/
 | Binary | Tests | CI job |
 |---|---|---|
 | `local` | compiler and querying pipeline, no Docker | `compiler-integration-test` |
+| `plan_shape` | plan-shape fixtures, with the production query config, no Docker | `compiler-integration-test` |
 | `server_containers` | Server tests with ClickHouse | `integration-test`, `integration-test-data-correctness`, `corpus-smoke-test` |
 | `indexer_containers` | Indexer tests with ClickHouse and NATS | `integration-test`, `integration-test-data-correctness` |
 | `cli` | the `orbit` CLI | `cli-integration-test` |
@@ -56,11 +58,13 @@ To run specific suites or tests directly:
 cargo nextest run --test local                                           # all local tests
 cargo nextest run --test local -E 'test(compiler::)'                     # compiler only
 cargo nextest run --test local -E 'test(querying_pipeline::)'            # querying pipeline only
+cargo nextest run --test plan_shape                                      # plan-shape fixtures
 
 # Container tests
 export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
 cargo nextest run --test server_containers --test indexer_containers     # all container tests
 cargo nextest run --test server_containers -E 'test(data_correctness)'   # one suite
+cargo nextest run --test server_containers -E 'test(plan_shape_index_explains)' # plan-shape EXPLAIN index checks
 cargo nextest run --test server_containers -E 'test(infra_canary)'       # canary
 
 # Run YAML-driven scenarios, optionally filtered by category

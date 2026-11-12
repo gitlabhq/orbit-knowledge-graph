@@ -25,6 +25,13 @@ pub async fn run_index_explains(ctx: &TestContext, directory: &Path) {
         if indexes.is_empty() {
             continue;
         }
+        if let Some(overlay) = &scenario.ontology_overlay {
+            failures.push(format!(
+                "{}: index EXPLAIN runs on the default schema, so drop ontology_overlay {overlay} or the indexes check",
+                path.display()
+            ));
+            continue;
+        }
         for (language, raw) in &scenario.query {
             let label = format!(
                 "{}: {} [{language}/clickhouse]",
