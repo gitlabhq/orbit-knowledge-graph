@@ -22,6 +22,8 @@ Use mise for all tasks.
 
 Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
 Commits title and keep it there through review.
+Exception: docs MRs that the docs-write flow opens (branches `docs-write/mr-*`)
+keep CI on and never carry `[skip ci]`. The flow waits for a green pipeline.
 
 When ready for CI, remove `[skip ci]` from the title, then start a pipeline.
 Editing the title alone starts no pipeline. When the MR is ready to be reviewed, add the `~workflow::ready for review` label.
@@ -57,3 +59,5 @@ Before you create or edit a skill, follow the [`authoring-skills`](https://gitla
 ## Writing docs
 
 For user docs (`docs/docs-gitlab-com/`), follow the [`gitlab-docs-change`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-change/SKILL.md) skill.
+The docs-write flow (`.gitlab/duo/catalog/flows/`) follows the `docs-write` skill from
+[`gitlab-org/orbit/team/skills`](https://gitlab.com/gitlab-org/orbit/team/skills) instead.
