@@ -217,14 +217,14 @@ async fn a_caller_who_can_read_nothing_gets_no_request() {
 async fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture() {
     let ctx = caller("1/9970/");
     let pushed = run(
-        "MATCH (m:SlackMessage) WHERE m.id = 'm1' RETURN m.text LIMIT 5",
+        "MATCH (m:SlackMessage) WHERE m.workspace = 'T01' RETURN m.text LIMIT 5",
         &ctx,
         Vec::new(),
     )
     .await;
     assert_eq!(
         pushed.error(),
-        "schema violation: search.messages cannot push down equality on SlackMessage.id; it filters on channel, author, sent_at, merge_request_id, text (contains)"
+        "schema violation: search.messages cannot push down equality on SlackMessage.workspace; it filters on id, channel, author, sent_at, merge_request_id, text (contains)"
     );
     let capture = run(&CODE.replace("match.ARGS", "match.BODY"), &ctx, Vec::new()).await;
     assert_eq!(
