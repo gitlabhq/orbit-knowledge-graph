@@ -245,7 +245,7 @@ pub fn compile_hydration(
 ) -> Result<Compiled> {
     let Frontend::Server(catalog) = env.frontend else {
         return Err(QueryError::PipelineInvariant(
-            "hydration reads the server's graph connection".into(),
+            "hydration runs on the server frontend's connection".into(),
         ));
     };
     let (query, planned, emitted) =

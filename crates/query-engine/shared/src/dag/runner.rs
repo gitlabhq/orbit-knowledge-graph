@@ -298,7 +298,7 @@ impl<'r> Runner<'r> {
         self.trace(id, &compiled);
         let compiler::dag::Frontend::Server(graph) = self.env.frontend else {
             return Err(QueryError::PipelineInvariant(
-                "hydration reads the server's graph connection".into(),
+                "hydration runs on the server frontend's connection".into(),
             )
             .into());
         };

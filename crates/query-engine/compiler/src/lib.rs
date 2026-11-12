@@ -187,7 +187,7 @@ pub fn compile_local(
         .and_then(dag::Dag::into_single)
         .and_then(statement)
         .count_err()?;
-    let grants = Grants::new(orbit_authorization::Caller::new("local", true, ()));
+    let grants = Grants::new(orbit_authorization::Caller::new("cli", true, ()));
     let mut ctx = config::GqlDuckdbCtx::new(grants, *limits, false, Arc::clone(data_model));
     ctx.set_statement(stage);
     config::run_gql_duckdb(&mut ctx)
