@@ -211,10 +211,7 @@ impl<'r> Runner<'r> {
         let checks = std::mem::take(&mut stage.checks);
         let compiled = compile(stage, inputs, &self.env)?;
         self.trace(id, &compiled);
-        let trusted = backend == compiler::dag::Backend::Engine
-            || (backend == compiler::dag::Backend::DuckDb
-                && matches!(self.env.primary, compiler::dag::Primary::DuckDb(_)));
-        if !compiled.proved && !trusted {
+        if !compiled.proved && backend != compiler::dag::Backend::Engine {
             return Err(QueryError::Security(format!(
                 "stage {id} carries no proof that each read has its policy"
             ))

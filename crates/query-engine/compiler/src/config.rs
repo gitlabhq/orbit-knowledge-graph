@@ -238,9 +238,9 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         gql_duckdb {
             backend: query_data_model::DuckDb
-            env: [limits, trace]
-            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned]
-            phases: [plan, result_contract, paginate, materialize, codegen]
+            env: [grants, limits, trace]
+            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned, proved]
+            phases: [plan, result_contract, paginate, materialize, security, security_check, codegen]
         }
         gql_orbit_code {
             backend: query_data_model::implementations::orbit_code::OrbitCode
@@ -417,7 +417,7 @@ fn result_contract(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()
     Ok(())
 }
 
-fn security(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) -> Result<()> {
+fn security(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     let plan = require(ctx.take_relational(), "relational")?;
     let model = ctx.data_model();
     let plan = security::apply_security_context(plan, model, ctx.grants())?;
@@ -436,9 +436,7 @@ fn paginate(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     Ok(())
 }
 
-fn security_check(
-    ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>,
-) -> Result<()> {
+fn security_check(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let model = ctx.data_model();
     security_check::verify(plan, model, ctx.grants())?;

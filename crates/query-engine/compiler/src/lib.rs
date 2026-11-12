@@ -179,9 +179,8 @@ pub fn compile(
     compile_stage(stage, data_model, grants, limits)
 }
 
-/// Compile a graph query into DuckDB SQL for local execution.
-///
-/// No security or hydration phases — local mode trusts all data.
+/// Compile a graph query into DuckDB SQL for local execution, as a caller who holds no scope:
+/// local stores are trusted, so their reads need none.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(
     raw: &str,
@@ -200,7 +199,8 @@ pub fn compile_local(
         .and_then(dag::Dag::into_single)
         .and_then(statement)
         .count_err()?;
-    let mut ctx = config::GqlDuckdbCtx::new(*limits, false, Arc::clone(data_model));
+    let grants = Grants::new(orbit_authorization::Caller::new("local", true, ()));
+    let mut ctx = config::GqlDuckdbCtx::new(grants, *limits, false, Arc::clone(data_model));
     ctx.set_statement(stage);
     config::run_gql_duckdb(&mut ctx)
         .and_then(|()| output(ctx.take_output()))

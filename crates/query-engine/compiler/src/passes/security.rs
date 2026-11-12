@@ -15,30 +15,21 @@ use orbit_authorization::{Grants, Key, ScopeSet};
 use orbit_utils::query_types::SqlType;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 use query_data_model::Catalog;
-use query_data_model::implementations::clickhouse::ClickHouse;
+use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
-    BinaryOp, Expr, Function, Operation, Relational,
+    BinaryOp, Expr, Function, Operation, Relational, RelationalPlan,
 };
 use query_data_model::plan::tracking::{NodeId, Plan};
 use serde_json::Value;
 
 use super::guards::{scan, scope_set};
 use crate::error::{QueryError, Result};
-use crate::passes::codegen::ClickHousePlan;
 
-pub fn apply_security_context(
-    plan: ClickHousePlan,
-    catalog: &Catalog<ClickHouse>,
+pub fn apply_security_context<B: RelationalBackend>(
+    plan: RelationalPlan<B>,
+    catalog: &Catalog<B>,
     grants: &Grants,
-) -> Result<ClickHousePlan> {
-    // No answers at all means the caller was never resolved; an empty result would hide that.
-    if grants.is_empty() {
-        return Err(QueryError::Security(
-            "the caller holds no scope answers; refusing to compile because every read \
-             would fall back to false and hide the misconfiguration"
-                .into(),
-        ));
-    }
+) -> Result<RelationalPlan<B>> {
     let mut guards = guards(&plan.plan, catalog, grants)?;
     catalog
         .rebuild(plan, |q, step| {
@@ -68,9 +59,9 @@ pub fn apply_security_context(
         .map_err(|error| QueryError::Security(error.to_string()))
 }
 
-fn guards(
-    graph: &Plan<Relational<ClickHouse>>,
-    catalog: &Catalog<ClickHouse>,
+fn guards<B: RelationalBackend>(
+    graph: &Plan<Relational<B>>,
+    catalog: &Catalog<B>,
     grants: &Grants,
 ) -> Result<HashMap<NodeId, Vec<Expr>>> {
     let mut guards = HashMap::new();
@@ -96,6 +87,14 @@ fn guards(
                 else {
                     continue;
                 };
+                // No answers at all means the caller was never resolved; a false filter would hide it.
+                if grants.is_empty() {
+                    return Err(QueryError::Security(
+                        "the caller holds no scope answers; refusing to compile because every read \
+                         would fall back to false and hide the misconfiguration"
+                            .into(),
+                    ));
+                }
                 let set = scope_set(grants, catalog.model(), guard.scope, guard.permission)?;
                 conditions.extend(ScopeFilter::new(set)?.on(Expr::Column(column)));
             }
@@ -114,7 +113,11 @@ fn source_of_rows(operation: &Operation) -> bool {
     )
 }
 
-fn collect_scans(graph: &Plan<Relational<ClickHouse>>, node: NodeId, scans: &mut Vec<NodeId>) {
+fn collect_scans<B: RelationalBackend>(
+    graph: &Plan<Relational<B>>,
+    node: NodeId,
+    scans: &mut Vec<NodeId>,
+) {
     match graph.operation(node) {
         Operation::Join(_) => {
             for input in graph.inputs(node) {
@@ -236,7 +239,10 @@ mod tests {
     use query_data_model::Catalog;
     use query_data_model::implementations::relational::plan::{JoinKind, ReadMode};
 
+    use query_data_model::implementations::clickhouse::ClickHouse;
+
     use super::*;
+    use crate::passes::codegen::ClickHousePlan;
 
     fn model() -> &'static Catalog<ClickHouse> {
         static MODEL: LazyLock<Catalog<ClickHouse>> =
