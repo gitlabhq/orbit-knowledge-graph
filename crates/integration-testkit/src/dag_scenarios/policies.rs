@@ -1,7 +1,6 @@
 //! Remote reads under every policy a code or live store renders: `none` with a check, a `none`
 //! entity next to a `via` entity in one stage, and the `global` scope kind.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use compiler::dag::Rendered;
@@ -13,7 +12,7 @@ use serde_json::json;
 
 use super::single::CODE;
 use super::{Run, json_rows, row};
-use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_packages, run_dag};
+use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_packages, edited, run_dag};
 
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
@@ -35,46 +34,25 @@ async fn run_on(
     Run { events, outcome }
 }
 
-/// The DAG packages with text replaced in some fragments, keeping each package's tier.
-fn replaced(edits: &[(&str, &str, &str)]) -> Packages {
-    let packages = dag_packages();
-    let tiers = packages.tiers().clone();
-    let mut by_tier: BTreeMap<Tier, BTreeMap<String, String>> = BTreeMap::new();
-    for (name, text) in packages.sources() {
-        let mut text = text.clone();
-        for (path, find, with) in edits.iter().filter(|(path, ..)| *path == name) {
-            assert!(text.contains(find), "{path} holds {find}");
-            text = text.replace(find, with);
-        }
-        let tier = tiers[name.split('/').next().unwrap_or_default()];
-        by_tier.entry(tier).or_default().insert(name.clone(), text);
-    }
-    by_tier
-        .into_iter()
-        .map(|(tier, sources)| Packages::new(tier, sources))
-        .reduce(Packages::with)
-        .unwrap()
-}
-
 /// A Slack listing of every message under `policy`, the entity's scope and `enforce` lines; the
 /// Slack sign-in decides which messages come back.
 fn listing(policy: &str) -> Packages {
     let files = [
         (
-            "audit.listing/package.yaml",
-            "kind: package\nname: audit.listing\nrequires: [gitlab, integration.slack]\n".to_string(),
+            "test.listing/package.yaml",
+            "kind: package\nname: test.listing\nrequires: [gitlab, integration.slack]\n".to_string(),
         ),
         (
-            "audit.listing/graph.yaml",
-            "kind: graph\npackage: audit.listing\nentities:\n  Listed:\n    identity: id\n    label: text\n    default_columns: [id, text]\n    properties:\n      id: {type: string}\n      channel: {type: string}\n      text: {type: string}\n".to_string(),
+            "test.listing/graph.yaml",
+            "kind: graph\npackage: test.listing\nentities:\n  Listed:\n    identity: id\n    label: text\n    default_columns: [id, text]\n    properties:\n      id: {type: string}\n      channel: {type: string}\n      text: {type: string}\n".to_string(),
         ),
         (
-            "audit.listing/authorization.yaml",
-            format!("kind: authorization\npackage: audit.listing\nentities:\n  Listed:\n    {policy}\n    permission: read\n    checks: [{{provider: slack, kind: delegated}}]\n    properties: {{open: [id, channel, text]}}\n"),
+            "test.listing/authorization.yaml",
+            format!("kind: authorization\npackage: test.listing\nentities:\n  Listed:\n    {policy}\n    permission: read\n    checks: [{{provider: slack, kind: delegated}}]\n    properties: {{open: [id, channel, text]}}\n"),
         ),
         (
-            "audit.listing/storage/live.yaml",
-            "kind: storage\npackage: audit.listing\nstore: slack\nentities:\n  Listed:\n    complete: true\n    columns:\n      id: {immutable: true}\n      channel: {}\n      text: {}\n    backend:\n      operation: search.messages\n      filters: [id, channel]\n".to_string(),
+            "test.listing/storage/live.yaml",
+            "kind: storage\npackage: test.listing\nstore: slack\nentities:\n  Listed:\n    complete: true\n    columns:\n      id: {immutable: true}\n      channel: {}\n      text: {}\n    backend:\n      operation: search.messages\n      filters: [id, channel]\n".to_string(),
         ),
     ];
     let sources = files
@@ -136,18 +114,21 @@ async fn a_global_live_entity_reads_with_its_permission_alone() {
 /// its store declares, and the `read_code` check decides the rows.
 #[tokio::test]
 async fn a_code_read_under_none_searches_the_named_repositories_through_its_check() {
-    let model = replaced(&[
-        (
-            "gitlab.source_code/authorization.yaml",
-            "orbit_code: {scope_key: {via: IN_PROJECT}}",
-            "orbit_code: none",
-        ),
-        (
-            "gitlab.source_code/storage/orbit_code.yaml",
-            "    backend:\n",
-            "    backend:\n      repository: project_id\n",
-        ),
-    ])
+    let model = edited(
+        dag_packages(),
+        &[
+            (
+                "gitlab.source_code/authorization.yaml",
+                "orbit_code: {scope_key: {via: IN_PROJECT}}",
+                "orbit_code: none",
+            ),
+            (
+                "gitlab.source_code/storage/orbit_code.yaml",
+                "    backend:\n",
+                "    backend:\n      repository: project_id\n",
+            ),
+        ],
+    )
     .load()
     .unwrap();
     let allowed = AllowedKeys::checks("project", [Key::Int(42)]);
@@ -164,20 +145,9 @@ async fn a_code_read_under_none_searches_the_named_repositories_through_its_chec
 /// repositories of `File`'s chain, so it keeps the readable one instead of dropping them all.
 #[tokio::test]
 async fn a_none_entity_before_a_via_entity_keeps_the_readable_repositories() {
-    let model = replaced(&[
-        (
-            "orbit_next.heads/authorization.yaml",
-            "enforce: {orbit_code: {scope_key: {via: HEAD_IN}}}",
-            "enforce: {orbit_code: none}\n    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]",
-        ),
-        (
-            "orbit_next.heads/storage/orbit_code.yaml",
-            "      branch: {immutable: true}\nrelationships:",
-            "      branch: {immutable: true}\n    backend: {repository: project_id}\nrelationships:",
-        ),
-    ])
-    .load()
-    .unwrap();
+    let model = crate::dag_fakes::heads_under_none(dag_packages())
+        .load()
+        .unwrap();
     let merge_requests = vec![
         json!({"mr_iid": 1, "mr_id": 2000, "mr_project_id": 42, "mr_source_branch": "feature-a", "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),
         json!({"mr_iid": 2, "mr_id": 2001, "mr_project_id": 77, "mr_source_branch": "fix-b", "_orbit_mr_id": 2001, "_orbit_mr_type": "MergeRequest"}),

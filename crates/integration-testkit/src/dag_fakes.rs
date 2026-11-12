@@ -208,6 +208,61 @@ pub fn dag_packages() -> query_data_model::Packages {
     query_data_model::testkit::with_demo().with(heads)
 }
 
+/// The DAG packages, plus releases on a second ClickHouse connection keyed by UUID, the
+/// deployments that name them on the graph connection, and reviews on a DuckDB connection.
+pub fn peer_packages() -> query_data_model::Packages {
+    let peers = crate::authorization_variants::platform(&[
+        "peers.releases",
+        "peers.deployments",
+        "peers.lake",
+    ]);
+    dag_packages().with(peers)
+}
+
+/// `packages` with text replaced in some fragments, keeping each package's tier.
+pub fn edited(
+    packages: query_data_model::Packages,
+    edits: &[(&str, &str, &str)],
+) -> query_data_model::Packages {
+    use std::collections::BTreeMap;
+    let tiers = packages.tiers().clone();
+    let mut by_tier: BTreeMap<query_data_model::Tier, BTreeMap<String, String>> = BTreeMap::new();
+    for (name, text) in packages.sources() {
+        let mut text = text.clone();
+        for (path, find, with) in edits.iter().filter(|(path, ..)| *path == name) {
+            assert!(text.contains(find), "{path} holds {find}");
+            text = text.replace(find, with);
+        }
+        let tier = tiers[name.split('/').next().unwrap_or_default()];
+        by_tier.entry(tier).or_default().insert(name.clone(), text);
+    }
+    by_tier
+        .into_iter()
+        .map(|(tier, sources)| query_data_model::Packages::new(tier, sources))
+        .reduce(query_data_model::Packages::with)
+        .expect("at least one package")
+}
+
+/// `packages` with `Head` enforcing only its `read_code` check on the code store, which then
+/// names `Head`'s repository property itself.
+pub fn heads_under_none(packages: query_data_model::Packages) -> query_data_model::Packages {
+    edited(
+        packages,
+        &[
+            (
+                "orbit_next.heads/authorization.yaml",
+                "enforce: {orbit_code: {scope_key: {via: HEAD_IN}}}",
+                "enforce: {orbit_code: none}\n    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]",
+            ),
+            (
+                "orbit_next.heads/storage/orbit_code.yaml",
+                "      branch: {immutable: true}\nrelationships:",
+                "      branch: {immutable: true}\n    backend: {repository: project_id}\nrelationships:",
+            ),
+        ],
+    )
+}
+
 pub fn dag_model() -> Arc<query_data_model::Model> {
     dag_packages().load().unwrap()
 }

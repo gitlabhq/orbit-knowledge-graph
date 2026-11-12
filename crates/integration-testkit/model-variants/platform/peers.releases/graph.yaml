@@ -1,0 +1,14 @@
+kind: graph
+package: peers.releases
+entities:
+  Release:
+    identity: id
+    label: name
+    default_columns: [id, name]
+    properties:
+      id: {type: uuid}
+      name: {type: string}
+      merge_request_id: {type: int64}
+      traversal_path: {type: string}
+relationships:
+  SHIPS: {variants: {Release -> MergeRequest: {cardinality: many_to_one}}}
