@@ -1,6 +1,6 @@
 ---
-source_checksum: cfd7a3bf6cbc9236
-distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
+source_checksum: 1d8a64da1ff294d3
+distilled_at_sha: b0b7e1628f9fb689a18cee2ec91c621c6a26dd2d
 ---
 <!-- Auto-generated from docs.gitlab.com by gitlab-ai-principles-distiller — do not edit manually -->
 
@@ -14,25 +14,33 @@ distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
 - Use active voice instead of passive voice; use passive only when the subject is awkward (e.g., "The report is exported").
 - Write from the customer perspective; DO NOT use "allows you to" or "enables you to" — address the user directly with "you".
 - DO NOT use marketing phrases like "save you time and money", or words like "easily" or "simply".
-- DO NOT write about the document itself (e.g., "This page shows..."); get straight to the point.
 - Use contractions for a friendly tone, but DO NOT use contractions to emphasize a negative, with proper nouns as the subject, in reference documentation, or in error messages.
 - DO NOT use possessives (`'s`) for product or organization names (e.g., use "the Docker CLI", not "Docker's CLI").
+- DO NOT copy and paste content from other sources unless it is a limited quotation with the source cited; rephrase or link to the source instead.
+- DO NOT attribute human qualities such as perception, intent, or awareness to software, systems, or data; describe what the system does mechanically (e.g., "before the response reaches the agent", not "before the agent sees the response"; checked by the `Anthropomorphism.yml` Vale rule).
 
 ### Language and Grammar
 
 - Spell out acronyms on first use per page; DO NOT spell them out more than once.
 - DO NOT make acronyms plural with an apostrophe (use `APIs`, not `API's`).
+- Avoid acronyms in topic titles; avoid making acronyms plural (use `YAML files`, not `YAMLs`) or possessive when the sentence can be rewritten.
 - Spell out zero through nine; use numerals for 10 and above.
 - Use `month day, year` format for dates and `AM`/`PM` for times.
 - DO NOT use semicolons (`;`), en dashes (`–`), or em dashes (`—`); use separate sentences or commas instead.
-- DO NOT use typographer's ("curly") quotation marks; use straight quotes.
-- Use serial (Oxford) commas before the final "and" or "or" in lists of three or more items.
+- DO NOT use typographer's ("curly") quotation marks; use straight quotes (checked by the `NonStandardQuotes.yml` Vale rule).
+- DO NOT use non-breaking spaces or tabs for indentation; use standard spaces (enforced by `lint-doc.sh`).
+- Use one space between sentences (checked by the `SentenceSpacing.yml` Vale rule).
+- Use serial (Oxford) commas before the final "and" or "or" in lists of three or more items (checked by the `OxfordComma.yml` Vale rule).
+- Avoid quotation marks for user input; use backticks instead.
 - DO NOT use Latin abbreviations like `e.g.` or `i.e.`.
 - Avoid ellipses; where unavoidable (for example, in a code block or CLI response) use three periods with no space (`...`).
 - DO NOT use the `&hellip;` HTML entity or the `&#8230;` HTML code; they break how code blocks render.
 - DO NOT include ellipses when documenting UI text (use `Search or go to`, not `Search or go to...`).
 - DO NOT use `-ing` words, ambiguous pronouns like "it", or phrases that hide the subject like "there is"/"there are".
+- DO NOT use culture-specific references (e.g., "kill two birds with one stone") or confusable words such as `since` where `because` is meant.
 - Break up noun strings (e.g., use "custom settings for project integrations", not "project integration custom settings").
+- DO NOT split a feature or product name that contains spaces across a line break.
+- Use prepositions at the end of a sentence when needed; stranded prepositions are fine.
 
 ### Capitalization
 
@@ -40,7 +48,6 @@ distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
 - Keep feature names lowercase unless they are listed as exceptions in markdownlint or the word list.
 - Capitalize GitLab product tiers (e.g., GitLab Free, GitLab Ultimate), third-party product names, and methodology names.
 - DO NOT match capitalization from the Features page or `features.yml` by default.
-- Use the same capitalization as displayed in the UI when referring to UI elements; exception: use sentence case for UI text that is all uppercase.
 
 ### Fake Data and Tokens
 
@@ -48,6 +55,7 @@ distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
 - Use diverse or non-gendered names (e.g., `Sidney Jones`, `Zhang Wei`) and `example.com` email addresses.
 - Use `example.com` for generic domains and `gitlab.example.com` for self-managed references.
 - Use only the approved fake token values from the token table in the style guide.
+- DO NOT show real user information in screenshots; replace it with example data (edit the page in the browser before capturing, use example accounts in a test environment, or blur the data).
 
 ### Markdown and Formatting
 
@@ -55,35 +63,38 @@ distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
 - DO NOT skip heading levels (e.g., `##` directly to `####`).
 - DO NOT use heading levels greater than `H5`; move content to a new page instead.
 - DO NOT use bold text in topic titles.
+- DO NOT use step numbers or words likely to change in topic titles (they change anchor links).
 - Leave one blank line before and after headings, paragraphs, lists, and code blocks.
 - Use dashes (`-`) for unordered lists, not asterisks (`*`).
 - Start every ordered list item with `1.`.
-- Use two spaces per indentation level for unordered lists; three spaces for ordered lists.
+- Use two spaces per indentation level for unordered lists; three spaces for ordered lists; align nested items (code blocks, alert boxes, illustrations, tabs) with the first character of the list item.
 - Use description lists to define terms or differentiate between options; use a regular list for UI elements; DO NOT mix description lists with other styles.
 - DO NOT use HTML in Markdown unless no Markdown equivalent exists, the content is reviewed by a technical writer, and the need is urgent.
 - Any `<a>` tags created with HTML must use absolute URLs as `href` attributes.
-- Use inline links, not reference-style links.
+- Use inline links, not reference-style links (checked by the `ReferenceLinks.yml` Vale rule).
 - Start each new sentence on a new line. Split long lines at approximately 100 characters; DO NOT split links across lines. Try to avoid splitting lines between logical word groupings; keep them together on the same line.
 - Use `<!-- -->` HTML comments for author notes; DO NOT use comments to hide documentation.
 
 ### Text Formatting
 
-- Use **bold** only for UI elements with visible labels and navigation paths; DO NOT use bold for keywords or emphasis.
+- DO NOT use bold for keywords or emphasis; use the UI text shortcodes for UI elements and navigation paths (see `doc/development/documentation/styleguide/ui_text.md`) in new content, and use bold only for hardcoded UI strings.
 - Use inline code (backticks) for user input, filenames, configuration parameters, keywords, API/HTTP methods, HTTP status codes, and short error messages.
-- Use code blocks for CLI/cURL commands and multi-line inputs/outputs; add a syntax name for highlighting.
-- Use `<kbd>` tags for keyboard commands; spell out full key names (except `Alt`); DO NOT use spaces between `<kbd>` tags in combinations.
+- Use code blocks for CLI/cURL commands and multi-line inputs/outputs; add a syntax name for highlighting (a supported Hugo syntax name, `opencypher`, or `plaintext` if nothing fits); use quadruple backticks when the block contains a nested code block.
+- Represent missing information in a code block with a comment or an ellipsis (e.g., `# Removed for readability`, `// ...`).
+- Use `<kbd>` tags for keyboard commands; spell out full key names (except `Alt`); DO NOT use spaces between `<kbd>` tags in combinations; capitalize action keys and letter keys; use `↑`, `↓`, `←`, `→` for arrows.
 - DO NOT use italics for emphasis in product documentation.
-- Use `<` and `>` to denote placeholder text in code blocks.
+- Use `<` and `>` to denote placeholder text in code blocks; outside a code block, also wrap the placeholder in single backticks.
 
 ### Lists
 
 - Make all list items parallel (same grammatical structure).
 - Start all list items with a capital letter.
-- DO NOT end list items with a period unless the item is a complete sentence.
+- DO NOT end list items with a period unless the item is a complete sentence; give all items in a list the same punctuation and DO NOT use semicolons or commas at the end of items.
 - DO NOT use bold formatting to define keywords or concepts in a list; use bold only for UI element labels.
 - Use ordered lists for sequential steps; use unordered lists for non-sequential items.
 - Add a colon (`:`) after the introductory phrase before a list.
 - DO NOT use list items to complete an introductory phrase (e.g., "You can do this by: - Copying..."); rewrite as a full sentence introducing the list.
+- Use lists and tables instead of complex sentences and paragraphs.
 
 ### Tables
 
@@ -91,34 +102,48 @@ distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
 - Make the header row and delimiter row the same length; DO NOT use shortened delimiters like `|-|-|-|`.
 - Use sentence case for table headers.
 - Place the `Description` column as the right-most column when possible.
+- Add spaces to make column widths consistent (padding may be skipped in the rightmost column of very wide tables); when skipping auto-format on a large table, still make the first two rows the same length and put spaces between `|` and cell contents.
 - DO NOT realign an entire table when only changing a few rows (to keep diffs readable).
+- Put Hugo table class attributes (`{.condensed}`, `{.expandable}`, `{.sortable}`) on the line directly after the last row of the table; otherwise Hugo ignores them.
+- Make a table sortable when users look up rows by name (attribute, parameter, setting, or event tables); DO NOT make a table sortable when row order has meaning, rows are grouped under subheading rows, or users scan it as a grid (permissions matrix, truth table).
+- Before you add `sortable`, check how each column sorts: text sorts case-insensitively, digit groups sort as whole numbers (versions sort correctly, `17.2` before `17.10`, but decimals might not, `1.5` before `1.25`), `{{< yes >}}`/`{{< no >}}` cells sort as `Yes`/`No`, empty cells sort last, and headers that contain a link cannot be sorted.
 - Use `{{< no >}}` and `{{< yes >}}` shortcodes for feature availability tables; DO NOT use these in API docs or inline text.
-- Use `<sup>` tags for table footnotes; place footnotes below the table under `**Footnotes**:` as an ordered list.
+- Use footnotes below tables only when the content cannot go in the table itself (the same information in several cells, or content that would disrupt the layout).
+- Use `[^label]` Markdown footnote syntax for table footnotes, with no space before the reference and a comma and space between multiple references (`[^a], [^b]`); place definitions directly below the table; indent continuation lines with four spaces.
+- DO NOT put a footnote reference or definition inside a shortcode, such as tabs.
+- Treat footnote labels as page-wide: reuse a label only to share one footnote, and DO NOT define the same label twice (the renderer silently keeps only the first definition).
 
 ### Links
 
 - DO NOT duplicate links on the same page.
 - DO NOT use links in headings.
-- DO NOT hard-wrap lines within a link.
+- DO NOT hard-wrap lines within a link; put the entire link on a single line (checked by the `MultiLineLinks.yml` Vale rule).
+- Avoid multiple links in a single paragraph or task, and try not to link to more than 15 other pages from one page; consider Related topics to reduce interrupting links.
+- Avoid anchor links to sections on the same page.
+- Check and update links to a topic's anchor when changing the topic title (broken anchors fail pipeline link jobs).
 - Use relative file paths for links within the same repository; use full URLs for links to other repositories or non-doc files.
 - Link to a specific commit (permalink) when linking to specific lines of code, not to a branch.
-- Use descriptive link text; DO NOT use "here", "this page", or "this documentation" as link text.
+- Use descriptive link text; DO NOT use "here", "this page", or "this documentation" as link text; use lowercase for topic, page, and API names in link text (`import API`, not `Import API`).
 - Use the pattern `For more information, see [link text](link.md)` or `To [DO THIS], see [link text](link.md)`.
 - DO NOT use "Learn more about...", "To read more...", or append "page" or "documentation" after the link text.
-- When linking to an issue, include the issue number in the link text (e.g., `[issue 12345](link)`); DO NOT use the pound sign (`issue #12345`).
+- DO NOT use the pound sign in issue link text (use `issue 12345`, not `issue #12345`).
 - DO NOT link to confidential issues, internal handbook pages, or permission-restricted features directly; put such links in backticks and note the access requirement.
 - Limit links to external documentation and handbook pages; weigh customer benefit against maintenance cost.
 - DO NOT link to the `/development` directory from any other directory within the GitLab repository.
+- DO NOT link directly to a single tab in a tab set.
 
 ### Images and Screenshots
 
-- Resize wide or tall screenshots (width ≤ 1000 px, height ≤ 500 px); compress all PNG images to 100 KB or less on disk.
-- Use descriptive lowercase filenames; append the GitLab version in the format `_vX_Y` (e.g., `pipelines_v11_1.png`).
+- Use illustrations sparingly; make them supplement the text (not replace it), introduce them with a sentence in the preceding text, and exclude personally identifying information.
+- Ensure screenshot content adheres to the GitLab SAFE framework; DO NOT use `lorem ipsum` text.
+- Capture only the relevant UI (DO NOT include sidebars unless necessary), keep screenshot dimensions small, and use the default **Neutral** navigation theme and **Light** syntax highlighting theme for consistency.
+- Keep screenshots at width ≤ 1000 px and height ≤ 500 px; compress all PNG images on disk (CI-checked with `bin/pngquant lint`; fix with `bin/pngquant compress`).
 - Place images in an `img/` subdirectory alongside the `.md` file.
 - Use PNG format; DO NOT use JPEG for screenshots.
 - DO NOT delete image files when removing references from English docs (localized docs may still use them).
 - DO NOT use animated GIFs; use static screenshots with callouts or link to a short video instead.
 - Write alt text that describes the context of the image (≤ 155 characters); DO NOT use phrases like "Image of" or strings of keywords.
+- Write alt text in sentence case with a period at the end, without inline styling (bold, italics, backticks); introduce the image in the topic, not in the alt text.
 - Use an empty alt tag (`alt=""`) for purely decorative images rather than omitting the tag.
 - Add callout arrows in `#EE2604` red at 3 pt line width to emphasize areas in screenshots.
 - DO NOT link to externally-hosted images; download and store them in the appropriate `img/` directory.
@@ -126,43 +151,63 @@ distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
 ### Diagrams
 
 - Prefer Mermaid for diagrams; use Draw.io for complex layouts where Mermaid produces unclear results.
-- Add `accTitle` and `accDescr` accessibility fields immediately after the diagram type declaration in Mermaid.
+- Add `accTitle` and `accDescr` accessibility fields immediately after the diagram type declaration in Mermaid (follow the alt text guidelines; `accDescr` is a single sentence with no line breaks).
 - DO NOT use color alone to differentiate diagram elements (must work in both light and dark modes).
 - DO NOT include links in diagrams (not testable by link checkers).
 - Keep diagrams simple; use rectangles for processes, diamonds for decisions, solid lines for direct relationships, dotted lines for indirect relationships.
+- Use the same shape and size for the same kind of element, add clear labels, and include a title and brief description for each diagram.
+- Use GitLab Sans for diagram text, or Google Inter as a fallback (Draw.io: use Inter, rectangles for elements, and the **Flowchart** shape collection for flowcharts).
+- Update diagrams along with documentation or code when processes change.
 - Save Draw.io diagrams with the `.drawio.svg` extension and include the diagram definition in the SVG file by selecting **Include a copy of my diagram** on export.
 
 ### Alert Boxes and Special Elements
 
 - Use alert boxes sparingly; DO NOT place two alert boxes consecutively.
 - Use `> [!note]`, `> [!warning]`, `> [!flag]`, and `> [!disclaimer]` for alert types.
-- DO NOT use blockquotes in product documentation; use code blocks, alert boxes, or plain text instead.
+- Use notes sparingly; prefer rewriting the sentence into a paragraph, a separate paragraph, or a new topic title over adding a note.
+- Use a warning alert to indicate deprecated features or procedures with potential for data loss.
+- Use the `> [!disclaimer]` alert (with no other text) near content about undelivered features: once at the top when the whole page is unavailable, or in the topic when only that topic is not ready.
 - Use the guide shortcode for tutorials only; DO NOT use a guide inside a guide.
 - Build tab sets with the `{{< tabs >}}` and `{{< tab title="..." >}}` shortcodes, and put only paragraphs, lists, alert boxes, and code blocks inside a tab; DO NOT nest version history bullets, topic headings, HTML, or other tabs inside one. Keep tab titles brief, parallel, and capitalized.
 - Use collapsible panels only on GitLab Duo pages in the availability details section; DO NOT use them for other content.
 - Use cards only on top-level landing pages where cards are the only content.
+- Use the `{{< maintained-versions >}}` shortcode to list currently maintained GitLab versions instead of writing the list by hand.
 - DO NOT use Markdown emoji format (`:smile:`); use GitLab SVG icons instead.
-- When using SVG icons, place the icon after the label text in parentheses (e.g., `Select **Edit** ({{< icon name="pencil" >}})`).
+- When using SVG icons, place the icon after the label text in parentheses (e.g., `Select **Edit** ({{< icon name="pencil" >}})`); DO NOT describe the icon in words when hover text exists, and avoid icons in text except when hover text is the only way to describe the UI element (when a button has no hover text, describe the icon, e.g., `the vertical ellipsis ({{< icon name="ellipsis_v" >}})`).
 - Use glossary tooltips only for the first occurrence of a GitLab-specific term or unfamiliar term on a page; DO NOT use them for common terms, every instance of a term, or as a replacement for acronyms. Limit to five to ten tooltips per page.
+- Use a glossary tooltip only when the definition is a single concise sentence (60 characters or fewer when possible); use a glossary page for longer definitions. Add tooltip definitions to `glossary.yaml` in `docs-gitlab-com`, short and without links.
 
 ### Videos and Demos
 
 - DO NOT upload videos to product repositories; link or embed them instead.
 - Embed only videos from the official GitLab YouTube channel; link to videos from other sources.
+- DO NOT use videos to replace documentation text; complement or illustrate it.
+- Precede a video link with the YouTube icon (`<i class="fa-youtube-play" aria-hidden="true"></i>`).
 - Include the video publication date as a comment below every video link or embed.
-- Include a `<div class="video-fallback">` fallback for embedded videos.
+- Include a `<div class="video-fallback">` fallback for embedded videos, and wrap the iframe in `<figure class="video-container">`.
 - Use `www.youtube-nocookie.com` in the `src` of embedded video iframes to enable Privacy Enhanced Mode.
 - Follow the same guidelines for click-through demo links as for videos.
 
-### Navigation and UI References
+### GitLab Self-Managed Procedures
 
-- Write navigation steps as location then action (e.g., "From the **Visibility** dropdown list, select **Public**").
-- Use **left sidebar** instead of "the Explore menu" or "the Your work sidebar".
-- Bold all UI element names; DO NOT bold the `>` separator in navigation paths.
-- Place punctuation outside bold tags unless the punctuation is part of the UI element itself.
-- Start optional steps with "Optional." followed by a period.
-- Start recommended steps with "Recommended." followed by a period.
-- Use "Complete the fields" to summarize multiple self-explanatory fields in a single task step rather than documenting each field individually.
+- Use the official installation method names (Linux package, Helm chart, GitLab Operator, Docker, Self-compiled) in sentences and titles; add explanatory parentheses (Omnibus, Kubernetes, source) only in tab titles.
+- Use tabs to differentiate installation methods in configuration procedures; always include parent settings in YAML examples and use the appropriate syntax highlighting (`ruby`, `shell`, or `yaml`).
+- Link to `doc/administration/restart_gitlab.md` when a restart or reconfigure is required instead of repeating the steps (use the full `https://docs.gitlab.com/administration/restart_gitlab` URL outside `doc/`).
+
+### UI Text and Navigation
+
+- Use the `ui` shortcode for GitLab UI text (buttons, checkboxes, settings, menus, pages, tabs) and the `external-ui` shortcode for non-GitLab products; match the UI text exactly, including capitalization. Exception: use sentence case for all-uppercase UI text from an external tool (e.g., `RECENT FLOWS`).
+- Copy the `ui` string from `locale/gitlab.pot` and include its namespace when it has one (e.g., `{{< ui text="Job|Cancel" >}}`); when a string occurs under multiple namespaces, use the one matching the documented area of the UI. A CI/CD job fails when a `ui` string is not found in `gitlab.pot` (`external-ui` strings are ignored).
+- DO NOT include a trailing ellipsis (`...` or `…`) in a `ui` shortcode string.
+- In tables, escape the namespace pipe in a `ui` shortcode with a backslash (for example, `{{< ui text="Job\|Cancel" >}}`) so it does not split the cell.
+- Use bold instead of the `ui` shortcode only for hardcoded UI strings that do not exist in `gitlab.pot`; otherwise fix the documentation to match the UI string.
+- Write navigation steps as location, then action (e.g., "From the **Project visibility** dropdown list, select **Public**").
+- Keep navigation steps brief and specific (DO NOT write "Select **Save** for the changes to take effect"); when a step needs a reason, start the step with it (e.g., "To view the changes, in the merge request, select the link").
+- Use the standard navigation step wording from `ui_text.md` for opening project or group settings, creating projects or groups, the Admin area, and similar tasks (start with "In the top bar, select **Search or go to** and find your project", then "In the left sidebar, select ...").
+- Use the lowercase names `left sidebar`, `right sidebar`, `top bar`, `details panel`, and `... panel` (based on the primary context, e.g., `merge request panel`) for UI areas; keep **GitLab Duo** capitalized; DO NOT use "the Explore menu" or "the Your work sidebar" (use `left sidebar`).
+- Start recommended steps with `Recommended.` (followed by a period).
+- Write UI instructions instead of keyboard commands when both options exist, for GitLab and third-party applications; document GitLab keyboard commands in `doc/user/shortcuts.md`.
+- When the UI text sufficiently explains the fields in a section, summarize them in one step with "Complete the fields." instead of a step per field; if only one field needs explanation, add it in the same step; use unordered list items to describe multiple fields.
 
 ### Metadata
 
@@ -172,6 +217,7 @@ distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
 - Add `availability_details: no` metadata on pages that purposely omit availability details.
 - Add `ignore_in_report: true` metadata to keep a page out of the global navigation; it excludes the page from the technical writing team's navigation report so the page is not prompted for a `navigation.yaml` entry.
 - Add a `description` metadata tag on top-level pages and REST API resource pages; start the description with an active verb for top-level pages.
+- DO NOT add `feedback: false` metadata (which omits the help and feedback section) without checking with a technical writer.
 
 ### Product Availability Details
 
@@ -182,7 +228,9 @@ distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
 - DO NOT repeat tier, offering, or status in a subheading's badge when it matches the parent topic's badge.
 - Place history notes (`{{< history >}}` shortcode) after the details block and immediately after the heading; start each entry with `-` and link to the related issue, MR, or epic when possible.
 - Add a history entry only to the page for the feature that changed; DO NOT duplicate the entry on other pages.
+- DO NOT link to the pricing page in history entries, and DO NOT include the subscription tier unless the feature is changing from one tier to another; for a tier change, use `moved` (e.g., `- [Moved](https://work-item-link) from GitLab Premium to GitLab Free in GitLab 19.0.`).
 - When a feature changes from seat-based billing to usage-based billing with GitLab Credits, add a `Changed to usage-based billing` entry only to the feature's history; DO NOT add an entry to the GitLab Credits history.
+- For a feature introduced as an experiment or beta, state the status in the `Introduced` history item and link it to the matching policy anchor (for example, `- [Introduced](https://work-item-link) as a [beta](../../policy/development_stages_support.md#beta) in GitLab 15.7.`); record a later experiment-to-beta move as a separate `Changed` item.
 - Remove history items and inline version references that refer to unsupported GitLab versions (current major version and two previous major versions are supported); when a new major version is about to be released, create removal MRs in advance but merge them only during that milestone.
 - For tools released on their own schedule (e.g., editor extensions, CLI tools), include both the GitLab version and the tool version in history entries with a link to the tool's release page; nest tool version entries under the related instance history item when both change together, or use `during the GitLab X.Y release` phrasing when the change is tool-only.
 - For GitLab Duo AI Gateway model changes that reach all versions immediately (not gated by a GitLab release), use a date instead of a milestone in the history entry and link the AI Gateway MR that made the change, not the GitLab issue or MR (e.g., `Claude Sonnet 5 [added](https://ai-gateway-mr-link) as a supported model on August 3, 2026`).
@@ -191,20 +239,20 @@ distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
 
 ### Deprecations and Removals
 
-- When deprecating a feature, add `(deprecated)` after the title, add a `> [!warning]` alert stating when it was deprecated and when it will be removed, and wrap the content in `<!--- start_remove The following content will be removed on remove_date: 'YYYY-MM-DD' -->` and `<!--- end_remove -->` HTML comments (set `remove_date` to three months after the planned removal release).
+- When deprecating a feature, add `(deprecated)` after the title, add a `> [!warning]` alert stating when it was deprecated and when it will be removed, add "This change is a breaking change." if the deprecation is a breaking change, wrap the content in `<!--- start_remove The following content will be removed on remove_date: 'YYYY-MM-DD' -->` and `<!--- end_remove -->` HTML comments (set `remove_date` to three months after the planned removal release), and open an MR to add `(deprecated)` to the left nav entry.
 - When removing a feature, change `(deprecated)` to `(removed)` in the title, remove all content except the deprecation/removal statement, set `remove_date` in metadata to three months after the removal release, and set `redirect_to` to a relevant replacement page.
 - When removing a topic (subsection) rather than a full page, leave the title and deprecation/removal details, add `(removed)` after the title, and wrap the remaining content in HTML comments with `remove_date` set to three months after the removal release.
 - After removing a page, edit `navigation.yaml` in `docs-gitlab-com` to remove the page's entry from the global navigation, update any links in the [Deprecations and Removals](https://docs.gitlab.com/update/deprecations/) YAML files, and run `bin/rake gitlab:docs:compile_deprecations`.
 - DO NOT follow the standard deprecation process for features that are not generally available; delete the content outright instead.
 - For features no longer actively developed but not deprecated, add a note under the topic title stating the feature is not under active development but community contributions are welcome.
+- DO NOT remove version-specific upgrade pages in `doc/update/versions/` immediately for a major milestone; add a note with a date three months in the future (do not add `Removed` to the title) so the page is removed during the monthly maintenance task.
 
 ### Documentation Workflow
 
-- Include documentation in the same MR as the feature code whenever possible; DO NOT merge a feature that exposes UI, API endpoints, or user-facing behaviour without accompanying documentation.
+- Include documentation in the same MR as the feature code whenever possible; DO NOT merge a feature that exposes UI, API endpoints, or user-facing behavior without accompanying documentation.
 - Ensure AI-generated documentation is reviewed by a Technical Writer and passes a Vale lint check before submission.
 - Delete documentation added prematurely rather than hiding it with HTML comments; add a link to the original MR in the removal MR.
 - When moving content to a new location and editing it in the same MR, use separate commits (first commit moves only, subsequent commits edit).
-- DO NOT promise to deliver features in a future release; instead reference the proposing issue (e.g., "Support for improvements is proposed in [issue 12345](link)").
 - Assign the technical writer as a reviewer directly on the MR (not just pinged) before the code maintainer review; documentation reviews must not block merging.
 - When a post-merge technical writer review is required, create an issue using the [Doc Review description template](https://gitlab.com/gitlab-org/gitlab/-/issues/new?description_template=Doc%20Review) and link it to the merged MR.
 - Name documentation-only branches in `omnibus-gitlab`, `charts/gitlab`, or `gitlab-operator` starting with `docs/`, `docs-`, or ending with `-docs` to trigger shorter pipelines.
@@ -249,8 +297,17 @@ distilled_at_sha: 3378d9de7ce956458ecfbc5e1845591fa87448fc
 For the full picture, see:
 
 - doc/development/documentation/styleguide/_index.md
+- doc/development/documentation/styleguide/tables.md
+- doc/development/documentation/styleguide/markdown.md
+- doc/development/documentation/styleguide/language.md
+- doc/development/documentation/styleguide/text_and_formatting.md
+- doc/development/documentation/styleguide/products_and_sections.md
+- doc/development/documentation/styleguide/links.md
+- doc/development/documentation/styleguide/shortcodes.md
+- doc/development/documentation/styleguide/images_and_diagrams.md
 - doc/development/documentation/workflow.md
 - doc/development/documentation/styleguide/availability_details.md
 - doc/development/documentation/styleguide/deprecations_and_removals.md
 - doc/development/documentation/metadata.md
+- doc/development/documentation/styleguide/ui_text.md
 

@@ -1504,6 +1504,10 @@
         "collector_url": {
           "type": "string"
         },
+        "local_collector_url": {
+          "type": "string",
+          "default": ""
+        },
         "deployment": {
           "$ref": "#/$defs/DeploymentConfig"
         }

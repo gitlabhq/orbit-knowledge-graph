@@ -1,5 +1,5 @@
 name: grep
-version: 2.10.0
+version: 2.11.0
 short: Search every line in local code, tests, config, and docs
 description: >-
   Search every line in local code, tests, config, and docs, like ripgrep.
@@ -26,6 +26,12 @@ description: >-
   `Project[id]`, or `Group[id]` as a path to search it instead. An indexed checkout of that project
   is searched locally; read another project's code with `context repo:group/project`.
   GitLab kinds: `issue:`, `mr:`, `comment:`, `commit:`, `milestone:`, `user:`,
-  `project:`, `group:`, and `branch:`.
+  `project:`, `group:`, and `branch:`. `gitlab:type:words`, such as
+  `gitlab:pipeline:deploy`, searches any other GitLab entity's text fields.
+  It searches the `origin` project or the named project or group, with up to
+  four billed graph queries per grep, and prints `Type[id]` tokens.
+  Code entities such as `definition:` need a project, not a group. Entities
+  outside projects, such as runners, are refused; use `query` for them.
+  `-F` reads `gitlab:x:y` as literal text.
   `branch:` finds branches by words from their names, with their merge requests
   and pipelines.

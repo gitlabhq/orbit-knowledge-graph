@@ -191,17 +191,22 @@ function scanHeredocOperand(src, start) {
 function scanHeredocBody(src, start, heredoc) {
   let at = start;
   let substitutes = false;
+  const lines = [];
   while (at < src.length) {
     const newline = src.indexOf(`
 `, at);
-    const line = src.slice(at, newline < 0 ? src.length : newline);
+    const raw = src.slice(at, newline < 0 ? src.length : newline);
+    const line = heredoc.stripTabs ? raw.replace(/^\t+/, "") : raw;
     at = newline < 0 ? src.length : newline + 1;
-    if ((heredoc.stripTabs ? line.replace(/^\t+/, "") : line) === heredoc.delimiter)
-      return { end: at, closed: true, substitutes };
+    if (line === heredoc.delimiter)
+      return { end: at, closed: true, substitutes, body: lines.join(`
+`) };
     if (!heredoc.quoted && SUBSTITUTION.test(line))
       substitutes = true;
+    lines.push(line);
   }
-  return { end: at, closed: false, substitutes };
+  return { end: at, closed: false, substitutes, body: lines.join(`
+`) };
 }
 
 class Lexer {
@@ -366,9 +371,11 @@ class Lexer {
     const stripTabs = this.src[this.pos + 2] === "-";
     const operandStart = this.pos + (stripTabs ? 3 : 2);
     const { delimiter, quoted, end } = scanHeredocOperand(this.src, operandStart + (this.src.slice(operandStart).match(/^[ \t]*/)?.[0].length ?? 0));
-    if (delimiter)
-      this.heredocs.push({ delimiter, stripTabs, quoted });
-    else
+    if (delimiter) {
+      const token = { kind: "heredoc", body: "" };
+      this.tokens.push(token);
+      this.heredocs.push({ delimiter, stripTabs, quoted, token });
+    } else
       this.unparsed = true;
     this.pos = end;
   }
@@ -393,6 +400,7 @@ class Lexer {
         this.tokens.push({ kind: "substitution" });
       if (!body.closed)
         this.unparsed = true;
+      heredoc.token.body = body.body;
       at = body.end;
     }
     this.pos = at - 1;
@@ -429,7 +437,7 @@ function displayName(name) {
   return /[,\s']/.test(text) ? `'${text.replaceAll("'", "\\'")}'` : text;
 }
 function emptyCommand(piped) {
-  return { piped, words: [], readsInput: false, writes: [], substitutes: false };
+  return { piped, words: [], readsInput: false, writes: [], substitutes: false, stdin: "" };
 }
 function isEmpty(command) {
   return !command.words.length && !command.writes.length && !command.substitutes;
@@ -450,11 +458,14 @@ function groupCommands(tokens) {
       current.words.push(token.text);
     else if (token?.kind === "substitution")
       current.substitutes = true;
+    else if (token?.kind === "heredoc")
+      current.stdin = token.body;
     else if (token?.kind === "redirect") {
       const { target, end } = redirectTarget(tokens, i + 1);
-      if (token.operator === "<")
+      if (token.operator === "<") {
         current.readsInput = true;
-      else if (target !== undefined)
+        current.stdin = "";
+      } else if (target !== undefined)
         current.writes.push(target);
       current.substitutes ||= tokens.slice(i + 1, end + 1).some((skipped) => skipped.kind === "substitution");
       i = end;
@@ -509,8 +520,11 @@ function runnable(command) {
   const runs = groupCommands(tokens).map((simple) => ({ ...simple, words: withoutKeywords(simple.words) })).filter((run) => !isEmpty(run));
   return { runs, unparsed };
 }
-function orbitInvocations(command) {
-  return runnable(command).runs.map(({ words }) => orbitWords(words)).filter((words) => words !== null);
+function orbitRuns(command) {
+  return runnable(command).runs.flatMap(({ words, stdin }) => {
+    const orbit = orbitWords(words);
+    return orbit ? [{ words: orbit, stdin }] : [];
+  });
 }
 var SHELL_WORDS = new Set(["cd", "pushd", "popd", "true", ":", "fi", "done", "esac", "}"]);
 function isQuiet(program, args, run) {
@@ -575,17 +589,32 @@ function s(o, t) {
   return m;
 }
 
+function envelopeQuery(stdin) {
+  try {
+    const query = JSON.parse(stdin)?.query;
+    return typeof query === "string" ? query : "";
+  } catch {
+    return "";
+  }
+}
+function queryText(args, stdin) {
+  const file = args.indexOf("--file");
+  if (file >= 0)
+    return args[file + 1] === "-" ? envelopeQuery(stdin) : "";
+  for (let i = 0;i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (arg === "--response-format")
+      i++;
+    else if (!arg.startsWith("-"))
+      return arg;
+  }
+  return "";
+}
 function queryOf(command) {
-  for (const words of orbitInvocations(command)) {
-    if (words[0] !== "query" || words.includes("--file"))
-      continue;
-    for (let i = 1;i < words.length; i++) {
-      const word = words[i] ?? "";
-      if (word === "--response-format")
-        i++;
-      else if (!word.startsWith("-"))
-        return word;
-    }
+  for (const { words, stdin } of orbitRuns(command)) {
+    const query = words[0] === "query" ? queryText(words.slice(1), stdin) : "";
+    if (query)
+      return query;
   }
   return "";
 }
@@ -825,9 +854,11 @@ var VALUE_FLAGS = new Set([
   "--budget",
   "--timeout"
 ]);
+var SQL_VALUE_FLAGS = new Set(["-f", "-F", "--format"]);
 var VALUE_FLAGS_BY_KEY = {
   grep: new Set(["-A", "--after-context", "-B", "--before-context", "-C", "--context", "-m", "--max-count", "-g", "--glob", "--include", "--exclude", "--exclude-dir", "-t", "--type", "-T", "--type-not", "-M", "--max-columns"]),
-  "workspace sql": new Set(["-f", "-F", "--format"])
+  "workspace sql": SQL_VALUE_FLAGS,
+  sql: SQL_VALUE_FLAGS
 };
 var SHOWS_ARGUMENT = new Set(["grep", "context", "workspace sql", "sql", "schema", "ontology", "graph-status", "skills", "skill"]);
 function labelFor(table, key) {
@@ -848,14 +879,13 @@ function firstArg(args, valueFlags) {
   }
   return "";
 }
-function detailFor(key, args, known) {
+function detailFor(key, args, known, query) {
   if (key === "query") {
-    const text = args.join(" ");
-    const schema = text.match(/CALL\s+db\.schema\(\s*'?(\w*)/i);
+    const schema = query.match(/CALL\s+db\.schema\(\s*'?(\w*)/i);
     if (schema)
       return schema[1] ?? "";
-    const file = args.indexOf("--file");
-    return entitiesOf(text, known) || (file >= 0 ? args[file + 1] ?? "" : "");
+    const file = args[args.indexOf("--file") + 1] ?? "";
+    return entitiesOf(query, known) || (args.includes("--file") && file !== "-" ? file : "");
   }
   if (!SHOWS_ARGUMENT.has(key))
     return "";
@@ -876,18 +906,18 @@ var CHANGES_STATE = new Set([
   "orbit workspace reset",
   "orbit config set"
 ]);
-function invocationOf(words, known) {
+function invocationOf({ words, stdin }, known) {
   if (words.length === 0 || words.some((arg) => arg === "--help" || arg === "-h"))
     return null;
   const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
   if (!sub)
     return { call: null, name: "orbit " + displayName(words[0] ?? "") };
-  const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
-  const label = isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY;
-  return { call: callOf(label, detailFor(sub.key, sub.args, known)), name: "orbit " + sub.key };
+  const query = sub.key === "query" ? queryText(sub.args, stdin) : "";
+  const label = /^\s*CALL\s+db\.schema\(/i.test(query) ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY;
+  return { call: callOf(label, detailFor(sub.key, sub.args, known, query)), name: "orbit " + sub.key };
 }
 function describeCommand(command, known = NO_ENTITIES) {
-  const invocations = orbitInvocations(command).flatMap((words) => invocationOf(words, known) ?? []);
+  const invocations = orbitRuns(command).flatMap((run) => invocationOf(run, known) ?? []);
   const calls = invocations.flatMap(({ call }) => call ?? []);
   const [first] = calls;
   if (!first)

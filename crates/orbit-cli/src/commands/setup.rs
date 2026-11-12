@@ -102,16 +102,10 @@ pub(crate) async fn install(
         .filter(|agent| agent.has_ui())
         .map(|agent| agent.title.as_str())
         .collect();
-    let plugin_instructions: Vec<&str> = selection
-        .agents
-        .iter()
-        .filter(|agent| agent.instructions_component() == Component::AgentPlugins)
-        .map(|agent| agent.title.as_str())
-        .collect();
     if interactive
         && options.ask_agent_plugins
         && !ui_agents.is_empty()
-        && !ask_install_agent_plugins(&ui_agents, &plugin_instructions)?
+        && !ask_install_agent_plugins(&ui_agents)?
     {
         selection.components.remove(&Component::AgentPlugins);
     }
@@ -140,20 +134,29 @@ pub(crate) async fn install(
     if selection.components.contains(&Component::Skill)
         && needs_instance_skill(&selection.skill, &selection.agents, &target)
     {
-        selection.skill.full_tree = Some(crate::skill::full_tree().await?);
+        selection.skill.full_tree = Some(match spec::keeps_local() {
+            true => crate::skill::embedded_full_tree()?,
+            false => crate::skill::full_tree().await?,
+        });
     }
 
     let report = apply_and_report(&options, |report| {
         components::install(&selection, &target, report)
     })?;
-    for warning in missing_instructions(&selection, &target, &report) {
+    for warning in missing_instructions(&selection, &target) {
         tui::warning(warning);
     }
     tui::card(
         "Configured",
         summary::format_configured_per_agent(&plan, &report),
     )?;
-    if !spec::reaches_gitlab() {
+    if spec::keeps_local() {
+        tui::card(
+            "GitLab",
+            "GitLab search is off for this setup, so GitLab Duo and Claude Code instructions \
+             cover local code only.",
+        )?;
+    } else if !spec::reaches_gitlab() {
         tui::card(
             "GitLab",
             format!(
@@ -233,22 +236,18 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
 
 /// Agents left without Orbit instructions because the component that loads them was skipped or
 /// could not be installed.
-fn missing_instructions(selection: &Selection, target: &Target, report: &Report) -> Vec<String> {
-    let skipped: Vec<&str> = report.skipped_agent_plugins().collect();
+fn missing_instructions(selection: &Selection, target: &Target) -> Vec<String> {
     selection
         .agents
         .iter()
         .filter_map(|agent| {
-            let component = agent.instructions_component();
-            let installed = (selection.components.contains(&component)
-                && !(component == Component::AgentPlugins
-                    && skipped.contains(&agent.title.as_str())))
+            let installed = selection.components.contains(&Component::Hooks)
                 || components::loads_instructions(*agent, target);
             (!installed).then(|| {
                 format!(
                     "{} gets no Orbit instructions: setup removed the old instruction block, and the {} that load them now were skipped",
                     agent.title,
-                    component.label()
+                    Component::Hooks.label()
                 )
             })
         })
@@ -271,7 +270,7 @@ const INSTALL_AGENT_PLUGINS: &str = "install";
 const SKIP_AGENT_PLUGINS: &str = "skip";
 
 /// Asks whether to install the agent plugins, starting on the recommended install.
-fn ask_install_agent_plugins(ui_agents: &[&str], plugin_instructions: &[&str]) -> Result<bool> {
+fn ask_install_agent_plugins(ui_agents: &[&str]) -> Result<bool> {
     let choices = [
         tui::Choice {
             key: INSTALL_AGENT_PLUGINS.to_string(),
@@ -282,10 +281,7 @@ fn ask_install_agent_plugins(ui_agents: &[&str], plugin_instructions: &[&str]) -
         tui::Choice {
             key: SKIP_AGENT_PLUGINS.to_string(),
             label: "Skip the agent plugins".to_string(),
-            hint: match plugin_instructions {
-                [] => String::new(),
-                agents => format!("{} gets no Orbit instructions", agents.join(" and ")),
-            },
+            hint: String::new(),
             section: None,
         },
     ];
@@ -584,6 +580,40 @@ mod tests {
         assert!(dir.path().join(".claude/settings.json").is_file());
         assert!(dir.path().join(".codex/hooks.json").is_file());
         assert!(!dir.path().join(".opencode").exists());
+    }
+
+    #[test]
+    fn setup_detects_duo_from_the_binary_glab_installed_before_its_first_run() {
+        for glab_config_dir in [".config/glab-cli", "Library/Application Support/glab-cli"] {
+            let home = tempfile::tempdir().unwrap();
+            let bin = home.path().join(glab_config_dir).join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::write(bin.join("duo"), "").unwrap();
+            let machine = Machine::new(home.path().to_path_buf(), BTreeMap::new());
+
+            let dir = tempfile::tempdir().unwrap();
+            let run = install(options_for(&[]), project(dir.path()), &machine).unwrap();
+
+            assert_eq!(run.detected_agents, ["duo"], "{glab_config_dir}");
+            assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
+        }
+    }
+
+    #[test]
+    fn setup_detects_duo_from_its_xdg_config_dir() {
+        let home = tempfile::tempdir().unwrap();
+        let xdg = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(xdg.path().join("gitlab/duo")).unwrap();
+        let env = BTreeMap::from([(
+            "XDG_CONFIG_HOME".to_string(),
+            xdg.path().display().to_string(),
+        )]);
+        let machine = Machine::new(home.path().to_path_buf(), env);
+
+        let dir = tempfile::tempdir().unwrap();
+        let run = install(options_for(&[]), project(dir.path()), &machine).unwrap();
+
+        assert_eq!(run.detected_agents, ["duo"]);
     }
 
     #[test]
@@ -1943,7 +1973,7 @@ mod tests {
     fn agents_without_the_component_that_loads_the_instructions_are_named() {
         let dir = tempfile::tempdir().unwrap();
         let target = project(dir.path());
-        let named = |agents: &[&str], skip: &[Component], skipped_plugin: bool| {
+        let named = |agents: &[&str], skip: &[Component]| {
             let selection = Selection {
                 agents: agents
                     .iter()
@@ -1952,37 +1982,53 @@ mod tests {
                 components: Component::from_flags(&[], skip).unwrap(),
                 skill: SkillRequest::default(),
             };
-            let mut report = Report::default();
-            if skipped_plugin {
-                report.note_plugin_skipped("Claude Code", "plugin", "too old");
-            }
-            missing_instructions(&selection, &target, &report)
+            missing_instructions(&selection, &target)
         };
         let every = ["claude", "codex", "duo", "opencode", "pi"];
 
-        assert!(named(&every, &[], false).is_empty());
-        assert_eq!(named(&every, &[Component::Hooks], false).len(), 4);
-        assert_eq!(named(&every, &[Component::AgentPlugins], false).len(), 1);
-        assert_eq!(named(&["claude"], &[], true).len(), 1);
+        assert!(named(&every, &[]).is_empty());
+        assert_eq!(named(&every, &[Component::Hooks]).len(), 5);
+        assert!(named(&every, &[Component::AgentPlugins]).is_empty());
 
         install_default(&["codex", "pi", "opencode", "claude"], dir.path());
         assert!(
-            named(&["codex", "pi", "opencode"], &[Component::Hooks], false).is_empty(),
+            named(&["codex", "pi", "opencode", "claude"], &[Component::Hooks]).is_empty(),
             "a run that skips the hooks keeps the ones already installed"
         );
-        assert!(named(&["claude"], &[Component::AgentPlugins], false).is_empty());
 
         std::fs::write(
             dir.path().join(".opencode/plugins/orbit.js"),
             "export default { id: \"orbit\" };\n",
         )
         .unwrap();
-        let stale = named(&["opencode"], &[Component::Hooks], false);
+        let stale = named(&["opencode"], &[Component::Hooks]);
         assert_eq!(
             stale.len(),
             1,
             "a plugin from an earlier release loads nothing: {stale:?}"
         );
+    }
+
+    #[test]
+    fn claude_loads_the_instructions_from_a_settings_hook_and_uninstall_removes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        install_default(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
+
+        let local = dir.path().join(".claude/settings.local.json");
+        let session = read_json(&local)["hooks"]["SessionStart"].clone();
+        assert_eq!(session.as_array().unwrap().len(), 1, "{session}");
+        assert!(
+            session[0]["hooks"][0]["command"]
+                .as_str()
+                .is_some_and(|command| command.contains("hook-guard instructions")),
+            "{session}"
+        );
+        let shared = read_json(&dir.path().join(".claude/settings.json"));
+        assert!(shared["hooks"].get("SessionStart").is_none(), "{shared}");
+
+        uninstall_named(&["claude"], dir.path());
+        assert!(!local.exists());
     }
 
     #[test]
@@ -1992,7 +2038,9 @@ mod tests {
         skipped.components = Component::from_flags(&[], &[Component::AgentPlugins]).unwrap();
         install(skipped, project(dir.path()), &bare_machine()).unwrap();
         assert!(!dir.path().join(".claude/orbit").exists());
-        assert!(!dir.path().join(".claude/settings.local.json").exists());
+        let local = read_json(&dir.path().join(".claude/settings.local.json"));
+        assert!(local.get("enabledPlugins").is_none(), "{local}");
+        assert!(local["hooks"]["SessionStart"].is_array(), "{local}");
 
         install_default(&["claude", "codex"], dir.path());
 
@@ -2375,9 +2423,14 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             install_default(&["claude"], dir.path());
             assert!(!dir.path().join(".claude/orbit").exists(), "{version:?}");
+            let local = read_json(&dir.path().join(".claude/settings.local.json"));
             assert!(
-                !dir.path().join(".claude/settings.local.json").exists(),
-                "{version:?}"
+                local.get("enabledPlugins").is_none(),
+                "{version:?}: {local}"
+            );
+            assert!(
+                local["hooks"]["SessionStart"].is_array(),
+                "{version:?}: {local}"
             );
         }
         components::agent_plugins::TEST_VERSION

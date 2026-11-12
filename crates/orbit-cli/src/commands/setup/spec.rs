@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ontology::migrations::sha256_hex;
 use rust_embed::Embed;
@@ -160,14 +161,37 @@ fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> S
 static SESSION: LazyLock<crate::remote::server_schema::Session> =
     LazyLock::new(|| crate::remote::server_schema::session_start(Path::new(".")));
 
+static NO_GITLAB: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn keep_local() {
+    NO_GITLAB.store(true, Ordering::Relaxed);
+}
+
+pub(crate) fn keeps_local() -> bool {
+    NO_GITLAB.load(Ordering::Relaxed)
+}
+
 pub(crate) fn reaches_gitlab() -> bool {
-    SESSION.reachable
+    !keeps_local() && SESSION.reachable
+}
+
+pub(crate) fn hook_gitlab_arg() -> &'static str {
+    if keeps_local() {
+        " --no-gitlab"
+    } else if reaches_gitlab() {
+        " --gitlab"
+    } else {
+        ""
+    }
 }
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
 
-pub(crate) fn instructions_text(setup_reached_gitlab: bool) -> String {
+pub(crate) fn instructions_text(setup_reached_gitlab: bool, no_gitlab: bool) -> String {
+    if no_gitlab {
+        return render_instructions(launcher(), false, &Providers::new());
+    }
     let remote = SESSION.reachable || (setup_reached_gitlab && !SESSION.signed_in);
     render_instructions(launcher(), remote, &SESSION.providers)
 }
@@ -566,16 +590,6 @@ impl Agent {
     pub(super) fn has_ui(self) -> bool {
         self.plugin.is_some() || self.ui_files(true).next().is_some()
     }
-
-    /// The component whose files make the agent load the Orbit instructions: the Claude Code
-    /// plugin, or the hook files and extensions of the other agents.
-    pub(super) fn instructions_component(self) -> super::Component {
-        if self.plugin.is_some() {
-            super::Component::AgentPlugins
-        } else {
-            super::Component::Hooks
-        }
-    }
 }
 
 pub(super) fn agents() -> impl Iterator<Item = Agent> {
@@ -707,7 +721,9 @@ mod tests {
         let providers = Providers::from([("gitlab".into(), vec!["Widget".into()])]);
         let rendered = render_instructions(GLAB_LAUNCHER, true, &providers);
         assert!(
-            rendered.ends_with("for `glab orbit query`:\n- gitlab: Widget"),
+            rendered.ends_with(
+                "for `glab orbit query` and `glab orbit grep gitlab:type:words`:\n- gitlab: Widget"
+            ),
             "{rendered}"
         );
         assert!(!render_instructions(GLAB_LAUNCHER, false, &providers).contains("Widget"));
@@ -1064,6 +1080,7 @@ mod tests {
         assert!(opencode.contains("experimental.chat.system.transform"));
         assert!(opencode.contains(r#""hook-guard", "instructions""#));
         for (name, suffix) in [
+            ("claude", "hook-guard instructions{{hook_gitlab}}"),
             ("codex", "hook-guard instructions"),
             ("duo", "hook-guard instructions{{hook_gitlab}}"),
         ] {
@@ -1080,7 +1097,6 @@ mod tests {
                 "{name}"
             );
         }
-        assert!(agent_named("claude").unwrap().plugin.is_some());
     }
 
     #[test]

@@ -67,6 +67,30 @@ test('a long grep flag does not take its value for the pattern', () => {
   }
 })
 
+test('a sql flag does not take its value for the query', () => {
+  for (const sql of ['orbit sql', 'orbit workspace sql']) {
+    for (const flag of ['-F', '--format']) {
+      expect(describeOrbitCall('Bash', { command: `${sql} ${flag} json 'SELECT 1'` })?.detail).toBe('SELECT 1')
+    }
+    expect(describeOrbitCall('Bash', { command: `${sql} -f query.sql` })?.detail).toBe('')
+  }
+})
+
+test('a query from stdin shows its entities, or no detail, rather than a dash', () => {
+  const envelope = JSON.stringify({ query: 'MATCH (mr:MergeRequest) RETURN count(mr) AS n' })
+  expect(describeOrbitCall('Bash', { command: `orbit query --file - <<'EOF2'\n${envelope}\nEOF2` })?.detail).toBe('Merge requests')
+  expect(describeOrbitCall('Bash', { command: 'cat q.json | orbit query --file -' })?.detail).toBe('')
+  expect(describeOrbitCall('Bash', { command: 'orbit query --file q.json' })?.detail).toBe('q.json')
+})
+
+test('each stdin query shows its own entities, and a stdin schema call keeps its label', () => {
+  const stdin = (query: string) => `orbit query --file - <<'EOF'\n${JSON.stringify({ query })}\nEOF`
+  const command = stdin('MATCH (u:User) RETURN u') + '\n' + stdin('MATCH (mr:MergeRequest) RETURN mr')
+  expect(describeOrbitCall('Bash', { command })?.detail).toBe('Users, Merge requests')
+  const schema = describeOrbitCall('Bash', { command: stdin("CALL db.schema('Project')") })
+  expect([schema?.label, schema?.detail]).toEqual(['Read Orbit schema', 'Project'])
+})
+
 test('calls that are not Orbit calls are left alone', () => {
   expect(describeOrbitCall('Bash', { command: 'ls -la' })).toBe(null)
   expect(describeOrbitCall('Read', { file_path: 'README.md' })).toBe(null)

@@ -12,7 +12,10 @@ use orbit_billing::{QuotaService, SnowplowBillingTracker};
 use orbit_log_fields::{info, warn};
 use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_server::active_schema::ActiveSchema;
-use orbit_server::analytics::{ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker};
+use orbit_server::analytics::{
+    AnalyticsTracker, ComposedAnalyticsTracker, ConsentGate, GitlabInstanceWatch,
+    SnowplowAnalyticsTracker,
+};
 use orbit_server::auth::JwtValidator;
 use orbit_server::cli::{Args, Mode};
 use orbit_server::cluster_health::ClusterHealthChecker;
@@ -273,9 +276,14 @@ async fn run_webserver(
     let mut analytics_tracker = None;
     let collector_url_missing = config.analytics.collector_url.trim().is_empty();
     if config.analytics.enabled == Some(true) && collector_url_missing {
-        return Err(anyhow::anyhow!(
-            "analytics.enabled=true but analytics.collector_url is empty"
-        ));
+        if config.analytics.local_collector().is_none() {
+            return Err(anyhow::anyhow!(
+                "analytics.enabled=true but analytics.collector_url is empty"
+            ));
+        }
+        warn!(
+            "analytics.enabled=true but analytics.collector_url is empty; analytics go to analytics.local_collector_url only"
+        );
     }
     if config.analytics.may_send_events() && !collector_url_missing {
         info!(
@@ -286,16 +294,27 @@ async fn run_webserver(
         );
         let tracker = SnowplowAnalyticsTracker::from_config(&config.analytics)
             .map_err(|e| anyhow::anyhow!("analytics tracker initialization failed: {e}"))?;
+        analytics_tracker = Some(tracker);
+    }
+    let local_analytics_tracker = SnowplowAnalyticsTracker::local_from_config(&config.analytics)
+        .map_err(|e| anyhow::anyhow!("local analytics tracker initialization failed: {e}"))?;
+    if analytics_tracker.is_some() || local_analytics_tracker.is_some() {
         let instance = GitlabInstanceWatch::default();
-        if config.analytics.follows_gitlab_setting() {
+        if analytics_tracker.is_some() && config.analytics.follows_gitlab_setting() {
             instance.spawn_refresh(gitlab_client.clone());
         }
-        grpc_server = grpc_server.with_analytics(Arc::new(ConsentGate::new(
-            Arc::new(tracker.clone()),
-            &config.analytics,
-            &instance,
-        )));
-        analytics_tracker = Some(tracker);
+        let mut trackers: Vec<Arc<dyn AnalyticsTracker>> = Vec::new();
+        if let Some(tracker) = &analytics_tracker {
+            trackers.push(Arc::new(ConsentGate::new(
+                Arc::new(tracker.clone()),
+                &config.analytics,
+                &instance,
+            )));
+        }
+        if let Some(local) = &local_analytics_tracker {
+            trackers.push(Arc::new(local.clone()));
+        }
+        grpc_server = grpc_server.with_analytics(Arc::new(ComposedAnalyticsTracker::new(trackers)));
     }
 
     info!(
@@ -313,6 +332,11 @@ async fn run_webserver(
     tokio::join!(
         async {
             if let Some(tracker) = analytics_tracker {
+                tracker.shutdown().await;
+            }
+        },
+        async {
+            if let Some(tracker) = local_analytics_tracker {
                 tracker.shutdown().await;
             }
         },

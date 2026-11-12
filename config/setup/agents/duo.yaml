@@ -1,7 +1,14 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
 name: duo
 title: GitLab Duo
-detect: ["~/.gitlab/duo"]
+# Duo creates its config dir on first run, so the binary glab installs counts too.
+detect:
+  - "$XDG_CONFIG_HOME/gitlab/duo"
+  - "~/.gitlab/duo"
+  - "$GLAB_CONFIG_DIR/bin/duo"
+  - "$XDG_CONFIG_HOME/glab-cli/bin/duo"
+  - "~/.config/glab-cli/bin/duo"
+  - "~/Library/Application Support/glab-cli/bin/duo"
 instruction_file:
   project: AGENTS.md
   global: "~/.gitlab/duo/AGENTS.md"

@@ -145,10 +145,7 @@ pub async fn run(
 
     let analytics = analytics::IndexingAnalytics::from_config(&config.analytics)?;
     if analytics.is_enabled() {
-        info!(
-            expanded(URL) = %config.analytics.collector_url,
-            "indexing analytics enabled"
-        );
+        info!("indexing analytics enabled");
     }
     if let Some(client) = &gitlab_client {
         analytics.watch_gitlab_instance(Arc::clone(client));

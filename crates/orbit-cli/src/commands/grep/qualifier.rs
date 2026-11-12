@@ -72,6 +72,38 @@ fn snake(name: &str) -> String {
     out
 }
 
+fn provider_kind(provider: &str, kind: &str) -> Option<String> {
+    let flat = kind.replace('_', "").to_ascii_lowercase();
+    let alias = ALIASES
+        .get(&kind.to_ascii_lowercase())
+        .filter(|node| crate::remote::grep::searched_kind(node).is_some());
+    if let Some(node) = alias {
+        return Some(node.clone());
+    }
+    let names = |nodes: &[String]| nodes.iter().any(|node| node.eq_ignore_ascii_case(&flat));
+    (names(&ONTOLOGY_NODES) || names(&SERVER_ENTITIES)).then(|| format!("{provider}:{kind}"))
+}
+
+static ONTOLOGY_NODES: LazyLock<Vec<String>> = LazyLock::new(|| {
+    ontology::Ontology::load_embedded()
+        .map(|ontology| ontology.node_names().map(str::to_string).collect())
+        .unwrap_or_default()
+});
+
+static SERVER_ENTITIES: LazyLock<Vec<String>> =
+    LazyLock::new(|| crate::remote::server_schema::cached_entity_names(std::path::Path::new(".")));
+
+fn provider_qualifier(name: &str, value: &str) -> Option<(String, Option<String>)> {
+    let provider = crate::remote::grep::provider(name)?;
+    let (kind, words) = value.split_once(':')?;
+    let named = !kind.is_empty() && kind.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !named {
+        return None;
+    }
+    let kind = provider_kind(provider, kind)?;
+    Some((kind, (!words.is_empty()).then(|| words.to_string())))
+}
+
 fn kind_for(name: &str) -> Option<String> {
     let lower = name.to_ascii_lowercase();
     [
@@ -122,7 +154,7 @@ fn globs_for(value: &str) -> Vec<String> {
     }
 }
 
-pub(super) fn parse(query: &str) -> Option<Parsed> {
+pub(super) fn parse(query: &str, providers: bool) -> Option<Parsed> {
     let mut parsed = Parsed::default();
     let mut sections: Vec<(Option<String>, Vec<String>)> = vec![(None, Vec::new())];
     let mut any = false;
@@ -135,6 +167,11 @@ pub(super) fn parse(query: &str) -> Option<Parsed> {
         };
         if value.starts_with(':') || value.starts_with('/') {
             sections.last_mut().expect("a section").1.push(token);
+            continue;
+        }
+        if let Some((kind, words)) = provider_qualifier(name, value).filter(|_| providers) {
+            sections.push((Some(kind), words.into_iter().collect()));
+            any = true;
             continue;
         }
         match name.to_ascii_lowercase().as_str() {
@@ -192,6 +229,7 @@ fn is_qualifier(word: &str) -> bool {
     word.split_once(':')
         .is_some_and(|(name, value)| match name.to_ascii_lowercase().as_str() {
             "file" | "path" | "repo" => !value.is_empty(),
+            _ if provider_qualifier(name, value).is_some() => true,
             _ => !value.starts_with([':', '/']) && kind_for(name).is_some(),
         })
 }
@@ -224,7 +262,12 @@ pub(super) fn apply(
         return plain(query);
     }
     let query = absorb_trailing(query, paths);
-    let Some(parsed) = query.as_deref().and_then(parse) else {
+    let root = crate::workspace::git_toplevel(std::path::Path::new(".")).ok();
+    let local = paths.iter().any(|path| {
+        std::path::Path::new(path).exists()
+            || root.as_ref().is_some_and(|root| root.join(path).exists())
+    });
+    let Some(parsed) = query.as_deref().and_then(|query| parse(query, !local)) else {
         return plain(query);
     };
     options.globs.extend(parsed.globs);
@@ -256,7 +299,7 @@ mod tests {
     }
 
     fn sections(query: &str) -> Vec<(Vec<String>, String)> {
-        parse(query)
+        parse(query, true)
             .unwrap()
             .sections
             .into_iter()
@@ -265,8 +308,27 @@ mod tests {
     }
 
     #[test]
+    fn a_provider_qualifier_names_one_entity_and_keeps_the_indexed_kinds() {
+        assert_eq!(
+            sections("gitlab:pipeline:deploy prod GitLab:mr:x"),
+            vec![
+                (strings(&["gitlab:pipeline"]), "deploy prod".into()),
+                (strings(&["MergeRequest"]), "x".into()),
+            ]
+        );
+        for literal in [
+            "gitlab:db:migrate",
+            "gitlab:packages:migrate",
+            "gitlab:users:list",
+        ] {
+            assert_eq!(parse(literal, true), None, "{literal}");
+        }
+        assert_eq!(parse("gitlab:pipeline:x", false), None);
+    }
+
+    #[test]
     fn an_unpaired_quote_stays_in_the_pattern() {
-        let parsed = parse(r#"apimachinery/pkg/runtime" file:describe_test.go"#).unwrap();
+        let parsed = parse(r#"apimachinery/pkg/runtime" file:describe_test.go"#, true).unwrap();
         assert_eq!(
             parsed.sections[0].query.as_deref(),
             Some(r#"apimachinery/pkg/runtime""#)
@@ -275,7 +337,7 @@ mod tests {
             parsed.globs,
             strings(&["*describe_test.go*", "**/*describe_test.go*/**"])
         );
-        let quoted = parse(r#""rate limit" file:a.rs"#).unwrap();
+        let quoted = parse(r#""rate limit" file:a.rs"#, true).unwrap();
         assert_eq!(quoted.sections[0].query.as_deref(), Some("rate limit"));
     }
 
@@ -296,7 +358,7 @@ mod tests {
             "stage: test",
             "type:go grep",
         ] {
-            assert_eq!(parse(literal), None, "{literal}");
+            assert_eq!(parse(literal, true), None, "{literal}");
         }
     }
 }
