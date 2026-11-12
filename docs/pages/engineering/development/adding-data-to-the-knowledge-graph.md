@@ -326,7 +326,7 @@ mise run schema:ledger:check  # confirm the ledger and snapshot match the ontolo
 - bumps `schema:` in `config/versions.yaml`;
 - writes the ontology archive `config/ontology-archives/v<N>.tar.gz`.
 
-`--scope` (`*`, `sdlc` or `code`) and `--entities` (with `sdlc` only) can widen the derived scope but never narrow it. With no ontology drift they declare it. `--scope none` is the exception: it replaces the derived scope, marks a change as output-neutral and requires a `--note` that certifies it. `--base` sets the ref that decides between a new bump and an amend (default `origin/main`). `--amend` and `--new` force that decision only when the base ref can't be read. Use it only when the produced rows and tables are byte-identical.
+`--scope` (`*`, `sdlc` or `code`) and `--entities` (with `sdlc` only) can widen the derived scope but never narrow it. With no ontology drift they declare it. `--scope none` is the exception: it replaces the derived scope, marks a change as output-neutral and requires a `--note` that certifies it. Use it only when the produced rows and tables are byte-identical. `--base` sets the ref that decides between a new bump and an amend (default `origin/main`). `--amend` and `--new` force that decision only when the base ref can't be read.
 
 Each archive holds the ontology sources of one schema version, and the server embeds them. Commit the new archive, and never edit or relabel an existing one. [`config/ontology-archives/README.md`](../../../../config/ontology-archives/README.md) explains the retention rules.
 
