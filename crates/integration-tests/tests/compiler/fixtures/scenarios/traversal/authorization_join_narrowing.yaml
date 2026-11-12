@@ -2,8 +2,6 @@
 cases:
   - name: pinned_target_narrows_the_caller_join
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     security:
@@ -19,8 +17,6 @@ cases:
 
   - name: pinned_target_scopes_the_caller_join
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     security:
@@ -35,8 +31,6 @@ cases:
 
   - name: pinned_source_narrows_the_callee_join
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[12000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":50}
       gql: |
         MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
     security:
@@ -63,13 +57,9 @@ cases:
           contains:
             - AS callee ON (callee.id = _orbit_edge_0.target_id)
           not_contains: []
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
 
   - name: pinned_target_drops_a_denied_caller
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     security:
@@ -84,8 +74,6 @@ cases:
 
   - name: pinned_source_drops_a_denied_callee
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[12000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":50}
       gql: |
         MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
     security:

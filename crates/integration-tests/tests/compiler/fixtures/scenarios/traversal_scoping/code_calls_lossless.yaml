@@ -2,16 +2,6 @@
 cases:
   - name: Code-intel CALLS traversal returns caller-callee pair without loss under scoping
     query:
-      json: |
-        {
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "caller", "entity": "Definition"},
-                {"id": "def", "entity": "Definition", "node_ids": [12000]}
-            ],
-            "relationships": [{"type": "CALLS", "from": "caller", "to": "def"}],
-            "limit": 50
-        }
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12000}) RETURN caller, def LIMIT 50
     security:

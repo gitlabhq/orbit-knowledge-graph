@@ -1,8 +1,6 @@
 cases:
   - name: File path token matching reads the text index
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","filters":{"file_path":{"token_match":"src"}},"columns":["file_path"]}],"limit":10}
       gql: |
         MATCH (d:Definition) WHERE token_match(d.file_path, 'src') RETURN d.file_path LIMIT 10
     logical: { expect: ["(Filter token_match(d.file_path, 'src') (_))"] }
@@ -13,8 +11,6 @@ cases:
 
   - name: Sort-key prefix remains case-sensitive
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","filters":{"branch":{"starts_with":"MAI"}},"columns":["branch"]}],"limit":10}
       gql: |
         MATCH (d:Definition) WHERE d.branch STARTS WITH 'MAI' RETURN d.branch LIMIT 10
     logical: { expect: ["(Filter starts_with(d.branch, 'MAI') (_))"] }

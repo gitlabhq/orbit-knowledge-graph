@@ -2,21 +2,6 @@
 cases:
   - name: Project-scoped MR-MRDiff-MRDiffFile chain returns all diff files without loss
     query:
-      json: |
-        {
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
-                 "filters": {"project_id": {"eq": 1000}}},
-                {"id": "diff", "entity": "MergeRequestDiff"},
-                {"id": "df", "entity": "MergeRequestDiffFile"}
-            ],
-            "relationships": [
-                {"type": "HAS_DIFF", "from": "mr", "to": "diff"},
-                {"type": "HAS_FILE", "from": "diff", "to": "df"}
-            ],
-            "limit": 50
-        }
       gql: |
         MATCH (mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:HAS_FILE]->(df:MergeRequestDiffFile) WHERE mr.project_id = 1000 RETURN mr.project_id, diff, df LIMIT 50
     security:

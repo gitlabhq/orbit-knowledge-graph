@@ -14,8 +14,6 @@ cases:
             - AS p FINAL
           not_contains:
             - tuple(p.traversal_path, p.id) IN
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
 
   - name: latest_status_once
     query:
@@ -30,8 +28,6 @@ cases:
           contains:
             - AS p FINAL
           not_contains: []
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
 
   - name: unpinned_high_fan_out_child_reads_final
     query:
@@ -47,8 +43,6 @@ cases:
             - AS j FINAL
           not_contains:
             - tuple(j.traversal_path, j.id) IN
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
 
   - name: pinned_high_fan_out_child_finds_then_checks
     query:
@@ -64,5 +58,3 @@ cases:
             - tuple(j.traversal_path, j.id) IN
           not_contains:
             - AS j FINAL
-    missing_frontends:
-      json: The original query scenario supplies only GQL.
