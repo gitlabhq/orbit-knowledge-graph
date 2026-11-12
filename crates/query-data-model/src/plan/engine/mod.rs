@@ -29,6 +29,12 @@ pub enum EngineOperation {
         rows: u64,
         skip: u64,
     },
+    /// Text columns cut to `chars` characters, with `suffix` after any that were cut.
+    Excerpt {
+        columns: Vec<Ref>,
+        chars: u32,
+        suffix: String,
+    },
 }
 
 impl Language for EngineLanguage {
@@ -43,6 +49,7 @@ impl Language for EngineLanguage {
             }),
             EngineOperation::Select(columns) => columns.iter_mut().for_each(visit),
             EngineOperation::Order(keys) => keys.iter_mut().for_each(|(key, _)| visit(key)),
+            EngineOperation::Excerpt { columns, .. } => columns.iter_mut().for_each(visit),
             EngineOperation::Rows { .. } | EngineOperation::Limit { .. } => {}
         }
     }
@@ -158,6 +165,37 @@ impl EngineBuilder {
 
     pub fn order(&mut self, rel: Rel, keys: Vec<(Ref, Order)>) -> Result<Rel, EngineError> {
         self.connect(EngineOperation::Order(keys), vec![rel], Outputs::preserve())
+    }
+
+    pub fn excerpt(
+        &mut self,
+        rel: Rel,
+        columns: Vec<Ref>,
+        chars: u32,
+        suffix: &str,
+    ) -> Result<Rel, EngineError> {
+        let operation = EngineOperation::Excerpt {
+            columns,
+            chars,
+            suffix: suffix.to_string(),
+        };
+        self.connect(operation, vec![rel], Outputs::preserve())
+    }
+
+    /// The output of `rel` declared `name`, as the result columns are.
+    pub fn output(&self, rel: &Rel, name: &str) -> Result<Ref, EngineError> {
+        self.construction
+            .outputs(&rel.rows)?
+            .into_iter()
+            .find(|output| {
+                self.construction
+                    .value(*output)
+                    .is_ok_and(|(declared, _)| declared == Some(name))
+            })
+            .ok_or(EngineError::UnknownColumn {
+                stage: usize::MAX,
+                column: name.to_string(),
+            })
     }
 
     pub fn limit(&mut self, rel: Rel, rows: u64, skip: u64) -> Result<Rel, EngineError> {

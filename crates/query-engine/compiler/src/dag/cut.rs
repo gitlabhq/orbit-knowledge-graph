@@ -99,6 +99,7 @@ impl Cut<'_> {
             .unwrap_or((self.limits.default_rows, None));
         let engine = EngineQuery {
             joins,
+            excerpted: self.excerpted()?,
             columns: self.result_columns(&stage, &group_of)?,
             order: engine_order,
             limit,

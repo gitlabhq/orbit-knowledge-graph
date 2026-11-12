@@ -13,16 +13,19 @@ use crate::passes::codegen::{SqlBackend, rejected};
 
 const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_UTF8_BYTES_PER_CHAR: u64 = 4;
-const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
+pub(crate) const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
+
+/// The characters each text value of a response keeps when `rows` rows fill one message.
+pub(crate) fn excerpt_chars(rows: u32) -> u32 {
+    (WORKHORSE_GRPC_MESSAGE_CAP_BYTES / MAX_UTF8_BYTES_PER_CHAR / u64::from(rows.max(1))) as u32
+}
 
 pub fn apply_text_excerpts<B: SqlBackend>(
     plan: RelationalPlan<B>,
     model: &Catalog<B>,
     query: Query<'_>,
 ) -> Result<RelationalPlan<B>> {
-    let max_chars = (WORKHORSE_GRPC_MESSAGE_CAP_BYTES
-        / MAX_UTF8_BYTES_PER_CHAR
-        / u64::from(query.sorted_rows()?.max(1))) as u32;
+    let max_chars = excerpt_chars(query.sorted_rows()?);
     let selected = selections(query);
     let columns: HashMap<String, HashSet<String>> = query
         .bindings()

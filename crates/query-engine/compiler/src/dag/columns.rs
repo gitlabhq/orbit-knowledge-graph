@@ -112,6 +112,37 @@ impl Cut<'_> {
     }
 
     /// The query's result columns in its RETURN order, each read from the stage that holds it.
+    /// The result columns of returned text properties, named as `result_columns` names them;
+    /// the keys a lookup resolves other properties by stay whole, as in a relational response.
+    pub(super) fn excerpted(&self) -> Result<Vec<String>> {
+        let model = self.query.model;
+        let graph = model.graph();
+        let mut excerpted = Vec::new();
+        for (binding, properties) in self.selected()? {
+            let Some(entity) = self.query.entity(binding) else {
+                continue;
+            };
+            let keys: Vec<PropertyId> = graph
+                .entity(entity)
+                .properties
+                .iter()
+                .filter_map(|property| model.lookup(*property))
+                .flat_map(|lookup| lookup.keys.iter().copied())
+                .collect();
+            let name = self.query.name(binding);
+            for property in properties {
+                let declared = graph.property(property);
+                if declared.data_type == query_data_model::DataType::String
+                    && !keys.contains(&property)
+                {
+                    excerpted.push(format!("{name}_{}", declared.name));
+                }
+            }
+        }
+        excerpted.sort();
+        Ok(excerpted)
+    }
+
     pub(super) fn result_columns(
         &self,
         stage: &impl Fn(usize) -> StageId,

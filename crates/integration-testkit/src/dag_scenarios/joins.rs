@@ -74,7 +74,9 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
     assert_eq!(call.filters[0].value, json!([2000, 2001]));
     assert_eq!(
         ops(&ran.plan(2, true)),
-        ["Rows", "Rows", "Join", "Order", "Select", "Limit"]
+        [
+            "Rows", "Rows", "Join", "Order", "Select", "Excerpt", "Limit"
+        ]
     );
     let keys = ran.events.iter().find_map(|event| match event {
         Event::Keys { count, sample, .. } => Some((*count, sample.clone())),
@@ -168,4 +170,18 @@ async fn an_empty_key_set_skips_the_stage_that_reads_it() {
     let ran = run(MENTIONS, &caller("1/9970/"), Vec::new()).await;
     assert!(ran.rendered(1).is_empty());
     assert!(ran.rows().is_empty());
+}
+
+#[tokio::test]
+async fn joined_text_is_excerpted_like_a_single_stage_response() {
+    let title = "a".repeat(200_000);
+    let merge_requests = vec![row(
+        json!({"mr_iid": 1, "mr_title": title, "mr_id": 2000, "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),
+    )];
+    let ran = run(MENTIONS, &caller("1/9970/"), merge_requests).await;
+    let rows = ran.rows();
+    let excerpt = rows[0]["mr_title"].as_str().unwrap();
+    let chars = 8 * 1024 * 1024 / 4 / 11;
+    assert_eq!(excerpt, format!("{} [truncated]", "a".repeat(chars)));
+    assert_eq!(rows[0]["m_text"], "deploy to staging at 5pm");
 }

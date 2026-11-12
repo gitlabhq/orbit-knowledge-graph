@@ -56,6 +56,25 @@ fn join_key(arrays: &[&ArrayRef], row: usize) -> Result<Option<Vec<Key>>, Execut
         .collect()
 }
 
+/// Text values cut to `chars` characters, each cut one followed by `suffix`.
+fn excerpt(array: &ArrayRef, chars: usize, suffix: &str) -> Result<ArrayRef, ExecutorError> {
+    let text = arrow::compute::cast(array, &DataType::Utf8).map_err(failed)?;
+    let text = text
+        .as_any()
+        .downcast_ref::<arrow::array::StringArray>()
+        .ok_or_else(|| ExecutorError("an excerpt reads a text column".into()))?;
+    let cut: arrow::array::StringArray = text
+        .iter()
+        .map(|value| {
+            value.map(|value| match value.char_indices().nth(chars) {
+                Some((end, _)) => format!("{}{suffix}", &value[..end]),
+                None => value.to_string(),
+            })
+        })
+        .collect();
+    Ok(Arc::new(cut))
+}
+
 pub fn run(
     plan: &EnginePlan,
     stages: &HashMap<StageId, Vec<RecordBatch>>,
@@ -149,6 +168,25 @@ pub fn run(
                 let start = (*skip as usize).min(table.rows);
                 let end = start.saturating_add(*rows as usize).min(table.rows);
                 table.take(&UInt32Array::from_iter_values(start as u32..end as u32))?
+            }
+            EngineOperation::Excerpt {
+                columns,
+                chars,
+                suffix,
+            } => {
+                let table = input(0)?;
+                let cut = table
+                    .columns
+                    .iter()
+                    .map(|(output, array)| match columns.contains(output) {
+                        true => Ok((*output, excerpt(array, *chars as usize, suffix)?)),
+                        false => Ok((*output, array.clone())),
+                    })
+                    .collect::<Result<_, ExecutorError>>()?;
+                Table {
+                    columns: cut,
+                    rows: table.rows,
+                }
             }
             EngineOperation::Select(selected) => {
                 let table = input(0)?;

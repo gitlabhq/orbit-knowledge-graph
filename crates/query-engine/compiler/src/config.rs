@@ -200,6 +200,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [stage_contexts]
             mutates: [engine, result_ctx]
         }
+        engine::response_policy {
+            reads_env: [data_model]
+            reads_state: [engine_query]
+            mutates: [engine]
+        }
         engine::paginate {
             reads_env: [data_model]
             reads_state: [engine_query]
@@ -254,7 +259,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             backend: crate::dag::Engine
             env: [limits, trace]
             state: [engine_query, stage_contexts, engine, result_ctx, planned]
-            phases: [engine::plan, engine::result_contract, engine::paginate]
+            phases: [engine::plan, engine::result_contract, engine::response_policy, engine::paginate]
         }
         hydration_clickhouse {
             backend: query_data_model::ClickHouse

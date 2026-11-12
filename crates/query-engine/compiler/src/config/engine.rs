@@ -143,6 +143,32 @@ pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Engine>) -> R
     Ok(())
 }
 
+/// Text columns of the joined rows keep as many characters as a single-stage response of the
+/// same page would.
+pub(super) fn response_policy(ctx: &mut impl CompilerCtx<Backend = Engine>) -> Result<()> {
+    let plan = require(ctx.take_engine(), "engine")?;
+    let query = require(ctx.engine_query().as_ref(), "engine_query")?;
+    let rows = query.skip.unwrap_or(0) + query.limit + 1;
+    let chars =
+        crate::passes::response_policy::excerpt_chars(u32::try_from(rows).unwrap_or(u32::MAX));
+    let suffix = crate::passes::response_policy::TEXT_TRUNCATION_SUFFIX;
+    let root = plan.root();
+    let plan = EngineBuilder::rebuild(ctx.data_model().id(), &plan, |q, step| {
+        let rel = step.keep(q)?;
+        if step.node() != root || query.excerpted.is_empty() {
+            return Ok(rel);
+        }
+        let columns = query
+            .excerpted
+            .iter()
+            .map(|name| q.output(&rel, name))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        q.excerpt(rel, columns, chars, suffix)
+    })?;
+    ctx.set_engine(plan);
+    Ok(())
+}
+
 pub(super) fn paginate(ctx: &mut impl CompilerCtx<Backend = Engine>) -> Result<()> {
     let plan = require(ctx.take_engine(), "engine")?;
     let query = require(ctx.engine_query().as_ref(), "engine_query")?;

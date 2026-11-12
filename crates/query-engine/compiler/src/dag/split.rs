@@ -26,7 +26,9 @@ pub(super) struct Crossing {
     pub pairs: Vec<((Ref, PropertyId), (Ref, PropertyId))>,
 }
 
-/// Splits a statement into stages, one per connection it reads.
+/// Splits a statement into stages, one per connection it reads. A query the relational connection
+/// serves alone is one stage; a remote stage always hands its rows to the engine stage, which
+/// shapes the response.
 pub fn split<B: SqlBackend>(
     statement: Statement,
     primary: &Catalog<B>,
@@ -36,19 +38,12 @@ pub fn split<B: SqlBackend>(
     let query = Query::new(&statement.plan, primary.model());
     let places = places(query, primary, remotes);
     let distinct: BTreeSet<Place> = places.values().copied().collect();
-    if distinct.len() <= 1 {
-        let (backend, connection) = match distinct.first() {
-            Some(Place::Remote(index)) => {
-                let target = &remotes.targets()[*index];
-                (target.backend(), target.connection())
-            }
-            _ => (B::BACKEND, primary.connection()),
-        };
+    if distinct.iter().all(|place| *place == Place::Primary) {
         return Ok(Dag {
             stages: vec![Stage {
                 id: 0,
-                backend,
-                connection: Some(connection.to_string()),
+                backend: B::BACKEND,
+                connection: Some(primary.connection().to_string()),
                 query: StageQuery::Gql(statement),
                 inputs: Vec::new(),
                 response: true,

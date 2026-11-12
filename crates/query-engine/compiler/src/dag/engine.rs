@@ -27,6 +27,8 @@ pub struct EngineQuery {
     pub order: Vec<(EngineColumn, Order)>,
     pub limit: u64,
     pub skip: Option<u64>,
+    /// The result columns that hold text, which the response policy excerpts.
+    pub excerpted: Vec<String>,
 }
 
 fn orders<S: serde::Serializer>(

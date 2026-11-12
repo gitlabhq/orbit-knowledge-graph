@@ -76,7 +76,7 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
             languages: vec!["rust".into()],
             trigrams: vec!["compile".into()],
             pattern: "compile($$$ARGS)".into(),
-            limit: Some(50),
+            limit: Some(1001),
             fields: vec![
                 RequestField::Path,
                 RequestField::Line,
@@ -89,10 +89,10 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
         ran.rows(),
         [
             row(
-                json!({"path": "crates/query-engine/compiler/src/lib.rs", "line": 120, "ARGS": "raw, fe, &data_model, &ctx", "project_id": 42})
+                json!({"f_path": "crates/query-engine/compiler/src/lib.rs", "match.line": 120, "match.ARGS": "raw, fe, &data_model, &ctx"})
             ),
             row(
-                json!({"path": "crates/orbit-server/src/query.rs", "line": 48, "ARGS": "&text, Frontend::Gql, &catalog, &security", "project_id": 42})
+                json!({"f_path": "crates/orbit-server/src/query.rs", "match.line": 48, "match.ARGS": "&text, Frontend::Gql, &catalog, &security"})
             ),
         ]
     );
@@ -135,14 +135,14 @@ async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
                 },
             ],
             window: None,
-            limit: Some(20),
+            limit: Some(1001),
             fields: vec!["author".into(), "text".into()],
         }
     );
     assert_eq!(
         ran.rows(),
         [row(
-            json!({"author": "ann", "text": "deploy to staging at 5pm"})
+            json!({"m_author": "ann", "m_text": "deploy to staging at 5pm"})
         )]
     );
     let checks = AllowedKeys(BTreeSet::new());
@@ -159,7 +159,7 @@ async fn the_repository_restriction_drops_projects_the_caller_cannot_read() {
     let paths: Vec<_> = narrow
         .rows()
         .into_iter()
-        .map(|row| row["path"].clone())
+        .map(|row| row["f_path"].clone())
         .collect();
     assert!(!paths.contains(&json!("src/vault.rs")), "{paths:?}");
 
@@ -167,7 +167,7 @@ async fn the_repository_restriction_drops_projects_the_caller_cannot_read() {
     let paths: Vec<_> = wide
         .rows()
         .into_iter()
-        .map(|row| row["path"].clone())
+        .map(|row| row["f_path"].clone())
         .collect();
     assert!(paths.contains(&json!("src/vault.rs")), "{paths:?}");
 }
@@ -185,7 +185,7 @@ async fn the_workspace_precondition_keeps_unreadable_namespaces_out_of_the_call(
     let texts: Vec<_> = narrow
         .rows()
         .into_iter()
-        .map(|row| row["text"].clone())
+        .map(|row| row["m_text"].clone())
         .collect();
     assert!(!texts.contains(&json!("deploy uses the production keys")));
 }
