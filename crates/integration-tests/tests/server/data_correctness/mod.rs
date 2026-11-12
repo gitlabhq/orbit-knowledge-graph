@@ -1,5 +1,6 @@
 mod dag;
 mod helpers;
+mod peers;
 mod retained;
 
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, query_scenario, run_subtests_shared};
@@ -35,6 +36,13 @@ async fn data_correctness_dag() {
     dag::query_4_drops_the_files_their_read_code_check_denies(&ctx).await;
     dag::merge_requests_join_the_slack_messages_that_discuss_them(&ctx).await;
     dag::a_code_search_reads_only_the_repositories_the_caller_can_read(&ctx).await;
+    dag::merge_requests_hand_slack_only_the_keys_their_check_allows(&ctx).await;
+    dag::a_head_under_none_keeps_the_files_its_via_chain_admits(&ctx).await;
+    peers::seed(&ctx).await;
+    peers::rollouts_on_one_clickhouse_join_releases_on_another_by_uuid(&ctx).await;
+    peers::releases_on_a_second_clickhouse_join_the_merge_requests_they_ship(&ctx).await;
+    peers::merge_requests_on_clickhouse_join_their_reviews_on_duckdb(&ctx).await;
+    dag::a_deep_page_fails_past_the_stage_cap_instead_of_losing_rows(&ctx).await;
 }
 
 #[tokio::test]
