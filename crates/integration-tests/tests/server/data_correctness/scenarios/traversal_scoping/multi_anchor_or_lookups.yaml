@@ -15,11 +15,6 @@ query:
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id IN [1000, 1004] RETURN mr.iid, p.name LIMIT 10
 
 expect:
-  sql_contains:
-    - "(_orbit_scope.id = 1000)"
-    - "(_orbit_scope.id = 1004)"
-    - ") OR startsWith(mr.traversal_path, (SELECT"
-    - ") OR startsWith(p.traversal_path, (SELECT"
   node_count: 7
   nodes:
     Project:

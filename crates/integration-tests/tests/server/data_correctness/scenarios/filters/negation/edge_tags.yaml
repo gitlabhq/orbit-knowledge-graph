@@ -43,7 +43,6 @@ cases:
         WHERE u.username IS NOT NULL
         RETURN g{.name}, count(u) AS members LIMIT 10
     expect:
-      skip_requirements: ["filter:username"]
       groups:
         g:
           entity: Group
@@ -61,7 +60,6 @@ cases:
         WHERE u.username IS NOT NULL AND NOT (r.source_id < 70 AND u.state = 'active')
         RETURN g{.name}, count(u) AS members LIMIT 10
     expect:
-      skip_requirements: ["filter:username"]
       groups:
         g:
           entity: Group
@@ -79,7 +77,6 @@ cases:
         WHERE u.username IS NOT NULL AND r.source_id < 70 AND u.state = 'active'
         RETURN g{.name}, count(u) AS members LIMIT 10
     expect:
-      skip_requirements: ["filter:username", "filter:state"]
       groups:
         g:
           entity: Group
@@ -114,7 +111,6 @@ cases:
         WHERE r.source_id < 70 AND u.state = 'active'
         RETURN g{.name}, count(u) AS members LIMIT 10
     expect:
-      skip_requirements: ["filter:state"]
       groups:
         g:
           entity: Group

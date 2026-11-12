@@ -1,8 +1,8 @@
 # Planner optimization coverage
 
 Run `mise test:plan-shape`. The runner discovers YAML files recursively under
-`fixtures/`. Each fixture checks normalized input, selected requirements, and/or
-the emitted SQL AST. Most fixtures run through both JSON and GQL.
+`fixtures/`. Each fixture checks normalized input, the selected plan, the lowered
+SQL AST, and/or the final secured AST. Most fixtures run through both JSON and GQL.
 
 The emitted AST includes the ClickHouse text-excerpt pass and the row window
 pass, so `Limit` shows the fetched rows (the page plus one probe row) and
@@ -25,6 +25,29 @@ A file can hold several fixtures in a `cases` list. Every other top-level key
 is a default for each case, and each case needs its own `name`.
 
 The fixtures cover access-path choices and their important eligibility guards.
+
+Final-output assertions use these optional ClickHouse fields:
+
+```yaml
+physical:
+  clickhouse:
+    final_ast:
+      expect: ["(Filter false, ... (_))"]
+    sql:
+      contains: ["SETTINGS use_query_cache = 0"]
+      not_contains: ["gl_edge"]
+    indexes:
+      - { table: gl_merge_request, name: idx_title }
+```
+
+`sql` checks the rendered query. `indexes` checks the ClickHouse layout and
+requires the final query to scan that table. `hydration` checks the hydration plan kind: `none`, `static`,
+or `dynamic`. Data-correctness scenarios reject these fields.
+
+`scenarios/` holds the compiler checks for the data-correctness scenarios. It
+mirrors the scenario tree: `scenarios/search/filter_starts_with.yaml` checks the
+query in `server/data_correctness/scenarios/search/filter_starts_with.yaml`.
+Production route cases stay in `edge_scans/production_variant_routes.yaml`.
 
 CTE assertions refer to top-level named query definitions, not execution order.
 Use one of these forms in a planned or emitted assertion block:
