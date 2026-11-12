@@ -2,13 +2,16 @@
 //! heads to Orbit Next, which searches only those heads; the engine joins both sides. `Head` has
 //! a composite identity, so the key set that crosses the stage is composite.
 
+use std::collections::BTreeSet;
+
 use compiler::dag::{Backend, Input, KeyInput, Rendered};
 use compiler::orbit_authorization::Key;
 use query_engine::shared::dag::Event;
 use serde_json::json;
 
 use super::single::ops;
-use super::{caller, row, run};
+use super::{caller, row, run, run_with};
+use crate::dag_fakes::AllowedKeys;
 
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
@@ -187,4 +190,20 @@ async fn a_code_stage_feeds_composite_keys_into_a_clickhouse_stage() {
             "_orbit_mr_type": "MergeRequest",
         }))]
     );
+}
+
+/// The code stage starts from `Head`, but it reads the `File`s at each head, so `File`'s
+/// `read_code` check runs on its rows.
+#[tokio::test]
+async fn the_files_at_a_head_go_through_their_read_code_check() {
+    let denied = AllowedKeys(BTreeSet::from([Key::Int(77)]));
+    let ran = run_with(
+        QUERY_4,
+        &caller("1/9970/"),
+        open_merge_requests(),
+        "alice",
+        &denied,
+    )
+    .await;
+    assert_eq!(ran.rows(), Vec::<query_data_model::catalog::Row>::new());
 }

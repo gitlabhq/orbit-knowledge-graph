@@ -10,7 +10,9 @@ pub use crate::passes::remote_security::Namespaces;
 pub use crate::passes::scope_lookup::{KEY, Resolves, ScopeLookup, lookups, namespaces};
 
 use query_data_model::catalog::{Check, Row};
-use query_data_model::plan::logical::LogicalOperation;
+use query_data_model::plan::logical::{LogicalOperation, LogicalType};
+
+use crate::error::{QueryError, Result};
 
 /// A row check the remote rows of a read go through, on the field that holds each row's key.
 #[derive(Debug, Clone, PartialEq)]
@@ -23,15 +25,34 @@ pub struct RowCheck {
     pub kind: crate::KeyKind,
 }
 
-/// The row checks of the entity the plan reads.
-pub fn row_checks(plan: &LogicalPlan, model: &Model) -> Vec<RowCheck> {
+/// The row checks of every entity the plan reads; a read whose entity the plan does not name
+/// fails closed.
+pub fn row_checks(plan: &LogicalPlan, model: &Model) -> Result<Vec<RowCheck>> {
     let access = model.access();
     let graph = model.graph();
-    plan.nodes()
-        .filter_map(|node| match plan.operation(node) {
-            LogicalOperation::Entities(entity) => Some(*entity),
-            _ => None,
-        })
+    let mut entities = Vec::new();
+    for node in plan.nodes() {
+        match plan.operation(node) {
+            LogicalOperation::Entities(entity) => entities.push(*entity),
+            LogicalOperation::Follow { .. } => {
+                let to = plan.outputs(node).last().map(|to| plan.value(to));
+                let Some(LogicalType::Entity(entity)) = to else {
+                    return Err(unnamed());
+                };
+                entities.push(*entity);
+            }
+            LogicalOperation::Neighbors { .. }
+            | LogicalOperation::Shortest { .. }
+            | LogicalOperation::Read(_)
+            | LogicalOperation::Union => return Err(unnamed()),
+            _ => {}
+        }
+    }
+    entities.sort_unstable();
+    entities.dedup();
+    let mut checks: Vec<RowCheck> = Vec::new();
+    for check in entities
+        .into_iter()
         .flat_map(|entity| &access.entity(entity).checks)
         .filter_map(|check| match check {
             Check::Rows {
@@ -49,7 +70,16 @@ pub fn row_checks(plan: &LogicalPlan, model: &Model) -> Vec<RowCheck> {
             }),
             Check::Delegated { .. } => None,
         })
-        .collect()
+    {
+        if !checks.contains(&check) {
+            checks.push(check);
+        }
+    }
+    Ok(checks)
+}
+
+fn unnamed() -> QueryError {
+    QueryError::Security("a remote stage reads nodes whose row checks it cannot name".into())
 }
 
 /// The rows whose key the check allows; a row without the key fails closed.

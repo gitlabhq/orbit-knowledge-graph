@@ -205,7 +205,7 @@ impl<'r> Runner<'r> {
                 .target(connection.as_deref().unwrap_or_default()),
         ) {
             (StageQuery::Gql(statement), Some(_)) => {
-                compiler::remote::row_checks(&statement.plan, self.env.primary.model())
+                compiler::remote::row_checks(&statement.plan, self.env.primary.model())?
             }
             _ => Vec::new(),
         };
