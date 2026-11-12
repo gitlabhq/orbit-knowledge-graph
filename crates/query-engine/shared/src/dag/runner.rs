@@ -89,6 +89,10 @@ impl<'r> Runner<'r> {
                     backend: stage.backend,
                     connection: stage.connection.clone(),
                     inputs: stage.inputs.clone(),
+                    logical: match &stage.query {
+                        StageQuery::Gql(statement) => compiler::dag::describe(&statement.plan),
+                        StageQuery::Engine(..) | StageQuery::Hydration(_) => Vec::new(),
+                    },
                 })
                 .collect();
             self.observer.event(Event::Split { stages });
@@ -177,18 +181,8 @@ impl<'r> Runner<'r> {
         if sets.iter().any(|set| set.keys.is_empty()) {
             return Ok((None, Executed::default()));
         }
-        let composite: Vec<KeySet> = sets
-            .iter()
-            .filter(|set| set.input.properties.len() > 1)
-            .cloned()
-            .collect();
-        let heads = match stage.backend {
-            compiler::dag::Backend::OrbitCode => compiler::dag::heads(&composite)?,
-            _ => Vec::new(),
-        };
         let mut inputs = Inputs {
             contexts: contexts.clone(),
-            composite,
             ..Inputs::default()
         };
         if let StageQuery::Gql(statement) = stage.query {
@@ -203,7 +197,10 @@ impl<'r> Runner<'r> {
             if let Some(connection) = stage.connection.as_deref()
                 && let Some(target) = self.env.remotes.target(connection)
             {
-                inputs.namespaces = remote::namespaces(self, id, target, &bound, &heads).await?;
+                match remote::namespaces(self, id, target, &bound).await? {
+                    Some(namespaces) => inputs.namespaces = namespaces,
+                    None => return Ok((None, Executed::default())),
+                }
             }
             stage.query = StageQuery::Gql(bound);
         }
@@ -215,7 +212,7 @@ impl<'r> Runner<'r> {
                 .target(connection.as_deref().unwrap_or_default()),
         ) {
             (StageQuery::Gql(statement), Some(_)) => {
-                compiler::remote::row_checks(&statement.plan, self.env.primary.model())
+                compiler::remote::row_checks(&statement.plan, self.env.primary.model())?
             }
             _ => Vec::new(),
         };

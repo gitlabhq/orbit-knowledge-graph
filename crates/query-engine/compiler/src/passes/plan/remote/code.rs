@@ -20,15 +20,11 @@ enum Returned {
 /// Literal atoms shorter than a trigram cannot narrow the candidate files.
 const TRIGRAM: usize = 3;
 
-/// `heads` are the branch heads an earlier stage handed this one, each a repository and a branch.
-pub fn plan(
-    logical: &LogicalPlan,
-    code: &Catalog<OrbitCode>,
-    heads: &[(i64, String)],
-) -> Result<CodePlan> {
+pub fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<CodePlan> {
     let graph = code.graph();
     let mut entity = None;
     let mut projects = Vec::new();
+    let mut heads = Vec::new();
     let mut structural = None;
     let mut returned = Vec::new();
     let mut limit = None;
@@ -43,12 +39,15 @@ pub fn plan(
                         query_data_model::plan::logical::LogicalType::Entity(to) => Some(*to),
                         _ => None,
                     });
-                entity = Some(at_heads(code, entity, relationships, to, heads)?);
+                entity = Some(follow(code, entity, relationships, to)?);
             }
-            LogicalOperation::Filter(predicate) => {
-                let anchor = entity.and_then(|entity| anchor(code, entity));
-                projects.extend(repositories(predicate, anchor)?);
-            }
+            LogicalOperation::Filter(predicate) => match branch_heads(predicate)? {
+                Some(found) => heads.extend(found),
+                None => {
+                    let anchor = entity.and_then(|entity| anchor(code, entity));
+                    projects.extend(repositories(predicate, anchor)?);
+                }
+            },
             LogicalOperation::Structural(matched) => structural = Some(matched),
             LogicalOperation::Select(items) => {
                 for item in items {
@@ -62,17 +61,6 @@ pub fn plan(
         }
     }
     let entity = entity.ok_or_else(|| unsupported(BACKEND, "search without an entity"))?;
-    for check in &code.model().access().entity(entity).checks {
-        if let query_data_model::catalog::Check::Rows { id, .. } = check {
-            let field = graph.property(*id).name.clone();
-            if !returned
-                .iter()
-                .any(|item| matches!(item, Returned::Field(name) if *name == field))
-            {
-                returned.push(Returned::Field(field));
-            }
-        }
-    }
     let Structural {
         pattern, language, ..
     } = structural.ok_or_else(|| unsupported(BACKEND, "search without a structural pattern"))?;
@@ -123,12 +111,13 @@ pub fn named_repositories(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> R
     for node in logical.nodes() {
         match logical.operation(node) {
             LogicalOperation::Entities(id) => entity = Some(*id),
-            LogicalOperation::Filter(predicate) => {
-                projects.extend(repositories(
-                    predicate,
-                    entity.and_then(|entity| anchor(code, entity)),
-                )?);
-            }
+            LogicalOperation::Filter(predicate) => match branch_heads(predicate)? {
+                Some(heads) => projects.extend(heads.into_iter().map(|(project, _)| project)),
+                None => {
+                    let anchor = entity.and_then(|entity| anchor(code, entity));
+                    projects.extend(repositories(predicate, anchor)?);
+                }
+            },
             _ => {}
         }
     }
@@ -221,38 +210,45 @@ fn select(
         Returned::Capture(name) => hits.capture(name),
     }
 }
-
-/// A step from the entity whose branch heads an earlier stage handed in to the files at those
-/// heads: the target holds a composite key on the source's identity.
-fn at_heads(
+/// A step between files and the branch heads they are at, either way: the side that holds a
+/// composite key on the other's identity is what the search returns.
+fn follow(
     code: &Catalog<OrbitCode>,
     from: Option<EntityId>,
     relationships: &[query_data_model::RelationshipId],
     to: Option<EntityId>,
-    heads: &[(i64, String)],
 ) -> Result<EntityId> {
     let (Some(from), Some(to), [relationship]) = (from, to, relationships) else {
         return Err(unsupported(BACKEND, "follow this relationship"));
     };
-    let keyed = code
-        .graph()
+    code.graph()
         .variants()
         .filter(|variant| variant.relationship == *relationship)
-        .filter(|variant| variant.source == from && variant.target == to)
-        .any(|variant| {
-            code.model()
-                .composite_key(variant.id)
-                .is_some_and(|(holder, _)| holder == Endpoint::Target)
-        });
-    match (keyed, heads.is_empty()) {
-        (true, false) => Ok(to),
-        (true, true) => Err(unsupported(
-            BACKEND,
-            "search branch heads no earlier stage named",
-        )),
-        (false, _) => Err(unsupported(
-            BACKEND,
-            "follow a relationship that keys no branch head",
-        )),
-    }
+        .filter(|variant| {
+            (variant.source, variant.target) == (from, to)
+                || (variant.source, variant.target) == (to, from)
+        })
+        .find_map(|variant| {
+            let (holder, _) = code.model().composite_key(variant.id)?;
+            Some(variant.endpoint(holder))
+        })
+        .ok_or_else(|| unsupported(BACKEND, "follow a relationship that keys no branch head"))
+}
+
+/// The (repository, branch) heads a tuple IN names; none for any other condition.
+fn branch_heads(predicate: &Predicate) -> Result<Option<Vec<(i64, String)>>> {
+    let Predicate::InTuple { values, .. } = predicate else {
+        return Ok(None);
+    };
+    values
+        .iter()
+        .map(|tuple| match &tuple[..] {
+            [Literal::Int(project), Literal::String(branch)] => Ok((*project, branch.clone())),
+            _ => Err(unsupported(
+                BACKEND,
+                "search heads named other than by (repository, branch)",
+            )),
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(Some)
 }

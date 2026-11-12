@@ -1,4 +1,5 @@
 mod client;
+pub mod dag;
 mod error;
 mod helpers;
 mod params;

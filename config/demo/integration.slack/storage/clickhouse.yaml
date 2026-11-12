@@ -2,6 +2,17 @@ kind: storage
 package: integration.slack
 store: graph
 entities:
+  Incident:
+    complete: true
+    table: gl_incident
+    columns:
+      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
+      title: {backend: {type: String, codec: [ZSTD(1)]}}
+      message_id: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}
+      traversal_path: {backend: {type: String, codec: [ZSTD(1)]}}
+    access: {filter: [id], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
   SlackWorkspace:
     complete: true
     table: gl_slack_workspace
@@ -16,3 +27,5 @@ entities:
 relationships:
   INSTALLED_IN:
     SlackWorkspace -> Group: {fk: {on: source, column: group_id}}
+  RAISED_IN:
+    Incident -> SlackMessage: {fk: {on: source, column: message_id}}

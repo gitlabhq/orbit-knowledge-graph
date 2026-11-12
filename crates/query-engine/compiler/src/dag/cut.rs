@@ -53,6 +53,11 @@ impl Cut<'_> {
                 let Some(entity) = self.query.entity(*binding) else {
                     continue;
                 };
+                for check in &self.query.model.access().entity(entity).checks {
+                    if let query_data_model::catalog::Check::Rows { id, .. } = check {
+                        push(needed.entry(*binding).or_default(), *id);
+                    }
+                }
                 let graph = self.query.model.graph();
                 let [identity] = graph.entity(entity).identity[..] else {
                     continue;

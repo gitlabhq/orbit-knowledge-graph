@@ -9,6 +9,14 @@ entities:
     properties:
       open: [id, workspace, merge_request_id, channel, author, text, sent_at]
 
+  Incident:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    properties:
+      open: [id, title, message_id]
+      hidden: [traversal_path]
+
   SlackWorkspace:
     scope: namespace
     permission: read
@@ -19,6 +27,10 @@ entities:
 relationships:
   IN_WORKSPACE: {scope: namespace, permission: read, enforce: {}}
   DISCUSSES: {scope: namespace, permission: read, enforce: {}}
+  RAISED_IN:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
   INSTALLED_IN:
     scope: namespace
     permission: read

@@ -408,19 +408,30 @@ pub(super) fn check(
                 store.source(variant.source).is_some() && on(&store.connection, variant.target);
             match store.binding(variant.id) {
                 Some(binding) => {
-                    let tableless = store.sources().all(|source| source.table.is_none());
-                    let joins = binding.fk.as_ref().is_none_or(|key| {
-                        let referenced = key
-                            .foreign_key
-                            .referenced_entity(variant.source, variant.target);
-                        tableless || !key.composite.is_empty() || on(&store.connection, referenced)
-                    }) && (store.edge_table(variant.id).is_none()
-                        || on(&store.connection, variant.target));
-                    if !joins {
+                    let unstored = binding.fk.as_ref().map(|key| {
+                        key.foreign_key
+                            .referenced_entity(variant.source, variant.target)
+                    });
+                    if let Some(referenced) = unstored.filter(|entity| {
+                        !stores.iter().any(|store| store.source(*entity).is_some())
+                    }) {
                         diagnostics.error(
                             &store.package,
                             format!(
-                                "store {} binds {}, whose other endpoint is not on connection {}",
+                                "store {} binds {}, but no store holds {}",
+                                store.name,
+                                label(graph, variant),
+                                graph.entity(referenced).name
+                            ),
+                        );
+                    }
+                    let edges_on_connection = store.edge_table(variant.id).is_none()
+                        || on(&store.connection, variant.target);
+                    if !edges_on_connection {
+                        diagnostics.error(
+                            &store.package,
+                            format!(
+                                "store {} keeps the edges of {} in a table, whose other endpoint is not on connection {}",
                                 store.name,
                                 label(graph, variant),
                                 store.connection

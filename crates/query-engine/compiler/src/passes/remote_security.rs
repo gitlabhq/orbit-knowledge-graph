@@ -11,10 +11,12 @@ use query_data_model::implementations::live::Live;
 use query_data_model::implementations::orbit_code::OrbitCode;
 use query_data_model::plan::code::{CodeOperation, CodePlan};
 use query_data_model::plan::live::{LiveOperation, LivePlan};
+use query_data_model::plan::logical::LogicalPlan;
 use query_data_model::plan::tracking::{Language, NodeId, Plan};
 
 use super::guards::scope_set;
 use crate::error::{QueryError, Result};
+use crate::passes::plan::remote::Target;
 
 /// The scope key of each repository and workspace a plan reads, resolved on the graph
 /// connection through the read's `via` chain before the request goes out.
@@ -81,6 +83,28 @@ pub fn secure_live(
             None => Ok(calls),
         }
     })?)
+}
+
+/// Whether the caller can read any repository or workspace the lookup resolved for the stage's
+/// read; a read only its checks restrict reads what its request names.
+pub fn readable(
+    target: &Target,
+    logical: &LogicalPlan,
+    grants: &Grants,
+    namespaces: &Namespaces,
+) -> Result<bool> {
+    let entity = super::scope_lookup::read_entity(logical)?;
+    let (set, paths): (_, Vec<&TraversalPath>) = match target {
+        Target::Code(code) => (
+            admitted(code.model(), code.guard(entity), grants)?,
+            namespaces.repositories.values().collect(),
+        ),
+        Target::Live(live) => (
+            admitted(live.model(), live.guard(entity), grants)?,
+            namespaces.workspaces.values().collect(),
+        ),
+    };
+    Ok(set.is_none_or(|set| paths.iter().any(|path| holds(set, path))))
 }
 
 /// The caller's scope set for a read's `via` policy; none for a read only its checks restrict.

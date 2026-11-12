@@ -166,6 +166,30 @@ async fn the_observer_sees_each_stage_in_order() {
 }
 
 #[tokio::test]
+async fn the_split_carries_each_stages_logical_sub_plan() {
+    let ran = run(MENTIONS, &caller("1/9970/"), open_merge_requests()).await;
+    let split = ran
+        .events
+        .iter()
+        .find_map(|event| match event {
+            Event::Split { stages } => Some(stages.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let logical: Vec<Vec<&str>> = split.iter().map(|stage| ops(&stage.logical)).collect();
+    assert_eq!(
+        logical,
+        [
+            vec!["Entities", "Filter", "Select", "Limit"],
+            vec!["Entities", "Select", "Limit"],
+            vec![],
+        ]
+    );
+    assert!(split[0].logical[0].ends_with("-> [mr]"));
+    assert!(split[1].logical[0].ends_with("-> [m]"));
+}
+
+#[tokio::test]
 async fn an_empty_key_set_skips_the_stage_that_reads_it() {
     let ran = run(MENTIONS, &caller("1/9970/"), Vec::new()).await;
     assert!(ran.rendered(1).is_empty());
@@ -183,5 +207,56 @@ async fn joined_text_is_excerpted_like_a_single_stage_response() {
     let excerpt = rows[0]["mr_title"].as_str().unwrap();
     let chars = 8 * 1024 * 1024 / 4 / 11;
     assert_eq!(excerpt, format!("{} [truncated]", "a".repeat(chars)));
+    assert_eq!(rows[0]["m_text"], "deploy to staging at 5pm");
+}
+
+const RAISED: &str = "MATCH (i:Incident)-[:RAISED_IN]->(m:SlackMessage) WHERE i.title CONTAINS 'outage' RETURN i.title, m.author, m.text LIMIT 10";
+
+/// A ClickHouse store keys incidents to the Slack messages they were raised in, on one column:
+/// the edge crosses connections, so the planner splits it into a stage boundary with a key set.
+#[tokio::test]
+async fn a_single_column_key_crosses_from_a_relational_store() {
+    let incidents = vec![row(
+        json!({"i_title": "staging outage", "i_message_id": "m1", "_orbit_i_id": 7, "_orbit_i_type": "Incident"}),
+    )];
+    let ran = run(RAISED, &caller("1/9970/"), incidents).await;
+    if let Err(error) = &ran.outcome {
+        panic!("the incident query failed: {error}");
+    }
+    let split = ran
+        .events
+        .iter()
+        .find_map(|event| match event {
+            Event::Split { stages } => Some(stages.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
+    assert_eq!(
+        backends,
+        [Backend::ClickHouse, Backend::Live, Backend::Engine]
+    );
+    assert_eq!(
+        split[1].inputs,
+        [Input::Keys(KeyInput {
+            from: 0,
+            columns: vec!["i_message_id".into()],
+            binding: "m".into(),
+            properties: vec!["id".into()],
+        })]
+    );
+    let call = ran
+        .rendered(1)
+        .into_iter()
+        .find_map(|request| match request {
+            Rendered::Live(call) => Some(call),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(call.filters[0].field, "id");
+    assert_eq!(call.filters[0].value, json!(["m1"]));
+    let rows = ran.rows();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["i_title"], "staging outage");
     assert_eq!(rows[0]["m_text"], "deploy to staging at 5pm");
 }

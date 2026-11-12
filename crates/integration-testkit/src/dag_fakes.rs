@@ -93,35 +93,28 @@ impl Executor for SeededGraph {
                 }
                 batch(&self.0, &fields)
             }
-            Request::Lookup(lookups) => {
+            Request::Lookup(lookup) => {
                 let seeded = seeded_namespaces();
-                let mut batches = Vec::new();
-                for lookup in lookups {
-                    let row = |id: Value, path: &str| {
-                        json!({compiler::remote::KEY: id, lookup.scope.as_str(): path})
-                            .as_object()
-                            .cloned()
-                            .unwrap_or_default()
-                    };
-                    let rows: Vec<Row> = match lookup.resolves {
-                        Resolves::Repositories => seeded
-                            .repositories
-                            .iter()
-                            .map(|(id, path)| row(Value::from(*id), path.as_str()))
-                            .collect(),
-                        Resolves::Workspaces => seeded
-                            .workspaces
-                            .iter()
-                            .map(|(id, path)| row(Value::from(id.as_str()), path.as_str()))
-                            .collect(),
-                    };
-                    let fields = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
-                    batches.extend(batch(&rows, &fields)?.batches);
-                }
-                Ok(Executed {
-                    batches,
-                    log: Vec::new(),
-                })
+                let row = |id: Value, path: &str| {
+                    json!({compiler::remote::KEY: id, lookup.scope.as_str(): path})
+                        .as_object()
+                        .cloned()
+                        .unwrap_or_default()
+                };
+                let rows: Vec<Row> = match lookup.resolves {
+                    Resolves::Repositories => seeded
+                        .repositories
+                        .iter()
+                        .map(|(id, path)| row(Value::from(*id), path.as_str()))
+                        .collect(),
+                    Resolves::Workspaces => seeded
+                        .workspaces
+                        .iter()
+                        .map(|(id, path)| row(Value::from(id.as_str()), path.as_str()))
+                        .collect(),
+                };
+                let fields = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
+                batch(&rows, &fields)
             }
             other => Err(unexpected(other)),
         }

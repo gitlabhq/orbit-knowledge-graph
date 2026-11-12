@@ -1,0 +1,41 @@
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      user: [1]
+      project: [1000]
+      merge_request: [99330, 99331]
+  extra_seed:
+    gl_merge_request:
+      - { id: 99330, iid: 30, title: Legacy theme switcher, state: opened, source_branch: legacy-theme, target_branch: main, project_id: 1000, author_id: 1, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 99330, iid: 30, title: Legacy theme switcher, state: opened, source_branch: legacy-theme, target_branch: main, project_id: 1000, author_id: 1, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: true }
+      - { id: 99331, iid: 31, title: Add token scopes, state: opened, source_branch: token-scopes, target_branch: main, project_id: 1000, author_id: 1, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 99330, target_kind: MergeRequest, source_tags: ["state:active"], target_tags: ["state:opened"], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 99330, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 99331, target_kind: MergeRequest, source_tags: ["state:active"], target_tags: ["state:opened"], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 99331, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["state:opened"], target_tags: [], _version: "2024-01-01 00:00:00" }
+
+cases:
+  - name: tombstoned_center_with_live_edges
+    description: Neighbors in both directions of a merge request whose latest row is a tombstone return nothing, though its edges are still live
+    query: |
+      MATCH (mr:MergeRequest)--(n) WHERE mr.id = 99330 RETURN mr, n LIMIT 50
+    expect:
+      skip_requirements: [node_ids, neighbors, "relationship:AUTHORED", "relationship:IN_PROJECT"]
+      node_count: 0
+
+  - name: live_center
+    description: Neighbors in both directions of a live merge request with the same edges return its author and project
+    query: |
+      MATCH (mr:MergeRequest)--(n) WHERE mr.id = 99331 RETURN mr, n LIMIT 50
+    expect:
+      node_count: 3
+      nodes:
+        MergeRequest: { ids: [99331] }
+        User: { ids: [1] }
+        Project: { ids: [1000] }
+      total_edge_count: 2
+      edges:
+        AUTHORED: [[1, 99331]]
+        IN_PROJECT: [[99331, 1000]]

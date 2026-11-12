@@ -16,6 +16,11 @@ orbit-authorization = { path = "../orbit-authorization" }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 anyhow = { workspace = true }
+async-trait = { workspace = true }
+compiler = { path = "../query-engine/compiler" }
+futures = { workspace = true }
+orbit-server-config = { path = "../orbit-server-config" }
+shared = { path = "../query-engine/shared" }
 query-data-model = { path = "../query-data-model" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

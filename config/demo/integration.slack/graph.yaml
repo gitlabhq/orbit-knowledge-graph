@@ -14,6 +14,16 @@ entities:
       text: {type: string}
       sent_at: {type: timestamp}
 
+  Incident:
+    identity: id
+    label: title
+    default_columns: [id, title, message_id]
+    properties:
+      id: {type: int64}
+      title: {type: string}
+      message_id: {type: string}
+      traversal_path: {type: string}
+
   SlackWorkspace:
     identity: id
     label: name
@@ -27,3 +37,4 @@ relationships:
   IN_WORKSPACE: {variants: {SlackMessage -> SlackWorkspace: {cardinality: many_to_one}}}
   INSTALLED_IN: {variants: {SlackWorkspace -> Group: {cardinality: many_to_one}}}
   DISCUSSES: {variants: {SlackMessage -> MergeRequest: {cardinality: many_to_one}}}
+  RAISED_IN: {variants: {Incident -> SlackMessage: {cardinality: many_to_one}}}

@@ -66,7 +66,7 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
     };
     assert_eq!(
         sql,
-        "SELECT k0.id, k0.traversal_path FROM gl_project AS k0 FINAL WHERE (startsWith(k0.traversal_path, {p0:String}) AND k0.id IN {p1:Array(Int64)})"
+        "SELECT k0.id AS id, k0.traversal_path AS traversal_path FROM gl_project AS k0 FINAL WHERE (startsWith(k0.traversal_path, {p0:String}) AND k0.id IN {p1:Array(Int64)})"
     );
     assert_eq!(
         *code_request(&rendered),
@@ -79,9 +79,9 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
             limit: Some(1001),
             fields: vec![
                 RequestField::Path,
+                RequestField::Repository("project_id".into()),
                 RequestField::Line,
                 RequestField::Capture("ARGS".into()),
-                RequestField::Repository("project_id".into()),
             ],
         }
     );
@@ -115,7 +115,7 @@ async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
     };
     assert_eq!(
         sql,
-        "SELECT k0.id, k1.traversal_path FROM gl_slack_workspace AS k0 FINAL INNER JOIN gl_group AS k1 FINAL ON (k0.group_id = k1.id) WHERE startsWith(k1.traversal_path, {p0:String})"
+        "SELECT k0.id AS id, k1.traversal_path AS traversal_path FROM gl_slack_workspace AS k0 FINAL INNER JOIN gl_group AS k1 FINAL ON (k0.group_id = k1.id) WHERE startsWith(k1.traversal_path, {p0:String})"
     );
     assert_eq!(
         *live_request(&rendered),
@@ -190,26 +190,19 @@ async fn the_workspace_precondition_keeps_unreadable_namespaces_out_of_the_call(
     assert!(!texts.contains(&json!("deploy uses the production keys")));
 }
 
+/// The lookup resolves only scope keys outside the caller's scope, so the stage reads nothing:
+/// no request goes out and the result is empty, as for a relational read.
 #[tokio::test]
 async fn a_caller_who_can_read_nothing_gets_no_request() {
-    for (query, message) in [
-        (
-            CODE,
-            "authorization error: the caller can read none of the requested repositories",
-        ),
-        (
-            SLACK,
-            "authorization error: the caller can read none of the workspaces",
-        ),
-    ] {
+    for query in [CODE, SLACK] {
         let ran = run(query, &caller("1/424242/"), Vec::new()).await;
-        assert!(ran.kinds().contains(&"failed 0".to_string()));
+        assert!(ran.kinds().contains(&"finished 0".to_string()));
         assert!(
             ran.rendered(0)
                 .iter()
                 .all(|request| matches!(request, Rendered::Sql { .. }))
         );
-        assert_eq!(ran.error(), message);
+        assert!(ran.rows().is_empty());
     }
 }
 
@@ -217,14 +210,14 @@ async fn a_caller_who_can_read_nothing_gets_no_request() {
 async fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture() {
     let ctx = caller("1/9970/");
     let pushed = run(
-        "MATCH (m:SlackMessage) WHERE m.id = 'm1' RETURN m.text LIMIT 5",
+        "MATCH (m:SlackMessage) WHERE m.workspace = 'T01' RETURN m.text LIMIT 5",
         &ctx,
         Vec::new(),
     )
     .await;
     assert_eq!(
         pushed.error(),
-        "schema violation: search.messages cannot push down equality on SlackMessage.id; it filters on channel, author, sent_at, merge_request_id, text (contains)"
+        "schema violation: search.messages cannot push down equality on SlackMessage.workspace; it filters on id, channel, author, sent_at, merge_request_id, text (contains)"
     );
     let capture = run(&CODE.replace("match.ARGS", "match.BODY"), &ctx, Vec::new()).await;
     assert_eq!(

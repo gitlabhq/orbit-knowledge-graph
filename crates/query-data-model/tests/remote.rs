@@ -232,13 +232,13 @@ fn a_filter_the_operation_cannot_push_down_is_a_construction_error() {
     let error = live
         .build(|q| {
             let messages = q.call(operation)?;
-            let id = messages.field("id")?;
-            q.filter(messages, id.eq("m1"))
+            let workspace = messages.field("workspace")?;
+            q.filter(messages, workspace.eq("T01"))
         })
         .unwrap_err();
     assert_eq!(
         error.to_string(),
-        "search.messages cannot push down equality on SlackMessage.id; it filters on channel, author, sent_at, merge_request_id, text (contains)"
+        "search.messages cannot push down equality on SlackMessage.workspace; it filters on id, channel, author, sent_at, merge_request_id, text (contains)"
     );
     let substring = live.build(|q| {
         let messages = q.call(operation)?;

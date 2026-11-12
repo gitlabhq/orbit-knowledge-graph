@@ -176,9 +176,7 @@ pub fn run_yaml_suite(yaml: &str) {
 
     pipeline_ctx.tracer.dump(&suite.name);
 
-    let db = client.lock().unwrap();
     let data_model = Arc::new(Catalog::<DuckDb>::embedded().expect("embedded model"));
-    let failures = run_suite(&suite, &db, &data_model, false);
-    drop(db);
+    let failures = run_suite(&suite, &client, &data_model, false);
     report(&suite, &failures);
 }

@@ -41,6 +41,11 @@ fn constant(leaf: &Predicate, in_values: usize) -> Result<(), PlanError> {
                 "IN requires 1-{in_values} values"
             )));
         }
+        Predicate::InTuple { values, .. } if values.is_empty() => {
+            return Err(PlanError::shape(format!(
+                "a tuple IN requires 1-{in_values} tuples"
+            )));
+        }
         Predicate::Compare {
             left,
             right: Operand::Expr(right),

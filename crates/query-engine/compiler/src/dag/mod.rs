@@ -13,7 +13,7 @@ mod split;
 mod sub;
 
 pub use compile::{
-    Compiled, Env, Inputs, Primary, Source, compile, compile_hydration, heads, split_query,
+    Compiled, Env, Inputs, Primary, Source, compile, compile_hydration, split_query,
 };
 pub use engine::{EngineColumn, EngineJoin, EngineNode, EngineQuery};
 pub use keys::{KeySet, bind};
