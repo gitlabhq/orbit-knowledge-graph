@@ -217,6 +217,18 @@ impl OrbitClient {
         Q: DeserializeOwned,
         V: Serialize,
     {
+        self.graphql_with_policy(operation, Policy::READ_ONLY).await
+    }
+
+    pub(crate) async fn graphql_with_policy<Q, V>(
+        &self,
+        operation: &Operation<Q, V>,
+        policy: Policy,
+    ) -> Result<Option<GraphQlResponse<Q, ErrorExtensions>>, RemoteError>
+    where
+        Q: DeserializeOwned,
+        V: Serialize,
+    {
         if Api::selected() == Some(Api::Rest) {
             return Ok(None);
         }
@@ -226,9 +238,7 @@ impl OrbitClient {
                 format!("could not encode GraphQL query: {error}"),
             )
         })?;
-        let body = self
-            .post_json(GRAPHQL_PATH, request, Policy::READ_ONLY)
-            .await?;
+        let body = self.post_json(GRAPHQL_PATH, request, policy).await?;
         let response: GraphQlResponse<Q, ErrorExtensions> =
             serde_json::from_slice(&body).map_err(|error| {
                 RemoteError::new(

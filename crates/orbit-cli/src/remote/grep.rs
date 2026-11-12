@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 use super::client::OrbitClient;
 use super::error::{EXIT_FORBIDDEN, EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError};
+use super::retry::Policy;
 use super::server_schema::{Anchor, Entities, Entity};
 
 /// Node kinds that GitLab grep searches. The API maps a kind to its scope, so requests send kinds as-is.
@@ -1085,7 +1086,7 @@ async fn graph_entities(client: &OrbitClient) -> Result<Entities, Outcome> {
         ))
     };
     let schema = client
-        .graphql(&GrepSchema::build(()))
+        .graphql_with_policy(&GrepSchema::build(()), Policy::BEST_EFFORT)
         .await
         .map_err(|error| Outcome::Failed(first_line(&error.message)))?
         .and_then(|response| response.data)
@@ -1235,9 +1236,12 @@ enum Named {
 async fn namespace_kind(client: &OrbitClient, path: &str) -> Result<Option<Named>, Outcome> {
     let full_path = cynic::Id::new(path);
     let data = client
-        .graphql(&NamespaceKind::build(NamespaceKindVariables {
-            full_path: &full_path,
-        }))
+        .graphql_with_policy(
+            &NamespaceKind::build(NamespaceKindVariables {
+                full_path: &full_path,
+            }),
+            Policy::BEST_EFFORT,
+        )
         .await
         .map_err(|error| Outcome::Failed(first_line(&error.message)))?
         .and_then(|response| response.data);

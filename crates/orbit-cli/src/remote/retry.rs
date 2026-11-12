@@ -8,6 +8,9 @@ const BASE_DELAY: Duration = Duration::from_secs(1);
 const MAX_DELAY: Duration = Duration::from_secs(30);
 const DEFAULT_WAIT_BUDGET: Duration = Duration::from_secs(300);
 
+/// Only 429, connect failures and (when opted in) 503 are retried. `QUERY`
+/// never retries 503: the server may already have run the query, and graph
+/// queries are billed.
 #[derive(Clone, Copy)]
 pub(crate) struct Policy {
     pub(crate) retry_unavailable: bool,

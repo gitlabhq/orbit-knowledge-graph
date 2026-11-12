@@ -226,3 +226,31 @@ fn remote_grep_gives_up_instead_of_waiting_out_a_long_retry_after() {
     assert!(started.elapsed() < Duration::from_secs(10));
     assert_eq!(output.status.code(), Some(1));
 }
+
+#[test]
+fn remote_grep_graph_lookup_gives_up_instead_of_waiting_out_a_long_retry_after() {
+    let server = serve(&[(429, Some("60")), (200, None)]);
+    let started = Instant::now();
+    let output = run_orbit(
+        &server.base_url,
+        &["grep", "gitlab:pipeline:main repo:g/p"],
+        &[],
+    );
+
+    assert_eq!(server.requests.load(Ordering::SeqCst), 1);
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn remote_grep_graph_lookup_retries_a_503() {
+    let server = serve(&[(503, None), (200, None)]);
+    let output = run_orbit(
+        &server.base_url,
+        &["grep", "gitlab:pipeline:main repo:g/p"],
+        &[],
+    );
+
+    assert_eq!(server.requests.load(Ordering::SeqCst), 2);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("HTTP 503; retrying"));
+}
