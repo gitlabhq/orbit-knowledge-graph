@@ -11,6 +11,12 @@ pub struct Record {
     pub properties: BTreeMap<String, Value>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Want {
+    First(usize),
+    All,
+}
+
 pub struct Fetcher {
     http: reqwest::Client,
 }
@@ -37,7 +43,7 @@ impl Fetcher {
         let path = fill(&request.path);
         let mut params = filled(&request.params, fill);
         let mut items = Vec::new();
-        for _ in 0..request.max_pages.max(1) {
+        for page in 0..request.max_pages.max(1) {
             let body = self
                 .get(base, &path, &params, &headers, request.error.as_deref())
                 .await?;
@@ -51,6 +57,12 @@ impl Fetcher {
             };
             params.retain(|(found, _)| *found != param);
             params.push((param, next));
+            if page + 1 == request.max_pages.max(1) {
+                bail!(
+                    "{name}: listing stopped after {} pages, so results would be cut off",
+                    request.max_pages
+                );
+            }
         }
         let shape = shaped(entity, request.key.as_ref(), &request.fields);
         items
@@ -66,6 +78,7 @@ impl Fetcher {
         entity: &Entity,
         query: &str,
         within: &[(String, String)],
+        want: Want,
     ) -> Result<Vec<Record>> {
         let search = entity
             .search_api
@@ -77,14 +90,17 @@ impl Fetcher {
         let mut extra: Vec<(String, String)> = Vec::new();
         for (to, value) in within {
             let filter = match to.strip_suffix("#name") {
-                Some(to) => match search.within_name.get(to) {
-                    Some(filter) => filter.replace("{name}", value),
-                    None => continue,
-                },
-                None => match search.within.get(to) {
-                    Some(filter) => filter.replace("{key}", value),
-                    None => continue,
-                },
+                Some(to) => search
+                    .within_name
+                    .get(to)
+                    .map(|filter| filter.replace("{name}", value)),
+                None => search
+                    .within
+                    .get(to)
+                    .map(|filter| filter.replace("{key}", value)),
+            };
+            let Some(filter) = filter else {
+                bail!("{name} cannot be narrowed by {to}");
             };
             match filter.split_once('=') {
                 Some((param, value)) if !param.contains([' ', ':']) => {
@@ -102,17 +118,53 @@ impl Fetcher {
             fill(value, source, &[]).replace("{query}", &text)
         });
         params.extend(extra);
-        let body = self
-            .get(
-                base,
-                &search.path,
-                &params,
-                &headers,
-                search.error.as_deref(),
-            )
-            .await?;
+        let mut items = Vec::new();
+        let complete = want == Want::All;
+        let pages = search.max_pages.max(1);
+        for page in 0..pages {
+            let body = self
+                .get(
+                    base,
+                    &search.path,
+                    &params,
+                    &headers,
+                    search.error.as_deref(),
+                )
+                .await?;
+            let found = pointer_items(&body, &search.items);
+            let full = complete && search.limit.is_some_and(|limit| found.len() >= limit);
+            items.extend(found);
+            let next = search.cursor.as_ref().and_then(|cursor| {
+                let next = body.pointer(&cursor.next)?.as_str()?;
+                (!next.is_empty()).then(|| (cursor.param.clone(), next.to_string()))
+            });
+            if let Want::First(enough) = want
+                && items.len() >= enough
+            {
+                items.truncate(enough);
+                break;
+            }
+            match next {
+                Some(_) if page + 1 == pages && !complete => break,
+                Some((param, next)) => {
+                    if page + 1 == pages {
+                        bail!(
+                            "{name}: the search has more than {} results, so they would be cut off; narrow it with more words or a reference",
+                            items.len()
+                        );
+                    }
+                    params.retain(|(found, _)| *found != param);
+                    params.push((param, next));
+                }
+                None if full => bail!(
+                    "{name}: the search returned its limit of {}, so results would be cut off; narrow it with more words or a reference",
+                    items.len()
+                ),
+                None => break,
+            }
+        }
         let shape = shaped(entity, search.key.as_ref(), &search.fields);
-        pointer_items(&body, &search.items)
+        items
             .into_iter()
             .map(|item| record(name, &shape, &[], item))
             .collect()

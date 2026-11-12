@@ -138,9 +138,21 @@ pub struct Search {
     #[serde(default)]
     pub within_name: BTreeMap<String, String>,
     #[serde(default)]
+    pub cursor: Option<Cursor>,
+    #[serde(default = "Search::default_max_pages")]
+    pub max_pages: usize,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
     pub key: Option<Vec<String>>,
     #[serde(default)]
     pub fields: BTreeMap<String, String>,
+}
+
+impl Search {
+    fn default_max_pages() -> usize {
+        5
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

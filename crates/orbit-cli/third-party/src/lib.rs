@@ -13,7 +13,7 @@ use arrow::array::RecordBatch;
 use ontology::Ontology;
 
 use config::{Entity, Source};
-use fetch::{Fetcher, Record};
+use fetch::{Fetcher, Record, Want};
 
 pub use config::Config;
 
@@ -26,7 +26,7 @@ const HEADLINE: usize = 100;
 
 pub struct ThirdParty {
     pub config: Config,
-    pub ontology: Arc<Ontology>,
+    ontology: std::sync::OnceLock<Arc<Ontology>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -78,8 +78,18 @@ impl ThirdParty {
         let Some(config) = Config::load(&Self::config_path(root))? else {
             return Ok(None);
         };
-        let ontology = schema::build(&config)?;
-        Ok(Some(Self { config, ontology }))
+        Ok(Some(Self {
+            config,
+            ontology: std::sync::OnceLock::new(),
+        }))
+    }
+
+    pub fn ontology(&self) -> Result<Arc<Ontology>> {
+        if let Some(ontology) = self.ontology.get() {
+            return Ok(Arc::clone(ontology));
+        }
+        let built = schema::build(&self.config)?;
+        Ok(Arc::clone(self.ontology.get_or_init(|| built)))
     }
 
     pub fn scope(&self, query: &str) -> (Option<Scope>, String) {
@@ -99,7 +109,10 @@ impl ThirdParty {
                 rest.push(word.to_string());
                 continue;
             };
-            let (kind, value) = value.split_once(':').unwrap_or((value, ""));
+            let Some((kind, value)) = value.split_once(':') else {
+                rest.push(word.to_string());
+                continue;
+            };
             let Some(entity) = self.config.kind(source, kind) else {
                 rest.push(word.to_string());
                 continue;
@@ -223,7 +236,7 @@ impl ThirdParty {
             .join(" ");
         let mut within: Vec<(String, String, String)> = Vec::new();
         for target in &scope.within {
-            if self.searches_by_name(target) {
+            if self.searches_by_name(target) && !looks_like_key(&target.key) {
                 within.push((
                     target.source.clone(),
                     format!("{}#name", target.entity),
@@ -233,11 +246,12 @@ impl ThirdParty {
             }
             match self.resolve_key(&fetcher, target).await {
                 Ok(key) => within.push((target.source.clone(), target.entity.clone(), key)),
-                Err(_) => within.push((
-                    target.source.clone(),
-                    format!("{}#name", target.entity),
-                    target.key.trim_start_matches(['#', '@']).to_string(),
-                )),
+                Err(error) => {
+                    grepped
+                        .failed
+                        .push((target.source.clone(), format!("{error:#}")));
+                    return grepped;
+                }
             }
         }
         let wanted: Vec<(&Source, &str, &Entity)> = self
@@ -251,9 +265,19 @@ impl ThirdParty {
                         .any(|(picked, entity)| *picked == source.name && entity == name)
             })
             .filter(|(source, name, entity)| {
-                scope.within.is_empty() || self.narrows(source, name, entity, &scope.within)
+                scope.within.is_empty()
+                    || within.iter().all(|(found, to, _)| {
+                        *found != source.name || self.can_narrow(name, entity, to)
+                    }) && self.narrows(source, name, entity, &scope.within)
             })
             .collect();
+        if wanted.is_empty() && !scope.within.is_empty() {
+            grepped.failed.push((
+                "third-party".into(),
+                "nothing that was asked for can be narrowed by those references".into(),
+            ));
+            return grepped;
+        }
         let searches = wanted.iter().map(|(source, name, entity)| {
             let within: Vec<(String, String)> = within
                 .iter()
@@ -299,6 +323,22 @@ impl ThirdParty {
             })
     }
 
+    fn can_narrow(&self, name: &str, entity: &Entity, to: &str) -> bool {
+        let (target, by_name) = match to.strip_suffix("#name") {
+            Some(target) => (target, true),
+            None => (to, false),
+        };
+        match &entity.search_api {
+            Some(search) => match by_name {
+                true => search.within_name.contains_key(target),
+                false => search.within.contains_key(target),
+            },
+            None => {
+                !by_name && (target == name || entity.links.iter().any(|link| link.to == target))
+            }
+        }
+    }
+
     fn narrows(&self, source: &Source, name: &str, entity: &Entity, within: &[Target]) -> bool {
         within.iter().any(|target| {
             target.source == source.name
@@ -317,15 +357,18 @@ impl ThirdParty {
         within: &[(String, String)],
     ) -> Result<Found> {
         let records = match &entity.search_api {
-            Some(_) => fetcher.search(source, name, entity, query, within).await?,
+            Some(_) => {
+                fetcher
+                    .search(source, name, entity, query, within, Want::First(GREP_LIMIT))
+                    .await?
+            }
             None => {
                 let all = fetcher.list(source, name, entity).await?;
                 let matchers = matchers(query);
                 all.into_iter()
                     .filter(|record| {
                         within.iter().all(|(to, key)| {
-                            to.ends_with("#name")
-                                || self.links_to(entity, record, to, key)
+                            self.links_to(entity, record, to, key)
                                 || (to == name && &record.key == key)
                         })
                     })
@@ -441,7 +484,14 @@ impl ThirdParty {
             let within = [(name.to_string(), key.clone())];
             let records = match &other.search_api {
                 Some(search) if search.within.contains_key(name) => fetcher
-                    .search(source, other_name, other, "", &within)
+                    .search(
+                        source,
+                        other_name,
+                        other,
+                        "",
+                        &within,
+                        Want::First(CONTEXT_LINKS),
+                    )
                     .await
                     .unwrap_or_default(),
                 Some(_) => continue,
@@ -492,7 +542,8 @@ impl ThirdParty {
     }
 
     pub async fn query(&self, query: &str) -> Result<Vec<RecordBatch>> {
-        let compiled = compiler::compile_local(query, compiler::Frontend::Gql, &self.ontology)
+        let ontology = self.ontology()?;
+        let compiled = compiler::compile_local(query, compiler::Frontend::Gql, &ontology)
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let fetcher = Fetcher::new()?;
         let mut loaded: BTreeMap<String, Vec<Record>> = BTreeMap::new();
@@ -507,7 +558,22 @@ impl ThirdParty {
             let records = match (&entity.search_api, &entity.list) {
                 (Some(_), _) => {
                     let (text, within) = self.search_terms(&compiled.input, node, entity)?;
-                    fetcher.search(source, name, entity, &text, &within).await?
+                    let limit = compiled.input.limit as usize;
+                    let want = match compiled.input.aggregation.metrics.is_empty()
+                        && compiled.input.order_by.is_none()
+                    {
+                        true => Want::First(limit),
+                        false => Want::All,
+                    };
+                    let records = fetcher
+                        .search(source, name, entity, &text, &within, want)
+                        .await?;
+                    if want != Want::All && records.len() >= limit {
+                        eprintln!(
+                            "orbit: {name} is read through a live search, so these are its newest {limit} matches; add a filter or an aggregate to read them all"
+                        );
+                    }
+                    records
                 }
                 (None, Some(_)) => fetcher.list(source, name, entity).await?,
                 (None, None) => bail!("{name} cannot be read"),
@@ -515,7 +581,7 @@ impl ThirdParty {
             loaded.insert(name.to_string(), records);
         }
         let client = duckdb_client::DuckDbClient::open(duckdb_client::OpenMode::InMemoryArrow)?;
-        client.initialize_schema(&compiler::generate_local_ddl(&self.ontology, ""))?;
+        client.initialize_schema(&compiler::generate_local_ddl(&ontology, ""))?;
         for (name, records) in &loaded {
             let (source, _, entity) = self
                 .config
@@ -536,14 +602,38 @@ impl ThirdParty {
         node: &compiler::input::InputNode,
         entity: &Entity,
     ) -> Result<(String, Vec<(String, String)>)> {
+        use compiler::input::FilterOp;
+        let term = |filter: &compiler::input::InputFilter,
+                    ops: &[FilterOp]|
+         -> Result<Option<String>> {
+            let op = filter.op.unwrap_or(FilterOp::Eq);
+            match (ops.contains(&op), filter.value_str()) {
+                (true, Some(text)) => Ok(Some(text.to_string())),
+                _ => bail!(
+                    "{} is read through a live search, which can only match {}; this filter uses {}",
+                    node.entity.as_deref().unwrap_or("this entity"),
+                    ops.iter()
+                        .map(|op| op.as_ref())
+                        .collect::<Vec<_>>()
+                        .join(" or "),
+                    op.as_ref()
+                ),
+            }
+        };
+        if !node.negated_filters.is_empty() {
+            bail!(
+                "{} is read through a live search, which cannot apply NOT filters",
+                node.entity.as_deref().unwrap_or("this entity")
+            );
+        }
         let mut words = Vec::new();
         for (field, filters) in &node.filters {
             if !searched(entity).contains(field) {
                 continue;
             }
             for filter in filters {
-                if let Some(text) = filter.value_str() {
-                    words.push(text.to_string());
+                if let Some(text) = term(filter, &[FilterOp::Eq, FilterOp::Contains])? {
+                    words.push(text);
                 }
             }
         }
@@ -562,16 +652,17 @@ impl ThirdParty {
                 continue;
             };
             for (field, filters) in &other.filters {
+                let to = match field.as_str() {
+                    "key" => other_name.to_string(),
+                    field if field == other_entity.label => format!("{other_name}#name"),
+                    _ => continue,
+                };
+                if !self.can_narrow(node.entity.as_deref().unwrap_or_default(), entity, &to) {
+                    continue;
+                }
                 for filter in filters {
-                    let Some(value) = filter.value_str() else {
-                        continue;
-                    };
-                    match field.as_str() {
-                        "key" => within.push((other_name.to_string(), value.to_string())),
-                        field if field == other_entity.label => {
-                            within.push((format!("{other_name}#name"), value.to_string()))
-                        }
-                        _ => {}
+                    if let Some(value) = term(filter, &[FilterOp::Eq])? {
+                        within.push((to.clone(), value));
                     }
                 }
             }
@@ -616,6 +707,15 @@ impl ThirdParty {
         }
         out
     }
+}
+
+fn looks_like_key(text: &str) -> bool {
+    let text = text.trim_start_matches(['#', '@']);
+    text.len() >= 2
+        && text.starts_with(|c: char| c.is_ascii_uppercase())
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
 }
 
 fn searched(entity: &Entity) -> Vec<String> {

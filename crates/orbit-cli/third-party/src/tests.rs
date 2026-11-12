@@ -226,6 +226,34 @@ async fn grep_narrows_a_search_by_reference() {
         .await,
         ["grafana:alert:a-web-errors", "grafana:alert:a-web-latency"]
     );
+    assert_eq!(
+        grep(
+            &third_party,
+            "slack:message:migration",
+            &["slack:channel:C1"]
+        )
+        .await,
+        found[..1]
+    );
+    for (query, within, expected) in [
+        ("web", "grafana:folder:NoSuchFolder", "has nothing at"),
+        (
+            "grafana:dashboard:web",
+            "grafana:dashboard:d-db",
+            "can be narrowed",
+        ),
+        ("slack:message:x", "slack:channel:C404", "has nothing at"),
+    ] {
+        let (scope, rest) = third_party.scope(query);
+        let mut scope = scope.unwrap_or_default();
+        scope.within = vec![third_party.parse_target(within).unwrap()];
+        let grepped = third_party.grep(&[rest], &scope).await;
+        let failed = format!("{:?}", grepped.failed);
+        assert!(
+            grepped.found.is_empty() && failed.contains(expected),
+            "{within}: {failed}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -337,12 +365,23 @@ async fn query_fetches_only_what_it_names_and_needs_a_filter_for_searched_entiti
         ["web rollout stuck on the db migration"]
     );
 
-    let error = third_party
-        .query("MATCH (m:SlackMessage) RETURN m.text")
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("needs a text filter"), "{error}");
+    for (query, expected) in [
+        (
+            "MATCH (m:SlackMessage) RETURN m.text",
+            "needs a text filter",
+        ),
+        (
+            "MATCH (m:SlackMessage) WHERE m.text <> 'done' RETURN m.text",
+            "uses ne",
+        ),
+        (
+            "MATCH (m:SlackMessage)-[:IN_CHANNEL]->(c:SlackChannel) WHERE c.name STARTS WITH 'tea' RETURN m.text",
+            "uses starts_with",
+        ),
+    ] {
+        let error = third_party.query(query).await.unwrap_err().to_string();
+        assert!(error.contains(expected), "{query}: {error}");
+    }
     let (ours, theirs) = third_party.labels_in("MATCH (c:SlackChannel), (p:Project) RETURN c");
     assert_eq!(
         (ours, theirs),

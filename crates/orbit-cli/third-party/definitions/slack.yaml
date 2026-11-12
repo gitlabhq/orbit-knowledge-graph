@@ -72,6 +72,8 @@ entities:
     search_api:
       path: /api/assistant.search.context
       params: {query: "{query}", limit: "20", sort: timestamp, channel_types: "public_channel,private_channel,mpim,im"}
+      cursor: {param: cursor, next: /response_metadata/next_cursor}
+      max_pages: 5
       items: /results/messages
       error: /error
       within:

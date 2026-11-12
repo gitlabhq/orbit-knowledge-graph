@@ -50,10 +50,6 @@ pub(crate) async fn grep(query: &str, paths: &mut Vec<String>) -> Result<Option<
         return Ok(None);
     };
     let (scope, rest) = third_party.scope(query);
-    anyhow::ensure!(
-        scope.is_none() || !rest.contains('|'),
-        "an OR across a third-party scope is not supported; run one grep per scope, such as `slack:message:a` and `grafana:dashboard:b`"
-    );
     let mut targets = Vec::new();
     paths.retain(|path| match third_party.parse_target(path) {
         Some(target) if !std::path::Path::new(path).exists() => {
@@ -65,6 +61,15 @@ pub(crate) async fn grep(query: &str, paths: &mut Vec<String>) -> Result<Option<
     if scope.is_none() && targets.is_empty() {
         return Ok(None);
     }
+    anyhow::ensure!(
+        !rest.contains('|'),
+        "an OR is not supported in a third-party grep; run one grep per term, such as `slack:message:a` then `slack:message:b`"
+    );
+    anyhow::ensure!(
+        !rest.trim().is_empty() || !targets.is_empty(),
+        "add words to search for, such as `{q}:words`, or `.` to list them all",
+        q = query.trim()
+    );
     anyhow::ensure!(
         paths.is_empty(),
         "a third-party grep takes references such as slack:channel:name, not code paths: {}",

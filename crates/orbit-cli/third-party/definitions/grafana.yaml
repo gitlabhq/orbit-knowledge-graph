@@ -40,7 +40,8 @@ entities:
       items: ""
     search_api:
       path: /api/search
-      params: {type: dash-db, query: "{query}", limit: "50"}
+      params: {type: dash-db, query: "{query}", limit: "5000"}
+      limit: 5000
       items: ""
       within:
         GrafanaFolder: "folderUIDs={key}"
