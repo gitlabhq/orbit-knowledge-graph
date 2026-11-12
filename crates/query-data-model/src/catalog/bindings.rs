@@ -218,23 +218,22 @@ impl Store {
     }
 }
 
-/// Variants that key on one column but reach different entities each name their own
-/// discriminator value.
+/// Variants that key on the same columns but reach different entities each name their own
+/// discriminator value; a composite key carries none, so two of them on the same columns clash.
 fn check_shared_keys(graph: &GraphCatalog, store: &Store, diagnostics: &mut Diagnostics) {
     let keys: Vec<(&RelationshipVariant, &str, &Key)> = store
         .bindings()
         .filter_map(|(variant, package, binding)| {
-            let key = binding.fk.as_ref().filter(|key| key.composite.is_empty())?;
-            Some((graph.variant(variant), package, key))
+            Some((graph.variant(variant), package, binding.fk.as_ref()?))
         })
         .collect();
     for (index, (variant, package, key)) in keys.iter().enumerate() {
-        let column = key.foreign_key.property;
+        let columns = key_columns(key);
         let referenced = key
             .foreign_key
             .referenced_entity(variant.source, variant.target);
         let clash = keys[..index].iter().find(|(other, _, other_key)| {
-            other_key.foreign_key.property == column
+            key_columns(other_key) == columns
                 && other_key
                     .foreign_key
                     .referenced_entity(other.source, other.target)
@@ -255,10 +254,22 @@ fn check_shared_keys(graph: &GraphCatalog, store: &Store, diagnostics: &mut Diag
                     store.name,
                     label(graph, other),
                     label(graph, variant),
-                    graph.property(column).name
+                    columns
+                        .iter()
+                        .map(|column| graph.property(*column).name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
             );
         }
+    }
+}
+
+/// The holder columns a key reads: its one column, or each part of a composite key.
+fn key_columns(key: &Key) -> Vec<PropertyId> {
+    match key.composite.is_empty() {
+        true => vec![key.foreign_key.property],
+        false => key.composite.iter().map(|(held, _)| *held).collect(),
     }
 }
 
