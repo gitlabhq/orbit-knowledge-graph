@@ -1,0 +1,4 @@
+kind: source
+package: integration.slack
+source: incident_sync
+entities: [Incident]
