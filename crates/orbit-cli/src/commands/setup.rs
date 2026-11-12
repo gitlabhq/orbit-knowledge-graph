@@ -166,9 +166,6 @@ pub(crate) async fn install(
             ),
         )?;
     }
-    if interactive && options.ask_sources && crate::commands::third_party::enabled() {
-        crate::commands::third_party::ask_to_connect().await?;
-    }
 
     let index_outcome = match index_repo::repository_root(&target) {
         None => IndexOutcome::OutsideRepository,
@@ -440,7 +437,6 @@ pub(crate) struct Options {
     pub(crate) index: bool,
     pub(crate) components: BTreeSet<Component>,
     pub(crate) ask_agent_plugins: bool,
-    pub(crate) ask_sources: bool,
     pub(crate) skill: SkillRequest,
 }
 
@@ -541,7 +537,6 @@ mod tests {
             index: false,
             components: Component::from_flags(&[], &[]).unwrap(),
             ask_agent_plugins: false,
-            ask_sources: false,
             skill: SkillRequest::default(),
         }
     }

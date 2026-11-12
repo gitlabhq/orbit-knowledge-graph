@@ -1,15 +1,4 @@
-description: Grafana folders, dashboards, and the alert rules on them, read live
-auth:
-  strategy: bearer
-  token_env: GRAFANA_TOKEN
-setup:
-  title: Grafana
-  token_help: "A service account token (glsa_…) with the Viewer role."
-  asks_url: true
-  url_help: "The Grafana server, such as https://dashboards.gitlab.net"
-  verify:
-    path: /api/user
-    shows: /login
+env: {token: GRAFANA_TOKEN, url: GRAFANA_URL}
 entities:
   GrafanaFolder:
     type: folder
@@ -21,12 +10,8 @@ entities:
       path: /api/folders
       params: {limit: "1000"}
       items: ""
-    get:
-      path: "/api/folders/{key}"
-      items: ""
     properties:
       title: {from: /title}
-      url: {from: /url}
   GrafanaDashboard:
     type: dashboard
     description: A Grafana dashboard
@@ -48,7 +33,6 @@ entities:
     properties:
       title: {from: /title}
       tags: {from: /tags}
-      url: {from: /url}
       folder: {from: /folderUid, description: UID of the GrafanaFolder it is in.}
       folder_title: {from: /folderTitle}
     links:
@@ -64,16 +48,11 @@ entities:
     list:
       path: /api/v1/provisioning/alert-rules
       items: ""
-    get:
-      path: "/api/v1/provisioning/alert-rules/{key}"
-      items: ""
     properties:
       title: {from: /title}
       rule_group: {from: /ruleGroup}
       summary: {from: /annotations/summary}
       description: {from: /annotations/description}
-      runbook_url: {from: /annotations/runbook_url}
-      paused: {type: bool, from: /isPaused}
       updated_at: {type: timestamp, from: /updated}
       folder: {from: /folderUID, description: UID of the GrafanaFolder it is in.}
       dashboard: {from: "/annotations/__dashboardUid__", description: UID of the GrafanaDashboard it is on.}

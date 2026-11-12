@@ -599,7 +599,6 @@ impl SetupFlags {
             index,
             components,
             ask_agent_plugins,
-            ask_sources: !self.dry_run,
             skill,
         }
     }
@@ -675,39 +674,6 @@ enum Commands {
 
         #[command(flatten)]
         flags: SetupFlags,
-    },
-    #[command(
-        hide = true,
-        about = "Nightly: connect a third-party source such as Slack or Grafana, reading its token from its variable such as SLACK_TOKEN; without a source, list what is connected (needs ORBIT_NIGHTLY=1)"
-    )]
-    Auth {
-        #[arg(value_name = "SOURCE", value_parser = commands::third_party::source_name_parser())]
-        source: Option<String>,
-
-        #[arg(
-            long,
-            value_name = "URL",
-            requires = "source",
-            help = "Server URL, for sources that need one such as Grafana"
-        )]
-        url: Option<String>,
-
-        #[arg(
-            long,
-            value_name = "TEAM",
-            requires = "source",
-            conflicts_with = "logout",
-            help = "Workspace to read, by ID or name, for tokens that span several such as Slack Enterprise Grid"
-        )]
-        team: Option<String>,
-
-        #[arg(
-            long,
-            requires = "source",
-            conflicts_with = "url",
-            help = "Remove the source from the third-party config"
-        )]
-        logout: bool,
     },
     #[command(about = descriptions::short("uninstall"), long_about = descriptions::long("uninstall"))]
     Uninstall {
@@ -1045,21 +1011,6 @@ async fn dispatch(
             }
             Ok(())
         }
-        Commands::Auth { .. } if commands::third_party::require_nightly().is_err() => {
-            commands::third_party::require_nightly()
-        }
-        Commands::Auth { source: None, .. } => commands::third_party::status(),
-        Commands::Auth {
-            source: Some(source),
-            logout: true,
-            ..
-        } => commands::third_party::disconnect(&source),
-        Commands::Auth {
-            source: Some(source),
-            url,
-            team,
-            ..
-        } => commands::third_party::connect(&source, url, team).await,
         Commands::Uninstall { agents, flags } => {
             let options = flags.to_options(
                 agents,
@@ -1121,12 +1072,7 @@ async fn dispatch(
             warn_moved("schema <table>", "workspace schema <table>");
             run_schema(db, raw, nodes)
         }
-        Commands::Schema { nodes, .. } => {
-            if commands::third_party::print_schema(&nodes).await? {
-                return Ok(());
-            }
-            Ok(remote::run_ontology(nodes).await?)
-        }
+        Commands::Schema { nodes, .. } => Ok(remote::run_ontology(nodes).await?),
         Commands::GraphStatus(args) => Ok(args.run().await?),
     }
 }

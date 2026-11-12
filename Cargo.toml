@@ -68,7 +68,6 @@ enum-as-inner = "0.7.0"
 either = "1.15.0"
 clap = { version = "4.5.57", default-features = false, features = ["std", "help", "usage", "error-context", "derive", "env"] }
 cliclack = "0.5"
-keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "linux-native"] }
 comrak = { version = "0.53.0", default-features = false }
 dirs = "6"
 dunce = "1.0.5"

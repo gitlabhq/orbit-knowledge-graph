@@ -739,25 +739,18 @@ mod tests {
     fn third_party_providers_show_with_or_without_gitlab() {
         let providers = Providers::from([
             ("gitlab".into(), vec!["Project".into()]),
-            (
-                "slack".into(),
-                vec!["SlackChannel".into(), "SlackUser".into()],
-            ),
+            ("slack".into(), vec!["SlackUser".into()]),
         ]);
-        let rendered = render_instructions(DIRECT_LAUNCHER, true, &providers);
+        let remote = render_instructions(DIRECT_LAUNCHER, true, &providers);
         assert!(
-            rendered.ends_with("\n- gitlab: Project\n- slack: SlackChannel, SlackUser"),
-            "{rendered}"
+            remote.ends_with("\n- gitlab: Project\n- slack: SlackUser"),
+            "{remote}"
         );
-        let rendered = render_instructions(DIRECT_LAUNCHER, false, &providers);
-        assert!(
-            rendered.ends_with("\n- slack: SlackChannel, SlackUser"),
-            "{rendered}"
-        );
-        assert!(!rendered.contains("- gitlab:"), "{rendered}");
+        let local = render_instructions(DIRECT_LAUNCHER, false, &providers);
+        assert!(local.ends_with(":\n- slack: SlackUser"), "{local}");
     }
 
-    const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh", "auth"];
+    const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh"];
 
     #[derive(serde::Deserialize)]
     struct CallLabels {

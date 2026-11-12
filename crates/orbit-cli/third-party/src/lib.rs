@@ -1,32 +1,27 @@
-pub mod auth;
 pub mod config;
 pub mod fetch;
 pub mod schema;
-pub mod setup;
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use anyhow::{Context, Result, bail};
 use arrow::array::RecordBatch;
+use compiler::input::{FilterOp, Input, InputFilter, InputNode};
 use ontology::Ontology;
+use regex::Regex;
 
 use config::{Entity, Source};
 use fetch::{Fetcher, Record, Want};
 
 pub use config::Config;
 
-pub const CONFIG_FILE: &str = "third-party.yaml";
-pub const CONFIG_ENV: &str = "ORBIT_THIRD_PARTY_CONFIG";
-
 const GREP_LIMIT: usize = 20;
 const CONTEXT_LINKS: usize = 10;
-const HEADLINE: usize = 100;
 
 pub struct ThirdParty {
     pub config: Config,
-    ontology: std::sync::OnceLock<Arc<Ontology>>,
+    ontology: OnceLock<Arc<Ontology>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -37,8 +32,6 @@ pub struct Scope {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hit {
-    pub source: String,
-    pub entity: String,
     pub reference: String,
     pub label: String,
     pub shown: Vec<String>,
@@ -48,9 +41,9 @@ pub struct Hit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
     pub source: String,
-    pub entity: String,
+    pub kind: String,
     pub hits: Vec<Hit>,
-    pub total: usize,
+    pub more: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,25 +59,21 @@ pub struct Grepped {
     pub failed: Vec<(String, String)>,
 }
 
+type Within = Vec<(String, String)>;
+
 impl ThirdParty {
-    pub fn config_path(root: &Path) -> PathBuf {
-        std::env::var_os(CONFIG_ENV)
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| root.join(CONFIG_FILE))
+    pub fn from_env() -> Option<Self> {
+        Self::new(Config::from_env(|name| std::env::var(name).ok()))
     }
 
-    pub fn open(root: &Path) -> Result<Option<Self>> {
-        let Some(config) = Config::load(&Self::config_path(root))? else {
-            return Ok(None);
-        };
-        Ok(Some(Self {
+    pub fn new(config: Config) -> Option<Self> {
+        (!config.sources.is_empty()).then(|| Self {
             config,
-            ontology: std::sync::OnceLock::new(),
-        }))
+            ontology: OnceLock::new(),
+        })
     }
 
-    pub fn ontology(&self) -> Result<Arc<Ontology>> {
+    fn ontology(&self) -> Result<Arc<Ontology>> {
         if let Some(ontology) = self.ontology.get() {
             return Ok(Arc::clone(ontology));
         }
@@ -96,43 +85,24 @@ impl ThirdParty {
         let mut picks = Vec::new();
         let mut rest = Vec::new();
         for word in query.split_whitespace() {
-            let Some((name, value)) = word.split_once(':') else {
-                rest.push(word.to_string());
-                continue;
-            };
-            let Some(source) = self
-                .config
-                .sources
-                .iter()
-                .find(|source| source.name == name)
-            else {
-                rest.push(word.to_string());
-                continue;
-            };
-            let Some((kind, value)) = value.split_once(':') else {
-                rest.push(word.to_string());
-                continue;
-            };
-            let Some(entity) = self.config.kind(source, kind) else {
-                rest.push(word.to_string());
-                continue;
-            };
-            picks.push((source.name.clone(), entity));
-            if !value.is_empty() {
-                rest.push(value.to_string());
+            let picked = word.split_once(':').and_then(|(name, value)| {
+                let source = self.config.source(name)?;
+                let (kind, value) = value.split_once(':')?;
+                Some((source.name.clone(), self.config.kind(source, kind)?, value))
+            });
+            match picked {
+                Some((source, entity, value)) => {
+                    picks.push((source, entity));
+                    rest.extend((!value.is_empty()).then(|| value.to_string()));
+                }
+                None => rest.push(word.to_string()),
             }
         }
-        let rest = rest.join(" ");
-        match picks.is_empty() {
-            true => (None, rest),
-            false => (
-                Some(Scope {
-                    picks,
-                    within: Vec::new(),
-                }),
-                rest,
-            ),
-        }
+        let scope = (!picks.is_empty()).then(|| Scope {
+            picks,
+            within: Vec::new(),
+        });
+        (scope, rest.join(" "))
     }
 
     pub fn parse_target(&self, target: &str) -> Option<Target> {
@@ -147,38 +117,11 @@ impl ThirdParty {
         })
     }
 
-    pub fn kind_of(&self, entity: &str) -> Option<String> {
-        self.config
-            .entity(entity)
-            .map(|(_, found)| found.kind.clone())
-    }
-
-    pub fn shown(&self, target: &Target) -> String {
-        let kind = self.kind_of(&target.entity).unwrap_or_default();
-        format!("{}:{kind}:{}", target.source, target.key)
-    }
-
-    fn reference(&self, source: &str, entity: &str, key: &str) -> String {
-        match self.config.entity(entity) {
-            Some((_, definition)) => format!("{source}:{}:{key}", definition.kind),
-            None => format!("{source}:{entity}:{key}"),
-        }
-    }
-
-    fn source_and_entity(&self, target: &Target) -> Result<(&Source, &str, &Entity)> {
-        let source = self
+    async fn resolve_key(&self, fetcher: &Fetcher, target: &Target) -> Result<String> {
+        let (source, name, entity) = self
             .config
-            .source(&target.source)
-            .with_context(|| format!("no source {}", target.source))?;
-        let (name, entity) = source
-            .entities
-            .get_key_value(&target.entity)
-            .with_context(|| format!("{} is not an entity of {}", target.entity, source.name))?;
-        Ok((source, name.as_str(), entity))
-    }
-
-    pub async fn resolve_key(&self, fetcher: &Fetcher, target: &Target) -> Result<String> {
-        let (source, name, entity) = self.source_and_entity(target)?;
+            .entity(&target.entity)
+            .context("no such entity")?;
         let bare = target.key.trim_start_matches(['#', '@']);
         if entity.list.is_none() {
             return Ok(target.key.clone());
@@ -190,177 +133,116 @@ impl ThirdParty {
             return Ok(record.key);
         }
         let all = fetcher.list(source, name, entity).await?;
-        if all.iter().any(|record| record.key == target.key) {
-            return Ok(target.key.clone());
-        }
-        if all.iter().any(|record| record.key == bare) {
-            return Ok(bare.to_string());
-        }
-        let label = |record: &Record| {
-            record
-                .properties
-                .get(&entity.label)
-                .map(fetch::text)
-                .unwrap_or_default()
-        };
-        let named: Vec<&Record> = all
-            .iter()
-            .filter(|record| label(record).eq_ignore_ascii_case(bare))
-            .collect();
-        match named.as_slice() {
-            [] => bail!("{} has nothing at {}", source.name, self.shown(target)),
-            [record] => Ok(record.key.clone()),
-            several => bail!(
-                "{} {}s are named {bare}; pick one: {}",
-                several.len(),
-                entity.kind,
-                several
-                    .iter()
-                    .map(|record| self.reference(&source.name, name, &record.key))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+        let mut named = all.iter().filter(|record| {
+            record.key == bare || value(record, &entity.label).eq_ignore_ascii_case(bare)
+        });
+        let at = reference(&source.name, &entity.kind, &target.key);
+        match (named.next(), named.next()) {
+            (Some(record), None) => Ok(record.key.clone()),
+            (Some(_), Some(_)) => bail!("several {}s are named {bare}; use its key", entity.kind),
+            (None, _) => bail!("{} has nothing at {at}", source.name),
         }
     }
 
-    pub async fn grep(&self, patterns: &[String], scope: &Scope) -> Grepped {
-        let mut grepped = Grepped::default();
-        let fetcher = match Fetcher::new() {
-            Ok(fetcher) => fetcher,
-            Err(error) => {
-                grepped
-                    .failed
-                    .push(("third-party".into(), format!("{error:#}")));
-                return grepped;
-            }
+    pub async fn grep(&self, query: &str, scope: &Scope) -> Grepped {
+        match self.try_grep(query, scope).await {
+            Ok(grepped) => grepped,
+            Err((source, error)) => Grepped {
+                found: Vec::new(),
+                failed: vec![(source, format!("{error:#}"))],
+            },
+        }
+    }
+
+    async fn try_grep(
+        &self,
+        query: &str,
+        scope: &Scope,
+    ) -> Result<Grepped, (String, anyhow::Error)> {
+        let fetcher = Fetcher::new().map_err(|error| ("third-party".to_string(), error))?;
+        let query = match query.trim() {
+            "." => "",
+            query => query,
         };
-        let query = patterns
+        let sources: std::collections::BTreeSet<&str> = scope
+            .within
             .iter()
-            .map(|pattern| pattern.trim())
-            .filter(|pattern| !pattern.is_empty() && *pattern != ".")
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut within: Vec<(String, String, String)> = Vec::new();
+            .map(|target| target.source.as_str())
+            .collect();
+        let mut within: Within = Vec::new();
         for target in &scope.within {
-            if self.searches_by_name(target) && !looks_like_key(&target.key) {
-                within.push((
-                    target.source.clone(),
-                    format!("{}#name", target.entity),
-                    target.key.trim_start_matches(['#', '@']).to_string(),
-                ));
-                continue;
-            }
-            match self.resolve_key(&fetcher, target).await {
-                Ok(key) => within.push((target.source.clone(), target.entity.clone(), key)),
-                Err(error) => {
-                    grepped
-                        .failed
-                        .push((target.source.clone(), format!("{error:#}")));
-                    return grepped;
-                }
-            }
+            within.push(
+                match self.searches_by_name(target) && !looks_like_key(&target.key) {
+                    true => (
+                        format!("{}#name", target.entity),
+                        target.key.trim_start_matches(['#', '@']).into(),
+                    ),
+                    false => (
+                        target.entity.clone(),
+                        self.resolve_key(&fetcher, target)
+                            .await
+                            .map_err(|error| (target.source.clone(), error))?,
+                    ),
+                },
+            );
         }
         let wanted: Vec<(&Source, &str, &Entity)> = self
             .config
             .entities()
-            .filter(|(source, name, _)| {
-                scope.picks.is_empty()
+            .filter(|(source, name, entity)| {
+                (scope.picks.is_empty()
                     || scope
                         .picks
-                        .iter()
-                        .any(|(picked, entity)| *picked == source.name && entity == name)
-            })
-            .filter(|(source, name, entity)| {
-                scope.within.is_empty()
-                    || within.iter().all(|(found, to, _)| {
-                        *found != source.name || self.can_narrow(name, entity, to)
-                    }) && self.narrows(source, name, entity, &scope.within)
+                        .contains(&(source.name.clone(), name.to_string())))
+                    && (within.is_empty() || sources.contains(source.name.as_str()))
+                    && within.iter().all(|(to, _)| can_narrow(name, entity, to))
             })
             .collect();
-        if let Some((source, _, _)) = within
-            .iter()
-            .find(|(found, _, _)| !wanted.iter().any(|(source, _, _)| &source.name == found))
-        {
-            grepped.failed.push((
-                source.clone(),
-                format!("nothing searched here can be narrowed by a {source} reference; run one grep per source"),
-            ));
-            return grepped;
-        }
-        if wanted.is_empty() && !scope.within.is_empty() {
-            grepped.failed.push((
-                "third-party".into(),
-                "nothing that was asked for can be narrowed by those references".into(),
-            ));
-            return grepped;
-        }
-        let searches = wanted.iter().map(|(source, name, entity)| {
-            let within: Vec<(String, String)> = within
+        if sources.len() > 1 || (!within.is_empty() && wanted.is_empty()) {
+            let source = sources
                 .iter()
-                .filter(|(found, _, _)| *found == source.name)
-                .map(|(_, to, key)| (to.clone(), key.clone()))
-                .collect();
-            let fetcher = &fetcher;
-            let query = query.clone();
-            async move {
-                let found = self
-                    .grep_entity(fetcher, source, name, entity, &query, &within)
-                    .await;
-                (*source, *name, found)
-            }
+                .next()
+                .copied()
+                .unwrap_or_default()
+                .to_string();
+            let error = anyhow::anyhow!(
+                "nothing asked for can be narrowed by those references, which must all come from one source"
+            );
+            return Err((source, error));
+        }
+        let fetcher = &fetcher;
+        let searches = wanted.iter().map(|(source, name, entity)| async {
+            let found = self
+                .grep_entity(fetcher, source, name, entity, query, &within)
+                .await;
+            (source.name.clone(), *name, found)
         });
+        let mut grepped = Grepped::default();
         for (source, name, found) in futures::future::join_all(searches).await {
             match found {
                 Ok(found) => grepped.found.push(found),
-                Err(error) => grepped
-                    .failed
-                    .push((source.name.clone(), format!("{name}: {error:#}"))),
+                Err(error) => grepped.failed.push((source, format!("{name}: {error:#}"))),
             }
         }
-        grepped
+        Ok(grepped)
     }
 
     fn searches_by_name(&self, target: &Target) -> bool {
         let Some(source) = self.config.source(&target.source) else {
             return false;
         };
-        let users_of = || {
-            source
-                .entities
-                .values()
-                .filter(|entity| entity.links.iter().any(|link| link.to == target.entity))
-        };
-        users_of().next().is_some()
-            && users_of().all(|entity| {
+        let mut users = source
+            .entities
+            .values()
+            .filter(|entity| entity.links.iter().any(|link| link.to == target.entity))
+            .peekable();
+        users.peek().is_some()
+            && users.all(|entity| {
                 entity
                     .search_api
                     .as_ref()
                     .is_some_and(|search| search.within_name.contains_key(&target.entity))
             })
-    }
-
-    fn can_narrow(&self, name: &str, entity: &Entity, to: &str) -> bool {
-        let (target, by_name) = match to.strip_suffix("#name") {
-            Some(target) => (target, true),
-            None => (to, false),
-        };
-        match &entity.search_api {
-            Some(search) => match by_name {
-                true => search.within_name.contains_key(target),
-                false => search.within.contains_key(target),
-            },
-            None => {
-                !by_name && (target == name || entity.links.iter().any(|link| link.to == target))
-            }
-        }
-    }
-
-    fn narrows(&self, source: &Source, name: &str, entity: &Entity, within: &[Target]) -> bool {
-        within.iter().any(|target| {
-            target.source == source.name
-                && ((target.entity == name && !self.searches_by_name(target))
-                    || entity.links.iter().any(|link| link.to == target.entity))
-        })
     }
 
     async fn grep_entity(
@@ -372,134 +254,73 @@ impl ThirdParty {
         query: &str,
         within: &[(String, String)],
     ) -> Result<Found> {
-        let records = match &entity.search_api {
+        let matchers = matchers(query);
+        let mut records = match &entity.search_api {
             Some(_) => {
+                let want = Want::First(GREP_LIMIT + 1);
                 fetcher
-                    .search(
-                        source,
-                        name,
-                        entity,
-                        query,
-                        within,
-                        Want::First(GREP_LIMIT + 1),
-                    )
+                    .search(source, name, entity, query, within, want)
                     .await?
             }
-            None => {
-                let all = fetcher.list(source, name, entity).await?;
-                let matchers = matchers(query);
-                all.into_iter()
-                    .filter(|record| {
-                        within.iter().all(|(to, key)| {
-                            self.links_to(entity, record, to, key)
-                                || (to == name && &record.key == key)
-                        })
+            None => fetcher
+                .list(source, name, entity)
+                .await?
+                .into_iter()
+                .filter(|record| {
+                    within.iter().all(|(to, key)| {
+                        (to == name && &record.key == key) || links_to(entity, record, to, key)
+                    }) && matchers.iter().all(|matcher| {
+                        entity
+                            .search
+                            .iter()
+                            .any(|field| matcher.is_match(&value(record, field)))
                     })
-                    .filter(|record| {
-                        matchers.iter().all(|matcher| {
-                            searched(entity)
-                                .iter()
-                                .any(|field| matcher.is_match(&value(record, field)))
-                        })
-                    })
-                    .collect()
-            }
+                })
+                .collect(),
         };
-        let mut records = records;
         if let Some(field) = &entity.newest {
             records.sort_by_key(|record| std::cmp::Reverse(value(record, field)));
         }
-        let total = match (&entity.search_api, records.len() > GREP_LIMIT) {
-            (Some(_), true) => GREP_LIMIT + 1,
-            _ => records.len(),
-        };
-        let matchers = matchers(query);
-        let hits = records
-            .iter()
-            .take(GREP_LIMIT)
-            .map(|record| self.hit(&source.name, name, entity, record, &matchers))
-            .collect();
         Ok(Found {
             source: source.name.clone(),
-            entity: name.to_string(),
-            hits,
-            total,
+            kind: entity.kind.clone(),
+            more: records.len() > GREP_LIMIT,
+            hits: records
+                .iter()
+                .take(GREP_LIMIT)
+                .map(|record| hit(&source.name, entity, record, &matchers))
+                .collect(),
         })
-    }
-
-    fn links_to(&self, entity: &Entity, record: &Record, to: &str, key: &str) -> bool {
-        entity
-            .links
-            .iter()
-            .filter(|link| link.to == to)
-            .any(|link| value(record, &link.via) == key)
-    }
-
-    fn hit(
-        &self,
-        source: &str,
-        name: &str,
-        entity: &Entity,
-        record: &Record,
-        matchers: &[regex::Regex],
-    ) -> Hit {
-        let shown: Vec<String> = entity
-            .shows
-            .iter()
-            .map(|field| value(record, field))
-            .filter(|value| !value.is_empty())
-            .map(|value| short_time(&value))
-            .collect();
-        let matched = searched(entity)
-            .into_iter()
-            .skip(1)
-            .filter(|field| !entity.shows.contains(field))
-            .filter_map(|field| {
-                let text = value(record, &field);
-                (!shown.contains(&text) && matchers.iter().any(|m| m.is_match(&text)))
-                    .then(|| (field, one_line(&text)))
-            })
-            .collect();
-        Hit {
-            source: source.to_string(),
-            entity: name.to_string(),
-            reference: self.reference(source, name, &record.key),
-            label: one_line(&value(record, &entity.label)),
-            shown,
-            matched,
-        }
     }
 
     pub async fn context(&self, target: &Target) -> Result<String> {
         let fetcher = Fetcher::new()?;
-        let (source, name, entity) = self.source_and_entity(target)?;
+        let (source, name, entity) = self
+            .config
+            .entity(&target.entity)
+            .context("no such entity")?;
         let key = self.resolve_key(&fetcher, target).await?;
-        let shown = self.reference(&source.name, name, &key);
+        let shown = reference(&source.name, &entity.kind, &key);
         let record = fetcher
             .get_one(source, name, entity, &key)
             .await?
             .with_context(|| format!("{} has nothing at {shown}", source.name))?;
-        let hit = self.hit(&source.name, name, entity, &record, &[]);
-        let mut out = match hit.label.chars().count() > HEADLINE {
-            true => format!("{shown}\n"),
-            false => format!("{shown}  {}\n", hit.label),
-        };
+        let mut out = format!("{shown}\n");
         for (field, property) in &record.properties {
             let text = fetch::text(property);
-            if !text.is_empty() && (field != &entity.label || hit.label.chars().count() > HEADLINE)
-            {
+            if !text.is_empty() {
                 out.push_str(&format!("{field}: {}\n", text.trim_end()));
             }
         }
         let mut links = Vec::new();
         for link in &entity.links {
-            let Some(other) = record.properties.get(&link.via).map(fetch::text) else {
-                continue;
-            };
-            if let Some((_, other_entity)) = self.config.entity(&link.to) {
+            if let Some(other) = record.properties.get(&link.via).map(fetch::text)
+                && let Some((_, _, to)) = self.config.entity(&link.to)
+            {
                 links.push(format!(
-                    "-[{}]-> {}:{}:{other}",
-                    link.kind, source.name, other_entity.kind
+                    "-[{}]-> {}",
+                    link.kind,
+                    reference(&source.name, &to.kind, &other)
                 ));
             }
         }
@@ -507,46 +328,28 @@ impl ThirdParty {
             let Some(link) = other.links.iter().find(|link| link.to == name) else {
                 continue;
             };
-            let within = [(name.to_string(), key.clone())];
-            let records = match &other.search_api {
-                Some(search) if search.within.contains_key(name) => fetcher
-                    .search(
-                        source,
-                        other_name,
-                        other,
-                        "",
-                        &within,
-                        Want::First(CONTEXT_LINKS),
-                    )
-                    .await
-                    .map_err(|error| eprintln!("orbit: {}: {other_name}: {error:#}", source.name))
-                    .unwrap_or_default(),
-                Some(_) => continue,
-                None => fetcher
-                    .list(source, other_name, other)
-                    .await
-                    .map_err(|error| eprintln!("orbit: {}: {other_name}: {error:#}", source.name))
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|record| value(record, &link.via) == key)
-                    .collect(),
-            };
-            if records.is_empty() {
+            if other.search_api.is_some() && !can_narrow(other_name, other, name) {
                 continue;
             }
+            let within = [(name.to_string(), key.clone())];
+            let found = self
+                .grep_entity(&fetcher, source, other_name, other, "", &within)
+                .await;
+            let found =
+                found.map_err(|error| eprintln!("orbit: {}: {other_name}: {error:#}", source.name));
+            let Some(found) = found.ok().filter(|found| !found.hits.is_empty()) else {
+                continue;
+            };
+            let hits = found.hits.iter().take(CONTEXT_LINKS);
             links.push(format!(
                 "<-[{}]- {} (latest {})",
                 link.kind,
                 other.kind,
-                records.len().min(CONTEXT_LINKS)
+                hits.len()
             ));
-            for record in records.iter().take(CONTEXT_LINKS) {
-                let label = truncate(&one_line(&value(record, &other.label)), 80);
-                links.push(format!(
-                    "  {}  {label}",
-                    self.reference(&source.name, other_name, &record.key)
-                ));
-            }
+            links.extend(
+                hits.map(|hit| format!("  {}  {}", hit.reference, truncate(&hit.label, 80))),
+            );
         }
         if !links.is_empty() {
             out.push_str(&format!("\nlinks:\n{}\n", links.join("\n")));
@@ -555,15 +358,13 @@ impl ThirdParty {
     }
 
     pub fn labels_in(&self, query: &str) -> (Vec<String>, Vec<String>) {
-        static LABEL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-            regex::Regex::new(r"\(\s*\w*\s*:\s*([A-Za-z]+)").expect("valid pattern")
-        });
+        static LABEL: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"\(\s*\w*\s*:\s*([A-Za-z]+)").expect("valid pattern"));
         let (mut ours, mut theirs) = (Vec::new(), Vec::new());
         for found in LABEL.captures_iter(query) {
-            let label = found[1].to_string();
-            match self.config.entity(&label) {
-                Some((name, _)) => ours.push(name.to_string()),
-                None => theirs.push(label),
+            match self.config.entity(&found[1]) {
+                Some((_, name, _)) => ours.push(name.to_string()),
+                None => theirs.push(found[1].to_string()),
             }
         }
         (ours, theirs)
@@ -574,40 +375,34 @@ impl ThirdParty {
         let compiled = compiler::compile_local(query, compiler::Frontend::Gql, &ontology)
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let fetcher = Fetcher::new()?;
-        let mut loaded: BTreeMap<String, Vec<Record>> = BTreeMap::new();
-        let mut searched_once = std::collections::BTreeSet::new();
+        let mut loaded: BTreeMap<&str, Vec<Record>> = BTreeMap::new();
         for node in &compiled.input.nodes {
-            let Some(label) = &node.entity else { continue };
-            let Some((source, name, entity)) = self.config.entity_in(label) else {
+            let Some((source, name, entity)) = node
+                .entity
+                .as_deref()
+                .and_then(|label| self.config.entity(label))
+            else {
                 continue;
             };
-            match &entity.search_api {
-                Some(_) => {
-                    if !searched_once.insert(name.to_string()) {
-                        bail!(
-                            "{name} is read through a live search, so a query can match it only once; run one query per search"
-                        );
-                    }
+            let records = match (&entity.search_api, loaded.contains_key(name)) {
+                (Some(_), true) => bail!(
+                    "{name} is read through a live search, so a query can match it only once; run one query per search"
+                ),
+                (Some(_), false) => {
                     let (text, within) = self.search_terms(&compiled.input, node, entity)?;
-                    let records = fetcher
+                    fetcher
                         .search(source, name, entity, &text, &within, Want::All)
-                        .await?;
-                    loaded.insert(name.to_string(), records);
+                        .await?
                 }
-                None if loaded.contains_key(name) => {}
-                None if entity.list.is_some() => {
-                    loaded.insert(name.to_string(), fetcher.list(source, name, entity).await?);
-                }
-                None => bail!("{name} cannot be read"),
-            }
+                (None, true) => continue,
+                (None, false) => fetcher.list(source, name, entity).await?,
+            };
+            loaded.insert(name, records);
         }
         let client = duckdb_client::DuckDbClient::open(duckdb_client::OpenMode::InMemoryArrow)?;
         client.initialize_schema(&compiler::generate_local_ddl(&ontology, ""))?;
         for (name, records) in &loaded {
-            let (source, _, entity) = self
-                .config
-                .entity_in(name)
-                .expect("loaded entities are configured");
+            let (source, _, entity) = self.config.entity(name).expect("loaded entities exist");
             schema::load(&client, &source.name, name, entity, records)?;
         }
         let sql = compiled.base.render();
@@ -622,125 +417,125 @@ impl ThirdParty {
 
     fn search_terms(
         &self,
-        input: &compiler::input::Input,
-        node: &compiler::input::InputNode,
+        input: &Input,
+        node: &InputNode,
         entity: &Entity,
-    ) -> Result<(String, Vec<(String, String)>)> {
-        use compiler::input::FilterOp;
-        let term = |filter: &compiler::input::InputFilter,
-                    ops: &[FilterOp]|
-         -> Result<Option<String>> {
+    ) -> Result<(String, Within)> {
+        let label = node.entity.as_deref().unwrap_or_default();
+        let live = format!("{label} is read through a live search, which");
+        if !node.negated_filters.is_empty() {
+            bail!("{live} cannot apply NOT filters");
+        }
+        let term = |filter: &InputFilter, contains: bool| -> Result<String> {
             let op = filter.op.unwrap_or(FilterOp::Eq);
-            match (ops.contains(&op), filter.value_str()) {
-                (true, Some(text)) => Ok(Some(text.to_string())),
+            match (
+                op == FilterOp::Eq || (contains && op == FilterOp::Contains),
+                filter.value_str(),
+            ) {
+                (true, Some(text)) => Ok(text.to_string()),
                 _ => bail!(
-                    "{} is read through a live search, which can only match {}; this filter uses {}",
-                    node.entity.as_deref().unwrap_or("this entity"),
-                    ops.iter()
-                        .map(|op| op.as_ref())
-                        .collect::<Vec<_>>()
-                        .join(" or "),
+                    "{live} can only match = or CONTAINS on its text and = on what it links to; this filter uses {}",
                     op.as_ref()
                 ),
             }
         };
-        if !node.negated_filters.is_empty() {
-            bail!(
-                "{} is read through a live search, which cannot apply NOT filters",
-                node.entity.as_deref().unwrap_or("this entity")
-            );
-        }
         let mut words = Vec::new();
         for (field, filters) in &node.filters {
-            if !searched(entity).contains(field) {
-                continue;
-            }
-            for filter in filters {
-                if let Some(text) = term(filter, &[FilterOp::Eq, FilterOp::Contains])? {
-                    words.push(text);
-                }
+            if entity.search.contains(field) {
+                words.extend(
+                    filters
+                        .iter()
+                        .map(|filter| term(filter, true))
+                        .collect::<Result<Vec<_>>>()?,
+                );
             }
         }
         let mut within = Vec::new();
-        for relationship in &input.relationships {
-            let other = match (relationship.from == node.id, relationship.to == node.id) {
-                (true, _) => &relationship.to,
-                (_, true) => &relationship.from,
-                _ => continue,
-            };
-            let Some(other) = input.nodes.iter().find(|found| &found.id == other) else {
-                continue;
-            };
-            let Some(label) = &other.entity else { continue };
-            let Some((_, other_name, other_entity)) = self.config.entity_in(label) else {
-                continue;
-            };
+        let linked = input.relationships.iter().filter_map(|edge| {
+            let other = [(&edge.from, &edge.to), (&edge.to, &edge.from)]
+                .into_iter()
+                .find_map(|(this, other)| (this == &node.id).then_some(other))?;
+            let other = input.nodes.iter().find(|found| &found.id == other)?;
+            Some((other, self.config.entity(other.entity.as_deref()?)?))
+        });
+        for (other, (_, other_name, other_entity)) in linked {
             for (field, filters) in &other.filters {
                 let to = match field.as_str() {
                     "key" => other_name.to_string(),
                     field if field == other_entity.label => format!("{other_name}#name"),
                     _ => continue,
                 };
-                if !self.can_narrow(node.entity.as_deref().unwrap_or_default(), entity, &to) {
-                    continue;
-                }
-                for filter in filters {
-                    if let Some(value) = term(filter, &[FilterOp::Eq])? {
-                        within.push((to.clone(), value));
+                if can_narrow(label, entity, &to) {
+                    for filter in filters {
+                        within.push((to.clone(), term(filter, false)?));
                     }
                 }
             }
         }
         if words.is_empty() && within.is_empty() {
             bail!(
-                "{} is searched live, so the query needs a text filter on it, such as `CONTAINS 'deploy'`, or a match on a channel or user",
-                node.entity.as_deref().unwrap_or("this entity")
+                "{live} needs a text filter on it, such as `CONTAINS 'deploy'`, or a match on a channel or user"
             );
         }
         Ok((words.join(" "), within))
     }
+}
 
-    pub fn schema_of(&self, only: &[String]) -> String {
-        let mut out = String::new();
-        for (source, name, entity) in self.config.entities() {
-            if !only.is_empty() && !only.iter().any(|wanted| wanted.eq_ignore_ascii_case(name)) {
-                continue;
-            }
-            let how = match entity.search_api {
-                Some(_) => "searched live; query it with a text filter or a linked match",
-                None => "listed live",
-            };
-            out.push_str(&format!(
-                "{name}  ({}:{})  {}; {how}\n",
-                source.name, entity.kind, entity.description
-            ));
-            let mut properties = vec!["key: string".to_string()];
-            properties.extend(
-                entity
-                    .properties
-                    .iter()
-                    .map(|(field, property)| format!("{field}: {}", property.kind.ontology())),
-            );
-            out.push_str(&format!("  properties: {}\n", properties.join(", ")));
-            for link in &entity.links {
-                out.push_str(&format!(
-                    "  -[{}]-> {}  (via {})\n",
-                    link.kind, link.to, link.via
-                ));
-            }
-        }
-        out
+fn can_narrow(name: &str, entity: &Entity, to: &str) -> bool {
+    let (target, by_name) = to
+        .strip_suffix("#name")
+        .map_or((to, false), |target| (target, true));
+    match (&entity.search_api, by_name) {
+        (Some(search), true) => search.within_name.contains_key(target),
+        (Some(search), false) => search.within.contains_key(target),
+        (None, true) => false,
+        (None, false) => target == name || entity.links.iter().any(|link| link.to == target),
     }
 }
 
-fn limited(batches: Vec<RecordBatch>, limit: usize) -> Vec<RecordBatch> {
-    let mut left = limit;
+fn links_to(entity: &Entity, record: &Record, to: &str, key: &str) -> bool {
+    entity
+        .links
+        .iter()
+        .any(|link| link.to == to && value(record, &link.via) == key)
+}
+
+fn reference(source: &str, kind: &str, key: &str) -> String {
+    format!("{source}:{kind}:{key}")
+}
+
+fn hit(source: &str, entity: &Entity, record: &Record, matchers: &[Regex]) -> Hit {
+    let shown: Vec<String> = entity
+        .shows
+        .iter()
+        .map(|field| short_time(&value(record, field)))
+        .filter(|value| !value.is_empty())
+        .collect();
+    let matched = entity
+        .search
+        .iter()
+        .filter(|field| **field != entity.label && !entity.shows.contains(field))
+        .filter_map(|field| {
+            let text = value(record, field);
+            (!shown.contains(&text) && matchers.iter().any(|m| m.is_match(&text)))
+                .then(|| (field.clone(), one_line(&text)))
+        })
+        .collect();
+    Hit {
+        reference: reference(source, &entity.kind, &record.key),
+        label: one_line(&value(record, &entity.label)),
+        shown,
+        matched,
+    }
+}
+
+fn limited(batches: Vec<RecordBatch>, mut left: usize) -> Vec<RecordBatch> {
     let mut kept = Vec::new();
     for batch in batches {
-        if left == 0 {
+        let take = batch.num_rows().min(left);
+        if take == 0 {
             break;
         }
-        let take = batch.num_rows().min(left);
         left -= take;
         kept.push(batch.slice(0, take));
     }
@@ -756,18 +551,6 @@ fn looks_like_key(text: &str) -> bool {
             .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
 }
 
-fn searched(entity: &Entity) -> Vec<String> {
-    let mut fields = vec![entity.label.clone()];
-    fields.extend(
-        entity
-            .search
-            .iter()
-            .filter(|field| **field != entity.label)
-            .cloned(),
-    );
-    fields
-}
-
 fn value(record: &Record, field: &str) -> String {
     match field {
         "key" => record.key.clone(),
@@ -779,11 +562,21 @@ fn value(record: &Record, field: &str) -> String {
     }
 }
 
-fn matchers(query: &str) -> Vec<regex::Regex> {
+fn matchers(query: &str) -> Vec<Regex> {
     query
         .split_whitespace()
         .filter_map(|word| {
-            regex::RegexBuilder::new(&loose(word))
+            let plain = !word.contains(['\\', '[', '(', '*', '+', '?', '{', '^', '$', '|', '.']);
+            let pattern = match plain {
+                true => word
+                    .split(['_', '-'])
+                    .filter(|part| !part.is_empty())
+                    .map(regex::escape)
+                    .collect::<Vec<_>>()
+                    .join("[-_ ]?"),
+                false => word.to_string(),
+            };
+            regex::RegexBuilder::new(&pattern)
                 .case_insensitive(true)
                 .build()
                 .ok()
@@ -792,64 +585,45 @@ fn matchers(query: &str) -> Vec<regex::Regex> {
 }
 
 fn returned(query: &str, batches: Vec<RecordBatch>) -> Vec<RecordBatch> {
-    static RETURN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"(?is)\bRETURN\b(.*?)(\bORDER\s+BY\b|\bSKIP\b|\bLIMIT\b|$)")
-            .expect("valid pattern")
+    static RETURN: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?is)\bRETURN\b(.*?)(\bORDER\s+BY\b|\bSKIP\b|\bLIMIT\b|$)").expect("valid")
     });
-    static ITEM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"(?i)^(?:.*\bAS\s+(\w+)|(\w+)\.(\w+)|(\w+))$").expect("valid pattern")
+    static ITEM: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^(?:.*\bAS\s+(\w+)|(\w+)\.(\w+)|(\w+))$").expect("valid")
     });
-    let Some(first) = batches.first() else {
+    let (Some(first), Some(items)) = (batches.first(), RETURN.captures(query)) else {
         return batches;
     };
-    let Some(items) = RETURN.captures(query).map(|found| found[1].to_string()) else {
-        return batches;
-    };
-    let mut wanted = Vec::new();
-    for item in items.split(',').map(str::trim) {
-        let Some(found) = ITEM.captures(item) else {
-            continue;
-        };
-        if let Some(alias) = found.get(1) {
-            wanted.push(alias.as_str().to_string());
-        } else if let (Some(node), Some(field)) = (found.get(2), found.get(3)) {
-            wanted.push(format!("{}_{}", node.as_str(), field.as_str()));
-        } else if let Some(node) = found.get(4) {
-            let prefix = format!("{}_", node.as_str());
-            wanted.extend(
-                first
-                    .schema()
-                    .fields()
-                    .iter()
-                    .map(|field| field.name().clone())
-                    .filter(|name| name.starts_with(&prefix)),
-            );
-        }
-    }
     let schema = first.schema();
+    let columns = schema.fields().iter().map(|field| field.name().as_str());
+    let wanted: Vec<String> = items[1]
+        .split(',')
+        .filter_map(|item| ITEM.captures(item.trim()))
+        .flat_map(
+            |found| match (found.get(1), found.get(2), found.get(3), found.get(4)) {
+                (Some(alias), ..) => vec![alias.as_str().to_string()],
+                (_, Some(node), Some(field), _) => {
+                    vec![format!("{}_{}", node.as_str(), field.as_str())]
+                }
+                (.., Some(node)) => columns
+                    .clone()
+                    .filter(|name| name.starts_with(&format!("{}_", node.as_str())))
+                    .map(String::from)
+                    .collect(),
+                _ => Vec::new(),
+            },
+        )
+        .collect();
     let indices: Vec<usize> = wanted
         .iter()
         .filter_map(|name| schema.index_of(name).ok())
         .collect();
-    if indices.is_empty() {
-        return batches;
-    }
-    batches
-        .into_iter()
-        .filter_map(|batch| batch.project(&indices).ok())
-        .collect()
-}
-
-fn loose(word: &str) -> String {
-    let plain = !word.contains(['\\', '[', '(', '*', '+', '?', '{', '^', '$', '|', '.']);
-    match plain {
-        true => word
-            .split(['_', '-'])
-            .filter(|part| !part.is_empty())
-            .map(regex::escape)
-            .collect::<Vec<_>>()
-            .join("[-_ ]?"),
-        false => word.to_string(),
+    match indices.is_empty() {
+        true => batches,
+        false => batches
+            .into_iter()
+            .filter_map(|batch| batch.project(&indices).ok())
+            .collect(),
     }
 }
 
@@ -865,11 +639,8 @@ fn truncate(text: &str, max: usize) -> String {
 }
 
 fn short_time(value: &str) -> String {
-    let is_time = value.len() >= 16
-        && value.as_bytes()[4] == b'-'
-        && value.as_bytes()[10] == b' '
-        && value.as_bytes()[13] == b':';
-    match is_time {
+    let bytes = value.as_bytes();
+    match value.len() >= 16 && bytes[4] == b'-' && bytes[10] == b' ' && bytes[13] == b':' {
         true => value[..16].to_string(),
         false => value.to_string(),
     }
@@ -879,51 +650,28 @@ pub fn render(found: &[Found]) -> String {
     let mut out = String::new();
     let mut current = None;
     for entity in found.iter().filter(|entity| !entity.hits.is_empty()) {
-        if current != Some(&entity.source) {
-            if current.is_some() {
-                out.push('\n');
-            }
+        if current.replace(&entity.source) != Some(&entity.source) {
             out.push_str(&format!("» {}\n", entity.source));
-            current = Some(&entity.source);
         }
         for hit in &entity.hits {
             let key = hit.reference.splitn(3, ':').nth(2).unwrap_or_default();
-            let named = !hit.label.is_empty() && hit.label != key;
-            match (hit.shown.is_empty(), named) {
-                (true, true) => out.push_str(&format!("{}  {}", hit.reference, hit.label)),
-                (true, false) => out.push_str(&hit.reference),
-                (false, true) => out.push_str(&format!(
-                    "{}  {}\n    {}",
-                    hit.reference,
-                    hit.shown.join(" · "),
-                    hit.label
-                )),
-                (false, false) => {
-                    out.push_str(&format!("{}  {}", hit.reference, hit.shown.join(" · ")))
-                }
+            let mut line = vec![hit.reference.clone()];
+            line.extend((!hit.shown.is_empty()).then(|| hit.shown.join(" · ")));
+            out.push_str(&line.join("  "));
+            if !hit.label.is_empty() && hit.label != key {
+                let gap = if hit.shown.is_empty() { "  " } else { "\n    " };
+                out.push_str(&format!("{gap}{}", hit.label));
             }
             for (field, text) in &hit.matched {
                 out.push_str(&format!("\n    {field}: {text}"));
             }
             out.push('\n');
         }
-        if entity.total > entity.hits.len() {
-            let kind = entity
-                .hits
-                .first()
-                .and_then(|hit| hit.reference.split(':').nth(1))
-                .unwrap_or(entity.entity.as_str());
+        if entity.more {
+            let shown = entity.hits.len();
+            let kind = &entity.kind;
             out.push_str(&format!(
-                "  {} of {}{} {kind}s shown; add words to narrow it\n",
-                entity.hits.len(),
-                match entity.total == GREP_LIMIT + 1 {
-                    true => "more than ",
-                    false => "",
-                },
-                match entity.total == GREP_LIMIT + 1 {
-                    true => GREP_LIMIT,
-                    false => entity.total,
-                },
+                "  {shown} of more than {GREP_LIMIT} {kind}s shown; add words to narrow it\n"
             ));
         }
     }

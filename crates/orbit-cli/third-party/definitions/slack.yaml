@@ -1,22 +1,5 @@
-description: Slack channels, people, and messages, read live
 base_url: https://slack.com
-auth:
-  strategy: bearer
-  token_env: SLACK_TOKEN
-setup:
-  title: Slack
-  token_help: "A bot or user token (xoxb- or xoxe-) with channels:read, channels:history, users:read, and search:read."
-  verify:
-    path: /api/auth.test
-    ok: /ok
-    error: /error
-    shows: /team
-  team:
-    when: /is_enterprise_install
-    path: /api/auth.teams.list
-    items: /teams
-    id: /id
-    name: /name
+env: {token: SLACK_TOKEN, url: SLACK_URL, team: SLACK_TEAM}
 entities:
   SlackChannel:
     type: channel
@@ -29,18 +12,15 @@ entities:
       params: {limit: "200", types: "public_channel,private_channel", exclude_archived: "true", team_id: "{team}"}
       items: /channels
       cursor: {param: cursor, next: /response_metadata/next_cursor}
-      error: /error
     get:
       path: /api/conversations.info
       params: {channel: "{key}"}
       items: /channel
-      error: /error
     properties:
       name: {from: /name, description: "Channel name without the leading #."}
       topic: {from: /topic/value}
       purpose: {from: /purpose/value}
-      members: {type: int, from: /num_members}
-      created_at: {type: timestamp, from: /created, format: unix}
+      created_at: {type: unix_time, from: /created}
   SlackUser:
     type: user
     description: A person in the Slack workspace
@@ -52,12 +32,10 @@ entities:
       params: {limit: "200", team_id: "{team}"}
       items: /members
       cursor: {param: cursor, next: /response_metadata/next_cursor}
-      error: /error
     get:
       path: /api/users.info
       params: {user: "{key}"}
       items: /user
-      error: /error
     properties:
       name: {from: /name}
       real_name: {from: /real_name}
@@ -67,6 +45,7 @@ entities:
     description: A message posted in a Slack channel
     key: [/channel_id, /message_ts]
     label: text
+    search: [text]
     newest: posted_at
     shows: [channel_name, author_name, posted_at]
     search_api:
@@ -75,7 +54,6 @@ entities:
       cursor: {param: cursor, next: /response_metadata/next_cursor}
       max_pages: 5
       items: /results/messages
-      error: /error
       within:
         SlackChannel: "in:<#{key}>"
         SlackUser: "from:<@{key}>"
@@ -86,7 +64,6 @@ entities:
       path: /api/conversations.replies
       params: {channel: "{key.0}", ts: "{key.1}", limit: "1", inclusive: "true"}
       items: /messages
-      error: /error
       key: ["{key.0}", /ts]
       fields:
         text: /text
@@ -99,8 +76,7 @@ entities:
       channel_name: {from: /channel_name}
       author: {from: /author_user_id, description: Key of the SlackUser who posted it.}
       author_name: {from: /author_name}
-      posted_at: {type: timestamp, from: /message_ts, format: unix}
-      replies: {type: int, from: /reply_count}
+      posted_at: {type: unix_time, from: /message_ts}
     links:
       - {type: IN_CHANNEL, to: SlackChannel, via: channel}
       - {type: AUTHORED_BY, to: SlackUser, via: author}

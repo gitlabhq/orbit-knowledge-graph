@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
-use crate::config::{Entity, Format, Source, Type};
+use crate::config::{Entity, Request, Source, Type};
 
 #[derive(Debug, Clone)]
 pub struct Record {
@@ -37,38 +37,9 @@ impl Fetcher {
             .list
             .as_ref()
             .with_context(|| format!("{name} has no list"))?;
-        let headers = headers(source)?;
-        let base = base(source)?;
-        let fill = |text: &str| fill(text, source, &[]);
-        let path = fill(&request.path);
-        let mut params = filled(&request.params, fill);
-        let mut items = Vec::new();
-        for page in 0..request.max_pages.max(1) {
-            let body = self
-                .get(base, &path, &params, &headers, request.error.as_deref())
-                .await?;
-            items.extend(pointer_items(&body, &request.items));
-            let next = request.cursor.as_ref().and_then(|cursor| {
-                let next = body.pointer(&cursor.next)?.as_str()?;
-                (!next.is_empty()).then(|| (cursor.param.clone(), next.to_string()))
-            });
-            let Some((param, next)) = next else {
-                break;
-            };
-            params.retain(|(found, _)| *found != param);
-            params.push((param, next));
-            if page + 1 == request.max_pages.max(1) {
-                bail!(
-                    "{name}: listing stopped after {} pages, so results would be cut off",
-                    request.max_pages
-                );
-            }
-        }
-        let shape = shaped(entity, request.key.as_ref(), &request.fields);
-        items
-            .into_iter()
-            .map(|item| record(name, &shape, &[], item))
-            .collect()
+        let params = filled(&request.params, |value| fill(value, source, &[]));
+        self.pages(source, name, entity, request, params, Want::All)
+            .await
     }
 
     pub async fn search(
@@ -84,20 +55,15 @@ impl Fetcher {
             .search_api
             .as_ref()
             .with_context(|| format!("{name} has no search_api"))?;
-        let headers = headers(source)?;
-        let base = base(source)?;
         let mut terms = vec![query.trim().to_string()];
-        let mut extra: Vec<(String, String)> = Vec::new();
+        let mut extra = Vec::new();
         for (to, value) in within {
             let filter = match to.strip_suffix("#name") {
                 Some(to) => search
                     .within_name
                     .get(to)
-                    .map(|filter| filter.replace("{name}", value)),
-                None => search
-                    .within
-                    .get(to)
-                    .map(|filter| filter.replace("{key}", value)),
+                    .map(|f| f.replace("{name}", value)),
+                None => search.within.get(to).map(|f| f.replace("{key}", value)),
             };
             let Some(filter) = filter else {
                 bail!("{name} cannot be narrowed by {to}");
@@ -109,61 +75,56 @@ impl Fetcher {
                 _ => terms.push(filter),
             }
         }
-        let text = terms
-            .into_iter()
-            .filter(|term| !term.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
+        terms.retain(|term| !term.is_empty());
+        let text = terms.join(" ");
         let mut params = filled(&search.params, |value| {
             fill(value, source, &[]).replace("{query}", &text)
         });
         params.extend(extra);
+        self.pages(source, name, entity, search, params, want).await
+    }
+
+    async fn pages(
+        &self,
+        source: &Source,
+        name: &str,
+        entity: &Entity,
+        request: &Request,
+        mut params: Vec<(String, String)>,
+        want: Want,
+    ) -> Result<Vec<Record>> {
         let mut items = Vec::new();
-        let complete = want == Want::All;
-        let pages = search.max_pages.max(1);
-        for page in 0..pages {
-            let body = self
-                .get(
-                    base,
-                    &search.path,
-                    &params,
-                    &headers,
-                    search.error.as_deref(),
-                )
-                .await?;
-            let found = pointer_items(&body, &search.items);
-            let full = complete && search.limit.is_some_and(|limit| found.len() >= limit);
+        let path = fill(&request.path, source, &[]);
+        let pages = request.max_pages.unwrap_or(10).max(1);
+        for page in 1..=pages {
+            let body = self.get(source, &path, &params).await?;
+            let found = pointer_items(&body, &request.items);
+            let full = request.limit.is_some_and(|limit| found.len() >= limit);
             items.extend(found);
-            let next = search.cursor.as_ref().and_then(|cursor| {
-                let next = body.pointer(&cursor.next)?.as_str()?;
-                (!next.is_empty()).then(|| (cursor.param.clone(), next.to_string()))
-            });
             if let Want::First(enough) = want
                 && items.len() >= enough
             {
                 items.truncate(enough);
                 break;
             }
+            let next = request.cursor.as_ref().and_then(|cursor| {
+                let next = body.pointer(&cursor.next)?.as_str()?;
+                (!next.is_empty()).then(|| (cursor.param.clone(), next.to_string()))
+            });
             match next {
-                Some(_) if page + 1 == pages && !complete => break,
-                Some((param, next)) => {
-                    if page + 1 == pages {
-                        bail!(
-                            "{name}: the search has more than {} results, so they would be cut off; narrow it with more words or a reference",
-                            items.len()
-                        );
-                    }
+                Some(_) if page == pages && want != Want::All => break,
+                None if !full || want != Want::All => break,
+                Some((param, next)) if page < pages => {
                     params.retain(|(found, _)| *found != param);
                     params.push((param, next));
                 }
-                None if full => bail!(
-                    "{name}: the search returned its limit of {}, so results would be cut off; narrow it with more words or a reference",
+                _ => bail!(
+                    "{name}: there are more than {} results, so they would be cut off; narrow it with more words or a reference",
                     items.len()
                 ),
-                None => break,
             }
         }
-        let shape = shaped(entity, search.key.as_ref(), &search.fields);
+        let shape = shaped(entity, request);
         items
             .into_iter()
             .map(|item| record(name, &shape, &[], item))
@@ -181,26 +142,17 @@ impl Fetcher {
             let all = self.list(source, name, entity).await?;
             return Ok(all.into_iter().find(|record| record.key == key));
         };
-        let headers = headers(source)?;
-        let base = base(source)?;
         let parts: Vec<&str> = key.splitn(entity.key.len().max(1), ':').collect();
         let fill = |text: &str| fill(text, source, &parts).replace("{key}", key);
-        let params = filled(&request.params, fill);
         let body = self
-            .get(
-                base,
-                &fill(&request.path),
-                &params,
-                &headers,
-                request.error.as_deref(),
-            )
+            .get(source, &fill(&request.path), &filled(&request.params, fill))
             .await?;
-        let shape = shaped(entity, request.key.as_ref(), &request.fields);
         let items = match body.pointer(&request.items) {
             Some(Value::Array(items)) => items.clone(),
             Some(item @ Value::Object(_)) => vec![item.clone()],
             _ => Vec::new(),
         };
+        let shape = shaped(entity, request);
         items
             .into_iter()
             .map(|item| record(name, &shape, &parts, item))
@@ -208,59 +160,34 @@ impl Fetcher {
             .transpose()
     }
 
-    async fn get(
-        &self,
-        base: &str,
-        path: &str,
-        params: &[(String, String)],
-        headers: &[(String, String)],
-        error: Option<&str>,
-    ) -> Result<Value> {
-        let request = crate::auth::apply(
-            self.http.get(format!("{base}{path}")).query(params),
-            headers,
-        );
-        let response = request.send().await?;
+    async fn get(&self, source: &Source, path: &str, params: &[(String, String)]) -> Result<Value> {
+        let base = source.base_url.clone().map_err(anyhow::Error::msg)?;
+        let response = self
+            .http
+            .get(format!("{}{path}", base.trim_end_matches('/')))
+            .query(params)
+            .bearer_auth(&source.token)
+            .send()
+            .await?;
         let status = response.status();
         if status.is_redirection() {
-            let to = response
-                .headers()
-                .get(reqwest::header::LOCATION)
-                .and_then(|location| location.to_str().ok())
-                .and_then(|location| reqwest::Url::parse(location).ok())
-                .and_then(|url| url.host_str().map(str::to_string))
-                .unwrap_or_else(|| "another page".into());
-            bail!("{path} redirected to {to}, so it wants a sign-in; check the token");
+            bail!("{path} redirected, so it wants a sign-in; check the token");
         }
         let body: Value = response
             .json()
             .await
             .with_context(|| format!("{path} answered {status} without JSON"))?;
         if !status.is_success() {
-            bail!("{path} answered {status}: {}", short(&body));
+            bail!(
+                "{path} answered {status}: {}",
+                body.to_string().chars().take(200).collect::<String>()
+            );
         }
-        if let Some(pointer) = error
-            && let Some(error) = body.pointer(pointer).and_then(Value::as_str)
-        {
+        if let Some(error) = body.pointer("/error").and_then(Value::as_str) {
             bail!("{path}: {error}");
         }
         Ok(body)
     }
-}
-
-fn headers(source: &Source) -> Result<Vec<(String, String)>> {
-    match &source.auth {
-        Some(auth) => auth.resolve(&source.name),
-        None => Ok(Vec::new()),
-    }
-}
-
-fn base(source: &Source) -> Result<&str> {
-    Ok(source
-        .base_url
-        .as_deref()
-        .with_context(|| format!("{} has no url", source.name))?
-        .trim_end_matches('/'))
 }
 
 fn fill(text: &str, source: &Source, parts: &[&str]) -> String {
@@ -282,21 +209,17 @@ fn filled(
         .collect()
 }
 
-fn shaped(entity: &Entity, key: Option<&Vec<String>>, fields: &BTreeMap<String, String>) -> Entity {
+fn shaped(entity: &Entity, request: &Request) -> Entity {
     let mut shape = entity.clone();
-    if let Some(key) = key {
+    if let Some(key) = &request.key {
         shape.key = key.clone();
     }
-    for (field, from) in fields {
+    for (field, from) in &request.fields {
         if let Some(property) = shape.properties.get_mut(field) {
             property.from = from.clone();
         }
     }
     shape
-}
-
-fn short(body: &Value) -> String {
-    body.to_string().chars().take(200).collect()
 }
 
 fn pointer_items(value: &Value, pointer: &str) -> Vec<Value> {
@@ -328,7 +251,7 @@ pub(crate) fn text(value: &Value) -> String {
 }
 
 fn record(name: &str, entity: &Entity, parts: &[&str], item: Value) -> Result<Record> {
-    let key_parts: Vec<String> = entity
+    let key: Vec<String> = entity
         .key
         .iter()
         .map(|pointer| {
@@ -338,72 +261,37 @@ fn record(name: &str, entity: &Entity, parts: &[&str], item: Value) -> Result<Re
         })
         .collect();
     anyhow::ensure!(
-        key_parts.iter().any(|part| !part.is_empty()),
+        key.iter().any(|part| !part.is_empty()),
         "{name}: an item has no key at {:?}",
         entity.key
     );
-    let mut properties = BTreeMap::new();
-    for (field, property) in &entity.properties {
-        let Some(value) = lookup(&item, parts, &property.from) else {
-            continue;
-        };
-        if let Some(value) = convert(&value, property.kind, property.format) {
-            properties.insert(field.clone(), value);
-        }
-    }
+    let properties = entity
+        .properties
+        .iter()
+        .filter_map(|(field, property)| {
+            let value = lookup(&item, parts, &property.from)?;
+            Some((field.clone(), convert(&value, property.kind)?))
+        })
+        .collect();
     Ok(Record {
-        key: key_parts.join(":"),
+        key: key.join(":"),
         properties,
     })
 }
 
-fn convert(value: &Value, kind: Type, format: Format) -> Option<Value> {
-    match kind {
-        Type::String => Some(Value::String(text(value))),
-        Type::Int => match value {
-            Value::Number(n) => n.as_i64().map(Value::from),
-            Value::String(s) => s.parse::<i64>().ok().map(Value::from),
-            _ => None,
-        },
-        Type::Bool => match value {
-            Value::Bool(b) => Some(Value::Bool(*b)),
-            Value::String(s) => s.parse::<bool>().ok().map(Value::Bool),
-            _ => None,
-        },
-        Type::Timestamp => timestamp(value, format).map(Value::String),
-    }
-}
-
-fn timestamp(value: &Value, format: Format) -> Option<String> {
-    let at = match format {
-        Format::Unix => {
-            let seconds: f64 = match value {
-                Value::Number(n) => n.as_f64()?,
-                Value::String(s) => s.parse().ok()?,
-                _ => return None,
-            };
-            chrono::DateTime::from_timestamp_micros((seconds * 1_000_000.0) as i64)?
+fn convert(value: &Value, kind: Type) -> Option<Value> {
+    let at = match kind {
+        Type::String => return Some(Value::String(text(value))),
+        Type::Int => return text(value).parse::<i64>().ok().map(Value::from),
+        Type::UnixTime => {
+            let seconds: f64 = text(value).parse().ok()?;
+            chrono::DateTime::from_timestamp_micros((seconds * 1e6) as i64)?
         }
-        Format::Plain => chrono::DateTime::parse_from_rfc3339(value.as_str()?)
+        Type::Timestamp => chrono::DateTime::parse_from_rfc3339(value.as_str()?)
             .ok()?
-            .with_timezone(&chrono::Utc),
+            .to_utc(),
     };
-    Some(at.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn timestamps_read_unix_seconds_and_rfc3339() {
-        assert_eq!(
-            timestamp(&Value::from("1712345678.000100"), Format::Unix).as_deref(),
-            Some("2024-04-05 19:34:38.000100")
-        );
-        assert_eq!(
-            timestamp(&Value::from("2024-04-05T19:34:38Z"), Format::Plain).as_deref(),
-            Some("2024-04-05 19:34:38.000000")
-        );
-    }
+    Some(Value::String(
+        at.format("%Y-%m-%d %H:%M:%S%.6f").to_string(),
+    ))
 }
