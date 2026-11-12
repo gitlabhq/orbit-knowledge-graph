@@ -73,6 +73,9 @@
     },
     "object_storage": {
       "$ref": "#/$defs/ObjectStorageConfig"
+    },
+    "connections": {
+      "$ref": "#/$defs/ConnectionsConfig"
     }
   },
   "additionalProperties": false,
@@ -97,7 +100,8 @@
     "billing",
     "authorization",
     "features",
-    "object_storage"
+    "object_storage",
+    "connections"
   ],
   "$defs": {
     "NatsConfiguration": {
@@ -2023,6 +2027,153 @@
       "enum": [
         "identity",
         "static"
+      ]
+    },
+    "ConnectionsConfig": {
+      "type": "object",
+      "properties": {
+        "duckdb": {
+          "description": "DuckDB connections that read their tables from S3.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/DuckDbConnection"
+          },
+          "default": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "DuckDbConnection": {
+      "type": "object",
+      "properties": {
+        "extension_directory": {
+          "description": "Holds the `httpfs` and `ducklake` extension files in DuckDB's `<version>/<platform>/` layout.",
+          "type": "string"
+        },
+        "s3": {
+          "$ref": "#/$defs/S3Endpoint"
+        },
+        "credentials": {
+          "$ref": "#/$defs/S3Credentials"
+        },
+        "location": {
+          "$ref": "#/$defs/DuckDbLocation"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "extension_directory",
+        "s3",
+        "credentials",
+        "location"
+      ]
+    },
+    "S3Endpoint": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "description": "`host:port`, without a scheme.",
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "url_style": {
+          "$ref": "#/$defs/S3UrlStyle"
+        },
+        "use_ssl": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "region",
+        "url_style",
+        "use_ssl"
+      ]
+    },
+    "S3UrlStyle": {
+      "type": "string",
+      "enum": [
+        "path",
+        "vhost"
+      ]
+    },
+    "S3Credentials": {
+      "description": "Static S3 keys, meant for secret files under\n`/etc/secrets/connections/duckdb/<name>/credentials/`.",
+      "type": "object",
+      "properties": {
+        "access_key_id": {
+          "type": "string"
+        },
+        "secret_access_key": {
+          "type": "string"
+        },
+        "session_token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "access_key_id",
+        "secret_access_key"
+      ]
+    },
+    "DuckDbLocation": {
+      "description": "Where the connection's tables live. The package names the tables either way.",
+      "oneOf": [
+        {
+          "description": "Each table reads the Parquet files under `s3://<bucket>/<prefix><table>/`.",
+          "type": "object",
+          "properties": {
+            "bucket": {
+              "type": "string"
+            },
+            "prefix": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "const": "parquet"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "bucket",
+            "prefix"
+          ]
+        },
+        {
+          "description": "Each table reads through the DuckLake catalog, whose data sits under `s3://<bucket>/<prefix>`.",
+          "type": "object",
+          "properties": {
+            "catalog": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "string"
+            },
+            "prefix": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "const": "ducklake"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "catalog",
+            "bucket",
+            "prefix"
+          ]
+        }
       ]
     }
   }
