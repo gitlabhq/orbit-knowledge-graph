@@ -11,11 +11,12 @@ use serde_json::{Value, json};
 use crate::commands::setup::spec;
 use crate::workspace;
 
+mod layers;
+
 const ENTRYPOINT_NAMES: &[&str] = &["main", "init", "new", "default", "drop", "fmt", "from"];
 const ENTRYPOINT_PREFIXES: &[&str] = &["Test", "Benchmark", "Example", "Fuzz"];
 const CONTAINER_KINDS: &[&str] = &["Impl", "Module", "Namespace"];
 const TEST_MODULE_REGEX: &str = r"(^|::|\.)(tests?|[a-z_]+_tests)(::|\.)";
-const CALLER_DEPTH: i64 = 3;
 const GATE_FAILED_EXIT_CODE: i32 = 3;
 const REPO_LOCAL_GIT_ENV: &[&str] = &[
     "GIT_DIR",
@@ -32,6 +33,7 @@ const MAX_SCAN_BYTES: u64 = 2 * 1024 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
 pub(crate) enum Rule {
     Cycles,
+    Layers,
     Hotspots,
     Dead,
 }
@@ -61,7 +63,7 @@ pub(crate) fn run(options: Options) -> Result<()> {
         spec::launcher()
     );
     let rules: BTreeSet<Rule> = if options.rules.is_empty() {
-        [Rule::Cycles, Rule::Hotspots, Rule::Dead].into()
+        [Rule::Cycles, Rule::Layers, Rule::Hotspots, Rule::Dead].into()
     } else {
         options.rules.iter().copied().collect()
     };
@@ -80,20 +82,31 @@ pub(crate) fn run(options: Options) -> Result<()> {
         Some(hunks) => Some(changed_definitions(&graph, hunks)?),
         None => None,
     };
-    let changed_ids: HashSet<i64> = changed
-        .iter()
-        .flatten()
-        .map(|definition| definition.id)
-        .collect();
+    let changed_ids: HashSet<i64> = changed.unwrap_or_default();
     let base = match (&options.diff, options.gate) {
         (Some(base), true) => Some(BaseGraph::index(&git.repo_path, base)?),
         _ => None,
     };
 
-    let cycles = match rules.contains(&Rule::Cycles) || options.gate {
-        true => Some(find_cycles(&graph, options.depth)?),
+    let layer_rules = layers::load(&git.repo_path)?;
+    anyhow::ensure!(
+        layer_rules.is_some() || !(options.rules.contains(&Rule::Layers)),
+        "the layers rule needs {} in the repository; see `{} quality --help`",
+        layers::CONFIG_PATH,
+        spec::launcher()
+    );
+    let wants_deps = rules.contains(&Rule::Cycles) || options.gate || layer_rules.is_some();
+    let deps = match wants_deps {
+        true => Some(dependencies(&graph, options.depth)?),
         false => None,
     };
+    let layer_violations = match (&layer_rules, &deps) {
+        (Some(layer_rules), Some(deps)) if rules.contains(&Rule::Layers) || options.gate => {
+            Some(layers::check(layer_rules, file_edges(&deps.files)))
+        }
+        _ => None,
+    };
+    let cycles = deps.as_ref().map(|deps| deps.cycles.clone());
     let hotspots = match rules.contains(&Rule::Hotspots) {
         true => Some(hotspots(&graph, &git.repo_path, options.limit)?),
         false => None,
@@ -101,10 +114,6 @@ pub(crate) fn run(options: Options) -> Result<()> {
     let dead = match rules.contains(&Rule::Dead) || options.gate {
         true => Some(dead_functions(&graph, &git.repo_path)?),
         false => None,
-    };
-    let blast = match &changed {
-        Some(changed) => Some(blast_radius(&graph, changed)?),
-        None => None,
     };
 
     let violations = match &base {
@@ -115,7 +124,15 @@ pub(crate) fn run(options: Options) -> Result<()> {
                 params: [base.project_id.into(), base.commit_sha.clone().into()],
             };
             let renames = Renames::between(&git.repo_path, &base.commit_sha, &git.commit_sha)?;
-            let base_edges: HashSet<(String, String)> = dependencies(&base_graph, options.depth)?
+            let base_deps = dependencies(&base_graph, options.depth)?;
+            let base_layer_pairs: HashSet<(String, String, String)> = layer_rules
+                .as_ref()
+                .map(|rules| layers::check(rules, file_edges(&base_deps.files)))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|v| (v.rule, renames.file(&v.from), renames.file(&v.to)))
+                .collect();
+            let base_edges: HashSet<(String, String)> = base_deps
                 .edges
                 .into_keys()
                 .map(|(from, to)| (renames.module(&from), renames.module(&to)))
@@ -124,13 +141,18 @@ pub(crate) fn run(options: Options) -> Result<()> {
                 .into_iter()
                 .map(|function| (renames.file(&function.file), function.name))
                 .collect();
-            gate_violations(
+            let mut found = gate_violations(
                 cycles.as_deref().unwrap_or_default(),
                 &base_edges,
                 dead.as_deref().unwrap_or_default(),
                 &base_dead,
                 &changed_ids,
-            )
+            );
+            found.extend(new_layer_violations(
+                layer_violations.as_deref().unwrap_or_default(),
+                &base_layer_pairs,
+            ));
+            found
         }
         None => Vec::new(),
     };
@@ -140,9 +162,10 @@ pub(crate) fn run(options: Options) -> Result<()> {
         base: options.diff.clone(),
         limit: options.limit,
         cycles: cycles.filter(|_| rules.contains(&Rule::Cycles)),
+        layers: layer_violations.filter(|_| rules.contains(&Rule::Layers)),
+        layers_configured: layer_rules.as_ref().map(Vec::len),
         hotspots,
         dead: dead.filter(|_| rules.contains(&Rule::Dead)),
-        blast,
         violations: options.gate.then_some(violations),
     };
     match options.format {
@@ -249,11 +272,14 @@ struct Cycle {
 
 struct Dependencies {
     edges: BTreeMap<(String, String), ModuleEdge>,
+    files: BTreeMap<(String, String), FileEdge>,
     cycles: Vec<Cycle>,
 }
 
-fn find_cycles(graph: &Graph, depth: Option<usize>) -> Result<Vec<Cycle>> {
-    Ok(dependencies(graph, depth)?.cycles)
+#[derive(Debug, Clone)]
+struct FileEdge {
+    refs: usize,
+    example: String,
 }
 
 fn dependencies(graph: &Graph, depth: Option<usize>) -> Result<Dependencies> {
@@ -280,7 +306,19 @@ ORDER BY sf, sl, tf, tname",
     let tnames = string_column(&batches, "tname");
 
     let mut edges: BTreeMap<(String, String), ModuleEdge> = BTreeMap::new();
+    let mut files: BTreeMap<(String, String), FileEdge> = BTreeMap::new();
     for i in 0..sfs.len() {
+        let example = || match snames[i].as_str() {
+            "" => format!("imports {}  ({}:{})", tnames[i], sfs[i], sls[i]),
+            source => format!("{source} -> {}  ({}:{})", tnames[i], sfs[i], sls[i]),
+        };
+        files
+            .entry((sfs[i].clone(), tfs[i].clone()))
+            .or_insert_with(|| FileEdge {
+                refs: 0,
+                example: example(),
+            })
+            .refs += 1;
         let from = module_of(&sfs[i], depth);
         let to = module_of(&tfs[i], depth);
         if from == to {
@@ -292,10 +330,7 @@ ORDER BY sf, sl, tf, tname",
                 from,
                 to,
                 refs: 0,
-                example: match snames[i].as_str() {
-                    "" => format!("imports {}  ({}:{})", tnames[i], sfs[i], sls[i]),
-                    source => format!("{source} -> {}  ({}:{})", tnames[i], sfs[i], sls[i]),
-                },
+                example: example(),
             });
         edge.refs += 1;
     }
@@ -341,7 +376,11 @@ ORDER BY sf, sl, tf, tname",
             .cmp(&a.modules.len())
             .then(a.modules.cmp(&b.modules))
     });
-    Ok(Dependencies { edges, cycles })
+    Ok(Dependencies {
+        edges,
+        files,
+        cycles,
+    })
 }
 
 fn strongly_connected(adjacency: &[Vec<usize>]) -> Vec<Vec<usize>> {
@@ -665,14 +704,6 @@ fn count_identifiers(
     counts
 }
 
-#[derive(Debug, Clone)]
-struct ChangedDefinition {
-    id: i64,
-    fqn: String,
-    kind: String,
-    loc: String,
-}
-
 fn resolve_commit(repo: &Path, base: &str) -> Result<String> {
     anyhow::ensure!(!base.starts_with('-'), "--diff takes a commit, not {base}");
     git(
@@ -737,9 +768,9 @@ fn parse_diff(diff: &str) -> BTreeMap<String, Vec<(i64, i64)>> {
 fn changed_definitions(
     graph: &Graph,
     ranges: &BTreeMap<String, Vec<(i64, i64)>>,
-) -> Result<Vec<ChangedDefinition>> {
+) -> Result<HashSet<i64>> {
     if ranges.is_empty() {
-        return Ok(Vec::new());
+        return Ok(HashSet::new());
     }
     let values = ranges
         .iter()
@@ -773,89 +804,7 @@ WHERE NOT EXISTS (
 ORDER BY file, line"
     );
     let batches = graph.query(&sql)?;
-    let ids = i64_column(&batches, "id");
-    let fqns = string_column(&batches, "fqn");
-    let kinds = string_column(&batches, "kind");
-    let files = string_column(&batches, "file");
-    let lines = i64_column(&batches, "line");
-    Ok((0..ids.len())
-        .map(|i| ChangedDefinition {
-            id: ids[i],
-            fqn: fqns[i].clone(),
-            kind: kinds[i].clone(),
-            loc: format!("{}:{}", files[i], lines[i]),
-        })
-        .collect())
-}
-
-#[derive(Debug)]
-struct Blast {
-    definition: ChangedDefinition,
-    direct: i64,
-    transitive: i64,
-    files: i64,
-    tests: i64,
-}
-
-fn blast_radius(graph: &Graph, changed: &[ChangedDefinition]) -> Result<Vec<Blast>> {
-    if changed.is_empty() {
-        return Ok(Vec::new());
-    }
-    let roots = changed
-        .iter()
-        .map(|definition| format!("({})", definition.id))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "WITH RECURSIVE {DEFINITIONS_CTE}, {CALLS_CTE}, roots(root) AS (VALUES {roots}),
-walk(root, id, depth) AS (
-  SELECT r.root, c.source_id, 1 FROM roots r JOIN c ON c.target_id = r.root
-  UNION
-  SELECT w.root, c.source_id, w.depth + 1 FROM walk w JOIN c ON c.target_id = w.id
-  WHERE w.depth < {CALLER_DEPTH}
-),
-callers AS (
-  SELECT w.root, w.id, min(w.depth) AS depth FROM walk w WHERE w.id <> w.root GROUP BY w.root, w.id
-)
-SELECT r.root,
-       CAST(count(DISTINCT x.id) FILTER (WHERE x.depth = 1 AND NOT {test}) AS BIGINT) AS direct,
-       CAST(count(DISTINCT x.id) FILTER (WHERE NOT {test}) AS BIGINT) AS transitive,
-       CAST(count(DISTINCT s.file_path) FILTER (WHERE NOT {test}) AS BIGINT) AS files,
-       CAST(count(DISTINCT x.id) FILTER (WHERE {test}) AS BIGINT) AS tests
-FROM roots r
-LEFT JOIN callers x ON x.root = r.root
-LEFT JOIN d s ON s.id = x.id
-GROUP BY r.root",
-        test = test_code("s.file_path", "s.fqn")
-    );
-    let batches = graph.query(&sql)?;
-    let roots = i64_column(&batches, "root");
-    let direct = i64_column(&batches, "direct");
-    let transitive = i64_column(&batches, "transitive");
-    let files = i64_column(&batches, "files");
-    let tests = i64_column(&batches, "tests");
-    let by_root: HashMap<i64, usize> = roots.iter().enumerate().map(|(i, &id)| (id, i)).collect();
-    let mut blast: Vec<Blast> = changed
-        .iter()
-        .map(|definition| {
-            let i = by_root.get(&definition.id).copied();
-            let pick = |column: &[i64]| i.map_or(0, |i| column[i]);
-            Blast {
-                definition: definition.clone(),
-                direct: pick(&direct),
-                transitive: pick(&transitive),
-                files: pick(&files),
-                tests: pick(&tests),
-            }
-        })
-        .collect();
-    blast.sort_by(|a, b| {
-        b.transitive
-            .cmp(&a.transitive)
-            .then(b.direct.cmp(&a.direct))
-            .then(a.definition.loc.cmp(&b.definition.loc))
-    });
-    Ok(blast)
+    Ok(i64_column(&batches, "id").into_iter().collect())
 }
 
 struct BaseGraph {
@@ -1015,6 +964,30 @@ impl Renames {
     }
 }
 
+fn file_edges(
+    files: &BTreeMap<(String, String), FileEdge>,
+) -> impl Iterator<Item = (&str, &str, usize, &str)> {
+    files
+        .iter()
+        .map(|((from, to), edge)| (from.as_str(), to.as_str(), edge.refs, edge.example.as_str()))
+}
+
+fn new_layer_violations(
+    current: &[layers::Violation],
+    base: &HashSet<(String, String, String)>,
+) -> Vec<String> {
+    current
+        .iter()
+        .filter(|v| !base.contains(&(v.rule.clone(), v.from.clone(), v.to.clone())))
+        .map(|v| {
+            format!(
+                "the change adds {} -> {}, which breaks layer `{}`: {}",
+                v.from, v.to, v.rule, v.example
+            )
+        })
+        .collect()
+}
+
 fn gate_violations(
     cycles: &[Cycle],
     base_edges: &HashSet<(String, String)>,
@@ -1055,9 +1028,10 @@ struct Report {
     base: Option<String>,
     limit: usize,
     cycles: Option<Vec<Cycle>>,
+    layers: Option<Vec<layers::Violation>>,
+    layers_configured: Option<usize>,
     hotspots: Option<Vec<Hotspot>>,
     dead: Option<Vec<Dead>>,
-    blast: Option<Vec<Blast>>,
     violations: Option<Vec<String>>,
 }
 
@@ -1104,6 +1078,32 @@ impl Report {
                 );
             }
         }
+        if let Some(found) = &self.layers {
+            let rules = self.layers_configured.unwrap_or(0);
+            let _ = writeln!(
+                out,
+                "\nLayer violations ({rules} rules in {}): {}",
+                layers::CONFIG_PATH,
+                found.len()
+            );
+            let mut by_rule: BTreeMap<&str, Vec<&layers::Violation>> = BTreeMap::new();
+            for v in found {
+                by_rule.entry(v.rule.as_str()).or_default().push(v);
+            }
+            for (rule, list) in by_rule {
+                let _ = writeln!(out, "  {rule}: {}", list.len());
+                for v in list.iter().take(self.limit) {
+                    let _ = writeln!(
+                        out,
+                        "     {} -> {}  ({} refs)  e.g. {}",
+                        v.from, v.to, v.refs, v.example
+                    );
+                }
+                if list.len() > self.limit {
+                    let _ = writeln!(out, "     … {} more", list.len() - self.limit);
+                }
+            }
+        }
         if let Some(hotspots) = &self.hotspots {
             let churn = hotspots.iter().any(|spot| spot.churn.is_some());
             let _ = writeln!(out, "\nCoupling hotspots (most callers from other files):");
@@ -1142,33 +1142,6 @@ impl Report {
                 );
             }
         }
-        if let Some(blast) = &self.blast {
-            let base = self.base.as_deref().unwrap_or("");
-            let _ = writeln!(
-                out,
-                "\nBlast radius of definitions changed since {base} ({}), callers up to {CALLER_DEPTH} hops:",
-                blast.len()
-            );
-            for item in blast.iter().take(self.limit) {
-                let tested = match item.tests {
-                    0 => "no test reaches it".to_string(),
-                    n => format!("{n} test callers"),
-                };
-                let _ = writeln!(
-                    out,
-                    "  {:>4} direct  {:>5} total  {:>4} files  {}  [{}]  {}  ({tested})",
-                    item.direct,
-                    item.transitive,
-                    item.files,
-                    item.definition.fqn,
-                    item.definition.kind,
-                    item.definition.loc
-                );
-            }
-            if blast.len() > self.limit {
-                let _ = writeln!(out, "  … {} more", blast.len() - self.limit);
-            }
-        }
         if let Some(violations) = &self.violations {
             if violations.is_empty() {
                 let _ = writeln!(out, "\nGate: passed");
@@ -1197,18 +1170,15 @@ impl Report {
                     "from": edge.from, "to": edge.to, "refs": edge.refs, "example": edge.example,
                 })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>()),
+            "layers": self.layers.as_ref().map(|found| found.iter().map(|v| json!({
+                "rule": v.rule, "from": v.from, "to": v.to, "refs": v.refs, "example": v.example,
+            })).collect::<Vec<_>>()),
             "hotspots": self.hotspots.as_ref().map(|spots| spots.iter().map(|spot| json!({
                 "fqn": spot.fqn, "kind": spot.kind, "location": spot.loc,
                 "callers": spot.callers, "caller_files": spot.files, "churn_90d": spot.churn,
             })).collect::<Vec<_>>()),
             "dead": self.dead.as_ref().map(|dead| dead.iter().map(|function| json!({
                 "id": function.id, "fqn": function.fqn, "location": function.loc,
-            })).collect::<Vec<_>>()),
-            "blast_radius": self.blast.as_ref().map(|blast| blast.iter().map(|item| json!({
-                "id": item.definition.id, "fqn": item.definition.fqn, "kind": item.definition.kind,
-                "location": item.definition.loc, "direct_callers": item.direct,
-                "transitive_callers": item.transitive, "caller_files": item.files,
-                "test_callers": item.tests,
             })).collect::<Vec<_>>()),
             "gate": self.violations.as_ref().map(|violations| json!({
                 "passed": violations.is_empty(), "violations": violations,
