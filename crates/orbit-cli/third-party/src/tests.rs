@@ -143,6 +143,7 @@ const GREP_ERRORS: &[&str] = &[
     "grafana:dashboard:web | grafana:dashboard:d-db | can be narrowed",
     "slack:message:x | slack:channel:C404 | has nothing at",
     "slack:message:migration | grafana:folder:f-web | can be narrowed",
+    "slack:channel:[abc |  | not a valid pattern",
 ];
 
 #[tokio::test]
@@ -221,6 +222,7 @@ const QUERIES: &[&str] = &[
     "MATCH (m:SlackMessage)-[:IN_CHANNEL]->(c:SlackChannel) WHERE m.text CONTAINS 'migration' RETURN c.name | team",
     "MATCH (m:SlackMessage)-[:IN_CHANNEL]->(c:SlackChannel {name: 'team'}) RETURN m.text | web rollout stuck on the db migration",
     "MATCH (c:SlackChannel) RETURN c.name ORDER BY c.name LIMIT 1 | deploys",
+    "MATCH (c:SlackChannel) WHERE c.name <> 'return' RETURN c.name ORDER BY c.name LIMIT 1 | deploys",
     "MATCH (m:SlackMessage) WHERE m.text CONTAINS 'migration' AND m.author_name = 'Carol' RETURN m.text SKIP 0 LIMIT 1 | db migration in a channel nobody synced https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/42",
 ];
 
@@ -237,6 +239,7 @@ async fn query_reads_what_it_names_in_full_or_says_why_not() {
     for case in QUERIES {
         let (query, expected) = case.split_once(" | ").unwrap();
         let batches = tp.query(query, None).await.unwrap();
+        assert!(!batches.is_empty(), "{query}: no rows");
         assert_eq!(batches[0].schema().fields().len(), 1, "{query}");
         assert_eq!(strings(&batches).join(", "), expected, "{query}");
     }
@@ -245,6 +248,17 @@ async fn query_reads_what_it_names_in_full_or_says_why_not() {
         let error = tp.query(query, None).await.unwrap_err().to_string();
         assert!(error.contains(expected), "{query}: {error}");
     }
+    let counted = tp
+        .query("MATCH (m:SlackMessage)-[:IN_CHANNEL]->(c:SlackChannel {name: 'team'}) RETURN c.name, count(m)", None)
+        .await
+        .unwrap();
+    let names: Vec<String> = counted[0]
+        .schema()
+        .fields()
+        .iter()
+        .map(|field| field.name().clone())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
     let labels = tp.labels_in("MATCH (c:SlackChannel), (p:Project) RETURN c");
     assert_eq!(
         labels,
@@ -296,36 +310,53 @@ struct FakeGitLab;
 
 #[async_trait::async_trait]
 impl GitLab for FakeGitLab {
-    async fn fetch(
-        &self,
-        label: &str,
-        _: &std::collections::HashMap<String, Vec<InputFilter>>,
-        mentioned: &[String],
-    ) -> Result<Vec<(String, schema::Row)>> {
+    async fn fetch(&self, part: &Part) -> Result<Fetched> {
+        let (anchor, mentioned) = part.anchor.clone().unwrap();
         assert_eq!(
-            (label, mentioned),
+            (anchor.as_str(), &mentioned[..]),
             (
-                "MergeRequest",
+                "mr",
                 &["gitlab-org/orbit/knowledge-graph#42".to_string()][..]
             )
         );
-        let values = BTreeMap::from([
-            ("iid".into(), 42.into()),
-            ("title".into(), "Fix the migration".into()),
-        ]);
-        Ok(vec![(
-            mentioned[0].clone(),
-            schema::Row { id: 9001, values },
-        )])
+        let row = |id, values: &[(&str, serde_json::Value)]| schema::Row {
+            id,
+            values: values
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        };
+        Ok(Fetched {
+            rows: vec![
+                (
+                    "MergeRequest".into(),
+                    mentioned[0].clone(),
+                    row(
+                        9001,
+                        &[("iid", 42.into()), ("title", "Fix the migration".into())],
+                    ),
+                ),
+                (
+                    "User".into(),
+                    "#null".into(),
+                    row(7, &[("username", "ada".into())]),
+                ),
+            ],
+            edges: vec![schema::Edge {
+                from: (7, "User".into()),
+                kind: "APPROVED".into(),
+                to: (9001, "MergeRequest".into()),
+            }],
+        })
     }
 }
 
 #[tokio::test]
 async fn mixed_queries_join_slack_messages_to_the_merge_requests_they_link() {
     let tp = connected().await;
-    let query = "MATCH (m:SlackMessage)-[:MENTIONS]->(mr:MergeRequest) WHERE m.text CONTAINS 'migration' RETURN mr.title";
+    let query = "MATCH (m:SlackMessage)-[:MENTIONS]->(mr:MergeRequest)<-[:APPROVED]-(u:User) WHERE m.text CONTAINS 'migration' RETURN u.username";
     let batches = tp.query(query, Some(&FakeGitLab)).await.unwrap();
-    assert_eq!(strings(&batches), ["Fix the migration"]);
+    assert_eq!(strings(&batches), ["ada"]);
     let error = tp.query(query, None).await.unwrap_err().to_string();
     assert!(error.contains("needs a GitLab sign-in"), "{error}");
     assert_eq!(

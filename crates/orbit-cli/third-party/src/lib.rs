@@ -7,7 +7,7 @@ use std::sync::{Arc, LazyLock, OnceLock};
 
 use anyhow::{Context, Result, bail};
 use arrow::array::RecordBatch;
-use compiler::input::{Input, InputNode};
+use compiler::input::Input;
 use ontology::Ontology;
 use regex::Regex;
 
@@ -15,7 +15,7 @@ use config::{Entity, Source};
 use fetch::{Fetcher, Record, Want};
 
 pub use async_trait::async_trait;
-pub use compiler::input::{FilterOp, InputFilter};
+pub use compiler::input::{Direction, FilterOp, InputFilter, InputNode};
 pub use config::Config;
 
 const GREP_LIMIT: usize = 20;
@@ -65,12 +65,19 @@ type Within = Vec<(String, String)>;
 
 #[async_trait::async_trait]
 pub trait GitLab: Send + Sync {
-    async fn fetch(
-        &self,
-        label: &str,
-        filters: &std::collections::HashMap<String, Vec<InputFilter>>,
-        mentioned: &[String],
-    ) -> Result<Vec<(String, schema::Row)>>;
+    async fn fetch(&self, part: &Part) -> Result<Fetched>;
+}
+
+pub struct Part {
+    pub nodes: Vec<compiler::input::InputNode>,
+    pub relationships: Vec<compiler::input::InputRelationship>,
+    pub anchor: Option<(String, Vec<String>)>,
+}
+
+#[derive(Default)]
+pub struct Fetched {
+    pub rows: Vec<(String, String, schema::Row)>,
+    pub edges: Vec<schema::Edge>,
 }
 
 pub fn mentions(text: &str) -> Vec<(&'static str, String, i64)> {
@@ -281,7 +288,7 @@ impl ThirdParty {
         query: &str,
         within: &[(String, String)],
     ) -> Result<Found> {
-        let matchers = matchers(query);
+        let matchers = matchers(query)?;
         let mut records = match &entity.search_api {
             Some(_) => {
                 let want = Want::First(GREP_LIMIT + 1);
@@ -409,7 +416,7 @@ impl ThirdParty {
         let mut rows: BTreeMap<String, Vec<schema::Row>> = BTreeMap::new();
         let mut edges = Vec::new();
         let mut mentioned: BTreeMap<&'static str, Vec<(String, i64)>> = BTreeMap::new();
-        let mut theirs = Vec::new();
+        let mut theirs: Vec<&compiler::input::InputNode> = Vec::new();
         for node in &compiled.input.nodes {
             let Some(label) = node.entity.as_deref() else {
                 continue;
@@ -446,24 +453,65 @@ impl ThirdParty {
         if !theirs.is_empty() {
             let gitlab =
                 gitlab.context("this query names GitLab entities, so it needs a GitLab sign-in")?;
-            for node in theirs {
-                let label = node.entity.clone().unwrap_or_default();
-                let wanted = mentioned.get(label.as_str()).cloned().unwrap_or_default();
-                let refs: Vec<String> = wanted.iter().map(|(at, _)| at.clone()).collect();
-                let found = gitlab.fetch(&label, &node.filters, &refs).await?;
-                for (at, message) in &wanted {
-                    if let Some(row) = found.iter().find(|row| row.0 == *at) {
+            let ids: Vec<&str> = theirs.iter().map(|node| node.id.as_str()).collect();
+            let relationships = compiled
+                .input
+                .relationships
+                .iter()
+                .filter(|edge| ids.contains(&edge.from.as_str()) && ids.contains(&edge.to.as_str()))
+                .cloned()
+                .collect();
+            let anchor = compiled.input.relationships.iter().find_map(|edge| {
+                let (ours, gitlab) = match (
+                    ids.contains(&edge.from.as_str()),
+                    ids.contains(&edge.to.as_str()),
+                ) {
+                    (false, true) => (&edge.from, &edge.to),
+                    (true, false) => (&edge.to, &edge.from),
+                    _ => return None,
+                };
+                edge.types
+                    .iter()
+                    .any(|kind| kind == "MENTIONS")
+                    .then_some(())?;
+                let label = theirs
+                    .iter()
+                    .find(|node| &node.id == gitlab)?
+                    .entity
+                    .clone()?;
+                let _ = ours;
+                Some((
+                    gitlab.clone(),
+                    mentioned
+                        .get(label.as_str())
+                        .map(|found| found.iter().map(|(at, _)| at.clone()).collect())
+                        .unwrap_or_default(),
+                ))
+            });
+            let part = Part {
+                nodes: theirs.iter().map(|node| (*node).clone()).collect(),
+                relationships,
+                anchor,
+            };
+            let fetched = gitlab.fetch(&part).await?;
+            for (label, at, row) in &fetched.rows {
+                for (wanted, message) in mentioned.get(label.as_str()).into_iter().flatten() {
+                    if wanted == at {
                         edges.push(schema::Edge {
                             from: (*message, "SlackMessage".into()),
                             kind: "MENTIONS".into(),
-                            to: (row.1.id, label.clone()),
+                            to: (row.id, label.clone()),
                         });
                     }
                 }
-                rows.entry(label)
-                    .or_default()
-                    .extend(found.into_iter().map(|(_, row)| row));
             }
+            for (label, _, row) in fetched.rows {
+                let rows = rows.entry(label).or_default();
+                if !rows.iter().any(|seen| seen.id == row.id) {
+                    rows.push(row);
+                }
+            }
+            edges.extend(fetched.edges);
         }
         let client = duckdb_client::DuckDbClient::open(duckdb_client::OpenMode::InMemoryArrow)?;
         let ddl = compiler::generate_local_ddl(&ontology, "").replace(" NOT NULL", "");
@@ -476,10 +524,7 @@ impl ThirdParty {
         let batches = client
             .query_arrow(&sql)
             .with_context(|| format!("running {sql}"))?;
-        Ok(returned(
-            query,
-            limited(batches, compiled.input.limit as usize),
-        ))
+        returned(query, limited(batches, compiled.input.limit as usize))
     }
 
     fn search_terms(
@@ -629,10 +674,10 @@ fn value(record: &Record, field: &str) -> String {
     }
 }
 
-fn matchers(query: &str) -> Vec<Regex> {
+fn matchers(query: &str) -> Result<Vec<Regex>> {
     query
         .split_whitespace()
-        .filter_map(|word| {
+        .map(|word| {
             let plain = !word.contains(['\\', '[', '(', '*', '+', '?', '{', '^', '$', '|', '.']);
             let pattern = match plain {
                 true => word
@@ -646,52 +691,60 @@ fn matchers(query: &str) -> Vec<Regex> {
             regex::RegexBuilder::new(&pattern)
                 .case_insensitive(true)
                 .build()
-                .ok()
+                .with_context(|| {
+                    format!("{word:?} is not a valid pattern; escape it or use plain words")
+                })
         })
         .collect()
 }
 
-fn returned(query: &str, batches: Vec<RecordBatch>) -> Vec<RecordBatch> {
-    static RETURN: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?is)\bRETURN\b(.*?)(\bORDER\s+BY\b|\bSKIP\b|\bLIMIT\b|$)").expect("valid")
-    });
-    static ITEM: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)^(?:.*\bAS\s+(\w+)|(\w+)\.(\w+)|(\w+))$").expect("valid")
-    });
-    let (Some(first), Some(items)) = (batches.first(), RETURN.captures(query)) else {
-        return batches;
+fn returned(query: &str, batches: Vec<RecordBatch>) -> Result<Vec<RecordBatch>> {
+    let Some(first) = batches.first() else {
+        return Ok(batches);
     };
+    let asked = compiler::gql::parse(query).map_err(|error| anyhow::anyhow!("{error}"))?;
     let schema = first.schema();
-    let columns = schema.fields().iter().map(|field| field.name().as_str());
-    let wanted: Vec<String> = items[1]
-        .split(',')
-        .filter_map(|item| ITEM.captures(item.trim()))
-        .flat_map(
-            |found| match (found.get(1), found.get(2), found.get(3), found.get(4)) {
-                (Some(alias), ..) => vec![alias.as_str().to_string()],
-                (_, Some(node), Some(field), _) => {
-                    vec![format!("{}_{}", node.as_str(), field.as_str())]
-                }
-                (.., Some(node)) => columns
-                    .clone()
-                    .filter(|name| name.starts_with(&format!("{}_", node.as_str())))
-                    .map(String::from)
-                    .collect(),
-                _ => Vec::new(),
-            },
-        )
-        .collect();
+    let mut wanted: Vec<String> = Vec::new();
+    for node in &asked.nodes {
+        match &node.columns {
+            Some(compiler::input::ColumnSelection::List(columns)) => {
+                wanted.extend(columns.iter().map(|column| format!("{}_{column}", node.id)))
+            }
+            Some(compiler::input::ColumnSelection::All) => wanted.extend(
+                schema
+                    .fields()
+                    .iter()
+                    .map(|field| field.name().clone())
+                    .filter(|name| name.starts_with(&format!("{}_", node.id))),
+            ),
+            None => {}
+        }
+    }
+    wanted.extend(
+        asked
+            .aggregation
+            .group_by
+            .iter()
+            .map(|key| key.output_name()),
+    );
+    wanted.extend(
+        asked
+            .aggregation
+            .metrics
+            .iter()
+            .map(|metric| metric.output_name()),
+    );
     let indices: Vec<usize> = wanted
         .iter()
         .filter_map(|name| schema.index_of(name).ok())
         .collect();
-    match indices.is_empty() {
-        true => batches,
-        false => batches
-            .into_iter()
-            .filter_map(|batch| batch.project(&indices).ok())
-            .collect(),
+    if indices.len() != wanted.len() {
+        return Ok(batches);
     }
+    batches
+        .into_iter()
+        .map(|batch| Ok(batch.project(&indices)?))
+        .collect()
 }
 
 fn one_line(text: &str) -> String {

@@ -57,8 +57,12 @@ pub(crate) async fn grep(query: &str, paths: &mut Vec<String>) -> Result<Option<
     for (source, error) in &grepped.failed {
         eprintln!("orbit: {source} search failed: {error}");
     }
+    let searched = grepped.found.len();
     match grepped.found.iter().any(|entity| !entity.hits.is_empty()) {
         true => Ok(Some(Some(orbit_third_party::render(&grepped.found)))),
+        false if searched == 0 && !grepped.failed.is_empty() => {
+            anyhow::bail!("every third-party search failed, so there are no results to show")
+        }
         false => {
             eprintln!("orbit: no third-party results match {:?}", rest.trim());
             Ok(Some(None))
@@ -131,71 +135,100 @@ pub(crate) async fn query_locally(
 
 struct Remote(crate::remote::client::OrbitClient);
 
+fn literal(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => {
+            format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"))
+        }
+        serde_json::Value::Array(items) => format!(
+            "[{}]",
+            items.iter().map(literal).collect::<Vec<_>>().join(", ")
+        ),
+        other => other.to_string(),
+    }
+}
+
+fn conditions(node: &orbit_third_party::InputNode) -> Result<Vec<String>> {
+    use orbit_third_party::FilterOp::*;
+    let mut wheres = Vec::new();
+    for (field, filters) in &node.filters {
+        for filter in filters {
+            let op = match filter.op.unwrap_or(Eq) {
+                Eq => "=",
+                Ne => "<>",
+                Gt => ">",
+                Lt => "<",
+                Gte => ">=",
+                Lte => "<=",
+                In => "IN",
+                Contains => "CONTAINS",
+                StartsWith => "STARTS WITH",
+                EndsWith => "ENDS WITH",
+                _ => anyhow::bail!(
+                    "{}.{field}: this filter can't be sent to GitLab in a mixed query",
+                    node.id
+                ),
+            };
+            let value = filter.value.as_ref().map(literal).unwrap_or_default();
+            wheres.push(format!("{}.{field} {op} {value}", node.id));
+        }
+    }
+    Ok(wheres)
+}
+
 #[orbit_third_party::async_trait]
 impl orbit_third_party::GitLab for Remote {
-    async fn fetch(
-        &self,
-        label: &str,
-        filters: &std::collections::HashMap<String, Vec<orbit_third_party::InputFilter>>,
-        mentioned: &[String],
-    ) -> Result<Vec<(String, orbit_third_party::schema::Row)>> {
-        let literal = |value: &serde_json::Value| match value {
-            serde_json::Value::String(text) => {
-                format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"))
-            }
-            other => other.to_string(),
-        };
-        let mut wheres = Vec::new();
-        for (field, filters) in filters {
-            for filter in filters {
-                use orbit_third_party::FilterOp::*;
-                let op = match filter.op.unwrap_or(Eq) {
-                    Eq => "=",
-                    Ne => "<>",
-                    Gt => ">",
-                    Lt => "<",
-                    Gte => ">=",
-                    Lte => "<=",
-                    In => "IN",
-                    Contains => "CONTAINS",
-                    StartsWith => "STARTS WITH",
-                    EndsWith => "ENDS WITH",
-                    _ => anyhow::bail!(
-                        "{label}.{field}: this filter can't be sent to GitLab in a mixed query"
-                    ),
-                };
-                let value = filter.value.as_ref().map(literal).unwrap_or_default();
-                wheres.push(format!("n.{field} {op} {value}"));
-            }
+    async fn fetch(&self, part: &orbit_third_party::Part) -> Result<orbit_third_party::Fetched> {
+        let mut patterns: Vec<String> = part
+            .nodes
+            .iter()
+            .map(|node| format!("({}:{})", node.id, node.entity.clone().unwrap_or_default()))
+            .collect();
+        for edge in &part.relationships {
+            let kind = edge.types.join("|");
+            patterns.push(match edge.direction {
+                orbit_third_party::Direction::Incoming => {
+                    format!("({})<-[:{kind}]-({})", edge.from, edge.to)
+                }
+                _ => format!("({})-[:{kind}]->({})", edge.from, edge.to),
+            });
         }
-        let by_url = !mentioned.is_empty() && label == "MergeRequest";
-        let query = match by_url {
-            true => {
-                let (paths, iids): (Vec<&str>, Vec<&str>) =
-                    mentioned.iter().filter_map(|at| at.split_once('#')).unzip();
-                let paths: std::collections::BTreeSet<String> =
-                    paths.iter().map(|path| format!("'{path}'")).collect();
-                wheres.push(format!(
-                    "p.full_path IN [{}]",
-                    paths.into_iter().collect::<Vec<_>>().join(", ")
-                ));
-                wheres.push(format!("n.iid IN [{}]", iids.join(", ")));
-                format!(
-                    "MATCH (n:{label})-[:IN_PROJECT]->(p:Project) WHERE {} RETURN n, p.full_path LIMIT 500",
-                    wheres.join(" AND ")
-                )
-            }
-            false => {
-                anyhow::ensure!(
-                    !wheres.is_empty(),
-                    "{label} in a mixed query needs a filter, such as {label}.state = 'opened', or a link from a Slack message"
-                );
-                format!(
-                    "MATCH (n:{label}) WHERE {} RETURN n LIMIT 500",
-                    wheres.join(" AND ")
-                )
-            }
-        };
+        let mut wheres = Vec::new();
+        for node in &part.nodes {
+            wheres.extend(conditions(node)?);
+        }
+        if let Some((anchor, mentioned)) = &part.anchor {
+            anyhow::ensure!(
+                !mentioned.is_empty(),
+                "no Slack message in that search links to a GitLab merge request or issue"
+            );
+            let (paths, iids): (Vec<&str>, Vec<&str>) =
+                mentioned.iter().filter_map(|at| at.split_once('#')).unzip();
+            let paths: std::collections::BTreeSet<String> =
+                paths.iter().map(|path| format!("'{path}'")).collect();
+            patterns.push(format!(
+                "({anchor})-[:IN_PROJECT]->(anchor_project:Project)"
+            ));
+            wheres.push(format!(
+                "anchor_project.full_path IN [{}]",
+                paths.into_iter().collect::<Vec<_>>().join(", ")
+            ));
+            wheres.push(format!("{anchor}.iid IN [{}]", iids.join(", ")));
+        }
+        anyhow::ensure!(
+            !wheres.is_empty(),
+            "the GitLab part of a mixed query needs a filter, or a link from a Slack message"
+        );
+        let mut returned: Vec<String> = part.nodes.iter().map(|node| node.id.clone()).collect();
+        if part.anchor.is_some() {
+            returned.push("anchor_project.full_path".into());
+        }
+        let query = format!(
+            "MATCH {} WHERE {} RETURN {} LIMIT 500",
+            patterns.join(", "),
+            wheres.join(" AND "),
+            returned.join(", ")
+        );
         let body =
             serde_json::to_vec(&serde_json::json!({"query": query, "response_format": "raw"}))?;
         let response = self
@@ -205,14 +238,15 @@ impl orbit_third_party::GitLab for Remote {
             .map_err(|error| anyhow::anyhow!("GitLab: {}", error.message))?;
         let response: serde_json::Value = serde_json::from_slice(&response)?;
         let result = &response["result"];
+        let pagination = &result["pagination"];
         anyhow::ensure!(
-            !result["pagination"]["truncated"].as_bool().unwrap_or(false)
-                && !result["pagination"]["has_more"].as_bool().unwrap_or(false),
-            "GitLab has more than 500 {label}s for that, so they would be cut off; narrow it with a filter"
+            !pagination["truncated"].as_bool().unwrap_or(false)
+                && !pagination["has_more"].as_bool().unwrap_or(false),
+            "GitLab has more than 500 rows for that, so they would be cut off; narrow it with a filter"
         );
         let nodes = result["nodes"].as_array().cloned().unwrap_or_default();
+        let edges = result["edges"].as_array().cloned().unwrap_or_default();
         let path_of = |id: &str| {
-            let edges = result["edges"].as_array()?;
             let to = edges
                 .iter()
                 .find(|edge| edge["from_id"] == id && edge["to"] == "Project")?["to_id"]
@@ -221,11 +255,19 @@ impl orbit_third_party::GitLab for Remote {
                 .as_str()
                 .map(String::from)
         };
-        let mut rows = Vec::new();
-        for node in nodes.iter().filter(|node| node["type"] == label) {
-            let Some(id) = node["id"].as_str() else {
+        let labels: Vec<&str> = part
+            .nodes
+            .iter()
+            .filter_map(|node| node.entity.as_deref())
+            .collect();
+        let mut fetched = orbit_third_party::Fetched::default();
+        for node in &nodes {
+            let (Some(kind), Some(id)) = (node["type"].as_str(), node["id"].as_str()) else {
                 continue;
             };
+            if !labels.contains(&kind) {
+                continue;
+            }
             let at = format!("{}#{}", path_of(id).unwrap_or_default(), node["iid"]);
             let values = node
                 .as_object()
@@ -234,7 +276,8 @@ impl orbit_third_party::GitLab for Remote {
                 .filter(|(field, _)| !matches!(field.as_str(), "type" | "id"))
                 .map(|(field, value)| (field.clone(), value.clone()))
                 .collect();
-            rows.push((
+            fetched.rows.push((
+                kind.to_string(),
                 at,
                 orbit_third_party::schema::Row {
                     id: id.parse()?,
@@ -242,6 +285,26 @@ impl orbit_third_party::GitLab for Remote {
                 },
             ));
         }
-        Ok(rows)
+        for edge in &edges {
+            let (Some(from), Some(to), Some(kind)) = (
+                edge["from"].as_str(),
+                edge["to"].as_str(),
+                edge["type"].as_str(),
+            ) else {
+                continue;
+            };
+            if !labels.contains(&from) || !labels.contains(&to) {
+                continue;
+            }
+            let id = |field: &str| edge[field].as_str().and_then(|id| id.parse::<i64>().ok());
+            if let (Some(from_id), Some(to_id)) = (id("from_id"), id("to_id")) {
+                fetched.edges.push(orbit_third_party::schema::Edge {
+                    from: (from_id, from.into()),
+                    kind: kind.into(),
+                    to: (to_id, to.into()),
+                });
+            }
+        }
+        Ok(fetched)
     }
 }
