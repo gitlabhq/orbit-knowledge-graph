@@ -26,7 +26,7 @@ Postgres table (monolith)
                                                                         │
 knowledge-graph ontology YAML (config/ontology/{nodes,edges})          │
    └─ gkg-indexer reads siphon_<table> ◄───────────────────────────────┘
-        └─ materializes gl_<node> tables + gl_edge rows
+        └─ materializes gl_<node> tables + edge-table rows
              └─ gRPC (GetGraphSchema / query) ──► monolith Orbit API
                   └─ Authz::RedactionService gates every node per-viewer
 ```
@@ -238,8 +238,8 @@ pipelines:
           label: IN_PROJECT
 ```
 
-- **`extract`:** `query: generated` builds the SQL from the declaration. It suits a single-table projection, and it also takes `fields`, `filter`, `lookups` and `partition_count`. Use `query: <name>.sql.j2` only for genuinely complex joins or materialized arrays. The template sits next to the YAML, as `agent_session.sql.j2` does. The indexer renders `{{version_column}}`, `{{deleted_column}}` and `{{watermark_column}}` in it. The "Extraction SQL" item in [`crates/indexer/AGENTS.md`](../../../../crates/indexer/AGENTS.md#before-writing-a-new-handler-reuse-existing-infra) has the full contract.
-- **`transform`:** `type: datafusion` is a row-wise projection of the extracted rows, and it is the default. `transform.edges` emits edges from an **FK column on this node's own source table**, for example `IN_PROJECT` from `project_id`. Each `label` must name an edge that declares a variant for that node pair (§5.2). Use a hand-written Rust transform only when SQL cannot express the graph shape. See [When a Rust transform is justified](../../../../crates/indexer/AGENTS.md#when-a-rust-transform-is-justified-adr-015).
+- **`extract`:** `query: generated` builds the SQL from the declaration. It suits a single-table projection, and it also takes `fields`, `filter`, `lookups` and `partition_count`. Use `query: <name>.sql.j2` only for genuinely complex joins or materialized arrays. The template sits next to the YAML, as `agent_session.sql.j2` does. The indexer renders `{{version_column}}`, `{{deleted_column}}` and `{{watermark_column}}` in it. The query must alias its columns `AS _version` and `AS _deleted`, and `{{filters}}` and `{{batch_size}}` pass through to query time. The "Extraction SQL" item in [`crates/indexer/AGENTS.md`](../../../../crates/indexer/AGENTS.md#before-writing-a-new-handler-reuse-existing-infra) has the full contract.
+- **`transform`:** Nodes and standalone edges always use `type: datafusion`, a row-wise projection of the extracted rows. The key is required. `transform.edges` emits edges from an **FK column on this node's own source table**, for example `IN_PROJECT` from `project_id`. Each `label` must name an edge that declares a variant for that node pair (§5.2). Set `mutable: true` on an edge whose FK can change after the row is created (a milestone or an assignee, for example). Without it the old edge is never tombstoned and stays in the graph. When SQL can't express the graph shape, put the logic in a derived entity (`domains.<domain>.derived` in `schema.yaml`, such as `SystemNote`) with a registered Rust transform. A node can't use one. See [When a Rust transform is justified](../../../../crates/indexer/AGENTS.md#when-a-rust-transform-is-justified-adr-015).
 - Use a **separate edge pipeline (§5.2)** for **join-table edges**, such as `DECLARES_DEPENDENCY` from `packages_dependency_links`, where the relationship lives in its own table.
 
 ### 5.2 Edge YAML — `config/ontology/edges/<edge>.yaml`
@@ -275,7 +275,7 @@ pipelines:
           label: <EDGE>
 ```
 
-A variant's `scope` is `namespace_anchor`, `same_namespace`, `prune_to_source` or `prune_to_target`. It tells the query compiler how a `traversal_path` crosses the edge, and `namespace_anchor` also requires an `fk_column`. If either FK column is `Nullable` in the source, the pipeline can emit null-target edges. Filter them or document it, because reviewers will ask. Prefer NOT-NULL join columns.
+A variant's `scope` is `namespace_anchor`, `same_namespace`, `prune_to_source` or `prune_to_target`. It tells the query compiler how a `traversal_path` crosses the edge, and `namespace_anchor` also requires an `fk_column`. Its target must be a namespace anchor (one with a `traversal_path_lookup`), and one FK column name must always map to the same anchor. If either FK column is `Nullable` in the source, the pipeline can emit null-target edges. Filter them or document it, because reviewers will ask. Prefer NOT-NULL join columns.
 
 Hot query shapes can be pre-joined by declaring a chain under `settings.denormalized_joins`
 in `schema.yaml` (see the [Denormalized joins](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/querying/graph_engine.md#denormalized-joins) section of the pre-rewrite graph engine doc).
@@ -326,7 +326,7 @@ mise run schema:ledger:check  # confirm the ledger and snapshot match the ontolo
 - bumps `schema:` in `config/versions.yaml`;
 - writes the ontology archive `config/ontology-archives/v<N>.tar.gz`.
 
-Flags can only **widen** the derived scope: `--scope` (`*`, `sdlc`, `code` or `none`), `--entities`, `--note`, `--base`, `--amend` and `--new`. `--scope none` marks a change as output-neutral and requires a `--note` that certifies it. Use it only when the produced rows and tables are byte-identical.
+`--scope` (`*`, `sdlc` or `code`) and `--entities` (with `sdlc` only) can widen the derived scope but never narrow it. With no ontology drift they declare it. `--scope none` is the exception: it replaces the derived scope, marks a change as output-neutral and requires a `--note` that certifies it. `--base` sets the ref that decides between a new bump and an amend (default `origin/main`). `--amend` and `--new` force that decision only when the base ref can't be read. Use it only when the produced rows and tables are byte-identical.
 
 Each archive holds the ontology sources of one schema version, and the server embeds them. Commit the new archive, and never edit or relabel an existing one. [`config/ontology-archives/README.md`](../../../../config/ontology-archives/README.md) explains the retention rules.
 
