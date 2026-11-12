@@ -29,47 +29,33 @@ struct Statement<'a> {
 #[async_trait]
 impl Executor for ClickHouseExecutor {
     async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
-        let statements: Vec<Statement<'_>> = match request {
-            Request::Query(compiled) => vec![Statement {
+        let statement = match request {
+            Request::Query(compiled) => Statement {
                 sql: &compiled.base.sql,
                 params: &compiled.base.params,
                 rendered: compiled.base.render(),
-            }],
-            Request::Hydration(query) => vec![Statement {
+            },
+            Request::Hydration(query) => Statement {
                 sql: &query.sql,
                 params: &query.params,
                 rendered: query.render(),
-            }],
-            Request::Lookup(lookups) => lookups
-                .iter()
-                .map(|lookup| Statement {
-                    sql: &lookup.query.sql,
-                    params: &lookup.query.parameters,
-                    rendered: lookup.query.sql.clone(),
-                })
-                .collect(),
+            },
+            Request::Lookup(lookup) => Statement {
+                sql: &lookup.query.sql,
+                params: &lookup.query.parameters,
+                rendered: lookup.query.sql.clone(),
+            },
             other => {
                 return Err(ExecutorError(format!(
                     "the ClickHouse connection runs SQL, not {other:?}"
                 )));
             }
         };
-        let mut executed = Executed::default();
-        for statement in statements {
-            let (batches, execution) = self.run(&statement).await?;
-            let concatenated = match batches.first() {
-                Some(first) if matches!(request, Request::Lookup(_)) => {
-                    vec![
-                        arrow::compute::concat_batches(&first.schema(), &batches)
-                            .map_err(|error| ExecutorError(error.to_string()))?,
-                    ]
-                }
-                _ => batches,
-            };
-            executed.batches.extend(concatenated);
-            executed.log.push(execution);
-        }
-        Ok(executed)
+        let (batches, execution) = self.run(&statement).await?;
+        Ok(Executed {
+            batches,
+            log: vec![execution],
+        })
     }
 }
 

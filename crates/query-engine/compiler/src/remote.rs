@@ -5,9 +5,9 @@ use query_data_model::Model;
 use query_data_model::plan::logical::LogicalPlan;
 
 pub use crate::passes::plan::remote::{RemotePlan, Target};
-pub use crate::passes::remote_security::Namespaces;
+pub use crate::passes::remote_security::{Namespaces, readable};
 
-pub use crate::passes::scope_lookup::{KEY, Resolves, ScopeLookup, lookups, namespaces};
+pub use crate::passes::scope_lookup::{KEY, Resolves, ScopeLookup, lookup, namespaces};
 
 use query_data_model::catalog::{Check, Row};
 use query_data_model::plan::logical::{LogicalOperation, LogicalType};

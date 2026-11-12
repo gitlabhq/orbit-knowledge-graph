@@ -3,7 +3,7 @@
 
 use arrow::record_batch::RecordBatch;
 use compiler::dag::Request;
-use compiler::remote::{Namespaces, RowCheck, Target, lookups};
+use compiler::remote::{Namespaces, RowCheck, Target, lookup};
 use query_data_model::catalog::Row;
 use query_data_model::surface::Statement;
 use serde_json::Value;
@@ -12,45 +12,33 @@ use super::executor::{Executed, ExecutorError, RowChecks};
 use super::rows;
 use super::runner::{DagError, Runner};
 
-/// Runs the scope lookups of a remote stage on the relational connection.
+/// Runs the scope lookup of a remote stage on the relational connection; none when the caller
+/// can read none of what it resolved, so the stage reads nothing.
 pub(super) async fn namespaces(
     runner: &mut Runner<'_>,
     stage: compiler::dag::StageId,
     target: &Target,
     statement: &Statement,
-) -> Result<Namespaces, DagError> {
+) -> Result<Option<Namespaces>, DagError> {
     let compiler::dag::Primary::ClickHouse(graph) = runner.env.primary else {
-        return Ok(Namespaces::default());
+        return Ok(Some(Namespaces::default()));
     };
-    let lookups = lookups(target, &statement.plan, graph, runner.env.grants)?;
-    if lookups.is_empty() {
-        return Ok(Namespaces::default());
-    }
-    let request = Request::Lookup(lookups.clone());
+    let Some(lookup) = lookup(target, &statement.plan, graph, runner.env.grants)? else {
+        return Ok(Some(Namespaces::default()));
+    };
+    let columns = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
+    let request = Request::Lookup(lookup.clone());
     runner.emit(|| super::observer::Event::Rendered {
         stage,
         requests: request.rendered(),
     });
     let executor = runner.executors.get(runner.env.primary.connection())?;
     let executed = executor.execute(&request).await?;
-    let mut results = Vec::new();
-    for (lookup, batches) in lookups.iter().zip(split(executed.batches, lookups.len())?) {
-        let columns = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
-        results.push((lookup, json(&batches, &columns)?));
-    }
-    Ok(compiler::remote::namespaces(&results)?)
-}
-
-/// An executor returns one batch per lookup, in lookup order.
-fn split(batches: Vec<RecordBatch>, count: usize) -> Result<Vec<Vec<RecordBatch>>, DagError> {
-    match batches.len() == count {
-        true => Ok(batches.into_iter().map(|batch| vec![batch]).collect()),
-        false => Err(ExecutorError(format!(
-            "{count} scope lookups returned {} result sets",
-            batches.len()
-        ))
-        .into()),
-    }
+    let rows = json(&executed.batches, &columns)?;
+    let namespaces = compiler::remote::namespaces(&lookup, &rows)?;
+    let grants = runner.env.grants;
+    let readable = compiler::remote::readable(target, &statement.plan, grants, &namespaces)?;
+    Ok(readable.then_some(namespaces))
 }
 
 /// Lookup rows as JSON rows of their key and scope columns.

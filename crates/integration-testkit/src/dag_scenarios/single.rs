@@ -190,26 +190,19 @@ async fn the_workspace_precondition_keeps_unreadable_namespaces_out_of_the_call(
     assert!(!texts.contains(&json!("deploy uses the production keys")));
 }
 
+/// The lookup resolves only scope keys outside the caller's scope, so the stage reads nothing:
+/// no request goes out and the result is empty, as for a relational read.
 #[tokio::test]
 async fn a_caller_who_can_read_nothing_gets_no_request() {
-    for (query, message) in [
-        (
-            CODE,
-            "authorization error: the caller can read none of the requested repositories",
-        ),
-        (
-            SLACK,
-            "authorization error: the caller can read none of the workspaces",
-        ),
-    ] {
+    for query in [CODE, SLACK] {
         let ran = run(query, &caller("1/424242/"), Vec::new()).await;
-        assert!(ran.kinds().contains(&"failed 0".to_string()));
+        assert!(ran.kinds().contains(&"finished 0".to_string()));
         assert!(
             ran.rendered(0)
                 .iter()
                 .all(|request| matches!(request, Rendered::Sql { .. }))
         );
-        assert_eq!(ran.error(), message);
+        assert!(ran.rows().is_empty());
     }
 }
 

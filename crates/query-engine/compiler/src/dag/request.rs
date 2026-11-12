@@ -13,7 +13,7 @@ use crate::passes::scope_lookup::ScopeLookup;
 pub enum Request {
     Query(Box<CompiledQueryContext>),
     Hydration(Box<ParameterizedQuery>),
-    Lookup(Vec<ScopeLookup>),
+    Lookup(ScopeLookup),
     Code(StructuralSearchRequest),
     Live(ExtractionRequest),
     /// The engine plan, and the compiled context of the response it produces.
@@ -56,22 +56,19 @@ impl Request {
         match self {
             Self::Query(compiled) => vec![sql(&compiled.base)],
             Self::Hydration(query) => vec![sql(query)],
-            Self::Lookup(lookups) => lookups
-                .iter()
-                .map(|lookup| {
-                    let mut params: Vec<(String, Value)> = lookup
-                        .query
-                        .parameters
-                        .iter()
-                        .map(|(name, param)| (name.clone(), param.value.clone()))
-                        .collect();
-                    params.sort_by(|a, b| a.0.cmp(&b.0));
-                    Rendered::Sql {
-                        sql: lookup.query.sql.clone(),
-                        params,
-                    }
-                })
-                .collect(),
+            Self::Lookup(lookup) => {
+                let mut params: Vec<(String, Value)> = lookup
+                    .query
+                    .parameters
+                    .iter()
+                    .map(|(name, param)| (name.clone(), param.value.clone()))
+                    .collect();
+                params.sort_by(|a, b| a.0.cmp(&b.0));
+                vec![Rendered::Sql {
+                    sql: lookup.query.sql.clone(),
+                    params,
+                }]
+            }
             Self::Code(request) => vec![Rendered::Code(request.clone())],
             Self::Live(request) => vec![Rendered::Live(request.clone())],
             Self::Engine { plan, .. } => vec![Rendered::Engine {
