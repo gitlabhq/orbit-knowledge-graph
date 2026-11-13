@@ -13,6 +13,7 @@ pub enum SupportLang {
     Cpp,
     #[serde(rename = "csharp")]
     CSharp,
+    Dockerfile,
     Elixir,
     Go,
     Haskell,
@@ -21,6 +22,7 @@ pub enum SupportLang {
     JavaScript,
     Kotlin,
     Lua,
+    Markdown,
     #[serde(rename = "ocaml")]
     OCaml,
     Php,
@@ -38,6 +40,8 @@ pub enum SupportLang {
 pub struct LangEntry {
     extensions: Vec<String>,
     #[serde(default)]
+    file_names: Option<FileNames>,
+    #[serde(default)]
     aliases: Vec<String>,
     grammar: String,
     #[serde(default)]
@@ -48,6 +52,36 @@ pub struct LangEntry {
     index_names: Vec<String>,
     #[serde(default, rename = "source_root")]
     _source_root: Option<String>,
+}
+
+/// Case-insensitive file-name rules for languages whose files often carry no
+/// language extension (`Dockerfile`, `app.Dockerfile`, `Dockerfile.dev`).
+/// They apply only when the file's extension names no language.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileNames {
+    #[serde(default)]
+    exact: Vec<String>,
+    #[serde(default)]
+    prefixes: Vec<String>,
+    #[serde(default)]
+    suffixes: Vec<String>,
+    /// Extensions that mark a template or backup, never the language itself.
+    #[serde(default)]
+    ignored_extensions: Vec<String>,
+}
+
+impl FileNames {
+    fn matches(&self, name: &str) -> bool {
+        let name = name.to_ascii_lowercase();
+        let ignored = name
+            .rsplit_once('.')
+            .is_some_and(|(_, ext)| self.ignored_extensions.iter().any(|i| i == ext));
+        !ignored
+            && (self.exact.contains(&name)
+                || self.prefixes.iter().any(|p| name.starts_with(p.as_str()))
+                || self.suffixes.iter().any(|s| name.ends_with(s.as_str())))
+    }
 }
 
 impl LangEntry {
@@ -94,10 +128,12 @@ pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
         SupportLang::Cpp => Some(include_str!("../langs/cpp.yaml")),
         SupportLang::Scala => Some(include_str!("../langs/scala.yaml")),
         SupportLang::Bash => Some(include_str!("../langs/bash.yaml")),
+        SupportLang::Dockerfile => Some(include_str!("../langs/dockerfile.yaml")),
         SupportLang::Elixir => Some(include_str!("../langs/elixir.yaml")),
         SupportLang::Lua => Some(include_str!("../langs/lua.yaml")),
         SupportLang::Swift => Some(include_str!("../langs/swift.yaml")),
         SupportLang::Zig => Some(include_str!("../langs/zig.yaml")),
+        SupportLang::Markdown => Some(include_str!("../langs/markdown.yaml")),
         _ => None,
     }
 }
@@ -113,10 +149,18 @@ impl SupportLang {
     }
 
     pub fn from_path(path: &str) -> Option<Self> {
-        let ext = std::path::Path::new(path)
+        let extension = std::path::Path::new(path)
             .extension()
-            .and_then(|e| e.to_str())?;
-        Self::from_extension(ext)
+            .and_then(|e| e.to_str());
+        if let Some(lang) = extension.and_then(Self::from_extension) {
+            return Some(lang);
+        }
+        let name = path.rsplit('/').next().unwrap_or(path);
+        LANG_CONFIG
+            .languages
+            .iter()
+            .find(|(_, entry)| entry.file_names.as_ref().is_some_and(|f| f.matches(name)))
+            .map(|(lang, _)| *lang)
     }
 
     /// The family this language indexes with, from `families:` in
@@ -152,6 +196,10 @@ impl SupportLang {
             .families
             .get(self.family())
             .map_or_else(|| vec![self], |f| f.members.clone())
+    }
+
+    pub fn uses_tree_sitter(&self) -> bool {
+        LANG_CONFIG.languages[self].grammar != COMRAK_GRAMMAR
     }
 
     pub fn ts_language(&self) -> tree_sitter::Language {
@@ -209,10 +257,13 @@ static DOTTED_EXTENSIONS: std::sync::LazyLock<std::collections::HashMap<&'static
         m
     });
 
+const COMRAK_GRAMMAR: &str = "comrak";
+
 fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
     match grammar {
         "tree-sitter-bash" => tree_sitter_bash::LANGUAGE.into(),
         "tree-sitter-c" => tree_sitter_c::LANGUAGE.into(),
+        "tree-sitter-containerfile" => tree_sitter_containerfile::LANGUAGE.into(),
         "tree-sitter-cpp" => tree_sitter_cpp::LANGUAGE.into(),
         "tree-sitter-c-sharp" => tree_sitter_c_sharp::LANGUAGE.into(),
         "tree-sitter-elixir" => tree_sitter_elixir::LANGUAGE.into(),
@@ -413,6 +464,11 @@ pub fn parse_with_sentinel(
     max_depth: usize,
 ) -> Result<(Tree, Option<Killed>), Killed> {
     sentinel.check()?;
+    if support_lang == SupportLang::Markdown {
+        let tree = crate::markdown::parse(source, lang, label);
+        sentinel.check()?;
+        return Ok((tree, None));
+    }
     CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
         c.ensure(support_lang, lang);

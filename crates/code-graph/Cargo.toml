@@ -10,7 +10,7 @@ test-utils = []
 [dependencies]
 orbit-log-fields = { workspace = true }
 treesitter-visit = { path = "treesitter-visit", features = ["builtin-parser"] }
-orbit-utils = { path = "../utils" }
+orbit-utils = { path = "../utils", features = ["markdown"] }
 orbit-arrow = { path = "../utils/arrow" }
 
 # Common
