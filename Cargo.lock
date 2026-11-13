@@ -2811,6 +2811,8 @@ dependencies = [
  "flate2",
  "futures",
  "jsonwebtoken",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "orbit-log-fields",
  "orbit-observability",
  "orbit-server-config",

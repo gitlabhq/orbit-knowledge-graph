@@ -434,6 +434,17 @@
       "domain": "indexer.etl"
     },
     {
+      "otel_name": "gkg.gitlab_client.insecure_credential.requests",
+      "prom_name": "gkg_gitlab_client_insecure_credential_requests_total",
+      "description": "Credentialed requests to GitLab over a channel that is neither TLS nor private.",
+      "kind": "counter",
+      "labels": [
+        "method"
+      ],
+      "stability": "stable",
+      "domain": "gitlab_client"
+    },
+    {
       "otel_name": "gkg.indexer.code.archive.bytes.skipped",
       "prom_name": "gkg_indexer_code_archive_bytes_skipped_bytes_total",
       "description": "Total bytes that the archive extractor refused to write to disk, summed from the tar header sizes of skipped entries. Same `reason` labels as `gkg.indexer.code.archive.entries.skipped`.",

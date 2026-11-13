@@ -10,6 +10,7 @@ base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
+opentelemetry = { workspace = true }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 jsonwebtoken = { workspace = true }
@@ -26,4 +27,5 @@ orbit-log-fields = { workspace = true }
 [dev-dependencies]
 axum = { workspace = true }
 flate2 = { workspace = true }
+opentelemetry_sdk = { version = "0.32", features = ["metrics", "testing"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "test-util"] }
