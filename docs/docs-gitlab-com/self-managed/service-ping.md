@@ -15,6 +15,7 @@ title: Usage data and Service Ping for GitLab Orbit
 
 GitLab Orbit reports its usage to GitLab through Service Ping, under the same settings as your GitLab instance.
 Through Service Ping, only a weekly payload of aggregated counts and instance details leaves your infrastructure, and only when your Service Ping settings allow it.
+Other connections are listed in [Networking](networking.md).
 Service Ping never sends the raw events, which stay in your ClickHouse database.
 
 ## Prerequisites
@@ -68,10 +69,11 @@ internal#985. -->
 
 ## What GitLab Orbit sends to GitLab
 
-When your Service Ping settings allow it, the exporter sends one payload a week, on Monday at 03:00 UTC, to `version.gitlab.com`.
+When your Service Ping settings allow it, the exporter sends one payload a week to `version.gitlab.com`.
+By default, it runs on Monday at 03:00 UTC.
 The payload contains:
 
-- 7-day and 28-day counts, such as the number of queries from each entry point, the number of indexing runs, and the number of distinct users, projects, and top-level groups.
+- 7-day and 28-day counts, such as the number of queries from each entry point, the number of indexing runs, and the number of distinct users and projects.
 - The week that the counts cover.
 - The GitLab Orbit version and your GitLab version.
 - Your GitLab instance's IDs and host name.
@@ -92,7 +94,7 @@ internal#989 lands. -->
 
 ## What stays in your cluster
 
-By default, the Helm chart sets `analytics.local_collector_url` to the address of DIP in your cluster, and GitLab Orbit sends every event there.
+By default, chart 8.0 and later installs DIP and configures GitLab Orbit to send every event to it.
 GitLab Orbit sends every event to DIP even when `analytics.enabled` is `false`, because `analytics.enabled` controls only [Snowplow analytics](#send-snowplow-analytics-events-to-gitlab).
 Only the weekly aggregated payload leaves your cluster through Service Ping.
 To stop sending events to DIP, see [Stop sending events to DIP](#stop-sending-events-to-dip).
@@ -118,6 +120,8 @@ ORDER BY component, window_end;
 GitLab Orbit follows the Service Ping settings of your GitLab instance.
 Before each weekly run, the exporter reads the settings from GitLab.
 If the exporter cannot read the settings, it sends nothing.
+If your GitLab instance has no UUID yet, the exporter builds and sends nothing until GitLab reports one.
+A week that waits for a UUID is sent if GitLab reports one in the 35 days after that week ends.
 
 | Setting | When off |
 |---------|----------|
