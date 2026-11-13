@@ -45,6 +45,7 @@ pub fn normalize<M: query_data_model::OrbitQueryModel>(input: Input, model: &M) 
                 .iter()
                 .filter(|property| model.property_realization(**property).is_some())
                 .filter(|property| !model.property_is_hidden(**property))
+                .filter(|property| !model.property_is_unresolvable(**property))
                 .filter(|property| !model.property_is_admin_only(**property))
                 .map(|property| model.graph().property(*property).name.clone())
                 .collect();
@@ -247,6 +248,23 @@ mod tests {
         let ontology = Ontology::load_embedded().unwrap();
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap();
         normalize(input, model.as_ref()).unwrap()
+    }
+
+    #[test]
+    fn star_expansion_omits_disabled_virtual_columns() {
+        let r = normalize_query(
+            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Pipeline", "node_ids": [1], "columns": "*"}]}"#,
+        );
+
+        let Some(ColumnSelection::List(columns)) = &r.nodes[0].columns else {
+            panic!("expected the star to expand into a list");
+        };
+        assert!(
+            !columns
+                .iter()
+                .any(|column| column.starts_with("observability_")),
+            "star expanded to a column the resolver cannot fill: {columns:?}"
+        );
     }
 
     #[test]
