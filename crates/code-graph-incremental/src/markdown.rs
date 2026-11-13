@@ -25,11 +25,8 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
         front_matter,
         sections,
     } = orbit_utils::markdown::parse(source);
-    let front_matter_defs = front_matter
-        .as_ref()
-        .map_or(0, |block| 1 + block.fields.len());
     let mut tree = Tree::with_capacity(
-        1 + 3 * (front_matter_defs + sections.len()),
+        1 + 3 * (usize::from(front_matter.is_some()) + sections.len()),
         node("document", lang.syms.intern(label), 0, source.len()),
     );
     tree.label = label.to_string();
@@ -42,14 +39,6 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
         let name = lang.syms.intern(FRONT_MATTER_NAME);
         tree.append(id, node("name", name, start, end));
         tree.append(id, node("segment", name, start, end));
-        for field in &block.fields {
-            let (start, end) = (field.start, field.end);
-            let field_id = tree.append(id, node("front_matter_field", 0, start, end));
-            let name = lang.syms.intern(&field.key);
-            let segment = lang.syms.intern(&field.segment);
-            tree.append(field_id, node("name", name, start, end));
-            tree.append(field_id, node("segment", segment, start, end));
-        }
     }
 
     let mut ids = Vec::with_capacity(sections.len());

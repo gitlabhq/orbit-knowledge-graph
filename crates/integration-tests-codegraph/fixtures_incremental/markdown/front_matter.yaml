@@ -1,4 +1,4 @@
-name: "Markdown (incremental): front matter is one block and one field per top-level key, identical across engines"
+name: "Markdown (incremental): front matter is one definition per file, identical across engines"
 
 fixtures:
   - path: doc/user/merge_requests.md
@@ -66,6 +66,38 @@ fixtures:
 
       Two thematic breaks, not front matter.
 
+  - path: notes/toml.md
+    content: |
+      +++
+      title = "TOML"
+      +++
+
+      # Toml
+
+  - path: notes/break.md
+    content: |
+      ---
+      title: Break
+      ---
+
+      Intro.
+
+      ---
+
+      After a thematic break.
+
+      ---
+
+  - path: notes/suffix.md
+    content: |
+      ---
+      title: Suffix
+      ---
+
+      # front_matter-1
+
+      # front_matter
+
 tests:
   - name: "every file with a front matter block has one FrontMatter definition"
     query: |
@@ -73,30 +105,38 @@ tests:
       WHERE d.definition_type = 'FrontMatter'
       RETURN d.file_path AS file, d.fqn AS fqn, d.name AS name
     assert:
-      - { row_count: 4 }
+      - { row_count: 6 }
       - { row: { file: "doc/user/merge_requests.md", fqn: "merge_requests#front_matter", name: "front_matter" } }
       - { row: { file: "skills/orbit/SKILL.md", fqn: "SKILL#front_matter", name: "front_matter" } }
+      - { row: { file: "skills/review/SKILL.md", fqn: "SKILL#front_matter", name: "front_matter" } }
       - { row: { file: "notes/blank.md", fqn: "blank#front_matter", name: "front_matter" } }
+      - { row: { file: "notes/break.md", fqn: "break#front_matter", name: "front_matter" } }
+      - { row: { file: "notes/suffix.md", fqn: "suffix#front_matter", name: "front_matter" } }
+      - { not: true, row: { file: "notes/toml.md" } }
 
-  - name: "each top-level key is a FrontMatterField under its block"
+  - name: "front matter keys do not become definitions"
     query: |
-      MATCH (p:Definition)-[:DEFINES]->(d:Definition)
-      WHERE d.definition_type = 'FrontMatterField'
-      RETURN p.fqn AS parent, d.fqn AS fqn, d.name AS name
+      MATCH (d:Definition)
+      WHERE d.definition_type <> 'FrontMatter' AND d.definition_type <> 'Section'
+      RETURN d.fqn AS fqn, d.definition_type AS definition_type
     assert:
-      - { row_count: 13 }
-      - { row: { parent: "merge_requests#front_matter", fqn: "merge_requests#front_matter#stage", name: "stage" } }
-      - { row: { parent: "merge_requests#front_matter", fqn: "merge_requests#front_matter#title", name: "title" } }
-      - { row: { parent: "SKILL#front_matter", fqn: "SKILL#front_matter#description", name: "description" } }
-      - { row: { parent: "SKILL#front_matter", fqn: "SKILL#front_matter#metadata", name: "metadata" } }
+      - { empty: true }
 
-  - name: "the file defines its front matter block and fields"
-    query: |
-      MATCH (f:File)-[:DEFINES]->(d:Definition)
-      WHERE d.definition_type IN ['FrontMatter', 'FrontMatterField']
-      RETURN f.path AS file, d.fqn AS fqn
-    assert:
-      - { row_count: 17 }
+  - name: "the file defines its front matter block, which defines nothing"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(d:Definition)
+          WHERE d.definition_type = 'FrontMatter'
+          RETURN f.path AS file, d.fqn AS fqn
+        assert:
+          - { row_count: 6 }
+          - { row: { file: "skills/review/SKILL.md", fqn: "SKILL#front_matter" } }
+      - query: |
+          MATCH (p:Definition)-[:DEFINES]->(d:Definition)
+          WHERE p.definition_type = 'FrontMatter'
+          RETURN p.fqn AS parent, d.fqn AS child
+        assert:
+          - { empty: true }
 
   - name: "a heading named like the front matter gets a suffixed fqn"
     query: |
@@ -104,7 +144,10 @@ tests:
       WHERE d.definition_type = 'Section'
       RETURN d.fqn AS fqn, d.name AS name
     assert:
-      - { row_count: 4 }
+      - { row_count: 7 }
+      - { row: { fqn: "suffix#front_matter-1", name: "front_matter-1" } }
+      - { row: { fqn: "suffix#front_matter-2", name: "front_matter" } }
+      - { row: { fqn: "toml#Toml", name: "Toml" } }
       - { row: { fqn: "SKILL#front_matter-1", name: "front_matter" } }
       - { row: { fqn: "merge_requests#Create a merge request", name: "Create a merge request" } }
       - { row: { fqn: "blank#Blank", name: "Blank" } }
@@ -112,21 +155,24 @@ tests:
   - name: "front matter ids and ranges are the same in both engines"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['FrontMatter', 'FrontMatterField']
-      RETURN d.fqn AS fqn, d.id AS id, d.start_byte AS start_byte, d.end_byte AS end_byte, d.start_line AS start_line, d.end_line AS end_line
+      WHERE d.definition_type = 'FrontMatter'
+      RETURN d.file_path AS file, d.id AS id, d.start_byte AS start_byte, d.end_byte AS end_byte, d.start_line AS start_line, d.end_line AS end_line
     assert:
-      - { row_count: 17 }
-      - { row: { fqn: "merge_requests#front_matter", id: 1737322248835097902, start_byte: 0, end_byte: 191, start_line: 1, end_line: 6 } }
-      - { row: { fqn: "merge_requests#front_matter#stage", id: 7313459264623323367, start_byte: 4, end_byte: 18, start_line: 2, end_line: 2 } }
-      - { row: { fqn: "merge_requests#front_matter#group", id: 5307424401651718400, start_byte: 18, end_byte: 37, start_line: 3, end_line: 3 } }
-      - { row: { fqn: "merge_requests#front_matter#info", id: 5376148533253754433, start_byte: 37, end_byte: 165, start_line: 4, end_line: 4 } }
-      - { row: { fqn: "merge_requests#front_matter#title", id: 8597904160589395415, start_byte: 165, end_byte: 187, start_line: 5, end_line: 5 } }
-      - { row: { fqn: "SKILL#front_matter", id: 1250515828031768561, start_byte: 0, end_byte: 111, start_line: 1, end_line: 8 } }
-      - { row: { fqn: "SKILL#front_matter#name", id: 1370902937627328482, start_byte: 4, end_byte: 16, start_line: 2, end_line: 2 } }
-      - { row: { fqn: "SKILL#front_matter#description", id: 2346644788423363252, start_byte: 16, end_byte: 61, start_line: 3, end_line: 4 } }
-      - { row: { fqn: "SKILL#front_matter#metadata", id: 8963022241248876000, start_byte: 84, end_byte: 107, start_line: 6, end_line: 7 } }
-      - { row: { fqn: "SKILL#front_matter", id: 5266977163424305735, start_byte: 0, end_byte: 243, start_line: 1, end_line: 16 } }
-      - { row: { fqn: "blank#front_matter", id: 511951402004096090, start_byte: 0, end_byte: 9, start_line: 1, end_line: 3 } }
+      - { row_count: 6 }
+      - { row: { file: "notes/break.md", id: 7214704662862655811, start_byte: 0, end_byte: 21, start_line: 1, end_line: 3 } }
+      - { row: { file: "notes/suffix.md", id: 1138141786811288481, start_byte: 0, end_byte: 22, start_line: 1, end_line: 3 } }
+      - { row: { file: "doc/user/merge_requests.md", id: 1737322248835097902, start_byte: 0, end_byte: 191, start_line: 1, end_line: 6 } }
+      - { row: { file: "skills/orbit/SKILL.md", id: 1250515828031768561, start_byte: 0, end_byte: 111, start_line: 1, end_line: 8 } }
+      - { row: { file: "notes/blank.md", id: 511951402004096090, start_byte: 0, end_byte: 9, start_line: 1, end_line: 3 } }
+
+  - name: "a SKILL.md block covers its multi-line values through the closing delimiter"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'FrontMatter' AND d.file_path = 'skills/review/SKILL.md'
+      RETURN d.id AS id, d.start_byte AS start_byte, d.end_byte AS end_byte, d.start_line AS start_line, d.end_line AS end_line
+    assert:
+      - { row_count: 1 }
+      - { row: { id: 5266977163424305735, start_byte: 0, end_byte: 243, start_line: 1, end_line: 16 } }
 
   - name: "sections after the front matter start at their heading in both engines"
     query: |
@@ -138,25 +184,3 @@ tests:
       - { row: { fqn: "SKILL#front_matter-1", id: 5595229349388437339, start_byte: 111 } }
       - { row: { fqn: "blank#Blank", id: 704564307224734628, start_byte: 10 } }
       - { row: { fqn: "SKILL#Review", id: 7763089820191681321, start_byte: 244 } }
-
-  - name: "SKILL.md fields cover their whole multi-line values in both engines"
-    query: |
-      MATCH (p:Definition)-[:DEFINES]->(d:Definition)
-      WHERE d.definition_type = 'FrontMatterField' AND d.file_path = 'skills/review/SKILL.md'
-      RETURN p.fqn AS parent, d.name AS name, d.id AS id, d.start_byte AS start_byte, d.end_byte AS end_byte, d.start_line AS start_line, d.end_line AS end_line
-    assert:
-      - { row_count: 6 }
-      - { row: { parent: "SKILL#front_matter", name: "name", id: 8155856516600246842, start_byte: 4, end_byte: 20, start_line: 2, end_line: 2 } }
-      - { row: { parent: "SKILL#front_matter", name: "description", id: 5718862394757483882, start_byte: 20, end_byte: 96, start_line: 3, end_line: 5 } }
-      - { row: { parent: "SKILL#front_matter", name: "usage", id: 6196474533819878838, start_byte: 96, end_byte: 135, start_line: 6, end_line: 8 } }
-      - { row: { parent: "SKILL#front_matter", name: "argument-hint", id: 1270131944465113425, start_byte: 135, end_byte: 168, start_line: 9, end_line: 9 } }
-      - { row: { parent: "SKILL#front_matter", name: "metadata", id: 5312470204692194473, start_byte: 168, end_byte: 206, start_line: 10, end_line: 12 } }
-      - { row: { parent: "SKILL#front_matter", name: "allowed-tools", id: 5762960145085755185, start_byte: 206, end_byte: 239, start_line: 13, end_line: 15 } }
-
-  - name: "nested keys under a SKILL.md field are not fields of their own"
-    query: |
-      MATCH (d:Definition)
-      WHERE d.file_path = 'skills/review/SKILL.md' AND d.name IN ['version', 'owner']
-      RETURN d.fqn AS fqn
-    assert:
-      - { empty: true }

@@ -194,11 +194,6 @@ pub enum Canonical {
         props(def_type = "true", display = "FrontMatter")
     )]
     FrontMatter,
-    #[strum(
-        serialize = "__front_matter_field",
-        props(def_type = "true", display = "FrontMatterField")
-    )]
-    FrontMatterField,
 }
 
 impl From<Canonical> for u16 {
