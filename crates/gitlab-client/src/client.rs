@@ -16,6 +16,7 @@ use orbit_observability::gitlab_client::{INSECURE_CREDENTIAL_REQUESTS, labels};
 use orbit_observability::resilience::MetricsObserver;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use url::Host;
 
 use crate::error::GitlabClientError;
 use crate::types::{CloudConnectorToken, GitlabInstance, MergeRequestDiffBatch, ProjectInfo};
@@ -88,21 +89,19 @@ impl Channel {
         if url.scheme() == "https" {
             return Self::Tls;
         }
-        let Some(host) = url.host_str() else {
-            return Self::InvalidUrl;
-        };
-        if host == "localhost" {
-            return Self::Localhost;
-        }
-        let literal = host.trim_start_matches('[').trim_end_matches(']');
-        let addresses: Vec<IpAddr> = match (literal.parse::<IpAddr>(), dialled) {
+        let addresses: Vec<IpAddr> = match url.host() {
+            None => return Self::InvalidUrl,
+            Some(Host::Domain("localhost")) => return Self::Localhost,
             // reqwest ignores the resolve_host override for an IP literal host.
-            (Ok(ip), _) => vec![ip],
-            (Err(_), Some(ip)) => vec![ip],
-            (Err(_), None) => (host, 0)
-                .to_socket_addrs()
-                .map(|addrs| addrs.map(|addr| addr.ip()).collect())
-                .unwrap_or_default(),
+            Some(Host::Ipv4(ip)) => vec![ip.into()],
+            Some(Host::Ipv6(ip)) => vec![ip.into()],
+            Some(Host::Domain(domain)) => match dialled {
+                Some(ip) => vec![ip],
+                None => (domain, 0)
+                    .to_socket_addrs()
+                    .map(|addrs| addrs.map(|addr| addr.ip()).collect())
+                    .unwrap_or_default(),
+            },
         };
         if addresses.is_empty() {
             Self::Unresolved
@@ -1041,7 +1040,7 @@ mod tests {
     }
 
     #[test]
-    fn https_is_tls_without_resolving_the_host() {
+    fn https_is_tls() {
         assert_eq!(channel_of("https://gitlab.invalid", None), Channel::Tls);
     }
 
@@ -1149,12 +1148,17 @@ mod tests {
             InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
         };
 
-        let app = Router::new().route(
-            "/api/v4/internal/orbit/project/{id}/info",
-            get(|| async {
-                axum::Json(serde_json::json!({"project_id": 1, "default_branch": "main"}))
-            }),
-        );
+        let app = Router::new()
+            .route(
+                "/api/v4/internal/orbit/project/{id}/info",
+                get(|| async {
+                    axum::Json(serde_json::json!({"project_id": 1, "default_branch": "main"}))
+                }),
+            )
+            .route(
+                "/api/v4/internal/orbit/project/{id}/repository/list_blobs",
+                axum::routing::post(|| async { Vec::<u8>::new() }),
+            );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -1176,9 +1180,10 @@ mod tests {
         private.project_info(1).await.unwrap();
         insecure.project_info(1).await.unwrap();
         insecure.project_info(1).await.unwrap();
+        let _stream = insecure.list_blobs(1, &["oid".to_string()]).await.unwrap();
         provider.force_flush().unwrap();
 
-        let counted: Vec<(u64, String)> = exporter
+        let mut counted: Vec<(u64, String)> = exporter
             .get_finished_metrics()
             .unwrap()
             .iter()
@@ -1200,6 +1205,10 @@ mod tests {
                 _ => panic!("insecure credential requests is not a u64 sum"),
             })
             .collect();
-        assert_eq!(counted, vec![(2, "GET".to_string())]);
+        counted.sort();
+        assert_eq!(
+            counted,
+            vec![(1, "POST".to_string()), (2, "GET".to_string())]
+        );
     }
 }

@@ -22,6 +22,7 @@ serde_json = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
+url = "2.5"
 orbit-log-fields = { workspace = true }
 
 [dev-dependencies]
