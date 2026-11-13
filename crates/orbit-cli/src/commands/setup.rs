@@ -1666,6 +1666,8 @@ mod tests {
 
     #[test]
     fn feature_pi_files_count_as_installed_and_are_removed_together() {
+        let is_output_guard =
+            |file: &&spec::TemplateFile| file.path.project.contains("orbit-output-guard/");
         let dir = tempfile::tempdir().unwrap();
         let target = project(dir.path());
         let pi = spec::agent_named("pi").unwrap();
@@ -1673,7 +1675,7 @@ mod tests {
         assert!(!installer.is_installed(pi, &target));
 
         let mut paths = Vec::new();
-        for file in pi.feature_files(true) {
+        for file in pi.feature_files(true).filter(is_output_guard) {
             let (path, _) = target.resolve(&file.path).unwrap();
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, file.render()).unwrap();
@@ -1687,7 +1689,14 @@ mod tests {
             .unwrap();
         assert!(paths.iter().all(|path| path.is_file()));
 
-        std::fs::write(&paths[0], pi.feature_files(true).next().unwrap().render()).unwrap();
+        std::fs::write(
+            &paths[0],
+            pi.feature_files(true)
+                .find(is_output_guard)
+                .unwrap()
+                .render(),
+        )
+        .unwrap();
         installer
             .remove(&[pi], &target, &mut Report::default())
             .unwrap();
