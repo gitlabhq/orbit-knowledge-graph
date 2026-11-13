@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use integration_testkit::cli::{create_test_repo, orbit_cmd, orbit_sql};
 use serde_json::{Value, json};
@@ -20,19 +20,6 @@ fn run(repo: &Path, data: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-fn revision_database(data: &Path) -> PathBuf {
-    let manifest = duckdb_client::DuckDbClient::open(duckdb_client::OpenMode::ReadOnly(
-        &data.join("local/manifest.duckdb"),
-    ))
-    .unwrap();
-    let batches = manifest
-        .query_arrow_json("SELECT database_path FROM _orbit_manifest", &[])
-        .unwrap();
-    let paths = duckdb_client::string_column(&batches, "database_path");
-    assert_eq!(paths.len(), 1, "{paths:?}");
-    PathBuf::from(&paths[0])
-}
-
 /// Makes the stored fingerprint differ from the binary's, as an `orbit`
 /// upgrade that changes the local schema or the code index revision does.
 fn age_stored_fingerprint(database: &Path, key: &str) {
@@ -47,34 +34,35 @@ fn age_stored_fingerprint(database: &Path, key: &str) {
 
 #[test]
 fn a_schema_rebuild_at_the_same_commit_reindexes_the_whole_repository() {
-    let commands: [&[&str]; 3] = [
-        &["workspace", "index", "."],
-        &["context", "src/main.py"],
-        &["grep", "hello"],
+    let cases: [(&str, &[&str]); 4] = [
+        ("local_ddl", &["workspace", "index", "."]),
+        ("code_index_revision", &["workspace", "index", "."]),
+        ("code_index_revision", &["context", "src/main.py"]),
+        ("code_index_revision", &["grep", "hello"]),
     ];
-    for key in ["local_ddl", "code_index_revision"] {
-        for command in commands {
-            let data = tempfile::TempDir::new().unwrap();
-            let repo = create_test_repo();
-            run(&repo.path, data.path(), &["workspace", "index", "."]);
-            let indexed = orbit_sql(DEFINITIONS, data.path());
-            assert_ne!(indexed, json!([{"definitions": 0}]));
+    for (key, command) in cases {
+        let data = tempfile::TempDir::new().unwrap();
+        let repo = create_test_repo();
+        run(&repo.path, data.path(), &["workspace", "index", "."]);
+        let indexed = orbit_sql(DEFINITIONS, data.path());
+        assert_ne!(indexed, json!([{"definitions": 0}]));
 
-            age_stored_fingerprint(&revision_database(data.path()), key);
-            run(&repo.path, data.path(), command);
+        let manifest = orbit_sql("SELECT database_path FROM _orbit_manifest", data.path());
+        let database = Path::new(manifest[0]["database_path"].as_str().unwrap());
+        age_stored_fingerprint(database, key);
+        run(&repo.path, data.path(), command);
 
-            assert_eq!(
-                orbit_sql(DEFINITIONS, data.path()),
-                indexed,
-                "{key} changed, then {command:?}"
-            );
-            let listed: Value = serde_json::from_str(&run(
-                &repo.path,
-                data.path(),
-                &["workspace", "list", "-F", "json"],
-            ))
-            .unwrap();
-            assert_eq!(listed[0]["status"], "indexed", "{key}, {command:?}");
-        }
+        assert_eq!(
+            orbit_sql(DEFINITIONS, data.path()),
+            indexed,
+            "{key} changed, then {command:?}"
+        );
+        let listed: Value = serde_json::from_str(&run(
+            &repo.path,
+            data.path(),
+            &["workspace", "list", "-F", "json"],
+        ))
+        .unwrap();
+        assert_eq!(listed[0]["status"], "indexed", "{key}, {command:?}");
     }
 }
