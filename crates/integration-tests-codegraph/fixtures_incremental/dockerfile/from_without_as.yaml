@@ -52,7 +52,7 @@ tests:
       - { row: { stage: "stage:build", image: "build" } }
       - { row: { stage: "stage:golang", image: "golang" } }
 
-  - name: "the named stage keeps its own ARG and base image calls"
+  - name: "the named stage keeps its own ARG call"
     query: |
       MATCH (s:Definition)-[:CALLS]->(v:Definition)
       WHERE s.name = 'build' AND v.definition_type = 'Variable'
