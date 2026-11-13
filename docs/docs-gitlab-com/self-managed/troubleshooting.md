@@ -68,6 +68,7 @@ GitLab then does not send the authorization token.
 
 To resolve this issue, use an endpoint host name that resolves only to loopback or private addresses, or set the endpoint to `tls://` and terminate TLS on the webserver.
 For the address ranges, see [Use a plaintext connection](networking.md#use-a-plaintext-connection).
+For the TLS setup, see [TLS and network requirements](networking.md#tls-and-network-requirements).
 
 ## Siphon pods do not start
 
@@ -96,8 +97,8 @@ On a Linux package instance, PostgreSQL does not start after you restart it for 
 
 This issue occurs when `/etc/gitlab/gitlab.rb` holds a partially applied combination of `wal_level`, `max_replication_slots`, and `max_wal_senders`.
 
-To resolve this issue, correct the three settings in `/etc/gitlab/gitlab.rb`, run `sudo gitlab-ctl reconfigure`, then confirm that PostgreSQL is running.
-For the values, see [Turn on logical replication in PostgreSQL](data-replication.md#turn-on-logical-replication-in-postgresql).
+To resolve this issue, correct the three settings in `/etc/gitlab/gitlab.rb`, run `sudo gitlab-ctl reconfigure`, then run `sudo gitlab-ctl restart postgresql`.
+For the values and the query that confirms the settings, see [Turn on logical replication in PostgreSQL](data-replication.md#turn-on-logical-replication-in-postgresql).
 
 ## Siphon logs permission errors, and the data lake tables stay empty
 
@@ -126,22 +127,9 @@ Rows arrive in tables such as `siphon_namespaces` and `siphon_projects`, but the
 This issue occurs when the table definitions that reference the `ci` and `sec` databases were removed from the Siphon configuration, for example to work around a generator failure caused by a missing `database_mapping`.
 GitLab splits its schema across the `main`, `ci`, and `sec` databases, whether or not your instance stores them separately.
 
-To resolve this issue, restore the table definitions, map `ci` and `sec` onto `main` in `database_mapping` in `siphon-values.yaml`, then restart the Siphon deployments.
+To resolve this issue, restore the table definitions, and map `ci` and `sec` onto `main` in `database_mapping` in `siphon-values.yaml`.
+Then run the `helm upgrade` command from [Install Siphon](data-replication.md#install-siphon), and restart the Siphon deployments.
 For more information, see [Values file settings](data-replication.md#values-file-settings).
-
-## Migrations stop after an upgrade
-
-After an upgrade that changes the schema, the graph migrations stop, and GitLab Orbit does not switch to the new graph version.
-
-This issue occurs when the GitLab Orbit ClickHouse users lack the `SELECT` grants on `system` tables that the setup statements define.
-A managed ClickHouse that restricts the `system` database is a common cause.
-
-To resolve this issue, apply the setup statements from the GitLab Orbit release that you deploy:
-
-- With the chart setup hook on, run `helm upgrade` again.
-  The hook applies the grants before the upgrade.
-- If you created the users manually, run `graph.sql` and `datalake.sql` from the current image again.
-  For the steps, see [Create the users manually](clickhouse.md#create-the-users-manually).
 
 ## The NATS volume is full
 
@@ -150,6 +138,7 @@ The persistent volume of NATS JetStream is full.
 This issue occurs when `nats_config.max_age_seconds` is missing from `siphon-values.yaml`, or when the JetStream volume is too small for the window that it sets.
 
 To resolve this issue, set `max_age_seconds` to the number of seconds of changed rows that the stream keeps, for example `1296000` for 15 days, and size the JetStream volume for that window.
+To apply a new `max_age_seconds`, run the `helm upgrade` command from [Install Siphon](data-replication.md#install-siphon), and restart the Siphon deployments.
 For the volume setting, see [Configure NATS](getting-started.md#configure-nats).
 For the size, see [NATS](sizing.md#nats).
 
@@ -161,7 +150,7 @@ This issue occurs when the first index has not finished.
 The first index takes from several minutes to a few hours, and pod status does not confirm indexing.
 An hourly sweep picks up any data that indexing missed.
 
-To resolve this issue, check the indexing progress, and send the query again when the summary ends with `Ready.`:
+To resolve this issue, check the indexing progress with the [GitLab Orbit CLI](../cli.md#install-the-cli), and send the query again when the summary ends with `Ready.`:
 
 ```shell
 glab orbit status --full-path <my-group>

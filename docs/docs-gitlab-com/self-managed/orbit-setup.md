@@ -68,8 +68,9 @@ To use a service mesh for encryption instead, see [Use a plaintext connection](n
 
 {{< tab title="Helm chart (Kubernetes)" >}}
 
-The GitLab chart does not generate the key.
-Create the Secret before you upgrade GitLab, or new GitLab pods stay in `ContainerCreating`.
+> [!warning]
+> The GitLab chart does not generate the key.
+> Create the Secret before you upgrade GitLab, or new GitLab pods stay in `ContainerCreating`.
 
 1. Generate a key:
 
