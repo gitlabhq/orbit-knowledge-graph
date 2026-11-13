@@ -69,9 +69,6 @@ struct CloudConnectorTokenClaims {
     exp: i64,
 }
 
-/// Whether the channel to GitLab may carry a credential: TLS, or a host whose
-/// addresses are all loopback or private. Rails checks its channel to Orbit
-/// before it forwards its JWT; this rule is at least as strict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 enum Channel {
@@ -84,8 +81,6 @@ enum Channel {
 }
 
 impl Channel {
-    /// `dialled` is the `resolve_host` address, which reqwest dials in place of
-    /// a domain host. It does not apply when the host is an IP literal.
     fn classify(base_url: &str, dialled: Option<IpAddr>) -> Self {
         let Ok(url) = reqwest::Url::parse(base_url) else {
             return Self::InvalidUrl;
@@ -101,6 +96,7 @@ impl Channel {
         }
         let literal = host.trim_start_matches('[').trim_end_matches(']');
         let addresses: Vec<IpAddr> = match (literal.parse::<IpAddr>(), dialled) {
+            // reqwest ignores the resolve_host override for an IP literal host.
             (Ok(ip), _) => vec![ip],
             (Err(_), Some(ip)) => vec![ip],
             (Err(_), None) => (host, 0)
@@ -122,7 +118,6 @@ impl Channel {
     }
 }
 
-/// Link-local addresses are not private.
 fn is_loopback_or_private(ip: IpAddr) -> bool {
     match ip.to_canonical() {
         IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
