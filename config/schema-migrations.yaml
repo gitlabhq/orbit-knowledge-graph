@@ -19,10 +19,10 @@ migrations:
 - version: 120
   scope: code
   note: >-
-    Definition gains twelve front_matter_* columns holding Markdown front matter values
-    (Agent Skills fields, GitLab docs title, stage, group and info, plus version and category). Only FrontMatter
-    rows carry values; every other row stores ''. Code tables are re-derived so existing
-    FrontMatter rows pick the values up.
+    Definition gains twelve front_matter_* columns holding Markdown front matter
+    values (Agent Skills fields, GitLab docs title, stage, group and info, plus version
+    and category). Only FrontMatter rows carry values; every other row stores ''.
+    Code tables are re-derived so existing FrontMatter rows pick the values up.
 - version: 119
   scope: none
   note: "Finding declares extract.partition_count: 5 so its first full load splits into five id ranges, as Job does. The partition count only changes how the indexer pages the datalake, not the rows it writes, so no table DDL or indexed row changes."

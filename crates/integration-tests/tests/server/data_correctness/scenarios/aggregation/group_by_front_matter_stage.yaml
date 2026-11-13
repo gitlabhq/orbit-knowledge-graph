@@ -1,0 +1,38 @@
+description: Grouping by a front matter column returns one row per distinct value, not one per definition
+
+config:
+  security:
+    paths: ["1/100/1000/"]
+  extra_seed:
+    gl_definition:
+      - { id: 99100, traversal_path: "1/100/1000/", project_id: 1000, branch: main, file_path: doc/a.md, name: front_matter, fqn: "a#front_matter", definition_type: FrontMatter, front_matter_stage: Verify, front_matter_group: Pipeline Authoring }
+      - { id: 99101, traversal_path: "1/100/1000/", project_id: 1000, branch: main, file_path: doc/b.md, name: front_matter, fqn: "b#front_matter", definition_type: FrontMatter, front_matter_stage: Verify, front_matter_group: Pipeline Execution }
+      - { id: 99102, traversal_path: "1/100/1000/", project_id: 1000, branch: main, file_path: doc/c.md, name: front_matter, fqn: "c#front_matter", definition_type: FrontMatter, front_matter_stage: Verify, front_matter_group: Pipeline Authoring }
+      - { id: 99103, traversal_path: "1/100/1000/", project_id: 1000, branch: main, file_path: doc/d.md, name: front_matter, fqn: "d#front_matter", definition_type: FrontMatter, front_matter_stage: Plan, front_matter_group: Project Management }
+
+cases:
+  - name: pages_per_stage
+    query:
+      gql: |
+        MATCH (d:Definition)
+        WHERE d.project_id = 1000 AND d.definition_type = 'FrontMatter' AND d.file_path STARTS WITH 'doc/'
+        RETURN d.front_matter_stage AS stage, count(d) AS pages
+        ORDER BY pages DESC
+    expect:
+      row_count: 2
+      row_values:
+        - { stage: Verify, pages: 3 }
+        - { stage: Plan, pages: 1 }
+
+  - name: pages_per_stage_and_group
+    query:
+      gql: |
+        MATCH (d:Definition)
+        WHERE d.project_id = 1000 AND d.definition_type = 'FrontMatter' AND d.front_matter_stage = 'Verify'
+        RETURN d.front_matter_group AS group_name, count(d) AS pages
+        ORDER BY pages DESC
+    expect:
+      row_count: 2
+      row_values:
+        - { group_name: Pipeline Authoring, pages: 2 }
+        - { group_name: Pipeline Execution, pages: 1 }
