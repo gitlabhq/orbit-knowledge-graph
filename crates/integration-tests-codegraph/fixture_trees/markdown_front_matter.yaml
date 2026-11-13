@@ -1,0 +1,131 @@
+- path: doc/user/merge_requests.md
+  content: |
+    ---
+    stage: Create
+    group: Source Code
+    info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/
+    title: Merge requests
+    ---
+
+    {{< details >}}
+
+    - Tier: Free
+
+    {{< /details >}}
+
+    ## Create a merge request
+
+- path: skills/orbit/SKILL.md
+  content: |
+    ---
+    name: orbit
+    description: >-
+      Query the knowledge graph.
+    # metadata is optional
+    metadata:
+      version: 1
+    ---
+    # front_matter
+
+- path: skills/review/SKILL.md
+  content: |
+    ---
+    name: review-mr
+    description: >-
+      Review a merge request.
+      Use when asked to review an MR.
+    usage: |
+      orbit query
+      orbit context
+    argument-hint: "scope: optional"
+    metadata:
+      version: 2
+      owner: orbit
+    allowed-tools:
+      - Bash
+      - Read
+    ---
+
+    # Review
+
+- path: notes/blank.md
+  content: |
+    ---
+
+    ---
+
+    # Blank
+
+- path: notes/rules.md
+  content: |
+    ---
+    ---
+
+    Two thematic breaks, not front matter.
+
+- path: notes/toml.md
+  content: |
+    +++
+    title = "TOML"
+    +++
+
+    # Toml
+
+- path: notes/break.md
+  content: |
+    ---
+    title: Break
+    ---
+
+    Intro.
+
+    ---
+
+    After a thematic break.
+
+    ---
+
+- path: notes/suffix.md
+  content: |
+    ---
+    title: Suffix
+    ---
+
+    # front_matter-1
+
+    # front_matter
+
+- path: skills/pdf/SKILL.md
+  content: |
+    ---
+    name: pdf-processing
+    description: Extract text and tables from PDF files.
+    license: Apache-2.0
+    compatibility: Requires poppler-utils
+    allowed-tools: Bash(git:*) Read
+    metadata:
+      author: example-org
+      version: "1.0"
+    version: 1.10
+    category: Documentation
+    ---
+    # PDF
+
+- path: doc/ci/yaml.md
+  content: |
+    ---
+    stage: Verify
+    group: Pipeline Authoring
+    info: To determine the technical writer, see https://handbook.gitlab.com/
+    title: CI/CD YAML syntax reference
+    description: Keywords for .gitlab-ci.yml.
+    ---
+
+- path: notes/odd.md
+  content: |
+    ---
+    title: [a, b]
+    stage: true
+    info: {k: v}
+    metadata: plain
+    ---
