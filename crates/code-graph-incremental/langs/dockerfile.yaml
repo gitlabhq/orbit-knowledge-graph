@@ -70,9 +70,9 @@ stages:
       - match: '(from_instruction (image_spec name: $N) as: $A)'
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)))'
       - match: '(from_instruction (image_spec name: $N tag: (image_tag $$$T)))'
-        replace: '(__from (__defname @$N|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
+        replace: '(__from (__defname @$ROOT|sibling_index|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
       - match: '(from_instruction (image_spec name: $N))'
-        replace: '(__from (__defname @$N|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)))'
+        replace: '(__from (__defname @$ROOT|sibling_index|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)))'
 
   - name: copy-from
     rules:

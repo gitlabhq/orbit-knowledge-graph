@@ -19,15 +19,22 @@ fixtures:
       FROM alpine:${BASE_TAG}
       RUN apk add curl
 
+  - path: same_image/Dockerfile
+    content: |
+      FROM node:20 AS named_a
+      FROM node:20 AS named_b
+      FROM node:20
+      FROM node:20-slim
+
 tests:
   - name: "an unnamed stage naming an earlier stage calls it"
     query: |
       MATCH (a:Definition)-[:CALLS]->(b:Definition)
-      WHERE a.name = 'stage:build' AND b.definition_type = 'Class'
+      WHERE a.name = 'stage:3' AND b.definition_type = 'Class'
       RETURN a.name AS from_stage, b.name AS to_stage
     assert:
       - { row_count: 1 }
-      - { row: { from_stage: "stage:build", to_stage: "build" } }
+      - { row: { from_stage: "stage:3", to_stage: "build" } }
 
   - name: "an ARG in an unnamed stage's image tag is called"
     query: |
@@ -37,20 +44,20 @@ tests:
       ORDER BY stage, variable
     assert:
       - { row_count: 2 }
-      - { row: { stage: "stage:alpine", variable: "BASE_TAG" } }
-      - { row: { stage: "stage:golang", variable: "GO_VERSION" } }
+      - { row: { stage: "stage:1", variable: "BASE_TAG" } }
+      - { row: { stage: "stage:5", variable: "GO_VERSION" } }
 
   - name: "an unnamed stage calls its base image"
     query: |
       MATCH (s:Definition)-[:CALLS]->(i:ImportedSymbol)
-      WHERE s.name STARTS WITH 'stage:'
+      WHERE s.name STARTS WITH 'stage:' AND s.file_path <> 'same_image/Dockerfile'
       RETURN s.name AS stage, i.import_path AS image
       ORDER BY stage
     assert:
       - { row_count: 3 }
-      - { row: { stage: "stage:alpine", image: "alpine" } }
-      - { row: { stage: "stage:build", image: "build" } }
-      - { row: { stage: "stage:golang", image: "golang" } }
+      - { row: { stage: "stage:1", image: "alpine" } }
+      - { row: { stage: "stage:3", image: "build" } }
+      - { row: { stage: "stage:5", image: "golang" } }
 
   - name: "the named stage keeps its own ARG call"
     query: |
@@ -69,3 +76,16 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { image: "golang" } }
+
+  - name: "unnamed stages from the same image each call the base image once"
+    query: |
+      MATCH (s:Definition)-[:CALLS]->(i:ImportedSymbol)
+      WHERE s.file_path = 'same_image/Dockerfile'
+      RETURN s.name AS stage, i.import_path AS image
+      ORDER BY stage
+    assert:
+      - { row_count: 4 }
+      - { row: { stage: "named_a", image: "node" } }
+      - { row: { stage: "named_b", image: "node" } }
+      - { row: { stage: "stage:2", image: "node" } }
+      - { row: { stage: "stage:3", image: "node" } }
