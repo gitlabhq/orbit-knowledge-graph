@@ -41,7 +41,7 @@ The next projects make these problems larger:
 
 1. **Packages declare everything.** Code knows no entity, relationship, table, connection, permission or domain by name. It holds no default for a fact that a package can declare. A missing declaration fails the load, and so does a declaration that nothing reads.
 2. **A package is a set of layered fragments:** graph, storage, service, authorization and source. Each layer names only the layers inside it.
-3. **The loader works once and infers nothing.** Packages declare every column, relationship binding and access policy. Each load names a deployment shape and keeps only the storage on that shape's connections. The loader resolves every name to a typed handle, checks every rule, and fails once with every error. It seals one resolved model per deployment shape, and code reads facts only through its handles. A hash of the packages and the shape's connections identifies the model, and every plan carries it.
+3. **The loader works once and infers nothing.** Packages declare every column, relationship binding and access policy. Each load names a deployment shape and keeps only the storage on that shape's connections. The loader resolves every name to a typed handle, checks every rule, and fails once with every error. It seals one `Model` per deployment shape, and code reads facts only through its handles. A hash of the packages and the shape's connections identifies the model, and every plan carries it.
 4. **Packages load at runtime from a registry.** Each package has its own version line, and a new version needs no rebuild or deploy. The publisher's tier limits what a package can declare. A version goes live after its backfill, and the query engine then swaps models atomically.
 5. **Each backend implements one trait.** Its catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. There is one logical plan language, and one physical plan language per kind of backend. The catalog builds, checks and renders plans into SQL with parameters or a native request. Shared code never checks a backend name.
 6. **Frontends parse, and compiler phases plan.** A frontend builds a logical plan, and construction errors replace the validation pass. The planning phase builds the physical plan in one step. Shared tracking checks every connection when the builder makes it. Rewrites use the same builder, so no phase can leave an invalid plan.
@@ -65,13 +65,13 @@ RETURN u.username, mr.title LIMIT 10
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 45, "rankSpacing": 55}}}%%
 flowchart TB
     accTitle: The data model in one picture
-    accDescr: The package registry feeds the loader, which checks packages once into the resolved model. The model exposes a logical catalog and one physical catalog per connection, both built on shared tracking. The query engine parses through the frontends and builds and rewrites physical plans through the catalogs, which send SQL, gRPC or live calls to the backends. The indexing engine reads sources and storage from the model and writes rows to ClickHouse.
+    accDescr: The package registry feeds the loader, which checks packages once into the model. The model exposes a logical catalog and one physical catalog per connection, both built on shared tracking. The query engine parses through the frontends and builds and rewrites physical plans through the catalogs, which send SQL, gRPC or live calls to the backends. The indexing engine reads sources and storage from the model and writes rows to ClickHouse.
     REG[("Package registry<br/>gitlab.*, integration.jira,<br/>integration.slack, overlay.agent_memory")]
     E["Query engine<br/>(compiler phases)"]
     L["Loader"]
     IX["Indexing engine<br/>(ADR 023)"]
     S["Frontends (GQL)"]
-    M["Resolved model<br/>(typed handles for graph, stores,<br/>policies and sources, ModelId)"]
+    M["Model<br/>(typed handles for graph, stores,<br/>policies and sources, ModelId)"]
     LC["Logical catalog"]
     PC["Physical catalogs<br/>(one per connection)"]
     T["Shared tracking"]
@@ -249,7 +249,7 @@ Each boundary between components has one typed API, and nothing crosses outside 
 
 | Boundary | API | What crosses |
 |---|---|---|
-| Model to engine | `ResolvedModel` handles | entity, store and edge facts |
+| Model to engine | `Model` and its typed `*Id` handles | entity, store and edge facts |
 | Backend capabilities | the `StorageBackend` trait per backend kind | joins, writer, search, operators, functions, scope rendering |
 | Planner decisions | the phase API per (frontend, backend) | FINAL or LIMIT BY, settings, stage order |
 | Execution | the `Executor` trait, with a wire codec | requests out, typed key sets and rows in |
@@ -299,7 +299,7 @@ if (Any errors?) then (yes)
   stop
 else (no)
   :Hash the packages and the shape's\nconnections into a ModelId;
-  :Seal and publish the resolved model;
+  :Seal and publish the Model;
   stop
 endif
 @enduml
@@ -311,15 +311,15 @@ Each fragment kind and each engine kind has one schema, generated from the spec 
 
 Every reference in a fragment must resolve to a declared fact of the right type. Every declared fact must also have a reader. Each backend states which fragment fields it reads, and a declaration that nothing reads fails the load. A missing declaration is always a load error, never a default.
 
-The loader seals its output into one resolved model per deployment shape. The model holds typed handles: `Entity`, `Store`, `Edge`, `Connection` and `Identity`, with typed keys and columns. The raw spec types are private to the data model crate. The model's API returns only handles. It has no lookup by name and no access to the raw spec, so no phase can read an undeclared fact. Compiler phases, the stage split, the runner and the executors read entity facts only through the resolved model. Every plan carries the `ModelId` it was built against.
+The loader seals its output into one `Model` per deployment shape. The model holds typed handles: `EntityId`, `PropertyId`, `RelationshipId`, `RelationshipVariantId`, `AttributeId`, `ConnectionId` and `StoreId`, with typed keys and columns. The raw spec types are private to the data model crate. The model's API returns only handles. It has no lookup by name and no access to the raw spec, so no phase can read an undeclared fact. Compiler phases, the stage split, the runner and the executors read entity facts only through the model. Every plan carries the `ModelId` it was built against.
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear"}}}%%
 flowchart LR
     accTitle: The sealed model
-    accDescr: Fragments and their raw spec types stay private to the data model crate. The loader validates and resolves them, then seals the resolved model. The GQL frontend turns names into handles once. Compiler phases, the stage split, the runner and the executors read only handles.
+    accDescr: Fragments and their raw spec types stay private to the data model crate. The loader validates and resolves them, then seals the Model. The GQL frontend turns names into handles once. Compiler phases, the stage split, the runner and the executors read only handles.
     F["Fragments<br/>(raw spec types,<br/>private to the crate)"] -->|validate, resolve| L["Loader"]
-    L -->|seals| RM["Resolved model<br/>(typed handles)"]
+    L -->|seals| RM["Model<br/>(typed *Id handles)"]
     RM -->|handles| G["GQL frontend<br/>(names to handles, once)"]
     RM -->|handles| C["Compiler phases, stage split,<br/>runner, executors"]
     G -->|logical plan| C
@@ -508,7 +508,7 @@ CH --> Caller : rows
 @enduml
 ```
 
-The frontend records what the caller asked for and makes no planning decisions. It resolves the query's names, its entities and properties, to handles once, as it parses the GQL text. Everything else comes from those handles through the model. Only placement picks a read's store and connection, through `complete_store(entity)` or `searching(entity, property)` and then `store.connection()`. The stage hands them to the backend. Nothing looks anything up by name, and tests resolve names with the explicit `Names` resolver.
+The frontend records what the caller asked for and makes no planning decisions. It resolves the query's names, its entities and properties, to handles once, as it parses the GQL text. Everything else comes from those handles through the model. Outside the model, only placement chooses a read's store, through `complete_store(entity)` or `searching(entity, property)`. Placement takes the connection from `store.connection()`, and the stage hands both to the backend. Nothing looks anything up by name, and tests resolve names with the explicit `Names` resolver.
 The planning phase decides and builds in one step, with no intermediate plan description. Later phases rewrite through the same builder under four rules:
 
 - Inputs come before consumers.
@@ -622,7 +622,7 @@ WHERE f.content CONTAINS EXACT 'TODO(security)'
 RETURN mr.iid, b.name, f.path
 ```
 
-Only placement picks a binding's store and connection, and each stage hands them to its backend. No backend calls placement. Each binding reads its entity's `complete: true` store, from `complete_store(entity)`, on that store's `store.connection()`. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. No order or fallback rule picks another store. Only a structural match reads elsewhere, on the store that `searching(entity, property)` returns, whose backend searches that property structurally.
+Outside the model, only placement chooses a binding's store and its connection, and each stage hands them to its backend. No backend calls placement. Each binding reads its entity's `complete: true` store, from `complete_store(entity)`, on that store's `store.connection()`. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. No order or fallback rule picks another store. Only a structural match reads elsewhere, on the store that `searching(entity, property)` returns, whose backend searches that property structurally.
 
 The planner splits the logical plan into one stage per connection and connects them in a DAG:
 
