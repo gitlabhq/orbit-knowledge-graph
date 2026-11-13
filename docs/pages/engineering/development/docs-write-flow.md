@@ -120,8 +120,8 @@ for the same features, without knowing which was which
   contradict the code, and missing steps.
 
 **Gate** ([results](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1494#note_4224136767)):
-at threshold 6, 86% of the MRs it lets through needed docs, but it catches only about a third of
-the MRs that do. The flow would write docs about 4 times a week.
+at threshold 6, 86% of the MRs it lets through needed docs. It catches only about a third of the
+MRs that do. The flow would write docs about 4 times a week.
 
 ## Known limits
 
