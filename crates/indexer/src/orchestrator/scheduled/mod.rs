@@ -33,6 +33,7 @@ use tracing::Instrument;
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
 use crate::orchestrator::{Trigger, TriggerError};
+use crate::retry::RetryExhausted;
 use orbit_server_config::NatsConfiguration;
 use orbit_server_config::ScheduleConfiguration;
 
@@ -43,6 +44,12 @@ pub struct TaskError(String);
 impl TaskError {
     pub fn new(error: impl std::fmt::Display) -> Self {
         Self(error.to_string())
+    }
+}
+
+impl From<RetryExhausted> for TaskError {
+    fn from(error: RetryExhausted) -> Self {
+        Self::new(error)
     }
 }
 

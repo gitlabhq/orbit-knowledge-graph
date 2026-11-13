@@ -23,10 +23,13 @@ use crate::analytics::{GraphStats, GraphStatsReporter};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::dispatch::enabled_namespaces::enabled_roots_with_enabled_at_sql;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::retry::{Backoff, LocalRetry, Step, drive};
 
 const TASK_NAME: &str = "analytics.graph_stats";
-const ATTEMPTS: u32 = 3;
-const RETRY_DELAY: Duration = Duration::from_secs(60);
+const SNAPSHOT_RETRY: LocalRetry = LocalRetry {
+    backoff: Backoff::Fixed(&[Duration::from_secs(60)]),
+    max_attempts: 3,
+};
 
 const GRAPH_BYTES_SQL: &str = r#"SELECT toInt64(sum(bytes_on_disk)) AS bytes
 FROM system.parts
@@ -270,23 +273,21 @@ impl ScheduledTask for GraphStatsSnapshot {
 
 impl GraphStatsSnapshot {
     async fn snapshot_and_report(&self) -> Result<(), TaskError> {
-        let mut attempt = 1;
-        let stats = loop {
+        let stats = drive(&SNAPSHOT_RETRY, |attempt| async move {
             match self.snapshot().await {
-                Ok(stats) => break stats,
-                Err(error) if attempt < ATTEMPTS => {
+                Ok(stats) => Step::Done(stats),
+                Err(error) => {
                     warn!(
-                        safe(ATTEMPT) = attempt,
+                        safe(ATTEMPT) = attempt + 1,
                         safe(ERROR_TYPE) = "graph_stats_snapshot",
                         expanded(ERROR_MESSAGE) = %error,
-                        "graph stats snapshot failed, retrying"
+                        "graph stats snapshot failed"
                     );
-                    attempt += 1;
-                    tokio::time::sleep(RETRY_DELAY).await;
+                    SNAPSHOT_RETRY.retry_or_give_up(attempt, (), error)
                 }
-                Err(error) => return Err(error),
             }
-        };
+        })
+        .await?;
         let Some(stats) = stats else {
             info!("no active schema version, skipping the graph stats snapshot");
             return Ok(());
