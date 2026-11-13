@@ -160,6 +160,10 @@ impl GraphWriter {
         }
     }
 
+    pub fn has_complete_index(&self) -> Result<bool> {
+        Ok(schema::stored_meta(&self.client, "indexed_commit")?.is_some())
+    }
+
     pub fn complete(&self, commit: &str) -> Result<()> {
         self.client.execute(
             "INSERT OR REPLACE INTO _orbit_meta (key, value) VALUES ('indexed_commit', ?1)",

@@ -258,10 +258,12 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
         if options.skip_current && !graph_lacks_commit(&db_path, &git.commit_sha)? {
             continue;
         }
-        let snapshot = options.db.is_none()
-            && db_path.exists()
-            && manifest::load_incremental_state(&manifest_path, git.project_id)?.is_some();
         let writer = GraphWriter::open_waiting(&db_path, &git, wait)?;
+        // Opening the writer can rebuild the database for a new schema, so a
+        // snapshot only counts against a database that still holds a complete index.
+        let snapshot = options.db.is_none()
+            && writer.has_complete_index()?
+            && manifest::load_incremental_state(&manifest_path, git.project_id)?.is_some();
         let progress = options
             .progress
             .then(|| Arc::new(RepositoryBars::open(&git)));

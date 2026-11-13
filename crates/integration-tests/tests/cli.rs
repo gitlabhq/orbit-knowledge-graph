@@ -4,6 +4,8 @@ use std::collections::BTreeSet;
 mod background_index;
 #[path = "cli/revisions.rs"]
 mod revisions;
+#[path = "cli/schema_rebuild.rs"]
+mod schema_rebuild;
 
 use integration_testkit::cli::{
     create_test_repo, git, init_repo_at, orbit_cmd, orbit_index, orbit_sql, rows, rows_where,
