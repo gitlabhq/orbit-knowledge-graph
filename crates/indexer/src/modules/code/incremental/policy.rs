@@ -66,6 +66,10 @@ fn repository_policy_preserves_existing_content_filters() {
         ),
         ("late_nul.txt", [vec![b'x'; 8000], vec![0]].concat()),
         ("empty.rs", vec![]),
+        ("docs-locale/ja/README.md", b"# Title".to_vec()),
+        ("doc/Doc-Locale/zh/setup.md", b"# Title".to_vec()),
+        ("docs-locale.md", b"# Title".to_vec()),
+        ("my-docs-locale/x.md", b"# Title".to_vec()),
     ] {
         assert_matches_legacy(path, &bytes);
     }
