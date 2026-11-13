@@ -99,11 +99,11 @@ where
     }
 
     /// The checks the entity's returned rows go through; none on a trusted connection.
-    pub fn checks(&self, entity: EntityId) -> &[Check] {
-        match self.trusted() {
-            true => &[],
-            false => &self.model().access().entity(entity).checks,
-        }
+    pub fn checks(&self, entity: EntityId) -> impl Iterator<Item = &Check> {
+        let trusted = self.trusted();
+        self.model()
+            .checks(entity, self.connection())
+            .filter(move |_| !trusted)
     }
 
     /// Each foreign key of a variant whose target holds its source's scope, with that target.

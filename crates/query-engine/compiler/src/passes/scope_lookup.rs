@@ -104,7 +104,10 @@ pub fn lookup(
         let built = model
             .get_store(first, &needs)
             .ok()
-            .and_then(|store| connections.get(model.store(store).connection()))
+            .and_then(|placement| match placement.parts() {
+                [(store, _)] => connections.get(model.store(*store).connection()),
+                _ => None,
+            })
             .and_then(|peer| {
                 let built = match peer {
                     Peer::ClickHouse(catalog) => build(catalog, guard, hops, grants, keys.clone()),

@@ -14,7 +14,7 @@ use crate::logical::columns::free_text;
 
 /// The entity's row check is on an entity that holds other rows' scope, such as a project.
 fn checked_by_scope_holder(model: &Catalog<impl SqlBackend>, entity: EntityId) -> bool {
-    model.checks(entity).iter().any(|check| match check {
+    model.checks(entity).any(|check| match check {
         Check::Rows { object, .. } => {
             let checked = object.unwrap_or(entity);
             model.graph().variants().any(|variant| {

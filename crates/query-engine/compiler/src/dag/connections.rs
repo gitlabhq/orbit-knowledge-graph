@@ -83,7 +83,7 @@ impl Peer {
 
 /// The store a read runs on, and the connection that store sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Placement {
+pub struct Place {
     pub connection: ConnectionId,
     pub store: StoreId,
 }

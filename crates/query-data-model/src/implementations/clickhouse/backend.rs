@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use super::ClickHouse;
 use super::schema::{self, Schema};
 use super::spec::{ClickHouseOptions, ClickHouseSource, ColumnSpec};
-use crate::catalog::{Capabilities, Diagnostics, PolicyKind, StorageBackend, StoreInput};
+use crate::catalog::{Capabilities, Diagnostics, Field, PolicyKind, StorageBackend, StoreInput};
 use crate::implementations::relational::{ReadPaths, RelationalFacts, RelationalStore};
 use crate::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
@@ -63,9 +63,11 @@ impl StorageBackend for ClickHouse {
         joins: true,
         writer: true,
         search: false,
+        delegates: false,
     };
     const POLICIES: &'static [PolicyKind] =
         &[PolicyKind::ScopeKey, PolicyKind::Owner, PolicyKind::None];
+    const FIELDS: &'static [Field] = crate::implementations::relational::FIELDS;
     type Options = ClickHouseOptions;
     type SourceOptions = ClickHouseSource;
     type ColumnOptions = Option<ColumnSpec>;

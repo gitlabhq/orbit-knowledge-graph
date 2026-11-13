@@ -204,6 +204,16 @@ impl Store {
         self.edge_guards.get(table)
     }
 
+    /// Whether a declared source writes the store's tables, rather than its own service.
+    pub(super) fn takes_writer(&self) -> bool {
+        super::registered(&self.kind).is_some_and(|backend| backend.capabilities().writer)
+    }
+
+    /// Whether the store's backend reads the generic fragment field.
+    pub(super) fn reads(&self, field: super::Field) -> bool {
+        super::registered(&self.kind).is_some_and(|backend| backend.reads(field))
+    }
+
     pub(super) fn facts<T: 'static>(&self) -> Option<&T> {
         (self.facts.as_deref()? as &dyn Any).downcast_ref()
     }

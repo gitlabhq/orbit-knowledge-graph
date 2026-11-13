@@ -6,8 +6,8 @@ entities:
     complete: true
     accepts: [project_id, branch]
     columns:
-      project_id: {immutable: true}
-      branch: {immutable: true}
+      project_id: {}
+      branch: {}
     backend:
       repository: {project: project_id, branch: branch}
 relationships:

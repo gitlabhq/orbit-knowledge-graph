@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use super::{Naming, Raw, explicit_null};
-use crate::catalog::StorageBackend;
+use crate::catalog::{Field, StorageBackend};
 use crate::{Endpoint, FieldSelectivity, ForeignKey, PropertyId};
 
 /// A backend block, typed by its store's backend when the fragment is parsed.
@@ -77,6 +77,44 @@ fn optional_block<T: WrittenBlock>(schema: &mut Schema) {
     }
 }
 
+/// Drops the generic fields the backend does not read, and requires a table of every entity
+/// in a store a source writes.
+fn read_fields<B: StorageBackend>(schema: &mut Schema) {
+    if let Some(properties) = schema
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for field in Field::ALL.iter().filter(|field| !B::FIELDS.contains(field)) {
+            properties.remove(field.name());
+        }
+        if B::CAPABILITIES.writer && properties.contains_key(Field::Table.name()) {
+            let required = schema.as_object_mut().map(|schema| {
+                schema
+                    .entry("required")
+                    .or_insert_with(|| serde_json::json!([]))
+            });
+            if let Some(required) = required.and_then(serde_json::Value::as_array_mut) {
+                required.push(Field::Table.name().into());
+            }
+        }
+    }
+}
+
+fn engine_schema<B: StorageBackend>(schema: &mut Schema) {
+    optional_block::<B::Options>(schema);
+    read_fields::<B>(schema);
+}
+
+fn entity_schema<B: StorageBackend>(schema: &mut Schema) {
+    optional_block::<B::SourceOptions>(schema);
+    read_fields::<B>(schema);
+}
+
+fn column_schema<B: StorageBackend>(schema: &mut Schema) {
+    optional_block::<B::ColumnOptions>(schema);
+    read_fields::<B>(schema);
+}
+
 fn engine_kind<B: StorageBackend>(_: &mut SchemaGenerator) -> Schema {
     schemars::json_schema!({"const": B::KIND})
 }
@@ -106,7 +144,7 @@ pub struct StorageFragment<K: Blocks = Erased> {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "K: Typed")]
-#[schemars(bound = "K: StorageBackend", transform = optional_block::<K::Options>)]
+#[schemars(bound = "K: StorageBackend", transform = engine_schema::<K>)]
 pub struct EngineSpec<K: Blocks = Erased> {
     #[schemars(schema_with = "engine_kind::<K>")]
     pub kind: String,
@@ -121,7 +159,7 @@ pub struct EngineSpec<K: Blocks = Erased> {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "K: Typed")]
-#[schemars(bound = "K: StorageBackend", transform = optional_block::<K::SourceOptions>)]
+#[schemars(bound = "K: StorageBackend", transform = entity_schema::<K>)]
 pub struct EntityStorage<K: Blocks = Erased> {
     /// This store holds or excludes every graph property of the entity, and plans read it here.
     #[serde(default)]
@@ -145,7 +183,7 @@ pub struct EntityStorage<K: Blocks = Erased> {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "K: Typed")]
-#[schemars(bound = "K: StorageBackend", transform = optional_block::<K::ColumnOptions>)]
+#[schemars(bound = "K: StorageBackend", transform = column_schema::<K>)]
 pub struct ColumnStorage<K: Blocks = Erased> {
     #[serde(default)]
     pub immutable: bool,

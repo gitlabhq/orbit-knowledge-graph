@@ -1173,7 +1173,12 @@ fn relational_columns_and_bindings_are_explicit() {
         ["gitlab: store graph column Note.body declares no storage type"]
     );
     let errors = gitlab_errors("    table: gl_note\n", "");
-    assert_eq!(errors, ["gitlab: store graph binds Note without a table"]);
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph holds Note in a clickhouse store, which a source writes, but names no table"
+        ]
+    );
 }
 
 #[test]
@@ -1264,14 +1269,12 @@ fn stores_that_hold_no_rows_name_no_table() {
     let packages = query_data_model::testkit::patched([(
         "gitlab.source_code/storage/orbit_code.yaml",
         "  File:\n    accepts: [project_id, branch]\n    columns:",
-        "  File:\n    accepts: [project_id, branch]\n    table: gl_file\n    columns:\n      id: {immutable: true}",
+        "  File:\n    accepts: [project_id, branch]\n    table: gl_file\n    columns:\n      id: {}",
     )]);
     let errors = spec_errors(packages.deployment("demo"));
     assert_eq!(
         errors,
-        [
-            "gitlab.source_code: store code is orbit_code and holds no table, but binds File to gl_file"
-        ]
+        ["gitlab.source_code: store code sets table on File, which orbit_code stores do not read"]
     );
 }
 
@@ -1408,7 +1411,7 @@ fn variants_on_the_same_composite_key_columns_clash() {
         ),
         (
             "overlay/storage/orbit_code.yaml",
-            "kind: storage\npackage: overlay\nstore: code\nentities:\n  Head: {complete: true, accepts: [project_id, branch], columns: {project_id: {immutable: true}, branch: {immutable: true}}, backend: {repository: {project: project_id, branch: branch}}}\n  Tip: {complete: true, accepts: [project_id, branch], columns: {project_id: {immutable: true}, branch: {immutable: true}}, backend: {repository: {project: project_id, branch: branch}}}\n",
+            "kind: storage\npackage: overlay\nstore: code\nentities:\n  Head: {complete: true, accepts: [project_id, branch], columns: {project_id: {}, branch: {}}, backend: {repository: {project: project_id, branch: branch}}}\n  Tip: {complete: true, accepts: [project_id, branch], columns: {project_id: {}, branch: {}}, backend: {repository: {project: project_id, branch: branch}}}\n",
         ),
         (
             "overlay/storage/clickhouse.yaml",

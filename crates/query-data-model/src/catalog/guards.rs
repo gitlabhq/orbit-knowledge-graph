@@ -132,8 +132,7 @@ fn entity_guard(
         );
         return None;
     };
-    let renders =
-        registered(&store.kind).is_some_and(|backend| backend.policies().contains(&policy.kind()));
+    let renders = registered(&store.kind).is_some_and(|backend| backend.renders(policy.kind()));
     if !renders {
         diagnostics.error(
             package,
@@ -189,8 +188,8 @@ fn edge_guards(
     diagnostics: &mut Diagnostics,
 ) -> BTreeMap<String, Guard> {
     let mut guards: BTreeMap<String, Guard> = BTreeMap::new();
-    let keyed = registered(&store.kind)
-        .is_some_and(|backend| backend.policies().contains(&PolicyKind::ScopeKey));
+    let keyed =
+        registered(&store.kind).is_some_and(|backend| backend.renders(PolicyKind::ScopeKey));
     for (variant, package, _) in store.bindings() {
         let relationship = graph.variant(variant).relationship;
         let name = &graph.relationship(relationship).name;

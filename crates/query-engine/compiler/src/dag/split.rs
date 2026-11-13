@@ -12,13 +12,10 @@ use query_data_model::{
 };
 
 use super::cut::{Cut, Group};
-use super::{Connections, Dag, Stage, StageQuery};
+use super::{Connections, Dag, Place, Stage, StageQuery};
 use crate::error::{QueryError, Result};
 use crate::logical::{Kind, Query, Step};
 use crate::passes::codegen::SqlBackend;
-
-/// The store a binding reads, and the served connection it sits on.
-pub(super) type Place = super::Placement;
 
 /// A relationship step whose endpoints live on different connections, with the key pairs the
 /// Combine stage joins its two sides on.
@@ -114,10 +111,15 @@ pub(crate) fn places(query: Query<'_>, connections: &Connections) -> Result<Hash
         .into_iter()
         .map(|binding| {
             let wanted = needs.remove(&binding.output).unwrap_or_default();
-            let store = model
+            let placement = model
                 .get_store(binding.entity, &wanted)
                 .map_err(|unplaced| QueryError::AllowlistRejected(unplaced.to_string()))?;
-            let store = model.store(store);
+            let [(store, _)] = placement.parts() else {
+                return Err(QueryError::PipelineInvariant(
+                    "a read runs on one store".into(),
+                ));
+            };
+            let store = model.store(*store);
             if connections.get(store.connection()).is_none() {
                 return Err(QueryError::AllowlistRejected(format!(
                     "{} reads from store {} on connection {}, which this deployment does not serve",
@@ -215,20 +217,38 @@ fn read(expr: Expr, needs: &mut HashMap<Ref, Needs>) {
     }
 }
 
-/// One condition's need on the property it tests. A comparison with another expression reads
-/// both sides, which the stage that holds them both evaluates.
+/// One condition's need on the property it tests; a negated leaf is its complement when it has
+/// one. A comparison with another expression reads both sides, which the stage that holds them
+/// both evaluates.
 fn condition(predicate: &Predicate, negated: bool, needs: &mut HashMap<Ref, Needs>) {
-    let operation = match predicate {
-        _ if negated => Operation::Other,
-        Predicate::Compare {
-            left,
-            right: Operand::Expr(right),
-            ..
-        } => {
-            read(*left, needs);
-            read(*right, needs);
-            return;
+    if let Predicate::Compare {
+        left,
+        right: Operand::Expr(right),
+        ..
+    } = predicate
+    {
+        read(*left, needs);
+        read(*right, needs);
+        return;
+    }
+    let complement = negated.then(|| predicate.complement());
+    let operation = match (complement.as_ref(), predicate) {
+        (Some(Some(complement)), _) => operation(complement),
+        (Some(None), _) => Operation::Other,
+        (None, predicate) => operation(predicate),
+    };
+    for expr in predicate.exprs() {
+        match expr {
+            Expr::Property { binding, property } => {
+                needs.entry(binding).or_default().apply(property, operation)
+            }
+            other => read(other, needs),
         }
+    }
+}
+
+fn operation(predicate: &Predicate) -> Operation {
+    match predicate {
         Predicate::Compare {
             comparison: Comparison::Eq,
             ..
@@ -240,14 +260,6 @@ fn condition(predicate: &Predicate, negated: bool, needs: &mut HashMap<Ref, Need
         Predicate::In { .. } | Predicate::InTuple { .. } => Operation::OneOf,
         Predicate::Text { matching, .. } => Operation::Text(*matching),
         _ => Operation::Other,
-    };
-    for expr in predicate.exprs() {
-        match expr {
-            Expr::Property { binding, property } => {
-                needs.entry(binding).or_default().apply(property, operation)
-            }
-            other => read(other, needs),
-        }
     }
 }
 

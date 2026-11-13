@@ -28,8 +28,12 @@ fn place(model: &Model, read: &str, searched: Option<&str>) -> Result<String, Un
         );
     }
     let entity = model.names().entity("File").unwrap();
-    let store = model.get_store(entity, &needs)?;
-    Ok(model.store(store).name().to_string())
+    let placement = model.get_store(entity, &needs)?;
+    let [(store, served)] = placement.parts() else {
+        panic!("a read of File runs on one store");
+    };
+    assert_eq!(*served, needs);
+    Ok(model.store(*store).name().to_string())
 }
 
 #[test]
@@ -81,7 +85,7 @@ fn with_mirror(search: &str) -> Result<Arc<Model>, String> {
     sources.insert(
         "gitlab.extra/storage/orbit_code.yaml".into(),
         format!(
-            "kind: storage\npackage: gitlab.extra\nstore: mirror\nengine:\n  kind: orbit_code\n  connection: code_indexing\nentities:\n  File:\n    accepts: [project_id, branch]\n    columns:\n      project_id: {{immutable: true}}\n      branch: {{immutable: true}}\n      path: {{immutable: true}}\n    backend:\n      repository: {{project: project_id, branch: branch}}\n      search: {search}\n"
+            "kind: storage\npackage: gitlab.extra\nstore: mirror\nengine:\n  kind: orbit_code\n  connection: code_indexing\nentities:\n  File:\n    accepts: [project_id, branch]\n    columns:\n      project_id: {{}}\n      branch: {{}}\n      path: {{}}\n    backend:\n      repository: {{project: project_id, branch: branch}}\n      search: {search}\n"
         ),
     );
     testkit::with_demo()

@@ -6,8 +6,8 @@ entities:
     complete: true
     accepts: [id]
     columns:
-      id: {immutable: true}
-      team: {immutable: true}
+      id: {}
+      team: {}
       channel: {}
       text: {}
     backend:

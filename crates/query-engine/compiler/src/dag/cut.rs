@@ -68,7 +68,7 @@ impl Cut<'_> {
                 let Some(entity) = self.query.entity(*binding) else {
                     continue;
                 };
-                for check in &access.entity(entity).checks {
+                for check in self.query.model.checks(entity, group.place) {
                     let query_data_model::catalog::Check::Rows {
                         provider,
                         permission,

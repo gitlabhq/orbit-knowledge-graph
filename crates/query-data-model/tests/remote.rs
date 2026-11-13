@@ -22,13 +22,13 @@ fn code_store(model: &Model) -> query_data_model::StoreId {
     let content = model.names().property(file, "content").unwrap();
     let mut needs = Needs::default();
     needs.apply(content, Operation::Search(SearchMode::Structural));
-    model.get_store(file, &needs).unwrap()
+    model.get_store(file, &needs).unwrap().parts()[0].0
 }
 
 /// The live store that holds messages.
 fn message_store(model: &Model) -> query_data_model::StoreId {
     let message = model.names().entity("SlackMessage").unwrap();
-    model.get_store(message, &Needs::default()).unwrap()
+    model.get_store(message, &Needs::default()).unwrap().parts()[0].0
 }
 
 fn field(

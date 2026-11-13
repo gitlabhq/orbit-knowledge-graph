@@ -93,6 +93,16 @@ impl Needs {
     }
 }
 
+/// The stores a read runs on, each with the needs it serves there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placement(Vec<(StoreId, Needs)>);
+
+impl Placement {
+    pub fn parts(&self) -> &[(StoreId, Needs)] {
+        &self.0
+    }
+}
+
 /// Why no store serves a read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Unplaced {
@@ -109,10 +119,15 @@ pub enum Unplaced {
 }
 
 impl Model {
-    /// The store a read of `entity` runs on: its complete store when that serves every need, else
-    /// the one partial store that does. The loader rejects two partial stores that could both
-    /// serve what the complete store cannot, so the answer never depends on store order.
-    pub fn get_store(&self, entity: EntityId, needs: &Needs) -> Result<StoreId, Unplaced> {
+    /// Where a read of `entity` runs: its complete store when that serves every need, else the
+    /// one partial store that does. The loader rejects two partial stores that could both serve
+    /// what the complete store cannot, so the answer never depends on store order.
+    pub fn get_store(&self, entity: EntityId, needs: &Needs) -> Result<Placement, Unplaced> {
+        let store = self.serving(entity, needs)?;
+        Ok(Placement(vec![(store, needs.clone())]))
+    }
+
+    fn serving(&self, entity: EntityId, needs: &Needs) -> Result<StoreId, Unplaced> {
         let complete = self.complete(entity).ok_or_else(|| Unplaced::Unstored {
             entity: self.graph.entity(entity).name.clone(),
         })?;

@@ -8,9 +8,9 @@ entities:
   File:
     accepts: [project_id, branch]
     columns:
-      project_id: {immutable: true}
-      branch: {immutable: true}
-      path: {immutable: true}
+      project_id: {}
+      branch: {}
+      path: {}
     backend:
       repository: {project: project_id, branch: branch}
       search: {content: [trigram, structural], path: [trigram]}

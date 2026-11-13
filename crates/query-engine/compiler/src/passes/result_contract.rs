@@ -78,7 +78,6 @@ pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, Vec<Enti
             let redaction = redaction_column(model, entity.id);
             let checks: Vec<EntityAuthConfig> = model
                 .checks(entity.id)
-                .iter()
                 .filter_map(|check| match check {
                     Check::Rows {
                         provider,

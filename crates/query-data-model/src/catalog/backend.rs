@@ -25,8 +25,11 @@ use crate::{
 pub trait StorageBackend: Sized + 'static {
     const KIND: &'static str;
     const CAPABILITIES: Capabilities;
-    /// The access policies this backend renders into its plans.
+    /// The access policies this backend renders into its plans, besides `via`, which every
+    /// backend without joins renders.
     const POLICIES: &'static [PolicyKind];
+    /// The generic storage fragment fields this backend reads; a fragment sets no other.
+    const FIELDS: &'static [Field];
     type Options: Block + DeserializeOwned + Default + WrittenBlock;
     type SourceOptions: Block + DeserializeOwned + Default + WrittenBlock;
     type ColumnOptions: Block + DeserializeOwned + Default + WrittenBlock;
@@ -64,6 +67,54 @@ pub struct Capabilities {
     pub writer: bool,
     /// Evaluates the search modes its stores declare, and searches by repository.
     pub search: bool,
+    /// Calls an external service at query time with the caller's own sign-in, so it answers an
+    /// entity's delegated check.
+    pub delegates: bool,
+}
+
+/// A generic field of a storage fragment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub enum Field {
+    Trusted,
+    PathColumn,
+    Complete,
+    Accepts,
+    Table,
+    Exclude,
+    Access,
+    Immutable,
+    Column,
+    Selectivity,
+    StoredAsText,
+    Fk,
+    EdgeTable,
+    Index,
+    Copies,
+}
+
+impl Field {
+    pub const ALL: [Self; 15] = [
+        Self::Trusted,
+        Self::PathColumn,
+        Self::Complete,
+        Self::Accepts,
+        Self::Table,
+        Self::Exclude,
+        Self::Access,
+        Self::Immutable,
+        Self::Column,
+        Self::Selectivity,
+        Self::StoredAsText,
+        Self::Fk,
+        Self::EdgeTable,
+        Self::Index,
+        Self::Copies,
+    ];
+
+    pub fn name(self) -> &'static str {
+        self.into()
+    }
 }
 
 /// The options of a backend block that takes none.
@@ -72,27 +123,6 @@ pub struct Capabilities {
 pub struct NoOptions {}
 
 impl WrittenBlock for NoOptions {}
-
-/// A store that holds no rows names no tables.
-pub fn check_unrelational<B: StorageBackend>(
-    input: &StoreInput<'_, B>,
-    diagnostics: &mut Diagnostics,
-) {
-    let store = input.store;
-    for source in store.sources() {
-        if let Some(table) = &source.table {
-            diagnostics.error(
-                &source.package,
-                format!(
-                    "store {} is {} and holds no table, but binds {} to {table}",
-                    store.name,
-                    store.kind,
-                    input.graph.entity(source.entity).name
-                ),
-            );
-        }
-    }
-}
 
 /// One result row of a backend service, keyed by the request's field names.
 pub type Row = serde_json::Map<String, serde_json::Value>;
@@ -355,6 +385,16 @@ pub(crate) trait Registered {
 
     fn policies(&self) -> &'static [PolicyKind];
 
+    fn fields(&self) -> &'static [Field];
+
+    fn renders(&self, policy: PolicyKind) -> bool {
+        self.policies().contains(&policy) || policy == PolicyKind::Via && !self.capabilities().joins
+    }
+
+    fn reads(&self, field: Field) -> bool {
+        self.fields().contains(&field)
+    }
+
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error>;
 
     /// The schema of a package file, whose storage fragments are this backend's.
@@ -409,6 +449,10 @@ impl<B: StorageBackend> Registered for Entry<B> {
 
     fn policies(&self) -> &'static [PolicyKind] {
         B::POLICIES
+    }
+
+    fn fields(&self) -> &'static [Field] {
+        B::FIELDS
     }
 
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error> {

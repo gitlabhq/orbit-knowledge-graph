@@ -16,7 +16,7 @@ pub use combine::{CombineColumn, CombineEdge, CombineJoin, CombineNode, CombineQ
 pub use compile::{
     Compiled, Env, Frontend, Inputs, Source, compile, compile_hydration, split_query,
 };
-pub use connections::{Connections, Peer, Placement};
+pub use connections::{Connections, Peer, Place};
 pub use keys::{KeySet, bind};
 pub use request::{Rendered, Request, describe};
 pub(crate) use split::places;

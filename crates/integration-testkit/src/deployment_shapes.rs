@@ -13,7 +13,7 @@ fn check(deployments: &Deployments, packages: &Packages) {
         let connections = Connections::of(&model).unwrap();
         for entity in model.graph().entities() {
             let store = match model.get_store(entity.id, &Needs::default()) {
-                Ok(store) => model.store(store),
+                Ok(placement) => model.store(placement.parts()[0].0),
                 Err(Unplaced::Unstored { .. }) => continue,
                 Err(error) => panic!("shape {shape}: {error}"),
             };

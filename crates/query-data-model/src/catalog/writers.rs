@@ -5,8 +5,9 @@ use super::sources::{RowWriter, Sources, Writer};
 use super::store::Store;
 use crate::{Endpoint, EntityId, GraphCatalog, RelationshipVariantId};
 
-/// Gives every stored entity and every edge-table variant its one writer. A foreign-key
-/// variant's writer is the writer of the node whose row holds the key.
+/// Gives every entity of a writer store and every edge-table variant its one writer. A
+/// foreign-key variant's writer is the writer of the node whose row holds the key. A store whose
+/// backend writes its own data takes no writer.
 pub(super) fn assign(
     graph: &GraphCatalog,
     stores: &[Store],
@@ -20,12 +21,19 @@ pub(super) fn assign(
         let writers = entities.remove(&entity.id).unwrap_or_default();
         let holder = stores
             .iter()
-            .find_map(|store| store.source(entity.id).filter(|held| held.table.is_some()));
+            .filter(|store| store.takes_writer())
+            .find_map(|store| store.source(entity.id));
         let package = holder.map_or_else(
             || declared(sources, packages, &writers),
             |held| held.package.clone(),
         );
-        let bound = stores.iter().any(|store| store.source(entity.id).is_some());
+        let unwritten = || -> Vec<&str> {
+            stores
+                .iter()
+                .filter(|store| store.source(entity.id).is_some())
+                .map(|store| store.name.as_str())
+                .collect()
+        };
         match (holder, writers.as_slice()) {
             (Some(_), [writer]) => {
                 sources.writers.entities.insert(entity.id, *writer);
@@ -34,7 +42,18 @@ pub(super) fn assign(
                 &package,
                 format!("stored entity {} has no writer", entity.name),
             ),
-            (None, [writer]) if !bound && !elsewhere.holds(&entity.name) => diagnostics.error(
+            (None, [writer]) if !elsewhere.holds(&entity.name) && !unwritten().is_empty() => {
+                diagnostics.error(
+                    &package,
+                    format!(
+                        "{} writes entity {}, whose stores {} take no writer",
+                        sources.row_writer_name(*writer),
+                        entity.name,
+                        unwritten().join(", ")
+                    ),
+                )
+            }
+            (None, [writer]) if !elsewhere.holds(&entity.name) => diagnostics.error(
                 &package,
                 format!(
                     "{} writes entity {}, which no store holds",

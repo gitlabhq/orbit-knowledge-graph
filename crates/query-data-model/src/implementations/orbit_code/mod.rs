@@ -7,8 +7,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::catalog::{
-    Capabilities, Diagnostics, ExecuteError, NoOptions, Operation, PolicyKind, Row, SearchMode,
-    StorageBackend, StoreInput, check_unrelational,
+    Capabilities, Diagnostics, ExecuteError, Field, NoOptions, Operation, PolicyKind, Row,
+    SearchMode, StorageBackend, StoreInput,
 };
 use crate::{DataType, EntityId, PropertyId};
 
@@ -94,8 +94,17 @@ impl StorageBackend for OrbitCode {
         joins: false,
         writer: false,
         search: true,
+        delegates: false,
     };
-    const POLICIES: &'static [PolicyKind] = &[PolicyKind::Via, PolicyKind::None];
+    const POLICIES: &'static [PolicyKind] = &[PolicyKind::None];
+    const FIELDS: &'static [Field] = &[
+        Field::Trusted,
+        Field::Complete,
+        Field::Accepts,
+        Field::Exclude,
+        Field::Column,
+        Field::Fk,
+    ];
     type Options = NoOptions;
     type SourceOptions = CodeSource;
     type ColumnOptions = NoOptions;
@@ -114,7 +123,6 @@ impl StorageBackend for OrbitCode {
         let graph = input.graph;
         let store_name = &input.store.name;
         let mut store = CodeStore::default();
-        check_unrelational(&input, diagnostics);
         for source in &input.entities {
             let name = &graph.entity(source.entity).name;
             let mut column = |written: &str, data_type: DataType| {
