@@ -126,6 +126,13 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
         stats["top_level_groups_indexed"], 1,
         "a namespace without Orbit enabled does not count"
     );
+    let groups = stats["groups_enabled_at"].as_object().unwrap();
+    assert_eq!(
+        groups.keys().collect::<Vec<_>>(),
+        [&ENABLED.to_string()],
+        "only the enabled root is listed: {stats}"
+    );
+    assert_eq!(stats["enabled_at"], groups[&ENABLED.to_string()]);
     assert_eq!(
         stats["projects_indexed"], 2,
         "an unindexed branch, a deleted project and another namespace do not count"

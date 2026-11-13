@@ -14,7 +14,7 @@
     "entity_counts",
     "projects_indexed",
     "top_level_groups_indexed",
-    "snapshot_at"
+    "groups_enabled_at"
   ],
   "properties": {
     "graph_bytes": {
@@ -49,10 +49,23 @@
       "minimum": 0,
       "maximum": 9223372036854775807
     },
-    "snapshot_at": {
-      "description": "Time the dispatcher took the snapshot, in UTC.",
+    "enabled_at": {
+      "description": "Earliest time a top-level group that still has Orbit enabled turned it on, in UTC. Absent when no group has Orbit enabled.",
       "type": "string",
       "format": "date-time"
+    },
+    "groups_enabled_at": {
+      "description": "Time each top-level group with Orbit enabled turned it on, in UTC. Keys are root namespace IDs. A group that turned Orbit off and on again shows its last enable time.",
+      "type": "object",
+      "maxProperties": 100000,
+      "patternProperties": {
+        "^[1-9][0-9]{0,18}$": {
+          "description": "Time one top-level group turned Orbit on",
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -22,8 +22,7 @@ pub struct GraphStats {
     pub graph_bytes: u64,
     pub entity_counts: BTreeMap<String, u64>,
     pub projects_indexed: u64,
-    pub top_level_groups_indexed: u64,
-    pub snapshot_at: DateTime<Utc>,
+    pub groups_enabled_at: BTreeMap<i64, DateTime<Utc>>,
 }
 
 #[derive(Clone)]
@@ -58,12 +57,24 @@ impl GraphStatsReporter {
                 Ok((key, saturating_i64(*count)))
             })
             .collect::<Result<_, labkit_events::Error>>()?;
+        let groups_enabled_at = stats
+            .groups_enabled_at
+            .iter()
+            .map(|(id, enabled_at)| {
+                let key = id
+                    .to_string()
+                    .parse::<orbit_graph_stats::OrbitGraphStatsGroupsEnabledAtKey>()
+                    .map_err(validation("groups_enabled_at"))?;
+                Ok((key, *enabled_at))
+            })
+            .collect::<Result<_, labkit_events::Error>>()?;
         let context = OrbitGraphStatsContext::new(orbit_graph_stats::OrbitGraphStats {
             graph_bytes: saturating_i64(stats.graph_bytes),
             entity_counts,
             projects_indexed: saturating_i64(stats.projects_indexed),
-            top_level_groups_indexed: saturating_i64(stats.top_level_groups_indexed),
-            snapshot_at: stats.snapshot_at,
+            top_level_groups_indexed: saturating_i64(stats.groups_enabled_at.len() as u64),
+            enabled_at: stats.groups_enabled_at.values().min().copied(),
+            groups_enabled_at,
         });
 
         let event = StructuredEvent::builder(ORBIT_CATEGORY, ACTION_GRAPH_STATS)
@@ -102,8 +113,10 @@ mod tests {
                 ("Project".to_string(), 202_930),
             ]),
             projects_indexed: 207_587,
-            top_level_groups_indexed: 412,
-            snapshot_at: "2026-11-11T04:30:00Z".parse().unwrap(),
+            groups_enabled_at: BTreeMap::from([
+                (9970, "2026-03-02T10:00:00Z".parse().unwrap()),
+                (2769844, "2026-07-15T08:30:00Z".parse().unwrap()),
+            ]),
         }
     }
 
@@ -127,8 +140,9 @@ mod tests {
             .data;
         assert_eq!(data["graph_bytes"], 437_763_723_476_i64);
         assert_eq!(data["entity_counts"]["Project"], 202_930);
-        assert_eq!(data["top_level_groups_indexed"], 412);
-        assert_eq!(data["snapshot_at"], "2026-11-11T04:30:00Z");
+        assert_eq!(data["top_level_groups_indexed"], 2);
+        assert_eq!(data["enabled_at"], "2026-03-02T10:00:00Z");
+        assert_eq!(data["groups_enabled_at"]["2769844"], "2026-07-15T08:30:00Z");
 
         let validator = jsonschema::validator_for(&load_schema_json("orbit_graph_stats")).unwrap();
         assert!(validator.is_valid(data), "{data}");

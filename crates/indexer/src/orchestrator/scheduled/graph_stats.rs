@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use orbit_log_fields::{info, warn};
 use orbit_migrations::catalog::OntologyCatalog;
@@ -21,7 +21,7 @@ use orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
 
 use crate::analytics::{GraphStats, GraphStatsReporter};
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::orchestrator::dispatch::enabled_namespaces::resolved_enabled_namespaces_sql;
+use crate::orchestrator::dispatch::enabled_namespaces::enabled_roots_with_enabled_at_sql;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 
 const TASK_NAME: &str = "analytics.graph_stats";
@@ -55,6 +55,12 @@ AND extract(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}') IN {{paths:Array(String)
     )
 });
 
+struct EnabledRoot {
+    id: i64,
+    path: String,
+    enabled_at: DateTime<Utc>,
+}
+
 pub struct GraphStatsSnapshot {
     graph: ArrowClickHouseClient,
     datalake: ArrowClickHouseClient,
@@ -87,7 +93,8 @@ impl GraphStatsSnapshot {
         let Some((version, ontology)) = self.served_ontology().await? else {
             return Ok(None);
         };
-        let paths = self.enabled_paths().await?;
+        let roots = self.enabled_roots().await?;
+        let paths: Vec<String> = roots.iter().map(|root| root.path.clone()).collect();
         let (graph_bytes, entity_counts, projects_indexed) = tokio::try_join!(
             self.graph_bytes(&ontology, version),
             self.entity_counts(&ontology, version),
@@ -98,8 +105,10 @@ impl GraphStatsSnapshot {
             graph_bytes,
             entity_counts,
             projects_indexed,
-            top_level_groups_indexed: paths.len() as u64,
-            snapshot_at: Utc::now(),
+            groups_enabled_at: roots
+                .into_iter()
+                .map(|root| (root.id, root.enabled_at))
+                .collect(),
         }))
     }
 
@@ -210,14 +219,26 @@ impl GraphStatsSnapshot {
         i64::extract_column(&batches, 0).map_err(TaskError::new)
     }
 
-    async fn enabled_paths(&self) -> Result<Vec<String>, TaskError> {
+    async fn enabled_roots(&self) -> Result<Vec<EnabledRoot>, TaskError> {
         let batches = self
             .datalake
-            .query(resolved_enabled_namespaces_sql())
+            .query(enabled_roots_with_enabled_at_sql())
             .fetch_arrow()
             .await
             .map_err(|error| self.query_error(error))?;
-        String::extract_column(&batches, 1).map_err(TaskError::new)
+        let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
+        let paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
+        let enabled_ats = DateTime::<Utc>::extract_column(&batches, 2).map_err(TaskError::new)?;
+        Ok(ids
+            .into_iter()
+            .zip(paths)
+            .zip(enabled_ats)
+            .map(|((id, path), enabled_at)| EnabledRoot {
+                id,
+                path,
+                enabled_at,
+            })
+            .collect())
     }
 
     fn query_error(&self, error: impl std::fmt::Display) -> TaskError {
