@@ -49,28 +49,16 @@ fn transport_is_protected(raw: &str) -> bool {
 /// Distinguishes an unconfigured block from a misconfigured one, so the
 /// resolver can say why it stayed off rather than leaving null columns as the
 /// only clue.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ObservabilityConfigError {
+    #[error("observability.provisioner_url is not set")]
+    MissingProvisionerUrl,
+    #[error("observability.provisioner_api_key is not set")]
     MissingProvisionerApiKey,
+    #[error("observability.provisioner_url must be https, or http on loopback")]
     UnprotectedProvisionerUrl,
+    #[error("observability.{0} must be greater than zero")]
     NonPositive(&'static str),
-}
-
-impl std::fmt::Display for ObservabilityConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MissingProvisionerApiKey => {
-                write!(f, "observability.provisioner_api_key is not set")
-            }
-            Self::UnprotectedProvisionerUrl => write!(
-                f,
-                "observability.provisioner_url must be https, or http on loopback"
-            ),
-            Self::NonPositive(field) => {
-                write!(f, "observability.{field} must be greater than zero")
-            }
-        }
-    }
 }
 
 impl ObservabilityConfig {
@@ -81,8 +69,10 @@ impl ObservabilityConfig {
         let url = non_empty(self.provisioner_url.as_deref());
         let key = non_empty(self.provisioner_api_key.as_deref());
 
-        let (Some(provisioner_url), key) = (url, key) else {
-            return Ok(None);
+        let (provisioner_url, key) = match (url, key) {
+            (None, None) => return Ok(None),
+            (None, Some(_)) => return Err(ObservabilityConfigError::MissingProvisionerUrl),
+            (Some(url), key) => (url, key),
         };
         if !transport_is_protected(&provisioner_url) {
             return Err(ObservabilityConfigError::UnprotectedProvisionerUrl);
@@ -164,6 +154,30 @@ mod tests {
         config.provisioner_api_key = None;
 
         assert_eq!(config.resolver_settings(), Ok(None));
+    }
+
+    #[test]
+    fn a_key_without_a_url_names_the_missing_field() {
+        let mut config = complete();
+        config.provisioner_url = None;
+
+        assert_eq!(
+            config.resolver_settings(),
+            Err(ObservabilityConfigError::MissingProvisionerUrl)
+        );
+    }
+
+    #[test]
+    fn the_error_is_usable_as_a_std_error() {
+        fn boxed(config: &ObservabilityConfig) -> Result<(), Box<dyn std::error::Error>> {
+            config.resolver_settings()?;
+            Ok(())
+        }
+
+        let mut config = complete();
+        config.provisioner_url = None;
+
+        assert!(boxed(&config).is_err());
     }
 
     #[test]
