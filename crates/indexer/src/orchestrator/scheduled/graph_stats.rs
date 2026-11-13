@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use clickhouse_client::FromArrowColumn;
+use clickhouse_client::{ArrowQuery, FromArrowColumn};
 use orbit_log_fields::{info, warn};
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::scope::CODE_INDEXING_CHECKPOINT_TABLE;
@@ -21,7 +21,9 @@ use orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
 
 use crate::analytics::{GraphStats, GraphStatsReporter};
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::orchestrator::dispatch::enabled_namespaces::enabled_roots_with_enabled_at_sql;
+use crate::orchestrator::dispatch::enabled_namespaces::{
+    enabled_roots_with_enabled_at_sql, resolved_enabled_namespaces_sql,
+};
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::retry::{Backoff, LocalRetry, Step, drive};
 
@@ -46,24 +48,20 @@ static ELIGIBLE_PROJECTS_SQL: LazyLock<String> = LazyLock::new(|| {
         r#"SELECT DISTINCT id
 FROM project_namespace_traversal_paths FINAL
 WHERE deleted = false
-  AND extract(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}') IN {{paths:Array(String)}}"#
+  AND extract(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}') IN (
+    SELECT traversal_path FROM ({}))"#,
+        resolved_enabled_namespaces_sql()
     )
 });
 
-static INDEXED_PROJECTS_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        r#"SELECT DISTINCT project_id
-FROM {{table:Identifier}} FINAL
+const INDEXED_PROJECTS_SQL: &str = r#"SELECT DISTINCT project_id
+FROM {table:Identifier} FINAL
 WHERE _deleted = false
   AND is_default_branch
-  AND indexed_at IS NOT NULL
-  AND extract(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}') IN {{paths:Array(String)}}"#
-    )
-});
+  AND indexed_at IS NOT NULL"#;
 
 struct EnabledRoot {
     id: i64,
-    path: String,
     enabled_at: DateTime<Utc>,
 }
 
@@ -100,11 +98,10 @@ impl GraphStatsSnapshot {
             return Ok(None);
         };
         let roots = self.enabled_roots().await?;
-        let paths: Vec<String> = roots.iter().map(|root| root.path.clone()).collect();
         let (graph_bytes, entity_counts, projects_indexed) = tokio::try_join!(
             self.graph_bytes(&ontology, version),
             self.entity_counts(&ontology, version),
-            self.projects_indexed(version, &paths),
+            self.projects_indexed(version),
         )?;
 
         Ok(Some(GraphStats {
@@ -182,18 +179,14 @@ impl GraphStatsSnapshot {
         Ok(counts)
     }
 
-    async fn projects_indexed(&self, version: u32, paths: &[String]) -> Result<u64, TaskError> {
-        if paths.is_empty() {
-            return Ok(0);
-        }
+    async fn projects_indexed(&self, version: u32) -> Result<u64, TaskError> {
         let code_checkpoint = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, version);
         let (eligible, indexed) = tokio::try_join!(
-            self.project_ids(&self.datalake, &ELIGIBLE_PROJECTS_SQL, None, paths),
+            self.project_ids(self.datalake.query(&ELIGIBLE_PROJECTS_SQL)),
             self.project_ids(
-                &self.graph,
-                &INDEXED_PROJECTS_SQL,
-                Some(&code_checkpoint),
-                paths
+                self.graph
+                    .query(INDEXED_PROJECTS_SQL)
+                    .param("table", code_checkpoint.as_str())
             ),
         )?;
         let eligible: HashSet<i64> = eligible.into_iter().collect();
@@ -205,17 +198,7 @@ impl GraphStatsSnapshot {
         Ok(indexed as u64)
     }
 
-    async fn project_ids(
-        &self,
-        client: &ArrowClickHouseClient,
-        sql: &str,
-        table: Option<&str>,
-        paths: &[String],
-    ) -> Result<Vec<i64>, TaskError> {
-        let mut query = client.query(sql).param("paths", paths);
-        if let Some(table) = table {
-            query = query.param("table", table);
-        }
+    async fn project_ids(&self, query: ArrowQuery) -> Result<Vec<i64>, TaskError> {
         let batches = query
             .fetch_arrow()
             .await
@@ -231,17 +214,11 @@ impl GraphStatsSnapshot {
             .await
             .map_err(|error| self.query_error(error))?;
         let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
-        let paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
         let enabled_ats = DateTime::<Utc>::extract_column(&batches, 2).map_err(TaskError::new)?;
         Ok(ids
             .into_iter()
-            .zip(paths)
             .zip(enabled_ats)
-            .map(|((id, path), enabled_at)| EnabledRoot {
-                id,
-                path,
-                enabled_at,
-            })
+            .map(|(id, enabled_at)| EnabledRoot { id, enabled_at })
             .collect())
     }
 
