@@ -62,7 +62,9 @@ impl Pass for CodePolicy {
     }
 }
 
-fn in_excluded_directory(path: &str) -> bool {
+/// `true` when a directory segment of the `/`-separated `path` is in
+/// [`EXCLUDED_INDEXING_DIRS`]; the basename itself never matches.
+pub fn in_excluded_directory(path: &str) -> bool {
     let Some((directories, _)) = path.rsplit_once('/') else {
         return false;
     };

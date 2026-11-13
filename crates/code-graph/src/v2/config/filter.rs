@@ -13,6 +13,7 @@ use orbit_utils::fs_walk::{
     CapExceeded, ContentClass, Counter, Decision, FileInventoryEntry, FileLabel, FileStreamHooks,
     SkipReason,
 };
+use orbit_utils::vfs_policies::in_excluded_directory;
 use rustc_hash::FxHashMap;
 
 use super::Language;
@@ -103,7 +104,7 @@ impl FileStreamHooks for CodeFilter {
             return Some(self.record(file, SkipReason::Oversize, ContentClass::Unknown));
         }
         let path = Path::new(&file.path);
-        if in_excluded_directory(path) {
+        if in_excluded_directory(&file.path) {
             return Some(self.record(file, SkipReason::ExcludedDirectory, ContentClass::Unknown));
         }
         if is_excluded_from_indexing(path) {
@@ -233,25 +234,6 @@ static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
     }
     builder.build().expect("static excluded-indexing globset")
 });
-
-use orbit_utils::vfs_policies::EXCLUDED_INDEXING_DIRS;
-
-fn in_excluded_directory(rel_path: &Path) -> bool {
-    let mut components = rel_path.components().peekable();
-    while let Some(component) = components.next() {
-        if components.peek().is_none() {
-            break;
-        }
-        if let std::path::Component::Normal(name) = component
-            && EXCLUDED_INDEXING_DIRS
-                .iter()
-                .any(|dir| name.eq_ignore_ascii_case(dir))
-        {
-            return true;
-        }
-    }
-    false
-}
 
 /// `true` when `rel_path` is on the [`EXCLUDED_INDEXING_GLOBS`] denylist. Match
 /// is case-insensitive, on the basename only. `false` means "load it"; resolver
