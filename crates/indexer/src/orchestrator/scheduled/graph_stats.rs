@@ -25,7 +25,6 @@ use crate::orchestrator::dispatch::enabled_namespaces::enabled_roots_with_enable
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 
 const TASK_NAME: &str = "analytics.graph_stats";
-/// A failed attempt is retried inside the run, because the cadence lock holds the day's slot.
 const ATTEMPTS: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_secs(60);
 
