@@ -1,8 +1,8 @@
 ---
-description: Daily snapshot of the instance's graph, sent once a day per instance by the GKG dispatcher, with graph size, live entity counts per ontology node type, and code-indexing coverage
+description: Daily snapshot of the instance's graph, sent once a day per instance by the Orbit dispatcher, with graph size, live entity counts per ontology node type, and code-indexing coverage
 internal_events: true
 status: active
-action: gkg_graph_stats
+action: orbit_graph_stats
 product_group: knowledge_graph
 product_categories:
 - knowledge_graph

@@ -424,7 +424,7 @@ pub struct MigrationCompletionConfig {
     pub schedule: ScheduleConfiguration,
 }
 
-/// Sends the daily `gkg_graph_stats` snapshot. Runs only when analytics is on.
+/// Sends the daily `orbit_graph_stats` snapshot. Runs only when analytics is on.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct GraphStatsConfig {

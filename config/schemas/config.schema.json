@@ -1079,7 +1079,7 @@
       ]
     },
     "GraphStatsConfig": {
-      "description": "Sends the daily `gkg_graph_stats` snapshot. Runs only when analytics is on.",
+      "description": "Sends the daily `orbit_graph_stats` snapshot. Runs only when analytics is on.",
       "type": "object",
       "properties": {
         "cron": {

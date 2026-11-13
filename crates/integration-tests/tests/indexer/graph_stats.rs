@@ -104,7 +104,7 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
 
     let events = tracker.drain();
     assert_eq!(events.len(), 1, "one snapshot per run");
-    assert_eq!(events[0].action(), "gkg_graph_stats");
+    assert_eq!(events[0].action(), "orbit_graph_stats");
     let stats = &events[0]
         .contexts()
         .iter()

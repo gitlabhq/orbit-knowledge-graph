@@ -1,4 +1,4 @@
-//! The daily `gkg_graph_stats` snapshot: graph size, live entity counts, and
+//! The daily `orbit_graph_stats` snapshot: graph size, live entity counts, and
 //! code-indexing coverage for the whole instance. The dispatcher sends one per
 //! instance per day so Service Ping can report "current value" metrics.
 
@@ -14,8 +14,8 @@ use orbit_server_config::AnalyticsConfig;
 
 use super::context::{build_common, saturating_i64};
 
-const GKG_CATEGORY: &str = "gkg";
-const ACTION_GRAPH_STATS: &str = "gkg_graph_stats";
+const ORBIT_CATEGORY: &str = "orbit";
+const ACTION_GRAPH_STATS: &str = "orbit_graph_stats";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphStats {
@@ -68,7 +68,7 @@ impl GraphStatsReporter {
             snapshot_at: stats.snapshot_at,
         });
 
-        let event = StructuredEvent::builder(GKG_CATEGORY, ACTION_GRAPH_STATS)
+        let event = StructuredEvent::builder(ORBIT_CATEGORY, ACTION_GRAPH_STATS)
             .context(common)
             .context(context)
             .build()?;

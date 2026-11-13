@@ -1,4 +1,4 @@
-//! `analytics.graph_stats`: the daily `gkg_graph_stats` snapshot of the served graph.
+//! `analytics.graph_stats`: the daily `orbit_graph_stats` snapshot of the served graph.
 //!
 //! The cadence lock lets one dispatcher replica run it per day, so each
 //! instance sends one snapshot. Counts drop soft-deleted rows: node counts read
