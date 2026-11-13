@@ -69,6 +69,11 @@ stages:
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
       - match: '(from_instruction (image_spec name: $N) as: $A)'
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)))'
+      # An unnamed stage is `stage:<image>#<index>`, e.g. `stage:node#2`. The
+      # regex strips the tag and digest from the image. The index is the FROM's
+      # position among the file's top-level nodes, so comments and parser
+      # directives count and it is not Docker's stage number. It keeps two
+      # stages from one image apart.
       - match: '(from_instruction (image_spec name: $N tag: (image_tag $$$T)))'
         replace: '(__from (__defname @$ROOT|concat("#", "child_sym:image_spec", "sibling_index")|regex_replace("(:[^/:#@]*)?(@[^#]*)?#", "#")|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
       - match: '(from_instruction (image_spec name: $N))'
