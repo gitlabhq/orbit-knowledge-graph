@@ -1,5 +1,8 @@
+use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+use futures::FutureExt;
 
 use compiler::dag::Peer;
 use duckdb_client::DuckDbClient;
@@ -8,7 +11,7 @@ use query_data_model::{DuckDb, Packages};
 
 use super::{
     PresetOr, QueryStep, assert_compilation, assert_output, build_redaction, build_security,
-    execute_output, read_scenarios, resolve_preset, seed_preset, step_label,
+    execute_output, read_scenarios, resolve_preset, seed_preset, settle, step_label,
 };
 use crate::context::TestContext;
 use crate::lake::{Lake, Mode};
@@ -75,10 +78,16 @@ pub async fn run_lake_dir(
             presets,
             &name,
         ));
-        for (index, step) in steps.iter().enumerate() {
-            let label = format!("{} [{mode:?}]", step_label(&name, index, steps.len()));
-            run_step(ctx, &graph, &security, &redaction, &peers, step, &label).await;
-        }
+        let label = format!("{name} [{mode:?}]");
+        let outcome = AssertUnwindSafe(async {
+            for (index, step) in steps.iter().enumerate() {
+                let label = format!("{} [{mode:?}]", step_label(&name, index, steps.len()));
+                run_step(ctx, &graph, &security, &redaction, &peers, step, &label).await;
+            }
+        })
+        .catch_unwind()
+        .await;
+        settle(outcome, config.expected_failure.as_ref(), &label);
         ran += 1;
     }
     assert!(ran > 0, "no lake scenarios under {}", root.display());

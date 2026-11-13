@@ -44,8 +44,8 @@ use query_engine::compiler::orbit_authorization::Key;
 
 pub use duckdb::run_duckdb_dir;
 pub use format::{
-    PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, QueryStep, RedactionConfig,
-    ScenarioConfig, SecurityOverride,
+    ExpectedFailure, PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, QueryStep,
+    RedactionConfig, ScenarioConfig, SecurityOverride,
 };
 pub use lake::run_lake_dir;
 
@@ -189,8 +189,34 @@ async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, pr
     } else {
         Ok(())
     };
-    if let Err(failure) = outcome.and(cleanup) {
+    if let Err(failure) = cleanup {
         resume_unwind(failure);
+    }
+    settle(outcome, config.expected_failure.as_ref(), name);
+}
+
+/// A case without an expected failure must pass; a case with one must fail with its message.
+fn settle(outcome: std::thread::Result<()>, expected: Option<&ExpectedFailure>, name: &str) {
+    match (outcome, expected) {
+        (Ok(()), None) => {}
+        (Err(failure), None) => resume_unwind(failure),
+        (Ok(()), Some(expected)) => panic!(
+            "{name}: passes now, so drop its expected failure ({})",
+            expected.reason
+        ),
+        (Err(failure), Some(expected)) => {
+            let message = failure
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| failure.downcast_ref::<&str>().copied())
+                .unwrap_or_default();
+            assert!(
+                message.contains(&expected.message),
+                "{name}: failed with {message:?}, not the expected {:?} ({})",
+                expected.message,
+                expected.reason
+            );
+        }
     }
 }
 
@@ -1360,6 +1386,29 @@ mod tests {
             assert!(message.contains("Orbit query syntax"), "{message}");
             assert!(message.contains(position), "{message}");
             assert!(!message.contains("private-query-literal"), "{message}");
+        }
+    }
+
+    #[test]
+    fn an_expected_failure_must_fail_with_its_message() {
+        let expected = ExpectedFailure {
+            reason: "a known defect".into(),
+            message: "edge set mismatch".into(),
+        };
+        let failed = |message: &'static str| -> std::thread::Result<()> {
+            Err(Box::new(message.to_string()))
+        };
+        settle(
+            failed("DEVELOPED_IN edge set mismatch"),
+            Some(&expected),
+            "case",
+        );
+        settle(Ok(()), None, "case");
+        for outcome in [Ok(()), failed("node count mismatch")] {
+            let settled = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                settle(outcome, Some(&expected), "case")
+            }));
+            assert!(settled.is_err());
         }
     }
 }

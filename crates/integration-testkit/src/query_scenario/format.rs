@@ -66,6 +66,17 @@ pub struct ScenarioConfig {
     pub duckdb: bool,
     #[serde(default)]
     pub skip: Option<String>,
+    #[serde(default)]
+    pub expected_failure: Option<ExpectedFailure>,
+}
+
+/// A known defect the case hits: it must fail with `message` until the defect is fixed, and
+/// fails once it passes, so the mark goes with the fix.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectedFailure {
+    pub reason: String,
+    pub message: String,
 }
 
 /// Either a preset name (string) or an inline value.
