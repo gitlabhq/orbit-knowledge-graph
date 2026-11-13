@@ -15,8 +15,6 @@ stages:
     rules:
       - match: '(__def (__section))'
         tag: { scoped: "true", definition_span: "true" }
-      - match: '(__def (__front_matter))'
-        tag: { definition_span: "true" }
 
 resolve:
   stages: []
