@@ -1,8 +1,5 @@
 description: Group -> Project CONTAINS traversal (perf load query)
 
-# compile_only: the query is validated against the live ontology but not
-# executed, so no seeded rows are needed. The perf load driver reads this same
-# file to fire the query against a running stack.
 query:
   json: |
     {
@@ -14,6 +11,3 @@ query:
       "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
       "limit": 50
     }
-
-expect:
-  compile_only: true

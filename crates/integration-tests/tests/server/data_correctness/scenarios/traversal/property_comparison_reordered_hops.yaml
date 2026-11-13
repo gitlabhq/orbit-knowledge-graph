@@ -21,4 +21,3 @@ expect:
     MEMBER_OF: [[1, 100], [2, 100], [6, 100]]
     CONTAINS: [[100, 1000]]
   referential_integrity: true
-  skip_requirements: ["filter:name"]

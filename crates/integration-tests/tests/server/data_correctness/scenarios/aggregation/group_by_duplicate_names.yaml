@@ -19,7 +19,6 @@ query:
     MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project {name: 'dup'}) RETURN p, count(g) AS n LIMIT 10
 
 expect:
-  skip_requirements: ["node_ids", "filter:name"]
   groups:
     p:
       entity: Project

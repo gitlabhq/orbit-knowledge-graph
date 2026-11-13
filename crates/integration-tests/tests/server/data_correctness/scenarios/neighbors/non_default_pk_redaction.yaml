@@ -20,8 +20,6 @@ query:
     MATCH (d:MergeRequestDiff)<-[:HAS_DIFF]-(n) WHERE d.head_commit_sha STARTS WITH 'bbbb' RETURN d, n
 
 expect:
-  skip_requirements:
-    - "filter:head_commit_sha"
   node_count: 2
   nodes:
     MergeRequestDiff:

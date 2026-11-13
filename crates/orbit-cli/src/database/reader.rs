@@ -3,6 +3,7 @@ use crate::commands::setup::spec;
 use crate::workspace;
 use anyhow::{Context, Result};
 use duckdb_client::{DuckDbClient, OpenMode, sql_lit, string_column};
+use orbit_utils::strings::quote_ident;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -145,8 +146,4 @@ impl GraphReader {
         )?;
         Ok(reader)
     }
-}
-
-fn quote_ident(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
 }

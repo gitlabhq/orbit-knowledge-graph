@@ -45,7 +45,10 @@ List these directories and read the relevant owner before you act:
 Do not change any file under `docs/` in an MR that changes code. Change it only when a CI or build check fails without it.
 Do not create a GitLab issue or epic until the author approves the draft.
 Read `CONTRIBUTING.md` for engineering, documentation, issue, and MR
-conventions. Read `CONTEXT.md` for domain terms.
+conventions. Before you open an MR, fill every section of
+`.gitlab/merge_request_templates/Default.md`, including the Agent context block.
+Copy one `type::` label, the `orbit::<area>` label, and the milestone from the linked
+issue. Read `CONTEXT.md` for domain terms.
 
 ## Writing or changing a skill
 

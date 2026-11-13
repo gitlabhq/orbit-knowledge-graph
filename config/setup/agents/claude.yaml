@@ -1,7 +1,4 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
-# Claude Code honors PreToolUse additionalContext, so search/read calls also get an
-# `orbit hook-guard` nudge on top of the CLAUDE.md block. Claude Code does not scan
-# `.agents/skills`, so the shared skill dir is linked into `.claude/skills`.
 name: claude
 title: Claude Code
 detect: ["$CLAUDE_CONFIG_DIR", "~/.claude", "~/.claude.json"]
@@ -19,6 +16,16 @@ json_merges:
         hooks:
           - type: command
             command: "{{orbit}} hook-guard search{{hook_gitlab}}"
+  - file:
+      project: .claude/settings.local.json
+      global: "${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json"
+    path: [hooks, SessionStart]
+    marker: hook-guard instructions
+    entries:
+      - hooks:
+          - type: command
+            command: "{{orbit}} hook-guard instructions{{hook_gitlab}}"
+            timeout: 10
 retired:
   mcp:
     file:
@@ -50,3 +57,4 @@ plugin:
   name: gitlab-orbit
   min_version: "2.1.287"
   version_command: [claude, --version]
+  features: true

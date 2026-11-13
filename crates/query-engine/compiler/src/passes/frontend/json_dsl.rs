@@ -48,6 +48,7 @@ fn derive_json_schema(model: &impl OrbitQueryModel) -> Result<serde_json::Value>
             for id in &entity.properties {
                 let property = model.graph().property(*id);
                 if model.property_is_hidden(*id)
+                    || model.property_is_unresolvable(*id)
                     || filterable_only
                         && !model.property_is_filterable(&entity.name, &property.name)
                 {
@@ -100,7 +101,13 @@ mod tests {
                     .iter()
                     .find(|field| field.name == property);
                 let reserved = ontology::constants::NODE_RESERVED_COLUMNS.contains(&property);
-                let visible = declared.filter(|field| !field.hidden);
+                let visible = declared.filter(|field| {
+                    !field.hidden
+                        && !matches!(
+                            &field.source,
+                            ontology::FieldSource::Virtual(source) if source.disabled
+                        )
+                });
                 for (selector, expected) in [
                     (
                         serde_json::json!({"columns": [property]}),

@@ -1,0 +1,18 @@
+---
+cases:
+  - name: after_partial_redaction
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "u", "entity": "User", "node_ids": [2, 3]}],
+          "neighbors": {"direction": "outgoing"}
+        }
+      gql: |
+        MATCH (u:User)-->(n) WHERE u.id IN [2, 3] RETURN u, n
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        hydration: dynamic

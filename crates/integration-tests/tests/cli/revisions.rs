@@ -90,19 +90,32 @@ fn workspace_sql_cannot_escape_the_data_directory() {
     let other = outside.path().join("other.duckdb");
     duckdb_client::DuckDbClient::open(&other).unwrap();
 
-    for sql in [
-        format!("SELECT * FROM read_text('{}')", secret.display()),
-        format!("ATTACH '{}' AS other", other.display()),
-        "INSTALL spatial".to_string(),
-        "SET enable_external_access = true".to_string(),
-    ] {
-        let (_, error, ok) = run_cmd(&["workspace", "sql", &sql], data.path());
-        assert!(!ok, "allowed: {sql}");
-        assert!(
-            error.contains("disabled by configuration")
-                || error.contains("configuration has been locked"),
-            "{sql}: {error}"
-        );
+    std::fs::create_dir(data.path().join("nested")).unwrap();
+    let dotted_root = data.path().join("nested").join("..");
+    let traversal = data
+        .path()
+        .join("..")
+        .join(outside.path().file_name().unwrap())
+        .join("other.duckdb");
+    std::os::unix::fs::symlink(outside.path(), data.path().join("link")).unwrap();
+    let symlinked = data.path().join("link").join("other.duckdb");
+    for root in [data.path(), dotted_root.as_path()] {
+        for sql in [
+            format!("SELECT * FROM read_text('{}')", secret.display()),
+            format!("ATTACH '{}' AS other", other.display()),
+            format!("ATTACH '{}' AS other", traversal.display()),
+            format!("ATTACH '{}' AS other", symlinked.display()),
+            "INSTALL spatial".to_string(),
+            "SET enable_external_access = true".to_string(),
+        ] {
+            let (_, error, ok) = run_cmd(&["workspace", "sql", &sql], root);
+            assert!(!ok, "allowed with root {}: {sql}", root.display());
+            assert!(
+                error.contains("disabled by configuration")
+                    || error.contains("configuration has been locked"),
+                "{sql}: {error}"
+            );
+        }
     }
 
     let (output, error, ok) = run_cmd(

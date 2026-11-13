@@ -1,0 +1,28 @@
+---
+cases:
+  - name: User-MergeRequest AUTHORED traversal returns correct edges and node properties
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "limit": 20
+        }
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, mr.title, mr.state LIMIT 20
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS mr_title
+            - AS mr_state
+          not_contains:
+            - AS u_username
+        hydration: static
