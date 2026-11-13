@@ -91,7 +91,7 @@ impl Channel {
         }
         let addresses: Vec<IpAddr> = match url.host() {
             None => return Self::InvalidUrl,
-            Some(Host::Domain("localhost")) => return Self::Localhost,
+            Some(Host::Domain("localhost")) if dialled.is_none() => return Self::Localhost,
             // reqwest ignores the resolve_host override for an IP literal host.
             Some(Host::Ipv4(ip)) => vec![ip.into()],
             Some(Host::Ipv6(ip)) => vec![ip.into()],
@@ -1094,6 +1094,18 @@ mod tests {
         assert_eq!(
             channel_of("http://gitlab.example.com", Some("203.0.113.10")),
             Channel::PublicAddress
+        );
+    }
+
+    #[test]
+    fn resolve_host_decides_the_channel_of_localhost() {
+        assert_eq!(
+            channel_of("http://localhost:8080", Some("203.0.113.10")),
+            Channel::PublicAddress
+        );
+        assert_eq!(
+            channel_of("http://localhost:8080", Some("127.0.0.1")),
+            Channel::PrivateAddress
         );
     }
 
