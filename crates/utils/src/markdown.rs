@@ -38,9 +38,8 @@ pub struct Section {
     pub end: usize,
 }
 
-/// The sections of a Markdown document. Only headings at the top level of the
-/// document count: a heading inside a block quote or list item is quoted
-/// content, not document structure.
+/// Only headings at the top level of the document count as sections: a heading
+/// inside a block quote or list item is quoted content, not document structure.
 pub fn parse(source: &str) -> Document {
     let arena = Arena::new();
     let mut options = Options::default();
