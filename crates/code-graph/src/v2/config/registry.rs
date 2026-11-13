@@ -53,15 +53,20 @@ mod tests {
             );
         }
         for path in [
-            "docs/Dockerfile-notes.md",
             "MyDockerfile",
-            "Dockerfile.md",
             "Dockerfile.tt",
             "Dockerfile.mri.erb",
             "Containerfile.template",
             "Dockerfile.wip.diff",
         ] {
             assert_eq!(detect_language_from_path(path), None, "{path}");
+        }
+        for path in ["docs/Dockerfile-notes.md", "Dockerfile.md"] {
+            assert_eq!(
+                detect_language_from_path(path),
+                Some(Language::Markdown),
+                "{path}"
+            );
         }
         assert_eq!(
             detect_language_from_path("Dockerfile.py"),
