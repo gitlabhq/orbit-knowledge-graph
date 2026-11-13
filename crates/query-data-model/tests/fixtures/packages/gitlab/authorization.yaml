@@ -26,6 +26,7 @@ entities:
   User:
     scope: global
     permission: read
+    checks: open
     properties:
       open: [id, username]
       admin_exact: [email]

@@ -6,6 +6,9 @@
 //! - `All`: no filter;
 //! - an empty set: `false`, so the read returns no rows.
 //!
+//! A global read has no scope key column: it reads every row when the caller holds its permission
+//! in any scope, and gets `false` otherwise.
+//!
 //! Each guard names its own permission, so a read of an entity that needs a stronger
 //! permission than its neighbours is filtered down to the scopes where the caller holds it.
 
@@ -81,11 +84,15 @@ fn guards<B: RelationalBackend>(
                 continue;
             };
             for guard in scan(catalog, *table).into_iter().flatten() {
-                let Some(column) = graph
-                    .outputs(scanned)
-                    .find(|output| graph.name(*output) == Some(guard.column.as_str()))
-                else {
-                    continue;
+                let column = match &guard.column {
+                    Some(name) => match graph
+                        .outputs(scanned)
+                        .find(|output| graph.name(*output) == Some(name.as_str()))
+                    {
+                        Some(column) => Some(column),
+                        None => continue,
+                    },
+                    None => None,
                 };
                 // No answers at all means the caller was never resolved; a false filter would hide it.
                 if grants.is_empty() {
@@ -96,7 +103,10 @@ fn guards<B: RelationalBackend>(
                     ));
                 }
                 let set = scope_set(grants, catalog.model(), guard.scope, guard.permission)?;
-                conditions.extend(ScopeFilter::new(set)?.on(Expr::Column(column)));
+                conditions.extend(match column {
+                    Some(column) => ScopeFilter::new(set)?.on(Expr::Column(column)),
+                    None => set.is_empty().then(falsehood),
+                });
             }
         }
         if !conditions.is_empty() {

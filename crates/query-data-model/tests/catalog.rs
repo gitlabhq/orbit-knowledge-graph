@@ -463,6 +463,76 @@ fn packages_below_the_platform_tier_declare_no_checks_or_none() {
 }
 
 #[test]
+fn a_global_entity_declares_its_checks_or_open() {
+    let model = load(&["gitlab"]).unwrap();
+    let user = model.entity("User").unwrap();
+    assert!(model.access().is_global(user));
+    assert!(model.access().entity(user).checks.is_empty());
+
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| match name {
+        "gitlab/authorization.yaml" => yaml.replace("    checks: open\n", ""),
+        _ => yaml,
+    }));
+    assert_eq!(
+        errors,
+        ["gitlab: User is in global scope global, so it declares checks or checks: open"]
+    );
+}
+
+#[test]
+fn only_a_global_entity_declares_checks_open() {
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| {
+        match name {
+        "gitlab/authorization.yaml" => yaml.replace(
+            "    checks: [{provider: rails, permission: read_merge_request, resource: merge_request}]\n",
+            "    checks: open\n",
+        ),
+        _ => yaml,
+    }
+    }));
+    assert_eq!(
+        errors,
+        ["gitlab: MergeRequest declares checks: open, which only a global entity may"]
+    );
+}
+
+#[test]
+fn only_a_platform_package_declares_checks_open() {
+    let errors = spec_errors(demo(|name, yaml| match name {
+        "integration.jira/authorization.yaml" => yaml.replace(
+            "  JiraIssue:\n    scope: namespace\n",
+            "  JiraIssue:\n    scope: namespace\n    checks: open\n",
+        ),
+        _ => yaml,
+    }));
+    assert!(
+        errors.contains(
+            &"integration.jira: JiraIssue declares checks: open, which only a platform package may"
+                .to_string()
+        ),
+        "{errors:?}"
+    );
+
+    let errors = spec_errors(load_with(
+        &["gitlab", "tenant.agent_memory"],
+        |name, yaml| match name {
+            "tenant.agent_memory/authorization.yaml" => yaml.replace(
+                "    permission: read_developer\n",
+                "    permission: read_developer\n    checks: open\n",
+            ),
+            _ => yaml,
+        },
+    ));
+    assert!(
+        errors.contains(
+            &"tenant.agent_memory: AgentMemory declares checks: open, which only a platform package may"
+                .to_string()
+        ),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn every_entity_needs_an_authorization_entry() {
     let errors = spec_errors(demo(|name, yaml| match name {
         "integration.jira/authorization.yaml" => {
@@ -501,6 +571,7 @@ fn a_package_cannot_loosen_another_package_access_rule() {
             "integration.jira: User.id has two access classes",
             "integration.jira: User.username has two access classes",
             "integration.jira: User.email has two access classes",
+            "integration.jira: User is in global scope global, so it declares checks or checks: open",
             "integration.jira: User has two authorization entries",
             "integration.jira: AUTHORED has two authorization entries",
             "integration.jira: User is in Global scope global, which a Integration package may not use",

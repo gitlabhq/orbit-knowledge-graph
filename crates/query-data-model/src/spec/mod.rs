@@ -5,9 +5,9 @@ mod source;
 mod storage;
 
 pub use authorization::{
-    AuthorizationFragment, CheckSpec, DelegatedCheck, DelegatedWord, EdgePolicy, EdgeScope,
-    EntityAccess, PackageManifest, PolicySpec, PolicyWord, PropertyAccess, PropertyClasses,
-    RelationshipAccess, RowCheck, ScopeDeclaration, ScopeKeySpec, ScopeKind, Via,
+    AuthorizationFragment, CheckSpec, ChecksSpec, ChecksWord, DelegatedCheck, DelegatedWord,
+    EdgePolicy, EdgeScope, EntityAccess, PackageManifest, PolicySpec, PolicyWord, PropertyAccess,
+    PropertyClasses, RelationshipAccess, RowCheck, ScopeDeclaration, ScopeKeySpec, ScopeKind, Via,
 };
 pub use graph::{
     Attribute, DefaultValue, Entity, GraphFragment, Property, Relationship, RelationshipVariant,

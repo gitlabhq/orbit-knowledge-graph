@@ -207,7 +207,7 @@ impl ResultContext {
     }
 
     /// Every node in `proved` whose entity declares no row check needs none: the security
-    /// check proved its read's scope filter, the only policy the entity has.
+    /// check proved its read's scope filter or global permission, the only policy the entity has.
     pub fn mark_proved(&mut self, proved: &std::collections::BTreeSet<String>) {
         let unchecked: Vec<String> = self
             .nodes

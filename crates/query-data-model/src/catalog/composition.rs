@@ -234,7 +234,7 @@ fn authorization_references(access: &AuthorizationFragment) -> Vec<(Kind, String
                 PolicySpec::ScopeKey { .. } | PolicySpec::Word(_) => {}
             }
         }
-        for check in &entity.checks {
+        for check in entity.checks.listed() {
             if let CheckSpec::Rows(row) = check {
                 names.push((Kind::Permission, row.permission.clone()));
                 names.extend(
@@ -297,7 +297,13 @@ fn tiers(
                 format!("{name} enforces none, which only a platform package may"),
             );
         }
-        for check in &entity.checks {
+        if entity.checks.is_open() {
+            diagnostics.error(
+                package,
+                format!("{name} declares checks: open, which only a platform package may"),
+            );
+        }
+        for check in entity.checks.listed() {
             match (tier, check) {
                 (Tier::Integration, CheckSpec::Delegated(_)) => {}
                 (Tier::Integration, CheckSpec::Rows(row)) => diagnostics.error(package, format!(

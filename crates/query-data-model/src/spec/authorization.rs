@@ -45,8 +45,41 @@ pub struct EntityAccess {
     #[serde(default)]
     pub enforce: IndexMap<String, PolicySpec>,
     #[serde(default)]
-    pub checks: Vec<CheckSpec>,
+    pub checks: ChecksSpec,
     pub properties: PropertyClasses,
+}
+
+/// An entity's row checks, or `open`: the permission alone admits every row of a global entity.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum ChecksSpec {
+    Word(ChecksWord),
+    Listed(Vec<CheckSpec>),
+}
+
+impl Default for ChecksSpec {
+    fn default() -> Self {
+        Self::Listed(Vec::new())
+    }
+}
+
+impl ChecksSpec {
+    pub fn listed(&self) -> &[CheckSpec] {
+        match self {
+            Self::Word(_) => &[],
+            Self::Listed(checks) => checks,
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Word(ChecksWord::Open))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChecksWord {
+    Open,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
