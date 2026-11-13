@@ -25,8 +25,15 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
         front_matter,
         sections,
     } = orbit_utils::markdown::parse(source);
+    let front_matter_nodes = front_matter.as_ref().map_or(0, |block| {
+        3 + block
+            .values
+            .iter()
+            .filter(|value| !value.is_empty())
+            .count()
+    });
     let mut tree = Tree::with_capacity(
-        1 + 3 * (usize::from(front_matter.is_some()) + sections.len()),
+        1 + front_matter_nodes + 3 * sections.len(),
         node("document", lang.syms.intern(label), 0, source.len()),
     );
     tree.label = label.to_string();
