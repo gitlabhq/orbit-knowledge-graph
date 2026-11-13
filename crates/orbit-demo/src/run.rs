@@ -4,14 +4,18 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use compiler::dag::{Backend, Env, Source};
+use std::collections::BTreeMap;
+
+use compiler::dag::{Backend, Env, Source, StageQuery, split_query};
+use compiler::surface;
 use query_data_model::catalog::Row;
+use query_data_model::surface::Statement;
 use query_engine::shared::dag::{Event, Executor, Executors, Observer, Runner};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 
-use crate::Demo;
 use crate::executors::{CodeHttp, LiveHttp, Sampled, Samples, json_rows};
+use crate::{Demo, plan_text};
 
 const ROWS: usize = 500;
 
@@ -136,21 +140,49 @@ async fn execute(
         executors = executors.with(target.connection(), sampled(executor));
     }
     let checks = session.checks(Arc::clone(log));
-    let env = Env {
+    let env = || Env {
         primary: &demo.primary,
         remotes: &demo.remotes,
         grants: &session.grants,
         limits: query_data_model::testkit::limits(),
         trace: true,
     };
+    let parse = || {
+        let admin = session.grants.caller().admin();
+        let catalog = surface::catalog(&demo.catalog, &demo.remotes, env().limits, admin);
+        surface::parse(query, catalog)
+    };
+    log.push(plans(demo, parse()?, &env()));
+    let env = env();
     let mut observer = Streaming {
         log: Arc::clone(log),
         samples: Arc::clone(&samples),
     };
     let outcome = Runner::new(env, &executors, &checks, &mut observer)
-        .run(Source::Text(query))
+        .run(Source::Parsed(parse()?))
         .await?;
     Ok(json_rows(&outcome.executed.batches, ROWS))
+}
+
+/// The query's logical plan and each stage's sub-plan as readable trees. The runner reports its
+/// plans as Debug text, so the demo splits a second parse of the same query to print them.
+fn plans(demo: &Demo, statement: Statement, env: &Env<'_>) -> Value {
+    let logical = plan_text::tree(&statement.plan, &demo.model);
+    let stages: BTreeMap<String, Vec<String>> = match split_query(Source::Parsed(statement), env) {
+        Ok(dag) => dag
+            .stages
+            .iter()
+            .filter_map(|stage| match &stage.query {
+                StageQuery::Gql(statement) => Some((
+                    stage.id.to_string(),
+                    plan_text::tree(&statement.plan, &demo.model),
+                )),
+                _ => None,
+            })
+            .collect(),
+        Err(_) => BTreeMap::new(),
+    };
+    json!({"event": "plans", "logical": logical, "stages": stages})
 }
 
 /// The caller's scope answer for every scope and permission the packages read with.

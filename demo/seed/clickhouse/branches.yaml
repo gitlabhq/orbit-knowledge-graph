@@ -1,9 +1,9 @@
 table: gl_branch
 rows:
   - {id: 9000, project_id: 1000, name: main, is_default: true, traversal_path: 1/100/1000/}
-  - {id: 9001, project_id: 1000, name: feature-auth, is_default: false, traversal_path: 1/100/1000/}
-  - {id: 9002, project_id: 1000, name: fix-rate, is_default: false, traversal_path: 1/100/1000/}
+  - {id: 9001, project_id: 1000, name: scoped-admin-tokens, is_default: false, traversal_path: 1/100/1000/}
+  - {id: 9002, project_id: 1000, name: limiter-burst-config, is_default: false, traversal_path: 1/100/1000/}
   - {id: 9003, project_id: 1001, name: main, is_default: true, traversal_path: 1/100/1001/}
-  - {id: 9004, project_id: 1001, name: dark-mode, is_default: false, traversal_path: 1/100/1001/}
+  - {id: 9004, project_id: 1001, name: console-dark-theme, is_default: false, traversal_path: 1/100/1001/}
   - {id: 9005, project_id: 2000, name: main, is_default: true, traversal_path: 1/200/2000/}
-  - {id: 9006, project_id: 2000, name: invoice-export, is_default: false, traversal_path: 1/200/2000/}
+  - {id: 9006, project_id: 2000, name: invoice-csv-export, is_default: false, traversal_path: 1/200/2000/}

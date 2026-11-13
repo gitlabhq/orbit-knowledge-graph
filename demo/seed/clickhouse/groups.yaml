@@ -1,4 +1,4 @@
 table: gl_group
 rows:
-  - {id: 100, name: Acme, full_path: acme, visibility_level: private, traversal_path: 1/100/}
-  - {id: 200, name: Globex, full_path: globex, visibility_level: private, traversal_path: 1/200/}
+  - {id: 100, name: Platform, full_path: kestrel/platform, description: Edge gateway, auth and the operator console, visibility_level: private, traversal_path: 1/100/}
+  - {id: 200, name: Payments, full_path: kestrel/payments, description: Ledger, invoicing and payouts, visibility_level: private, traversal_path: 1/200/}

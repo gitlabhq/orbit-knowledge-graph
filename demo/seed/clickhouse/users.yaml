@@ -1,6 +1,6 @@
 table: gl_user
 rows:
-  - {id: 1, username: maria, name: Maria Maintainer, state: active, user_type: human}
-  - {id: 2, username: gus, name: Gus Guest, state: active, user_type: human}
-  - {id: 3, username: zed, name: Zed Zanzibar, state: active, user_type: human}
-  - {id: 4, username: ann, name: Ann Author, state: active, user_type: human}
+  - {id: 1, username: praman, name: Priya Raman, first_name: Priya, last_name: Raman, state: active, user_type: human}
+  - {id: 2, username: tferreira, name: Tomás Ferreira, first_name: Tomás, last_name: Ferreira, state: active, user_type: human}
+  - {id: 3, username: iokafor, name: Ines Okafor, first_name: Ines, last_name: Okafor, state: active, user_type: human}
+  - {id: 4, username: dbrandt, name: Daniel Brandt, first_name: Daniel, last_name: Brandt, state: active, user_type: human}

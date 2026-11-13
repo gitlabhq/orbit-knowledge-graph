@@ -31,11 +31,13 @@ function apply(event) {
   switch (event.event) {
     case "caller": run.grants = event.grants; break;
     case "check": stage(run.current).checks.push(event); break;
-    case "logical": run.logical = event.plan; break;
+    case "plans":
+      run.logical = event.logical;
+      for (const [id, plan] of Object.entries(event.stages)) run.subplans[id] = { plan };
+      break;
     case "split":
       for (const info of event.stages) {
         run.stages.push({ ...info, status: "waiting", rendered: [], samples: [], keys: [], checks: [] });
-        run.subplans[info.id] = { plan: info.logical };
         for (const input of info.inputs) {
           run.edges.push({ id: `e${input.from}-${info.id}-${input.kind}`, from: input.from, to: info.id, kind: input.kind, properties: input.properties || [] });
         }

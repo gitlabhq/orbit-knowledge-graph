@@ -78,6 +78,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
         kinds(&ran),
         [
             "caller",
+            "plans",
             "logical",
             "split",
             "started 0",
@@ -119,9 +120,9 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     assert_eq!(
         keys["sample"],
         json!([
-            [1000, "feature-auth"],
-            [1000, "fix-rate"],
-            [1001, "dark-mode"]
+            [1000, "limiter-burst-config"],
+            [1000, "scoped-admin-tokens"],
+            [1001, "console-dark-theme"]
         ])
     );
     let code = ran
@@ -145,14 +146,14 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     assert_eq!(requests, ["scope lookup", "structural search"]);
     assert_eq!(
         paths(&ran),
-        ["src/auth.rs", "src/limiter.rs", "web/theme.rs"]
+        ["src/auth/scopes.rs", "src/limiter.rs", "src/theme.rs"]
     );
     assert_eq!(
         paths(&events(page, "guest", QUERY_4).await),
-        ["web/theme.rs"]
+        ["src/theme.rs"]
     );
     let zanzibar = events(page, "zanzibar", QUERY_4).await;
-    assert_eq!(paths(&zanzibar), ["src/auth.rs", "src/limiter.rs"]);
+    assert_eq!(paths(&zanzibar), ["src/auth/scopes.rs", "src/limiter.rs"]);
     let check = zanzibar
         .iter()
         .find(|event| event["event"] == "check")
@@ -161,10 +162,33 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
         (&check["provider"], &check["permission"], &check["field"]),
         (&json!("rails"), &json!("read_code"), &json!("project_id"))
     );
-    let sub_plan = &split["stages"][1]["logical"];
+    assert_eq!(
+        (&check["asked"], &check["allowed"]),
+        (&json!([1000, 2000]), &json!([1000]))
+    );
+
+    let plans = ran.iter().find(|event| event["event"] == "plans").unwrap();
+    let logical: Vec<&str> = plans["logical"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|line| line.as_str().unwrap().trim())
+        .collect();
+    for line in [
+        "Limit 20",
+        "Filter mr.state = 'opened'",
+        "Follow mr -[SOURCE_HEAD]-> h",
+        "Follow h -[HEAD_FILE]-> f",
+        "Entities mr: MergeRequest",
+    ] {
+        assert!(logical.contains(&line), "{line} in {logical:#?}");
+    }
+    let code_stage = plans["stages"]["1"].as_array().unwrap();
     assert!(
-        sub_plan.as_array().is_some_and(|plan| !plan.is_empty()),
-        "{sub_plan}"
+        code_stage
+            .iter()
+            .any(|line| line.as_str().unwrap().trim() == "Entities h: Head"),
+        "{code_stage:?}"
     );
 
     let discussed = events(page, "maintainer", DISCUSSED).await;

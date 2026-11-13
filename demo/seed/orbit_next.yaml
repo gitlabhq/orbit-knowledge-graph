@@ -3,67 +3,104 @@ repositories:
     traversal_path: 1/100/1000/
     branches:
       main:
-        - path: src/lib.rs
+        - path: src/server.rs
           content: |
-            pub mod auth;
-            pub mod limiter;
+            use std::net::SocketAddr;
 
-            pub fn serve() {
-                todo!("wire the server")
+            use crate::config::Config;
+            use crate::router::Router;
+
+            pub async fn serve(config: Config, router: Router) -> anyhow::Result<()> {
+                let listener = tokio::net::TcpListener::bind(config.listen).await?;
+                tracing::info!(addr = %config.listen, "gateway listening");
+                let shutdown = async { todo!("drain connections on SIGTERM") };
+                axum::serve(listener, router.into_service()).with_graceful_shutdown(shutdown).await?;
+                Ok(())
             }
         - path: src/auth.rs
           content: |
-            pub fn check(token: &str) -> bool {
-                !token.is_empty()
+            use crate::token::{Claims, TokenError};
+
+            pub fn verify(header: Option<&str>, keys: &KeySet) -> Result<Claims, TokenError> {
+                let token = header
+                    .and_then(|value| value.strip_prefix("Bearer "))
+                    .ok_or(TokenError::Missing)?;
+                keys.decode(token)
             }
-      feature-auth:
-        - path: src/auth.rs
+      scoped-admin-tokens:
+        - path: src/auth/scopes.rs
           content: |
-            pub fn check(token: &str, scope: &str) -> bool {
-                todo!("check the token scope")
+            use crate::token::Claims;
+
+            pub const ADMIN_WRITE: &str = "admin:write";
+
+            pub fn require(claims: &Claims, scope: &str) -> Result<(), ScopeError> {
+                if claims.scopes.iter().any(|held| held == scope) {
+                    return Ok(());
+                }
+                todo!("reject tokens without the admin:write scope")
             }
-      fix-rate:
+      limiter-burst-config:
         - path: src/limiter.rs
           content: |
-            pub struct Limiter { burst: u32 }
+            use std::time::{Duration, Instant};
 
-            impl Limiter {
-                pub fn allow(&mut self) -> bool {
-                    todo!("tune the burst size")
+            pub struct TokenBucket {
+                tokens: f64,
+                refilled: Instant,
+                rate: f64,
+            }
+
+            impl TokenBucket {
+                pub fn new(config: &LimiterConfig) -> Self {
+                    let burst = todo!("read the burst size from LimiterConfig");
+                    Self { tokens: burst, refilled: Instant::now(), rate: config.per_second }
                 }
             }
   1001:
     traversal_path: 1/100/1001/
     branches:
       main:
-        - path: web/theme.rs
+        - path: src/theme.rs
           content: |
-            pub fn palette() -> [u32; 2] {
-                [0xffffff, 0x000000]
+            pub struct Palette {
+                pub background: u32,
+                pub text: u32,
             }
-        - path: web/sidebar.rs
+
+            pub const LIGHT: Palette = Palette { background: 0xffffff, text: 0x1f1e24 };
+        - path: src/sidebar.rs
           content: |
-            pub fn render() -> String {
-                todo!("render the sidebar")
+            use crate::layout::Viewport;
+
+            pub fn collapsed(viewport: Viewport) -> bool {
+                todo!("collapse the sidebar below 960px")
             }
-      dark-mode:
-        - path: web/theme.rs
+      console-dark-theme:
+        - path: src/theme.rs
           content: |
-            pub fn palette(dark: bool) -> [u32; 2] {
-                todo!("pick the contrast ratio")
+            pub const DARK: Palette = Palette { background: 0x18171d, text: 0xececef };
+
+            pub fn contrast(palette: &Palette) -> f64 {
+                todo!("pick contrast ratios that pass WCAG AA")
             }
   2000:
     traversal_path: 1/200/2000/
     branches:
       main:
-        - path: src/invoice.rs
+        - path: src/totals.rs
           content: |
-            pub fn total(cents: &[i64]) -> i64 {
-                todo!("sum with overflow checks")
+            use crate::money::Cents;
+
+            pub fn total(lines: &[Cents]) -> Cents {
+                todo!("sum with checked_add and report overflow")
             }
-      invoice-export:
-        - path: src/export.rs
+      invoice-csv-export:
+        - path: src/export/csv.rs
           content: |
-            pub fn export(rows: &[i64]) -> String {
-                todo!("round to cents")
+            use crate::invoice::Invoice;
+
+            pub fn write(invoices: &[Invoice], out: &mut impl std::io::Write) -> std::io::Result<()> {
+                writeln!(out, "invoice,customer,settled_at,total")?;
+                todo!("round each line to cents before summing")
             }

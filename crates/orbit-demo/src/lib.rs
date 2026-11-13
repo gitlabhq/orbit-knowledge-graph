@@ -8,6 +8,7 @@ pub mod config;
 pub mod executors;
 pub mod fakes;
 pub mod lockdown;
+pub mod plan_text;
 pub mod run;
 pub mod seed;
 pub mod store;

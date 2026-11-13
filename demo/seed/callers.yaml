@@ -12,7 +12,7 @@ gitlab:
         "user:2": [1001, 3002]
     slack:
       module: fake.slack
-      handles: {"user:1": maria, "user:2": gus}
+      handles: {"user:1": priya, "user:2": tomas}
       readable: {}
 
 zanzibar:
@@ -21,29 +21,29 @@ zanzibar:
     oidc: {module: fake.oidc}
     gitlab_session:
       module: fake.zanzibar
-      relations: {zed: [1/100/1000/, 1/200/2000/, 1/200/]}
+      relations: {iokafor: [1/100/1000/, 1/200/2000/, 1/200/]}
       allowed: {}
     rails:
       module: fake.zanzibar
       relations: {}
-      allowed: {zed: [1000, 3000, 3001, 3005]}
+      allowed: {iokafor: [1000, 3000, 3001, 3005]}
     slack:
       module: fake.slack
-      handles: {zed: zed}
+      handles: {iokafor: ines}
       readable: {}
 
 callers:
   maintainer:
     deployment: gitlab
-    label: Maria, maintainer of Acme (GitLab session)
+    label: Priya Raman, staff engineer, maintainer of Platform
     user_id: 1
     paths: [{path: 1/100/, access_level: 40}]
   guest:
     deployment: gitlab
-    label: Gus, guest of Acme and reporter on acme/web (GitLab session)
+    label: Tomás Ferreira, contractor, guest on Platform, reporter on console
     user_id: 2
     paths: [{path: 1/100/, access_level: 10}, {path: 1/100/1001/, access_level: 20}]
   zanzibar:
     deployment: zanzibar
-    label: Zed, related to acme/api and Globex (Zanzibar-style provider)
-    subject: zed
+    label: Ines Okafor, payments lead under Zanzibar, ledger code withheld
+    subject: iokafor

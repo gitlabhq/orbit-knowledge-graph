@@ -5,42 +5,42 @@ workspaces:
       - id: m1
         workspace: T01
         merge_request_id: 3000
-        channel: api-dev
-        author: ann
-        text: token scopes are ready for review
-        sent_at: "2026-11-02T17:00:00Z"
-        visible_to: [maria, zed]
+        channel: gateway
+        author: daniel
+        text: "!412 is ready for review. Admin routes now need admin:write, everything else is unchanged."
+        sent_at: "2026-11-02T16:40:00Z"
+        visible_to: [priya, ines]
       - id: m2
         workspace: T01
         merge_request_id: 3000
-        channel: api-incidents
-        author: maria
-        text: the old tokens leaked scopes, keep this private
-        sent_at: "2026-11-02T18:00:00Z"
-        visible_to: [maria]
+        channel: gateway-incidents
+        author: priya
+        text: "Context for !412: last week's incident was a read-only token calling DELETE /admin/routes. Keep this thread private until the postmortem is out."
+        sent_at: "2026-11-02T17:05:00Z"
+        visible_to: [priya]
       - id: m3
         workspace: T01
         merge_request_id: 3002
-        channel: web-dev
-        author: gus
-        text: dark mode screenshots are in the thread
-        sent_at: "2026-11-03T09:00:00Z"
-        visible_to: [maria, gus]
+        channel: console
+        author: tomas
+        text: "Dark theme screenshots for !88 are in the thread. Sidebar contrast still needs a pass."
+        sent_at: "2026-11-03T09:15:00Z"
+        visible_to: [priya, tomas]
       - id: m4
         workspace: T01
         channel: random
-        author: ann
-        text: lunch at noon?
-        sent_at: "2026-11-03T12:00:00Z"
-        visible_to: [maria, gus, zed]
+        author: daniel
+        text: "Who has the spare USB-C to HDMI adapter from the third floor room?"
+        sent_at: "2026-11-03T12:02:00Z"
+        visible_to: [priya, tomas, ines]
   T02:
     traversal_path: 1/200/
     messages:
       - id: m5
         workspace: T02
         merge_request_id: 3005
-        channel: billing
-        author: zed
-        text: invoice export rounds per line, not per total
-        sent_at: "2026-11-04T10:00:00Z"
-        visible_to: [zed]
+        channel: payments
+        author: ines
+        text: "Finance confirmed the CSV must round per line, not per invoice total. Updating !57."
+        sent_at: "2026-11-04T10:20:00Z"
+        visible_to: [ines]

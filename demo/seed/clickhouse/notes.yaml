@@ -1,6 +1,6 @@
 table: gl_note
 rows:
-  - {id: 5000, note: Should the scope list be cached?, noteable_type: MergeRequest, noteable_id: 3000, project_id: 1000, author_id: 4, internal: false, traversal_path: 1/100/1000/}
-  - {id: 5001, note: The burst size needs a benchmark first., noteable_type: MergeRequest, noteable_id: 3001, project_id: 1000, author_id: 1, internal: false, traversal_path: 1/100/1000/}
-  - {id: 5002, note: Contrast looks low on the sidebar., noteable_type: MergeRequest, noteable_id: 3002, project_id: 1001, author_id: 2, internal: false, traversal_path: 1/100/1001/}
-  - {id: 5003, note: This switcher is superseded by dark mode., noteable_type: MergeRequest, noteable_id: 3004, project_id: 1001, author_id: 1, internal: false, traversal_path: 1/100/1001/}
+  - {id: 5000, note: "Should a missing scope return 403 or 404? A 404 hides which admin routes exist.", noteable_type: MergeRequest, noteable_id: 3000, project_id: 1000, author_id: 4, internal: false, traversal_path: 1/100/1000/}
+  - {id: 5001, note: "Can we keep the default at 20 and add a per-route override? The load test only covered the default.", noteable_type: MergeRequest, noteable_id: 3001, project_id: 1000, author_id: 1, internal: false, traversal_path: 1/100/1000/}
+  - {id: 5002, note: "The sidebar text fails contrast in dark mode. I measured 3.9:1.", noteable_type: MergeRequest, noteable_id: 3002, project_id: 1001, author_id: 1, internal: false, traversal_path: 1/100/1001/}
+  - {id: 5003, note: "Closing this in favour of !88, which replaces the switcher.", noteable_type: MergeRequest, noteable_id: 3004, project_id: 1001, author_id: 1, internal: false, traversal_path: 1/100/1001/}

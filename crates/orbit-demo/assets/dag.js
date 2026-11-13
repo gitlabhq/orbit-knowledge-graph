@@ -2,7 +2,7 @@
 
 (function () {
   const NS = "http://www.w3.org/2000/svg";
-  const W = 236, H = 96, GAP_X = 236, GAP_Y = 48, MARGIN = 16, TOP = 52;
+  const W = 236, H = 96, GAP_X = 236, GAP_Y = 48, ARC = 44;
   const NAMES = { clickhouse: "ClickHouse", duckdb: "DuckDB", orbit_code: "Orbit Next", live: "Slack (live)", engine: "Query engine" };
   const KINDS = { relational: "Relational", remote: "Remote", engine: "Engine" };
   const STATES = { waiting: "Waiting", running: "Running", done: "Finished", failed: "Failed" };
@@ -55,14 +55,17 @@
       (columns[rank[n.id()]] = columns[rank[n.id()]] || []).push(n.id());
     });
     cy.destroy();
+    const ranks = Object.keys(columns).length;
     const tallest = Math.max(...Object.values(columns).map((c) => c.length));
+    const skips = edges.some((e) => rank["s" + e.to] - rank["s" + e.from] > 1);
+    const pad = Math.max(12, 32 - 6 * ranks);
+    const top = pad + (skips ? ARC : 0);
     const positions = {};
     for (const [r, ids] of Object.entries(columns)) {
       const offset = ((tallest - ids.length) * (H + GAP_Y)) / 2;
-      ids.forEach((id, i) => { positions[id] = { x: MARGIN + Number(r) * (W + GAP_X), y: TOP + offset + i * (H + GAP_Y) }; });
+      ids.forEach((id, i) => { positions[id] = { x: pad + Number(r) * (W + GAP_X), y: top + offset + i * (H + GAP_Y) }; });
     }
-    const ranks = Object.keys(columns).length;
-    return { positions, width: MARGIN * 2 + ranks * (W + GAP_X) - GAP_X, height: TOP + MARGIN + tallest * (H + GAP_Y) - GAP_Y };
+    return { positions, width: 2 * pad + ranks * (W + GAP_X) - GAP_X, height: top + pad + tallest * (H + GAP_Y) - GAP_Y };
   }
 
   function arrows(defs) {
@@ -77,7 +80,7 @@
     const group = el("g", { class: "dag-edge " + (e.state || "") }, svg);
     let d, lx, ly;
     if (b.x - a.x > W + GAP_X) {
-      const top = Math.min(a.y, b.y) - 34;
+      const top = Math.min(a.y, b.y) - ARC + 8;
       const x1 = a.x + W - 36, x2 = b.x + 36;
       d = `M ${x1} ${a.y} C ${x1} ${top}, ${x2} ${top}, ${x2} ${b.y}`;
       lx = (x1 + x2) / 2; ly = top + 12;
@@ -111,14 +114,14 @@
   function draw(svg, model, selected, onSelect) {
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     if (!model.stages.length) {
-      svg.setAttribute("viewBox", "0 0 1200 180");
-      text(svg, 600, 95, "Run a query to see its stages, the key sets between them and their rows.", "dag-empty", "middle");
+      svg.setAttribute("viewBox", "0 0 1200 120");
+      svg.style.maxWidth = "";
+      text(svg, 600, 65, "Run a query to see its stages, the key sets between them and their rows.", "dag-empty", "middle");
       return;
     }
     const { positions, width, height } = layout(model.stages, model.edges);
-    const minWidth = 3 * (W + GAP_X) - GAP_X + 2 * MARGIN;
-    const vw = Math.max(width, minWidth), vh = Math.max(height, 180);
-    svg.setAttribute("viewBox", `${(width - vw) / 2} 0 ${vw} ${vh}`);
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.style.maxWidth = `${Math.round(width * 1.2)}px`;
     arrows(el("defs", {}, svg));
     const slots = {};
     for (const e of model.edges) edge(svg, model, positions, e, slots);
