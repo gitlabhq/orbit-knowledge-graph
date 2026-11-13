@@ -46,6 +46,8 @@ pub struct Config {
     >,
     #[prost(message, optional, tag = "21")]
     pub object_storage: ::core::option::Option<ObjectStorage>,
+    #[prost(message, optional, tag = "22")]
+    pub observability: ::core::option::Option<Observability>,
 }
 impl ::prost::Name for Config {
     const NAME: &'static str = "Config";
@@ -1006,6 +1008,33 @@ impl ::prost::Name for FeatureScope {
     }
     fn type_url() -> ::prost::alloc::string::String {
         "/orbit.config.v1.FeatureScope".into()
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Observability {
+    #[prost(string, optional, tag = "1")]
+    pub provisioner_url: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "2")]
+    pub provisioner_api_key: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(uint64, optional, tag = "3")]
+    pub host_map_refresh_seconds: ::core::option::Option<u64>,
+    #[prost(uint64, optional, tag = "4")]
+    pub host_map_retry_after_seconds: ::core::option::Option<u64>,
+    #[prost(uint64, optional, tag = "5")]
+    pub request_timeout_seconds: ::core::option::Option<u64>,
+    #[prost(uint64, optional, tag = "6")]
+    pub query_timeout_seconds: ::core::option::Option<u64>,
+    #[prost(uint64, optional, tag = "7")]
+    pub max_result_rows: ::core::option::Option<u64>,
+}
+impl ::prost::Name for Observability {
+    const NAME: &'static str = "Observability";
+    const PACKAGE: &'static str = "orbit.config.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "orbit.config.v1.Observability".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/orbit.config.v1.Observability".into()
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

@@ -23,6 +23,7 @@ use crate::health_check::{HealthCheckConfig, NamespaceTarget};
 use crate::metrics::{ExpandedLogsConfig, MetricsConfig, OtelConfig, PrometheusConfig};
 use crate::nats::NatsConfiguration;
 use crate::object_storage::{ObjectStorageAuth, ObjectStorageConfig, ObjectStorageProvider};
+use crate::observability::ObservabilityConfig;
 use crate::probe_server::ProbeServerConfig;
 use crate::proto;
 use crate::query::{QueryConfig, QuerySettings};
@@ -106,6 +107,7 @@ impl TryFrom<proto::Config> for AppConfig {
             billing: billing(present(config.billing))?,
             features: features(config.features),
             object_storage: object_storage(present(config.object_storage))?,
+            observability: observability(present(config.observability)),
         })
     }
 }
@@ -559,6 +561,18 @@ fn features(value: HashMap<String, proto::FeatureScope>) -> FeaturesConfig {
             )
         })
         .collect()
+}
+
+fn observability(value: proto::Observability) -> ObservabilityConfig {
+    ObservabilityConfig {
+        provisioner_url: value.provisioner_url,
+        provisioner_api_key: value.provisioner_api_key,
+        host_map_refresh_seconds: present(value.host_map_refresh_seconds),
+        host_map_retry_after_seconds: present(value.host_map_retry_after_seconds),
+        request_timeout_seconds: present(value.request_timeout_seconds),
+        query_timeout_seconds: present(value.query_timeout_seconds),
+        max_result_rows: present(value.max_result_rows),
+    }
 }
 
 fn object_storage(value: proto::ObjectStorage) -> Result<ObjectStorageConfig> {
