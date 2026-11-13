@@ -1,0 +1,53 @@
+name: "Dockerfile: FROM without AS emits the same calls as FROM with AS"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      ARG GO_VERSION=1.22
+      FROM golang:${GO_VERSION} AS build
+      RUN go build -o /out/app ./cmd/app
+
+      FROM build
+      RUN echo done
+
+      FROM golang:${GO_VERSION}
+      RUN go version
+
+  - path: single/Dockerfile
+    content: |
+      ARG BASE_TAG=3.19
+      FROM alpine:${BASE_TAG}
+      RUN apk add curl
+
+tests:
+  - name: "an unnamed stage naming an earlier stage calls it"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.name = 'stage:build' AND b.definition_type = 'Class'
+      RETURN a.name AS from_stage, b.name AS to_stage
+    assert:
+      - { row_count: 1 }
+      - { row: { from_stage: "stage:build", to_stage: "build" } }
+
+  - name: "an ARG in an unnamed stage's image tag is called"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(v:Definition)
+      WHERE v.definition_type = 'Variable' AND a.name STARTS WITH 'stage:'
+      RETURN a.name AS stage, v.name AS variable
+      ORDER BY stage, variable
+    assert:
+      - { row_count: 2 }
+      - { row: { stage: "stage:alpine", variable: "BASE_TAG" } }
+      - { row: { stage: "stage:golang", variable: "GO_VERSION" } }
+
+  - name: "an unnamed stage calls its base image"
+    query: |
+      MATCH (s:Definition)-[:CALLS]->(i:ImportedSymbol)
+      WHERE s.name STARTS WITH 'stage:'
+      RETURN s.name AS stage, i.import_path AS image
+      ORDER BY stage
+    assert:
+      - { row_count: 3 }
+      - { row: { stage: "stage:alpine", image: "alpine" } }
+      - { row: { stage: "stage:build", image: "build" } }
+      - { row: { stage: "stage:golang", image: "golang" } }
