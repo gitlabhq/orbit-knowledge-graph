@@ -419,16 +419,17 @@ RETURN m.author, m.text LIMIT 20
 ```
 
 ```rust
-let live = model.physical::<Live>(data_extraction)?;
+let store = model.complete_store(message);
+let live = model.physical::<Live>(store.connection())?;
 let plan = live.build(|q| {
-    let messages = q.call(live.operation(slack, message)?)?;
+    let messages = q.call(live.operation(store, message)?)?;
     let messages = q.filter(messages, channel.eq("orbit-dev").and(text.contains("deploy")))?;
     q.select(q.limit(messages, 20)?, [author, text])
 })?;
 let request = live.render(&plan);
 ```
 
-The variables `data_extraction`, `slack`, `message`, `channel`, `text` and `author` are handles, which the frontend resolved from the query's names.
+The frontend resolves the query's names once, at parse: the entity `message` and the properties `channel`, `text` and `author`. Everything else, such as the store and its connection, comes from those handles through the model by placement, never from a lookup by name. Tests resolve names with the explicit `Names` resolver.
 
 The `live` policy follows each message to the namespace that installed its workspace. A scope lookup on the graph connection resolves that chain first, because the complete store of `SlackWorkspace` is there. The live backend sends the request only for workspaces in namespaces where the caller holds `read`. The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through that sign-in.
 
@@ -560,9 +561,10 @@ RETURN f.path, match.line, match.ARGS LIMIT 50
 ```
 
 ```rust
-let code = model.physical::<OrbitCode>(code_indexing)?;
+let store = model.searching(file, content)?;
+let code = model.physical::<OrbitCode>(store.connection())?;
 let plan = code.build(|q| {
-    let files = q.repositories(code.index(code_store, file)?, [project])?;
+    let files = q.repositories(code.index(store, file)?, [project])?;
     let files = q.languages(files, [Language::Rust])?;
     let files = q.prefilter(files, Trigrams::of(["compile"]))?;
     let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)"))?;
@@ -572,7 +574,8 @@ let plan = code.build(|q| {
 let request = code.render(&plan);
 ```
 
-The planner adds the trigram prefilter: it takes the pattern's literal atoms and narrows the candidate files before the structural pass. The request goes over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. As in the live example, `code_indexing`, `code_store`, `file` and `path` are handles that the frontend resolved. `File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction. `of: holder` on `IN_PROJECT` makes the project that holds the file the scope entity.
+The planner adds the trigram prefilter: it takes the pattern's literal atoms and narrows the candidate files before the structural pass. The request goes over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures.
+As in the live example, the frontend resolved `file`, `content` and `path`. The structural match places the read on the backend that searches `content`. So the store and its connection come from those handles through the model. `File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction. `of: holder` on `IN_PROJECT` makes the project that holds the file the scope entity.
 
 ## Add a namespace overlay
 

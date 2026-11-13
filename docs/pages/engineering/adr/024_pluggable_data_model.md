@@ -508,7 +508,7 @@ CH --> Caller : rows
 @enduml
 ```
 
-The frontend records what the caller asked for and makes no planning decisions. It resolves every name to a handle once, as it parses the GQL text. After that, nothing looks anything up by name.
+The frontend records what the caller asked for and makes no planning decisions. It resolves the query's names, its entities and properties, to handles once, as it parses the GQL text. Everything else, such as a read's store and connection, comes from those handles through the model by placement. Nothing looks anything up by name, and tests resolve names with the explicit `Names` resolver.
 The planning phase decides and builds in one step, with no intermediate plan description. Later phases rewrite through the same builder under four rules:
 
 - Inputs come before consumers.
