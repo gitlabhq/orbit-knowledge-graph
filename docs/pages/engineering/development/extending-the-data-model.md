@@ -7,8 +7,8 @@ Each extension writes only a package, a frontend or a backend:
 | To add | Write | Leave untouched |
 |---|---|---|
 | A GitLab entity | Fragments in a `gitlab.*` package | The compiler |
-| An indexed third-party source | A package with a `source` fragment | The compiler and the indexing engine |
-| A live third-party entity | A package with a `live` store | The frontends and the compiler phases |
+| An integration's lake store | A package with a `duckdb` store and a `source` fragment | The compiler and the indexing engine |
+| An integration's live store | A `live` store next to the lake store | The frontends and the compiler phases |
 | A backend | A `StorageBackend`, its plan language and its renderer | The frontends and the shared phases |
 | A namespace overlay | A package that loads for one top-level namespace | Everything else |
 | A query language | A frontend that builds logical plans | The planner |
@@ -228,9 +228,12 @@ relationships: [CONTAINS, DEFINES, CALLS, IMPORTS]
 
 Publish the new package version to the registry. The registry diffs its storage against the active version. The indexing engine then backfills the tables in scope, and the version goes live.
 
-## Add an indexed third-party source
+## Add an integration's lake store
 
-An integration that lands rows in the data lake ships a package with graph, authorization, storage and source fragments. The Data Extraction Service writes the Jira rows to S3, and a DuckDB store reads them there:
+An integration combines a lake store and a live store for the same entities. The lake store is the complete store: it holds the full history and every column.
+The live store is a partial store that calls the service's API at query time, for what the API adds. Placement reads from the lake unless a node needs a live-only column or operation.
+
+An integration ships a package with graph, authorization, storage and source fragments. The Data Extraction Service writes the Jira rows to S3, and a DuckDB store reads them there:
 
 ```yaml
 # packages/integration.jira/sources/des.yaml
@@ -267,6 +270,7 @@ entities:
       id: {immutable: true, backend: {type: VARCHAR}}
       key: {backend: {type: VARCHAR}}
       summary: {backend: {type: VARCHAR}}
+      description: {backend: {type: VARCHAR}}
       merge_request_id: {backend: {type: BIGINT}}
       traversal_path: {backend: {type: VARCHAR}}
     accepts: [id, merge_request_id]
@@ -274,7 +278,7 @@ entities:
 ```
 
 The ETL of the Data Extraction Service writes the `traversal_path` of the namespace that installed the integration on every row. That path is the scope key, so the authorization enforces a scope filter like any other entity: `enforce: {duckdb: {scope_key: traversal_path}}`.
-`JiraIssue` declares no check. Its node comes back only when its stage's security check proved the scope filter on the read, and otherwise the query engine redacts it.
+`JiraIssue` declares no row check. Its node comes back only when its stage's security check proved the scope filter on the read, and otherwise the query engine redacts it.
 
 The connection's `location` in deployment config sets the DuckDB mode, and the package is the same in both modes:
 
@@ -288,9 +292,36 @@ connections:
 
 `parquet` reads each table from the Parquet files under its prefix. `ducklake` reads each table through the DuckLake catalog, and its data path is the bucket and prefix.
 
-## Add a live third-party entity
+## Add an integration's live store
 
-An entity can be fetched at query time instead of indexed, so its `live` store holds no rows.
+A live store is the integration's partial store, on a backend that neither joins nor has writers. It holds no rows and declares no writer. It calls the service's API at query time, through a `Credentials` check, so the service runs each call with the caller's own sign-in.
+
+Jira gains a live store that adds full-text search on `description`, which the lake store does not index:
+
+```yaml
+# packages/integration.jira/storage/live.yaml
+kind: storage
+package: integration.jira
+store: jira_live
+engine:
+  kind: live
+  connection: data_extraction
+entities:
+  JiraIssue:
+    columns:
+      id: {immutable: true}
+      key: {}
+      summary: {}
+      description: {}
+    accepts: [id, key]
+    access: {filter: [id, key], text: [description]}
+    backend:
+      operation: search.issues
+```
+
+Its authorization adds a `live` policy and the check: `live: {scope_key: {via: IN_JIRA_PROJECT}}` next to the `duckdb` policy, and `checks: [{provider: jira, kind: delegated}]`.
+
+Slack keeps its history in a lake store and adds a live store for search. `MENTIONS` links a message to the Jira issue it names, so `integration.slack` requires `integration.jira`:
 
 ```yaml
 # packages/integration.slack/graph.yaml
@@ -308,6 +339,8 @@ entities:
       author: {type: string}
       text: {type: string}
       sent_at: {type: timestamp}
+      issue_id: {type: string?}
+      traversal_path: {type: string}
   SlackWorkspace:
     identity: id
     label: name
@@ -322,6 +355,8 @@ relationships:
     variants: {SlackMessage -> SlackWorkspace: {cardinality: many_to_one}}
   INSTALLED_IN:
     variants: {SlackWorkspace -> Group: {cardinality: many_to_one}}
+  MENTIONS:
+    variants: {SlackMessage -> JiraIssue: {cardinality: many_to_one}}
 ```
 
 ```yaml
@@ -333,17 +368,19 @@ entities:
     scope: namespace
     permission: read
     enforce:
+      duckdb: {scope_key: traversal_path}
       live: {scope_key: {via: [IN_WORKSPACE, INSTALLED_IN]}}
     checks:
       - {provider: slack, kind: delegated}
     properties:
-      open: [id, channel, author, text, sent_at]
+      open: [id, channel, author, text, sent_at, issue_id]
       exact: [workspace]
+      hidden: [traversal_path]
   SlackWorkspace:
     scope: namespace
     permission: read
     enforce:
-      clickhouse: {scope_key: traversal_path}
+      duckdb: {scope_key: traversal_path}
     properties:
       open: [id, name]
       hidden: [namespace_id, traversal_path]
@@ -351,24 +388,73 @@ relationships:
   IN_WORKSPACE:
     scope: namespace
     permission: read
-    enforce: {}
+    enforce: {duckdb: {scope_key: traversal_path, of: both}}
   INSTALLED_IN:
     scope: namespace
     permission: read
-    enforce: {clickhouse: {scope_key: traversal_path, of: holder}}
+    enforce: {duckdb: {scope_key: traversal_path, of: holder}}
+  MENTIONS:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}
 ```
+
+The lake store is complete for both entities and binds every relationship. It declares no `text` access, so it does not serve full-text search on `text`:
+
+```yaml
+# packages/integration.slack/storage/duckdb.yaml
+kind: storage
+package: integration.slack
+store: slack
+engine:
+  kind: duckdb
+  connection: slack_lake
+entities:
+  SlackMessage:
+    complete: true
+    table: slack_message
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      workspace: {backend: {type: VARCHAR}}
+      channel: {backend: {type: VARCHAR}}
+      author: {backend: {type: VARCHAR}}
+      text: {backend: {type: VARCHAR}}
+      sent_at: {immutable: true, backend: {type: TIMESTAMP}}
+      issue_id: {backend: {type: VARCHAR}}
+      traversal_path: {backend: {type: VARCHAR}}
+    accepts: [id, workspace, issue_id]
+    access: {filter: [workspace, channel, author, sent_at], order: [id]}
+  SlackWorkspace:
+    complete: true
+    table: slack_workspace
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      name: {backend: {type: VARCHAR}}
+      namespace_id: {backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+    accepts: [id]
+    access: {order: [id]}
+relationships:
+  IN_WORKSPACE:
+    SlackMessage -> SlackWorkspace: {fk: {on: source, column: workspace}}
+  INSTALLED_IN:
+    SlackWorkspace -> Group: {fk: {on: source, column: namespace_id}}
+  MENTIONS:
+    SlackMessage -> JiraIssue: {fk: {on: source, column: issue_id}}
+```
+
+The live store is partial. It lists the columns the API returns and declares the full-text search:
 
 ```yaml
 # packages/integration.slack/storage/live.yaml
 kind: storage
 package: integration.slack
-store: slack
+store: slack_live
 engine:
   kind: live
   connection: data_extraction
 entities:
   SlackMessage:
-    complete: true
     columns:
       id: {immutable: true}
       workspace: {}
@@ -376,51 +462,28 @@ entities:
       author: {}
       text: {}
       sent_at: {}
-    accepts: [workspace]
-    access: {filter: [workspace, channel, author, sent_at], text: [text]}
+      issue_id: {}
+    accepts: [workspace, issue_id]
+    access: {filter: [workspace, channel, author, sent_at, issue_id], text: [text]}
     backend:
       operation: search.messages
-relationships:
-  IN_WORKSPACE:
-    SlackMessage -> SlackWorkspace: {fk: {on: source, column: workspace}}
 ```
 
-The live backend does not join, so `IN_WORKSPACE` declares no edge policy. The message's own policy decides whether the caller sees it. The workspaces live in the graph store, so `INSTALLED_IN` is a foreign key on a `SlackWorkspace` row:
+The Data Extraction Service's `des` source writes the lake store. The live backend has no writer capability, so the live store declares no writer:
 
 ```yaml
-# packages/integration.slack/storage/clickhouse.yaml
-kind: storage
-package: integration.slack
-store: graph
-entities:
-  SlackWorkspace:
-    complete: true
-    table: slack_workspace
-    columns:
-      id: {immutable: true, backend: {type: String}}
-      name: {backend: {type: String}}
-      namespace_id: {backend: {type: Int64}}
-      traversal_path: {backend: {type: String}}
-    accepts: [id]
-    access: {order: [id]}
-relationships:
-  INSTALLED_IN:
-    SlackWorkspace -> Group: {fk: {on: source, column: namespace_id}}
-```
-
-The integration's data lake source writes the workspaces from its installation records. The live backend has no writer capability, because the live source serves `SlackMessage`. So `SlackMessage` declares no writer:
-
-```yaml
-# packages/integration.slack/sources/data_lake.yaml
+# packages/integration.slack/sources/des.yaml
 kind: source
 package: integration.slack
-source: data_lake
+source: des
+declare:
+  connection: slack_lake
+  version: _siphon_replicated_at
+  watermark: _siphon_watermark
+  deleted: _siphon_deleted
 entities:
-  SlackWorkspace:
-    tables: [slack_installations]
-    order_by: [id]
-    query: generated
-    columns: {id: workspace_id, name: workspace_name, namespace_id: namespace_id, traversal_path: traversal_path}
+  SlackMessage: {tables: [slack_message], order_by: [traversal_path, id], query: generated}
+  SlackWorkspace: {tables: [slack_workspace], order_by: [traversal_path, id], query: generated}
 ```
 
 The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit. The `access` hints say which filters the operation pushes down, and any other filter is a construction error.
@@ -443,10 +506,21 @@ let plan = live.build(|q| {
 let request = live.render(&plan)?;
 ```
 
-Placement, `places` in the stage split, picked the stage's store with `model.complete_store(message)` and its connection with `store.connection()`.
+Placement picked the live store for this stage, because only it serves `CONTAINS` on `text`. The stage's connection is that store's `store.connection()`.
 The frontend resolves only the query's names, once, at parse. Everything else comes from those handles through the model, and tests resolve names with the explicit `Names` resolver, `model.names()`.
 
-The `live` policy follows each message to the namespace that installed its workspace. A scope lookup on the graph connection resolves that chain first, because the complete store of `SlackWorkspace` is there. The live backend sends the request only for workspaces in namespaces where the caller holds `read`. The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through that sign-in.
+The `live` policy follows each message to the namespace that installed its workspace. A scope lookup on the Slack lake connection resolves that chain first, because the complete store of `SlackWorkspace` is there. The live backend sends the request only for workspaces in namespaces where the caller holds `read`. The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through that sign-in.
+
+One query can read the lake for one node and live for another:
+
+```cypher
+MATCH (i:JiraIssue)<-[:MENTIONS]-(m:SlackMessage)
+WHERE i.key = 'ORBIT-42' AND m.text CONTAINS 'rollback'
+RETURN i.summary, m.channel, m.text LIMIT 20
+```
+
+`JiraIssue` reads from the Jira lake store, which serves the filter on `key` and the `summary` column. `SlackMessage` reads from the Slack live store, because only it serves `CONTAINS` on `text`.
+The lake stage hands the issue IDs to the live stage, which takes them on `issue_id` from its `accepts:`. The combine stage combines both stages' rows on `MENTIONS`.
 
 ## Add a backend
 
@@ -562,7 +636,7 @@ server:
 local:
   connections: [local]
 demo:
-  connections: [main, code_indexing, data_extraction, jira_lake]
+  connections: [main, code_indexing, data_extraction, jira_lake, slack_lake]
 ```
 
 The runtime config selects one shape with `schema.deployment`. The loader keeps only the storage fragments on that shape's connections, and then it runs every check. The model ID follows that deployment's model.
@@ -755,6 +829,7 @@ authorization:
       permissions: {read: reporter, read_code: reporter, read_merge_request: reporter, read_vulnerability: security_manager}
     rails: {module: gitlab.abilities, connection: rails, batch: 1000}
     slack: {module: slack.sign_in, connection: data_extraction}
+    jira: {module: jira.sign_in, connection: data_extraction}
 ```
 
 Binding the deployment fails for an entity with no row check whose scope provider does not answer exactly. The error names the entity, its scope kind, its scope and the provider.

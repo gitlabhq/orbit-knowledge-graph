@@ -148,7 +148,8 @@ packages/
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
-│   │   └── duckdb.yaml
+│   │   ├── duckdb.yaml
+│   │   └── live.yaml
 │   └── sources/
 │       └── des.yaml
 ├── integration.slack/
@@ -156,10 +157,10 @@ packages/
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
-│   │   ├── clickhouse.yaml
+│   │   ├── duckdb.yaml
 │   │   └── live.yaml
 │   └── sources/
-│       └── data_lake.yaml
+│       └── des.yaml
 └── overlay.agent_memory/
     ├── package.yaml
     ├── graph.yaml
@@ -219,9 +220,14 @@ Storage rules:
 - Every store declares `accepts:` for each entity, whatever its backend's [capabilities](#4-catalogs-give-each-connection-a-typed-view). It names the columns that the store takes key sets on.
 - A store returns every column it lists. So its columns decide whether it returns an entity's identity, and no other flag says so.
 - A store whose backend searches by repository declares `repository: {project: <column>, branch: <column>}` for each entity. Orbit Next is an example. Each backend kind's schema names its other required fields, for example `operation` for the live backend.
-- Each variant is bound once, in the store that holds its rows. A foreign key lives in the store whose table holds the column, and an edge table in the store that declares it. A foreign key's store can differ from the other endpoint's, as with `IN_WORKSPACE` from a live message to an indexed workspace. The two endpoints of an edge table share its connection.
+- Each variant is bound once, in the store that holds its rows. A foreign key lives in the store whose table holds the column, and an edge table in the store that declares it. A foreign key's store can differ from the other endpoint's. For example, `INSTALLED_IN` points from a Slack workspace in a lake store to a `Group` in the graph store. The two endpoints of an edge table share its connection.
 - Access hints are backend-neutral. Each backend turns them into indexes and sort keys, and a platform `backend` block can override that.
 - An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
+- An integration combines two stores for the same entities. Its lake store is the complete store, on a backend that joins and has writers.
+- The extraction service's ETL writes the lake store and supplies `traversal_path`. The lake store holds the full history and every column, and its policy is `scope_key: traversal_path`.
+- The integration's live store is a partial store, on a backend without joins or writers. It calls the service's API at query time.
+- The live store offers only what the API adds: full-text search, fields that are current right now, and data not yet extracted. Its read uses a `Credentials` check, so the service runs the call with the caller's own sign-in.
+- For example, Jira and Slack each keep a DuckDB lake store over S3 and a live store.
 - Every edge has five structural fields that the model defines, the `EdgeField` values: source ID, source kind, target ID, target kind and relationship kind. They are not relationship attributes.
 - Each store with edge tables declares `edge_columns:` once, mapping every edge field to its column. Every edge table in the store uses it, so a table whose columns differ belongs in a separate store. Every field is required and none has a default, so no column name is a convention. Edge-owned attributes stay per relationship.
 - In a store whose backend has the writer capability, each entity and edge-table variant has exactly one declared writer.
@@ -352,7 +358,7 @@ An entity declares its scope, the permission that a read needs, and one `enforce
 
 `checks` name a provider, a permission and the provider's resource type, and they run on returned rows. A row comes back only if every check allows it. Each check derives its own key from the row through its declared object and ID property. So a Rails check on a commit's project and a Cedar check on the commit itself can share one entity.
 
-An entity with no checks comes back on its scope filter alone. Its node comes back only when its stage's security check proved that filter on the read. Otherwise the query engine redacts the node, so the read fails closed.
+An entity with no row checks comes back on its scope filter alone. A `Credentials` check is not a row check. Its node comes back only when its stage's security check proved that filter on the read. Otherwise the query engine redacts the node, so the read fails closed.
 An entity's `checks:` is either a list of checks or the word `open`. A global entity has no scope filter, so it needs a check or `checks: open`. Without either, the load fails.
 With `checks: open`, the rows that a global read admits come back without a row check.
 Rows that the Data Extraction Service writes carry `traversal_path` from its ETL, and that path is their scope key. A third-party read that an external service serves at query time uses a `Credentials` check, for example a Slack message read.
@@ -584,7 +590,7 @@ The same contract fits other authorization systems:
 
 GitLab access levels appear only in the GitLab module's options, which map each permission to a role.
 A scope answer is exact when the provider owns the grants, as GitLab paths, SpiceDB lookups and group claims do.
-If an entity has no checks and its scope provider does not answer exactly, binding the deployment fails.
+If an entity has no row checks and its scope provider does not answer exactly, binding the deployment fails.
 
 ### 7. The same path for every backend
 
@@ -632,6 +638,8 @@ Placement picks each node's store with one call, `model.get_store(entity, &needs
 1. `get_store` returns the complete store if it serves every need.
 2. Otherwise, it returns the one partial store that serves every need. For example, a `File` read with a structural match on `content` reads from the Orbit Next store.
 3. If no store serves every need, the query fails, and the error names the unmet need.
+
+An integration's entity reads from its lake store unless a node needs a live-only column or operation. So one query can read the lake for one node and live for another.
 
 A store serves a need only through declared facts: its listed columns, its backend's capabilities, its search modes and its `accepts:`.
 Two partial stores that could both serve needs the complete store cannot serve are a load error, so placement never depends on order. Search is one kind of need, not a special case.
