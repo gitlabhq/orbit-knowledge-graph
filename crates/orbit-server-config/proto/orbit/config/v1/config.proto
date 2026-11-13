@@ -42,6 +42,7 @@ message Config {
   Billing billing = 19 [(buf.validate.field).required = true];
   map<string, FeatureScope> features = 20 [(buf.validate.field).map.keys.string = {in: ["code_graph_incremental"]}];
   ObjectStorage object_storage = 21 [(buf.validate.field).required = true];
+  Observability observability = 22 [(buf.validate.field).required = true];
 }
 
 message ProbeServer {
@@ -411,6 +412,16 @@ enum ObjectStorageProvider {
 enum ObjectStorageAuth {
   identity = 0;
   static = 1;
+}
+
+message Observability {
+  optional string provisioner_url = 1;
+  optional string provisioner_api_key = 2;
+  optional uint64 host_map_refresh_seconds = 3 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1];
+  optional uint64 host_map_retry_after_seconds = 4 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1];
+  optional uint64 request_timeout_seconds = 5 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1];
+  optional uint64 query_timeout_seconds = 6 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1];
+  optional uint64 max_result_rows = 7 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1];
 }
 
 message ObjectStorage {
