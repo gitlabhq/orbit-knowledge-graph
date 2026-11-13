@@ -1,7 +1,7 @@
 //! The DAG runner: runs a query's stages in dependency order through the executors a
 //! deployment registers, reporting each step to an observer.
 
-mod engine;
+mod combine;
 mod executor;
 mod observer;
 mod remote;

@@ -114,7 +114,7 @@ impl Store {
         (key.discriminator.is_none() && key.composite.is_empty()).then_some(key.foreign_key)
     }
 
-    /// The holder and the column pairs of a key on a composite identity, which only the engine
+    /// The holder and the column pairs of a key on a composite identity, which only the Combine stage
     /// joins on, between stages.
     pub fn composite_key(
         &self,

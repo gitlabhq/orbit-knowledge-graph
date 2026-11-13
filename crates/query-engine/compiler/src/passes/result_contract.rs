@@ -200,7 +200,7 @@ impl ResultContext {
     }
 
     /// A node of a remote stage, whose rows that stage put through every check of the entity
-    /// before the engine joined them.
+    /// before the Combine stage joined them.
     pub fn add_stage_checked_node(&mut self, alias: &str, entity_type: &str) {
         self.add_node(alias, entity_type);
         self.stage_checked.insert(alias.to_string());

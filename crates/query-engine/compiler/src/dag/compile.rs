@@ -49,7 +49,7 @@ pub struct Env<'a> {
 }
 
 /// What a stage reads before it plans, besides the key sets `bind` puts in its statement: what
-/// its remote reads' policies admit, and the result contexts of the stages the engine joins.
+/// its remote reads' policies admit, and the result contexts of the stages the Combine stage joins.
 #[derive(Debug, Default)]
 pub struct Inputs {
     pub admitted: Option<Admitted>,
@@ -74,7 +74,7 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
     let (grants, limits, trace) = (env.grants.clone(), *env.limits, env.trace);
     let statement = match stage.query {
         StageQuery::Gql(statement) => statement,
-        StageQuery::Engine(query, shape) => return engine(query, *shape, inputs, env),
+        StageQuery::Combine(query, shape) => return combine(query, *shape, inputs, env),
         StageQuery::Hydration(_) => {
             return Err(QueryError::PipelineInvariant(
                 "a hydration stage compiles through compile_hydration".into(),
@@ -144,20 +144,20 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
     }
 }
 
-/// The `(gql, engine)` stage: the join of the other stages' rows, shaped as the response.
-fn engine(
-    query: super::EngineQuery,
+/// The `(gql, combine)` stage: the join of the other stages' rows, shaped as the response.
+fn combine(
+    query: super::CombineQuery,
     response: super::Response,
     inputs: Inputs,
     env: &Env<'_>,
 ) -> Result<Compiled> {
     let trace = env.trace;
     let shared = Arc::clone(env.frontend.shared_model());
-    let mut ctx = config::GqlEngineCtx::new(*env.limits, trace, shared);
-    ctx.set_engine_query(query);
+    let mut ctx = config::GqlCombineCtx::new(*env.limits, trace, shared);
+    ctx.set_combine_query(query);
     ctx.set_stage_contexts(inputs.contexts);
-    config::run_gql_engine(&mut ctx).count_err()?;
-    let plan = produced(ctx.take_engine())?;
+    config::run_gql_combine(&mut ctx).count_err()?;
+    let plan = produced(ctx.take_combine())?;
     let described = describe(&plan);
     let compiled = crate::CompiledQueryContext {
         query_type: crate::QueryType::Traversal,
@@ -178,7 +178,7 @@ fn engine(
         planned: ctx.take_planned().unwrap_or_default(),
         proved: false,
         emitted: if trace { described } else { Vec::new() },
-        request: Request::Engine {
+        request: Request::Combine {
             plan,
             compiled: Box::new(compiled),
         },

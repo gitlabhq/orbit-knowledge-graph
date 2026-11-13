@@ -1,6 +1,6 @@
 //! ADR 024's DAG queries with ClickHouse on the test container: relational stages and scope
 //! lookups run real SQL through the server's executor, Orbit Next and the Data Extraction
-//! Service run behind their seeded fakes, and the engine joins every side.
+//! Service run behind their seeded fakes, and the Combine stage joins every side.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -241,7 +241,7 @@ pub(super) async fn merge_requests_join_the_slack_messages_that_discuss_them(ctx
     assert_eq!(pairs(&none), []);
 }
 
-/// The joined rows carry the DISCUSSES edge between the endpoints the engine joins: a message
+/// The joined rows carry the DISCUSSES edge between the endpoints the Combine stage joins: a message
 /// outside the caller's workspaces never comes back, a merge request the redaction service
 /// denies takes its edges with it, and a caller who reads nothing gets no edge.
 pub(super) async fn the_joined_rows_carry_the_edges_they_cross(ctx: &TestContext) {

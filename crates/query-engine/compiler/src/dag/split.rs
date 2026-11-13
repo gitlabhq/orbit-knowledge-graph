@@ -16,7 +16,7 @@ use crate::passes::codegen::SqlBackend;
 pub(super) type Place = usize;
 
 /// A relationship step whose endpoints live on different connections, with the key pairs the
-/// engine joins its two sides on.
+/// Combine stage joins its two sides on.
 pub(super) struct Crossing {
     pub groups: (usize, usize),
     pub pairs: Vec<((Ref, PropertyId), (Ref, PropertyId))>,
@@ -29,7 +29,7 @@ pub(super) struct Crossing {
 
 /// Splits a statement into stages, one per connection it reads. A query one relational
 /// connection serves alone is one stage on it; otherwise every stage hands its rows to the
-/// engine stage, which shapes the response.
+/// Combine stage, which shapes the response.
 /// `frontend` is the catalog the deployment's frontend rules read, which the query's statistics
 /// read too.
 pub fn split<B: SqlBackend>(
@@ -161,7 +161,7 @@ fn group_of(groups: &[Group], binding: Ref) -> Option<usize> {
         .position(|group| group.bindings.contains(&binding))
 }
 
-/// The foreign key of the step's one relationship variant, as the key pair the engine joins on.
+/// The foreign key of the step's one relationship variant, as the key pair the Combine stage joins on.
 fn crossing(
     query: Query<'_>,
     index: usize,
@@ -176,7 +176,7 @@ fn crossing(
     let (source_entity, target_entity) = (query.entity(source), query.entity(target));
     let unjoinable = || {
         QueryError::Validation(format!(
-            "{} -> {} crosses connections, so it needs one relationship with a foreign key the engine joins on",
+            "{} -> {} crosses connections, so it needs one relationship with a foreign key the Combine stage joins on",
             query.name(source),
             query.name(target)
         ))

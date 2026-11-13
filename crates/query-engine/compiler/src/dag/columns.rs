@@ -6,7 +6,7 @@ use query_data_model::plan::tracking::Ref;
 
 use super::cut::Cut;
 use super::split::Crossing;
-use super::{EngineColumn, KeyInput, StageId};
+use super::{CombineColumn, KeyInput, StageId};
 use crate::error::{QueryError, Result};
 use crate::logical::columns::defaults;
 
@@ -152,7 +152,7 @@ impl Cut<'_> {
         &self,
         stage: &impl Fn(usize) -> StageId,
         group_of: &impl Fn(Ref) -> usize,
-    ) -> Result<Vec<(String, EngineColumn)>> {
+    ) -> Result<Vec<(String, CombineColumn)>> {
         let selected = self.selected()?;
         let graph = self.query.model.graph();
         let mut columns = Vec::new();
@@ -188,7 +188,7 @@ impl Cut<'_> {
                         let holder = self.matched_group(*output)?;
                         columns.push((
                             name.to_string(),
-                            EngineColumn {
+                            CombineColumn {
                                 stage: stage(holder),
                                 column: column.to_string(),
                             },

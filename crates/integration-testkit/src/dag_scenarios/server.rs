@@ -103,7 +103,7 @@ async fn served_output() -> PipelineOutput {
     let compiled = ctx
         .compiled
         .clone()
-        .expect("the engine stage compiled the response");
+        .expect("the Combine stage compiled the response");
     let mut result =
         QueryResult::from_batches(&executed.batches, &executed.result_context).unwrap();
     let mut redaction = MockRedactionService::new();

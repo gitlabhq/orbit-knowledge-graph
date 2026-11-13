@@ -1,4 +1,4 @@
-//! The engine plan language: the query engine's own physical plan over the rows earlier stages
+//! The Combine plan language: the query engine's own physical plan over the rows earlier stages
 //! of an execution DAG returned. It joins them, then applies the result columns, order and limit.
 
 use crate::DataType;
@@ -10,12 +10,12 @@ use crate::plan::tracking::{
 };
 
 #[derive(Debug)]
-pub struct EngineLanguage;
+pub struct CombineLanguage;
 
-pub type EnginePlan = Plan<EngineLanguage>;
+pub type CombinePlan = Plan<CombineLanguage>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum EngineOperation {
+pub enum CombineOperation {
     /// The rows one stage returned, one output per column.
     Rows {
         stage: usize,
@@ -41,28 +41,28 @@ pub enum EngineOperation {
     },
 }
 
-impl Language for EngineLanguage {
-    type Operation = EngineOperation;
+impl Language for CombineLanguage {
+    type Operation = CombineOperation;
     type Value = ();
 
-    fn references(operation: &mut EngineOperation, visit: &mut dyn FnMut(&mut Ref)) {
+    fn references(operation: &mut CombineOperation, visit: &mut dyn FnMut(&mut Ref)) {
         match operation {
-            EngineOperation::Join { on } => on.iter_mut().for_each(|(left, right, _)| {
+            CombineOperation::Join { on } => on.iter_mut().for_each(|(left, right, _)| {
                 visit(left);
                 visit(right);
             }),
-            EngineOperation::Select(columns) => columns.iter_mut().for_each(visit),
-            EngineOperation::Order(keys) => keys.iter_mut().for_each(|(key, _)| visit(key)),
-            EngineOperation::Excerpt { columns, .. } => columns.iter_mut().for_each(visit),
-            EngineOperation::Rows { .. }
-            | EngineOperation::Limit { .. }
-            | EngineOperation::Tag(_) => {}
+            CombineOperation::Select(columns) => columns.iter_mut().for_each(visit),
+            CombineOperation::Order(keys) => keys.iter_mut().for_each(|(key, _)| visit(key)),
+            CombineOperation::Excerpt { columns, .. } => columns.iter_mut().for_each(visit),
+            CombineOperation::Rows { .. }
+            | CombineOperation::Limit { .. }
+            | CombineOperation::Tag(_) => {}
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum EngineError {
+pub enum CombineError {
     #[error(transparent)]
     Rejected(#[from] Rejected),
     #[error("stage {stage} returns no column {column}")]
@@ -71,7 +71,7 @@ pub enum EngineError {
     EmptyJoin,
 }
 
-/// The name a stage's column carries in the engine plan.
+/// The name a stage's column carries in the Combine plan.
 pub fn qualified(stage: usize, column: &str) -> String {
     format!("{stage}.{column}")
 }
@@ -82,15 +82,15 @@ pub struct Rel {
     rows: tracking::Rows,
 }
 
-pub struct EngineBuilder {
-    construction: Construction<EngineLanguage>,
+pub struct CombineBuilder {
+    construction: Construction<CombineLanguage>,
 }
 
-impl EngineBuilder {
+impl CombineBuilder {
     pub fn build(
         snapshot: ModelId,
-        construct: impl FnOnce(&mut Self) -> Result<Rel, EngineError>,
-    ) -> Result<EnginePlan, EngineError> {
+        construct: impl FnOnce(&mut Self) -> Result<Rel, CombineError>,
+    ) -> Result<CombinePlan, CombineError> {
         let mut builder = Self {
             construction: Construction::new(snapshot),
         };
@@ -101,9 +101,9 @@ impl EngineBuilder {
     /// Replays `plan`; `visit` keeps, replaces or extends each operation.
     pub fn rebuild(
         snapshot: ModelId,
-        plan: &EnginePlan,
-        visit: impl FnMut(&mut Self, &mut Step<'_, '_, Self>) -> Result<Rel, EngineError>,
-    ) -> Result<EnginePlan, EngineError> {
+        plan: &CombinePlan,
+        visit: impl FnMut(&mut Self, &mut Step<'_, '_, Self>) -> Result<Rel, CombineError>,
+    ) -> Result<CombinePlan, CombineError> {
         let mut builder = Self {
             construction: Construction::new(snapshot),
         };
@@ -111,12 +111,12 @@ impl EngineBuilder {
         builder.finish(root)
     }
 
-    fn finish(self, root: Result<Rel, EngineError>) -> Result<EnginePlan, EngineError> {
+    fn finish(self, root: Result<Rel, CombineError>) -> Result<CombinePlan, CombineError> {
         Ok(self.construction.finish(root?.rows)?)
     }
 
     /// The output that holds `column` of `stage` in `rel`.
-    pub fn column(&self, rel: &Rel, stage: usize, column: &str) -> Result<Ref, EngineError> {
+    pub fn column(&self, rel: &Rel, stage: usize, column: &str) -> Result<Ref, CombineError> {
         let wanted = qualified(stage, column);
         self.construction
             .outputs(&rel.rows)?
@@ -126,18 +126,18 @@ impl EngineBuilder {
                     .value(*output)
                     .is_ok_and(|(name, _)| name == Some(wanted.as_str()))
             })
-            .ok_or(EngineError::UnknownColumn {
+            .ok_or(CombineError::UnknownColumn {
                 stage,
                 column: column.to_string(),
             })
     }
 
-    pub fn rows(&mut self, stage: usize, columns: &[String]) -> Result<Rel, EngineError> {
+    pub fn rows(&mut self, stage: usize, columns: &[String]) -> Result<Rel, CombineError> {
         let declared = columns
             .iter()
             .map(|column| Declare::named(qualified(stage, column), ()));
         self.connect(
-            EngineOperation::Rows { stage },
+            CombineOperation::Rows { stage },
             Vec::new(),
             Outputs::extend(declared),
         )
@@ -148,41 +148,45 @@ impl EngineBuilder {
         left: Rel,
         right: Rel,
         on: Vec<(Ref, Ref, DataType)>,
-    ) -> Result<Rel, EngineError> {
+    ) -> Result<Rel, CombineError> {
         if on.is_empty() {
-            return Err(EngineError::EmptyJoin);
+            return Err(CombineError::EmptyJoin);
         }
         let mut kept = self.construction.outputs(&left.rows)?;
         kept.extend(self.construction.outputs(&right.rows)?);
         let kept = kept.into_iter().map(Output::Keep);
         self.connect(
-            EngineOperation::Join { on },
+            CombineOperation::Join { on },
             vec![left, right],
             Outputs::replace(kept),
         )
     }
 
-    pub fn select(&mut self, rel: Rel, columns: Vec<(String, Ref)>) -> Result<Rel, EngineError> {
+    pub fn select(&mut self, rel: Rel, columns: Vec<(String, Ref)>) -> Result<Rel, CombineError> {
         let refs = columns.iter().map(|(_, output)| *output).collect();
         let declared = columns
             .into_iter()
             .map(|(name, _)| Output::Declare(Declare::named(name, ())));
         self.connect(
-            EngineOperation::Select(refs),
+            CombineOperation::Select(refs),
             vec![rel],
             Outputs::replace(declared),
         )
     }
 
-    pub fn order(&mut self, rel: Rel, keys: Vec<(Ref, Order)>) -> Result<Rel, EngineError> {
-        self.connect(EngineOperation::Order(keys), vec![rel], Outputs::preserve())
+    pub fn order(&mut self, rel: Rel, keys: Vec<(Ref, Order)>) -> Result<Rel, CombineError> {
+        self.connect(
+            CombineOperation::Order(keys),
+            vec![rel],
+            Outputs::preserve(),
+        )
     }
 
-    pub fn tag(&mut self, rel: Rel, columns: Vec<(String, String)>) -> Result<Rel, EngineError> {
+    pub fn tag(&mut self, rel: Rel, columns: Vec<(String, String)>) -> Result<Rel, CombineError> {
         let declared = columns.iter().map(|(name, _)| Declare::named(name, ()));
         let declared: Vec<_> = declared.collect();
         self.connect(
-            EngineOperation::Tag(columns),
+            CombineOperation::Tag(columns),
             vec![rel],
             Outputs::extend(declared),
         )
@@ -194,8 +198,8 @@ impl EngineBuilder {
         columns: Vec<Ref>,
         chars: u32,
         suffix: &str,
-    ) -> Result<Rel, EngineError> {
-        let operation = EngineOperation::Excerpt {
+    ) -> Result<Rel, CombineError> {
+        let operation = CombineOperation::Excerpt {
             columns,
             chars,
             suffix: suffix.to_string(),
@@ -204,7 +208,7 @@ impl EngineBuilder {
     }
 
     /// The output of `rel` declared `name`, as the result columns are.
-    pub fn output(&self, rel: &Rel, name: &str) -> Result<Ref, EngineError> {
+    pub fn output(&self, rel: &Rel, name: &str) -> Result<Ref, CombineError> {
         self.construction
             .outputs(&rel.rows)?
             .into_iter()
@@ -213,23 +217,23 @@ impl EngineBuilder {
                     .value(*output)
                     .is_ok_and(|(declared, _)| declared == Some(name))
             })
-            .ok_or(EngineError::UnknownColumn {
+            .ok_or(CombineError::UnknownColumn {
                 stage: usize::MAX,
                 column: name.to_string(),
             })
     }
 
-    pub fn limit(&mut self, rel: Rel, rows: u64, skip: u64) -> Result<Rel, EngineError> {
-        let operation = EngineOperation::Limit { rows, skip };
+    pub fn limit(&mut self, rel: Rel, rows: u64, skip: u64) -> Result<Rel, CombineError> {
+        let operation = CombineOperation::Limit { rows, skip };
         self.connect(operation, vec![rel], Outputs::preserve())
     }
 
     fn connect(
         &mut self,
-        operation: EngineOperation,
+        operation: CombineOperation,
         inputs: Vec<Rel>,
         outputs: Outputs<()>,
-    ) -> Result<Rel, EngineError> {
+    ) -> Result<Rel, CombineError> {
         let inputs = inputs.into_iter().map(|rel| rel.rows).collect();
         let connected = self.construction.connect(operation, inputs, outputs)?;
         Ok(Rel {
@@ -238,17 +242,17 @@ impl EngineBuilder {
     }
 }
 
-impl Rebuilder for EngineBuilder {
-    type Language = EngineLanguage;
-    type Old = EnginePlan;
+impl Rebuilder for CombineBuilder {
+    type Language = CombineLanguage;
+    type Old = CombinePlan;
     type Rows = Rel;
-    type Error = EngineError;
+    type Error = CombineError;
 
-    fn plan(old: &EnginePlan) -> &EnginePlan {
+    fn plan(old: &CombinePlan) -> &CombinePlan {
         old
     }
 
-    fn construction(&mut self) -> &mut Construction<EngineLanguage> {
+    fn construction(&mut self) -> &mut Construction<CombineLanguage> {
         &mut self.construction
     }
 
@@ -258,10 +262,10 @@ impl Rebuilder for EngineBuilder {
 
     fn apply(
         &mut self,
-        operation: EngineOperation,
+        operation: CombineOperation,
         inputs: Vec<Rel>,
         outputs: Outputs<()>,
-    ) -> Result<Rel, EngineError> {
+    ) -> Result<Rel, CombineError> {
         self.connect(operation, inputs, outputs)
     }
 }

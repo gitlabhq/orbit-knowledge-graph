@@ -1,5 +1,5 @@
 //! Queries across connections: a relational stage hands its keys to a remote stage, and the
-//! engine stage joins both sides and applies the result columns, order and limit.
+//! Combine stage joins both sides and applies the result columns, order and limit.
 
 use compiler::dag::{Backend, Input, KeyInput, Rendered};
 use compiler::orbit_authorization::Key;
@@ -39,7 +39,7 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
     let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
     assert_eq!(
         backends,
-        [Backend::ClickHouse, Backend::Live, Backend::Engine]
+        [Backend::ClickHouse, Backend::Live, Backend::Combine]
     );
     assert_eq!(
         split[1].inputs,
@@ -60,7 +60,7 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
     };
     assert!(
         sql.starts_with("SELECT mr.iid AS mr_iid, mr.title AS mr_title, mr.id AS mr_id, "),
-        "a stage that feeds the engine hands its text on whole: {sql}"
+        "a stage that feeds the Combine stage hands its text on whole: {sql}"
     );
     assert!(sql.contains("startsWith(mr.traversal_path"), "{sql}");
     let call = ran
@@ -304,7 +304,7 @@ async fn a_single_column_key_crosses_from_a_relational_store() {
     let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
     assert_eq!(
         backends,
-        [Backend::ClickHouse, Backend::Live, Backend::Engine]
+        [Backend::ClickHouse, Backend::Live, Backend::Combine]
     );
     assert_eq!(
         split[1].inputs,

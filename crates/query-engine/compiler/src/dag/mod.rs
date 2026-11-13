@@ -3,20 +3,20 @@
 //! registered for its frontend and backend.
 
 mod columns;
+mod combine;
 mod compile;
 mod connections;
 mod cut;
-mod engine;
 mod keys;
 mod request;
 mod split;
 mod sub;
 
+pub use combine::{CombineColumn, CombineEdge, CombineJoin, CombineNode, CombineQuery};
 pub use compile::{
     Compiled, Env, Frontend, Inputs, Source, compile, compile_hydration, split_query,
 };
 pub use connections::{Connections, Peer, Unplaced};
-pub use engine::{EngineColumn, EngineEdge, EngineJoin, EngineNode, EngineQuery};
 pub use keys::{KeySet, bind};
 pub use request::{Rendered, Request, describe};
 pub use split::split;
@@ -56,13 +56,13 @@ impl StageBackend for Live {
     const BACKEND: Backend = Backend::Live;
 }
 
-/// The query engine itself, which joins the rows of the other stages.
+/// The Combine stage, which joins the rows of the other stages.
 #[derive(Debug)]
-pub struct Engine;
+pub struct Combine;
 
-impl StageBackend for Engine {
+impl StageBackend for Combine {
     type Catalog = Model;
-    const BACKEND: Backend = Backend::Engine;
+    const BACKEND: Backend = Backend::Combine;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr)]
@@ -77,7 +77,7 @@ pub enum Backend {
     DuckDb,
     OrbitCode,
     Live,
-    Engine,
+    Combine,
 }
 
 /// The error of a binding of `entity` that no served connection reads.
@@ -106,12 +106,12 @@ pub enum StageQuery {
     /// A logical plan over the bindings the stage's connection holds.
     Gql(Statement),
     /// The join of earlier stages' rows, with the query's result columns, order and limit.
-    Engine(EngineQuery, Box<Response>),
+    Combine(CombineQuery, Box<Response>),
     /// The rows a hydration reads by key.
     Hydration(HydrationRequest),
 }
 
-/// What the engine stage's response reports about the query, from its top-level logical plan.
+/// What the Combine stage's response reports about the query, from its top-level logical plan.
 #[derive(Debug)]
 pub struct Response {
     pub shape: crate::passes::result_contract::ResultShape,
@@ -142,7 +142,7 @@ pub enum Input {
 pub struct Stage {
     pub id: StageId,
     pub backend: Backend,
-    /// The connection the stage runs on; the engine stage runs in the query engine.
+    /// The connection the stage runs on; the Combine stage runs in the query engine.
     pub connection: Option<String>,
     pub query: StageQuery,
     pub inputs: Vec<Input>,

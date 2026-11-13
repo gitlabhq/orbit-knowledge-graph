@@ -1,4 +1,4 @@
-//! Runs an engine plan over the rows earlier stages returned: hash joins on typed keys, then
+//! Runs a Combine plan over the rows earlier stages returned: hash joins on typed keys, then
 //! order, result columns and the page window.
 
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use arrow::record_batch::RecordBatch;
 use compiler::dag::StageId;
 use compiler::orbit_authorization::Key;
 use query_data_model::DataType;
-use query_data_model::plan::engine::{EngineOperation, EnginePlan};
+use query_data_model::plan::combine::{CombineOperation, CombinePlan};
 use query_data_model::plan::logical::Order;
 use query_data_model::plan::tracking::{NodeId, Ref};
 
@@ -29,7 +29,7 @@ impl Table {
             .iter()
             .find(|(declared, _)| *declared == output)
             .map(|(_, array)| array)
-            .ok_or_else(|| ExecutorError("an engine operation reads an unknown column".into()))
+            .ok_or_else(|| ExecutorError("a Combine operation reads an unknown column".into()))
     }
 
     fn take(&self, indices: &UInt32Array) -> Result<Self, ExecutorError> {
@@ -83,7 +83,7 @@ fn excerpt(array: &ArrayRef, chars: usize, suffix: &str) -> Result<ArrayRef, Exe
 }
 
 pub fn run(
-    plan: &EnginePlan,
+    plan: &CombinePlan,
     stages: &HashMap<StageId, Vec<RecordBatch>>,
 ) -> Result<RecordBatch, ExecutorError> {
     let mut tables: HashMap<NodeId, Table> = HashMap::new();
@@ -93,10 +93,10 @@ pub fn run(
             inputs
                 .get(index)
                 .and_then(|node| tables.get(node))
-                .ok_or_else(|| ExecutorError("an engine operation lacks its input".into()))
+                .ok_or_else(|| ExecutorError("a Combine operation lacks its input".into()))
         };
         let table = match plan.operation(node) {
-            EngineOperation::Rows { stage } => {
+            CombineOperation::Rows { stage } => {
                 let batch = concat(stages.get(stage).map_or(&[][..], Vec::as_slice))?;
                 let columns = plan
                     .outputs(node)
@@ -121,7 +121,7 @@ pub fn run(
                     rows: batch.map_or(0, |batch| batch.num_rows()),
                 }
             }
-            EngineOperation::Join { on } => {
+            CombineOperation::Join { on } => {
                 let (left, right) = (input(0)?, input(1)?);
                 let near = on
                     .iter()
@@ -154,7 +154,7 @@ pub fn run(
                     columns: left.columns.into_iter().chain(right.columns).collect(),
                 }
             }
-            EngineOperation::Order(keys) => {
+            CombineOperation::Order(keys) => {
                 let table = input(0)?;
                 let sort = keys
                     .iter()
@@ -170,13 +170,13 @@ pub fn run(
                     .collect::<Result<Vec<_>, ExecutorError>>()?;
                 table.take(&lexsort_to_indices(&sort, None).map_err(failed)?)?
             }
-            EngineOperation::Limit { rows, skip } => {
+            CombineOperation::Limit { rows, skip } => {
                 let table = input(0)?;
                 let start = (*skip as usize).min(table.rows);
                 let end = start.saturating_add(*rows as usize).min(table.rows);
                 table.take(&UInt32Array::from_iter_values(start as u32..end as u32))?
             }
-            EngineOperation::Tag(tags) => {
+            CombineOperation::Tag(tags) => {
                 let table = input(0)?;
                 let outputs: Vec<Ref> = plan.outputs(node).collect();
                 let declared = &outputs[outputs.len() - tags.len()..];
@@ -193,7 +193,7 @@ pub fn run(
                     rows: table.rows,
                 }
             }
-            EngineOperation::Excerpt {
+            CombineOperation::Excerpt {
                 columns,
                 chars,
                 suffix,
@@ -212,7 +212,7 @@ pub fn run(
                     rows: table.rows,
                 }
             }
-            EngineOperation::Select(selected) => {
+            CombineOperation::Select(selected) => {
                 let table = input(0)?;
                 let columns = plan
                     .outputs(node)
@@ -229,7 +229,7 @@ pub fn run(
     }
     let root = tables
         .remove(&plan.root())
-        .ok_or_else(|| ExecutorError("the engine plan has no root".into()))?;
+        .ok_or_else(|| ExecutorError("the Combine plan has no root".into()))?;
     let fields: Vec<Field> = root
         .columns
         .iter()

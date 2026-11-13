@@ -5,7 +5,7 @@ use query_data_model::plan::tracking::Ref;
 
 use super::split::{Crossing, Place};
 use super::{
-    Backend, Connections, Dag, EngineColumn, EngineEdge, EngineJoin, EngineNode, EngineQuery,
+    Backend, CombineColumn, CombineEdge, CombineJoin, CombineNode, CombineQuery, Connections, Dag,
     Input, Peer, RowCheck, Stage, StageId, StageQuery,
 };
 use crate::error::{QueryError, Result};
@@ -98,14 +98,14 @@ impl Cut<'_> {
                     continue;
                 }
                 push(needed.entry(*binding).or_default(), identity);
-                nodes.push(EngineNode {
+                nodes.push(CombineNode {
                     alias: self.query.name(*binding).to_string(),
                     entity: graph.entity(entity).name.clone(),
                     id: self.column(stage(index), *binding, identity),
                 });
             }
         }
-        let mut engine_order = Vec::new();
+        let mut combine_order = Vec::new();
         for (key, direction) in self.query.sort_keys() {
             let Expr::Property { binding, property } = key else {
                 return Err(QueryError::Validation(
@@ -113,7 +113,7 @@ impl Cut<'_> {
                 ));
             };
             push(needed.entry(binding).or_default(), property);
-            engine_order.push((
+            combine_order.push((
                 self.column(stage(group_of(binding)), binding, property),
                 direction,
             ));
@@ -161,7 +161,7 @@ impl Cut<'_> {
                         .collect()
                 };
                 let graph = self.query.model.graph();
-                EngineJoin {
+                CombineJoin {
                     types: consumer
                         .iter()
                         .map(|(_, property)| graph.property(*property).data_type)
@@ -178,7 +178,7 @@ impl Cut<'_> {
         let edges = self
             .crossings
             .iter()
-            .map(|crossing| EngineEdge {
+            .map(|crossing| CombineEdge {
                 step: crossing.step,
                 relationship: graph.relationship(crossing.relationship).name.clone(),
                 source: self.query.name(crossing.ends.0).to_string(),
@@ -198,13 +198,13 @@ impl Cut<'_> {
                     .collect()
             })
             .collect();
-        let engine = EngineQuery {
+        let combine = CombineQuery {
             edges,
             steps,
             joins,
             excerpted: self.excerpted()?,
             columns: self.result_columns(&stage, &group_of)?,
-            order: engine_order,
+            order: combine_order,
             limit,
             skip,
             nodes,
@@ -212,9 +212,9 @@ impl Cut<'_> {
         let inputs = (0..stages.len()).map(|from| Input::Rows { from }).collect();
         stages.push(Stage {
             id: stages.len(),
-            backend: Backend::Engine,
+            backend: Backend::Combine,
             connection: None,
-            query: StageQuery::Engine(engine, Box::new(response)),
+            query: StageQuery::Combine(combine, Box::new(response)),
             inputs,
             response: true,
             checks: Vec::new(),
@@ -235,14 +235,14 @@ impl Cut<'_> {
         stage: StageId,
         binding: Ref,
         property: PropertyId,
-    ) -> EngineColumn {
+    ) -> CombineColumn {
         let name = &self.query.model.graph().property(property).name;
         let group = self
             .groups
             .iter()
             .find(|group| group.bindings.contains(&binding));
         let relational = group.is_some_and(|group| self.peer(group.place).remote().is_none());
-        EngineColumn {
+        CombineColumn {
             stage,
             column: match relational {
                 true => format!("{}_{name}", self.query.name(binding)),

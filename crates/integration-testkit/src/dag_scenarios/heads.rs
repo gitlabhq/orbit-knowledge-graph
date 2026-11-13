@@ -1,5 +1,5 @@
 //! ADR 024's query 4: open merge requests read in ClickHouse hand their (project, source branch)
-//! heads to Orbit Next, which searches only those heads; the engine joins both sides. `Head` has
+//! heads to Orbit Next, which searches only those heads; the Combine stage joins both sides. `Head` has
 //! a composite identity, so the key set that crosses the stage is composite.
 
 use compiler::dag::{Backend, Input, KeyInput, Rendered};
@@ -62,7 +62,7 @@ async fn open_merge_requests_search_their_branch_heads_in_orbit_next() {
     let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
     assert_eq!(
         backends,
-        [Backend::ClickHouse, Backend::OrbitCode, Backend::Engine]
+        [Backend::ClickHouse, Backend::OrbitCode, Backend::Combine]
     );
     assert_eq!(
         split[1].inputs,
@@ -162,7 +162,7 @@ async fn a_code_stage_feeds_composite_keys_into_a_clickhouse_stage() {
     let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
     assert_eq!(
         backends,
-        [Backend::OrbitCode, Backend::ClickHouse, Backend::Engine]
+        [Backend::OrbitCode, Backend::ClickHouse, Backend::Combine]
     );
     assert_eq!(
         split[1].inputs,

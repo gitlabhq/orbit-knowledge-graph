@@ -1,14 +1,14 @@
-//! The `(gql, engine)` stage phases: join the earlier stages' rows and order them, add the
+//! The `(gql, combine)` stage phases: join the earlier stages' rows and order them, add the
 //! columns redaction reads with the result contract, then page the joined rows.
 
 use std::collections::BTreeMap;
 
-use query_data_model::plan::engine::{EngineBuilder, EngineOperation};
+use query_data_model::plan::combine::{CombineBuilder, CombineOperation};
 use query_data_model::plan::tracking::Ref;
 
 use super::{CompilerCtx, require};
 use crate::constants::edge_column_prefix;
-use crate::dag::{Engine, EngineColumn};
+use crate::dag::{Combine, CombineColumn};
 use crate::error::Result;
 use crate::passes::result_contract::{EdgeMeta, ResultContext};
 use crate::types::QueryType;
@@ -26,11 +26,11 @@ fn edge_columns(edge: &EdgeMeta) -> impl Iterator<Item = &String> {
     .chain(&edge.path_column)
 }
 
-pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Engine>) -> Result<()> {
-    let query = require(ctx.engine_query().as_ref(), "engine_query")?;
+pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Combine>) -> Result<()> {
+    let query = require(ctx.combine_query().as_ref(), "combine_query")?;
     let contexts = require(ctx.stage_contexts().as_ref(), "stage_contexts")?;
     let mut used: BTreeMap<usize, Vec<String>> = BTreeMap::new();
-    let mut use_column = |column: &EngineColumn| {
+    let mut use_column = |column: &CombineColumn| {
         let columns = used.entry(column.stage).or_default();
         if !columns.contains(&column.column) {
             columns.push(column.column.clone());
@@ -56,78 +56,76 @@ pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Engine>) -> Result<()> {
             .flat_map(|node| [&node.id_column, &node.type_column]);
         let edges = context.edges().iter().flat_map(edge_columns);
         for column in nodes.chain(edges) {
-            use_column(&EngineColumn {
+            use_column(&CombineColumn {
                 stage: *stage,
                 column: column.clone(),
             });
         }
     }
-    let planned =
-        EngineBuilder::build(ctx.data_model().id(), |q| {
-            let mut stages = used.iter();
-            let (first, columns) = stages
-                .next()
-                .ok_or(query_data_model::plan::engine::EngineError::EmptyJoin)?;
-            let mut rel = q.rows(*first, columns)?;
-            let mut joined = vec![*first];
-            for (stage, columns) in stages {
-                let right = q.rows(*stage, columns)?;
-                let mut on = Vec::new();
-                for join in &query.joins {
-                    let pairs = join.left.iter().zip(&join.right).zip(&join.types);
-                    for ((left, other), data_type) in pairs {
-                        let (near, far) = match (left.stage == *stage, other.stage == *stage) {
-                            (false, true) => (left, other),
-                            (true, false) => (other, left),
-                            _ => continue,
-                        };
-                        if joined.contains(&near.stage) {
-                            on.push((
-                                q.column(&rel, near.stage, &near.column)?,
-                                q.column(&right, far.stage, &far.column)?,
-                                *data_type,
-                            ));
-                        }
+    let planned = CombineBuilder::build(ctx.data_model().id(), |q| {
+        let mut stages = used.iter();
+        let (first, columns) = stages
+            .next()
+            .ok_or(query_data_model::plan::combine::CombineError::EmptyJoin)?;
+        let mut rel = q.rows(*first, columns)?;
+        let mut joined = vec![*first];
+        for (stage, columns) in stages {
+            let right = q.rows(*stage, columns)?;
+            let mut on = Vec::new();
+            for join in &query.joins {
+                let pairs = join.left.iter().zip(&join.right).zip(&join.types);
+                for ((left, other), data_type) in pairs {
+                    let (near, far) = match (left.stage == *stage, other.stage == *stage) {
+                        (false, true) => (left, other),
+                        (true, false) => (other, left),
+                        _ => continue,
+                    };
+                    if joined.contains(&near.stage) {
+                        on.push((
+                            q.column(&rel, near.stage, &near.column)?,
+                            q.column(&right, far.stage, &far.column)?,
+                            *data_type,
+                        ));
                     }
                 }
-                rel = q.join(rel, right, on)?;
-                joined.push(*stage);
             }
-            let keys = query
+            rel = q.join(rel, right, on)?;
+            joined.push(*stage);
+        }
+        let keys = query
             .order
             .iter()
             .map(|(column, order)| Ok((q.column(&rel, column.stage, &column.column)?, *order)))
-            .collect::<std::result::Result<Vec<_>, query_data_model::plan::engine::EngineError>>()?;
-            let rel = match keys.is_empty() {
-                true => rel,
-                false => q.order(rel, keys)?,
-            };
-            let columns = query
-                .columns
-                .iter()
-                .map(|(name, column)| {
-                    Ok((name.clone(), q.column(&rel, column.stage, &column.column)?))
-                })
-                .collect::<std::result::Result<
-                    Vec<(String, Ref)>,
-                    query_data_model::plan::engine::EngineError,
-                >>()?;
-            q.select(rel, columns)
-        })?;
+            .collect::<std::result::Result<Vec<_>, query_data_model::plan::combine::CombineError>>(
+            )?;
+        let rel = match keys.is_empty() {
+            true => rel,
+            false => q.order(rel, keys)?,
+        };
+        let columns = query
+            .columns
+            .iter()
+            .map(|(name, column)| Ok((name.clone(), q.column(&rel, column.stage, &column.column)?)))
+            .collect::<std::result::Result<
+                Vec<(String, Ref)>,
+                query_data_model::plan::combine::CombineError,
+            >>()?;
+        q.select(rel, columns)
+    })?;
     if *ctx.trace() {
         ctx.set_planned(crate::dag::describe(&planned));
     }
-    ctx.set_engine(planned);
+    ctx.set_combine(planned);
     Ok(())
 }
 
 /// The stages' nodes, whose id and type columns the result carries for redaction, and the edges
 /// between them: each relational stage's own, under the pattern step they stand for, and each
 /// crossing's, between its endpoint nodes.
-pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Engine>) -> Result<()> {
-    let plan = require(ctx.take_engine(), "engine")?;
+pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Combine>) -> Result<()> {
+    let plan = require(ctx.take_combine(), "combine")?;
     let contexts = require(ctx.stage_contexts().as_ref(), "stage_contexts")?;
-    let query = require(ctx.engine_query().as_ref(), "engine_query")?;
+    let query = require(ctx.combine_query().as_ref(), "combine_query")?;
     let mut result = ResultContext::new().with_query_type(QueryType::Traversal);
     let mut redacted = Vec::new();
     let mut edges = Vec::new();
@@ -204,8 +202,8 @@ pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Engine>) -> R
     }
     edges.sort_by_key(|edge| edge.relationship);
     edges.into_iter().for_each(|edge| result.add_edge(edge));
-    let plan = EngineBuilder::rebuild(ctx.data_model().id(), &plan, |q, step| {
-        let EngineOperation::Select(selected) = &step.operation else {
+    let plan = CombineBuilder::rebuild(ctx.data_model().id(), &plan, |q, step| {
+        let CombineOperation::Select(selected) = &step.operation else {
             return step.keep(q);
         };
         let names = step
@@ -229,22 +227,22 @@ pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Engine>) -> R
             false => q.tag(rows, tags.clone()),
         }
     })?;
-    ctx.set_engine(plan);
+    ctx.set_combine(plan);
     ctx.set_result_ctx(result);
     Ok(())
 }
 
 /// Text columns of the joined rows keep as many characters as a single-stage response of the
 /// same page would.
-pub(super) fn response_policy(ctx: &mut impl CompilerCtx<Backend = Engine>) -> Result<()> {
-    let plan = require(ctx.take_engine(), "engine")?;
-    let query = require(ctx.engine_query().as_ref(), "engine_query")?;
+pub(super) fn response_policy(ctx: &mut impl CompilerCtx<Backend = Combine>) -> Result<()> {
+    let plan = require(ctx.take_combine(), "combine")?;
+    let query = require(ctx.combine_query().as_ref(), "combine_query")?;
     let rows = query.skip.unwrap_or(0) + query.limit + 1;
     let chars =
         crate::passes::response_policy::excerpt_chars(u32::try_from(rows).unwrap_or(u32::MAX));
     let suffix = crate::passes::response_policy::TEXT_TRUNCATION_SUFFIX;
     let root = plan.root();
-    let plan = EngineBuilder::rebuild(ctx.data_model().id(), &plan, |q, step| {
+    let plan = CombineBuilder::rebuild(ctx.data_model().id(), &plan, |q, step| {
         let rel = step.keep(q)?;
         if step.node() != root || query.excerpted.is_empty() {
             return Ok(rel);
@@ -256,22 +254,22 @@ pub(super) fn response_policy(ctx: &mut impl CompilerCtx<Backend = Engine>) -> R
             .collect::<std::result::Result<Vec<_>, _>>()?;
         q.excerpt(rel, columns, chars, suffix)
     })?;
-    ctx.set_engine(plan);
+    ctx.set_combine(plan);
     Ok(())
 }
 
-pub(super) fn paginate(ctx: &mut impl CompilerCtx<Backend = Engine>) -> Result<()> {
-    let plan = require(ctx.take_engine(), "engine")?;
-    let query = require(ctx.engine_query().as_ref(), "engine_query")?;
+pub(super) fn paginate(ctx: &mut impl CompilerCtx<Backend = Combine>) -> Result<()> {
+    let plan = require(ctx.take_combine(), "combine")?;
+    let query = require(ctx.combine_query().as_ref(), "combine_query")?;
     let (rows, skip) = (query.limit + 1, query.skip.unwrap_or(0));
     let root = plan.root();
-    let plan = EngineBuilder::rebuild(ctx.data_model().id(), &plan, |q, step| {
+    let plan = CombineBuilder::rebuild(ctx.data_model().id(), &plan, |q, step| {
         let rel = step.keep(q)?;
         match step.node() == root {
             true => q.limit(rel, rows, skip),
             false => Ok(rel),
         }
     })?;
-    ctx.set_engine(plan);
+    ctx.set_combine(plan);
     Ok(())
 }

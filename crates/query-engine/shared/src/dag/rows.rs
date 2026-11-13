@@ -209,7 +209,7 @@ mod tests {
     const UUID: &str = "61f0c404-5cb3-11e7-907b-a6006ad3dba0";
 
     /// ClickHouse returns a UUID column as 16 bytes and a service returns it as text; both read
-    /// as the same typed key, so the engine joins them.
+    /// as the same typed key, so the Combine stage joins them.
     #[test]
     fn a_uuid_key_reads_the_same_from_bytes_and_text() {
         let bytes = uuid::Uuid::parse_str(UUID).unwrap().into_bytes();

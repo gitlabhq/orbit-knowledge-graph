@@ -38,7 +38,7 @@ impl From<DagError> for pipeline::PipelineError {
 }
 
 /// What a query returns once its stages ran: the compiled context of the stage whose rows are
-/// the response, a single relational stage or the engine stage, and those rows.
+/// the response, a single relational stage or the Combine stage, and those rows.
 #[derive(Debug)]
 pub struct Outcome {
     pub compiled: Arc<CompiledQueryContext>,
@@ -93,7 +93,7 @@ impl<'r> Runner<'r> {
                     inputs: stage.inputs.clone(),
                     logical: match &stage.query {
                         StageQuery::Gql(statement) => compiler::dag::describe(&statement.plan),
-                        StageQuery::Engine(..) | StageQuery::Hydration(_) => Vec::new(),
+                        StageQuery::Combine(..) | StageQuery::Hydration(_) => Vec::new(),
                     },
                 })
                 .collect();
@@ -139,7 +139,7 @@ impl<'r> Runner<'r> {
             .ok_or_else(|| QueryError::PipelineInvariant("a DAG has at least one stage".into()))?;
         let compiled = match request {
             Some(Request::Query(compiled)) if single => compiled,
-            Some(Request::Engine { compiled, .. }) => compiled,
+            Some(Request::Combine { compiled, .. }) => compiled,
             _ => {
                 return Err(QueryError::PipelineInvariant(
                     "the last stage of a DAG is its response stage".into(),
@@ -211,15 +211,15 @@ impl<'r> Runner<'r> {
         let checks = std::mem::take(&mut stage.checks);
         let compiled = compile(stage, inputs, &self.env)?;
         self.trace(id, &compiled);
-        if !compiled.proved && backend != compiler::dag::Backend::Engine {
+        if !compiled.proved && backend != compiler::dag::Backend::Combine {
             return Err(QueryError::Security(format!(
                 "stage {id} carries no proof that each read has its policy"
             ))
             .into());
         }
         let executed = match (&compiled.request, &connection) {
-            (Request::Engine { plan, .. }, _) => Executed {
-                batches: vec![super::engine::run(plan, results)?],
+            (Request::Combine { plan, .. }, _) => Executed {
+                batches: vec![super::combine::run(plan, results)?],
                 log: Vec::new(),
             },
             (request, Some(connection)) => self.executors.get(connection)?.execute(request).await?,

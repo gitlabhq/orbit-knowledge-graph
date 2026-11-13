@@ -81,7 +81,7 @@ impl<'m> LogicalCatalog<'m> {
         Self { served, ..self }
     }
 
-    /// Whether the deployment serves several connections, whose stages the engine joins.
+    /// Whether the deployment serves several connections, whose stages the Combine stage joins.
     pub fn serves_peers(self) -> bool {
         self.served.len() > 1
     }

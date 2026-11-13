@@ -142,9 +142,9 @@ impl From<LiveError> for QueryError {
     }
 }
 
-/// The engine plan is built from a DAG the split already checked, so its errors are invariants.
-impl From<query_data_model::plan::engine::EngineError> for QueryError {
-    fn from(error: query_data_model::plan::engine::EngineError) -> Self {
+/// The Combine plan is built from a DAG the split already checked, so its errors are invariants.
+impl From<query_data_model::plan::combine::CombineError> for QueryError {
+    fn from(error: query_data_model::plan::combine::CombineError) -> Self {
         Self::PipelineInvariant(error.to_string())
     }
 }

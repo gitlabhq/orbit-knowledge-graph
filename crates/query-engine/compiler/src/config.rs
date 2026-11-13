@@ -21,7 +21,7 @@ use orbit_authorization::Grants;
 use query_data_model::surface::Statement;
 
 mod code;
-mod engine;
+mod combine;
 mod live;
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
@@ -53,8 +53,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub admitted: crate::remote::Admitted,
         pub code: query_data_model::plan::code::CodePlan,
         pub live: query_data_model::plan::live::LivePlan,
-        pub engine: query_data_model::plan::engine::EnginePlan,
-        pub engine_query: crate::dag::EngineQuery,
+        pub combine: query_data_model::plan::combine::CombinePlan,
+        pub combine_query: crate::dag::CombineQuery,
         pub stage_contexts: Vec<(crate::dag::StageId, ResultContext)>,
         pub planned: Vec<String>,
         pub request: crate::dag::Request,
@@ -189,25 +189,25 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [live]
             mutates: [request]
         }
-        engine::plan {
+        combine::plan {
             reads_env: [data_model, trace]
-            reads_state: [engine_query, stage_contexts]
-            mutates: [engine, planned]
+            reads_state: [combine_query, stage_contexts]
+            mutates: [combine, planned]
         }
-        engine::result_contract {
+        combine::result_contract {
             reads_env: [data_model]
-            reads_state: [engine_query, stage_contexts]
-            mutates: [engine, result_ctx]
+            reads_state: [combine_query, stage_contexts]
+            mutates: [combine, result_ctx]
         }
-        engine::response_policy {
+        combine::response_policy {
             reads_env: [data_model]
-            reads_state: [engine_query]
-            mutates: [engine]
+            reads_state: [combine_query]
+            mutates: [combine]
         }
-        engine::paginate {
+        combine::paginate {
             reads_env: [data_model]
-            reads_state: [engine_query]
-            mutates: [engine]
+            reads_state: [combine_query]
+            mutates: [combine]
         }
     }
 
@@ -254,11 +254,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             state: [statement, admitted, live, planned, request, proved]
             phases: [live::plan, live::security, live::security_check, live::render]
         }
-        gql_engine {
-            backend: crate::dag::Engine
+        gql_combine {
+            backend: crate::dag::Combine
             env: [limits, trace]
-            state: [engine_query, stage_contexts, engine, result_ctx, planned]
-            phases: [engine::plan, engine::result_contract, engine::response_policy, engine::paginate]
+            state: [combine_query, stage_contexts, combine, result_ctx, planned]
+            phases: [combine::plan, combine::result_contract, combine::response_policy, combine::paginate]
         }
         hydration_clickhouse {
             backend: query_data_model::ClickHouse

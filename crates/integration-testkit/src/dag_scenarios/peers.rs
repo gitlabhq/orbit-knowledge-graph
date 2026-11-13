@@ -149,7 +149,7 @@ async fn a_duckdb_frontend_looks_up_a_live_stages_workspaces_on_duckdb() {
 const ESCALATED: &str = "MATCH (e:Escalation)-[:ESCALATES]->(m:TeamMessage) WHERE e.reason = 'paged' RETURN e.id, m.text ORDER BY e.id LIMIT 10";
 
 /// A DuckDB stage reads the escalations the caller can read and hands their message ids to the
-/// live stage, which reads only the admitted workspaces; the engine joins both.
+/// live stage, which reads only the admitted workspaces; the Combine stage joins both.
 #[tokio::test]
 async fn a_duckdb_stage_feeds_its_keys_to_a_live_stage() {
     let lake = lake();

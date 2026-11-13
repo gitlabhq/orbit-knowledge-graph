@@ -1,5 +1,5 @@
 //! ADR 024 execution DAGs end to end over the seeded fakes: GQL text, the logical plan, the
-//! stage split, each stage's planned, emitted and rendered plan, and the rows the engine returns.
+//! stage split, each stage's planned, emitted and rendered plan, and the rows the Combine stage returns.
 
 mod heads;
 mod joins;
