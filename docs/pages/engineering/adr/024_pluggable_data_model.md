@@ -508,7 +508,7 @@ CH --> Caller : rows
 @enduml
 ```
 
-The frontend records what the caller asked for and makes no planning decisions. It resolves the query's names, its entities and properties, to handles once, as it parses the GQL text. Everything else comes from those handles through the model. Outside the model, only placement chooses a read's store, through `complete_store(entity)` or `searching(entity, property)`. Placement takes the connection from `store.connection()`, and the stage hands both to the backend. Nothing looks anything up by name, and tests resolve names with the explicit `Names` resolver.
+The frontend records what the caller asked for and makes no planning decisions. It resolves the query's names, its entities and properties, to handles once, as it parses the GQL text. Everything else comes from those handles through the model. Outside the model, only placement chooses a read's store, with one `get_store` call per node. The stage hands the `StoreId` and its `ConnectionId` to the backend. Nothing looks anything up by name, and tests resolve names with the explicit `Names` resolver.
 The planning phase decides and builds in one step, with no intermediate plan description. Later phases rewrite through the same builder under four rules:
 
 - Inputs come before consumers.
@@ -622,7 +622,17 @@ WHERE f.content CONTAINS EXACT 'TODO(security)'
 RETURN mr.iid, b.name, f.path
 ```
 
-Outside the model, only placement chooses a binding's store and its connection, and each stage hands them to its backend. No backend calls placement. Each binding reads its entity's `complete: true` store, from `complete_store(entity)`, on that store's `store.connection()`. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. No order or fallback rule picks another store. Only a structural match reads elsewhere, on the store that `searching(entity, property)` returns, whose backend searches that property structurally.
+An entity has one complete store and any number of partial stores. A partial store holds a subset of the columns, or it offers an operation that the complete store does not.
+Placement picks each node's store with one call, `model.get_store(entity, &needs)`, which returns a `StoreId`. The needs are what the query needs from that node: the properties it reads and the operations it applies, meaning filter operators and search modes.
+
+1. `get_store` returns the complete store if it serves every need.
+2. Otherwise, it returns the one partial store that serves every need. For example, a `File` read with a structural match on `content` reads from the Orbit Next store.
+3. If no store serves every need, the query fails, and the error names the unmet need.
+
+A store serves a need only through declared facts: its listed columns, its backend's capabilities, its search modes and its `accepts:`.
+Two partial stores that could both serve needs the complete store cannot serve are a load error, so placement never depends on order. Search is one kind of need, not a special case.
+Outside the model, only placement calls `get_store`, once per node. The stage carries the `StoreId` and its `ConnectionId` to the backend, and no backend calls placement.
+If the deployment does not serve that connection, the query fails with an error that names the entity and the connection.
 
 The planner splits the logical plan into one stage per connection and connects them in a DAG:
 

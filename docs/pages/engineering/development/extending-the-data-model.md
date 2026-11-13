@@ -143,7 +143,11 @@ relationships:
 
 `accepts` names the columns that the store takes key sets on, when another stage hands it keys. Every store declares it, whatever its backend's capabilities. A store returns every column it lists, so listing `id` is what makes it return the identity.
 
-In each deployment's model, every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. A query reads the entity on that store's connection. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. Only a structural match reads elsewhere, on the connection whose backend searches that property structurally. Every other store is partial and lists exactly the properties it holds. A store whose backend has no writer capability holds no table, for example a live or code store. It lists the properties it serves, and its backend checks its own fields.
+In each deployment's model, every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. Every other store is partial and lists exactly the properties it holds. A partial store holds a subset of the columns, or it offers an operation that the complete store does not. `File`'s Orbit Next store is partial: it holds a few `File` columns and offers the structural search that the complete ClickHouse store lacks.
+A store whose backend has no writer capability holds no table, for example a live or code store. It lists the properties it serves, and its backend checks its own fields.
+An edge table's `copies:` is a related case. It holds copies of endpoint properties such as `branch`, so a filter on them prunes the edge read.
+
+A query's needs from a node are the properties it reads, its filter operators and its search modes. Placement reads the node from its complete store when that store serves every need. Otherwise it reads from the one partial store that serves every need. If no store does, the query fails, and the error names the unmet need. If the deployment does not serve the chosen store's connection, the query fails with an error that names the entity and the connection.
 
 `AUTHORED` is a foreign key: the `author_id` column on the `MergeRequest` row holds the author. `APPROVED` is many-to-many, so its rows live in an edge table. Every variant binds to one of the two, or the load fails.
 
@@ -817,6 +821,7 @@ The loader collects every error with its package and fails once. A missing decla
 - A user-scoped entity whose owner relationship does not reach `User` or allows more than one owner per row. The owner relationship must be a foreign key on the entity's row.
 - An unknown deployment shape.
 - A stored entity with no `complete: true` store in the deployment's model, or with two.
+- Two partial stores of one entity that could both serve needs that its complete store cannot serve.
 - A store entry without `accepts:`, or an `accepts:` column that the store does not list.
 - A relationship variant with no binding, or with two. A foreign key binds in the store whose table holds the column, and an edge table binds in the store that declares it.
 - An edge table whose two endpoints are not both on its connection.
