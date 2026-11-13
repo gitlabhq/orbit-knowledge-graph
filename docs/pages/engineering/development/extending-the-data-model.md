@@ -138,7 +138,7 @@ relationships:
 
 `access` says how queries use the columns, in terms that every backend understands. ClickHouse derives its skip indexes and sort key from it, so no package writes index or sort-key details. Column storage types stay explicit. The `backend` block overrides the derived indexes only where a platform package needs it to.
 
-Every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. The planner reads the entity from that store by default. Every other store is partial and lists exactly the properties it holds. A live or code store holds no table. It lists the properties it serves, and its backend checks its own fields.
+In each deployment's model, every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. A query reads the entity on that store's connection. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. Only a structural match reads elsewhere, on the code connection that searches its property. Every other store is partial and lists exactly the properties it holds. A live or code store holds no table. It lists the properties it serves, and its backend checks its own fields.
 
 `AUTHORED` is a foreign key: the `author_id` column on the `MergeRequest` row holds the author. `APPROVED` is many-to-many, so its rows live in an edge table. Every variant binds to one of the two, or the load fails.
 
@@ -226,7 +226,20 @@ entities:
     query: generated
 ```
 
-Every row carries the `traversal_path` of the namespace that installed the integration, so its authorization enforces a scope filter like any other entity: `enforce: {clickhouse: {scope_key: traversal_path}}`.
+The ETL of the Data Extraction Service writes the `traversal_path` of the namespace that installed the integration on every row. That path is the scope key, so the authorization enforces a scope filter like any other entity: `enforce: {clickhouse: {scope_key: traversal_path}}`.
+`JiraIssue` declares no check. Its node comes back only when its stage's security check proved the scope filter on the read, and otherwise the query engine redacts it.
+
+A DuckDB store over S3 can hold the rows instead, with a `duckdb` storage fragment and a `duckdb` policy. The connection's `location` in deployment config sets its mode, and the package is the same in both modes:
+
+```yaml
+connections:
+  duckdb:
+    jira_lake:
+      location: {mode: parquet, bucket: lake, prefix: jira/}
+      # or: {mode: ducklake, catalog: /var/lib/orbit/jira.ducklake, bucket: lake, prefix: jira/data/}
+```
+
+`parquet` reads each table from the Parquet files under its prefix. `ducklake` reads each table through the DuckLake catalog, and its data path is the bucket and prefix.
 
 ## Add a live third-party entity
 
@@ -445,6 +458,20 @@ entities:
 
 `access` marks `path` and `content` as searchable.
 
+A store's connection serves only in the deployment shapes that list it. `config/deployments.yaml` names each shape and the connections it serves:
+
+```yaml
+# config/deployments.yaml
+server:
+  connections: [main]
+local:
+  connections: [local]
+demo:
+  connections: [main, code_indexing, data_extraction, jira_lake]
+```
+
+The runtime config selects one shape with `schema.deployment`. The loader keeps only the storage fragments on that shape's connections, and then it runs every check. The model ID follows that deployment's model.
+
 A query for every call to `compile` in a project's Rust files plans into a code plan:
 
 ```cypher
@@ -625,6 +652,8 @@ authorization:
     slack: {module: slack.sign_in, connection: data_extraction}
 ```
 
+Binding the deployment fails for an entity with no row check whose scope provider does not answer exactly. The error names the entity, its scope kind, its scope and the provider.
+
 GitLab access levels appear only in the `gitlab.session` options. A deployment that loads its own packages instead of the GitLab packages binds other modules to the same contract:
 
 ```yaml
@@ -687,10 +716,11 @@ The loader collects every error with its package and fails once. A missing decla
 - A backend that stores a non-global entity or a relationship but has no `enforce` entry for it.
 - A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.
 - A `via` chain that does not reach an entity that holds the scope key, or a step with more than one target.
-- An `enforce` entry of `none` with no `checks`, or an entity whose scope answer is not exact and that has no check.
+- An `enforce` entry of `none` with no `checks`.
 - A provider name the deployment does not bind, or one bound to a module that does not answer the query the check needs.
 - A user-scoped entity whose owner relationship does not reach `User`, or allows more than one owner per row.
-- A stored entity with no `complete: true`, or with two.
+- An unknown deployment shape.
+- A stored entity with no `complete: true` store in the deployment's model, or with two.
 - A relationship variant with no binding, or with two. A foreign key binds in the store whose table holds the column, and an edge table binds in the store that declares it.
 - A foreign key column, `via` step or edge-table ID column whose type differs from the identity it points to. The loader casts nothing.
 - A stored entity or edge-table variant with no writer, or with two.

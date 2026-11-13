@@ -41,12 +41,12 @@ The next projects make these problems larger:
 
 1. **Packages declare everything.** Code knows no entity, relationship, table, connection, permission or domain by name. It holds no default for a fact that a package can declare. A missing declaration fails the load.
 2. **A package is a set of layered fragments:** graph, storage, service, authorization and source. Each layer names only the layers inside it.
-3. **The loader works once and infers nothing.** Packages declare every column, relationship binding and access policy. The loader resolves every name to an ID, checks every rule, and fails once with every error. A hash of the packages identifies the model, and every plan carries it.
+3. **The loader works once and infers nothing.** Packages declare every column, relationship binding and access policy. Each load names a deployment shape and keeps only the storage on that shape's connections. The loader resolves every name to an ID, checks every rule, and fails once with every error. A hash of the packages and the shape's connections identifies the model, and every plan carries it.
 4. **Packages load at runtime from a registry.** Each package has its own version line, and a new version needs no rebuild or deploy. The publisher's tier limits what a package can declare. A version goes live after its backfill, and the query engine then swaps models atomically.
 5. **Each backend implements one trait.** Its catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. There is one logical plan language, and one physical plan language per kind of backend. The catalog builds, checks and renders plans into SQL with parameters or a native request. Shared code never checks a backend name.
 6. **Frontends parse, and compiler phases plan.** A frontend builds a logical plan, and construction errors replace the validation pass. The planning phase builds the physical plan in one step. Shared tracking checks every connection when the builder makes it. Rewrites use the same builder, so no phase can leave an invalid plan.
 7. **Authorization runs through providers.** Packages declare each entity's scope, permission, policies and checks. A deployment binds provider modules that identify the caller, list scopes and check rows. GitLab is one such module. The security phase applies the policies, and a final check proves that every read has its policy.
-8. **A query that spans connections runs as a DAG of stages,** one per connection, connected by key sets and rows. The query engine applies the final order, limit and pagination.
+8. **A query that spans connections runs as a DAG of peer stages,** one per connection, connected by key sets and rows. A combine stage combines their rows on their keys, applies the response policy, and orders, limits and pages the result.
 9. **Plan tests check three points:** the logical plan, the physical plan right after planning, and the physical plan after every phase.
 
 ## How it works
@@ -75,7 +75,7 @@ flowchart TB
     LC["Logical catalog"]
     PC["Physical catalogs<br/>(one per connection)"]
     T["Shared tracking"]
-    DD[("DuckDB<br/>local store")]
+    DD[("DuckDB<br/>local or S3 store")]
     ON["Orbit Next<br/>code service"]
     DES["Data Extraction<br/>Service"]
     CH[("ClickHouse<br/>graph store")]
@@ -215,7 +215,7 @@ Nothing is inferred, so a forgotten column, an unbound variant or a backend with
 
 Storage rules:
 
-- Every stored entity marks one store `complete: true`, even with one store. That store lists or excludes every property, and the planner reads the entity there unless a query needs another store. Other stores list only what they hold.
+- In each deployment's model, every stored entity marks exactly one store `complete: true`, even with one store. That store lists or excludes every property. Other stores list only what they hold.
 - Each variant is bound once, in the store that holds its rows. A foreign key lives in the store whose table holds the column, and an edge table in the store that declares it. That store can differ from the other endpoint's, as with `IN_WORKSPACE` from a live message to an indexed workspace.
 - Access hints are backend-neutral. Each backend turns them into indexes and sort keys, and a platform `backend` block can override that.
 - An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
@@ -236,7 +236,7 @@ Four fixed places hold every fact, and nothing lives outside them:
 | Owner | Holds |
 |---|---|
 | Packages | data: entities, identity, storage, bindings, writers, policies |
-| Deployment config | connections, providers, limits such as row and node caps, engine settings |
+| Deployment config | connections and deployment shapes, providers, limits such as row and node caps, engine settings |
 | Backends, in Rust | capabilities: operators, functions, match modes, how each scope kind renders |
 | Compiler phases | decisions: routing, foreign key or edge, how to read the latest row, stage splits |
 
@@ -262,6 +262,7 @@ set separator none
 skinparam shadowing false
 start
 :Read the fragments of every package;
+:Keep the storage fragments\non the deployment shape's connections;
 :Resolve every name to an ID;
 :Check every rule\n(names, duplicates, foreign keys, connections);
 :Check every access policy;
@@ -278,12 +279,14 @@ if (Any errors?) then (yes)
   :Fail once, with every error\nand the package that caused it;
   stop
 else (no)
-  :Hash the packages into a ModelId;
+  :Hash the packages and the shape's\nconnections into a ModelId;
   :Publish the checked Model;
   stop
 endif
 @enduml
 ```
+
+Every load names a deployment shape. `config/deployments.yaml` names each shape and the connections it serves, such as `server`, `local` and `demo`. The loader keeps only the storage fragments of the stores on that shape's connections, and then it runs every check. An unknown shape fails the load, and no load skips this filter. The runtime config selects the shape with `schema.deployment`.
 
 Code after the loader reads facts by ID, and every plan carries the `ModelId` it was built against. A missing declaration is always a load error, never a default.
 
@@ -306,6 +309,9 @@ An entity declares its scope, the permission that a read needs, and one `enforce
 | `none`, only with a check | a check-only entity |
 
 `checks` name a provider and a permission and run on returned rows. A row comes back only if every check allows it. Each check derives its own key from the row through its declared object and ID property. So a Rails check on a commit's project and a Cedar check on the commit itself can share one entity.
+
+An entity with no checks comes back on its scope filter alone. Its node comes back only when its stage's security check proved that filter on the read. Otherwise the query engine redacts the node, so the read fails closed.
+Rows that the Data Extraction Service writes carry `traversal_path` from its ETL, and that path is their scope key. A live third-party read uses a `Credentials` check.
 
 Every property and edge attribute has exactly one access class. If it has none or two, the load fails. The security phase enforces the classes on every plan, including plans that a phase builds directly.
 
@@ -415,6 +421,7 @@ A catalog holds the declarations for one model and one plan language, plus the A
 The model exposes one logical catalog and one physical catalog per connection.
 Each backend implements `StorageBackend`, owns its schema and renderer, and declares its capabilities as facts.
 A stage targets one connection and can read every store on it.
+DuckDB is a relational store on a local file or on S3. On S3, the deployment config sets the connection's mode. `parquet` takes a bucket and a prefix, and `ducklake` takes a catalog and a data path. The package is the same in both modes.
 
 ### 5. A query becomes a request
 
@@ -521,7 +528,8 @@ The same contract fits other authorization systems:
 | OIDC groups | an OIDC token | the `groups` claim | none |
 
 GitLab access levels appear only in the GitLab module's options, which map each permission to a role.
-A scope answer is exact when the provider owns the grants, as GitLab paths, SpiceDB lookups and group claims do. Otherwise the entity must declare a check.
+A scope answer is exact when the provider owns the grants, as GitLab paths, SpiceDB lookups and group claims do.
+If an entity has no checks and its scope provider does not answer exactly, binding the deployment fails.
 
 ### 7. The same path for every backend
 
@@ -549,7 +557,7 @@ The planning phase turns one logical plan into the physical plan of the connecti
 
 ### 8. A query that spans connections runs as a DAG of stages
 
-This query joins open merge requests in ClickHouse with code that Orbit Next keeps on S3 in its trigram index, commit manifests and code graph:
+This query combines open merge requests in ClickHouse with code that Orbit Next keeps on S3 in its trigram index, commit manifests and code graph:
 
 ```cypher
 MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_BRANCH]->(b:Branch)
@@ -558,30 +566,42 @@ WHERE f.content CONTAINS EXACT 'TODO(security)'
 RETURN mr.iid, b.name, f.path
 ```
 
+Each binding reads on the connection of its entity's `complete: true` store. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. No order or fallback rule picks another store. Only a structural match reads elsewhere, on the code connection that searches its property.
+
 The planner splits the logical plan into one stage per connection and connects them in a DAG:
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear"}}}%%
 flowchart LR
     accTitle: An execution DAG across two connections
-    accDescr: Stage 1 runs on ClickHouse and returns open merge requests with their project and source branch. Its keys feed stage 2, which runs on Orbit Next and searches only those branch heads for the exact text. Stage 3 runs in the query engine, joins both results on project and branch, and applies the result columns, order, limit and pagination.
-    S1["Stage 1: ClickHouse<br/>open merge requests<br/>and source branches"]
-    S2["Stage 2: Orbit Next<br/>head commits of those branches,<br/>files with an exact match"]
-    S3["Stage 3: query engine<br/>join on project and branch,<br/>order, limit, pagination"]
+    accDescr: Stage 1 runs on ClickHouse and returns open merge requests with their project and source branch. Its keys feed stage 2, which runs on Orbit Next and searches only those branch heads for the exact text. Stage 3 is the combine stage. It combines both results on project and branch, applies the response policy and the result columns, and then orders, limits and pages the result.
+    S1["Stage 1: ClickHouse peer<br/>open merge requests<br/>and source branches"]
+    S2["Stage 2: Orbit Next peer<br/>head commits of those branches,<br/>files with an exact match"]
+    S3["Stage 3: combine stage<br/>combine on project and branch,<br/>response policy, order,<br/>limit, pagination"]
     S1 -->|"keys: (project, branch)"| S2
     S1 -->|"rows: mr.iid, b.name"| S3
     S2 -->|"rows: f.path"| S3
 
     classDef stage fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
-    classDef engine fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    classDef combine fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
     class S1,S2 stage
-    class S3 engine
+    class S3 combine
 ```
 
-Each stage is an ordinary physical plan in its catalog's language. An edge carries a key set, which the next stage reads as an `IN` input, or rows that a later stage joins.
+Every connection runs as a peer stage, relational connections included. No connection hosts the others.
+Each stage is an ordinary physical plan in its catalog's language. An edge carries a key set, which the next stage reads as an `IN` input, or rows that a later stage combines.
+A stage accepts a typed key set on any column that its store binds. It returns the key columns that its outgoing boundaries need.
+The key types on the two sides of a boundary must match, and the loader checks them.
 The planner orders stages by selectivity: the few open merge requests limit the code search to their branches.
 The content match runs before order, limit and pagination, so those apply to matched rows only.
-Every stage carries its own policy, and plan tests assert the logical plan, the planned DAG and the emitted DAG.
+
+The combine stage combines the stages' rows on their keys in process, applies the response policy, and orders, limits and pages the result. The combine stage pipeline is `[plan, result_contract, response_policy, paginate]`.
+A relationship that crosses a stage boundary returns its edges. Each edge comes from a key pair of the crossing. An edge stays only when both of its endpoints survive redaction.
+
+Every stage carries its own policy. Every node that a stage reads adds its declared checks to that stage.
+A remote stage runs its row checks through `Provider<Check>` in the deployment's modules, the same contract as every other check.
+A producer's checks run before its keys cross a boundary.
+Plan tests assert the logical plan, the planned DAG and the emitted DAG.
 
 [Extending the data model](../development/extending-the-data-model.md) shows each extension with its packages and code. It covers a GitLab entity, Jira, Slack, Orbit Next, agent memory and a new query language.
 
@@ -596,7 +616,7 @@ Every stage carries its own policy, and plan tests assert the logical plan, the 
 - Indexer code changes that alter written rows sit outside every package, so the ledger widens their scope by hand.
 - The server keeps each model snapshot until its compiles finish, and caches keyed by the model hash evict old ones.
 - A new backend brings its own plan language and renderer and reuses the frontends, tracking and phases.
-- A key set between stages has a size cap. A stage over it fails the query and never reads without a bound.
+- A stage that hands more than `query.limits.stage_keys` rows to the next stage fails the query. The query engine never truncates those rows, and no stage reads without a bound.
 
 These items are out of scope:
 
