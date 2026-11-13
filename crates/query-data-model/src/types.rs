@@ -48,7 +48,9 @@ pub enum EnumType {
 }
 
 /// Filter selectivity hint for the query planner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldSelectivity {
     /// Few distinct values (enums, booleans). Filtering narrows weakly.
@@ -68,7 +70,7 @@ impl FieldSelectivity {
 }
 
 /// How many rows of each endpoint one row of the other endpoint links to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Cardinality {
     OneToOne,
@@ -89,7 +91,7 @@ impl Cardinality {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraversalPathKind {
     Id,

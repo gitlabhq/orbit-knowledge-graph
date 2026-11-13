@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::DuckDb;
@@ -8,14 +9,16 @@ use crate::implementations::relational::{
 };
 use crate::spec::parse_word;
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DuckDbSource {
     #[serde(default)]
     pub sort_key: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+impl crate::spec::WrittenBlock for DuckDbSource {}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DuckDbColumn {
     #[serde(rename = "type")]

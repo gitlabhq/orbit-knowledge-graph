@@ -1,0 +1,273 @@
+{
+  "$defs": {
+    "Attribute": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "Cardinality": {
+      "description": "How many rows of each endpoint one row of the other endpoint links to.",
+      "enum": [
+        "one_to_one",
+        "one_to_many",
+        "many_to_one",
+        "many_to_many"
+      ],
+      "type": "string"
+    },
+    "DefaultValue": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "format": "double",
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "The value a row takes when its source omits the property."
+    },
+    "Entity": {
+      "additionalProperties": false,
+      "properties": {
+        "default_columns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "The property, or properties in order, whose values identify a row."
+        },
+        "label": {
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/Property"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "style": {
+          "$ref": "#/$defs/Style",
+          "default": {
+            "color": "#6B7280",
+            "size": 30
+          }
+        }
+      },
+      "required": [
+        "identity",
+        "label",
+        "default_columns",
+        "properties"
+      ],
+      "type": "object"
+    },
+    "Property": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DefaultValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminal": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        },
+        "unique": {
+          "default": false,
+          "type": "boolean"
+        },
+        "values": {
+          "additionalProperties": false,
+          "default": null,
+          "patternProperties": {
+            "^-?\\d+$": {
+              "type": "string"
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "Relationship": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/Attribute"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variants": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RelationshipVariant"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "variants"
+      ],
+      "type": "object"
+    },
+    "RelationshipVariant": {
+      "additionalProperties": false,
+      "properties": {
+        "cardinality": {
+          "$ref": "#/$defs/Cardinality"
+        }
+      },
+      "required": [
+        "cardinality"
+      ],
+      "type": "object"
+    },
+    "Style": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "type": "string"
+        },
+        "size": {
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "size",
+        "color"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "domain": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "domain_description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "entities": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Entity"
+      },
+      "type": "object"
+    },
+    "kind": {
+      "const": "graph",
+      "type": "string"
+    },
+    "package": {
+      "type": "string"
+    },
+    "relationships": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Relationship"
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "kind",
+    "package"
+  ],
+  "type": "object"
+}

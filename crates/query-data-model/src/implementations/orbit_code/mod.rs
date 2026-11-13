@@ -3,6 +3,7 @@ mod render;
 pub use render::{RequestField, StructuralSearchRequest};
 
 use indexmap::IndexMap;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::catalog::{
@@ -19,23 +20,26 @@ pub trait CodeSearch {
     fn search(&self, request: &StructuralSearchRequest) -> Result<Vec<Row>, ExecuteError>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchMode {
     Trigram,
     Structural,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CodeSource {
+    #[schemars(required)]
     pub repository: Option<RepositorySpec>,
     #[serde(default)]
     pub search: IndexMap<String, Vec<SearchMode>>,
 }
 
+impl crate::spec::WrittenBlock for CodeSource {}
+
 /// The columns that name the repository and the branch each row is in.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RepositorySpec {
     pub project: String,

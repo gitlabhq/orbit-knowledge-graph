@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, HashMap};
 use super::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 use crate::spec::{Attribute, Entity, Property, Relationship, RelationshipVariant};
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct Style {
     pub size: i32,

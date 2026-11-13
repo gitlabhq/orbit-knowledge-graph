@@ -408,10 +408,22 @@ description = "Validate named query YAML files against JSON schema"
 run = "find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json"
 description = "Validate indexer test scenario YAML files against JSON schema"
 
+[tasks."model:validate"]
+run = "sh ./scripts/checks/validate-model-packages.sh"
+description = "Validate every data model package file against the JSON schema of its kind"
+
 
 [tasks."schema:generate"]
 run = "cargo xtask schema -o config/schemas/config.schema.json"
 description = "Generate JSON Schema for the server configuration"
+
+[tasks."model:schema:generate"]
+run = "cargo xtask model-schema"
+description = "Generate the JSON schemas of data model package files"
+
+[tasks."model:schema:check"]
+run = "cargo xtask model-schema --check"
+description = "Fail if the committed data model JSON schemas differ from the spec types"
 
 [tasks."toolchain:generate"]
 run = "bash ./scripts/checks/check-rust-toolchain.sh --write"

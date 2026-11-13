@@ -15,11 +15,11 @@ pub use access::{
     Access, Check, EdgeScope, EntityAccess, Permission, PermissionId, Policy, PropertyAccess,
     ProviderUse, RelationshipAccess, Scope, ScopeId, ScopeKind,
 };
-pub(crate) use backend::registered;
 pub use backend::{
     Capabilities, Catalog, ColumnInput, ExecuteError, NoOptions, Render, Row, SourceInput,
     StorageBackend, StoreInput, check_unrelational,
 };
+pub(crate) use backend::{backends, registered};
 pub use diagnostics::{Diagnostics, SpecError};
 pub use guards::{Guard, PolicyKind, Rule};
 pub use lookups::{Lookup, Lookups};

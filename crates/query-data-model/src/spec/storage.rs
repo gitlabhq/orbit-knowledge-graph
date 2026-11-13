@@ -2,10 +2,12 @@ use std::any::Any;
 use std::fmt::Debug;
 
 use indexmap::IndexMap;
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use super::{Naming, Raw, explicit_null};
+use crate::catalog::StorageBackend;
 use crate::{Endpoint, FieldSelectivity, ForeignKey, PropertyId};
 
 /// A backend block, typed by its store's backend when the fragment is parsed.
@@ -31,6 +33,54 @@ pub trait Blocks {
     type Column: Debug;
 }
 
+/// A backend block's schema. The loader reads an omitted block as its default, and reports a
+/// missing block the backend requires: one typed as an `Option`, or one with a required field.
+pub trait WrittenBlock: JsonSchema {
+    fn written(generator: &mut SchemaGenerator) -> Schema {
+        generator.subschema_for::<Self>()
+    }
+
+    fn required() -> bool {
+        Self::json_schema(&mut SchemaGenerator::default())
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|required| !required.is_empty())
+    }
+}
+
+impl<T: JsonSchema> WrittenBlock for Option<T> {
+    fn written(generator: &mut SchemaGenerator) -> Schema {
+        generator.subschema_for::<T>()
+    }
+
+    fn required() -> bool {
+        true
+    }
+}
+
+fn block<T: WrittenBlock>(generator: &mut SchemaGenerator) -> Schema {
+    T::written(generator)
+}
+
+fn optional_block<T: WrittenBlock>(schema: &mut Schema) {
+    if T::required() {
+        return;
+    }
+    if let Some(required) = schema
+        .get_mut("required")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        required.retain(|field| field != "backend");
+        if required.is_empty() {
+            schema.remove("required");
+        }
+    }
+}
+
+fn engine_kind<B: StorageBackend>(_: &mut SchemaGenerator) -> Schema {
+    schemars::json_schema!({"const": B::KIND})
+}
+
 /// The blocks of a fragment whose backend only the store's own catalog reads.
 #[derive(Debug)]
 pub struct Erased;
@@ -41,8 +91,9 @@ impl Blocks for Erased {
     type Column = Box<dyn Block>;
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "K: Typed")]
+#[schemars(bound = "K: StorageBackend")]
 pub struct StorageFragment<K: Blocks = Erased> {
     pub package: String,
     pub store: String,
@@ -53,25 +104,30 @@ pub struct StorageFragment<K: Blocks = Erased> {
     pub relationships: IndexMap<String, IndexMap<String, Binding<Raw>>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "K: Typed")]
+#[schemars(bound = "K: StorageBackend", transform = optional_block::<K::Options>)]
 pub struct EngineSpec<K: Blocks = Erased> {
+    #[schemars(schema_with = "engine_kind::<K>")]
     pub kind: String,
     pub connection: String,
     #[serde(default)]
     pub trusted: bool,
     pub path_column: Option<String>,
     #[serde(default)]
+    #[schemars(!default, schema_with = "block::<K::Options>")]
     pub backend: K::Engine,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "K: Typed")]
+#[schemars(bound = "K: StorageBackend", transform = optional_block::<K::SourceOptions>)]
 pub struct EntityStorage<K: Blocks = Erased> {
     /// This store holds or excludes every graph property of the entity, and plans read it here.
     #[serde(default)]
     pub complete: bool,
     /// The stored properties a stage takes key sets on.
+    #[schemars(required)]
     pub accepts: Option<Vec<String>>,
     pub table: Option<String>,
     #[serde(default, deserialize_with = "explicit_null")]
@@ -83,11 +139,13 @@ pub struct EntityStorage<K: Blocks = Erased> {
     #[serde(default)]
     pub access: AccessHints<Raw>,
     #[serde(default)]
+    #[schemars(!default, schema_with = "block::<K::SourceOptions>")]
     pub backend: K::Entity,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "K: Typed")]
+#[schemars(bound = "K: StorageBackend", transform = optional_block::<K::ColumnOptions>)]
 pub struct ColumnStorage<K: Blocks = Erased> {
     #[serde(default)]
     pub immutable: bool,
@@ -98,6 +156,7 @@ pub struct ColumnStorage<K: Blocks = Erased> {
     #[serde(default)]
     pub stored_as_text: bool,
     #[serde(default)]
+    #[schemars(!default, schema_with = "block::<K::ColumnOptions>")]
     pub backend: K::Column,
 }
 
@@ -168,12 +227,13 @@ impl<K: Typed> StorageFragment<K> {
 }
 
 /// How queries read an entity, in terms every backend turns into its own indexes and order.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(
     default,
     deny_unknown_fields,
     bound(deserialize = "S::Property: Deserialize<'de>")
 )]
+#[schemars(bound = "S::Property: JsonSchema")]
 pub struct AccessHints<S: Naming> {
     pub filter: Vec<S::Property>,
     pub text: Vec<S::Property>,
@@ -191,11 +251,12 @@ impl<S: Naming> Default for AccessHints<S> {
 }
 
 /// Where one relationship variant's rows live: a foreign key, an edge table, or both.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(
     deny_unknown_fields,
     bound(deserialize = "S::Key: Deserialize<'de>, S::Copies: Deserialize<'de>")
 )]
+#[schemars(bound = "S::Key: JsonSchema, S::Copies: JsonSchema")]
 pub struct Binding<S: Naming> {
     pub fk: Option<S::Key>,
     pub edge_table: Option<String>,
@@ -205,13 +266,13 @@ pub struct Binding<S: Naming> {
 }
 
 /// An edge table that the variant's writer derives from its foreign key, read in its place.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EdgeIndex {
     pub edge_table: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KeySpec {
     pub on: Endpoint,
@@ -239,7 +300,7 @@ pub struct Discriminator {
 }
 
 /// One written value or a list of them.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum OneOrMany {
     One(String),

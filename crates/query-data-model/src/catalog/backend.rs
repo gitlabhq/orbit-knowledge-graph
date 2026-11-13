@@ -13,7 +13,7 @@ use crate::implementations::{
     clickhouse::ClickHouse, duckdb::DuckDb, live::Live, orbit_code::OrbitCode,
 };
 use crate::plan::tracking::{Language, Plan};
-use crate::spec::{Block, Blocks, StorageFragment, Typed};
+use crate::spec::{Block, Blocks, StorageFragment, Typed, WrittenBlock};
 use crate::{
     ConnectionId, DataModelError, EntityId, GraphCatalog, Packages, PropertyId,
     RelationshipVariantId,
@@ -26,9 +26,9 @@ pub trait StorageBackend: Sized + 'static {
     const CAPABILITIES: Capabilities;
     /// The access policies this backend renders into its plans.
     const POLICIES: &'static [PolicyKind];
-    type Options: Block + DeserializeOwned + Default;
-    type SourceOptions: Block + DeserializeOwned + Default;
-    type ColumnOptions: Block + DeserializeOwned + Default;
+    type Options: Block + DeserializeOwned + Default + WrittenBlock;
+    type SourceOptions: Block + DeserializeOwned + Default + WrittenBlock;
+    type ColumnOptions: Block + DeserializeOwned + Default + WrittenBlock;
     type Store: Debug + Send + Sync + std::panic::RefUnwindSafe + 'static;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
@@ -60,9 +60,11 @@ pub struct Capabilities {
 }
 
 /// The options of a backend block that takes none.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NoOptions {}
+
+impl WrittenBlock for NoOptions {}
 
 /// A store that holds no rows names no tables.
 pub fn check_unrelational<B: StorageBackend>(
@@ -347,6 +349,9 @@ pub(crate) trait Registered {
 
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error>;
 
+    /// The schema of a package file, whose storage fragments are this backend's.
+    fn schema(&self) -> schemars::Schema;
+
     fn resolve(
         &self,
         model: &Model,
@@ -365,8 +370,12 @@ const REGISTRY: [&dyn Registered; 4] = [
     &Entry::<Live>(PhantomData),
 ];
 
+pub(crate) fn backends() -> impl Iterator<Item = &'static dyn Registered> {
+    REGISTRY.into_iter()
+}
+
 pub(crate) fn registered(kind: &str) -> Option<&'static dyn Registered> {
-    REGISTRY.into_iter().find(|backend| backend.kind() == kind)
+    backends().find(|backend| backend.kind() == kind)
 }
 
 impl<B: StorageBackend> Registered for Entry<B> {
@@ -389,6 +398,10 @@ impl<B: StorageBackend> Registered for Entry<B> {
 
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error> {
         StorageFragment::<B>::parse(yaml)
+    }
+
+    fn schema(&self) -> schemars::Schema {
+        schemars::schema_for!(crate::spec::Fragment<StorageFragment<B>>)
     }
 
     fn resolve(

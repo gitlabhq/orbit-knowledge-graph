@@ -363,6 +363,17 @@ indexer-scenario-schema-validate:
   script:
     - find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json
 
+model-schema-validate:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - sh ./scripts/checks/validate-model-packages.sh
+
 setup-schema-validate:
   stage: lint
   image: ghcr.io/astral-sh/uv:python3.12-alpine
@@ -413,6 +424,16 @@ generate-config-schema:
     paths:
       - config/schemas/config.schema.json
     expire_in: 24 hours
+
+model-schema-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run model:schema:check
 
 rust-toolchain-sync-check:
   stage: lint

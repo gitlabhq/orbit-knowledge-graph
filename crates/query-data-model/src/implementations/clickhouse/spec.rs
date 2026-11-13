@@ -1,13 +1,15 @@
 use std::collections::BTreeMap;
 
 use indexmap::IndexMap;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::spec::WrittenBlock;
 use crate::{DenormalizedDirection, TraversalPathKind};
 
 pub type Settings = IndexMap<String, String>;
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ClickHouseOptions {
     pub version_column: Option<String>,
@@ -25,7 +27,9 @@ pub struct ClickHouseOptions {
     pub refreshable_views: IndexMap<String, RefreshableViewSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+impl WrittenBlock for ClickHouseOptions {}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ColumnSpec {
     #[serde(rename = "type")]
@@ -35,14 +39,14 @@ pub struct ColumnSpec {
     pub codec: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum IndexSpec {
     Kind(String),
     Detail(IndexDetail),
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IndexDetail {
     #[serde(rename = "type")]
@@ -52,7 +56,7 @@ pub struct IndexDetail {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum IndexSpecs {
     One(IndexSpec),
@@ -95,14 +99,14 @@ fn unit_granularity() -> u32 {
     1
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ProjectionSpec {
     Ordered(OrderedProjection),
     Aggregate(AggregateProjection),
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OrderedProjection {
     pub order_by: Vec<String>,
@@ -110,14 +114,14 @@ pub struct OrderedProjection {
     pub lightweight: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AggregateProjection {
     pub select: Vec<String>,
     pub group_by: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ClickHouseSource {
     pub sort_key: Vec<String>,
@@ -131,7 +135,9 @@ pub struct ClickHouseSource {
     pub path_lookups: IndexMap<TraversalPathKind, PathLookupSpec>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+impl WrittenBlock for ClickHouseSource {}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct EdgeTable {
     pub shared: bool,
@@ -144,7 +150,7 @@ pub struct EdgeTable {
     pub settings: Settings,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TableSpec {
     /// What the engines keep in the table; each role names at most one table.
@@ -166,7 +172,7 @@ pub struct TableSpec {
 }
 
 /// An engine-owned table the indexing and query engines read and write by its role.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TableRole {
     /// Each indexing plan's watermark and completion, keyed by plan.
@@ -177,7 +183,7 @@ pub enum TableRole {
     DeletionSchedule,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DictionarySpec {
     pub source: String,
@@ -188,14 +194,14 @@ pub struct DictionarySpec {
     pub lifetime: LifetimeSpec,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LifetimeSpec {
     pub min: u32,
     pub max: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSpec {
     #[serde(default = "yes")]
@@ -209,7 +215,7 @@ pub struct ViewSpec {
     pub populate: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RefreshableViewSpec {
     #[serde(default = "yes")]
@@ -223,7 +229,7 @@ fn yes() -> bool {
     true
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DenormalizedSpec {
     pub entity: String,
@@ -236,14 +242,14 @@ pub struct DenormalizedSpec {
     pub nullable: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CopySpec {
     pub source: String,
     pub sort_key: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JoinSpec {
     pub sort_key: Vec<String>,
@@ -253,7 +259,7 @@ pub struct JoinSpec {
     pub relationships: Vec<JoinRelationshipSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JoinSourceSpec {
     pub table: String,
@@ -264,14 +270,14 @@ pub struct JoinSourceSpec {
     pub filter: IndexMap<String, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JoinOnSpec {
     pub previous: String,
     pub column: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JoinNodeSpec {
     pub entity: String,
@@ -279,7 +285,7 @@ pub struct JoinNodeSpec {
     pub key: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JoinRelationshipSpec {
     pub relationship: String,
@@ -288,7 +294,7 @@ pub struct JoinRelationshipSpec {
     pub edge: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PathLookupSpec {
     pub table: String,

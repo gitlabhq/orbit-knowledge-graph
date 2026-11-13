@@ -1,0 +1,385 @@
+{
+  "$defs": {
+    "CheckSpec": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DelegatedCheck"
+        },
+        {
+          "$ref": "#/$defs/RowCheck"
+        }
+      ]
+    },
+    "DelegatedCheck": {
+      "additionalProperties": false,
+      "description": "The provider answers `Credentials`, and the backend runs the read with the caller's sign-in.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/DelegatedWord"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "DelegatedWord": {
+      "enum": [
+        "delegated"
+      ],
+      "type": "string"
+    },
+    "EdgePolicy": {
+      "additionalProperties": false,
+      "description": "An edge row's scope key: the copy of `scope_key` it holds, and which endpoints share it.",
+      "properties": {
+        "of": {
+          "$ref": "#/$defs/EdgeScope"
+        },
+        "scope_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope_key",
+        "of"
+      ],
+      "type": "object"
+    },
+    "EdgeScope": {
+      "description": "Which endpoints an edge row's scope key belongs to.",
+      "oneOf": [
+        {
+          "const": "target",
+          "description": "The target's key; the source may sit in another scope.",
+          "type": "string"
+        },
+        {
+          "const": "source",
+          "description": "The source's key; the target may sit in another scope.",
+          "type": "string"
+        },
+        {
+          "const": "both",
+          "description": "The target's key, which the source shares.",
+          "type": "string"
+        },
+        {
+          "const": "nested",
+          "description": "The target's key, which lies within the source's scope.",
+          "type": "string"
+        },
+        {
+          "const": "holder",
+          "description": "The target is the scope entity that holds the source.",
+          "type": "string"
+        },
+        {
+          "const": "own",
+          "description": "The edge's own key, which neither endpoint is known to share.",
+          "type": "string"
+        }
+      ]
+    },
+    "EntityAccess": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CheckSpec"
+          },
+          "type": "array"
+        },
+        "enforce": {
+          "additionalProperties": {
+            "$ref": "#/$defs/PolicySpec"
+          },
+          "description": "One policy per backend kind that stores the entity; a global entity declares none.",
+          "type": "object"
+        },
+        "permission": {
+          "type": "string"
+        },
+        "properties": {
+          "$ref": "#/$defs/PropertyClasses"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope",
+        "permission",
+        "properties"
+      ],
+      "type": "object"
+    },
+    "OneOrMany": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "One written value or a list of them."
+    },
+    "PolicySpec": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PolicyWord"
+        },
+        {
+          "properties": {
+            "scope_key": {
+              "$ref": "#/$defs/ScopeKeySpec"
+            }
+          },
+          "required": [
+            "scope_key"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PolicyWord": {
+      "enum": [
+        "none"
+      ],
+      "type": "string"
+    },
+    "PropertyClasses": {
+      "additionalProperties": false,
+      "description": "Every property of an entity, or attribute of a relationship, in exactly one class: `open`\nreads and filters freely, `exact` filters without pattern matches, `unfiltered` is read but\nnever filtered, `hidden` is neither, and `admin` and `admin_exact` are `open` and `exact`\nfor administrators only.",
+      "properties": {
+        "admin": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "admin_exact": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "exact": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hidden": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "open": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unfiltered": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RelationshipAccess": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "$ref": "#/$defs/PropertyClasses"
+        },
+        "enforce": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EdgePolicy"
+          },
+          "type": "object"
+        },
+        "permission": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "variants": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/EdgePolicy"
+            },
+            "type": "object"
+          },
+          "description": "Policies for single variants, by backend kind, where they differ from `enforce`.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "scope",
+        "permission",
+        "enforce"
+      ],
+      "type": "object"
+    },
+    "RowCheck": {
+      "additionalProperties": false,
+      "description": "The provider answers `Check` for the returned rows, or for the `object` each row names.",
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "object": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "permission": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "resource": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "permission",
+        "resource"
+      ],
+      "type": "object"
+    },
+    "ScopeDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "description": "The entity an `owner` scope's rows belong to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/ScopeKind"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "ScopeKeySpec": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/Via"
+        }
+      ]
+    },
+    "ScopeKind": {
+      "enum": [
+        "hierarchy",
+        "flat",
+        "owner",
+        "global"
+      ],
+      "type": "string"
+    },
+    "Via": {
+      "additionalProperties": false,
+      "properties": {
+        "via": {
+          "$ref": "#/$defs/OneOrMany"
+        }
+      },
+      "required": [
+        "via"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A package's authorization: the platform vocabulary it declares and its entities' policies.",
+  "properties": {
+    "entities": {
+      "additionalProperties": {
+        "$ref": "#/$defs/EntityAccess"
+      },
+      "type": "object"
+    },
+    "kind": {
+      "const": "authorization",
+      "type": "string"
+    },
+    "package": {
+      "type": "string"
+    },
+    "permissions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "relationships": {
+      "additionalProperties": {
+        "$ref": "#/$defs/RelationshipAccess"
+      },
+      "type": "object"
+    },
+    "scopes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ScopeDeclaration"
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "kind",
+    "package"
+  ],
+  "type": "object"
+}

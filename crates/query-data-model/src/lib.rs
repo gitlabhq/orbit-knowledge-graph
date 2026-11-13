@@ -31,4 +31,5 @@ pub use implementations::clickhouse::facts::{
 pub use implementations::duckdb::DuckDb;
 pub use implementations::relational::RelationshipRoute;
 pub use packages::{Packages, Tier};
+pub use spec::schemas;
 pub use types::{Cardinality, DataType, EnumType, FieldSelectivity, TraversalPathKind};

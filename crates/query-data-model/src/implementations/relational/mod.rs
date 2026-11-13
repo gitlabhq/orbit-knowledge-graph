@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::catalog::{Catalog, StorageBackend};
@@ -16,7 +17,7 @@ pub use catalog::RelationshipRoute;
 pub use store::{ReadPaths, RelationalStore, Versioning, entity_layout};
 pub use tables::{Column, Engine, Index, PathColumn, Projection, Table};
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct RelationalOptions {
     pub version_column: Option<String>,
@@ -24,7 +25,9 @@ pub struct RelationalOptions {
     pub edge_tables: IndexMap<String, EdgeTableSpec>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+impl crate::spec::WrittenBlock for RelationalOptions {}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct EdgeTableSpec {
     pub shared: bool,

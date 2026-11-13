@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use indexmap::IndexMap;
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 
@@ -14,8 +15,9 @@ pub const TEMPLATE_EXTENSION: &str = ".sql.j2";
 /// The source whose rows the code indexer writes itself, with no pipelines.
 pub const CODE_INDEXER_SOURCE: &str = "code_indexer";
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(try_from = "WrittenFragment")]
+#[schemars(with = "WrittenFragment")]
 pub struct SourceFragment {
     pub package: String,
     pub source: String,
@@ -31,7 +33,7 @@ pub struct SourceFragment {
 
 /// The names the source's own code reads by role, so it names no entity, relationship or
 /// table itself.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Roles {
     #[serde(default)]
@@ -49,7 +51,7 @@ pub struct Writes {
     pub relationships: IndexMap<String, Vec<String>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct WrittenFragment {
     package: String,
@@ -57,10 +59,12 @@ struct WrittenFragment {
     #[serde(default)]
     declare: Option<SourceDeclaration>,
     #[serde(default)]
+    #[schemars(schema_with = "entity_pipelines_schema")]
     entities: Option<Listed<Pipelines>>,
     #[serde(default)]
     relationships: IndexMap<String, Listed<RelationshipSourceSpec>>,
     #[serde(default, deserialize_with = "derived")]
+    #[schemars(schema_with = "derived_schema")]
     derived: Pipelines,
     #[serde(default)]
     roles: Roles,
@@ -115,6 +119,25 @@ enum Listed<T> {
     Specs(T),
 }
 
+impl<T: JsonSchema> JsonSchema for Listed<T> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("Listed_{}", T::schema_name()).into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let specs = generator.subschema_for::<T>();
+        listed(generator, specs)
+    }
+}
+
+fn listed(generator: &mut SchemaGenerator, specs: Schema) -> Schema {
+    schemars::json_schema!({"anyOf": [generator.subschema_for::<Vec<String>>(), specs]})
+}
+
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for Listed<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct Visit<T>(std::marker::PhantomData<T>);
@@ -146,7 +169,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for Listed<T> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SourceDeclaration {
     pub connection: String,
@@ -157,16 +180,17 @@ pub struct SourceDeclaration {
     pub enabled_namespaces: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RelationshipSourceSpec {
     #[serde(default)]
     pub reindex: Vec<Short<ReindexTrigger<Raw>>>,
     #[serde(deserialize_with = "relationship_pipelines")]
+    #[schemars(schema_with = "relationship_pipelines_schema")]
     pub pipelines: Pipelines,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PipelineSpec {
     pub tables: Vec<String>,
@@ -246,6 +270,44 @@ impl PipelineSpec {
     }
 }
 
+/// A section's pipelines, with only the fields `rules` allows the section and those it requires.
+fn section_schema(generator: &mut SchemaGenerator, section: &str) -> Schema {
+    let (allows, requires) = rules(section);
+    let mut pipeline = PipelineSpec::json_schema(generator);
+    let always: Vec<serde_json::Value> = pipeline
+        .get("required")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(properties) = pipeline
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        properties.retain(|field, _| {
+            allows.contains(&field.as_str()) || always.iter().any(|kept| kept == field.as_str())
+        });
+    }
+    let required: Vec<serde_json::Value> = always
+        .into_iter()
+        .chain(requires.iter().map(|field| (*field).into()))
+        .collect();
+    pipeline.insert("required".into(), required.into());
+    schemars::json_schema!({"type": "object", "additionalProperties": pipeline})
+}
+
+fn entity_pipelines_schema(generator: &mut SchemaGenerator) -> Schema {
+    let specs = section_schema(generator, "entities");
+    listed(generator, specs)
+}
+
+fn relationship_pipelines_schema(generator: &mut SchemaGenerator) -> Schema {
+    section_schema(generator, "relationships")
+}
+
+fn derived_schema(generator: &mut SchemaGenerator) -> Schema {
+    section_schema(generator, "derived")
+}
+
 fn pipelines<'de, D: Deserializer<'de>>(
     deserializer: D,
     section: &str,
@@ -267,8 +329,9 @@ fn derived<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Pipelines, D::E
     pipelines(deserializer, "derived")
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "")]
+#[schemars(bound = "S::Entity: JsonSchema")]
 pub struct ExtractLookup<S: Naming = Resolved> {
     pub entity: S::Entity,
     #[serde(rename = "id")]
@@ -281,8 +344,9 @@ pub struct ExtractLookup<S: Naming = Resolved> {
     pub namespaced: S::Loaded<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "")]
+#[schemars(bound = "S::Relationship: JsonSchema, Endpoint<S>: JsonSchema")]
 pub struct EdgeMapping<S: Naming = Resolved> {
     #[serde(rename = "label")]
     pub relationship: S::Relationship,
@@ -296,8 +360,12 @@ pub struct EdgeMapping<S: Naming = Resolved> {
     pub variants: S::Loaded<Vec<RelationshipVariantId>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "")]
+#[schemars(
+    rename = "PipelineEndpoint",
+    bound = "S::Enrich: JsonSchema, EndpointKind<S>: JsonSchema"
+)]
 pub struct Endpoint<S: Naming = Resolved> {
     pub field: String,
     pub kind: EndpointKind<S>,
@@ -305,8 +373,9 @@ pub struct Endpoint<S: Naming = Resolved> {
     pub properties: S::Enrich,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged, bound = "")]
+#[schemars(bound = "S::Entity: JsonSchema")]
 pub enum EndpointKind<S: Naming = Resolved> {
     Entity(S::Entity),
     Column {
@@ -316,7 +385,7 @@ pub enum EndpointKind<S: Naming = Resolved> {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct ReindexTrigger<S: Naming = Resolved> {
     pub table: String,
@@ -377,7 +446,7 @@ impl EndpointKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum PathSpec {
     Column(#[serde(deserialize_with = "column_path")] String),

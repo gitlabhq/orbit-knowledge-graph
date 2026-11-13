@@ -1,5 +1,6 @@
 mod authorization;
 mod graph;
+mod schemas;
 mod service;
 mod source;
 pub(crate) mod storage;
@@ -11,6 +12,7 @@ pub use authorization::{
 pub use graph::{
     Attribute, DefaultValue, Entity, GraphFragment, Property, Relationship, RelationshipVariant,
 };
+pub use schemas::schemas;
 pub use service::{Lookup, ServiceFragment};
 pub use source::{
     CODE_INDEXER_SOURCE, EdgeMapping, Endpoint, EndpointKind, ExtractLookup, GENERATED_QUERY,
@@ -18,7 +20,7 @@ pub use source::{
 };
 pub use storage::{
     AccessHints, Binding, Block, Blocks, CopySources, Discriminator, EngineSpec, EntityStorage,
-    Key, KeySpec, OneOrMany, StorageFragment, Typed,
+    Key, KeySpec, OneOrMany, StorageFragment, Typed, WrittenBlock,
 };
 
 use std::collections::{BTreeMap, HashMap};
@@ -26,6 +28,7 @@ use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 
 use indexmap::IndexMap;
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -34,8 +37,9 @@ use crate::packages::{Tier, directory};
 use crate::{EntityId, PropertyId, RelationshipId};
 
 /// One package file. Its storage blocks parse only once the store's engine kind is known.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[schemars(bound = "S: JsonSchema")]
 pub enum Fragment<S = Box<StorageFragment>> {
     Graph(GraphFragment),
     Storage(S),
@@ -442,6 +446,25 @@ pub struct Short<T>(pub T);
 
 pub trait ShortForm {
     const KEY: &'static str;
+}
+
+impl<T: ShortForm + JsonSchema> JsonSchema for Short<T> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("Short_{}", T::schema_name()).into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let key = T::json_schema(generator)
+            .get("properties")
+            .and_then(|properties| properties.get(T::KEY))
+            .cloned()
+            .expect("a short form's key is a field of its full form");
+        schemars::json_schema!({"anyOf": [key, generator.subschema_for::<T>()]})
+    }
 }
 
 impl<'de, T: ShortForm + Deserialize<'de>> Deserialize<'de> for Short<T> {

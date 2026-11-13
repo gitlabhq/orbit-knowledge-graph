@@ -1,0 +1,1105 @@
+{
+  "$defs": {
+    "AccessHints": {
+      "additionalProperties": false,
+      "description": "How queries read an entity, in terms every backend turns into its own indexes and order.",
+      "properties": {
+        "filter": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "text": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "AggregateProjection": {
+      "additionalProperties": false,
+      "properties": {
+        "group_by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "select": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "select",
+        "group_by"
+      ],
+      "type": "object"
+    },
+    "Binding": {
+      "additionalProperties": false,
+      "description": "Where one relationship variant's rows live: a foreign key, an edge table, or both.",
+      "properties": {
+        "copies": {
+          "additionalProperties": {
+            "$ref": "#/$defs/OneOrMany"
+          },
+          "type": "object"
+        },
+        "edge_table": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fk": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeySpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EdgeIndex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ClickHouseOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ColumnSpec"
+          },
+          "type": "object"
+        },
+        "copies": {
+          "additionalProperties": {
+            "$ref": "#/$defs/CopySpec"
+          },
+          "type": "object"
+        },
+        "deleted_column": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "denormalized": {
+          "items": {
+            "$ref": "#/$defs/DenormalizedSpec"
+          },
+          "type": "array"
+        },
+        "dictionaries": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DictionarySpec"
+          },
+          "type": "object"
+        },
+        "edge_tables": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EdgeTable"
+          },
+          "type": "object"
+        },
+        "engine": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "joins": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JoinSpec"
+          },
+          "type": "object"
+        },
+        "refreshable_views": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RefreshableViewSpec"
+          },
+          "type": "object"
+        },
+        "settings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "tables": {
+          "additionalProperties": {
+            "$ref": "#/$defs/TableSpec"
+          },
+          "type": "object"
+        },
+        "version_column": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "views": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ViewSpec"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ClickHouseSource": {
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "epoch_nulls": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "high_fan_out": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "indexes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/IndexSpecs"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "path_lookups": {
+          "additionalProperties": false,
+          "properties": {
+            "full_path": {
+              "$ref": "#/$defs/PathLookupSpec"
+            },
+            "id": {
+              "$ref": "#/$defs/PathLookupSpec"
+            }
+          },
+          "type": "object"
+        },
+        "primary_key": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "projections": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProjectionSpec"
+          },
+          "type": "object"
+        },
+        "settings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "sort_key": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ColumnSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "codec": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "default": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "ColumnStorage": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/ColumnSpec"
+        },
+        "column": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "immutable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "selectivity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldSelectivity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How well an equality filter on the column narrows; without it the planner judges by type."
+        },
+        "stored_as_text": {
+          "default": false,
+          "description": "The column holds an enum's labels rather than its integer codes.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "backend"
+      ],
+      "type": "object"
+    },
+    "CopySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "sort_key": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "sort_key"
+      ],
+      "type": "object"
+    },
+    "DenormalizedDirection": {
+      "enum": [
+        "source",
+        "target"
+      ],
+      "type": "string"
+    },
+    "DenormalizedSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "entity": {
+          "type": "string"
+        },
+        "nullable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "property": {
+          "type": "string"
+        },
+        "relationship": {
+          "type": "string"
+        },
+        "side": {
+          "$ref": "#/$defs/DenormalizedDirection"
+        },
+        "tag": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity",
+        "property",
+        "relationship",
+        "side",
+        "column",
+        "tag"
+      ],
+      "type": "object"
+    },
+    "DictionarySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "key": {
+          "type": "string"
+        },
+        "layout": {
+          "type": "string"
+        },
+        "lifetime": {
+          "$ref": "#/$defs/LifetimeSpec"
+        },
+        "size_in_cells": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "key",
+        "attributes",
+        "layout",
+        "lifetime"
+      ],
+      "type": "object"
+    },
+    "EdgeIndex": {
+      "additionalProperties": false,
+      "description": "An edge table that the variant's writer derives from its foreign key, read in its place.",
+      "properties": {
+        "edge_table": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "edge_table"
+      ],
+      "type": "object"
+    },
+    "EdgeTable": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ColumnSpec"
+          },
+          "type": "object"
+        },
+        "engine": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "indexes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/IndexSpecs"
+          },
+          "type": "object"
+        },
+        "primary_key": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "projections": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProjectionSpec"
+          },
+          "type": "object"
+        },
+        "settings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "shared": {
+          "default": false,
+          "type": "boolean"
+        },
+        "sort_key": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Endpoint": {
+      "enum": [
+        "source",
+        "target"
+      ],
+      "type": "string"
+    },
+    "EngineSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/ClickHouseOptions"
+        },
+        "connection": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "clickhouse"
+        },
+        "path_column": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trusted": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "connection"
+      ],
+      "type": "object"
+    },
+    "EntityStorage": {
+      "additionalProperties": false,
+      "properties": {
+        "accepts": {
+          "description": "The stored properties a stage takes key sets on.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "access": {
+          "$ref": "#/$defs/AccessHints"
+        },
+        "backend": {
+          "$ref": "#/$defs/ClickHouseSource"
+        },
+        "columns": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ColumnStorage"
+          },
+          "type": "object"
+        },
+        "complete": {
+          "default": false,
+          "description": "This store holds or excludes every graph property of the entity, and plans read it here.",
+          "type": "boolean"
+        },
+        "exclude": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path_column": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "table": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "accepts"
+      ],
+      "type": "object"
+    },
+    "FieldSelectivity": {
+      "description": "Filter selectivity hint for the query planner.",
+      "oneOf": [
+        {
+          "const": "low",
+          "description": "Few distinct values (enums, booleans). Filtering narrows weakly.",
+          "type": "string"
+        },
+        {
+          "const": "high",
+          "description": "Many distinct values (IDs, strings, timestamps). Filtering narrows effectively.",
+          "type": "string"
+        }
+      ]
+    },
+    "IndexDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "granularity": {
+          "default": 1,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "IndexSpec": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/IndexDetail"
+        }
+      ]
+    },
+    "IndexSpecs": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IndexSpec"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/IndexSpec"
+          },
+          "type": "array"
+        }
+      ]
+    },
+    "JoinNodeSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "source": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entity",
+        "source",
+        "key"
+      ],
+      "type": "object"
+    },
+    "JoinOnSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "previous": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "previous",
+        "column"
+      ],
+      "type": "object"
+    },
+    "JoinRelationshipSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "edge": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "relationship": {
+          "type": "string"
+        },
+        "source": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "relationship",
+        "source",
+        "target"
+      ],
+      "type": "object"
+    },
+    "JoinSourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "filter": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JoinOnSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path_column": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "table": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "columns"
+      ],
+      "type": "object"
+    },
+    "JoinSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/JoinNodeSpec"
+          },
+          "type": "array"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/JoinRelationshipSpec"
+          },
+          "type": "array"
+        },
+        "sort_key": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/JoinSourceSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sort_key",
+        "sources",
+        "nodes"
+      ],
+      "type": "object"
+    },
+    "KeySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "$ref": "#/$defs/OneOrMany",
+          "description": "One column, or one per part of a composite identity, in identity order."
+        },
+        "on": {
+          "$ref": "#/$defs/Endpoint"
+        },
+        "type_column": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type_value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OneOrMany"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "on",
+        "column"
+      ],
+      "type": "object"
+    },
+    "LifetimeSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "type": "object"
+    },
+    "OneOrMany": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "One written value or a list of them."
+    },
+    "OrderedProjection": {
+      "additionalProperties": false,
+      "properties": {
+        "lightweight": {
+          "default": false,
+          "type": "boolean"
+        },
+        "order_by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "order_by"
+      ],
+      "type": "object"
+    },
+    "PathLookupSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "table": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "key"
+      ],
+      "type": "object"
+    },
+    "ProjectionSpec": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OrderedProjection"
+        },
+        {
+          "$ref": "#/$defs/AggregateProjection"
+        }
+      ]
+    },
+    "RefreshableViewSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "append_to": {
+          "type": "string"
+        },
+        "refresh": {
+          "type": "string"
+        },
+        "select": {
+          "type": "string"
+        },
+        "versioned": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "append_to",
+        "refresh",
+        "select"
+      ],
+      "type": "object"
+    },
+    "TableRole": {
+      "description": "An engine-owned table the indexing and query engines read and write by its role.",
+      "oneOf": [
+        {
+          "const": "plan_progress",
+          "description": "Each indexing plan's watermark and completion, keyed by plan.",
+          "type": "string"
+        },
+        {
+          "const": "code_progress",
+          "description": "Each repository branch's code indexing progress.",
+          "type": "string"
+        },
+        {
+          "const": "deletion_schedule",
+          "description": "Each deleted namespace's scheduled deletion.",
+          "type": "string"
+        }
+      ]
+    },
+    "TableSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ColumnSpec"
+          },
+          "type": "object"
+        },
+        "engine": {
+          "type": "string"
+        },
+        "indexes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/IndexSpecs"
+          },
+          "type": "object"
+        },
+        "primary_key": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "projections": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProjectionSpec"
+          },
+          "type": "object"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TableRole"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the engines keep in the table; each role names at most one table."
+        },
+        "settings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "sort_key": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ttl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "versioned": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "engine",
+        "columns"
+      ],
+      "type": "object"
+    },
+    "ViewSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "order_by": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "populate": {
+          "default": false,
+          "type": "boolean"
+        },
+        "select": {
+          "type": "string"
+        },
+        "to": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "versioned": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "select"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "engine": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EngineSpec"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "entities": {
+      "additionalProperties": {
+        "$ref": "#/$defs/EntityStorage"
+      },
+      "type": "object"
+    },
+    "kind": {
+      "const": "storage",
+      "type": "string"
+    },
+    "package": {
+      "type": "string"
+    },
+    "relationships": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "$ref": "#/$defs/Binding"
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "store": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "package",
+    "store"
+  ],
+  "type": "object"
+}

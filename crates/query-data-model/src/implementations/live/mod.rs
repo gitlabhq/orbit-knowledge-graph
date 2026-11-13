@@ -2,6 +2,7 @@ mod render;
 
 pub use render::{ExtractionRequest, RequestFilter, Window};
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::catalog::{
@@ -18,7 +19,7 @@ pub trait DataExtraction {
     fn extract(&self, user: &str, request: &ExtractionRequest) -> Result<Vec<Row>, ExecuteError>;
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LiveSource {
     pub operation: String,

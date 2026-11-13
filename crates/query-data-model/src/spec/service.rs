@@ -1,9 +1,10 @@
 use indexmap::IndexMap;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{Naming, Raw, Resolved};
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceFragment {
     pub package: String,
@@ -11,8 +12,11 @@ pub struct ServiceFragment {
     pub lookups: IndexMap<String, Lookup<Raw>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "")]
+#[schemars(
+    bound = "S::Defaulted<String>: JsonSchema, S::Entity: JsonSchema, S::Property: JsonSchema"
+)]
 pub struct Lookup<S: Naming = Resolved> {
     #[serde(skip)]
     pub service: S::Loaded<String>,

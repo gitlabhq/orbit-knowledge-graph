@@ -8,7 +8,7 @@ pub struct TraversalPathLookup {
     pub property: PropertyId,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DenormalizedDirection {
     Source,
