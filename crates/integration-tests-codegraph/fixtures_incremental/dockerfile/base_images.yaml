@@ -28,4 +28,4 @@ tests:
       - { row_count: 3 }
       - { row: { stage: "build", image: "registry.gitlab.com/group/project/base" } }
       - { row: { stage: "compile", image: "golang" } }
-      - { row: { stage: "stage:2", image: "scratch" } }
+      - { row: { stage: "stage:scratch#2", image: "scratch" } }

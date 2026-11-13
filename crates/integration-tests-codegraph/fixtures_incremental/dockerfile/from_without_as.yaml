@@ -26,38 +26,46 @@ fixtures:
       FROM node:20
       FROM node:20-slim
 
+  - path: refs/Dockerfile
+    content: |
+      ARG BASE=debian
+      FROM debian@sha256:abc123
+      FROM registry.example.com:5000/team/app:1.2@sha256:def456
+      FROM ${BASE}
+
 tests:
   - name: "an unnamed stage naming an earlier stage calls it"
     query: |
       MATCH (a:Definition)-[:CALLS]->(b:Definition)
-      WHERE a.name = 'stage:3' AND b.definition_type = 'Class'
+      WHERE a.name = 'stage:build#3' AND b.definition_type = 'Class'
       RETURN a.name AS from_stage, b.name AS to_stage
     assert:
       - { row_count: 1 }
-      - { row: { from_stage: "stage:3", to_stage: "build" } }
+      - { row: { from_stage: "stage:build#3", to_stage: "build" } }
 
   - name: "an ARG in an unnamed stage's image tag is called"
     query: |
       MATCH (a:Definition)-[:CALLS]->(v:Definition)
-      WHERE v.definition_type = 'Variable' AND a.name STARTS WITH 'stage:'
+      WHERE v.definition_type = 'Variable' AND a.name STARTS WITH 'stage:' AND a.file_path <> 'refs/Dockerfile'
       RETURN a.name AS stage, v.name AS variable
       ORDER BY stage, variable
     assert:
       - { row_count: 2 }
-      - { row: { stage: "stage:1", variable: "BASE_TAG" } }
-      - { row: { stage: "stage:5", variable: "GO_VERSION" } }
+      - { row: { stage: "stage:alpine#1", variable: "BASE_TAG" } }
+      - { row: { stage: "stage:golang#5", variable: "GO_VERSION" } }
 
   - name: "an unnamed stage calls its base image"
     query: |
       MATCH (s:Definition)-[:CALLS]->(i:ImportedSymbol)
       WHERE s.name STARTS WITH 'stage:' AND s.file_path <> 'same_image/Dockerfile'
+        AND s.file_path <> 'refs/Dockerfile'
       RETURN s.name AS stage, i.import_path AS image
       ORDER BY stage
     assert:
       - { row_count: 3 }
-      - { row: { stage: "stage:1", image: "alpine" } }
-      - { row: { stage: "stage:3", image: "build" } }
-      - { row: { stage: "stage:5", image: "golang" } }
+      - { row: { stage: "stage:alpine#1", image: "alpine" } }
+      - { row: { stage: "stage:build#3", image: "build" } }
+      - { row: { stage: "stage:golang#5", image: "golang" } }
 
   - name: "the named stage keeps its own ARG call"
     query: |
@@ -87,5 +95,17 @@ tests:
       - { row_count: 4 }
       - { row: { stage: "named_a", image: "node" } }
       - { row: { stage: "named_b", image: "node" } }
-      - { row: { stage: "stage:2", image: "node" } }
-      - { row: { stage: "stage:3", image: "node" } }
+      - { row: { stage: "stage:node#2", image: "node" } }
+      - { row: { stage: "stage:node#3", image: "node" } }
+
+  - name: "tag, digest and variable image refs keep the image in the stage name"
+    query: |
+      MATCH (s:Definition)
+      WHERE s.file_path = 'refs/Dockerfile' AND s.name STARTS WITH 'stage:'
+      RETURN s.name AS stage
+      ORDER BY stage
+    assert:
+      - { row_count: 3 }
+      - { row: { stage: "stage:${BASE}#3" } }
+      - { row: { stage: "stage:debian#1" } }
+      - { row: { stage: "stage:registry.example.com:5000/team/app#2" } }
