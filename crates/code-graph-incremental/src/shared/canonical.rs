@@ -194,6 +194,30 @@ pub enum Canonical {
         props(def_type = "true", display = "FrontMatter")
     )]
     FrontMatter,
+    #[strum(serialize = "__front_matter_name")]
+    FrontMatterName,
+    #[strum(serialize = "__front_matter_description")]
+    FrontMatterDescription,
+    #[strum(serialize = "__front_matter_license")]
+    FrontMatterLicense,
+    #[strum(serialize = "__front_matter_compatibility")]
+    FrontMatterCompatibility,
+    #[strum(serialize = "__front_matter_allowed_tools")]
+    FrontMatterAllowedTools,
+    #[strum(serialize = "__front_matter_metadata")]
+    FrontMatterMetadata,
+    #[strum(serialize = "__front_matter_title")]
+    FrontMatterTitle,
+    #[strum(serialize = "__front_matter_stage")]
+    FrontMatterStage,
+    #[strum(serialize = "__front_matter_group")]
+    FrontMatterGroup,
+    #[strum(serialize = "__front_matter_info")]
+    FrontMatterInfo,
+    #[strum(serialize = "__front_matter_version")]
+    FrontMatterVersion,
+    #[strum(serialize = "__front_matter_category")]
+    FrontMatterCategory,
 }
 
 impl From<Canonical> for u16 {

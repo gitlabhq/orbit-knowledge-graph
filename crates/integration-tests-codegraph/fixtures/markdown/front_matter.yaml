@@ -98,6 +98,40 @@ fixtures:
 
       # front_matter
 
+  - path: skills/pdf/SKILL.md
+    content: |
+      ---
+      name: pdf-processing
+      description: Extract text and tables from PDF files.
+      license: Apache-2.0
+      compatibility: Requires poppler-utils
+      allowed-tools: Bash(git:*) Read
+      metadata:
+        author: example-org
+        version: "1.0"
+      version: 1.10
+      category: Documentation
+      ---
+      # PDF
+
+  - path: doc/ci/yaml.md
+    content: |
+      ---
+      stage: Verify
+      group: Pipeline Authoring
+      info: To determine the technical writer, see https://handbook.gitlab.com/
+      title: CI/CD YAML syntax reference
+      description: Keywords for .gitlab-ci.yml.
+      ---
+
+  - path: notes/odd.md
+    content: |
+      ---
+      title: [a, b]
+      stage: true
+      metadata: plain
+      ---
+
 tests:
   - name: "every file with a front matter block has one FrontMatter definition"
     query: |
@@ -105,7 +139,7 @@ tests:
       WHERE d.definition_type = 'FrontMatter'
       RETURN d.file_path AS file, d.fqn AS fqn, d.name AS name
     assert:
-      - { row_count: 6 }
+      - { row_count: 9 }
       - { row: { file: "doc/user/merge_requests.md", fqn: "merge_requests#front_matter", name: "front_matter" } }
       - { row: { file: "skills/orbit/SKILL.md", fqn: "SKILL#front_matter", name: "front_matter" } }
       - { row: { file: "skills/review/SKILL.md", fqn: "SKILL#front_matter", name: "front_matter" } }
@@ -129,7 +163,7 @@ tests:
           WHERE d.definition_type = 'FrontMatter'
           RETURN f.path AS file, d.fqn AS fqn
         assert:
-          - { row_count: 6 }
+          - { row_count: 9 }
           - { row: { file: "skills/review/SKILL.md", fqn: "SKILL#front_matter" } }
       - query: |
           MATCH (p:Definition)-[:DEFINES]->(d:Definition)
@@ -144,7 +178,7 @@ tests:
       WHERE d.definition_type = 'Section'
       RETURN d.fqn AS fqn, d.name AS name
     assert:
-      - { row_count: 7 }
+      - { row_count: 8 }
       - { row: { fqn: "suffix#front_matter-1", name: "front_matter-1" } }
       - { row: { fqn: "suffix#front_matter-2", name: "front_matter" } }
       - { row: { fqn: "toml#Toml", name: "Toml" } }
@@ -158,7 +192,7 @@ tests:
       WHERE d.definition_type = 'FrontMatter'
       RETURN d.file_path AS file, d.id AS id, d.start_byte AS start_byte, d.end_byte AS end_byte, d.start_line AS start_line, d.end_line AS end_line
     assert:
-      - { row_count: 6 }
+      - { row_count: 9 }
       - { row: { file: "notes/break.md", id: 7214704662862655811, start_byte: 0, end_byte: 21, start_line: 1, end_line: 3 } }
       - { row: { file: "notes/suffix.md", id: 1138141786811288481, start_byte: 0, end_byte: 22, start_line: 1, end_line: 3 } }
       - { row: { file: "doc/user/merge_requests.md", id: 1737322248835097902, start_byte: 0, end_byte: 191, start_line: 1, end_line: 6 } }
@@ -184,3 +218,68 @@ tests:
       - { row: { fqn: "SKILL#front_matter-1", id: 5595229349388437339, start_byte: 111 } }
       - { row: { fqn: "blank#Blank", id: 704564307224734628, start_byte: 10 } }
       - { row: { fqn: "SKILL#Review", id: 7763089820191681321, start_byte: 244 } }
+
+  - name: "front matter values are stored in their columns, the same in both engines"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'FrontMatter'
+      RETURN d.file_path AS file, d.front_matter_name AS name, d.front_matter_description AS description, d.front_matter_license AS license, d.front_matter_compatibility AS compatibility, d.front_matter_allowed_tools AS allowed_tools, d.front_matter_metadata AS metadata, d.front_matter_title AS title, d.front_matter_stage AS stage, d.front_matter_group AS group_name, d.front_matter_info AS info, d.front_matter_version AS version, d.front_matter_category AS category
+    assert:
+      - { row_count: 9 }
+      - row:
+          file: "skills/pdf/SKILL.md"
+          name: "pdf-processing"
+          description: "Extract text and tables from PDF files."
+          license: "Apache-2.0"
+          compatibility: "Requires poppler-utils"
+          allowed_tools: "Bash(git:*) Read"
+          metadata: '{"author":"example-org","version":"1.0"}'
+          title: ""
+          stage: ""
+          group_name: ""
+          info: ""
+          version: "1.10"
+          category: "Documentation"
+      - row:
+          file: "doc/ci/yaml.md"
+          name: ""
+          description: "Keywords for .gitlab-ci.yml."
+          title: "CI/CD YAML syntax reference"
+          stage: "Verify"
+          group_name: "Pipeline Authoring"
+          info: "To determine the technical writer, see https://handbook.gitlab.com/"
+          metadata: ""
+      - row:
+          file: "skills/review/SKILL.md"
+          name: "review-mr"
+          description: "Review a merge request. Use when asked to review an MR."
+          allowed_tools: ""
+          metadata: '{"owner":"orbit","version":"2"}'
+      - { row: { file: "skills/orbit/SKILL.md", name: "orbit", description: "Query the knowledge graph.", metadata: '{"version":"1"}' } }
+      - { row: { file: "notes/odd.md", title: "", stage: "true", metadata: "" } }
+      - { row: { file: "notes/blank.md", name: "", title: "", metadata: "" } }
+
+  - name: "front matter columns filter like any other Definition property"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.definition_type = 'FrontMatter' AND d.front_matter_stage = 'Verify'
+          RETURN d.file_path AS file, d.front_matter_group AS group_name
+        assert:
+          - { row_count: 1 }
+          - { row: { file: "doc/ci/yaml.md", group_name: "Pipeline Authoring" } }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.front_matter_metadata CONTAINS '"author":"example-org"'
+          RETURN d.file_path AS file, d.front_matter_name AS name
+        assert:
+          - { row_count: 1 }
+          - { row: { file: "skills/pdf/SKILL.md", name: "pdf-processing" } }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.definition_type <> 'FrontMatter'
+          RETURN d.front_matter_name AS name, d.front_matter_title AS title, d.front_matter_metadata AS metadata
+        assert:
+          - { column_values: { field: name, values: [""] } }
+          - { column_values: { field: title, values: [""] } }
+          - { column_values: { field: metadata, values: [""] } }
