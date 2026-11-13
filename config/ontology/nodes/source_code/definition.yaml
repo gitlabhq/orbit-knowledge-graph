@@ -145,6 +145,7 @@ properties:
     source: front_matter_license
     nullable: false
     description: "Front matter `license` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+    selectivity: low
 
   front_matter_compatibility:
     type: string
@@ -175,30 +176,35 @@ properties:
     source: front_matter_stage
     nullable: false
     description: "Front matter `stage` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+    selectivity: low
 
   front_matter_group:
     type: string
     source: front_matter_group
     nullable: false
     description: "Front matter `group` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+    selectivity: low
 
   front_matter_info:
     type: string
     source: front_matter_info
     nullable: false
     description: "Front matter `info` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+    selectivity: low
 
   front_matter_version:
     type: string
     source: front_matter_version
     nullable: false
     description: "Front matter `version` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+    selectivity: low
 
   front_matter_category:
     type: string
     source: front_matter_category
     nullable: false
     description: "Front matter `category` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+    selectivity: low
 
   content:
     type: string
