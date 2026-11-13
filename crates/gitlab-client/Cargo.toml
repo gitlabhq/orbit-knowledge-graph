@@ -23,6 +23,8 @@ strum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 url = "2.5"
+http = "1"
+hyper-util = { version = "0.1.20", features = ["client-proxy"] }
 orbit-log-fields = { workspace = true }
 
 [dev-dependencies]
