@@ -421,7 +421,7 @@ pub fn parse_with_sentinel(
     max_depth: usize,
 ) -> Result<(Tree, Option<Killed>), Killed> {
     sentinel.check()?;
-    if !support_lang.uses_tree_sitter() {
+    if support_lang == SupportLang::Markdown {
         let tree = crate::markdown::parse(source, lang, label);
         sentinel.check()?;
         return Ok((tree, None));
