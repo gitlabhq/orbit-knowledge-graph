@@ -25,7 +25,7 @@ fn check(deployments: &Deployments, packages: &Packages) {
                 entity.name
             );
             assert!(
-                connections.holding(entity.id).is_ok(),
+                connections.placed(entity.id).is_ok(),
                 "shape {shape}: {} has no connection to run on",
                 entity.name
             );

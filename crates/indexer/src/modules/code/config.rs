@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
+use query_data_model::catalog::sources::CODE_INDEXER_SOURCE;
 use query_data_model::catalog::sources::Role;
 use query_data_model::implementations::clickhouse::spec::TableRole;
-use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, DataModelError};
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
@@ -138,8 +138,10 @@ impl CodeTableNames {
 
         let kinds = CodeKinds::from_catalog(catalog)?;
         let table = |name: &str| -> Result<String, DataModelError> {
-            graph
-                .entity_id(name)
+            catalog
+                .names()
+                .entity(name)
+                .ok()
                 .and_then(|entity| catalog.table_of(entity))
                 .map(|table| prefixed_table_name(table, *SCHEMA_VERSION))
                 .ok_or_else(|| DataModelError::Invalid(format!("{name} has no graph table")))

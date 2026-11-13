@@ -30,23 +30,23 @@ fn names(plan: &LogicalPlan, node: NodeId) -> Vec<&str> {
 fn entities_filter_and_follow_build_a_logical_plan() {
     let model = load(&["gitlab"]);
     let catalog = model.logical(limits());
-    let requests = catalog.entity("MergeRequest").unwrap();
-    let authored = catalog.relationship("AUTHORED").unwrap();
+    let requests = catalog.entity_named("MergeRequest").unwrap();
+    let authored = catalog.relationship_named("AUTHORED").unwrap();
 
     let plan = catalog
         .build(|q| {
             let requests = q.entities(requests)?;
-            let state = requests.property("state")?;
-            let title = requests.property("title")?;
+            let state = requests.property_named("state")?;
+            let title = requests.property_named("title")?;
             let requests = q.filter(requests, state.eq("opened"))?;
             let matches = q.follow(requests, authored, Direction::Incoming)?;
-            let author = matches.endpoint()?.property("username")?;
+            let author = matches.endpoint()?.property_named("username")?;
             q.select(matches, [title.named("title"), author.named("author")])
         })
         .unwrap();
 
     assert_eq!(names(&plan, plan.root()), ["title", "author"]);
-    let user = model.entity("User").unwrap();
+    let user = model.names().entity("User").unwrap();
     match operations(&plan).as_slice() {
         [
             LogicalOperation::Entities(_),
@@ -62,23 +62,23 @@ fn entities_filter_and_follow_build_a_logical_plan() {
 fn two_occurrences_of_one_entity_keep_distinct_outputs() {
     let model = load(&["gitlab"]);
     let catalog = model.logical(limits());
-    let users = catalog.entity("User").unwrap();
-    let notes = catalog.entity("Note").unwrap();
-    let authored = catalog.relationship("AUTHORED").unwrap();
-    let has_note = catalog.relationship("HAS_NOTE").unwrap();
+    let users = catalog.entity_named("User").unwrap();
+    let notes = catalog.entity_named("Note").unwrap();
+    let authored = catalog.relationship_named("AUTHORED").unwrap();
+    let has_note = catalog.relationship_named("HAS_NOTE").unwrap();
 
-    let requests = catalog.entity("MergeRequest").unwrap();
+    let requests = catalog.entity_named("MergeRequest").unwrap();
 
     let mut handles = Vec::new();
     let plan = catalog
         .build(|q| {
             let authors = q.entities(users)?;
-            let author = authors.property("username")?;
+            let author = authors.property_named("username")?;
             let outgoing = Direction::Outgoing;
             let requests = q.follow_to(authors, authored, outgoing, Some(requests))?;
             let notes = q.follow_to(requests, has_note, outgoing, Some(notes))?;
             let commenters = q.follow(notes, authored, Direction::Incoming)?;
-            let commenter = commenters.property("username")?;
+            let commenter = commenters.property_named("username")?;
             handles.extend([author, commenter]);
             q.select(
                 commenters,
@@ -109,12 +109,12 @@ fn two_occurrences_of_one_entity_keep_distinct_outputs() {
 fn an_aggregate_declares_outputs_that_a_filter_can_use() {
     let model = load(&["gitlab"]);
     let catalog = model.logical(limits());
-    let requests = catalog.entity("MergeRequest").unwrap();
+    let requests = catalog.entity_named("MergeRequest").unwrap();
 
     let plan = catalog
         .build(|q| {
             let rows = q.entities(requests)?;
-            let state = rows.property("state")?;
+            let state = rows.property_named("state")?;
             let rows = q.aggregate(rows, [state.named("state")], [count().named("total")])?;
             let total = rows.column("total")?;
             let rows = q.filter(rows, total.gt(10))?;
@@ -126,7 +126,7 @@ fn an_aggregate_declares_outputs_that_a_filter_can_use() {
 
     let hidden = catalog.build(|q| {
         let rows = q.entities(requests)?;
-        let title = rows.property("title")?;
+        let title = rows.property_named("title")?;
         let rows = q.aggregate(rows, [], [count().named("total")])?;
         assert_eq!(
             rows.column("title").unwrap_err().to_string(),
@@ -144,14 +144,14 @@ fn an_aggregate_declares_outputs_that_a_filter_can_use() {
 fn shared_bodies_are_reused_and_scoped() {
     let model = load(&["gitlab"]);
     let catalog = model.logical(limits());
-    let requests = catalog.entity("MergeRequest").unwrap();
+    let requests = catalog.entity_named("MergeRequest").unwrap();
 
     let plan = catalog
         .build(|q| {
             let open = q.share("open_requests", |q| {
                 let rows = q.entities(requests)?;
-                let state = rows.property("state")?;
-                let title = rows.property("title")?;
+                let state = rows.property_named("state")?;
+                let title = rows.property_named("title")?;
                 let rows = q.filter(rows, state.eq("opened"))?;
                 q.select(rows, [title.named("title")])
             })?;
@@ -200,8 +200,11 @@ fn handles_from_another_plan_or_snapshot_are_rejected() {
     let model = load(&["gitlab"]);
     let other = load(&["gitlab", "tenant.agent_memory"]);
     let catalog = model.logical(limits());
-    let requests = catalog.entity("MergeRequest").unwrap();
-    let foreign = other.logical(limits()).entity("MergeRequest").unwrap();
+    let requests = catalog.entity_named("MergeRequest").unwrap();
+    let foreign = other
+        .logical(limits())
+        .entity_named("MergeRequest")
+        .unwrap();
 
     let snapshot = catalog.build(|q| q.entities(foreign));
     assert_eq!(
@@ -213,7 +216,7 @@ fn handles_from_another_plan_or_snapshot_are_rejected() {
     let first = catalog
         .build(|q| {
             let rows = q.entities(requests)?;
-            title = Some(rows.property("title")?);
+            title = Some(rows.property_named("title")?);
             Ok::<_, PlanError>(rows)
         })
         .unwrap();
@@ -239,10 +242,10 @@ fn handles_from_another_plan_or_snapshot_are_rejected() {
 fn an_invalid_follow_names_the_connecting_relationships() {
     let model = load(&["gitlab"]);
     let catalog = model.logical(limits());
-    let requests = catalog.entity("MergeRequest").unwrap();
-    let users = catalog.entity("User").unwrap();
-    let contains = catalog.relationship("CONTAINS").unwrap();
-    let authored = catalog.relationship("AUTHORED").unwrap();
+    let requests = catalog.entity_named("MergeRequest").unwrap();
+    let users = catalog.entity_named("User").unwrap();
+    let contains = catalog.relationship_named("CONTAINS").unwrap();
+    let authored = catalog.relationship_named("AUTHORED").unwrap();
 
     let error = catalog
         .build(|q| {
@@ -278,13 +281,13 @@ fn property_policy_and_types_are_checked_at_construction() {
     })
     .unwrap();
     let catalog = model.logical(limits());
-    let requests = catalog.entity("MergeRequest").unwrap();
-    let users = catalog.entity("User").unwrap();
+    let requests = catalog.entity_named("MergeRequest").unwrap();
+    let users = catalog.entity_named("User").unwrap();
     let attempt = |entity, property: &str, predicate: fn(Expr) -> _| {
         catalog
             .build(|q| {
                 let rows = q.entities(entity)?;
-                let value = rows.property(property)?;
+                let value = rows.property_named(property)?;
                 q.filter(rows, predicate(value))
             })
             .unwrap_err()
@@ -310,11 +313,11 @@ fn property_policy_and_types_are_checked_at_construction() {
 
     let model = load(&["gitlab"]);
     let search = |catalog: query_data_model::plan::logical::LogicalCatalog<'_>| {
-        let users = catalog.entity("User").unwrap();
+        let users = catalog.entity_named("User").unwrap();
         catalog
             .build(|q| {
                 let rows = q.entities(users)?;
-                let email = rows.property("email")?;
+                let email = rows.property_named("email")?;
                 q.filter(rows, email.contains("@gitlab"))
             })
             .unwrap_err()
@@ -334,11 +337,11 @@ fn property_policy_and_types_are_checked_at_construction() {
 fn a_failed_step_closes_the_construction_session() {
     let model = load(&["gitlab"]);
     let catalog = model.logical(limits());
-    let requests = catalog.entity("MergeRequest").unwrap();
+    let requests = catalog.entity_named("MergeRequest").unwrap();
 
     let result = catalog.build(|q| {
         let rows = q.entities(requests)?;
-        let title = rows.property("title")?;
+        let title = rows.property_named("title")?;
         let failed = q.filter(rows, title.eq(true));
         assert!(matches!(failed, Err(PlanError::Invalid { .. })));
         let retry = q.entities(requests);
@@ -354,7 +357,7 @@ fn a_failed_step_closes_the_construction_session() {
         swallowed = q
             .follow(
                 other,
-                catalog.relationship("CONTAINS")?,
+                catalog.relationship_named("CONTAINS")?,
                 Direction::Outgoing,
             )
             .err();
@@ -384,7 +387,7 @@ fn guard_every_scan(
         if !matches!(step.operation, LogicalOperation::Entities(_)) {
             return Ok(rows);
         }
-        let state = rows.property("state")?;
+        let state = rows.property_named("state")?;
         q.filter(rows, state.ne("locked"))
     })?;
     Ok((plan, visits))
@@ -405,13 +408,13 @@ fn consumers_of_scans(plan: &LogicalPlan) -> Vec<&LogicalOperation> {
 fn a_rebuild_guards_every_scan_and_preserves_outputs() {
     let model = load(&["gitlab"]);
     let catalog = model.logical(limits());
-    let requests = catalog.entity("MergeRequest").unwrap();
+    let requests = catalog.entity_named("MergeRequest").unwrap();
     fn titles<'m>(
         q: &mut LogicalBuilder<'m>,
         requests: Declared<EntityId>,
     ) -> Result<Rows<'m>, PlanError> {
         let rows = q.entities(requests)?;
-        let title = rows.property("title")?;
+        let title = rows.property_named("title")?;
         q.select(rows, [title.named("title")])
     }
 
@@ -454,11 +457,11 @@ fn a_rebuild_guards_every_scan_and_preserves_outputs() {
 fn changed_outputs_need_explicit_reconnection() {
     let model = load(&["gitlab"]);
     let catalog = model.logical(limits());
-    let requests = catalog.entity("MergeRequest").unwrap();
+    let requests = catalog.entity_named("MergeRequest").unwrap();
     let build = || {
         catalog.build(|q| {
             let rows = q.entities(requests)?;
-            let title = rows.property("title")?;
+            let title = rows.property_named("title")?;
             let rows = q.select(rows, [title.named("title")])?;
             let title = rows.column("title")?;
             q.order(rows, [(title, Order::Ascending)])

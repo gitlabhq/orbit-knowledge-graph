@@ -11,7 +11,7 @@ pub mod render;
 mod store;
 mod tables;
 
-pub use capabilities::{Capabilities, CurrentRows, RelationalBackend};
+pub use capabilities::{CurrentRows, RelationalBackend, SqlCapabilities};
 pub use catalog::RelationshipRoute;
 pub use store::{ReadPaths, RelationalStore, Versioning, entity_layout};
 pub use tables::{Column, Engine, Index, PathColumn, Projection, Table};

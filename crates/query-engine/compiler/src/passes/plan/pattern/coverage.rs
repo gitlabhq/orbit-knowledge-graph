@@ -98,7 +98,7 @@ impl<B: SqlBackend> Pattern<'_, B> {
                     Endpoint::Source => variant.source,
                     Endpoint::Target => variant.target,
                 };
-                let property = graph.property_id(entity, property)?;
+                let property = self.model.names().property(entity, property).ok()?;
                 self.model.copy(variant.id, side, property)
             })
     }
@@ -155,7 +155,7 @@ impl<B: SqlBackend> Pattern<'_, B> {
         let entity = node
             .entity
             .as_deref()
-            .and_then(|entity| self.model.graph().entity_id(entity));
+            .and_then(|entity| self.model.names().entity(entity).ok());
         let table = node
             .table
             .as_deref()

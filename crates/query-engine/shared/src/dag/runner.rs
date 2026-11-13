@@ -89,7 +89,14 @@ impl<'r> Runner<'r> {
                 .map(|stage| StageInfo {
                     id: stage.id,
                     backend: stage.backend,
-                    connection: stage.connection.clone(),
+                    connection: stage.runs.connection().map(|connection| {
+                        self.env
+                            .frontend
+                            .model()
+                            .connection(connection)
+                            .name()
+                            .to_string()
+                    }),
                     inputs: stage.inputs.clone(),
                     logical: match &stage.query {
                         StageQuery::Gql(statement) => compiler::dag::describe(&statement.plan),
@@ -188,7 +195,7 @@ impl<'r> Runner<'r> {
             ..Inputs::default()
         };
         if let StageQuery::Gql(statement) = stage.query {
-            let connections = self.env.connections.names();
+            let connections = self.env.connections.ids();
             let bound = bind(
                 statement,
                 &sets,
@@ -196,10 +203,10 @@ impl<'r> Runner<'r> {
                 self.env.limits,
                 connections,
             )?;
-            if let Some(connection) = stage.connection.as_deref()
-                && let Some(target) = self.env.connections.target(connection)
+            if let compiler::dag::Runs::On { connection, stores } = &stage.runs
+                && let Some(target) = self.env.connections.target(*connection)
             {
-                match remote::admitted(self, id, target, &bound).await? {
+                match remote::admitted(self, id, target, stores, &bound).await? {
                     Some(admitted) => inputs.admitted = Some(admitted),
                     None => return Ok((None, Executed::default())),
                 }
@@ -207,7 +214,7 @@ impl<'r> Runner<'r> {
             stage.query = StageQuery::Gql(bound);
         }
         let (connection, backend, response) =
-            (stage.connection.clone(), stage.backend, stage.response);
+            (stage.runs.connection(), stage.backend, stage.response);
         let checks = std::mem::take(&mut stage.checks);
         let compiled = compile(stage, inputs, &self.env)?;
         self.trace(id, &compiled);
@@ -222,7 +229,9 @@ impl<'r> Runner<'r> {
                 batches: vec![super::combine::run(plan, results)?],
                 log: Vec::new(),
             },
-            (request, Some(connection)) => self.executors.get(connection)?.execute(request).await?,
+            (request, Some(connection)) => {
+                self.executors.get(*connection)?.execute(request).await?
+            }
             (_, None) => {
                 return Err(QueryError::PipelineInvariant(format!(
                     "a {backend:?} stage has no connection"
@@ -302,8 +311,7 @@ impl<'r> Runner<'r> {
             )
             .into());
         };
-        let connection = graph.connection().to_string();
-        let executor = self.executors.get(&connection)?;
+        let executor = self.executors.get(graph.connection())?;
         let executed = executor.execute(&compiled.request).await?;
         let Request::Hydration(query) = compiled.request else {
             return Err(QueryError::PipelineInvariant(

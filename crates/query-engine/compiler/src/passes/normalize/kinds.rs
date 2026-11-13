@@ -19,7 +19,7 @@ impl Narrowed {
     fn new(query: Query<'_>, names: Vec<String>) -> Result<Self> {
         let ids = names
             .iter()
-            .map(|name| query.model.relationship(name))
+            .map(|name| query.model.names().relationship(name))
             .collect::<std::result::Result<_, _>>()
             .map_err(PlanError::from)?;
         Ok(Self { ids })
@@ -86,14 +86,14 @@ fn infer(
     source: Option<&str>,
     target: Option<&str>,
 ) -> Vec<String> {
-    let graph = query.model.graph();
+    let names = query.model.names();
     match direction {
-        Direction::Outgoing => graph.relationship_names(source, target),
-        Direction::Incoming => graph.relationship_names(target, source),
-        Direction::Both => graph
-            .relationship_names(source, target)
+        Direction::Outgoing => names.relationships_between(source, target),
+        Direction::Incoming => names.relationships_between(target, source),
+        Direction::Both => names
+            .relationships_between(source, target)
             .into_iter()
-            .chain(graph.relationship_names(target, source))
+            .chain(names.relationships_between(target, source))
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect(),
@@ -108,7 +108,7 @@ fn apply(
     for (names, negated) in conditions.into_iter().flatten() {
         if types.is_empty() {
             types = match negated {
-                true => query.model.graph().relationship_names(None, None),
+                true => query.model.names().relationships_between(None, None),
                 false => names.clone(),
             };
         }

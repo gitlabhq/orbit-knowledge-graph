@@ -41,14 +41,33 @@ impl<'m> Binding<'m> {
         Expr::Node(self.output)
     }
 
-    pub fn property(self, name: &str) -> Result<Expr, PlanError> {
+    /// The property a frontend names, under its access class; nothing after the frontend
+    /// resolves a name.
+    pub fn property_named(self, name: &str) -> Result<Expr, PlanError> {
         Ok(Expr::Property {
             binding: self.output,
             property: self.resolve(name)?,
         })
     }
 
-    pub fn truncate(self, name: &str, unit: TimeUnit) -> Result<Expr, PlanError> {
+    /// `property` of this binding's entity.
+    pub fn property(self, property: PropertyId) -> Result<Expr, PlanError> {
+        let model = self.catalog.model();
+        match self.kind {
+            LogicalType::Entity(entity) if model.graph().property(property).entity == entity => {
+                Ok(Expr::Property {
+                    binding: self.output,
+                    property,
+                })
+            }
+            _ => Err(PlanError::shape(format!(
+                "{} is not a property of this binding",
+                model.graph().property(property).name
+            ))),
+        }
+    }
+
+    pub fn truncate_named(self, name: &str, unit: TimeUnit) -> Result<Expr, PlanError> {
         Ok(Expr::Truncate {
             binding: self.output,
             property: self.resolve(name)?,
@@ -79,7 +98,9 @@ impl<'m> Binding<'m> {
             _ => return Err(PlanError::NoEntity),
         };
         let model = self.catalog.model();
-        let property = model.property(entity, name)?;
+        let property = model
+            .graph()
+            .property(model.names().property(entity, name)?);
         let access = model.access().property(property.id);
         let qualified = || format!("{}.{name}", model.graph().entity(entity).name);
         if access.hidden {
@@ -214,8 +235,8 @@ impl<'m> Rows<'m> {
         }
     }
 
-    pub fn property(&self, name: &str) -> Result<Expr, PlanError> {
-        self.endpoint()?.property(name)
+    pub fn property_named(&self, name: &str) -> Result<Expr, PlanError> {
+        self.endpoint()?.property_named(name)
     }
 
     pub fn edge_column(&self, edge: Binding<'m>, name: &str) -> Result<Expr, PlanError> {

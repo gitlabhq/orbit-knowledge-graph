@@ -88,22 +88,22 @@ impl Cut<'_> {
         let producer_group = self.group(producer[0].0);
         let binding = self.query.name(consumer[0].0).to_string();
         let graph = self.query.model.graph();
-        let peer = &self.connections.peers()[self.groups[self.group(consumer[0].0)].place];
+        let group = &self.groups[self.group(consumer[0].0)];
         for (bound, property) in &consumer {
             let entity = self.query.entity(*bound).ok_or_else(|| {
                 QueryError::PipelineInvariant("a crossing's endpoint has no entity".into())
             })?;
-            if !peer.accepts(entity, *property) {
+            let store = self.store(group, entity);
+            if !store.accepts(entity, *property) {
                 return Err(QueryError::Validation(format!(
                     "{} on connection {} takes no key set on {}.{}, so the query cannot cross into it there",
                     self.query.name(*bound),
-                    peer.connection(),
+                    self.query.model.connection(store.connection()).name(),
                     graph.entity(entity).name,
                     graph.property(*property).name
                 )));
             }
         }
-        let name = |property: PropertyId| graph.property(property).name.clone();
         Ok(KeyInput {
             from: stage(producer_group),
             columns: producer
@@ -114,10 +114,7 @@ impl Cut<'_> {
                 })
                 .collect(),
             binding,
-            properties: consumer
-                .iter()
-                .map(|(_, property)| name(*property))
-                .collect(),
+            properties: consumer.iter().map(|(_, property)| *property).collect(),
             types: consumer
                 .iter()
                 .map(|(_, property)| graph.property(*property).data_type)

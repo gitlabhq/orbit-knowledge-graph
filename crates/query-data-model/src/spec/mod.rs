@@ -2,12 +2,11 @@ mod authorization;
 mod graph;
 mod service;
 mod source;
-mod storage;
+pub(crate) mod storage;
 
 pub use authorization::{
-    AuthorizationFragment, CheckSpec, DelegatedCheck, DelegatedWord, EdgePolicy, EdgeScope,
-    EntityAccess, PackageManifest, PolicySpec, PolicyWord, PropertyAccess, PropertyClasses,
-    RelationshipAccess, RowCheck, ScopeDeclaration, ScopeKeySpec, ScopeKind, Via,
+    AuthorizationFragment, CheckSpec, EdgePolicy, EdgeScope, PackageManifest, PolicySpec,
+    PolicyWord, PropertyAccess, PropertyClasses, ScopeKeySpec, ScopeKind,
 };
 pub use graph::{
     Attribute, DefaultValue, Entity, GraphFragment, Property, Relationship, RelationshipVariant,
@@ -15,12 +14,11 @@ pub use graph::{
 pub use service::{Lookup, ServiceFragment};
 pub use source::{
     CODE_INDEXER_SOURCE, EdgeMapping, Endpoint, EndpointKind, ExtractLookup, GENERATED_QUERY,
-    PathSpec, PipelineSpec, ReindexTrigger, RelationshipSourceSpec, Roles, SourceDeclaration,
-    SourceFragment, TEMPLATE_EXTENSION, Writes,
+    PathSpec, PipelineSpec, ReindexTrigger, SourceFragment, TEMPLATE_EXTENSION, Writes,
 };
 pub use storage::{
-    AccessHints, Binding, Block, Blocks, ColumnStorage, CopySources, Discriminator, EdgeIndex,
-    EngineSpec, EntityStorage, Erased, Key, KeySpec, OneOrMany, StorageFragment, Typed,
+    AccessHints, Binding, Block, Blocks, CopySources, Discriminator, EngineSpec, EntityStorage,
+    Key, KeySpec, OneOrMany, StorageFragment, Typed,
 };
 
 use std::collections::{BTreeMap, HashMap};

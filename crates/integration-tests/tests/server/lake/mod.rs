@@ -74,7 +74,9 @@ fn catalog() -> Catalog<DuckDb> {
     let model = query_data_model::testkit::with_demo()
         .deployed(&query_data_model::testkit::deployments(), SHAPE)
         .unwrap();
-    model.physical::<DuckDb>(CONNECTION).unwrap()
+    model
+        .physical::<DuckDb>(model.names().connection(CONNECTION).unwrap())
+        .unwrap()
 }
 
 async fn seeded(mode: Mode, storage_type: impl Fn(&str, &str, &str) -> String) -> Lake {

@@ -18,3 +18,5 @@ id!(PropertyId);
 id!(RelationshipId);
 id!(RelationshipVariantId);
 id!(AttributeId);
+id!(ConnectionId);
+id!(StoreId);

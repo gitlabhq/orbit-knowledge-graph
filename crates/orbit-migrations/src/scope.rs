@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::Schema;
+use query_data_model::catalog::sources::CODE_INDEXER_SOURCE;
 use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor, RowWriter, Writer};
 use query_data_model::implementations::clickhouse::spec::TableRole;
-use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, EntityId, RelationshipId};
 use serde::{Deserialize, Serialize};
 

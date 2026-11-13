@@ -32,7 +32,7 @@ fn variant_scope(
 ) -> Option<query_data_model::catalog::EdgeScope> {
     let graph = model.graph();
     let variant: RelationshipVariantId =
-        graph.variant_id(graph.relationship_id(kind)?, source?, target?)?;
+        graph.variant_id(model.names().relationship(kind).ok()?, source?, target?)?;
     model.edge_scope(variant)
 }
 

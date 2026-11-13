@@ -16,7 +16,7 @@ pub use combine::{CombineColumn, CombineEdge, CombineJoin, CombineNode, CombineQ
 pub use compile::{
     Compiled, Env, Frontend, Inputs, Source, compile, compile_hydration, split_query,
 };
-pub use connections::{Connections, Peer, Unplaced};
+pub use connections::{Connections, Peer, Placement, Unplaced};
 pub use keys::{KeySet, bind};
 pub use request::{Rendered, Request, describe};
 pub use split::split;
@@ -92,12 +92,6 @@ pub(crate) fn unplaced(entity: &str, unplaced: Unplaced) -> QueryError {
     }
 }
 
-impl Backend {
-    pub fn relational(self) -> bool {
-        matches!(self, Self::ClickHouse | Self::DuckDb)
-    }
-}
-
 pub type StageId = usize;
 
 /// What a stage plans from.
@@ -126,7 +120,8 @@ pub struct KeyInput {
     pub from: StageId,
     pub columns: Vec<String>,
     pub binding: String,
-    pub properties: Vec<String>,
+    #[serde(skip)]
+    pub properties: Vec<query_data_model::PropertyId>,
     /// The declared type of each key part, which the producer's rows are read as.
     pub types: Vec<query_data_model::DataType>,
 }
@@ -138,12 +133,31 @@ pub enum Input {
     Rows { from: StageId },
 }
 
+/// Where a stage runs: on one connection, reading each entity from the store placement chose, or
+/// in the query engine, combining the other stages' rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Runs {
+    On {
+        connection: query_data_model::ConnectionId,
+        stores: Vec<(query_data_model::EntityId, query_data_model::StoreId)>,
+    },
+    Combine,
+}
+
+impl Runs {
+    pub fn connection(&self) -> Option<query_data_model::ConnectionId> {
+        match self {
+            Self::On { connection, .. } => Some(*connection),
+            Self::Combine => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Stage {
     pub id: StageId,
     pub backend: Backend,
-    /// The connection the stage runs on; the Combine stage runs in the query engine.
-    pub connection: Option<String>,
+    pub runs: Runs,
     pub query: StageQuery,
     pub inputs: Vec<Input>,
     /// Whether the stage's rows are the response: the response policy shapes them for the

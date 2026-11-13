@@ -56,7 +56,7 @@ fn check_connections(stores: &[Store], diagnostics: &mut Diagnostics) {
     for (index, store) in stores.iter().enumerate() {
         let Some(first) = stores[..index]
             .iter()
-            .find(|other| other.connection == store.connection)
+            .find(|other| other.connection_name == store.connection_name)
         else {
             continue;
         };
@@ -65,7 +65,7 @@ fn check_connections(stores: &[Store], diagnostics: &mut Diagnostics) {
                 &store.package,
                 format!(
                     "store {} is {} but connection {} is {}",
-                    store.name, store.kind, store.connection, first.kind
+                    store.name, store.kind, store.connection_name, first.kind
                 ),
             );
         }
@@ -74,7 +74,7 @@ fn check_connections(stores: &[Store], diagnostics: &mut Diagnostics) {
                 &store.package,
                 format!(
                     "store {} and store {} share connection {} but only one is trusted",
-                    store.name, first.name, store.connection
+                    store.name, first.name, store.connection_name
                 ),
             );
         }
@@ -106,7 +106,9 @@ impl Store {
     fn new(name: &str, package: &str, engine: &EngineSpec, graph: &GraphCatalog) -> Self {
         Self {
             name: name.to_string(),
-            connection: engine.connection.clone(),
+            connection_name: engine.connection.clone(),
+            connection_id: crate::ConnectionId::default(),
+            id: crate::StoreId::default(),
             kind: engine.kind.clone(),
             trusted: engine.trusted,
             path_column: engine.path_column.clone(),

@@ -14,25 +14,32 @@ fn a_pattern_binds_aliases_hops_and_edges() {
     let catalog = model.logical(limits());
     let plan = catalog
         .build(|q| {
-            let users = catalog.entity("User")?;
+            let users = catalog.entity_named("User")?;
             let rows = q.entities_as(users, "u")?;
             let user = rows.binding("u")?;
             let step = Step::new(Direction::Outgoing)
-                .via([catalog.relationship("AUTHORED")?])
-                .to(catalog.entity("MergeRequest")?)
+                .via([catalog.relationship_named("AUTHORED")?])
+                .to(catalog.entity_named("MergeRequest")?)
                 .named("mr")
                 .edge("r");
             let rows = q.traverse(rows, user, step)?;
             let mr = rows.binding("mr")?;
             let edge = rows.edge().unwrap();
-            let open = mr.property("state")?.one_of([Literal::from("opened")]);
-            let titled = mr.property("title")?.matches(Matching::StartsWith, "fix");
+            let open = mr
+                .property_named("state")?
+                .one_of([Literal::from("opened")]);
+            let titled = mr
+                .property_named("title")?
+                .matches(Matching::StartsWith, "fix");
             let kind = edge.field("relationship_kind".parse().unwrap())?;
             let rows = q.filter(rows, open.and(!titled).and(kind.eq("AUTHORED")))?;
-            let title = mr.property("title")?;
+            let title = mr.property_named("title")?;
             let rows = q.order(rows, [(title, Order::Descending)])?;
             let columns = Columns::Listed(vec![
-                model.graph().property_named("User", "username").unwrap().id,
+                model
+                    .names()
+                    .property(model.names().entity("User").unwrap(), "username")
+                    .unwrap(),
             ]);
             let rows = q.select(
                 rows,
@@ -78,9 +85,9 @@ fn neighbors_paths_and_aggregates_declare_their_outputs() {
     let catalog = model.logical(limits());
     let plan = catalog
         .build(|q| {
-            let rows = q.entities_as(catalog.entity("Project")?, "p")?;
+            let rows = q.entities_as(catalog.entity_named("Project")?, "p")?;
             let center = rows.binding("p")?;
-            let rows = q.filter(rows, center.property("id")?.eq(1))?;
+            let rows = q.filter(rows, center.property_named("id")?.eq(1))?;
             let rows = q.neighbors(rows, center, Step::new(Direction::Both).named("n"))?;
             assert_eq!(rows.binding("n")?.kind(), LogicalType::Node);
             q.limit(rows, 10)
@@ -93,9 +100,9 @@ fn neighbors_paths_and_aggregates_declare_their_outputs() {
 
     catalog
         .build(|q| {
-            let groups = q.entities_as(catalog.entity("Group")?, "g")?;
-            let projects = q.entities_as(catalog.entity("Project")?, "p")?;
-            let contains = catalog.relationship("CONTAINS")?;
+            let groups = q.entities_as(catalog.entity_named("Group")?, "g")?;
+            let projects = q.entities_as(catalog.entity_named("Project")?, "p")?;
+            let contains = catalog.relationship_named("CONTAINS")?;
             let step = Step::new(Direction::Outgoing)
                 .via([contains])
                 .hops(Hops { min: 1, max: 3 });
@@ -107,11 +114,11 @@ fn neighbors_paths_and_aggregates_declare_their_outputs() {
 
     catalog
         .build(|q| {
-            let rows = q.entities_as(catalog.entity("User")?, "u")?;
+            let rows = q.entities_as(catalog.entity_named("User")?, "u")?;
             let user = rows.binding("u")?;
             let step = Step::new(Direction::Outgoing)
-                .via([catalog.relationship("AUTHORED")?])
-                .to(catalog.entity("Note")?)
+                .via([catalog.relationship_named("AUTHORED")?])
+                .to(catalog.entity_named("Note")?)
                 .named("n");
             let rows = q.traverse(rows, user, step)?;
             let note = rows.binding("n")?;
@@ -133,7 +140,7 @@ fn construction_errors_name_their_class() {
     let catalog = model.logical(limits());
     let unknown = catalog
         .build(|q| {
-            let rows = q.entities_as(catalog.entity("User")?, "u")?;
+            let rows = q.entities_as(catalog.entity_named("User")?, "u")?;
             rows.binding("x")?;
             Ok::<_, PlanError>(rows)
         })
@@ -143,10 +150,10 @@ fn construction_errors_name_their_class() {
 
     let far = catalog
         .build(|q| {
-            let rows = q.entities_as(catalog.entity("Project")?, "p")?;
+            let rows = q.entities_as(catalog.entity_named("Project")?, "p")?;
             let from = rows.binding("p")?;
             let step = Step::new(Direction::Outgoing)
-                .to(catalog.entity("User")?)
+                .to(catalog.entity_named("User")?)
                 .hops(Hops { min: 1, max: 2 });
             q.traverse(rows, from, step)
         })
@@ -155,10 +162,10 @@ fn construction_errors_name_their_class() {
 
     let deep = catalog
         .build(|q| {
-            let rows = q.entities_as(catalog.entity("Group")?, "g")?;
+            let rows = q.entities_as(catalog.entity_named("Group")?, "g")?;
             let from = rows.binding("g")?;
             let step = Step::new(Direction::Outgoing)
-                .to(catalog.entity("Project")?)
+                .to(catalog.entity_named("Project")?)
                 .hops(Hops { min: 1, max: 4 });
             q.traverse(rows, from, step)
         })
@@ -167,8 +174,10 @@ fn construction_errors_name_their_class() {
 
     let truncated = catalog
         .build(|q| {
-            let rows = q.entities_as(catalog.entity("User")?, "u")?;
-            let name = rows.binding("u")?.truncate("username", TimeUnit::Day)?;
+            let rows = q.entities_as(catalog.entity_named("User")?, "u")?;
+            let name = rows
+                .binding("u")?
+                .truncate_named("username", TimeUnit::Day)?;
             q.aggregate(rows, [name.named("day")], [Measure::Count(None).named("n")])
         })
         .unwrap_err();
@@ -176,7 +185,7 @@ fn construction_errors_name_their_class() {
 
     let page = catalog
         .build(|q| {
-            let rows = q.entities(catalog.entity("User")?)?;
+            let rows = q.entities(catalog.entity_named("User")?)?;
             q.limit(rows, 0)
         })
         .unwrap_err();
@@ -187,11 +196,11 @@ const ATTRIBUTES: &str = "{open: [branch, project_id]}";
 
 fn on_branch(catalog: LogicalCatalog<'_>, column: &str) -> Result<LogicalPlan, PlanError> {
     catalog.build(|q| {
-        let rows = q.entities_as(catalog.entity("File")?, "f")?;
+        let rows = q.entities_as(catalog.entity_named("File")?, "f")?;
         let from = rows.binding("f")?;
         let step = Step::new(Direction::Outgoing)
-            .via([catalog.relationship("ON_BRANCH")?])
-            .to(catalog.entity("Branch")?)
+            .via([catalog.relationship_named("ON_BRANCH")?])
+            .to(catalog.entity_named("Branch")?)
             .named("b")
             .edge("r");
         let rows = q.traverse(rows, from, step)?;
@@ -245,11 +254,11 @@ fn plans_carry_the_declared_node_order_through_rebuilds() {
     let catalog = model.logical(limits());
     let plan = catalog
         .build(|q| {
-            let rows = q.entities_as(catalog.entity("User")?, "u")?;
+            let rows = q.entities_as(catalog.entity_named("User")?, "u")?;
             let user = rows.binding("u")?;
             let step = Step::new(Direction::Outgoing)
-                .via([catalog.relationship("AUTHORED")?])
-                .to(catalog.entity("MergeRequest")?)
+                .via([catalog.relationship_named("AUTHORED")?])
+                .to(catalog.entity_named("MergeRequest")?)
                 .named("mr");
             let rows = q.traverse(rows, user, step)?;
             q.declare_order([rows.binding("mr")?, rows.binding("u")?])?;

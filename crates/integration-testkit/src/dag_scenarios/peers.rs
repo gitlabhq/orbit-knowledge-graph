@@ -39,7 +39,11 @@ fn lake() -> Lake {
     let model = peer_packages()
         .deployed(&query_data_model::testkit::deployments(), "lake")
         .unwrap();
-    let catalog = Arc::new(model.physical::<DuckDb>("lake").unwrap());
+    let catalog = Arc::new(
+        model
+            .physical::<DuckDb>(model.names().connection("lake").unwrap())
+            .unwrap(),
+    );
     let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
     client.initialize_schema(&catalog.create_sql()).unwrap();
     for statement in [
@@ -51,12 +55,15 @@ fn lake() -> Lake {
     let connections = Connections::of(&model).unwrap();
     let executors = Executors::default()
         .with(
-            "lake",
+            model.names().connection("lake").unwrap(),
             Arc::new(DuckDbExecutor {
                 client: Arc::new(Mutex::new(client)),
             }),
         )
-        .with("data_extraction", seeded_live("alice"));
+        .with(
+            model.names().connection("data_extraction").unwrap(),
+            seeded_live("alice"),
+        );
     Lake {
         model,
         frontend: Frontend::Local(catalog),

@@ -671,7 +671,7 @@ mod tests {
     }
 
     fn node(catalog: &Catalog<ClickHouse>, name: &str) -> NodeTransformDeclaration {
-        let entity = catalog.graph().entity_id(name).expect("entity");
+        let entity = catalog.names().entity(name).expect("entity");
         let pipeline = catalog
             .model()
             .sources()
@@ -702,7 +702,7 @@ mod tests {
         target: (&str, EndpointKind),
     ) -> EdgeMapping {
         let graph = catalog.graph();
-        let relationship = graph.relationship_id(label).expect("relationship");
+        let relationship = catalog.names().relationship(label).expect("relationship");
         let variants = graph
             .relationship(relationship)
             .variants
@@ -728,7 +728,7 @@ mod tests {
     }
 
     fn entity(catalog: &Catalog<ClickHouse>, name: &str) -> EndpointKind {
-        EndpointKind::Entity(catalog.graph().entity_id(name).expect("entity"))
+        EndpointKind::Entity(catalog.names().entity(name).expect("entity"))
     }
 
     #[test]
@@ -869,7 +869,7 @@ mod tests {
     #[test]
     fn fk_edge_transform_type_mapping_collapses_raw_values() {
         let catalog = catalog();
-        let work_item = catalog.graph().entity_id("WorkItem").unwrap();
+        let work_item = catalog.names().entity("WorkItem").unwrap();
         let kind = EndpointKind::Column {
             column: "noteable_type".to_string(),
             mapping: BTreeMap::from([

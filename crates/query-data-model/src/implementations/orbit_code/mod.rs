@@ -6,8 +6,8 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 
 use crate::catalog::{
-    Diagnostics, ExecuteError, NoOptions, PolicyKind, Row, StorageBackend, StoreInput,
-    check_unrelational,
+    Capabilities, Diagnostics, ExecuteError, NoOptions, PolicyKind, Row, StorageBackend,
+    StoreInput, check_unrelational,
 };
 use crate::{DataType, EntityId, PropertyId};
 
@@ -92,11 +92,20 @@ impl CodeStore {
 
 impl StorageBackend for OrbitCode {
     const KIND: &'static str = "orbit_code";
+    const CAPABILITIES: Capabilities = Capabilities {
+        joins: false,
+        writer: false,
+        search: true,
+    };
     const POLICIES: &'static [PolicyKind] = &[PolicyKind::Via, PolicyKind::None];
     type Options = NoOptions;
     type SourceOptions = CodeSource;
     type ColumnOptions = NoOptions;
     type Store = CodeStore;
+
+    fn structural(store: &CodeStore, entity: EntityId) -> Option<PropertyId> {
+        store.structural(entity)
+    }
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> CodeStore {
         let graph = input.graph;

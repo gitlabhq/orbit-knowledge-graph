@@ -131,6 +131,7 @@ pub fn granted_paths(
     entity: &str,
 ) -> Result<Vec<TraversalPath>, PipelineError> {
     let entity = model
+        .names()
         .entity(entity)
         .map_err(|error| PipelineError::custom(error.to_string()))?;
     let access = model.access();
@@ -201,7 +202,7 @@ pub fn parse_hydration_batches(
                 .or_insert_with(|| {
                     let graph = model.graph();
                     graph
-                        .entity_named(&entity_type)
+                        .entity_kind(&entity_type)
                         .map(|entity| {
                             entity
                                 .properties

@@ -47,7 +47,7 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
             from: 0,
             columns: vec!["mr_id".into()],
             binding: "m".into(),
-            properties: vec!["merge_request_id".into()],
+            properties: super::properties("SlackMessage", &["merge_request_id"]),
             types: vec![query_data_model::DataType::Int],
         })]
     );
@@ -312,7 +312,7 @@ async fn a_single_column_key_crosses_from_a_relational_store() {
             from: 0,
             columns: vec!["i_message_id".into()],
             binding: "m".into(),
-            properties: vec!["id".into()],
+            properties: super::properties("SlackMessage", &["id"]),
             types: vec![query_data_model::DataType::String],
         })]
     );

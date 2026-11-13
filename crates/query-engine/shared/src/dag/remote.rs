@@ -22,11 +22,18 @@ pub(super) async fn admitted(
     runner: &mut Runner<'_>,
     stage: compiler::dag::StageId,
     target: &Target,
+    placed: &[(query_data_model::EntityId, query_data_model::StoreId)],
     statement: &Statement,
 ) -> Result<Option<Admitted>, DagError> {
     let grants = runner.env.grants;
     let mut namespaces = Namespaces::default();
-    let lookups = lookup(target, &statement.plan, runner.env.connections, grants)?;
+    let lookups = lookup(
+        target,
+        &statement.plan,
+        placed,
+        runner.env.connections,
+        grants,
+    )?;
     for lookup in lookups {
         let columns = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
         let request = Request::Lookup(lookup.clone());
@@ -34,7 +41,7 @@ pub(super) async fn admitted(
             stage,
             requests: request.rendered(),
         });
-        let executor = runner.executors.get(&lookup.connection)?;
+        let executor = runner.executors.get(lookup.connection)?;
         let executed = executor.execute(&request).await?;
         let rows = json(&executed.batches, &columns)?;
         compiler::remote::namespaces(&lookup, &rows, &mut namespaces)?;

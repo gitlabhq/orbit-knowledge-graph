@@ -39,7 +39,7 @@ pub struct ScopeLookup {
     /// The entity whose `via` chain the lookup resolves.
     pub entity: EntityId,
     /// The relational connection that stores the chain, which runs the lookup.
-    pub connection: String,
+    pub connection: query_data_model::ConnectionId,
     pub resolves: Resolves,
     pub query: ParameterizedSql,
     /// The column that holds the scope key in the lookup rows.
@@ -52,6 +52,7 @@ pub struct ScopeLookup {
 pub fn lookup(
     target: &Target,
     logical: &LogicalPlan,
+    placed: &[(EntityId, query_data_model::StoreId)],
     connections: &Connections,
     grants: &Grants,
 ) -> Result<Vec<ScopeLookup>> {
@@ -69,7 +70,13 @@ pub fn lookup(
             .ok_or_else(|| QueryError::Security("the read has no guard".into()))?;
         let (resolves, keys) = match target {
             Target::Code(code) => {
-                let mut projects = named_repositories(logical, code)?;
+                let mut projects: Vec<i64> = named_repositories(logical, code, placed)?
+                    .into_iter()
+                    .filter_map(|project| match project {
+                        query_data_model::plan::logical::Literal::Int(project) => Some(project),
+                        _ => None,
+                    })
+                    .collect();
                 projects.sort_unstable();
                 projects.dedup();
                 (
@@ -83,18 +90,18 @@ pub fn lookup(
             .first()
             .ok_or_else(|| QueryError::Security("the scope lookup has an empty via chain".into()))?
             .to;
-        let built = connections.peers().iter().find_map(|peer| {
-            let built = match peer {
-                Peer::ClickHouse(catalog) if peer.holds(first) => {
-                    build(catalog, guard, hops, grants, keys.clone())
-                }
-                Peer::DuckDb(catalog) if peer.holds(first) => {
-                    build(catalog, guard, hops, grants, keys.clone())
-                }
-                _ => return None,
-            };
-            Some(built.map(|built| (peer.connection(), built)))
-        });
+        let built = connections
+            .placed(first)
+            .ok()
+            .and_then(|placement| connections.get(placement.connection))
+            .and_then(|peer| {
+                let built = match peer {
+                    Peer::ClickHouse(catalog) => build(catalog, guard, hops, grants, keys.clone()),
+                    Peer::DuckDb(catalog) => build(catalog, guard, hops, grants, keys.clone()),
+                    Peer::Remote(_) => return None,
+                };
+                Some(built.map(|built| (peer.connection(), built)))
+            });
         let (connection, (query, scope)) = built.ok_or_else(|| {
             QueryError::Security(format!(
                 "no served relational connection stores {}'s via chain",
@@ -103,7 +110,7 @@ pub fn lookup(
         })??;
         lookups.push(ScopeLookup {
             entity,
-            connection: connection.to_string(),
+            connection,
             resolves,
             query,
             scope,
@@ -168,7 +175,7 @@ fn build<B: SqlBackend>(
         graph.table_of(entity).map(str::to_string).ok_or_else(|| {
             shape(&format!(
                 "reaches an entity connection {} does not store",
-                graph.connection()
+                graph.model().connection(graph.connection()).name()
             ))
         })
     };

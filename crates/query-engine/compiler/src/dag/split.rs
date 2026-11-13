@@ -4,7 +4,9 @@ use orbit_server_config::QueryLimits;
 use query_data_model::plan::logical::{Expr, LogicalOperation};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::surface::Statement;
-use query_data_model::{Catalog, Direction, Endpoint, PropertyId, RelationshipId};
+use query_data_model::{
+    Catalog, ConnectionId, Direction, Endpoint, EntityId, PropertyId, RelationshipId, StoreId,
+};
 
 use super::cut::{Cut, Group};
 use super::{Connections, Dag, Stage, StageQuery};
@@ -12,8 +14,8 @@ use crate::error::{QueryError, Result};
 use crate::logical::{Kind, Query, Step};
 use crate::passes::codegen::SqlBackend;
 
-/// The served connection a binding reads, by its index among the deployment's connections.
-pub(super) type Place = usize;
+/// The store a binding reads, and the served connection it sits on.
+pub(super) type Place = super::Placement;
 
 /// A relationship step whose endpoints live on different connections, with the key pairs the
 /// Combine stage joins its two sides on.
@@ -40,9 +42,9 @@ pub fn split<B: SqlBackend>(
 ) -> Result<Dag> {
     let query = Query::new(&statement.plan, frontend.model());
     let places = places(query, connections)?;
-    let distinct: BTreeSet<Place> = places.values().copied().collect();
+    let distinct: BTreeSet<ConnectionId> = places.values().map(|place| place.connection).collect();
     let single = match distinct.iter().collect::<Vec<_>>()[..] {
-        [place] => Some(&connections.peers()[*place]).filter(|peer| peer.remote().is_none()),
+        [connection] => connections.get(*connection).filter(|peer| peer.joins()),
         _ => None,
     };
     if let Some(peer) = single {
@@ -50,7 +52,10 @@ pub fn split<B: SqlBackend>(
             stages: vec![Stage {
                 id: 0,
                 backend: peer.backend(),
-                connection: Some(peer.connection().to_string()),
+                runs: super::Runs::On {
+                    connection: peer.connection(),
+                    stores: stores(query, &places, |_| true),
+                },
                 query: StageQuery::Gql(statement),
                 inputs: Vec::new(),
                 response: true,
@@ -62,7 +67,8 @@ pub fn split<B: SqlBackend>(
     if query.kind() != Kind::Traversal {
         let names: Vec<&str> = distinct
             .iter()
-            .map(|place| connections.peers()[*place].connection())
+            .filter_map(|connection| connections.get(*connection))
+            .map(super::Peer::name)
             .collect();
         return Err(QueryError::Validation(format!(
             "a {} query reads one connection; this one reads {}",
@@ -122,7 +128,7 @@ fn places(query: Query<'_>, connections: &Connections) -> Result<HashMap<Ref, Pl
                     ))
                 })?,
                 None => connections
-                    .holding(entity)
+                    .placed(entity)
                     .map_err(|unplaced| super::unplaced(name, unplaced))?,
             };
             Ok((binding.output, place))
@@ -134,8 +140,9 @@ fn places(query: Query<'_>, connections: &Connections) -> Result<HashMap<Ref, Pl
 fn groups(query: Query<'_>, places: &HashMap<Ref, Place>) -> Vec<Group> {
     let mut groups: Vec<Group> = Vec::new();
     let mut joined: HashMap<Ref, Ref> = HashMap::new();
+    let connection = |binding: &Ref| places.get(binding).map(|place| place.connection);
     for step in query.steps() {
-        if places.get(&step.from) == places.get(&step.to) {
+        if connection(&step.from) == connection(&step.to) {
             joined.insert(step.to, step.from);
         }
     }
@@ -147,12 +154,37 @@ fn groups(query: Query<'_>, places: &HashMap<Ref, Place>) -> Vec<Group> {
         match groups.iter_mut().find(|group| group.bindings[0] == root) {
             Some(group) => group.bindings.push(binding.output),
             None => groups.push(Group {
-                place: places[&binding.output],
+                place: places[&binding.output].connection,
                 bindings: vec![binding.output],
+                stores: Vec::new(),
             }),
         }
     }
+    for group in &mut groups {
+        let bindings = group.bindings.clone();
+        group.stores = stores(query, places, |binding| bindings.contains(&binding));
+    }
     groups
+}
+
+/// The placed store of each entity the bindings `mine` keeps read, once per entity.
+fn stores(
+    query: Query<'_>,
+    places: &HashMap<Ref, Place>,
+    mine: impl Fn(Ref) -> bool,
+) -> Vec<(EntityId, StoreId)> {
+    let mut stores: Vec<(EntityId, StoreId)> = Vec::new();
+    for binding in query
+        .bindings()
+        .into_iter()
+        .filter(|binding| mine(binding.output))
+    {
+        let placed = (binding.entity, places[&binding.output].store);
+        if !stores.contains(&placed) {
+            stores.push(placed);
+        }
+    }
+    stores
 }
 
 fn group_of(groups: &[Group], binding: Ref) -> Option<usize> {

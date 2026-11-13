@@ -14,18 +14,18 @@ static CATALOG: LazyLock<Catalog<ClickHouse>> = LazyLock::new(|| {
 
 pub(crate) fn edge_table(relationship_kind: &str, source_kind: &str, target_kind: &str) -> String {
     let variant = CATALOG
-        .graph()
-        .variant_named(relationship_kind, source_kind, target_kind)
+        .names()
+        .variant(relationship_kind, source_kind, target_kind)
         .unwrap_or_else(|| {
             panic!(
                 "relationship '{relationship_kind}' has no {source_kind} -> {target_kind} variant"
             )
         });
-    t(CATALOG.edge_table(variant.id).unwrap())
+    t(CATALOG.edge_table(variant).unwrap())
 }
 
 pub(crate) fn edge_tables(relationship_kind: &str) -> Vec<String> {
-    let Some(relationship) = CATALOG.graph().relationship_id(relationship_kind) else {
+    let Ok(relationship) = CATALOG.names().relationship(relationship_kind) else {
         return Vec::new();
     };
     CATALOG

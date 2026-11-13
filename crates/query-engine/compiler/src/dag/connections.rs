@@ -1,4 +1,5 @@
-//! The connections a deployment serves, each a peer that a stage of a query can run on.
+//! The connections a deployment serves, each a peer that a stage of a query can run on, and the
+//! placement of each read on one store of one of them.
 
 use std::sync::Arc;
 
@@ -6,7 +7,8 @@ use query_data_model::catalog::Guard;
 use query_data_model::implementations::live::Live;
 use query_data_model::implementations::orbit_code::OrbitCode;
 use query_data_model::{
-    Catalog, ClickHouse, DataModelError, DuckDb, EntityId, Model, PropertyId, StorageBackend,
+    Catalog, ClickHouse, ConnectionId, DataModelError, DuckDb, EntityId, Model, PropertyId,
+    StorageBackend, StoreId,
 };
 
 use super::Backend;
@@ -22,26 +24,23 @@ pub enum Peer {
 }
 
 impl Peer {
-    /// The connection `connection` of `model`, as the peer of the kind its stores declare.
-    pub fn of(model: &Arc<Model>, connection: &str) -> Result<Self, DataModelError> {
-        let kind = model
-            .stores()
-            .iter()
-            .find(|store| store.connection == connection)
-            .map(|store| store.kind.as_str())
-            .ok_or_else(|| DataModelError::UnknownReference {
-                kind: "connection",
-                name: connection.to_string(),
-            })?;
-        Ok(match kind {
+    /// The connection `connection` of `model`, as the catalog of the kind its stores declare.
+    pub fn of(model: &Arc<Model>, connection: ConnectionId) -> Result<Self, DataModelError> {
+        Ok(match model.connection(connection).kind() {
             ClickHouse::KIND => Self::ClickHouse(Arc::new(model.physical(connection)?)),
             DuckDb::KIND => Self::DuckDb(Arc::new(model.physical(connection)?)),
             OrbitCode::KIND => Self::Remote(Target::Code(Arc::new(model.physical(connection)?))),
-            _ => Self::Remote(Target::Live(Arc::new(model.physical::<Live>(connection)?))),
+            Live::KIND => Self::Remote(Target::Live(Arc::new(model.physical(connection)?))),
+            kind => {
+                return Err(DataModelError::UnknownReference {
+                    kind: "backend",
+                    name: kind.to_string(),
+                });
+            }
         })
     }
 
-    pub fn connection(&self) -> &str {
+    pub fn connection(&self) -> ConnectionId {
         match self {
             Self::ClickHouse(catalog) => catalog.connection(),
             Self::DuckDb(catalog) => catalog.connection(),
@@ -64,54 +63,31 @@ impl Peer {
         }
     }
 
-    pub fn guard(&self, entity: EntityId) -> Option<&Guard> {
-        match self {
-            Self::ClickHouse(catalog) => catalog.guard(entity),
-            Self::DuckDb(catalog) => catalog.guard(entity),
-            Self::Remote(target) => target.guard(entity),
-        }
+    /// Whether the connection evaluates scope filters and relationship steps in its own query.
+    pub fn joins(&self) -> bool {
+        let model = self.model();
+        model.connection(self.connection()).capabilities().joins
     }
 
-    /// Whether a stage on this connection reads `entity`: a relational table, a live endpoint
-    /// or a code index.
-    pub fn holds(&self, entity: EntityId) -> bool {
-        match self {
-            Self::ClickHouse(catalog) => catalog.table_of(entity).is_some(),
-            Self::DuckDb(catalog) => catalog.table_of(entity).is_some(),
-            Self::Remote(Target::Live(live)) => live.endpoint(entity).is_some(),
-            Self::Remote(Target::Code(code)) => code.home(entity).is_some(),
-        }
+    /// The connection's name, for messages.
+    pub fn name(&self) -> &str {
+        self.model().connection(self.connection()).name()
     }
 
-    /// Whether a stage on this connection takes a key set on `property` of `entity`.
-    pub fn accepts(&self, entity: EntityId, property: PropertyId) -> bool {
-        self.home(entity)
-            .is_some_and(|store| store.accepts(entity, property))
-    }
-
-    fn home(&self, entity: EntityId) -> Option<&query_data_model::catalog::Store> {
-        match self {
-            Self::ClickHouse(catalog) => catalog.home(entity).map(|(store, _)| store),
-            Self::DuckDb(catalog) => catalog.home(entity).map(|(store, _)| store),
-            Self::Remote(Target::Live(live)) => live.home(entity).map(|(store, _)| store),
-            Self::Remote(Target::Code(code)) => code.home(entity).map(|(store, _)| store),
-        }
-    }
-
-    /// Whether this connection's reads of `entity` return its identity: its home store here
-    /// lists every identity column.
-    pub fn returns_identity(&self, entity: EntityId) -> bool {
-        self.home(entity)
-            .is_some_and(|store| store.returns_identity(entity))
-    }
-
-    fn model(&self) -> &Model {
+    pub fn model(&self) -> &Model {
         match self {
             Self::ClickHouse(catalog) => catalog.model(),
             Self::DuckDb(catalog) => catalog.model(),
             Self::Remote(target) => target.model(),
         }
     }
+}
+
+/// The store a read runs on, and the connection that store sits on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Placement {
+    pub connection: ConnectionId,
+    pub store: StoreId,
 }
 
 /// Why a binding has no connection to run on.
@@ -127,18 +103,15 @@ pub enum Unplaced {
 #[derive(Debug, Clone)]
 pub struct Connections {
     peers: Arc<Vec<Peer>>,
-    names: Arc<Vec<String>>,
+    ids: Arc<Vec<ConnectionId>>,
 }
 
 impl Connections {
     pub fn new(peers: Vec<Peer>) -> Self {
-        let names = peers
-            .iter()
-            .map(|peer| peer.connection().to_string())
-            .collect();
+        let ids = peers.iter().map(Peer::connection).collect();
         Self {
             peers: Arc::new(peers),
-            names: Arc::new(names),
+            ids: Arc::new(ids),
         }
     }
 
@@ -151,18 +124,12 @@ impl Connections {
         Self::new(vec![B::peer(Arc::new(catalog))])
     }
 
-    /// Every connection of a deployment's model, each as the peer of its kind.
+    /// Every connection of a deployment's model, in the model's order, each as the peer of its
+    /// kind.
     pub fn of(model: &Arc<Model>) -> Result<Self, DataModelError> {
-        let mut connections: Vec<&str> = model
-            .stores()
-            .iter()
-            .map(|store| store.connection.as_str())
-            .collect();
-        connections.sort_unstable();
-        connections.dedup();
-        let peers = connections
-            .into_iter()
-            .map(|connection| Peer::of(model, connection))
+        let peers = model
+            .connections()
+            .map(|connection| Peer::of(model, connection.id()))
             .collect::<Result<_, _>>()?;
         Ok(Self::new(peers))
     }
@@ -171,49 +138,54 @@ impl Connections {
         &self.peers
     }
 
-    pub fn names(&self) -> &[String] {
-        &self.names
+    /// The served connections, which logical plans across them read.
+    pub fn ids(&self) -> &[ConnectionId] {
+        &self.ids
     }
 
-    pub fn get(&self, connection: &str) -> Option<&Peer> {
+    pub fn get(&self, connection: ConnectionId) -> Option<&Peer> {
         self.peers
             .iter()
             .find(|peer| peer.connection() == connection)
     }
 
-    pub fn target(&self, connection: &str) -> Option<&Target> {
+    pub fn target(&self, connection: ConnectionId) -> Option<&Target> {
         self.get(connection)?.remote()
     }
 
-    /// The code connection that runs structural matches over `property` of `entity`.
-    pub fn searching(&self, entity: EntityId, property: PropertyId) -> Option<usize> {
-        self.peers.iter().position(|peer| match peer {
-            Peer::Remote(Target::Code(code)) => code
-                .home(entity)
-                .is_some_and(|(_, facts)| facts.structural(entity) == Some(property)),
-            _ => false,
+    fn served(&self, store: &query_data_model::catalog::Store) -> Option<Placement> {
+        self.get(store.connection()).map(|_| Placement {
+            connection: store.connection(),
+            store: store.id(),
         })
     }
 
-    /// The connection a read of `entity` runs on: the one its `complete: true` store sits on.
-    pub fn holding(&self, entity: EntityId) -> Result<usize, Unplaced> {
+    /// The placement of a structural match over `property` of `entity`: the store that searches
+    /// it, on a served connection.
+    pub fn searching(&self, entity: EntityId, property: PropertyId) -> Option<Placement> {
+        let model = self.peers.first()?.model();
+        self.served(model.searching(entity, property)?)
+    }
+
+    /// The placement of a read of `entity`: its `complete: true` store, on a served connection.
+    pub fn placed(&self, entity: EntityId) -> Result<Placement, Unplaced> {
         let model = self
             .peers
             .first()
             .map(Peer::model)
             .ok_or(Unplaced::Unstored)?;
-        let store = model
-            .stores()
-            .iter()
-            .find(|store| store.complete(entity))
-            .ok_or(Unplaced::Unstored)?;
-        self.peers
-            .iter()
-            .position(|peer| peer.connection() == store.connection)
-            .ok_or_else(|| Unplaced::Unserved(store.connection.clone()))
+        let store = model.complete_store(entity).ok_or(Unplaced::Unstored)?;
+        self.served(store).ok_or_else(|| {
+            Unplaced::Unserved(model.connection(store.connection()).name().to_string())
+        })
     }
 
+    /// The guard of a read of `entity` on its placed store.
     pub fn guard(&self, entity: EntityId) -> Option<&Guard> {
-        self.peers[self.holding(entity).ok()?].guard(entity)
+        let placement = self.placed(entity).ok()?;
+        self.get(placement.connection)?
+            .model()
+            .store(placement.store)
+            .guard(entity)
     }
 }

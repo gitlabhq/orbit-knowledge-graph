@@ -38,7 +38,11 @@ fn declared_in(
     );
     for store in model.stores() {
         add(names, "store", [store.name.as_str()]);
-        add(names, "connection", [store.connection.as_str()]);
+        add(
+            names,
+            "connection",
+            [model.connection(store.connection()).name()],
+        );
         add(
             names,
             "table",
@@ -48,9 +52,9 @@ fn declared_in(
             .bindings()
             .filter_map(|(variant, _, _)| store.edge_table(variant));
         add(names, "table", edges);
-        match store.kind.as_str() {
+        match model.connection(store.connection()).kind() {
             "clickhouse" => {
-                let catalog = model.physical::<ClickHouse>(&store.connection).unwrap();
+                let catalog = model.physical::<ClickHouse>(store.connection()).unwrap();
                 let schema = catalog.schema().unwrap();
                 add(names, "table", schema.table_names());
                 add(
@@ -72,7 +76,7 @@ fn declared_in(
                 );
             }
             "duckdb" => {
-                let catalog = model.physical::<DuckDb>(&store.connection).unwrap();
+                let catalog = model.physical::<DuckDb>(store.connection()).unwrap();
                 add(names, "table", catalog.tables().map(|t| t.name.as_str()));
             }
             _ => {}

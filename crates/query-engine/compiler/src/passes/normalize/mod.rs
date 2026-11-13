@@ -39,7 +39,7 @@ pub fn normalize(
 fn available(query: Query<'_>, connections: &Connections) -> Result<()> {
     let entities = query.plan.nodes().flat_map(|node| query.plan.outputs(node));
     for entity in entities.filter_map(|output| query.entity(output)) {
-        if let Err(unplaced) = connections.holding(entity) {
+        if let Err(unplaced) = connections.placed(entity) {
             let entity = &query.model.graph().entity(entity).name;
             return Err(crate::dag::unplaced(entity, unplaced));
         }

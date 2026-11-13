@@ -67,7 +67,7 @@ pub(super) fn readable(
     let guard = guard.ok_or_else(|| {
         QueryError::Security(format!(
             "{name} has no guard on connection {}",
-            model.connection()
+            model.model().connection(model.connection()).name()
         ))
     })?;
     if scope_set(grants, model.model(), guard.scope, guard.permission)?.is_empty() {

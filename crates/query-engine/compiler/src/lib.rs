@@ -297,7 +297,7 @@ pub(crate) mod testkit {
 mod tests {
     use super::*;
     use query_data_model::implementations::clickhouse::spec::ColumnSpec;
-    use query_data_model::spec::{ColumnStorage, Fragment, Fragments};
+    use query_data_model::testkit::{ColumnStorage, Fragment, Fragments};
     use std::sync::LazyLock;
 
     static MODEL: LazyLock<Arc<Catalog<ClickHouse>>> = LazyLock::new(|| {

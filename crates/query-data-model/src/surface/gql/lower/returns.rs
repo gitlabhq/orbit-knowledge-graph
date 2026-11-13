@@ -100,7 +100,7 @@ impl Returned {
             } => {
                 let expr = rows
                     .binding(&property.node.value)?
-                    .truncate(&property.property.value, unit)?;
+                    .truncate_named(&property.property.value, unit)?;
                 let name = alias.unwrap_or_else(|| span.as_str().to_string());
                 self.items.push((name, Item::Value(expr)));
             }
@@ -195,7 +195,9 @@ impl Returned {
                     return Ok(*expr);
                 }
                 match self.aliases.get(&name.value) {
-                    Some(Some((node, property))) => Ok(rows.binding(node)?.property(property)?),
+                    Some(Some((node, property))) => {
+                        Ok(rows.binding(node)?.property_named(property)?)
+                    }
                     Some(None) => Err(invalid(
                         name.span,
                         "ORDER BY a property alias, not a node alias",
@@ -287,7 +289,7 @@ fn aggregate<'m>(
             }
             Expression::DateTrunc { unit, property, .. } => {
                 let (node, name) = (property.node.value, property.property.value);
-                let expr = rows.binding(&node)?.truncate(&name, unit)?;
+                let expr = rows.binding(&node)?.truncate_named(&name, unit)?;
                 let unit: &str = unit.into();
                 (
                     expr.named(alias.unwrap_or(format!("{node}_{name}_{unit}"))),
@@ -297,7 +299,7 @@ fn aggregate<'m>(
             }
             Expression::Property(property) => {
                 let (node, name) = (property.node.value, property.property.value);
-                let expr = rows.binding(&node)?.property(&name)?;
+                let expr = rows.binding(&node)?.property_named(&name)?;
                 let derived = format!("{node}_{name}");
                 (
                     expr.named(alias.unwrap_or(derived)),
@@ -405,7 +407,7 @@ fn measure(
     let (node, property, input) = match target {
         Target::Property(property) => {
             let (node, name) = (property.node.value, property.property.value);
-            let input = rows.binding(&node)?.property(&name)?;
+            let input = rows.binding(&node)?.property_named(&name)?;
             (node, Some(name), input)
         }
         Target::Variable(variable) => {
@@ -458,7 +460,7 @@ fn property_ids(
     let binding = rows.binding(alias)?;
     names
         .iter()
-        .map(|name| match binding.property(name)? {
+        .map(|name| match binding.property_named(name)? {
             Expr::Property { property, .. } => Ok(property),
             _ => Err(crate::plan::logical::PlanError::NoEntity.into()),
         })

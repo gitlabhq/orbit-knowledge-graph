@@ -402,11 +402,11 @@ pub(super) fn check(
         let on = |connection: &str, entity| {
             stores
                 .iter()
-                .any(|store| store.connection == connection && store.source(entity).is_some())
+                .any(|store| store.connection_name == connection && store.source(entity).is_some())
         };
         for store in stores {
-            let holds =
-                store.source(variant.source).is_some() && on(&store.connection, variant.target);
+            let holds = store.source(variant.source).is_some()
+                && on(&store.connection_name, variant.target);
             match store.binding(variant.id) {
                 Some(binding) => {
                     let unstored = binding.fk.as_ref().map(|key| {
@@ -428,7 +428,7 @@ pub(super) fn check(
                         );
                     }
                     let edges_on_connection = store.edge_table(variant.id).is_none()
-                        || on(&store.connection, variant.target);
+                        || on(&store.connection_name, variant.target);
                     if !edges_on_connection {
                         diagnostics.error(
                             &store.package,
@@ -436,7 +436,7 @@ pub(super) fn check(
                                 "store {} keeps the edges of {} in a table, whose other endpoint is not on connection {}",
                                 store.name,
                                 label(graph, variant),
-                                store.connection
+                                store.connection_name
                             ),
                         );
                     }

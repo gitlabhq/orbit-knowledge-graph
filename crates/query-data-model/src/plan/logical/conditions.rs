@@ -114,7 +114,10 @@ fn kinds(model: &Model, predicate: &Predicate) -> Result<(), PlanError> {
                 "type(r) supports =, <>, or IN with relationship type names, such as type(r) = 'TYPE' or type(r) IN ['TYPE', 'OTHER']",
             )
         })?;
-        if names.iter().any(|name| model.relationship(name).is_err()) {
+        if names
+            .iter()
+            .any(|name| model.names().relationship(name).is_err())
+        {
             return Err(PlanError::shape(
                 "type() names a relationship type that the schema does not have; relationship type names are uppercase and case-sensitive, and CALL db.schema() lists them",
             ));

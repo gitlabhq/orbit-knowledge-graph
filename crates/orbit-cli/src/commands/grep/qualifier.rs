@@ -42,7 +42,7 @@ static ALIASES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
         aliases.insert(snake(node), node.to_string());
     }
     for (node, names) in declared {
-        if graph.entity_id(&node).is_some() && searchable(&node) {
+        if model.names().entity(&node).is_ok() && searchable(&node) {
             aliases.extend(names.into_iter().map(|name| (name, node.clone())));
         }
     }

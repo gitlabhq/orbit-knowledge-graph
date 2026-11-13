@@ -1,11 +1,11 @@
 use super::{
     Condition, LiveError, LiveLanguage, LiveOperation, LivePlan, LiveValue, Operation, Workspaces,
 };
-use crate::DataType;
 use crate::catalog::Catalog;
 use crate::implementations::live::Live;
 use crate::plan::logical::Literal;
 use crate::plan::tracking::{self, Construction, Declared, Ref};
+use crate::{DataType, PropertyId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
@@ -58,13 +58,14 @@ pub struct Calls {
 }
 
 impl Calls {
-    pub fn field(&self, name: &str) -> Result<Field, LiveError> {
+    /// The field the call returns `property` in.
+    pub fn field(&self, property: PropertyId) -> Result<Field, LiveError> {
         self.fields
             .iter()
-            .find(|field| field.name == name)
+            .find(|field| field.value.property == property)
             .cloned()
             .ok_or_else(|| LiveError::UnknownField {
-                name: name.to_string(),
+                name: format!("{property:?}"),
                 available: self.fields.iter().map(|field| field.name.clone()).collect(),
             })
     }

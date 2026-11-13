@@ -11,7 +11,9 @@ fn model() -> Arc<Model> {
 #[test]
 fn graph_store_entities_filter_on_their_own_path_column() {
     let model = model();
-    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
     let store = catalog.store("graph").unwrap();
     for entity in model.graph().entities() {
         let guard = store.guard(entity.id).unwrap();
@@ -55,15 +57,18 @@ fn every_package_declares_its_manifest_and_requirements() {
 fn code_edges_copy_endpoint_project_and_branch_in_the_graph_store_only() {
     let model = model();
     let graph = model.graph();
-    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let names = model.names();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
     let store = catalog.store("graph").unwrap();
     let copy = |relationship: &str, source: &str, target: &str, endpoint: Endpoint| {
-        let variant = graph.variant_named(relationship, source, target).unwrap();
+        let variant = graph.variant(names.variant(relationship, source, target).unwrap());
         let entity = match endpoint {
             Endpoint::Source => variant.source,
             Endpoint::Target => variant.target,
         };
-        let branch = graph.property_id(entity, "branch")?;
+        let branch = names.property(entity, "branch").ok()?;
         store.copy(variant.id, endpoint, branch)
     };
     assert_eq!(

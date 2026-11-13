@@ -14,7 +14,7 @@ use indexer::testkit::{
 use indexer::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use indexer::types::{Envelope, Event, Subscription};
 use integration_testkit::TestContext;
-use query_data_model::spec::Fragment;
+use query_data_model::testkit::Fragment;
 use query_data_model::{Catalog, ClickHouse, Model, Packages};
 
 pub fn handler_context() -> HandlerContext {

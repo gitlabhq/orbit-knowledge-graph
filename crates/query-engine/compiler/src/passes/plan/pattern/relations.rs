@@ -158,7 +158,7 @@ where
             };
             let entity = |node: &str| {
                 let name = nodes.get(node)?.entity.as_deref()?;
-                graph.entity_id(name)
+                model.names().entity(name).ok()
             };
             let (source_node, target_node) = stored_order(direction, from, to);
             let (source, target) = (entity(source_node), entity(target_node));

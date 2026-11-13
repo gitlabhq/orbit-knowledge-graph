@@ -11,7 +11,8 @@ use crate::passes::remote_security::{check_live, secure_live};
 
 pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()> {
     let statement = require(ctx.statement().as_ref(), "statement")?;
-    let planned = plan_live(&statement.plan, ctx.data_model())?;
+    let placed = require(ctx.placed().as_ref(), "placed")?;
+    let planned = plan_live(&statement.plan, ctx.data_model(), placed)?;
     if *ctx.trace() {
         ctx.set_planned(crate::dag::describe(&planned));
     }

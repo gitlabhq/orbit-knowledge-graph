@@ -17,7 +17,7 @@ use crate::passes::plan::predicates::Column as Named;
 pub(crate) type Built<T> = std::result::Result<T, RelationalError>;
 
 pub(crate) fn stored<B: RelationalBackend>() -> bool {
-    B::CAPABILITIES.current_rows == CurrentRows::Stored
+    B::SQL.current_rows == CurrentRows::Stored
 }
 
 pub(crate) fn scan<B: RelationalBackend>(

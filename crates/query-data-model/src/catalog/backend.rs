@@ -14,12 +14,16 @@ use crate::implementations::{
 };
 use crate::plan::tracking::{Language, Plan};
 use crate::spec::{Block, Blocks, StorageFragment, Typed};
-use crate::{DataModelError, EntityId, GraphCatalog, Packages, PropertyId, RelationshipVariantId};
+use crate::{
+    ConnectionId, DataModelError, EntityId, GraphCatalog, Packages, PropertyId,
+    RelationshipVariantId,
+};
 
 /// A storage backend: the blocks its stores' fragments write, and the facts it resolves them
 /// into. A block the YAML omits reads as its type's default.
 pub trait StorageBackend: Sized + 'static {
     const KIND: &'static str;
+    const CAPABILITIES: Capabilities;
     /// The access policies this backend renders into its plans.
     const POLICIES: &'static [PolicyKind];
     type Options: Block + DeserializeOwned + Default;
@@ -28,6 +32,11 @@ pub trait StorageBackend: Sized + 'static {
     type Store: Debug + Send + Sync + std::panic::RefUnwindSafe + 'static;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
+
+    /// The property a structural pattern over `entity` runs on, in a store that searches.
+    fn structural(_store: &Self::Store, _entity: EntityId) -> Option<PropertyId> {
+        None
+    }
 }
 
 impl<B: StorageBackend> Blocks for B {
@@ -37,6 +46,18 @@ impl<B: StorageBackend> Blocks for B {
 }
 
 impl<B: StorageBackend> Typed for B {}
+
+/// What a backend kind can do, which engine and loader rules read instead of its kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Capabilities {
+    /// Evaluates scope filters and relationship steps in its own query.
+    pub joins: bool,
+    /// Holds tables that a declared source writes; otherwise its own service writes or serves
+    /// what it reads, and its stores declare no writer.
+    pub writer: bool,
+    /// Evaluates the search modes its stores declare, and searches by repository.
+    pub search: bool,
+}
 
 /// The options of a backend block that takes none.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -121,7 +142,7 @@ pub struct StoreInput<'a, B: StorageBackend> {
 #[derive(Debug)]
 pub struct Catalog<B: StorageBackend> {
     model: Arc<Model>,
-    connection: String,
+    connection: ConnectionId,
     stores: Vec<usize>,
     backend: PhantomData<fn() -> B>,
 }
@@ -130,23 +151,23 @@ impl<B: StorageBackend> Catalog<B> {
     /// The catalog of the one connection that holds the model's stores of this backend.
     pub fn from_model(model: &Arc<Model>) -> Result<Self, DataModelError> {
         let mut connections = model
-            .stores
-            .iter()
-            .filter(|store| store.kind == B::KIND)
-            .map(|store| store.connection.as_str());
+            .connections()
+            .filter(|connection| connection.kind() == B::KIND);
         let connection = connections
             .next()
             .ok_or_else(|| DataModelError::UnknownReference {
                 kind: "backend",
                 name: B::KIND.to_string(),
             })?;
-        if let Some(other) = connections.find(|other| *other != connection) {
+        if let Some(other) = connections.next() {
             return Err(DataModelError::Invalid(format!(
-                "{} stores sit on connections {connection} and {other}",
-                B::KIND
+                "{} stores sit on connections {} and {}",
+                B::KIND,
+                connection.name(),
+                other.name()
             )));
         }
-        model.physical(connection)
+        model.physical(connection.id())
     }
 
     /// The catalog of the embedded packages as a deployment of the shape `shape` reads them.
@@ -158,6 +179,11 @@ impl<B: StorageBackend> Catalog<B> {
         &self.model
     }
 
+    /// The model's name resolver, for a frontend and for tests.
+    pub fn names(&self) -> super::Names<'_> {
+        self.model.names()
+    }
+
     /// The model, for callers that keep it past this catalog.
     pub fn shared_model(&self) -> &Arc<Model> {
         &self.model
@@ -167,8 +193,8 @@ impl<B: StorageBackend> Catalog<B> {
         self.model.graph()
     }
 
-    pub fn connection(&self) -> &str {
-        &self.connection
+    pub fn connection(&self) -> ConnectionId {
+        self.connection
     }
 
     pub fn stores(&self) -> impl Iterator<Item = (&Store, &B::Store)> {
@@ -249,30 +275,34 @@ impl<B: StorageBackend> Catalog<B> {
 }
 
 impl Model {
+    /// The catalog of `connection`, whose stores are all of backend `B`.
     pub fn physical<B: StorageBackend>(
         self: &Arc<Self>,
-        connection: &str,
+        connection: ConnectionId,
     ) -> Result<Catalog<B>, DataModelError> {
         let stores: Vec<usize> = (0..self.stores.len())
-            .filter(|index| self.stores[*index].connection == connection)
+            .filter(|index| self.stores[*index].connection_id == connection)
             .collect();
-        let Some(first) = stores.first().map(|index| &self.stores[*index]) else {
-            return Err(DataModelError::UnknownReference {
-                kind: "connection",
-                name: connection.to_string(),
-            });
-        };
-        if first.kind != B::KIND {
+        let served = self.connection(connection);
+        if served.kind() != B::KIND {
             let mut diagnostics = Diagnostics::default();
+            let package = stores
+                .first()
+                .map_or("", |index| self.stores[*index].package.as_str());
             diagnostics.error(
-                &first.package,
-                format!("connection {connection} is {}, not {}", first.kind, B::KIND),
+                package,
+                format!(
+                    "connection {} is {}, not {}",
+                    served.name(),
+                    served.kind(),
+                    B::KIND
+                ),
             );
             diagnostics.finish()?;
         }
         Ok(Catalog {
             model: Arc::clone(self),
-            connection: connection.to_string(),
+            connection,
             stores,
             backend: PhantomData,
         })
@@ -309,6 +339,10 @@ impl Model {
 pub(crate) trait Registered {
     fn kind(&self) -> &'static str;
 
+    fn capabilities(&self) -> Capabilities;
+
+    fn structural(&self, facts: &Facts, entity: EntityId) -> Option<PropertyId>;
+
     fn policies(&self) -> &'static [PolicyKind];
 
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error>;
@@ -338,6 +372,15 @@ pub(crate) fn registered(kind: &str) -> Option<&'static dyn Registered> {
 impl<B: StorageBackend> Registered for Entry<B> {
     fn kind(&self) -> &'static str {
         B::KIND
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        B::CAPABILITIES
+    }
+
+    fn structural(&self, facts: &Facts, entity: EntityId) -> Option<PropertyId> {
+        let store = (facts.as_ref() as &dyn std::any::Any).downcast_ref::<B::Store>()?;
+        B::structural(store, entity)
     }
 
     fn policies(&self) -> &'static [PolicyKind] {
@@ -394,7 +437,7 @@ impl<B: StorageBackend> Registered for Entry<B> {
             connection: model
                 .stores
                 .iter()
-                .filter(|other| other.connection == store.connection)
+                .filter(|other| other.connection_name == store.connection_name)
                 .collect(),
             options,
             entities,

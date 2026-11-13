@@ -1,7 +1,10 @@
 use std::collections::BTreeSet;
 
 use super::Model;
-use crate::{Direction, EntityId, Hop, Property, RelationshipId};
+use crate::generic::AttributeId;
+use crate::{
+    ConnectionId, Direction, EntityId, Hop, PropertyId, RelationshipId, RelationshipVariantId,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Unresolved {
@@ -50,26 +53,87 @@ fn hint(from: &str, to: &str, connecting: &[String], reversed: &Option<Box<Rever
     }
 }
 
+/// Resolves written names to handles. The query frontend resolves a query's names once here, and
+/// nothing after it looks a name up; the indexer, the CLI and tests resolve theirs here too.
+#[derive(Debug, Clone, Copy)]
+pub struct Names<'m>(&'m Model);
+
 impl Model {
+    pub fn names(&self) -> Names<'_> {
+        Names(self)
+    }
+}
+
+impl Names<'_> {
     pub fn entity(&self, name: &str) -> Result<EntityId, Unresolved> {
-        self.graph
+        let model = self.0;
+        model
+            .graph
             .entity_id(name)
             .ok_or_else(|| Unresolved::Entity {
                 name: name.to_string(),
                 similar: similar(
                     name,
-                    self.graph.entities().map(|entity| entity.name.as_str()),
+                    model.graph.entities().map(|entity| entity.name.as_str()),
                 ),
             })
     }
 
-    pub fn property(&self, entity: EntityId, name: &str) -> Result<&Property, Unresolved> {
-        let found = self.graph.property_id(entity, name);
-        found
-            .map(|id| self.graph.property(id))
-            .ok_or_else(|| self.unknown_property(entity, name))
+    pub fn property(&self, entity: EntityId, name: &str) -> Result<PropertyId, Unresolved> {
+        self.0
+            .graph
+            .property_id(entity, name)
+            .ok_or_else(|| self.0.unknown_property(entity, name))
     }
 
+    pub fn relationship(&self, name: &str) -> Result<RelationshipId, Unresolved> {
+        let model = self.0;
+        model
+            .graph
+            .relationship_id(name)
+            .ok_or_else(|| Unresolved::Relationship {
+                name: name.to_string(),
+                similar: similar(
+                    name,
+                    model
+                        .graph
+                        .relationships()
+                        .map(|relationship| relationship.name.as_str()),
+                ),
+            })
+    }
+
+    /// The variant `source -> target` of the relationship named `relationship`.
+    pub fn variant(
+        &self,
+        relationship: &str,
+        source: &str,
+        target: &str,
+    ) -> Option<RelationshipVariantId> {
+        self.0
+            .graph
+            .variant_named(relationship, source, target)
+            .map(|variant| variant.id)
+    }
+
+    pub fn attribute(&self, relationship: RelationshipId, name: &str) -> Option<AttributeId> {
+        self.0.graph.attribute_id(relationship, name)
+    }
+
+    pub fn connection(&self, name: &str) -> Option<ConnectionId> {
+        self.0
+            .connections()
+            .find(|connection| connection.name() == name)
+            .map(|connection| connection.id())
+    }
+
+    /// The relationships with a variant from `source` to `target`, either left open.
+    pub fn relationships_between(&self, source: Option<&str>, target: Option<&str>) -> Vec<String> {
+        self.0.graph.relationship_names(source, target)
+    }
+}
+
+impl Model {
     pub(crate) fn unknown_property(&self, entity: EntityId, name: &str) -> Unresolved {
         let entity = self.graph.entity(entity);
         let visible = entity
@@ -82,20 +146,6 @@ impl Model {
             name: name.to_string(),
             similar: similar(name, visible),
         }
-    }
-
-    pub fn relationship(&self, name: &str) -> Result<RelationshipId, Unresolved> {
-        self.graph
-            .relationship_id(name)
-            .ok_or_else(|| Unresolved::Relationship {
-                name: name.to_string(),
-                similar: similar(
-                    name,
-                    self.graph
-                        .relationships()
-                        .map(|relationship| relationship.name.as_str()),
-                ),
-            })
     }
 
     pub fn connect(

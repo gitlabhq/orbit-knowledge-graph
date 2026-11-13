@@ -3,14 +3,14 @@ mod ddl;
 mod functions;
 pub mod render;
 
-use super::relational::{Capabilities, CurrentRows, RelationalBackend, Table};
+use super::relational::{CurrentRows, RelationalBackend, SqlCapabilities, Table};
 use crate::Catalog;
 
 #[derive(Debug, Clone)]
 pub struct DuckDb;
 
 impl RelationalBackend for DuckDb {
-    const CAPABILITIES: Capabilities = Capabilities {
+    const SQL: SqlCapabilities = SqlCapabilities {
         current_rows: CurrentRows::Stored,
         limit_by: false,
         settings: false,

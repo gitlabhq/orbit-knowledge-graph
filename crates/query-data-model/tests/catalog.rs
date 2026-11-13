@@ -120,9 +120,9 @@ fn spec_errors<T: std::fmt::Debug>(result: Result<T, DataModelError>) -> Vec<Str
 fn platform_and_tenant_packages_compose_into_one_graph() {
     let model = load(&["gitlab", "tenant.agent_memory"]).unwrap();
     let graph = model.graph();
-    let in_project = model.relationship("IN_PROJECT").unwrap();
-    let memory = model.entity("AgentMemory").unwrap();
-    let project = model.entity("Project").unwrap();
+    let in_project = model.names().relationship("IN_PROJECT").unwrap();
+    let memory = model.names().entity("AgentMemory").unwrap();
+    let project = model.names().entity("Project").unwrap();
 
     assert_eq!(graph.entity(memory).package, "tenant.agent_memory");
     let hops = model
@@ -135,12 +135,15 @@ fn platform_and_tenant_packages_compose_into_one_graph() {
 fn a_clickhouse_catalog_resolves_tables_columns_and_routes() {
     let model = load(&["gitlab", "tenant.agent_memory"]).unwrap();
     let graph = model.graph();
-    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let names = model.names();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
     let store = catalog.store("graph").unwrap();
     let facts = catalog.backend("graph").unwrap();
-    let request = model.entity("MergeRequest").unwrap();
-    let title = model.property(request, "title").unwrap().id;
-    let diff = model.property(request, "diff").unwrap().id;
+    let request = model.names().entity("MergeRequest").unwrap();
+    let title = model.names().property(request, "title").unwrap();
+    let diff = model.names().property(request, "diff").unwrap();
 
     assert_eq!(
         store.source(request).unwrap().table.as_deref(),
@@ -153,9 +156,7 @@ fn a_clickhouse_catalog_resolves_tables_columns_and_routes() {
     );
     assert!(store.column(diff).is_none());
 
-    let authored = graph
-        .variant_named("AUTHORED", "User", "MergeRequest")
-        .unwrap();
+    let authored = graph.variant(names.variant("AUTHORED", "User", "MergeRequest").unwrap());
     let routes: Vec<_> = catalog.routes(authored.id).collect();
     assert_eq!(routes.len(), 1);
     let edge = routes[0].edge.unwrap();
@@ -169,8 +170,8 @@ fn a_clickhouse_catalog_resolves_tables_columns_and_routes() {
 #[test]
 fn virtual_columns_come_from_the_lookup_registry() {
     let model = load(&["gitlab"]).unwrap();
-    let request = model.entity("MergeRequest").unwrap();
-    let diff = model.property(request, "diff").unwrap().id;
+    let request = model.names().entity("MergeRequest").unwrap();
+    let diff = model.names().property(request, "diff").unwrap();
     let lookup = model.lookup(diff).unwrap();
     let keys: Vec<_> = lookup
         .keys
@@ -238,9 +239,12 @@ fn with_lake(
 fn one_query_can_join_stores_on_the_same_connection() {
     let model = with_lake(|_, yaml| yaml).unwrap();
     let graph = model.graph();
-    let catalog = model.physical::<ClickHouse>("main").unwrap();
-    let request = model.entity("MergeRequest").unwrap();
-    let title = model.property(request, "title").unwrap().id;
+    let names = model.names();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
+    let request = model.names().entity("MergeRequest").unwrap();
+    let title = model.names().property(request, "title").unwrap();
 
     let tables: Vec<_> = catalog
         .sources(request)
@@ -263,9 +267,11 @@ fn one_query_can_join_stores_on_the_same_connection() {
         Rule::Column("trav_path".into())
     );
 
-    let in_project = graph
-        .variant_named("IN_PROJECT", "MergeRequest", "Project")
-        .unwrap();
+    let in_project = graph.variant(
+        names
+            .variant("IN_PROJECT", "MergeRequest", "Project")
+            .unwrap(),
+    );
     let routes: Vec<_> = catalog.routes(in_project.id).collect();
     let edges: Vec<_> = routes.iter().filter_map(|route| route.edge).collect();
     let keys: Vec<_> = routes
@@ -285,7 +291,7 @@ fn one_query_can_join_stores_on_the_same_connection() {
 #[test]
 fn a_catalog_rejects_stores_of_another_backend() {
     let model = load(&["gitlab"]).unwrap();
-    let errors = spec_errors(model.physical::<DuckDb>("main"));
+    let errors = spec_errors(model.physical::<DuckDb>(model.names().connection("main").unwrap()));
     assert_eq!(
         errors,
         ["gitlab: connection main is clickhouse, not duckdb"]
@@ -312,20 +318,24 @@ fn backends_reject_unknown_options() {
 fn guards_read_the_declared_scope_key_of_each_store() {
     let model = load(&["gitlab", "tenant.agent_memory"]).unwrap();
     let access = model.access();
-    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
     let store = catalog.store("graph").unwrap();
-    let request = model.entity("MergeRequest").unwrap();
+    let request = model.names().entity("MergeRequest").unwrap();
 
     let guard = store.guard(request).unwrap();
     assert_eq!(guard.rule, Rule::Column("traversal_path".into()));
     assert_eq!(access.permission(guard.permission).name, "read");
     assert_eq!(access.scope(guard.scope).name, "namespace");
 
-    let memory = store.guard(model.entity("AgentMemory").unwrap()).unwrap();
+    let memory = store
+        .guard(model.names().entity("AgentMemory").unwrap())
+        .unwrap();
     assert_eq!(memory.rule, Rule::Column("traversal_path".into()));
     assert_eq!(access.permission(memory.permission).name, "read_developer");
 
-    let user = store.guard(model.entity("User").unwrap()).unwrap();
+    let user = store.guard(model.names().entity("User").unwrap()).unwrap();
     assert_eq!(user.rule, Rule::Global);
     assert_eq!(
         store.edge_guard("gl_edge").unwrap().rule,
@@ -409,7 +419,7 @@ fn every_row_check_of_an_entity_keys_rows_its_own_way() {
         "{provider: rails, permission: read_project, resource: project, object: Project, id: project_id}",
     ] {
         let model = checks(second).unwrap();
-        let note = model.entity("Note").unwrap();
+        let note = model.names().entity("Note").unwrap();
         assert_eq!(model.access().entity(note).checks.len(), 2);
     }
 }
@@ -430,8 +440,12 @@ fn a_checked_entity_needs_its_checks() {
     };
     let model =
         checked("    checks: [{provider: rails, permission: read_note, resource: note}]").unwrap();
-    let catalog = model.physical::<ClickHouse>("main").unwrap();
-    let guard = catalog.guard(model.entity("Note").unwrap()).unwrap();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
+    let guard = catalog
+        .guard(model.names().entity("Note").unwrap())
+        .unwrap();
     assert_eq!(guard.rule, Rule::Checked);
     assert_eq!(
         spec_errors(checked("")),
@@ -628,9 +642,9 @@ fn an_unknown_permission_or_scope_fails_the_load() {
 #[test]
 fn frontend_errors_name_the_alternatives() {
     let model = load(&["gitlab"]).unwrap();
-    let user = model.entity("User").unwrap();
-    let request = model.entity("MergeRequest").unwrap();
-    let has_note = model.relationship("HAS_NOTE").unwrap();
+    let user = model.names().entity("User").unwrap();
+    let request = model.names().entity("MergeRequest").unwrap();
+    let has_note = model.names().relationship("HAS_NOTE").unwrap();
 
     let error = model
         .connect(user, &[has_note], Some(request), Direction::Outgoing)
@@ -641,6 +655,7 @@ fn frontend_errors_name_the_alternatives() {
     );
     let error = demo(|_, yaml| yaml)
         .unwrap()
+        .names()
         .entity("JiraIssu")
         .unwrap_err();
     assert_eq!(
@@ -662,7 +677,8 @@ const HAS_NOTE_ATTRIBUTES: &str = "      MergeRequest -> Note: { cardinality: on
 fn relationships_declare_typed_attributes() {
     let model = load_with(&["gitlab"], attribute_storage(ATTRIBUTE_COLUMNS)).unwrap();
     let graph = model.graph();
-    let has_note = graph.relationship_id("HAS_NOTE").unwrap();
+    let names = model.names();
+    let has_note = names.relationship("HAS_NOTE").unwrap();
     let names: Vec<_> = graph
         .relationship(has_note)
         .attributes
@@ -683,12 +699,12 @@ fn relationships_declare_typed_attributes() {
             ("thread", query_data_model::DataType::String, false),
         ]
     );
-    let thread = graph.attribute_id(has_note, "thread").unwrap();
+    let thread = model.names().attribute(has_note, "thread").unwrap();
     assert_eq!(
         graph.attribute(thread).description.as_deref(),
         Some("Discussion the note belongs to")
     );
-    assert_eq!(graph.attribute_id(has_note, "missing"), None);
+    assert_eq!(model.names().attribute(has_note, "missing"), None);
 }
 
 #[test]
@@ -711,12 +727,12 @@ fn access_entries_apply_to_relationship_attributes() {
         _ => storage(name, yaml),
     })
     .unwrap();
-    let graph = model.graph();
-    let has_note = graph.relationship_id("HAS_NOTE").unwrap();
+    let names = model.names();
+    let has_note = names.relationship("HAS_NOTE").unwrap();
     let access = |name| {
         model
             .access()
-            .attribute(graph.attribute_id(has_note, name).unwrap())
+            .attribute(names.attribute(has_note, name).unwrap())
     };
     assert!(access("thread").hidden && !access("thread").filterable);
     assert!(!access("position").hidden && access("position").filterable);
@@ -773,7 +789,9 @@ fn edge_tables_hold_a_column_for_every_relationship_attribute() {
         ),
     )
     .unwrap();
-    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
     let edge = catalog.physical_table("gl_edge").unwrap();
     assert!(edge.has_column("thread") && edge.has_column("position"));
 }
@@ -796,13 +814,21 @@ fn attributes_need_a_matching_edge_column() {
 #[test]
 fn string_enums_keep_their_declared_values() {
     let model = demo(|_, yaml| yaml).unwrap();
-    let issue = model.entity("JiraIssue").unwrap();
-    let category = model.property(issue, "status_category").unwrap();
+    let issue = model.names().entity("JiraIssue").unwrap();
+    let category = model.names().property(issue, "status_category").unwrap();
     assert_eq!(
-        model.enum_type(category.id),
+        model.enum_type(category),
         query_data_model::EnumType::String
     );
-    assert_eq!(category.enum_values.as_ref().unwrap()[&2], "done");
+    assert_eq!(
+        model
+            .graph()
+            .property(category)
+            .enum_values
+            .as_ref()
+            .unwrap()[&2],
+        "done"
+    );
 }
 
 #[test]
@@ -973,7 +999,9 @@ fn managed(extra: &'static str) -> impl Fn(&str, String) -> String {
 #[test]
 fn a_managed_store_resolves_its_physical_schema() {
     let model = load_with(&["gitlab"], managed("")).unwrap();
-    let catalog = model.physical::<ClickHouse>("main").unwrap();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
     let schema = catalog.backend("graph").unwrap().schema().unwrap();
     let requests = schema.table("gl_merge_request").unwrap();
     let columns: Vec<_> = requests

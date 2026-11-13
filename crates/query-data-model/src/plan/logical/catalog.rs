@@ -3,13 +3,13 @@ use orbit_server_config::QueryLimits;
 use super::{LogicalBuilder, LogicalPlan, PlanError, Rows};
 use crate::catalog::Store;
 use crate::plan::tracking::{self, Declared, Each, Step};
-use crate::{EntityId, Model, PropertyId, RelationshipId, RelationshipVariantId};
+use crate::{ConnectionId, EntityId, Model, PropertyId, RelationshipId, RelationshipVariantId};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LogicalCatalog<'m> {
     model: &'m Model,
     admin: bool,
-    served: &'m [String],
+    served: &'m [ConnectionId],
     restricted: bool,
     limits: &'m QueryLimits,
     all_columns: bool,
@@ -67,7 +67,7 @@ impl<'m> LogicalCatalog<'m> {
 
     /// Reads only what the stores of the `served` connections hold, as a query's frontend does.
     #[must_use]
-    pub fn serving(self, served: &'m [String]) -> Self {
+    pub fn serving(self, served: &'m [ConnectionId]) -> Self {
         Self {
             served,
             restricted: true,
@@ -77,7 +77,7 @@ impl<'m> LogicalCatalog<'m> {
 
     /// Plans across the `served` connections, whose stage plans read what the frontend resolved.
     #[must_use]
-    pub fn across(self, served: &'m [String]) -> Self {
+    pub fn across(self, served: &'m [ConnectionId]) -> Self {
         Self { served, ..self }
     }
 
@@ -90,7 +90,7 @@ impl<'m> LogicalCatalog<'m> {
         self.model
             .stores()
             .iter()
-            .filter(move |store| self.served.contains(&store.connection))
+            .filter(move |store| self.served.contains(&store.connection()))
     }
 
     /// The entity's home store among the served ones holds the property.
@@ -121,15 +121,22 @@ impl<'m> LogicalCatalog<'m> {
             })
     }
 
-    pub fn entity(self, name: &str) -> Result<Declared<EntityId>, PlanError> {
-        Ok(Declared::new(self.model.id(), self.model.entity(name)?))
+    /// The entity a frontend names; nothing after the frontend resolves a name.
+    pub fn entity_named(self, name: &str) -> Result<Declared<EntityId>, PlanError> {
+        Ok(self.entity(self.model.names().entity(name)?))
     }
 
-    pub fn relationship(self, name: &str) -> Result<Declared<RelationshipId>, PlanError> {
-        Ok(Declared::new(
-            self.model.id(),
-            self.model.relationship(name)?,
-        ))
+    /// The relationship a frontend names; nothing after the frontend resolves a name.
+    pub fn relationship_named(self, name: &str) -> Result<Declared<RelationshipId>, PlanError> {
+        Ok(self.relationship(self.model.names().relationship(name)?))
+    }
+
+    pub fn entity(self, entity: EntityId) -> Declared<EntityId> {
+        Declared::new(self.model.id(), entity)
+    }
+
+    pub fn relationship(self, relationship: RelationshipId) -> Declared<RelationshipId> {
+        Declared::new(self.model.id(), relationship)
     }
 
     pub fn build<E: From<PlanError>>(

@@ -4,7 +4,10 @@ use indexmap::IndexMap;
 
 use super::Diagnostics;
 use super::store::Store;
-pub use crate::spec::{EdgeMapping, Endpoint, EndpointKind, ExtractLookup, ReindexTrigger};
+pub use crate::spec::{
+    CODE_INDEXER_SOURCE, EdgeMapping, Endpoint, EndpointKind, ExtractLookup, PathSpec,
+    ReindexTrigger,
+};
 use crate::spec::{
     GENERATED_QUERY, PipelineSpec, Raw, Short, SourceFragment, TEMPLATE_EXTENSION, Writes,
     parse_variant, snake_case,

@@ -51,6 +51,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub output: CompiledQueryContext,
         pub hydration_query: ParameterizedQuery,
         pub admitted: crate::remote::Admitted,
+        pub placed: Vec<(query_data_model::EntityId, query_data_model::StoreId)>,
         pub code: query_data_model::plan::code::CodePlan,
         pub live: query_data_model::plan::live::LivePlan,
         pub combine: query_data_model::plan::combine::CombinePlan,
@@ -153,7 +154,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         code::plan {
             reads_env: [data_model, trace]
-            reads_state: [statement]
+            reads_state: [statement, placed]
             mutates: [code, planned]
         }
         code::security {
@@ -172,7 +173,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         live::plan {
             reads_env: [data_model, trace]
-            reads_state: [statement]
+            reads_state: [statement, placed]
             mutates: [live, planned]
         }
         live::security {
@@ -245,13 +246,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
         gql_orbit_code {
             backend: query_data_model::implementations::orbit_code::OrbitCode
             env: [grants, limits, trace]
-            state: [statement, admitted, code, planned, request, proved]
+            state: [statement, admitted, placed, code, planned, request, proved]
             phases: [code::plan, code::security, code::security_check, code::render]
         }
         gql_live {
             backend: query_data_model::implementations::live::Live
             env: [grants, limits, trace]
-            state: [statement, admitted, live, planned, request, proved]
+            state: [statement, admitted, placed, live, planned, request, proved]
             phases: [live::plan, live::security, live::security_check, live::render]
         }
         gql_combine {

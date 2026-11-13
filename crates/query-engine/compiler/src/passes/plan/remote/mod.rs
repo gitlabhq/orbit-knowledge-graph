@@ -34,8 +34,22 @@ fn unsupported(backend: &str, what: &str) -> QueryError {
     QueryError::Validation(format!("the {backend} backend cannot {what}"))
 }
 
+/// The store placement put `entity` on, among a stage's placed stores.
+pub(crate) fn placed_store(
+    placed: &[(EntityId, query_data_model::StoreId)],
+    entity: EntityId,
+) -> crate::error::Result<query_data_model::StoreId> {
+    placed
+        .iter()
+        .find(|(held, _)| *held == entity)
+        .map(|(_, store)| *store)
+        .ok_or_else(|| {
+            QueryError::PipelineInvariant("a stage reads an entity it did not place".into())
+        })
+}
+
 impl Target {
-    pub fn connection(&self) -> &str {
+    pub fn connection(&self) -> query_data_model::ConnectionId {
         match self {
             Self::Code(code) => code.connection(),
             Self::Live(live) => live.connection(),

@@ -82,7 +82,7 @@ impl Render for Catalog<OrbitCode> {
         let index = index.ok_or(CodeError::Incomplete("repositories"))?;
         let store = &self.model().stores()[index.store];
         let repository = self
-            .repository(index.entity)
+            .repository(store.id(), index.entity)
             .ok_or(CodeError::Incomplete("repository columns"))?;
         let fields = plan
             .outputs(plan.root())

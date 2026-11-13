@@ -22,6 +22,16 @@ use serde_json::Value;
 
 use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_model, run_dag};
 
+/// The properties `names` of `entity` in the DAG model, as a key input lists them.
+fn properties(entity: &str, names: &[&str]) -> Vec<query_data_model::PropertyId> {
+    let model = dag_model();
+    let entity = model.names().entity(entity).unwrap();
+    names
+        .iter()
+        .map(|name| model.names().property(entity, name).unwrap())
+        .collect()
+}
+
 fn caller(path: &str) -> Grants {
     let session = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new(path, 20)]).unwrap();
     let config = orbit_server_config::AppConfig::embedded_defaults().authorization;

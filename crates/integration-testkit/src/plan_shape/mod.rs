@@ -344,9 +344,8 @@ fn hydration_request(
                     _ => None,
                 })
                 .unwrap_or_default();
-            let entity = query.entity_name(binding.output).unwrap_or_default();
             let plan = catalog.build(|q| {
-                let rows = q.entities_as(catalog.entity(entity)?, binding.name)?;
+                let rows = q.entities_as(catalog.entity(binding.entity), binding.name)?;
                 let endpoint = rows.endpoint()?;
                 let rows = match &anchor.pinned {
                     None => rows,
@@ -358,13 +357,8 @@ fn hydration_request(
                                     .expect("pinned keys are single")
                             })
                             .collect();
-                        let graph = query.model.graph();
-                        let identity = graph.entity(binding.entity).identity[0];
-                        q.pin(
-                            rows,
-                            endpoint.property(&graph.property(identity).name)?,
-                            &ids,
-                        )?
+                        let identity = query.model.graph().entity(binding.entity).identity[0];
+                        q.pin(rows, endpoint.property(identity)?, &ids)?
                     }
                 };
                 let projection = Projection::Graph {

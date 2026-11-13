@@ -7,6 +7,7 @@ use std::sync::Arc;
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use compiler::dag::Request;
+use query_data_model::ConnectionId;
 
 use crate::types::QueryExecution;
 
@@ -29,19 +30,22 @@ pub trait Executor: Send + Sync {
 /// The executor registered for each connection a deployment serves.
 #[derive(Clone, Default)]
 pub struct Executors {
-    by_connection: HashMap<String, Arc<dyn Executor>>,
+    by_connection: HashMap<ConnectionId, Arc<dyn Executor>>,
 }
 
 impl Executors {
     #[must_use]
-    pub fn with(mut self, connection: impl Into<String>, executor: Arc<dyn Executor>) -> Self {
-        self.by_connection.insert(connection.into(), executor);
+    pub fn with(mut self, connection: ConnectionId, executor: Arc<dyn Executor>) -> Self {
+        self.by_connection.insert(connection, executor);
         self
     }
 
-    pub fn get(&self, connection: &str) -> Result<&Arc<dyn Executor>, ExecutorError> {
-        self.by_connection
-            .get(connection)
-            .ok_or_else(|| ExecutorError(format!("no executor serves connection {connection}")))
+    pub fn get(&self, connection: ConnectionId) -> Result<&Arc<dyn Executor>, ExecutorError> {
+        self.by_connection.get(&connection).ok_or_else(|| {
+            ExecutorError(format!(
+                "no executor serves connection {}",
+                connection.index()
+            ))
+        })
     }
 }

@@ -22,7 +22,7 @@ pub struct SharePolicy {
 impl SharePolicy {
     pub fn of<B: RelationalBackend>(prefix: impl Into<String>) -> Self {
         Self {
-            materialized: B::CAPABILITIES.materialized_bodies,
+            materialized: B::SQL.materialized_bodies,
             inline_lookups: true,
             prefix: prefix.into(),
         }

@@ -89,31 +89,35 @@ impl GraphCatalog {
         &self.attributes[id.index()]
     }
 
-    pub fn attribute_id(&self, relationship: RelationshipId, name: &str) -> Option<AttributeId> {
+    pub(crate) fn attribute_id(
+        &self,
+        relationship: RelationshipId,
+        name: &str,
+    ) -> Option<AttributeId> {
         self.attribute_ids
             .get(&(relationship, name.to_string()))
             .copied()
     }
 
-    pub fn entity_id(&self, name: &str) -> Option<EntityId> {
+    pub(crate) fn entity_id(&self, name: &str) -> Option<EntityId> {
         self.entity_ids.get(name).copied()
     }
 
-    pub fn entity_named(&self, name: &str) -> Option<&Entity> {
+    /// The entity a stored kind value names: the value writers put in an edge table's endpoint
+    /// kind column and the engine in a row's type column, decoded where rows come back.
+    pub fn entity_kind(&self, stored: &str) -> Option<&Entity> {
+        self.entity_named(stored)
+    }
+
+    pub(crate) fn entity_named(&self, name: &str) -> Option<&Entity> {
         self.entity_id(name).map(|id| self.entity(id))
     }
 
-    pub fn property_id(&self, entity: EntityId, name: &str) -> Option<PropertyId> {
+    pub(crate) fn property_id(&self, entity: EntityId, name: &str) -> Option<PropertyId> {
         self.property_ids.get(entity.index())?.get(name).copied()
     }
 
-    pub fn property_named(&self, entity: &str, property: &str) -> Option<&Property> {
-        let entity = self.entity_id(entity)?;
-        self.property_id(entity, property)
-            .map(|id| self.property(id))
-    }
-
-    pub fn relationship_id(&self, name: &str) -> Option<RelationshipId> {
+    pub(crate) fn relationship_id(&self, name: &str) -> Option<RelationshipId> {
         self.relationship_ids.get(name).copied()
     }
 
@@ -128,7 +132,7 @@ impl GraphCatalog {
             .copied()
     }
 
-    pub fn variant_named(
+    pub(crate) fn variant_named(
         &self,
         relationship: &str,
         source: &str,
@@ -141,7 +145,11 @@ impl GraphCatalog {
             .map(|id| self.variant(id))
     }
 
-    pub fn relationship_names(&self, source: Option<&str>, target: Option<&str>) -> Vec<String> {
+    pub(crate) fn relationship_names(
+        &self,
+        source: Option<&str>,
+        target: Option<&str>,
+    ) -> Vec<String> {
         let source = source.and_then(|name| self.entity_id(name));
         let target = target.and_then(|name| self.entity_id(name));
         let connected: std::collections::BTreeSet<RelationshipId> = match (source, target) {

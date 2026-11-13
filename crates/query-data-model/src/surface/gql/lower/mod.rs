@@ -204,7 +204,7 @@ impl<'i> Graph<'i> {
             let from = rows.binding(&self.nodes[near].alias)?;
             let step = edge.step(q, direction)?.named(&target.alias);
             rows = match &target.label {
-                Some(label) => q.traverse(rows, from, step.to(q.catalog().entity(label)?))?,
+                Some(label) => q.traverse(rows, from, step.to(q.catalog().entity_named(label)?))?,
                 None => q.neighbors(rows, from, step)?,
             };
             rows = edge.inline(q, rows)?;
@@ -254,14 +254,14 @@ fn bind<'m>(q: &mut LogicalBuilder<'m>, node: &Node<'_>) -> Built<'m> {
             node.alias
         ))
     })?;
-    let rows = q.entities_as(q.catalog().entity(label)?, &node.alias)?;
+    let rows = q.entities_as(q.catalog().entity_named(label)?, &node.alias)?;
     inline(q, rows, node)
 }
 
 fn inline<'m>(q: &mut LogicalBuilder<'m>, rows: Rows<'m>, node: &Node<'_>) -> Built<'m> {
     let binding = rows.binding(&node.alias)?;
     let predicates = conditions::entries(&node.properties, q.catalog().model(), |name| {
-        Ok(binding.property(name)?)
+        Ok(binding.property_named(name)?)
     })?;
     conjoin(q, rows, predicates)
 }
@@ -284,7 +284,7 @@ fn relationships(
 ) -> Result<Vec<Declared<RelationshipId>>, SurfaceError> {
     Ok(types
         .iter()
-        .map(|name| q.catalog().relationship(name))
+        .map(|name| q.catalog().relationship_named(name))
         .collect::<Result<_, _>>()?)
 }
 

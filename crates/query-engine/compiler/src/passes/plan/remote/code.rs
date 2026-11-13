@@ -4,9 +4,9 @@ use query_data_model::plan::logical::{
     Columns, Comparison, Conjunct, Expr, Literal, LogicalOperation, LogicalPlan, MATCH_LINE,
     Operand, Predicate, Projection, Structural,
 };
-use query_data_model::{Catalog, EntityId, PropertyId, StorageBackend};
+use query_data_model::{Catalog, EntityId, PropertyId, StorageBackend, StoreId};
 
-use super::unsupported;
+use super::{placed_store, unsupported};
 use crate::error::{QueryError, Result};
 
 const BACKEND: &str = OrbitCode::KIND;
@@ -20,7 +20,11 @@ enum Returned {
 /// Literal atoms shorter than a trigram cannot narrow the candidate files.
 const TRIGRAM: usize = 3;
 
-pub fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<CodePlan> {
+pub fn plan(
+    logical: &LogicalPlan,
+    code: &Catalog<OrbitCode>,
+    placed: &[(EntityId, StoreId)],
+) -> Result<CodePlan> {
     let mut entity = None;
     let mut projects = Vec::new();
     let mut heads = Vec::new();
@@ -44,7 +48,7 @@ pub fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<CodePlan
                 keyed.extend(pairs);
             }
             LogicalOperation::Filter(predicate) => {
-                let repository = repository(code, entity)?;
+                let repository = repository(code, placed, entity)?;
                 match branch_heads(predicate, repository)? {
                     Some(found) => heads.extend(found),
                     None => projects.extend(repositories(predicate, repository)?),
@@ -53,7 +57,7 @@ pub fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<CodePlan
             LogicalOperation::Structural(matched) => structural = Some(matched),
             LogicalOperation::Select(items) => {
                 for item in items {
-                    returned.extend(fields(logical, code, entity, &keyed, item)?);
+                    returned.extend(fields(logical, code, placed, entity, &keyed, item)?);
                 }
             }
             LogicalOperation::Limit { rows, skip: None } => limit = Some(*rows),
@@ -69,14 +73,15 @@ pub fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<CodePlan
         .into_iter()
         .filter(|atom| atom.len() >= TRIGRAM)
         .collect();
+    let store = placed_store(placed, entity)?;
     Ok(code.build(|q| {
-        let index = code.index(entity)?;
+        let index = code.index(store, entity)?;
         let files = q.repositories(
             index,
             projects
                 .iter()
-                .copied()
-                .chain(heads.iter().map(|(project, _)| *project)),
+                .chain(heads.iter().map(|(project, _)| project))
+                .cloned(),
         )?;
         let files = match heads.is_empty() {
             true => files,
@@ -101,14 +106,18 @@ pub fn plan(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<CodePlan
 }
 
 /// The repositories a code plan names: the conditions on its entity's repository columns.
-pub fn named_repositories(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> Result<Vec<i64>> {
+pub fn named_repositories(
+    logical: &LogicalPlan,
+    code: &Catalog<OrbitCode>,
+    placed: &[(EntityId, StoreId)],
+) -> Result<Vec<Literal>> {
     let mut entity = None;
     let mut projects = Vec::new();
     for node in logical.nodes() {
         match logical.operation(node) {
             LogicalOperation::Entities(id) => entity = Some(*id),
             LogicalOperation::Filter(predicate) => {
-                let repository = repository(code, entity)?;
+                let repository = repository(code, placed, entity)?;
                 match branch_heads(predicate, repository)? {
                     Some(heads) => projects.extend(heads.into_iter().map(|(project, _)| project)),
                     None => projects.extend(repositories(predicate, repository)?),
@@ -120,13 +129,19 @@ pub fn named_repositories(logical: &LogicalPlan, code: &Catalog<OrbitCode>) -> R
     Ok(projects)
 }
 
-fn repository(code: &Catalog<OrbitCode>, entity: Option<EntityId>) -> Result<Repository> {
-    entity
-        .and_then(|entity| code.repository(entity))
-        .ok_or_else(|| unsupported(BACKEND, "filter before it names an indexed entity"))
+fn repository(
+    code: &Catalog<OrbitCode>,
+    placed: &[(EntityId, StoreId)],
+    entity: Option<EntityId>,
+) -> Result<Repository> {
+    let entity =
+        entity.ok_or_else(|| unsupported(BACKEND, "filter before it names an indexed entity"))?;
+    code.repository(placed_store(placed, entity)?, entity)
+        .ok_or_else(|| unsupported(BACKEND, "filter an entity it names no repository of"))
 }
 
-fn repositories(predicate: &Predicate, repository: Repository) -> Result<Vec<i64>> {
+/// The repository keys the conditions on the project column name.
+fn repositories(predicate: &Predicate, repository: Repository) -> Result<Vec<Literal>> {
     let mut projects = Vec::new();
     for conjunct in predicate.conjuncts() {
         let Conjunct::Leaf {
@@ -141,17 +156,10 @@ fn repositories(predicate: &Predicate, repository: Repository) -> Result<Vec<i64
             Predicate::Compare {
                 left,
                 comparison: Comparison::Eq,
-                right: Operand::Literal(Literal::Int(project)),
-            } if on_project(left) => projects.push(*project),
+                right: Operand::Literal(project),
+            } if on_project(left) => projects.push(project.clone()),
             Predicate::In { left, values } if on_project(left) => {
-                for value in values {
-                    let Literal::Int(project) = value else {
-                        return Err(QueryError::PipelineInvariant(
-                            "a repository column holds integers".into(),
-                        ));
-                    };
-                    projects.push(*project);
-                }
+                projects.extend(values.iter().cloned())
             }
             _ => {
                 return Err(unsupported(
@@ -169,6 +177,7 @@ fn repositories(predicate: &Predicate, repository: Repository) -> Result<Vec<i64
 fn fields(
     logical: &LogicalPlan,
     code: &Catalog<OrbitCode>,
+    placed: &[(EntityId, StoreId)],
     entity: Option<EntityId>,
     keyed: &[(PropertyId, PropertyId)],
     item: &Projection,
@@ -182,9 +191,7 @@ fn fields(
     let returned = || -> Result<Vec<PropertyId>> {
         let entity =
             entity.ok_or_else(|| unsupported(BACKEND, "return a node it has not named"))?;
-        let (store, _) = code
-            .home(entity)
-            .ok_or_else(|| unsupported(BACKEND, "find the entity's index"))?;
+        let store = code.model().store(placed_store(placed, entity)?);
         Ok(store.returns(entity).collect())
     };
     Ok(match item {
@@ -289,7 +296,7 @@ fn follow(
 fn branch_heads(
     predicate: &Predicate,
     repository: Repository,
-) -> Result<Option<Vec<(i64, String)>>> {
+) -> Result<Option<Vec<(Literal, String)>>> {
     let Predicate::InTuple { left, values } = predicate else {
         return Ok(None);
     };
@@ -309,10 +316,10 @@ fn branch_heads(
     };
     values
         .iter()
-        .map(|tuple| match (&tuple[project], &tuple[branch]) {
-            (Literal::Int(project), Literal::String(branch)) => Ok((*project, branch.clone())),
+        .map(|tuple| match &tuple[branch] {
+            Literal::String(branch) => Ok((tuple[project].clone(), branch.clone())),
             _ => Err(QueryError::PipelineInvariant(
-                "repository columns hold an integer project and a text branch".into(),
+                "a branch column holds text".into(),
             )),
         })
         .collect::<Result<Vec<_>>>()

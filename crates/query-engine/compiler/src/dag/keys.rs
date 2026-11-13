@@ -26,7 +26,7 @@ pub fn bind(
     sets: &[KeySet],
     model: &Model,
     limits: &QueryLimits,
-    connections: &[String],
+    connections: &[query_data_model::ConnectionId],
 ) -> Result<Statement> {
     let limits = QueryLimits {
         in_values: limits.in_values.max(limits.stage_keys),
@@ -55,11 +55,11 @@ pub fn bind(
         for set in sets.iter().filter(here) {
             let binding = rows.binding(&set.input.binding)?;
             let predicate = match &set.input.properties[..] {
-                [property] => binding.property(property)?.one_of(single(&set.keys)?),
+                [property] => binding.property(*property)?.one_of(single(&set.keys)?),
                 properties => Predicate::InTuple {
                     left: properties
                         .iter()
-                        .map(|property| binding.property(property))
+                        .map(|property| binding.property(*property))
                         .collect::<std::result::Result<_, _>>()?,
                     values: set
                         .keys
@@ -130,7 +130,13 @@ mod tests {
                 from: 0,
                 columns: vec!["project_id".into(), "path".into()],
                 binding: "f".into(),
-                properties: vec!["project_id".into(), "path".into()],
+                properties: {
+                    let model = frontend.model();
+                    let file = model.names().entity("File").unwrap();
+                    ["project_id", "path"]
+                        .map(|name| model.names().property(file, name).unwrap())
+                        .to_vec()
+                },
                 types: vec![
                     query_data_model::DataType::Int,
                     query_data_model::DataType::String,

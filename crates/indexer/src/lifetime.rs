@@ -379,7 +379,7 @@ mod tests {
     }
 
     fn entity(catalog: &Catalog<ClickHouse>, name: &str) -> EntityId {
-        catalog.graph().entity_id(name).expect("entity")
+        catalog.names().entity(name).expect("entity")
     }
 
     #[test]

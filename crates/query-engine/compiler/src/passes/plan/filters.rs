@@ -132,8 +132,10 @@ pub fn bind_filter(
         FilterOwner::Entity(entity) => {
             let table = model.table_of(*entity);
             (
-                graph
-                    .property_id(*entity, property)
+                model
+                    .names()
+                    .property(*entity, property)
+                    .ok()
                     .map(|property| graph.property(property))
                     .map(|property| (Some(property.id), Some(property.data_type))),
                 table.is_some_and(|table| in_sort_key(model, table, property)),

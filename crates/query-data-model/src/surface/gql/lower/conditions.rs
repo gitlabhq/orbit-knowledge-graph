@@ -174,7 +174,7 @@ pub(super) fn column(rows: &Rows<'_>, property: &Property<'_>) -> Result<Expr, S
     let name = &property.property.value;
     Ok(match binding.kind() {
         LogicalType::Edge => rows.edge_column(binding, name)?,
-        _ => binding.property(name)?,
+        _ => binding.property_named(name)?,
     })
 }
 

@@ -4,9 +4,9 @@ use query_data_model::plan::logical::{
     Columns, Comparison, Conjunct, Expr, Literal, LogicalOperation, LogicalPlan, Matching, Operand,
     Predicate, Projection,
 };
-use query_data_model::{Catalog, PropertyId, StorageBackend};
+use query_data_model::{Catalog, EntityId, PropertyId, StorageBackend, StoreId};
 
-use super::unsupported;
+use super::{placed_store, unsupported};
 use crate::error::Result;
 
 const BACKEND: &str = Live::KIND;
@@ -24,8 +24,11 @@ struct Window {
     to: Option<String>,
 }
 
-pub fn plan(logical: &LogicalPlan, live: &Catalog<Live>) -> Result<LivePlan> {
-    let graph = live.graph();
+pub fn plan(
+    logical: &LogicalPlan,
+    live: &Catalog<Live>,
+    placed: &[(EntityId, StoreId)],
+) -> Result<LivePlan> {
     let mut entity = None;
     let mut pushed = Vec::new();
     let mut window = Window::default();
@@ -54,20 +57,16 @@ pub fn plan(logical: &LogicalPlan, live: &Catalog<Live>) -> Result<LivePlan> {
         }
     }
     let entity = entity.ok_or_else(|| unsupported(BACKEND, "call without an entity"))?;
-    let store = live
-        .home(entity)
-        .map(|(store, _)| store.name.clone())
-        .ok_or_else(|| unsupported(BACKEND, "find the entity's operation"))?;
-    let name = |property: PropertyId| graph.property(property).name.as_str();
+    let store = placed_store(placed, entity)?;
     Ok(live.build(|q| {
-        let calls = q.call(live.operation(&store, &graph.entity(entity).name)?)?;
+        let calls = q.call(live.operation(store, entity)?)?;
         let mut filters: Option<Conditions> = None;
         for condition in &pushed {
             let next = match condition {
-                Pushed::Equals(property, value) => calls.field(name(*property))?.eq(value.clone()),
-                Pushed::Contains(property, text) => calls.field(name(*property))?.contains(text),
+                Pushed::Equals(property, value) => calls.field(*property)?.eq(value.clone()),
+                Pushed::Contains(property, text) => calls.field(*property)?.contains(text),
                 Pushed::OneOf(property, values) => {
-                    calls.field(name(*property))?.one_of(values.iter().cloned())
+                    calls.field(*property)?.one_of(values.iter().cloned())
                 }
             };
             filters = Some(match filters {
@@ -81,7 +80,7 @@ pub fn plan(logical: &LogicalPlan, live: &Catalog<Live>) -> Result<LivePlan> {
         };
         let calls = match window.property {
             Some(property) => {
-                let field = calls.field(name(property))?;
+                let field = calls.field(property)?;
                 q.window(calls, &field, window.from.clone(), window.to.clone())?
             }
             None => calls,
@@ -90,21 +89,17 @@ pub fn plan(logical: &LogicalPlan, live: &Catalog<Live>) -> Result<LivePlan> {
             Some(rows) => q.limit(calls, rows)?,
             None => calls,
         };
-        let fields = selected(&calls, &returned, name)?;
+        let fields = selected(&calls, &returned)?;
         q.select(calls, fields)
     })?)
 }
 
-fn selected<'n>(
-    calls: &Calls,
-    returned: &[PropertyId],
-    name: impl Fn(PropertyId) -> &'n str,
-) -> std::result::Result<Vec<Field>, LiveError> {
+fn selected(calls: &Calls, returned: &[PropertyId]) -> std::result::Result<Vec<Field>, LiveError> {
     match returned {
         [] => Ok(calls.fields().to_vec()),
         properties => properties
             .iter()
-            .map(|property| calls.field(name(*property)))
+            .map(|property| calls.field(*property))
             .collect(),
     }
 }

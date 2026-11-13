@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+pub use crate::spec::storage::ColumnStorage;
+pub use crate::spec::{Fragment, Fragments};
 use crate::{Packages, Tier};
 
 const OVERLAYS: &str = concat!(env!("ORBIT_CONFIG_DIR"), "/seeds/overlays");

@@ -36,7 +36,7 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
         build: impl FnOnce(&mut Self) -> Result<Relation, RelationalError>,
     ) -> Result<Subquery, RelationalError> {
         self.guard(match materialized {
-            true => supported(B::CAPABILITIES.materialized_bodies, "materialized bodies"),
+            true => supported(B::SQL.materialized_bodies, "materialized bodies"),
             false => Ok(()),
         })?;
         self.define(name, Sharing::Shared { materialized }, build)

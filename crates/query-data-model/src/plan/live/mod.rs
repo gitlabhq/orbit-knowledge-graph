@@ -7,7 +7,7 @@ use crate::catalog::{Catalog, Guard};
 use crate::implementations::live::{Endpoint, Live};
 use crate::plan::logical::Literal;
 use crate::plan::tracking::{self, Declared, Each, Plan, Ref, Rejected, Step};
-use crate::{DataType, EntityId, PropertyId};
+use crate::{DataType, EntityId, PropertyId, StoreId};
 
 #[derive(Debug)]
 pub struct LiveLanguage;
@@ -120,39 +120,31 @@ pub enum LiveError {
 }
 
 impl Catalog<Live> {
-    pub fn operation(&self, store: &str, entity: &str) -> Result<Declared<Operation>, LiveError> {
+    /// The operation that reads `entity` in `store`, the store placement put the read on.
+    pub fn operation(
+        &self,
+        store: StoreId,
+        entity: EntityId,
+    ) -> Result<Declared<Operation>, LiveError> {
         let model = self.model();
-        let found = model
-            .stores()
-            .iter()
-            .position(|candidate| {
-                candidate.name == store && candidate.connection == self.connection()
-            })
-            .and_then(|index| {
-                let entity = model.graph().entity_id(entity)?;
-                model.stores()[index].source(entity)?;
-                Some(Operation {
-                    store: index,
-                    entity,
-                })
-            });
-        found
-            .map(|operation| Declared::new(model.id(), operation))
-            .ok_or_else(|| LiveError::UnknownOperation {
-                name: format!("{store}.{entity}"),
+        let held = model.store(store);
+        if held.connection() != self.connection() || held.source(entity).is_none() {
+            return Err(LiveError::UnknownOperation {
+                name: format!("{}.{}", held.name, model.graph().entity(entity).name),
                 available: self
                     .stores()
-                    .flat_map(|(store, _)| {
-                        store.sources().map(move |source| {
-                            format!(
-                                "{}.{}",
-                                store.name,
-                                model.graph().entity(source.entity).name
-                            )
-                        })
-                    })
+                    .flat_map(|(store, _)| store.sources().map(|source| source.entity))
+                    .map(|served| model.graph().entity(served).name.clone())
                     .collect(),
-            })
+            });
+        }
+        Ok(Declared::new(
+            model.id(),
+            Operation {
+                store: store.index(),
+                entity,
+            },
+        ))
     }
 
     pub fn endpoint(&self, entity: EntityId) -> Option<&Endpoint> {

@@ -8,7 +8,7 @@ pub enum CurrentRows {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Capabilities {
+pub struct SqlCapabilities {
     pub current_rows: CurrentRows,
     pub limit_by: bool,
     pub settings: bool,
@@ -19,5 +19,5 @@ pub struct Capabilities {
 }
 
 pub trait RelationalBackend: StorageBackend<Store: RelationalFacts> {
-    const CAPABILITIES: Capabilities;
+    const SQL: SqlCapabilities;
 }

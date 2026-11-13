@@ -16,6 +16,34 @@ fn model() -> Arc<Model> {
     testkit::with_demo().deployment("demo").unwrap()
 }
 
+/// The code store that searches files, which placement puts a structural match on.
+fn code_store(model: &Model) -> query_data_model::StoreId {
+    let file = model.names().entity("File").unwrap();
+    let content = model.names().property(file, "content").unwrap();
+    model.searching(file, content).unwrap().id()
+}
+
+/// The live store that holds messages.
+fn message_store(model: &Model) -> query_data_model::StoreId {
+    let message = model.names().entity("SlackMessage").unwrap();
+    model.complete_store(message).unwrap().id()
+}
+
+fn field(
+    model: &Model,
+    calls: &query_data_model::plan::live::Calls,
+    name: &str,
+) -> Result<query_data_model::plan::live::Field, LiveError> {
+    let message = model.names().entity("SlackMessage").unwrap();
+    calls.field(model.names().property(message, name).unwrap())
+}
+
+fn projects(keys: &[i64]) -> Vec<query_data_model::plan::logical::Literal> {
+    keys.iter()
+        .map(|key| query_data_model::plan::logical::Literal::Int(*key))
+        .collect()
+}
+
 #[test]
 fn the_new_fragments_load_from_their_per_kind_directories() {
     let embedded = Packages::embedded();
@@ -28,6 +56,7 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
         embedded
             .deployment("server")
             .unwrap()
+            .names()
             .entity("SlackMessage")
             .is_err()
     );
@@ -38,8 +67,10 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
     );
 
     let model = model();
-    let message = model.entity("SlackMessage").unwrap();
-    let live = model.physical::<Live>("data_extraction").unwrap();
+    let message = model.names().entity("SlackMessage").unwrap();
+    let live = model
+        .physical::<Live>(model.names().connection("data_extraction").unwrap())
+        .unwrap();
     let guard = live.store("slack").unwrap().guard(message).unwrap();
     let names = |rule: &Rule| match rule {
         Rule::Via(hops) => hops
@@ -49,8 +80,10 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
         other => panic!("expected a via chain, got {other:?}"),
     };
     assert_eq!(names(&guard.rule), ["IN_WORKSPACE", "INSTALLED_IN"]);
-    let file = model.entity("File").unwrap();
-    let code = model.physical::<OrbitCode>("code_indexing").unwrap();
+    let file = model.names().entity("File").unwrap();
+    let code = model
+        .physical::<OrbitCode>(model.names().connection("code_indexing").unwrap())
+        .unwrap();
     let guard = code.store("code").unwrap().guard(file).unwrap();
     assert_eq!(names(&guard.rule), ["IN_PROJECT"]);
     assert!(!model.access().entity(file).checks.is_empty());
@@ -59,12 +92,14 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
 #[test]
 fn a_code_plan_renders_a_structural_search_request() {
     let model = model();
-    let code = model.physical::<OrbitCode>("code_indexing").unwrap();
-    let file = model.entity("File").unwrap();
-    let path = model.property(file, "path").unwrap().id;
+    let code = model
+        .physical::<OrbitCode>(model.names().connection("code_indexing").unwrap())
+        .unwrap();
+    let file = model.names().entity("File").unwrap();
+    let path = model.names().property(file, "path").unwrap();
     let plan = code
         .build(|q| {
-            let files = q.repositories(code.index(file)?, [42])?;
+            let files = q.repositories(code.index(code_store(&model), file)?, projects(&[42]))?;
             let files = q.languages(files, [Language::Rust])?;
             let files = q.prefilter(files, Trigrams::of(["compile"]))?;
             let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)")?)?;
@@ -94,10 +129,14 @@ fn a_code_plan_renders_a_structural_search_request() {
 #[test]
 fn code_construction_rejects_unknown_captures_and_misplaced_steps() {
     let model = model();
-    let code = model.physical::<OrbitCode>("code_indexing").unwrap();
-    let index = code.index(model.entity("File").unwrap()).unwrap();
+    let code = model
+        .physical::<OrbitCode>(model.names().connection("code_indexing").unwrap())
+        .unwrap();
+    let index = code
+        .index(code_store(&model), model.names().entity("File").unwrap())
+        .unwrap();
     let unknown = code.build(|q| {
-        let files = q.repositories(index, [42])?;
+        let files = q.repositories(index, projects(&[42]))?;
         let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)")?)?;
         let capture = hits.capture("BODY")?;
         q.select(hits, [capture])
@@ -108,14 +147,14 @@ fn code_construction_rejects_unknown_captures_and_misplaced_steps() {
     );
 
     let late = code.build(|q| {
-        let files = q.repositories(index, [42])?;
+        let files = q.repositories(index, projects(&[42]))?;
         let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)")?)?;
         q.prefilter(hits, Trigrams::of(["compile"]))
     });
     assert_eq!(late.unwrap_err(), CodeError::AfterMatch("a prefilter"));
 
     let short = code.build(|q| {
-        let files = q.repositories(index, [42])?;
+        let files = q.repositories(index, projects(&[42]))?;
         q.prefilter(files, Trigrams::of(["fn"]))
     });
     assert_eq!(short.unwrap_err(), CodeError::ShortAtom("fn".into()));
@@ -140,9 +179,13 @@ fn code_construction_rejects_unknown_captures_and_misplaced_steps() {
         ))
         .deployment("demo")
         .unwrap();
-    let foreign = other.physical::<OrbitCode>("code_indexing").unwrap();
-    let foreign = foreign.index(other.entity("File").unwrap()).unwrap();
-    let rejected = code.build(|q| q.repositories(foreign, [42]));
+    let foreign = other
+        .physical::<OrbitCode>(other.names().connection("code_indexing").unwrap())
+        .unwrap();
+    let foreign = foreign
+        .index(code_store(&other), other.names().entity("File").unwrap())
+        .unwrap();
+    let rejected = code.build(|q| q.repositories(foreign, projects(&[42])));
     assert_eq!(
         rejected.unwrap_err(),
         CodeError::Rejected(Rejected::ForeignSnapshot)
@@ -152,12 +195,15 @@ fn code_construction_rejects_unknown_captures_and_misplaced_steps() {
 #[test]
 fn a_rewrite_restricts_repositories_through_the_builder() {
     let model = model();
-    let code = model.physical::<OrbitCode>("code_indexing").unwrap();
-    let file = model.entity("File").unwrap();
-    let path = model.property(file, "path").unwrap().id;
+    let code = model
+        .physical::<OrbitCode>(model.names().connection("code_indexing").unwrap())
+        .unwrap();
+    let file = model.names().entity("File").unwrap();
+    let path = model.names().property(file, "path").unwrap();
     let plan = code
         .build(|q| {
-            let files = q.repositories(code.index(file)?, [7, 42])?;
+            let files =
+                q.repositories(code.index(code_store(&model), file)?, projects(&[7, 42]))?;
             let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)")?)?;
             let path = hits.column(path)?;
             q.select(hits, [path])
@@ -180,12 +226,20 @@ fn a_rewrite_restricts_repositories_through_the_builder() {
 #[test]
 fn a_live_plan_renders_an_extraction_request() {
     let model = model();
-    let live = model.physical::<Live>("data_extraction").unwrap();
+    let live = model
+        .physical::<Live>(model.names().connection("data_extraction").unwrap())
+        .unwrap();
     let plan = live
         .build(|q| {
-            let messages = q.call(live.operation("slack", "SlackMessage")?)?;
-            let (channel, text) = (messages.field("channel")?, messages.field("text")?);
-            let author = messages.field("author")?;
+            let messages = q.call(live.operation(
+                message_store(&model),
+                model.names().entity("SlackMessage").unwrap(),
+            )?)?;
+            let (channel, text) = (
+                field(&model, &messages, "channel")?,
+                field(&model, &messages, "text")?,
+            );
+            let author = field(&model, &messages, "author")?;
             let messages = q.filter(
                 messages,
                 channel.eq("orbit-dev").and(text.contains("deploy")),
@@ -233,12 +287,19 @@ fn a_live_plan_renders_an_extraction_request() {
 #[test]
 fn a_filter_the_operation_cannot_push_down_is_a_construction_error() {
     let model = model();
-    let live = model.physical::<Live>("data_extraction").unwrap();
-    let operation = live.operation("slack", "SlackMessage").unwrap();
+    let live = model
+        .physical::<Live>(model.names().connection("data_extraction").unwrap())
+        .unwrap();
+    let operation = live
+        .operation(
+            message_store(&model),
+            model.names().entity("SlackMessage").unwrap(),
+        )
+        .unwrap();
     let error = live
         .build(|q| {
             let messages = q.call(operation)?;
-            let workspace = messages.field("workspace")?;
+            let workspace = field(&model, &messages, "workspace")?;
             q.filter(messages, workspace.eq("T01"))
         })
         .unwrap_err();
@@ -248,7 +309,7 @@ fn a_filter_the_operation_cannot_push_down_is_a_construction_error() {
     );
     let substring = live.build(|q| {
         let messages = q.call(operation)?;
-        let author = messages.field("author")?;
+        let author = field(&model, &messages, "author")?;
         q.filter(messages, author.contains("ann"))
     });
     assert!(matches!(
@@ -330,9 +391,11 @@ fn a_via_step_whose_key_type_differs_from_the_target_id_fails_the_load() {
 #[test]
 fn a_code_store_names_the_repository_and_branch_columns_of_each_entity() {
     let model = model();
-    let code = model.physical::<OrbitCode>("code_indexing").unwrap();
-    let file = model.graph().entity_id("File").unwrap();
-    let repository = code.repository(file).unwrap();
+    let code = model
+        .physical::<OrbitCode>(model.names().connection("code_indexing").unwrap())
+        .unwrap();
+    let file = model.names().entity("File").unwrap();
+    let repository = code.repository(code_store(&model), file).unwrap();
     assert_eq!(
         model.graph().property(repository.project).name,
         "project_id"

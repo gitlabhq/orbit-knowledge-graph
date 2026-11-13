@@ -241,7 +241,9 @@ mod tests {
         let model: Arc<Model> = query_data_model::testkit::with_demo()
             .deployment("demo")
             .unwrap();
-        model.physical::<DuckDb>("jira_lake").unwrap()
+        model
+            .physical::<DuckDb>(model.names().connection("jira_lake").unwrap())
+            .unwrap()
     }
 
     #[test]

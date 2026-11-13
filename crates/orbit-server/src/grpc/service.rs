@@ -1205,8 +1205,10 @@ mod tests {
 
         let snapshot = service.active_schema.snapshot().unwrap();
         let graph = snapshot.data_model.graph();
-        let (outgoing, incoming) =
-            OrbitServiceImpl::get_node_edge_names(graph, graph.entity_id("User").unwrap());
+        let (outgoing, incoming) = OrbitServiceImpl::get_node_edge_names(
+            graph,
+            snapshot.data_model.names().entity("User").unwrap(),
+        );
 
         assert!(
             !outgoing.is_empty() || !incoming.is_empty(),

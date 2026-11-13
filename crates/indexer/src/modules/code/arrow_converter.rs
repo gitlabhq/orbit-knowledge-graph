@@ -7,8 +7,8 @@ use code_graph::v2::types::EdgeKind;
 use code_graph_incremental::export::ExportTables;
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::catalog::sources::CODE_INDEXER_SOURCE;
 use query_data_model::implementations::clickhouse::schema::{Table, data_type};
-use query_data_model::spec::CODE_INDEXER_SOURCE;
 
 use super::config::CodeKinds;
 use query_data_model::{Catalog, ClickHouse, DataModelError, DataType, DuckDb};
@@ -151,12 +151,14 @@ fn entity_specs(
     entity_name: &str,
 ) -> Result<Vec<ColumnSpec>, DataModelError> {
     let graph = catalog.graph();
-    let entity = graph
-        .entity_id(entity_name)
-        .ok_or_else(|| DataModelError::UnknownReference {
-            kind: "entity",
-            name: entity_name.to_string(),
-        })?;
+    let entity =
+        catalog
+            .names()
+            .entity(entity_name)
+            .map_err(|_| DataModelError::UnknownReference {
+                kind: "entity",
+                name: entity_name.to_string(),
+            })?;
     let table = catalog
         .table_of(entity)
         .ok_or_else(|| DataModelError::Invalid(format!("{entity_name} has no graph table")))?;

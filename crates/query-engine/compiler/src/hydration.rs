@@ -46,18 +46,21 @@ impl HydrationArm {
             .map(crate::logical::anchors::literal)
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| QueryError::Validation("a composite key cannot pin one row".into()))?;
-        let key = identity(model, model.entity(entity).map_err(PlanError::from)?)?;
+        let key = identity(
+            model,
+            model.names().entity(entity).map_err(PlanError::from)?,
+        )?;
         let plan = catalog.build(|q| {
-            let declared = catalog.entity(entity)?;
+            let declared = catalog.entity_named(entity)?;
             let name = q.internal_name("hydrate")?;
             let rows = q.entities_as(declared, &name)?;
             let binding = rows.endpoint()?;
-            let id = binding.property(key)?;
+            let id = binding.property_named(key)?;
             let rows = q.pin(rows, id, &ids)?;
             let entity = binding.entity().ok_or(PlanError::NoEntity)?;
             let listed = columns
                 .iter()
-                .map(|column| Ok(model.property(entity, column)?.id))
+                .map(|column| Ok(model.names().property(entity, column)?))
                 .collect::<std::result::Result<_, PlanError>>()?;
             let projection = Projection::Graph {
                 binding: binding.output(),

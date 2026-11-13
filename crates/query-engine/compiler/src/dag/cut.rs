@@ -3,7 +3,7 @@ use query_data_model::PropertyId;
 use query_data_model::plan::logical::{Expr, LogicalOperation};
 use query_data_model::plan::tracking::Ref;
 
-use super::split::{Crossing, Place};
+use super::split::Crossing;
 use super::{
     Backend, CombineColumn, CombineEdge, CombineJoin, CombineNode, CombineQuery, Connections, Dag,
     Input, Peer, RowCheck, Stage, StageId, StageQuery,
@@ -12,8 +12,11 @@ use crate::error::{QueryError, Result};
 use crate::logical::Query;
 
 pub(super) struct Group {
-    pub place: Place,
+    /// The connection the group's stage runs on.
+    pub place: query_data_model::ConnectionId,
     pub bindings: Vec<Ref>,
+    /// The placed store of each entity the group reads.
+    pub stores: Vec<(query_data_model::EntityId, query_data_model::StoreId)>,
 }
 
 pub(super) struct Cut<'q> {
@@ -57,8 +60,8 @@ impl Cut<'_> {
         let graph = self.query.model.graph();
         let access = self.query.model.access();
         for (index, group) in self.groups.iter().enumerate() {
-            let remote = self.peer(group.place).remote();
-            if remote.is_none() && !producers.contains(&index) {
+            let joins = self.peer(group.place).joins();
+            if joins && !producers.contains(&index) {
                 continue;
             }
             for binding in &group.bindings {
@@ -88,13 +91,13 @@ impl Cut<'_> {
                         checks[index].push(check);
                     }
                 }
-                if remote.is_none() {
+                if joins {
                     continue;
                 }
                 let [identity] = graph.entity(entity).identity[..] else {
                     continue;
                 };
-                if !self.peer(group.place).returns_identity(entity) {
+                if !self.store(group, entity).returns_identity(entity) {
                     continue;
                 }
                 push(needed.entry(*binding).or_default(), identity);
@@ -121,7 +124,7 @@ impl Cut<'_> {
         let mut stages = Vec::new();
         for (id, group) in order.iter().enumerate() {
             let peer = self.peer(self.groups[*group].place);
-            let (connection, backend) = (peer.connection().to_string(), peer.backend());
+            let (connection, backend) = (peer.connection(), peer.backend());
             let checks = std::mem::take(&mut checks[*group]);
             let inputs = self
                 .crossings
@@ -135,12 +138,15 @@ impl Cut<'_> {
                 group,
                 &needed,
                 self.limits,
-                self.connections.names(),
+                self.connections.ids(),
             )?;
             stages.push(Stage {
                 id,
                 backend,
-                connection: Some(connection),
+                runs: super::Runs::On {
+                    connection,
+                    stores: group.stores.clone(),
+                },
                 query: StageQuery::Gql(query_data_model::surface::Statement { plan, debug }),
                 inputs,
                 response: false,
@@ -213,7 +219,7 @@ impl Cut<'_> {
         stages.push(Stage {
             id: stages.len(),
             backend: Backend::Combine,
-            connection: None,
+            runs: super::Runs::Combine,
             query: StageQuery::Combine(combine, Box::new(response)),
             inputs,
             response: true,
@@ -225,8 +231,24 @@ impl Cut<'_> {
         })
     }
 
-    fn peer(&self, place: Place) -> &Peer {
-        &self.connections.peers()[place]
+    fn peer(&self, connection: query_data_model::ConnectionId) -> &Peer {
+        self.connections
+            .get(connection)
+            .expect("a group's connection is served")
+    }
+
+    /// The store placement put `entity` on in `group`.
+    pub(super) fn store(
+        &self,
+        group: &Group,
+        entity: query_data_model::EntityId,
+    ) -> &query_data_model::catalog::Store {
+        let (_, store) = group
+            .stores
+            .iter()
+            .find(|(placed, _)| *placed == entity)
+            .expect("every entity a group reads is placed");
+        self.query.model.store(*store)
     }
 
     /// The name of the column a stage returns a binding's property in.
@@ -241,7 +263,7 @@ impl Cut<'_> {
             .groups
             .iter()
             .find(|group| group.bindings.contains(&binding));
-        let relational = group.is_some_and(|group| self.peer(group.place).remote().is_none());
+        let relational = group.is_some_and(|group| self.peer(group.place).joins());
         CombineColumn {
             stage,
             column: match relational {
@@ -266,8 +288,8 @@ impl Cut<'_> {
         };
         let rank = |index: usize| {
             let group = &self.groups[index];
-            let remote = self.peer(group.place).remote().is_some();
-            (!bounded(group), remote, index)
+            let joins = self.peer(group.place).joins();
+            (!bounded(group), !joins, index)
         };
         let root = (0..self.groups.len())
             .min_by_key(|index| rank(*index))

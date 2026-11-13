@@ -32,8 +32,10 @@ impl NodePlan {
         let id_column = identity_column(model, entity)?.to_string();
         let graph = model.graph();
         let stored = |name: &str| {
-            graph
-                .property_id(entity, name)
+            model
+                .names()
+                .property(entity, name)
+                .ok()
                 .and_then(|property| model.lookup(property))
                 .is_none()
         };
@@ -240,7 +242,7 @@ fn node_access<B: SqlBackend>(
         && !ordered
         && !local_predicate;
     let joined_as_rows = query.steps().is_empty()
-        || !B::CAPABILITIES.deferred_nodes
+        || !B::SQL.deferred_nodes
         || group_target
         || metric_target
         || ordered

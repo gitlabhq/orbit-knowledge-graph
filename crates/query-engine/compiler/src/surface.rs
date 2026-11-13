@@ -13,7 +13,7 @@ pub fn catalog<'m, B: StorageBackend>(
     limits: &'m QueryLimits,
     admin: bool,
 ) -> LogicalCatalog<'m> {
-    let logical = catalog.model().logical(limits).serving(connections.names());
+    let logical = catalog.model().logical(limits).serving(connections.ids());
     match admin {
         true => logical.as_admin(),
         false => logical,

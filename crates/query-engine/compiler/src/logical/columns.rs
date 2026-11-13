@@ -93,7 +93,7 @@ pub fn identity_column(
         crate::error::QueryError::Lowering(format!(
             "{} has no identity column on connection {}",
             model.graph().entity(entity).name,
-            model.connection()
+            model.model().connection(model.connection()).name()
         ))
     })
 }

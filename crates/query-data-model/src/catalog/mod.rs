@@ -17,12 +17,13 @@ pub use access::{
 };
 pub(crate) use backend::registered;
 pub use backend::{
-    Catalog, ColumnInput, ExecuteError, NoOptions, Render, Row, SourceInput, StorageBackend,
-    StoreInput, check_unrelational,
+    Capabilities, Catalog, ColumnInput, ExecuteError, NoOptions, Render, Row, SourceInput,
+    StorageBackend, StoreInput, check_unrelational,
 };
 pub use diagnostics::{Diagnostics, SpecError};
 pub use guards::{Guard, PolicyKind, Rule};
 pub use lookups::{Lookup, Lookups};
+pub use names::Names;
 pub use names::{Reversed, Unresolved};
 pub use sources::Sources;
 pub use store::{Source, Store, StoredColumn};
@@ -38,6 +39,35 @@ use crate::{DataModelError, EntityId, GraphCatalog, PropertyId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModelId([u8; 32]);
 
+/// One connection a deployment serves, with the backend kind of every store on it.
+#[derive(Debug)]
+pub struct Connection {
+    id: crate::ConnectionId,
+    name: String,
+    kind: &'static str,
+    capabilities: Capabilities,
+}
+
+impl Connection {
+    pub fn id(&self) -> crate::ConnectionId {
+        self.id
+    }
+
+    /// The name the deployment config binds the connection by.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The backend kind, which only picks the connection's catalog, executor and codec.
+    pub fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    pub fn capabilities(&self) -> Capabilities {
+        self.capabilities
+    }
+}
+
 #[derive(Debug)]
 pub struct Model {
     id: ModelId,
@@ -45,6 +75,7 @@ pub struct Model {
     access: Access,
     lookups: Lookups,
     stores: Vec<Store>,
+    connections: Vec<Connection>,
     sources: Sources,
 }
 
@@ -92,6 +123,7 @@ impl Model {
         let elsewhere = fragments.elsewhere();
         let (mut stores, blocks) =
             layout::resolve(&graph, &storages, &served, elsewhere, &mut diagnostics);
+        let connections = connect(&mut stores);
         let complete = access.covers(&graph);
         if complete {
             guards::resolve(&graph, &access, &mut stores, &mut diagnostics);
@@ -113,6 +145,7 @@ impl Model {
             access,
             lookups,
             stores,
+            connections,
             sources,
         };
         let mut diagnostics = Diagnostics::default();
@@ -139,6 +172,27 @@ impl Model {
 
     pub fn stores(&self) -> &[Store] {
         &self.stores
+    }
+
+    /// Every connection the deployment serves, in name order.
+    pub fn connections(&self) -> impl Iterator<Item = &Connection> {
+        self.connections.iter()
+    }
+
+    pub fn store(&self, id: crate::StoreId) -> &Store {
+        &self.stores[id.index()]
+    }
+
+    pub fn connection(&self, id: crate::ConnectionId) -> &Connection {
+        &self.connections[id.index()]
+    }
+
+    /// The store whose backend searches `property` of `entity` structurally: the placement of a
+    /// structural match, which need not be the entity's complete store.
+    pub fn searching(&self, entity: EntityId, property: PropertyId) -> Option<&Store> {
+        self.stores
+            .iter()
+            .find(|store| store.searches(entity, property))
     }
 
     pub fn sources(&self) -> &Sources {
@@ -200,6 +254,43 @@ impl Model {
             .peekable();
         holders.peek().is_some() && holders.all(|store| store.immutable(property))
     }
+}
+
+/// The connections of `stores` in name order, each with its stores' backend kind; a store whose
+/// kind no backend registers is a diagnostic of the layout already.
+fn connect(stores: &mut [Store]) -> Vec<Connection> {
+    for (index, store) in stores.iter_mut().enumerate() {
+        store.id = crate::StoreId(index);
+    }
+    let mut names: Vec<&str> = stores
+        .iter()
+        .map(|store| store.connection_name.as_str())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    let connections: Vec<Connection> = names
+        .iter()
+        .enumerate()
+        .filter_map(|(index, name)| {
+            let store = stores.iter().find(|store| store.connection_name == *name)?;
+            let backend = registered(&store.kind)?;
+            Some(Connection {
+                id: crate::ConnectionId(index),
+                name: name.to_string(),
+                kind: backend.kind(),
+                capabilities: backend.capabilities(),
+            })
+        })
+        .collect();
+    for store in stores.iter_mut() {
+        if let Some(connection) = connections
+            .iter()
+            .find(|connection| connection.name == store.connection_name)
+        {
+            store.connection_id = connection.id;
+        }
+    }
+    connections
 }
 
 impl ModelId {

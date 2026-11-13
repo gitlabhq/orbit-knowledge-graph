@@ -17,7 +17,7 @@ use query_engine::shared::PipelineOutput;
 use query_engine::shared::hydration::parse_hydration_batches;
 use query_engine::types::QueryResult;
 
-fn schema_sql(fragments: &query_data_model::spec::Fragments) -> Vec<String> {
+fn schema_sql(fragments: &query_data_model::testkit::Fragments) -> Vec<String> {
     let prefix = integration_testkit::TABLE_PREFIX.as_str();
     graph_schema(fragments)
         .tables

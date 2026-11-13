@@ -9,7 +9,7 @@ use crate::catalog::Catalog;
 use crate::implementations::orbit_code::OrbitCode;
 use crate::implementations::orbit_code::Repository;
 use crate::plan::tracking::{self, Declared, Each, Plan, Ref, Rejected, Step};
-use crate::{EntityId, PropertyId};
+use crate::{EntityId, PropertyId, StoreId};
 
 #[derive(Debug)]
 pub struct CodeLanguage;
@@ -90,6 +90,8 @@ pub enum CodeError {
         name: String,
         available: Vec<String>,
     },
+    #[error("a repository is named by its integer project key, not {0}")]
+    RepositoryKey(String),
     #[error("top keeps at least one match")]
     EmptyTop,
     #[error("a code request needs {0}")]
@@ -97,28 +99,36 @@ pub enum CodeError {
 }
 
 impl Catalog<OrbitCode> {
-    /// The index of `entity` in its home store on this connection.
-    pub fn index(&self, entity: EntityId) -> Result<Declared<Index>, CodeError> {
+    /// The index of `entity` in `store`, the store placement put the read on.
+    pub fn index(&self, store: StoreId, entity: EntityId) -> Result<Declared<Index>, CodeError> {
         let model = self.model();
-        let (home, _) = self.home(entity).ok_or_else(|| CodeError::UnknownIndex {
-            name: model.graph().entity(entity).name.clone(),
-            available: self
-                .stores()
-                .flat_map(|(store, _)| store.sources().map(|source| source.entity))
-                .map(|indexed| model.graph().entity(indexed).name.clone())
-                .collect(),
-        })?;
-        let store = model
-            .stores()
-            .iter()
-            .position(|candidate| std::ptr::eq(candidate, home))
-            .ok_or(CodeError::Incomplete("an index store"))?;
-        Ok(Declared::new(model.id(), Index { store, entity }))
+        let held = model.store(store);
+        if held.connection() != self.connection() || held.source(entity).is_none() {
+            return Err(CodeError::UnknownIndex {
+                name: format!("{}.{}", held.name, model.graph().entity(entity).name),
+                available: self
+                    .stores()
+                    .flat_map(|(store, _)| store.sources().map(|source| source.entity))
+                    .map(|indexed| model.graph().entity(indexed).name.clone())
+                    .collect(),
+            });
+        }
+        Ok(Declared::new(
+            model.id(),
+            Index {
+                store: store.index(),
+                entity,
+            },
+        ))
     }
 
-    /// The columns that name the repository and branch of each row of `entity`.
-    pub fn repository(&self, entity: EntityId) -> Option<Repository> {
-        self.home(entity)?.1.repository(entity)
+    /// The columns `store` names the repository and branch of each row of `entity` by.
+    pub fn repository(&self, store: StoreId, entity: EntityId) -> Option<Repository> {
+        let held = self.model().store(store);
+        self.stores()
+            .find(|(candidate, _)| candidate.id() == held.id())?
+            .1
+            .repository(entity)
     }
 
     pub fn build<'c>(

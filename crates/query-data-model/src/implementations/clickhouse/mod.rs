@@ -9,7 +9,7 @@ pub use versioned::versioned;
 
 use std::sync::Arc;
 
-use super::relational::{Capabilities, CurrentRows, RelationalBackend};
+use super::relational::{CurrentRows, RelationalBackend, SqlCapabilities};
 use facts::{DenormalizedKey, DenormalizedProperty};
 
 use crate::{Catalog, DataModelError, Model, Packages, RelationshipId};
@@ -18,7 +18,7 @@ use crate::{Catalog, DataModelError, Model, Packages, RelationshipId};
 pub struct ClickHouse;
 
 impl RelationalBackend for ClickHouse {
-    const CAPABILITIES: Capabilities = Capabilities {
+    const SQL: SqlCapabilities = SqlCapabilities {
         current_rows: CurrentRows::Final,
         limit_by: true,
         settings: true,

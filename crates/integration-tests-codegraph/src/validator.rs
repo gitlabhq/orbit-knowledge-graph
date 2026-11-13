@@ -5,7 +5,7 @@ use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use duckdb_client::DuckDbClient;
 use orbit_arrow::ArrowUtils;
-use query_data_model::{Catalog, DuckDb, GraphCatalog};
+use query_data_model::{Catalog, DuckDb};
 use tabled::{Table, builder::Builder};
 
 use super::assertions::{
@@ -27,7 +27,7 @@ pub fn run_suite(
     data_model: &Arc<Catalog<DuckDb>>,
     probe_skipped: bool,
 ) -> Vec<Failure> {
-    let mut failures = undeclared_edges(client, data_model.graph());
+    let mut failures = undeclared_edges(client, data_model.names());
     for test in &suite.tests {
         if test.skip {
             eprintln!("  [SKIP] \"{}\"", test.name);
@@ -41,7 +41,10 @@ pub fn run_suite(
     failures
 }
 
-fn undeclared_edges(client: &Arc<Mutex<DuckDbClient>>, graph: &GraphCatalog) -> Vec<Failure> {
+fn undeclared_edges(
+    client: &Arc<Mutex<DuckDbClient>>,
+    names: query_data_model::catalog::Names<'_>,
+) -> Vec<Failure> {
     let batches = client
         .lock()
         .expect("the fixture database")
@@ -59,7 +62,7 @@ fn undeclared_edges(client: &Arc<Mutex<DuckDbClient>>, graph: &GraphCatalog) -> 
                 value("source_kind"),
                 value("target_kind"),
             );
-            if graph.variant_named(&kind, &source, &target).is_none() {
+            if names.variant(&kind, &source, &target).is_none() {
                 failures.push(Failure {
                     test: "the model declares every indexed edge".into(),
                     severity: Severity::Error,

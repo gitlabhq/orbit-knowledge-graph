@@ -35,7 +35,12 @@ pub async fn run_lake_dir(
         })
         .unwrap();
     let graph = crate::versioned_data_model(fragments);
-    let lake_catalog = Arc::new(graph.shared_model().physical::<DuckDb>(connection).unwrap());
+    let lake_catalog = Arc::new(
+        graph
+            .shared_model()
+            .physical::<DuckDb>(graph.names().connection(connection).unwrap())
+            .unwrap(),
+    );
     let lake = Lake::seed(
         mode,
         &lake_catalog,

@@ -21,6 +21,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 named-queries = { path = "../../named-queries" }
+query-data-model = { path = "../../query-data-model", features = ["testkit"] }
 
 [lints]
 workspace = true

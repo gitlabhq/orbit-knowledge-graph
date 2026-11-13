@@ -119,7 +119,7 @@ fn nodes(
             let lookups: Vec<TpLookup> = keys
                 .iter()
                 .filter_map(|key| {
-                    let entity = model.graph().entity_id(&key.entity)?;
+                    let entity = model.names().entity(&key.entity).ok()?;
                     let lookup = model.path_lookup(entity, key.kind)?;
                     Some(TpLookup {
                         source_table: lookup.table.clone(),

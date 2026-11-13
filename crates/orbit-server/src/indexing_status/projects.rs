@@ -5,8 +5,7 @@ use indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS;
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::catalog::Rule;
 use query_data_model::implementations::clickhouse::spec::TableRole;
-use query_data_model::implementations::orbit_code::OrbitCode;
-use query_data_model::{Catalog, ClickHouse, EntityId, Model, StorageBackend};
+use query_data_model::{Catalog, ClickHouse, EntityId, Model};
 use tonic::Status;
 
 use super::phase::Phase;
@@ -107,12 +106,13 @@ pub async fn read_project_coverage(
         .collect())
 }
 
-/// The entity the code store scopes every read through: the repositories code is indexed for.
+/// The entity the searching stores scope every read through: the repositories code is indexed
+/// for.
 pub(super) fn repository_entity(model: &Model) -> Result<EntityId, Status> {
     let mut ends = model
         .stores()
         .iter()
-        .filter(|store| store.kind == OrbitCode::KIND)
+        .filter(|store| model.connection(store.connection()).capabilities().search)
         .flat_map(|store| {
             store
                 .sources()
@@ -121,18 +121,14 @@ pub(super) fn repository_entity(model: &Model) -> Result<EntityId, Status> {
                     _ => None,
                 })
         });
-    let first = ends.next().ok_or_else(|| {
-        Status::internal(format!(
-            "no {} store scopes its reads through an entity",
-            OrbitCode::KIND
-        ))
-    })?;
+    let first = ends
+        .next()
+        .ok_or_else(|| Status::internal("no searching store scopes its reads through an entity"))?;
     match ends.all(|end| end == first) {
         true => Ok(first),
-        false => Err(Status::internal(format!(
-            "{} stores scope their reads through different entities",
-            OrbitCode::KIND
-        ))),
+        false => Err(Status::internal(
+            "searching stores scope their reads through different entities",
+        )),
     }
 }
 
@@ -142,7 +138,7 @@ fn find_coverage_tables(catalog: &Catalog<ClickHouse>) -> Result<(&str, &str), S
         Status::internal(format!(
             "{} has no table on connection {}",
             catalog.graph().entity(repository).name,
-            catalog.connection()
+            catalog.model().connection(catalog.connection()).name()
         ))
     })?;
     let code_checkpoint_table = catalog

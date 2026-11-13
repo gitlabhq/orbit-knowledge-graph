@@ -48,7 +48,9 @@ pub(super) async fn seed(ctx: &TestContext) {
         .deployed(&query_data_model::testkit::deployments(), "peers")
         .unwrap();
     for (connection, table) in [("main", "gl_rollout"), ("releases", "gl_release")] {
-        let catalog = unprefixed.physical::<ClickHouse>(connection).unwrap();
+        let catalog = unprefixed
+            .physical::<ClickHouse>(unprefixed.names().connection(connection).unwrap())
+            .unwrap();
         let schema = catalog.schema().unwrap();
         let table = schema.table(table).unwrap();
         ctx.execute(&table.to_create_sql(&TABLE_PREFIX)).await;
@@ -68,7 +70,9 @@ pub(super) async fn seed(ctx: &TestContext) {
 }
 
 fn lake(model: &Arc<Model>) -> DuckDbClient {
-    let catalog = model.physical::<DuckDb>("lake").unwrap();
+    let catalog = model
+        .physical::<DuckDb>(model.names().connection("lake").unwrap())
+        .unwrap();
     let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
     client.initialize_schema(&catalog.create_sql()).unwrap();
     client
@@ -83,8 +87,14 @@ fn lake(model: &Arc<Model>) -> DuckDbClient {
 fn peers(ctx: &TestContext) -> Peers {
     let model = model();
     let connections = Connections::of(&model).unwrap();
-    let main = Arc::new(model.physical::<ClickHouse>("main").unwrap());
-    let releases = model.physical::<ClickHouse>("releases").unwrap();
+    let main = Arc::new(
+        model
+            .physical::<ClickHouse>(model.names().connection("main").unwrap())
+            .unwrap(),
+    );
+    let releases = model
+        .physical::<ClickHouse>(model.names().connection("releases").unwrap())
+        .unwrap();
     let client = Arc::new(ctx.create_client());
     let graph = graph_executors(
         Arc::clone(&client),
@@ -94,11 +104,15 @@ fn peers(ctx: &TestContext) -> Peers {
         Vec::new(),
     );
     let second = graph_executors(client, &releases, "base", "gkg;peers".into(), Vec::new());
+    let named = |name: &str| model.names().connection(name).unwrap();
     let executors = Executors::default()
-        .with("main", Arc::clone(graph.get("main").unwrap()))
-        .with("releases", Arc::clone(second.get("releases").unwrap()))
+        .with(named("main"), Arc::clone(graph.get(named("main")).unwrap()))
         .with(
-            "lake",
+            named("releases"),
+            Arc::clone(second.get(named("releases")).unwrap()),
+        )
+        .with(
+            named("lake"),
             Arc::new(DuckDbExecutor {
                 client: Arc::new(Mutex::new(lake(&model))),
             }),

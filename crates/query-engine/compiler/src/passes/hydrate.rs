@@ -307,7 +307,7 @@ fn served<'m>(
     entity: EntityId,
     property: &str,
 ) -> Option<&'m Lookup> {
-    model.lookup(model.graph().property_id(entity, property)?)
+    model.lookup(model.names().property(entity, property).ok()?)
 }
 
 /// Returns the columns that were injected (not originally requested).
@@ -454,7 +454,7 @@ lookups:
     }
 
     fn entity(model: &Catalog<ClickHouse>) -> query_data_model::EntityId {
-        model.graph().entity_id("TestNode").unwrap()
+        model.names().entity("TestNode").unwrap()
     }
 
     #[test]

@@ -3,7 +3,7 @@ use integration_testkit::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_data_model, load_fragments, load_seed,
 };
 use query_data_model::implementations::clickhouse::spec::{ClickHouseOptions, JoinSpec};
-use query_data_model::spec::Fragment;
+use query_data_model::testkit::Fragment;
 use query_data_model::{ClickHouse, StorageBackend};
 
 #[tokio::test]

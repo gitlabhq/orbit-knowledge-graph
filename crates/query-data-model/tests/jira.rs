@@ -42,7 +42,7 @@ fn edit(
 fn every_jira_entity_has_one_complete_store_on_the_lake_connection() {
     let model = demo(|_, yaml| yaml).unwrap();
     for name in ENTITIES {
-        let entity = model.entity(name).unwrap();
+        let entity = model.names().entity(name).unwrap();
         let holders: Vec<_> = model
             .stores()
             .iter()
@@ -50,8 +50,8 @@ fn every_jira_entity_has_one_complete_store_on_the_lake_connection() {
             .map(|store| {
                 (
                     store.name.as_str(),
-                    store.kind.as_str(),
-                    store.connection.as_str(),
+                    model.connection(store.connection()).kind(),
+                    model.connection(store.connection()).name(),
                 )
             })
             .collect();
@@ -64,7 +64,9 @@ fn every_jira_entity_has_one_complete_store_on_the_lake_connection() {
         assert!(store.complete(entity), "{name}");
         assert!(!store.trusted);
     }
-    let catalog = model.physical::<DuckDb>("jira_lake").unwrap();
+    let catalog = model
+        .physical::<DuckDb>(model.names().connection("jira_lake").unwrap())
+        .unwrap();
     let tables: Vec<_> = catalog.tables().map(|table| table.name.as_str()).collect();
     assert_eq!(
         tables,
@@ -112,8 +114,11 @@ fn every_jira_entity_has_one_complete_store_on_the_lake_connection() {
 fn jira_keys_are_strings_and_the_site_is_a_uuid() {
     let model = demo(|_, yaml| yaml).unwrap();
     let identity = |entity: &str, property: &str| {
-        let entity = model.entity(entity).unwrap();
-        model.property(entity, property).unwrap().data_type
+        let entity = model.names().entity(entity).unwrap();
+        model
+            .graph()
+            .property(model.names().property(entity, property).unwrap())
+            .data_type
     };
     assert_eq!(identity("JiraProject", "id"), DataType::String);
     assert_eq!(identity("JiraIssue", "id"), DataType::String);
@@ -126,6 +131,7 @@ fn jira_keys_are_strings_and_the_site_is_a_uuid() {
 fn jira_foreign_keys_reference_gitlab_entities_on_another_connection() {
     let model = demo(|_, yaml| yaml).unwrap();
     let graph = model.graph();
+    let names = model.names();
     for (relationship, source, target, column) in [
         (
             "DEVELOPED_IN",
@@ -142,32 +148,30 @@ fn jira_foreign_keys_reference_gitlab_entities_on_another_connection() {
         ),
         ("COMMENTS_ON", "JiraComment", "JiraIssue", "issue_id"),
     ] {
-        let variant = graph.variant_named(relationship, source, target).unwrap();
+        let variant = graph.variant(names.variant(relationship, source, target).unwrap());
         let key = model.foreign_key(variant.id).unwrap();
         assert_eq!(key.holder, Endpoint::Source, "{relationship}");
         assert_eq!(graph.property(key.property).name, column, "{relationship}");
     }
-    let cites = graph
-        .variant_named("CITES", "JiraIssue", "GitLabRef")
-        .unwrap();
+    let cites = graph.variant(names.variant("CITES", "JiraIssue", "GitLabRef").unwrap());
     let key = model.foreign_key(cites.id).unwrap();
     assert_eq!(key.holder, Endpoint::Target);
     assert_eq!(graph.property(key.property).name, "issue_id");
     let target = |entity: &str| {
-        let entity = model.entity(entity).unwrap();
+        let entity = model.names().entity(entity).unwrap();
         model
             .stores()
             .iter()
             .find(|store| store.complete(entity))
-            .map(|store| store.connection.as_str())
+            .map(|store| model.connection(store.connection()).name())
             .unwrap()
     };
     assert_eq!(target("MergeRequest"), "main");
     assert_eq!(target("Project"), "main");
     assert_eq!(target("JiraIssue"), "jira_lake");
 
-    let issue = model.entity("JiraIssue").unwrap();
-    let request = model.entity("MergeRequest").unwrap();
+    let issue = model.names().entity("JiraIssue").unwrap();
+    let request = model.names().entity("MergeRequest").unwrap();
     let hops = model
         .connect(request, &[], Some(issue), Direction::Both)
         .unwrap();
@@ -182,10 +186,12 @@ fn jira_foreign_keys_reference_gitlab_entities_on_another_connection() {
 fn jira_reads_are_scoped_by_the_path_the_parquet_rows_carry() {
     let model = demo(|_, yaml| yaml).unwrap();
     let access = model.access();
-    let catalog = model.physical::<DuckDb>("jira_lake").unwrap();
+    let catalog = model
+        .physical::<DuckDb>(model.names().connection("jira_lake").unwrap())
+        .unwrap();
     let store = catalog.store("jira").unwrap();
     for name in ENTITIES {
-        let guard = store.guard(model.entity(name).unwrap()).unwrap();
+        let guard = store.guard(model.names().entity(name).unwrap()).unwrap();
         assert_eq!(guard.rule, Rule::Column("traversal_path".into()), "{name}");
         assert_eq!(access.permission(guard.permission).name, "read");
         assert_eq!(access.scope(guard.scope).name, "namespace");
@@ -304,7 +310,7 @@ fn the_des_source_declares_the_lifecycle_columns_its_parquet_rows_carry() {
         .find(|store| store.name == "jira")
         .unwrap();
     for name in ENTITIES {
-        let entity = model.entity(name).unwrap();
+        let entity = model.names().entity(name).unwrap();
         let table = store.source(entity).unwrap().table.clone().unwrap();
         let pipelines: Vec<_> = sources
             .entity_pipelines(entity)

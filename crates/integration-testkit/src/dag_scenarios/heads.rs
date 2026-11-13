@@ -70,7 +70,7 @@ async fn open_merge_requests_search_their_branch_heads_in_orbit_next() {
             from: 0,
             columns: vec!["mr_project_id".into(), "mr_source_branch".into()],
             binding: "h".into(),
-            properties: vec!["project_id".into(), "branch".into()],
+            properties: super::properties("Head", &["project_id", "branch"]),
             types: vec![
                 query_data_model::DataType::Int,
                 query_data_model::DataType::String
@@ -170,7 +170,7 @@ async fn a_code_stage_feeds_composite_keys_into_a_clickhouse_stage() {
             from: 0,
             columns: vec!["project_id".into(), "branch".into()],
             binding: "mr".into(),
-            properties: vec!["project_id".into(), "source_branch".into()],
+            properties: super::properties("MergeRequest", &["project_id", "source_branch"]),
             types: vec![
                 query_data_model::DataType::Int,
                 query_data_model::DataType::String

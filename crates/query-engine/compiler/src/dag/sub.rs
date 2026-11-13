@@ -21,7 +21,7 @@ pub(super) fn plan(
     group: &Group,
     needed: &HashMap<Ref, Vec<PropertyId>>,
     limits: &QueryLimits,
-    connections: &[String],
+    connections: &[query_data_model::ConnectionId],
 ) -> Result<LogicalPlan> {
     let rows = limits.stage_keys as u64 + 1;
     let limits = QueryLimits {
@@ -29,16 +29,16 @@ pub(super) fn plan(
         ..*limits
     };
     let catalog = query.model.logical(&limits).as_admin().across(connections);
-    let graph = query.model.graph();
-    let entity_name = |binding: Ref| -> Result<&str> {
+    let entity = |binding: Ref| {
         query
-            .entity_name(binding)
+            .entity(binding)
+            .map(|entity| catalog.entity(entity))
             .ok_or_else(|| QueryError::PipelineInvariant("a binding has no entity".into()))
     };
     let mine = |reference: Ref| group.bindings.contains(&reference);
     catalog.build(|q| {
         let first = group.bindings[0];
-        let mut rows = q.entities_as(catalog.entity(entity_name(first)?)?, query.name(first))?;
+        let mut rows = q.entities_as(entity(first)?, query.name(first))?;
         let mut map: HashMap<Ref, Ref> =
             HashMap::from([(first, rows.binding(query.name(first))?.output())]);
         let mut matched: Vec<(Ref, String)> = Vec::new();
@@ -59,11 +59,9 @@ pub(super) fn plan(
                     let mut step = Step::new(*direction)
                         .hops(*range)
                         .named(query.name(to))
-                        .to(catalog.entity(entity_name(to)?)?);
+                        .to(entity(to)?);
                     for relationship in relationships {
-                        step = step.via([
-                            catalog.relationship(&graph.relationship(*relationship).name)?
-                        ]);
+                        step = step.via([catalog.relationship(*relationship)]);
                     }
                     if let Some(name) = query.plan.name(edge) {
                         step = step.edge(name);

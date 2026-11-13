@@ -172,7 +172,7 @@ mod tests {
         RelationalError, UnaryOp,
     };
     use query_data_model::plan::tracking::Declare;
-    use query_data_model::spec::Fragment;
+    use query_data_model::testkit::Fragment;
     use query_data_model::{Catalog, Model, Packages, TRAVERSAL_PATH_COLUMN};
 
     type Built<T> = std::result::Result<T, RelationalError>;

@@ -5,7 +5,10 @@ use std::panic::RefUnwindSafe;
 
 use super::guards::Guard;
 use crate::spec::{AccessHints, Binding, Resolved};
-use crate::{Endpoint, EntityId, FieldSelectivity, ForeignKey, PropertyId, RelationshipVariantId};
+use crate::{
+    ConnectionId, Endpoint, EntityId, FieldSelectivity, ForeignKey, PropertyId,
+    RelationshipVariantId, StoreId,
+};
 
 /// A store's backend facts, which only the backend's catalog reads.
 pub(crate) type Facts = Box<dyn BackendFacts>;
@@ -44,8 +47,10 @@ pub struct StoredColumn {
 #[derive(Debug)]
 pub struct Store {
     pub name: String,
-    pub connection: String,
-    pub kind: String,
+    pub(crate) connection_name: String,
+    pub(crate) connection_id: ConnectionId,
+    pub(crate) id: StoreId,
+    pub(crate) kind: String,
     pub trusted: bool,
     pub path_column: Option<String>,
     pub package: String,
@@ -60,6 +65,15 @@ pub struct Store {
 }
 
 impl Store {
+    pub fn id(&self) -> StoreId {
+        self.id
+    }
+
+    /// The connection the store sits on.
+    pub fn connection(&self) -> ConnectionId {
+        self.connection_id
+    }
+
     pub fn source(&self, entity: EntityId) -> Option<&Source> {
         self.sources[entity.index()].as_ref()
     }
@@ -179,6 +193,14 @@ impl Store {
     /// The guard of an edge table the store holds.
     pub fn edge_guard(&self, table: &str) -> Option<&Guard> {
         self.edge_guards.get(table)
+    }
+
+    /// Whether this store's backend runs structural patterns over `property` of `entity`.
+    pub fn searches(&self, entity: EntityId, property: PropertyId) -> bool {
+        let (Some(facts), Some(backend)) = (&self.facts, super::registered(&self.kind)) else {
+            return false;
+        };
+        backend.structural(facts, entity) == Some(property)
     }
 
     pub(super) fn facts<T: 'static>(&self) -> Option<&T> {

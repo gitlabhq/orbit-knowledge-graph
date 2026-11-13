@@ -81,9 +81,15 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
             ));
         }
     };
-    let connection = stage.connection.unwrap_or_default();
-    let peer = env.connections.get(&connection).ok_or_else(|| {
-        QueryError::PipelineInvariant(format!("no served connection {connection}"))
+    let super::Runs::On { connection, stores } = stage.runs else {
+        return Err(QueryError::PipelineInvariant(
+            "only the Combine stage runs in the query engine".into(),
+        ));
+    };
+    let peer = env.connections.get(connection).ok_or_else(|| {
+        QueryError::PipelineInvariant(
+            "a stage runs on a connection the deployment does not serve".into(),
+        )
     })?;
     match peer {
         Peer::ClickHouse(catalog) => {
@@ -114,6 +120,7 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
         Peer::Remote(Target::Code(code)) => {
             let mut ctx = config::GqlOrbitCodeCtx::new(grants, limits, trace, Arc::clone(code));
             ctx.set_statement(statement);
+            ctx.set_placed(stores);
             if let Some(admitted) = inputs.admitted {
                 ctx.set_admitted(admitted);
             }
@@ -129,6 +136,7 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
         Peer::Remote(Target::Live(live)) => {
             let mut ctx = config::GqlLiveCtx::new(grants, limits, trace, Arc::clone(live));
             ctx.set_statement(statement);
+            ctx.set_placed(stores);
             if let Some(admitted) = inputs.admitted {
                 ctx.set_admitted(admitted);
             }
