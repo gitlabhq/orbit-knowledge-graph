@@ -341,3 +341,43 @@ pub async fn run_served(
         .await;
     (observer.0, outcome)
 }
+
+/// The edges the graph response of `outcome` returns once `redaction` answers its result's
+/// checks, each as `From:id -TYPE-> To:id`, sorted.
+pub fn response_edges(
+    outcome: &Outcome,
+    redaction: &crate::mock_redaction::MockRedactionService,
+) -> Vec<String> {
+    use query_engine::formatters::GraphFormatter;
+    let compiled = &outcome.compiled;
+    let context = &compiled.base.result_context;
+    let mut result =
+        orbit_server::redaction::QueryResult::from_batches(&outcome.executed.batches, context)
+            .expect("the joined rows read as a result");
+    let redacted_count = result.apply_authorizations(&redaction.check(&result.resource_checks()));
+    let output = query_engine::shared::PipelineOutput {
+        row_count: result.authorized_count(),
+        redacted_count,
+        query_type: compiled.query_type.to_string(),
+        raw_query_strings: Vec::new(),
+        compiled: Arc::clone(compiled),
+        query_result: result,
+        result_context: context.clone(),
+        execution_log: Vec::new(),
+        pagination: None,
+    };
+    let mut edges: Vec<String> = GraphFormatter
+        .build_response(&output)
+        .edges
+        .iter()
+        .map(|edge| {
+            let (from, to) = (&edge.from, &edge.to);
+            format!(
+                "{from}:{} -{}-> {to}:{}",
+                edge.from_id, edge.edge_type, edge.to_id
+            )
+        })
+        .collect();
+    edges.sort();
+    edges
+}

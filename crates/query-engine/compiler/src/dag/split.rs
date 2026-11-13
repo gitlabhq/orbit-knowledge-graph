@@ -4,7 +4,7 @@ use orbit_server_config::QueryLimits;
 use query_data_model::plan::logical::{Expr, LogicalOperation};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::surface::Statement;
-use query_data_model::{Catalog, Direction, Endpoint, PropertyId};
+use query_data_model::{Catalog, Direction, Endpoint, PropertyId, RelationshipId};
 
 use super::cut::{Cut, Group};
 use super::{Connections, Dag, Stage, StageQuery};
@@ -20,6 +20,11 @@ pub(super) type Place = usize;
 pub(super) struct Crossing {
     pub groups: (usize, usize),
     pub pairs: Vec<((Ref, PropertyId), (Ref, PropertyId))>,
+    /// The step's index among the pattern's steps.
+    pub step: usize,
+    pub relationship: RelationshipId,
+    /// The bindings of the relationship variant's source and target.
+    pub ends: (Ref, Ref),
 }
 
 /// Splits a statement into stages, one per connection it reads. A query one relational
@@ -69,9 +74,10 @@ pub fn split<B: SqlBackend>(
     let crossings = query
         .steps()
         .into_iter()
-        .filter_map(|step| {
+        .enumerate()
+        .filter_map(|(index, step)| {
             let (from, to) = (group_of(&groups, step.from)?, group_of(&groups, step.to)?);
-            (from != to).then(|| crossing(query, step, (from, to)))
+            (from != to).then(|| crossing(query, index, step, (from, to)))
         })
         .collect::<Result<Vec<_>>>()?;
     let cut = Cut {
@@ -156,7 +162,12 @@ fn group_of(groups: &[Group], binding: Ref) -> Option<usize> {
 }
 
 /// The foreign key of the step's one relationship variant, as the key pair the engine joins on.
-fn crossing(query: Query<'_>, step: Step<'_>, groups: (usize, usize)) -> Result<Crossing> {
+fn crossing(
+    query: Query<'_>,
+    index: usize,
+    step: Step<'_>,
+    groups: (usize, usize),
+) -> Result<Crossing> {
     let graph = query.model.graph();
     let (source, target) = match step.direction {
         Direction::Incoming => (step.to, step.from),
@@ -193,6 +204,9 @@ fn crossing(query: Query<'_>, step: Step<'_>, groups: (usize, usize)) -> Result<
     };
     Ok(Crossing {
         groups,
+        step: index,
+        relationship: *relationship,
+        ends: (source, target),
         pairs: keys
             .into_iter()
             .map(|(held, key)| ((holder, held), (referenced, key)))

@@ -16,7 +16,7 @@ pub use compile::{
     Compiled, Env, Frontend, Inputs, Source, compile, compile_hydration, split_query,
 };
 pub use connections::{Connections, Peer, Unplaced};
-pub use engine::{EngineColumn, EngineJoin, EngineNode, EngineQuery};
+pub use engine::{EngineColumn, EngineEdge, EngineJoin, EngineNode, EngineQuery};
 pub use keys::{KeySet, bind};
 pub use request::{Rendered, Request, describe};
 pub use split::split;

@@ -173,11 +173,20 @@ async fn a_duckdb_stage_feeds_its_keys_to_a_live_stage() {
             (json!(2), json!("deploy uses the production keys")),
         ]
     );
+    assert_eq!(
+        both.edges(),
+        [
+            "Escalation:1 -ESCALATES-> TeamMessage:m1",
+            "Escalation:2 -ESCALATES-> TeamMessage:m5",
+        ]
+    );
 
     let one = lake.run(ESCALATED, &["1/9970/"]).await;
+    assert_eq!(one.edges(), ["Escalation:1 -ESCALATES-> TeamMessage:m1"]);
     assert_eq!(column(one, "e_id"), [json!(1)]);
 
     let none = lake.run(ESCALATED, &["1/101/"]).await;
     assert!(calls(&none, 1).is_empty());
+    assert!(none.edges().is_empty());
     assert!(column(none, "e_id").is_empty());
 }

@@ -134,6 +134,35 @@ pub struct EdgeMeta {
     pub relationship: usize,
 }
 
+impl EdgeMeta {
+    /// The edge a hop's rows carry in the columns under `prefix`, and its path when the hop has
+    /// a variable length.
+    pub(crate) fn hop(
+        prefix: String,
+        variable_length: bool,
+        rel_types: Vec<String>,
+        relationship: usize,
+    ) -> Self {
+        use crate::constants::{
+            EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_PATH_NODES_SUFFIX,
+            EDGE_SRC_KIND_SUFFIX, EDGE_SRC_SUFFIX,
+        };
+        Self {
+            type_column: format!("{prefix}{EDGE_KIND_SUFFIX}"),
+            src_column: format!("{prefix}{EDGE_SRC_SUFFIX}"),
+            src_type_column: format!("{prefix}{EDGE_SRC_KIND_SUFFIX}"),
+            dst_column: format!("{prefix}{EDGE_DST_SUFFIX}"),
+            dst_type_column: format!("{prefix}{EDGE_DST_KIND_SUFFIX}"),
+            path_column: variable_length.then(|| format!("{prefix}{EDGE_PATH_NODES_SUFFIX}")),
+            column_prefix: prefix,
+            rel_types,
+            relationship,
+            from_alias: String::new(),
+            to_alias: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ResultContext {
     pub query_type: Option<QueryType>,
@@ -467,25 +496,13 @@ pub fn apply<B: SqlBackend>(
     }
     let contract = return_columns(kind, &bindings, &selectable_nodes, &metadata.nodes, model)?;
     if matches!(kind, Kind::Traversal | Kind::Aggregation) {
-        use crate::constants::{
-            EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_SRC_KIND_SUFFIX,
-            EDGE_SRC_SUFFIX,
-        };
         for edge in &metadata.edges {
-            let prefix = edge.column_prefix.clone();
-            ctx.edges.push(EdgeMeta {
-                type_column: format!("{prefix}{EDGE_KIND_SUFFIX}"),
-                src_column: format!("{prefix}{EDGE_SRC_SUFFIX}"),
-                src_type_column: format!("{prefix}{EDGE_SRC_KIND_SUFFIX}"),
-                dst_column: format!("{prefix}{EDGE_DST_SUFFIX}"),
-                dst_type_column: format!("{prefix}{EDGE_DST_KIND_SUFFIX}"),
-                column_prefix: prefix,
-                path_column: edge.path_column.clone(),
-                rel_types: edge.rel_types.clone(),
-                relationship: edge.relationship,
-                from_alias: String::new(),
-                to_alias: String::new(),
-            });
+            ctx.edges.push(EdgeMeta::hop(
+                edge.column_prefix.clone(),
+                edge.variable_length,
+                edge.rel_types.clone(),
+                edge.relationship,
+            ));
         }
     }
     let plan = match contract.outputs.is_empty() {

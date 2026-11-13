@@ -166,6 +166,10 @@ async fn the_server_formats_a_joined_response_like_a_single_stage_one() {
             ("\"SlackMessage\"".to_string(), "\"m1\"".to_string()),
         ]
     );
+    assert_eq!(
+        graph["edges"],
+        json!([{"from": "SlackMessage", "from_id": "m1", "to": "MergeRequest", "to_id": "2000", "type": "DISCUSSES"}])
+    );
 
     let toon = ToonFormatter.format(&output).to_string();
     assert!(toon.contains("deploy to staging at 5pm"), "{toon}");

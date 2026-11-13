@@ -5,8 +5,8 @@ use query_data_model::plan::tracking::Ref;
 
 use super::split::{Crossing, Place};
 use super::{
-    Backend, Connections, Dag, EngineColumn, EngineJoin, EngineNode, EngineQuery, Input, Peer,
-    RowCheck, Stage, StageId, StageQuery,
+    Backend, Connections, Dag, EngineColumn, EngineEdge, EngineJoin, EngineNode, EngineQuery,
+    Input, Peer, RowCheck, Stage, StageId, StageQuery,
 };
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
@@ -175,7 +175,32 @@ impl Cut<'_> {
             .query
             .limit()
             .unwrap_or((self.limits.default_rows, None));
+        let edges = self
+            .crossings
+            .iter()
+            .map(|crossing| EngineEdge {
+                step: crossing.step,
+                relationship: graph.relationship(crossing.relationship).name.clone(),
+                source: self.query.name(crossing.ends.0).to_string(),
+                target: self.query.name(crossing.ends.1).to_string(),
+            })
+            .collect();
+        let pattern = self.query.steps();
+        let steps = order
+            .iter()
+            .map(|group| {
+                let own = |binding: Ref| group_of(binding) == *group;
+                pattern
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, step)| own(step.from) && own(step.to))
+                    .map(|(index, _)| index)
+                    .collect()
+            })
+            .collect();
         let engine = EngineQuery {
+            edges,
+            steps,
             joins,
             excerpted: self.excerpted()?,
             columns: self.result_columns(&stage, &group_of)?,

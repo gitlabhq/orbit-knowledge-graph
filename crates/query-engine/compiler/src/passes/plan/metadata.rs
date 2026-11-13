@@ -62,7 +62,7 @@ impl NodeBinding {
 #[derive(Clone)]
 pub struct PlannedEdge {
     pub column_prefix: String,
-    pub path_column: Option<String>,
+    pub variable_length: bool,
     pub rel_types: Vec<String>,
     pub relationship: usize,
 }

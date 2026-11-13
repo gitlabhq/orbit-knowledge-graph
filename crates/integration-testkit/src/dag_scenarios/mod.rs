@@ -88,6 +88,17 @@ impl Run {
         }
     }
 
+    /// The graph response's edges, with every result check denied.
+    fn edges(&self) -> Vec<String> {
+        match &self.outcome {
+            Ok(outcome) => crate::dag_fakes::response_edges(
+                outcome,
+                &crate::mock_redaction::MockRedactionService::new(),
+            ),
+            Err(error) => panic!("the run failed: {error}"),
+        }
+    }
+
     fn error(self) -> String {
         match self.outcome {
             Ok(_) => panic!("the run succeeded"),

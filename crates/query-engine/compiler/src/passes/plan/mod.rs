@@ -160,7 +160,7 @@ fn pattern<B: SqlBackend>(
         .relations
         .iter()
         .map(|hop| PlannedEdge {
-            path_column: (hop.max_hops > 1).then(|| hop.path_nodes_column()),
+            variable_length: hop.max_hops > 1,
             column_prefix: hop.column_prefix(),
             rel_types: hop.rel_types.clone(),
             relationship: hop.input_index,

@@ -34,6 +34,22 @@ pub struct EngineQuery {
     /// The nodes of remote stages whose identity the stage returns, which the result carries
     /// like the nodes of relational stages.
     pub nodes: Vec<EngineNode>,
+    /// The relationships the joins follow, which the result carries as edges between their
+    /// endpoint nodes.
+    pub edges: Vec<EngineEdge>,
+    /// The pattern step each stage's own relationships stand for, by stage and in the order the
+    /// stage's statement follows them.
+    pub steps: Vec<Vec<usize>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EngineEdge {
+    /// The step's index among the pattern's steps.
+    pub step: usize,
+    pub relationship: String,
+    /// The aliases of the relationship variant's source and target.
+    pub source: String,
+    pub target: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
