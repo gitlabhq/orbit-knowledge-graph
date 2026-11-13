@@ -8,8 +8,6 @@ pub const FQN_SEPARATOR: &str = "#";
 
 pub const MAX_SECTIONS_PER_FILE: usize = 10_000;
 
-/// Name and FQN segment of the front matter block. A top-level section whose
-/// heading is the same text gets a suffixed segment instead.
 pub const FRONT_MATTER_NAME: &str = "front_matter";
 
 const FRONT_MATTER_DELIMITER: &str = "---";
@@ -20,8 +18,6 @@ pub struct Document {
     pub sections: Vec<Section>,
 }
 
-/// A YAML front matter block, from its opening `---` through the line ending
-/// of its closing `---`. Blank lines after the block are not part of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontMatter {
     pub start: usize,
@@ -42,9 +38,9 @@ pub struct Section {
     pub end: usize,
 }
 
-/// The front matter and sections of a Markdown document. Only headings at the
-/// top level of the document count: a heading inside a block quote or list
-/// item is quoted content, not document structure.
+/// The sections of a Markdown document. Only headings at the top level of the
+/// document count: a heading inside a block quote or list item is quoted
+/// content, not document structure.
 pub fn parse(source: &str) -> Document {
     let arena = Arena::new();
     let mut options = Options::default();
