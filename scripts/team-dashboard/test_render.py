@@ -146,7 +146,7 @@ class DashboardTestCase(unittest.TestCase):
 
 
 def url(iid, project_id=KG_ID):
-    return f"https://gitlab.com/p{project_id}/-/merge_requests/{iid}+"
+    return f"https://gitlab.com/p{project_id}/-/merge_requests/{iid}+s"
 
 
 def visible(text):
@@ -174,7 +174,7 @@ def section(text, heading):
 
 
 def merge_request_iids(text):
-    return [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", text)]
+    return [int(m) for m in re.findall(r"/merge_requests/(\d+)\+s", text)]
 
 
 def issue(iid, assignees=("a", "b", "c"), updated="2026-10-30T00:00:00Z", labels=(), **extra):
@@ -338,6 +338,7 @@ class RenderTest(DashboardTestCase):
         self.assertEqual(listed, [1, 6])
         self.assertLess(teamwide.index("/issues/6+"), teamwide.index("/issues/1+"))
         self.assertNotIn("/issues/1470+", teamwide)
+        self.assertNotIn("+s", teamwide)
 
     def test_labelled_merge_requests_float_by_priority_then_severity(self):
         ready = dashboard.READY_LABEL
@@ -353,7 +354,7 @@ class RenderTest(DashboardTestCase):
         routes = self.approvals_for({i: approvals() for i in range(1, 8)})
         text = self.region(self.kg(*mrs, routes=routes))
         review = block(text, "## Ready for review", "## Ready to merge")
-        order = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", review)]
+        order = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+s", review)]
         self.assertEqual(order, [7, 5, 4, 3, 2, 1, 6])
         self.assertIn(f"- {url(5)} · 25d · priority::1 · severity::2", review)
         self.assertIn(f"- {url(2)} · 22d · severity::1", review)
@@ -370,7 +371,7 @@ class RenderTest(DashboardTestCase):
         ]
         routes = self.approvals_for({i: approvals() for i in range(1, 6)})
         review = block(self.region(self.kg(*mrs, routes=routes)), "## Ready for review", "## Ready to merge")
-        order = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+", review)]
+        order = [int(m) for m in re.findall(r"/merge_requests/(\d+)\+s", review)]
         self.assertEqual(order, [5, 2, 4, 1, 3])
         self.assertIn("· priority::2 · severity::2", review)
 
