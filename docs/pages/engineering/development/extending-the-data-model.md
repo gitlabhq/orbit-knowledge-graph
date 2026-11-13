@@ -419,17 +419,20 @@ RETURN m.author, m.text LIMIT 20
 ```
 
 ```rust
-let store = model.complete_store(message);
-let live = model.physical::<Live>(store.connection())?;
+let live = model.physical::<Live>(stage.connection.as_deref().unwrap_or_default())?;
+let (store, _) = live.home(message).ok_or(LiveError::Incomplete("an operation"))?;
 let plan = live.build(|q| {
-    let messages = q.call(live.operation(store, message)?)?;
-    let messages = q.filter(messages, channel.eq("orbit-dev").and(text.contains("deploy")))?;
-    q.select(q.limit(messages, 20)?, [author, text])
+    let messages = q.call(live.operation(&store.name, &live.graph().entity(message).name)?)?;
+    let found = messages.field("channel")?.eq("orbit-dev");
+    let messages = q.filter(messages, found.and(messages.field("text")?.contains("deploy")))?;
+    let fields = [messages.field("author")?, messages.field("text")?];
+    q.select(q.limit(messages, 20)?, fields)
 })?;
-let request = live.render(&plan);
+let request = live.render(&plan)?;
 ```
 
-The frontend resolves the query's names once, at parse: the entity `message` and the properties `channel`, `text` and `author`. Everything else, such as the store and its connection, comes from those handles through the model by placement, never from a lookup by name. Tests resolve names with the explicit `Names` resolver.
+Placement picked `stage.connection`. The stage split's `places` takes the connection of the entity's complete store through `Connections::holding`. On that connection, `Catalog::home` picks the store that holds the entity.
+The frontend resolves only the query's names, once, at parse. Everything else comes from those handles through the model, and tests resolve names with the explicit `Names` resolver.
 
 The `live` policy follows each message to the namespace that installed its workspace. A scope lookup on the graph connection resolves that chain first, because the complete store of `SlackWorkspace` is there. The live backend sends the request only for workspaces in namespaces where the caller holds `read`. The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through that sign-in.
 
@@ -561,21 +564,24 @@ RETURN f.path, match.line, match.ARGS LIMIT 50
 ```
 
 ```rust
-let store = model.searching(file, content)?;
-let code = model.physical::<OrbitCode>(store.connection())?;
+let code = model.physical::<OrbitCode>(stage.connection.as_deref().unwrap_or_default())?;
+let (store, _) = code.home(file).ok_or(CodeError::Incomplete("an index"))?;
 let plan = code.build(|q| {
-    let files = q.repositories(code.index(store, file)?, [project])?;
+    let index = code.index(&store.name, &code.graph().entity(file).name)?;
+    let files = q.repositories(index, [42])?;
     let files = q.languages(files, [Language::Rust])?;
     let files = q.prefilter(files, Trigrams::of(["compile"]))?;
-    let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)"))?;
+    let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)")?)?;
     let hits = q.top(hits, 50)?;
-    q.select(hits, [hits.field(path)?, hits.field("line")?, hits.capture("ARGS")?])
+    let fields = [hits.field("path")?, hits.field("line")?, hits.capture("ARGS")?];
+    q.select(hits, fields)
 })?;
-let request = code.render(&plan);
+let request = code.render(&plan)?;
 ```
 
 The planner adds the trigram prefilter: it takes the pattern's literal atoms and narrows the candidate files before the structural pass. The request goes over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures.
-As in the live example, the frontend resolved `file`, `content` and `path`. The structural match places the read on the backend that searches `content`. So the store and its connection come from those handles through the model. `File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction. `of: holder` on `IN_PROJECT` makes the project that holds the file the scope entity.
+Placement picked `stage.connection` through `Connections::searching`, because a structural match reads on the connection whose backend searches the property. On that connection, `Catalog::home` picks the store that indexes `File`.
+`File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction. `of: holder` on `IN_PROJECT` makes the project that holds the file the scope entity.
 
 ## Add a namespace overlay
 
