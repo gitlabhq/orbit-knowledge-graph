@@ -98,9 +98,16 @@ pub fn render<B: SqlBackend>(
     query_config: QueryConfig,
 ) -> ParameterizedQuery {
     let rendered = B::render(model, plan);
+    let root = plan.plan.root();
+    let columns = plan
+        .plan
+        .outputs(root)
+        .map(|output| plan.plan.name(output).unwrap_or_default().to_string())
+        .collect();
     ParameterizedQuery {
         sql: rendered.sql,
         params: rendered.parameters,
+        columns,
         result_context,
         query_config,
         dialect: B::DIALECT,
@@ -146,6 +153,8 @@ pub enum SqlDialect {
 pub struct ParameterizedQuery {
     pub sql: String,
     pub params: HashMap<String, ParamValue>,
+    /// The names of the columns the statement returns, in order.
+    pub columns: Vec<String>,
     pub result_context: ResultContext,
     /// Resolved query settings. Baked into the SQL SETTINGS clause by codegen
     /// and also applied as HTTP-level ClickHouse settings by the execution

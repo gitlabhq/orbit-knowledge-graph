@@ -83,12 +83,8 @@ async fn the_server_checks_remote_rows_through_the_deployments_providers() {
 async fn served_output() -> PipelineOutput {
     let model = dag_model();
     let graph = Arc::new(SeededGraph(vec![
-        row(
-            json!({"mr_iid": 1, "mr_title": "Add feature A", "mr_id": 2000, "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),
-        ),
-        row(
-            json!({"mr_iid": 2, "mr_title": "Fix bug B", "mr_id": 2001, "_orbit_mr_id": 2001, "_orbit_mr_type": "MergeRequest"}),
-        ),
+        row(json!({"mr_iid": 1, "mr_title": "Add feature A", "mr_id": 2000})),
+        row(json!({"mr_iid": 2, "mr_title": "Fix bug B", "mr_id": 2001})),
     ]));
     let dag = served_stage(&model, graph);
     let mut ctx = context(&model, DISCUSSED);

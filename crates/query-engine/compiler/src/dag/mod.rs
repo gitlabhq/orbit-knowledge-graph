@@ -6,17 +6,19 @@ mod columns;
 mod combine;
 mod compile;
 mod connections;
+mod contract;
 mod cut;
 mod keys;
 mod request;
 mod split;
 mod sub;
 
-pub use combine::{CombineColumn, CombineEdge, CombineJoin, CombineNode, CombineQuery};
+pub use combine::{CombineEdge, CombineJoin, CombineNode, CombineQuery};
 pub use compile::{
     Compiled, Env, Frontend, Inputs, Source, compile, compile_hydration, split_query,
 };
 pub use connections::{Connections, Peer, Placement, Unplaced};
+pub use contract::{Column, ColumnType, Contract, Handle, Output};
 pub use keys::{KeySet, bind};
 pub use request::{Rendered, Request, describe};
 pub use split::split;
@@ -114,11 +116,12 @@ pub struct Response {
 }
 
 /// A key set an earlier stage returns, which this stage reads as an `IN` input before it
-/// plans: the producer's columns, one per key part, pin the consumer binding's properties.
+/// plans: the producer's contract positions, one per key part, pin the consumer binding's
+/// properties.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KeyInput {
     pub from: StageId,
-    pub columns: Vec<String>,
+    pub positions: Vec<usize>,
     pub binding: String,
     #[serde(skip)]
     pub properties: Vec<query_data_model::PropertyId>,
@@ -160,21 +163,21 @@ pub struct Stage {
     pub runs: Runs,
     pub query: StageQuery,
     pub inputs: Vec<Input>,
-    /// Whether the stage's rows are the response: the response policy shapes them for the
-    /// caller, where a stage that feeds others hands its rows on whole.
-    pub response: bool,
+    /// The columns a stage that feeds Combine hands on, whole; none for the stage whose rows
+    /// are the response, which the response policy shapes for the caller.
+    pub contract: Option<Contract>,
     /// The row checks the stage's rows go through before a later stage reads them.
     pub checks: Vec<RowCheck>,
 }
 
-/// A row check a stage's rows go through, on the column that holds each row's key.
+/// A row check a stage's rows go through, on the contract position that holds each row's key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowCheck {
     pub provider: String,
     pub permission: String,
     pub resource: String,
-    pub column: String,
-    /// The type of the key the check reads from `column`.
+    pub position: usize,
+    /// The type of the key the check reads at `position`.
     pub kind: crate::KeyKind,
 }
 

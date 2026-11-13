@@ -467,33 +467,9 @@ pub fn apply<B: SqlBackend>(
     model: &Catalog<B>,
 ) -> Result<(RelationalPlan<B>, ResultContext)> {
     let kind = query.kind();
-    let mut ctx = ResultContext::new().with_query_type(kind.into());
-    ctx.entity_auth = entity_auth(model);
-    let facts = query.leaves();
-    let anchors = query.anchors(&facts);
-    if kind == Kind::Neighbors
-        && let Some(center) = anchors.first()
-        && let Some([id]) = center.pinned.as_deref()
-    {
-        let entity = model.graph().entity(center.binding.entity);
-        ctx.neighbors_center = Some((entity.name.clone(), id.clone()));
-        ctx.labels = model
-            .graph()
-            .entities()
-            .map(|entity| (entity.name.clone(), entity.label.clone()))
-            .collect();
-    }
+    let mut ctx = context(query, model);
     let bindings = query.bindings();
-    let selectable_nodes: HashSet<&str> = match kind {
-        Kind::Aggregation => aggregation_row_nodes(query, model),
-        Kind::Traversal | Kind::Neighbors => bindings.iter().map(|binding| binding.name).collect(),
-        Kind::PathFinding => HashSet::new(),
-    };
-    for binding in &bindings {
-        if selectable_nodes.contains(binding.name) {
-            ctx.add_node(binding.name, &model.graph().entity(binding.entity).name);
-        }
-    }
+    let selectable_nodes = selectable(query, model);
     let contract = return_columns(kind, &bindings, &selectable_nodes, &metadata.nodes, model)?;
     if matches!(kind, Kind::Traversal | Kind::Aggregation) {
         for edge in &metadata.edges {
@@ -510,6 +486,48 @@ pub fn apply<B: SqlBackend>(
         false => enforce(plan, model, contract, kind)?,
     };
     Ok((plan, ctx))
+}
+
+/// The aliases whose nodes a query's rows return.
+fn selectable<'p>(query: Query<'p>, model: &Catalog<impl SqlBackend>) -> HashSet<&'p str> {
+    match query.kind() {
+        Kind::Aggregation => aggregation_row_nodes(query, model),
+        Kind::Traversal | Kind::Neighbors => query
+            .bindings()
+            .iter()
+            .map(|binding| binding.name)
+            .collect(),
+        Kind::PathFinding => HashSet::new(),
+    }
+}
+
+/// The nodes a query returns and the checks of their entities, without the columns that carry
+/// them.
+pub fn context<B: SqlBackend>(query: Query<'_>, model: &Catalog<B>) -> ResultContext {
+    let kind = query.kind();
+    let mut ctx = ResultContext::new().with_query_type(kind.into());
+    ctx.entity_auth = entity_auth(model);
+    let facts = query.leaves();
+    let anchors = query.anchors(&facts);
+    if kind == Kind::Neighbors
+        && let Some(center) = anchors.first()
+        && let Some([id]) = center.pinned.as_deref()
+    {
+        let entity = model.graph().entity(center.binding.entity);
+        ctx.neighbors_center = Some((entity.name.clone(), id.clone()));
+        ctx.labels = model
+            .graph()
+            .entities()
+            .map(|entity| (entity.name.clone(), entity.label.clone()))
+            .collect();
+    }
+    let selectable_nodes = selectable(query, model);
+    for binding in &query.bindings() {
+        if selectable_nodes.contains(binding.name) {
+            ctx.add_node(binding.name, &model.graph().entity(binding.entity).name);
+        }
+    }
+    ctx
 }
 
 /// The aliases an aggregation returns as rows: node groups and free-text property groups.

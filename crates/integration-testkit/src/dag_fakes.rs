@@ -5,8 +5,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use compiler::dag::Request;
-use compiler::dag::{Backend, Connections, Env, Frontend, Peer, Source};
+use compiler::dag::{Backend, Connections, Contract, Env, Frontend, Peer, Request, Source};
 use compiler::orbit_authorization::Key;
 use compiler::orbit_authorization::{Answers, AuthError, Check, Checks, Module, Need, Provider};
 use compiler::remote::Resolves;
@@ -26,9 +25,57 @@ fn unexpected(request: &Request) -> ExecutorError {
     ExecutorError(format!("this fake runs no {request:?}"))
 }
 
-fn batch(rows: &[Row], fields: &[String]) -> Result<Executed, ExecutorError> {
+/// The rows a fake returns, field by field in contract order.
+fn batch(
+    rows: &[Row],
+    fields: &[String],
+    contract: Option<&Contract>,
+) -> Result<Executed, ExecutorError> {
+    let contract =
+        contract.ok_or_else(|| ExecutorError("a fake stage request carries a contract".into()))?;
     Ok(Executed {
-        batches: vec![from_rows(rows, fields)?],
+        batches: vec![from_rows(rows, fields, contract)?],
+        log: Vec::new(),
+    })
+}
+
+/// Rows of a request without a contract, as a backend names them: integers as Int64, anything
+/// else as text.
+fn named(rows: &[Row], fields: &[String]) -> Result<Executed, ExecutorError> {
+    use arrow::array::{ArrayRef, Int64Array, StringArray};
+    use arrow::datatypes::{Field, Schema};
+    let mut schema = Vec::new();
+    let mut arrays: Vec<ArrayRef> = Vec::new();
+    for field in fields {
+        let values: Vec<&Value> = rows
+            .iter()
+            .map(|row| row.get(field).unwrap_or(&Value::Null))
+            .collect();
+        let array: ArrayRef = match values.iter().all(|value| value.is_null() || value.is_i64()) {
+            true => Arc::new(
+                values
+                    .iter()
+                    .map(|value| value.as_i64())
+                    .collect::<Int64Array>(),
+            ),
+            false => Arc::new(
+                values
+                    .iter()
+                    .map(|value| match value {
+                        Value::Null => None,
+                        Value::String(text) => Some(text.clone()),
+                        other => Some(other.to_string()),
+                    })
+                    .collect::<StringArray>(),
+            ),
+        };
+        schema.push(Field::new(field, array.data_type().clone(), true));
+        arrays.push(array);
+    }
+    let batch = arrow::record_batch::RecordBatch::try_new(Arc::new(Schema::new(schema)), arrays)
+        .map_err(|error| ExecutorError(error.to_string()))?;
+    Ok(Executed {
+        batches: vec![batch],
         log: Vec::new(),
     })
 }
@@ -38,7 +85,11 @@ pub struct CodeExecutor(pub SeededCodeSearch);
 
 #[async_trait]
 impl Executor for CodeExecutor {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
         let Request::Code(search) = request else {
             return Err(unexpected(request));
         };
@@ -57,7 +108,7 @@ impl Executor for CodeExecutor {
                 | RequestField::Branch(name) => name.clone(),
             })
             .collect();
-        batch(&rows, &fields)
+        batch(&rows, &fields, contract)
     }
 }
 
@@ -69,7 +120,11 @@ pub struct LiveExecutor {
 
 #[async_trait]
 impl Executor for LiveExecutor {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
         let Request::Live(call) = request else {
             return Err(unexpected(request));
         };
@@ -77,28 +132,28 @@ impl Executor for LiveExecutor {
             .service
             .extract(&self.user, call)
             .map_err(|error| ExecutorError(error.0))?;
-        batch(&rows, &call.fields)
+        batch(&rows, &call.fields, contract)
     }
 }
 
 /// The graph connection in tests that assert plans without a container: each query returns the
-/// seeded rows, and each scope lookup the seeded namespaces.
+/// seeded rows under the names its SQL gives its columns, and each scope lookup the seeded
+/// namespaces.
 pub struct SeededGraph(pub Vec<Row>);
 
 #[async_trait]
 impl Executor for SeededGraph {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
         match request {
             Request::Query(_) if self.0.is_empty() => Ok(Executed::default()),
-            Request::Query(_) => {
-                let mut fields: Vec<String> = Vec::new();
-                for key in self.0.iter().flat_map(|row| row.keys()) {
-                    if !fields.contains(key) {
-                        fields.push(key.clone());
-                    }
-                }
-                batch(&self.0, &fields)
-            }
+            Request::Query(compiled) => match contract {
+                Some(_) => batch(&self.0, &compiled.base.columns, contract),
+                None => named(&self.0, &compiled.base.columns),
+            },
             Request::Lookup(lookup) => {
                 let seeded = seeded_scopes();
                 let row = |id: Value, path: &str| {
@@ -120,7 +175,7 @@ impl Executor for SeededGraph {
                         .collect(),
                 };
                 let fields = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
-                batch(&rows, &fields)
+                named(&rows, &fields)
             }
             other => Err(unexpected(other)),
         }

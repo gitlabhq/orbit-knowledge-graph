@@ -16,11 +16,9 @@ const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]-
 fn open_merge_requests() -> Vec<query_data_model::catalog::Row> {
     vec![
         row(
-            json!({"mr_iid": 1, "mr_id": 2000, "mr_project_id": 42, "mr_source_branch": "feature-a", "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),
+            json!({"mr_iid": 1, "mr_id": 2000, "mr_project_id": 42, "mr_source_branch": "feature-a"}),
         ),
-        row(
-            json!({"mr_iid": 2, "mr_id": 2001, "mr_project_id": 77, "mr_source_branch": "fix-b", "_orbit_mr_id": 2001, "_orbit_mr_type": "MergeRequest"}),
-        ),
+        row(json!({"mr_iid": 2, "mr_id": 2001, "mr_project_id": 77, "mr_source_branch": "fix-b"})),
     ]
 }
 
@@ -68,7 +66,7 @@ async fn open_merge_requests_search_their_branch_heads_in_orbit_next() {
         split[1].inputs,
         [Input::Keys(KeyInput {
             from: 0,
-            columns: vec!["mr_project_id".into(), "mr_source_branch".into()],
+            positions: vec![1, 2],
             binding: "h".into(),
             properties: super::properties("Head", &["project_id", "branch"]),
             types: vec![
@@ -168,7 +166,7 @@ async fn a_code_stage_feeds_composite_keys_into_a_clickhouse_stage() {
         split[1].inputs,
         [Input::Keys(KeyInput {
             from: 0,
-            columns: vec!["project_id".into(), "branch".into()],
+            positions: vec![3, 2],
             binding: "mr".into(),
             properties: super::properties("MergeRequest", &["project_id", "source_branch"]),
             types: vec![

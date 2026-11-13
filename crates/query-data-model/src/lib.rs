@@ -19,7 +19,7 @@ pub use constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, 
 pub use deployments::Deployments;
 pub use error::DataModelError;
 pub use generic::{
-    Attribute, ConnectionId, Direction, Domain, Endpoint, Entity, EntityId, ForeignKey,
+    Attribute, ConnectionId, Direction, Domain, EdgeField, Endpoint, Entity, EntityId, ForeignKey,
     GraphCatalog, Hop, Property, PropertyId, Relationship, RelationshipId, RelationshipVariant,
     RelationshipVariantId, StoreId,
 };

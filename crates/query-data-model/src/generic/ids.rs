@@ -20,3 +20,13 @@ id!(RelationshipVariantId);
 id!(AttributeId);
 id!(ConnectionId);
 id!(StoreId);
+
+/// A column an edge carries: its endpoints' ids and kinds, and its relationship.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EdgeField {
+    SourceId,
+    SourceKind,
+    TargetId,
+    TargetKind,
+    Kind,
+}

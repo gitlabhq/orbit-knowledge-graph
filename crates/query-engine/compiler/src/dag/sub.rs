@@ -1,16 +1,16 @@
 //! The logical plan of one stage: the bindings its connection holds, the steps and conditions
-//! among them, and the columns later stages read, rebuilt through the logical builder.
+//! among them, and the columns of its contract, rebuilt through the logical builder.
 
 use std::collections::HashMap;
 
 use orbit_server_config::QueryLimits;
-use query_data_model::PropertyId;
 use query_data_model::plan::logical::{
-    Columns, Logical, LogicalOperation, LogicalPlan, Projection, Step,
+    Columns, Logical, LogicalOperation, LogicalPlan, MATCH_LINE, Projection, Step,
 };
 use query_data_model::plan::tracking::{Language, Ref};
 
 use super::cut::Group;
+use super::{Contract, Handle, Output};
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
 
@@ -19,7 +19,7 @@ use crate::logical::Query;
 pub(super) fn plan(
     query: Query<'_>,
     group: &Group,
-    needed: &HashMap<Ref, Vec<PropertyId>>,
+    contract: &Contract,
     limits: &QueryLimits,
     connections: &[query_data_model::ConnectionId],
 ) -> Result<LogicalPlan> {
@@ -41,7 +41,6 @@ pub(super) fn plan(
         let mut rows = q.entities_as(entity(first)?, query.name(first))?;
         let mut map: HashMap<Ref, Ref> =
             HashMap::from([(first, rows.binding(query.name(first))?.output())]);
-        let mut matched: Vec<(Ref, String)> = Vec::new();
         for (node, operation) in query.operations() {
             let outputs: Vec<Ref> = query.plan.outputs(node).collect();
             match operation {
@@ -116,37 +115,45 @@ pub(super) fn plan(
                     }
                     let language: &str = structural.language.into();
                     rows = q.structural(rows, target, structural.pattern.text(), language)?;
-                    for output in &outputs {
-                        matched.push((*output, query.name(*output).to_string()));
-                    }
                 }
                 _ => {}
             }
         }
+        let graph = query.model.graph();
         let mut items = Vec::new();
         for binding in &group.bindings {
-            let properties = needed.get(binding).cloned().unwrap_or_default();
-            let bound = rows.binding(query.name(*binding))?.output();
+            let name = query.name(*binding);
+            let Some(entity) = query.entity(*binding) else {
+                continue;
+            };
+            let identity = &graph.entity(entity).identity;
+            let properties = contract
+                .columns
+                .iter()
+                .filter_map(|column| match &column.output {
+                    Output::Node { binding, handle } if binding == name => Some(match handle {
+                        Handle::Identity(part) => identity[*part],
+                        Handle::Property(property) => *property,
+                    }),
+                    _ => None,
+                })
+                .collect();
+            let bound = rows.binding(name)?.output();
             let projection = Projection::Graph {
                 binding: bound,
                 columns: Columns::Listed(properties),
             };
             items.push(projection.named(query.name(*binding)));
         }
-        for (_, name) in matched
-            .iter()
-            .filter(|(output, _)| returned(query, *output))
-        {
-            items.push(Projection::Value(rows.column(name)?).named(name.clone()));
+        for column in &contract.columns {
+            let name = match &column.output {
+                Output::Line => MATCH_LINE.to_string(),
+                Output::Capture(capture) => format!("match.{capture}"),
+                _ => continue,
+            };
+            items.push(Projection::Value(rows.column(&name)?).named(name));
         }
         let rows = q.select(rows, items)?;
         Ok(q.limit(rows, limits.stage_keys as u64 + 1)?)
-    })
-}
-
-/// Whether the query returns a match column.
-fn returned(query: Query<'_>, output: Ref) -> bool {
-    query.selected().iter().any(|item| {
-        matches!(item, Projection::Value(query_data_model::plan::logical::Expr::Output(selected)) if *selected == output)
     })
 }

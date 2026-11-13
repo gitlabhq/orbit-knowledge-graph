@@ -96,18 +96,17 @@ pub fn run(
                 .ok_or_else(|| ExecutorError("a Combine operation lacks its input".into()))
         };
         let table = match plan.operation(node) {
-            CombineOperation::Rows { stage } => {
+            CombineOperation::Rows { stage, columns } => {
                 let batch = concat(stages.get(stage).map_or(&[][..], Vec::as_slice))?;
                 let columns = plan
                     .outputs(node)
-                    .map(|output| {
-                        let name = plan.name(output).unwrap_or_default();
-                        let column = name.split_once('.').map_or(name, |(_, column)| column);
+                    .zip(columns)
+                    .map(|(output, position)| {
                         let array = match &batch {
                             Some(batch) => {
-                                batch.column_by_name(column).cloned().ok_or_else(|| {
+                                batch.columns().get(*position).cloned().ok_or_else(|| {
                                     ExecutorError(format!(
-                                        "stage {stage} returned no column {column}"
+                                        "stage {stage} returned no column at position {position}"
                                     ))
                                 })?
                             }
@@ -187,6 +186,29 @@ pub fn run(
                         table.rows
                     ]));
                     columns.push((*output, constant));
+                }
+                Table {
+                    columns,
+                    rows: table.rows,
+                }
+            }
+            CombineOperation::Composite(keys) => {
+                let table = input(0)?;
+                let outputs: Vec<Ref> = plan.outputs(node).collect();
+                let declared = &outputs[outputs.len() - keys.len()..];
+                let mut columns = table.columns.clone();
+                for (output, parts) in declared.iter().zip(keys) {
+                    let arrays = parts
+                        .iter()
+                        .map(|(part, data_type)| Ok((table.array(*part)?, *data_type)))
+                        .collect::<Result<Vec<_>, ExecutorError>>()?;
+                    let composed = (0..table.rows)
+                        .map(|row| {
+                            Ok(join_key(&arrays, row)?
+                                .map(|parts| Key::Composite(parts).to_string()))
+                        })
+                        .collect::<Result<arrow::array::StringArray, ExecutorError>>()?;
+                    columns.push((*output, Arc::new(composed) as ArrayRef));
                 }
                 Table {
                     columns,
