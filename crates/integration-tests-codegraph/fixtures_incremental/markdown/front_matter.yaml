@@ -129,6 +129,7 @@ fixtures:
       ---
       title: [a, b]
       stage: true
+      info: {k: v}
       metadata: plain
       ---
 
@@ -256,7 +257,7 @@ tests:
           allowed_tools: ""
           metadata: '{"owner":"orbit","version":"2"}'
       - { row: { file: "skills/orbit/SKILL.md", name: "orbit", description: "Query the knowledge graph.", metadata: '{"version":"1"}' } }
-      - { row: { file: "notes/odd.md", title: "", stage: "true", metadata: "" } }
+      - { row: { file: "notes/odd.md", title: "", stage: "true", info: "", metadata: "" } }
       - { row: { file: "notes/blank.md", name: "", title: "", metadata: "" } }
 
   - name: "front matter columns filter like any other Definition property"

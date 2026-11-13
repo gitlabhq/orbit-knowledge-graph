@@ -20,7 +20,7 @@ migrations:
   scope: code
   note: >-
     Definition gains twelve front_matter_* columns holding Markdown front matter values
-    (Agent Skills fields plus GitLab docs title, stage, group and info). Only FrontMatter
+    (Agent Skills fields, GitLab docs title, stage, group and info, plus version and category). Only FrontMatter
     rows carry values; every other row stores ''. Code tables are re-derived so existing
     FrontMatter rows pick the values up.
 - version: 119

@@ -18,7 +18,7 @@ const FRONT_MATTER_DELIMITER: &str = "---";
 
 const MAX_FRONT_MATTER_YAML_BYTES: usize = 64 * 1024;
 
-pub const MAX_FRONT_MATTER_VALUE_BYTES: usize = 4 * 1024;
+const MAX_FRONT_MATTER_VALUE_BYTES: usize = 4 * 1024;
 
 const METADATA_KEY: &str = "metadata";
 
