@@ -3,6 +3,8 @@ mod support;
 use query_data_model::catalog::Rule;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::duckdb::DuckDb;
+use query_data_model::implementations::relational::Target;
+use query_data_model::plan::logical::EdgeField;
 use query_data_model::{DataModelError, Direction, Endpoint, Model, Packages};
 use support::{demo, load_with};
 
@@ -201,10 +203,11 @@ engine:
   connection: main
   path_column: traversal_path
   backend:
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
       mr_note_export:
         sort_key: [traversal_path, source_id, target_id]
-        columns: { source_id: { type: Int64 }, target_id: { type: Int64 } }
+        columns: { source_id: { type: Int64 }, source_kind: { type: String }, relationship_kind: { type: String }, target_kind: { type: String }, target_id: { type: Int64 } }
 entities:
   MergeRequest:
     accepts: [id, project_id]
@@ -746,16 +749,91 @@ fn bad_relationship_attributes_fail_the_load() {
             "gitlab/graph.yaml",
             HAS_NOTE_VARIANT,
             "      MergeRequest -> Note: { cardinality: one_to_many }
-    attributes: { source_id: int64, mood: feeling, state: enum }\n",
+    attributes: { mood: feeling, state: enum }\n",
         ),
     ));
     assert_eq!(
         errors,
         [
-            "gitlab: attribute HAS_NOTE.source_id is a reserved edge column",
             "gitlab: attribute HAS_NOTE.mood has unsupported type `feeling`",
             "gitlab: attribute HAS_NOTE.state has unsupported type `enum`",
         ]
+    );
+}
+
+#[test]
+fn attributes_never_take_a_declared_edge_column() {
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| {
+        match name {
+        "gitlab/graph.yaml" => yaml.replace(
+            HAS_NOTE_VARIANT,
+            "      MergeRequest -> Note: { cardinality: one_to_many }\n    attributes: { source_id: int64 }\n",
+        ),
+        "gitlab/authorization.yaml" => attribute_access(yaml, "{open: [source_id]}"),
+        _ => yaml,
+    }
+    }));
+    assert_eq!(
+        errors,
+        [
+            "gitlab: store graph HAS_NOTE(MergeRequest -> Note) declares attribute source_id on an edge column the store reserves"
+        ]
+    );
+}
+
+#[test]
+fn edge_tables_need_their_store_edge_columns() {
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| match name {
+        "gitlab/storage/clickhouse.yaml" => yaml.replace("source_kind: { type: String }, ", ""),
+        _ => yaml,
+    }));
+    assert_eq!(
+        errors,
+        ["gitlab: store graph edge table gl_edge has no edge column source_kind"]
+    );
+    let errors = spec_errors(load_with(&["gitlab"], |name, yaml| match name {
+        "gitlab/storage/clickhouse.yaml" => {
+            let start = yaml.find("    edge_columns:").unwrap();
+            let end = start + yaml[start..].find('\n').unwrap() + 1;
+            format!("{}{}", &yaml[..start], &yaml[end..])
+        }
+        _ => yaml,
+    }));
+    assert_eq!(
+        errors,
+        ["gitlab: store graph declares edge tables but no edge_columns"]
+    );
+}
+
+#[test]
+fn the_physical_catalog_answers_column_facts_by_handle() {
+    let model = load_with(&["gitlab"], |_, yaml| yaml).unwrap();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
+    let names = model.names();
+    let edge = catalog.edge_table_ids(&[]).pop().unwrap();
+    let kind = catalog
+        .column_of(Target::Edge(EdgeField::Kind), edge)
+        .unwrap();
+    assert_eq!(catalog.column_name(kind), "relationship_kind");
+    assert!(catalog.in_sort_key(kind));
+    let source_kind = catalog
+        .column_of(Target::Edge(EdgeField::SourceKind), edge)
+        .unwrap();
+    assert!(!catalog.in_sort_key(source_kind));
+    assert_eq!(
+        catalog.column_type(source_kind),
+        Some(query_data_model::DataType::String)
+    );
+    let group = names.entity("Group").unwrap();
+    let id = Target::Property(names.property(group, "id").unwrap());
+    let table = catalog.entity_table(group).unwrap();
+    assert!(catalog.column_of(id, table).is_some());
+    assert_eq!(catalog.column_of(id, edge), None);
+    assert_eq!(
+        catalog.column_of(Target::Edge(EdgeField::Kind), table),
+        None
     );
 }
 
@@ -923,14 +1001,16 @@ fn trusted_and_untrusted_stores_cannot_share_a_connection() {
 
 #[test]
 fn one_connection_has_one_backend() {
-    let errors = spec_errors(with_lake(|name, yaml| match name {
+    let errors = spec_errors(with_lake(|name, yaml| {
+        match name {
         LAKE_FILE => yaml
             .replace("  kind: clickhouse", "  kind: duckdb")
             .replace(
-                "{ source_id: { type: Int64 }, target_id: { type: Int64 } }",
-                "{ source_id: int64, target_id: int64 }",
+                "{ source_id: { type: Int64 }, source_kind: { type: String }, relationship_kind: { type: String }, target_kind: { type: String }, target_id: { type: Int64 } }",
+                "{ source_id: int64, source_kind: string, relationship_kind: string, target_kind: string, target_id: int64 }",
             ),
         _ => yaml,
+    }
     }));
     assert_eq!(
         errors,

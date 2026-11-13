@@ -1,5 +1,32 @@
 use crate::catalog::{Source, Store};
-use crate::{DataType, EntityId, PropertyId};
+use crate::generic::AttributeId;
+use crate::plan::logical::EdgeField;
+use crate::{DataType, EntityId, PropertyId, StoreId};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Target {
+    Property(PropertyId),
+    Attribute(AttributeId),
+    Edge(EdgeField),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TableId {
+    pub(crate) store: StoreId,
+    pub(crate) index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ColumnId {
+    pub(crate) table: TableId,
+    pub(crate) index: usize,
+}
+
+impl ColumnId {
+    pub fn table(self) -> TableId {
+        self.table
+    }
+}
 
 /// A table a store holds: the columns plans read and, for a table the store creates, its DDL.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +42,7 @@ pub struct Table {
     pub settings: Vec<(String, String)>,
     pub ttl: Option<String>,
     pub path_columns: Vec<PathColumn>,
+    pub edge: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +112,7 @@ impl Table {
             settings: Vec::new(),
             ttl: None,
             path_columns: Vec::new(),
+            edge: false,
         }
     }
 
@@ -117,6 +146,7 @@ impl Table {
         Self {
             sort_key,
             path_columns: path_columns.collect(),
+            edge: true,
             ..Self::new(name, columns)
         }
     }

@@ -51,6 +51,7 @@ impl StorageBackend for DuckDb {
             options.version_column.as_ref(),
             options.deleted_column.as_ref(),
             &edge_tables,
+            options.edge_columns.as_ref(),
             diagnostics,
         );
         relational.tables = entity_tables(&input, diagnostics);

@@ -12,6 +12,7 @@ engine:
       _version: {type: "DateTime64(6, 'UTC')", default: now64(6)}
       _deleted: {type: Bool, default: "false"}
     engine: ReplacingMergeTree(_version, _deleted)
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
       acme_thread_edge:
         shared: true

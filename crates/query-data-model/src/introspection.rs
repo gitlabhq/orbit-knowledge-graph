@@ -408,11 +408,12 @@ engine:
   backend:
     version_column: _version
     deleted_column: _deleted
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
       gl_edge:
         shared: true
         sort_key: [traversal_path, source_id, relationship_kind, target_id]
-        columns: {source_id: {type: Int64}, target_id: {type: Int64}}
+        columns: {source_id: {type: Int64}, source_kind: {type: String}, relationship_kind: {type: String}, target_kind: {type: String}, target_id: {type: Int64}}
 entities:
   Project:
     complete: true
@@ -453,6 +454,7 @@ engine:
   trusted: true
   path_column: traversal_path
   backend:
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
       gl_edge:
         shared: true

@@ -7,7 +7,7 @@ pub mod columns;
 mod conditions;
 
 pub use boolean::Boolean;
-pub use conditions::{Leaf, binding, polarized};
+pub use conditions::{Leaf, binding, polarized, target};
 
 use query_data_model::plan::logical::{
     Columns, Expr, Hops, LogicalOperation, LogicalPlan, LogicalType, Measure, Order, Projection,

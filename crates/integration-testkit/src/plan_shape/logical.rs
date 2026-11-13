@@ -294,9 +294,9 @@ impl Render<'_> {
             } => format!("type({})", self.name(binding)),
             Expr::Edge { binding, field } => {
                 let field = match field {
-                    EdgeField::Source => "source_id",
+                    EdgeField::SourceId => "source_id",
                     EdgeField::SourceKind => "source_kind",
-                    EdgeField::Target => "target_id",
+                    EdgeField::TargetId => "target_id",
                     EdgeField::TargetKind => "target_kind",
                     EdgeField::Kind => "relationship_kind",
                 };

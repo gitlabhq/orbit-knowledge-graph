@@ -83,6 +83,7 @@ impl StorageBackend for ClickHouse {
             options.version_column.as_ref(),
             options.deleted_column.as_ref(),
             &edge_tables,
+            options.edge_columns.as_ref(),
             diagnostics,
         );
         let mut read_paths = ReadPaths::default();

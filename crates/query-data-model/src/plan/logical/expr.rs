@@ -40,16 +40,26 @@ pub enum TimeUnit {
     Year,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::EnumString,
+    strum::VariantNames,
+    strum::IntoStaticStr,
+)]
 pub enum EdgeField {
     #[strum(serialize = "relationship_kind")]
     Kind,
     #[strum(serialize = "source_id")]
-    Source,
+    SourceId,
     #[strum(serialize = "source_kind")]
     SourceKind,
     #[strum(serialize = "target_id")]
-    Target,
+    TargetId,
     #[strum(serialize = "target_kind")]
     TargetKind,
 }

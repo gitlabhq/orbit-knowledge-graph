@@ -12,12 +12,12 @@ use std::collections::{HashMap, HashSet};
 use query_data_model::constants::*;
 use query_data_model::implementations::relational::plan::Relation;
 
-use super::relations::edge_columns;
 use super::{EdgeRelation, NodePlan, Pattern};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection, membership};
 use crate::passes::plan::rows::{BindingSource, Reads, Rel};
+use query_data_model::implementations::relational::Target;
 
 type IdSet = (Rel, String);
 
@@ -47,7 +47,7 @@ pub(super) struct RelationBuilder<'a, 'q, 'c, B: SqlBackend> {
     condition: Vec<Predicate>,
     outputs: Vec<Projection>,
     nodes: HashMap<String, PlannedNode>,
-    tagged: HashSet<(String, String, usize)>,
+    tagged: HashSet<(String, Target, usize)>,
 }
 
 #[derive(Default)]
@@ -311,7 +311,7 @@ where
         source: &Rel,
     ) -> Result<()> {
         let pattern = self.pattern;
-        let (start, end) = edge_columns(relation.direction);
+        let (start, end) = relation.id_columns()?;
         let bounded = [&relation.from_node, &relation.to_node]
             .into_iter()
             .any(|node| self.ids(node).is_some() || pattern.endpoint_is_selective(node));
@@ -323,7 +323,7 @@ where
             let used_later = bounded
                 && pattern.relations[index + 1..]
                     .iter()
-                    .any(|next| next.endpoint_column(node).is_some())
+                    .any(|next| next.endpoint_field(node).is_some())
                 || !stored::<B>()
                     && pattern.nodes[node].joined
                     && (pattern.endpoint_is_selective(other) || self.ids(other).is_some());

@@ -93,7 +93,7 @@ impl QueryStats {
         let facts = query.leaves();
         let anchors = query.anchors(&facts);
         let selected = selections(query);
-        let field = |fact: &Leaf<'_>| query.column_name(fact.left()).map(str::to_string);
+        let field = |fact: &Leaf<'_>| query.field_name(fact.left()).map(str::to_string);
         let node_filters = anchors.iter().flat_map(|anchor| anchor.filters.iter());
         let edge_filters = facts
             .iter()

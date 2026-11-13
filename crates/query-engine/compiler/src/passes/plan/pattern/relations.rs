@@ -4,20 +4,22 @@
 use crate::passes::codegen::SqlBackend;
 use query_data_model::Catalog;
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use query_data_model::constants::{SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
+use query_data_model::implementations::relational::{EdgeColumns, TableId, Target};
+use query_data_model::plan::logical::EdgeField;
 use query_data_model::plan::tracking::Ref;
-use query_data_model::{Direction, EntityId, RelationshipId};
+use query_data_model::{Direction, EntityId, GraphCatalog, RelationshipId};
 
 use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::{EDGE_PATH_NODES_SUFFIX, edge_column_prefix, edge_relation_alias};
 use crate::error::{QueryError, Result};
-use crate::logical::Leaf;
 use crate::logical::Query;
+use crate::logical::{Leaf, target};
 use crate::passes::plan::filters::{
     BoundFilter, FilterOwner, bind_filter, unindex_if_key_narrowed,
 };
+use crate::passes::plan::predicates::{Column, Predicate};
 
 /// The edge tables storing a variant of `relationships` from `source` to `target`; any relationship when none is named.
 fn tables_between(
@@ -25,7 +27,7 @@ fn tables_between(
     relationships: &[RelationshipId],
     source: EntityId,
     target: EntityId,
-) -> Vec<String> {
+) -> Vec<TableId> {
     let graph = model.graph();
     let any: Vec<RelationshipId>;
     let relationships = match relationships {
@@ -46,16 +48,16 @@ fn tables_between(
                 .variants()
                 .any(|variant| variant.source == source && variant.target == target)
         })
-        .map(|route| route.table.to_string())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
+        .map(|route| (route.table, route.id))
+        .collect::<BTreeMap<_, _>>()
+        .into_values()
         .collect()
 }
 
-pub(super) fn edge_columns(direction: Direction) -> (&'static str, &'static str) {
+pub(crate) fn id_fields(direction: Direction) -> (EdgeField, EdgeField) {
     match direction {
-        Direction::Outgoing | Direction::Both => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN),
-        Direction::Incoming => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN),
+        Direction::Outgoing | Direction::Both => (EdgeField::SourceId, EdgeField::TargetId),
+        Direction::Incoming => (EdgeField::TargetId, EdgeField::SourceId),
     }
 }
 
@@ -87,11 +89,55 @@ impl EdgeRelation {
         }
     }
 
-    pub fn single_edge_table(&self) -> Option<&str> {
+    pub fn single_edge_table(&self) -> Option<TableId> {
         let [table] = self.edge_tables.as_slice() else {
             return None;
         };
-        Some(table)
+        Some(*table)
+    }
+
+    pub fn edges(&self) -> Result<&EdgeColumns> {
+        self.edges.as_ref().ok_or_else(|| {
+            QueryError::Lowering(format!(
+                "relationship {} reads edge rows on a connection that declares no edge columns",
+                self.alias
+            ))
+        })
+    }
+
+    pub fn column(&self, field: EdgeField) -> Result<&str> {
+        Ok(self.edges()?.column(field))
+    }
+
+    pub fn id_columns(&self) -> Result<(&str, &str)> {
+        let (start, end) = id_fields(self.direction);
+        Ok((self.column(start)?, self.column(end)?))
+    }
+
+    pub fn target_column(
+        &self,
+        alias: &str,
+        target: Target,
+        graph: &GraphCatalog,
+    ) -> Result<Column> {
+        Ok(match target {
+            Target::Edge(field) => Column::new(alias, self.column(field)?),
+            Target::Attribute(attribute) => Column::new(alias, &graph.attribute(attribute).name),
+            Target::Property(_) => {
+                return Err(QueryError::PipelineInvariant(
+                    "an edge filter reads a node property".into(),
+                ));
+            }
+        })
+    }
+
+    pub fn filter_at(
+        &self,
+        alias: &str,
+        filter: &BoundFilter,
+        graph: &GraphCatalog,
+    ) -> Result<Predicate> {
+        Ok(filter.at(self.target_column(alias, filter.target, graph)?, None))
     }
 
     pub fn column_prefix(&self) -> String {
@@ -102,8 +148,14 @@ impl EdgeRelation {
         format!("{}{EDGE_PATH_NODES_SUFFIX}", self.column_prefix())
     }
 
-    pub(super) fn endpoint_column(&self, node: &str) -> Option<&'static str> {
-        let (start, end) = edge_columns(self.direction);
+    pub(super) fn endpoint_column(&self, node: &str) -> Result<Option<&str>> {
+        self.endpoint_field(node)
+            .map(|field| self.column(field))
+            .transpose()
+    }
+
+    pub(crate) fn endpoint_field(&self, node: &str) -> Option<EdgeField> {
+        let (start, end) = id_fields(self.direction);
         if self.from_node == node {
             Some(start)
         } else if self.to_node == node {
@@ -136,13 +188,14 @@ pub(super) fn build_relations<B>(
     facts: &[Leaf<'_>],
     model: &Catalog<B>,
     nodes: &HashMap<String, NodePlan>,
-) -> Vec<EdgeRelation>
+) -> Result<Vec<EdgeRelation>>
 where
     B: SqlBackend,
 {
     let graph = model.graph();
     let leaves = query.leaves();
-    query
+    let edges = model.edge_columns();
+    Ok(query
         .steps()
         .into_iter()
         .enumerate()
@@ -172,29 +225,29 @@ where
                 };
             let max_hops = step.range.max;
             let mut edge_tables = if max_hops > 1 {
-                model.edge_tables(relationships)
+                model.edge_table_ids(relationships)
             } else {
                 let mut tables = between(source, target);
                 if direction == Direction::Both {
                     tables.extend(between(target, source));
-                    tables.sort();
+                    tables.sort_by(|a, b| model.table_at(*a).name.cmp(&model.table_at(*b).name));
                     tables.dedup();
                 }
                 tables
             };
             if edge_tables.is_empty() {
-                edge_tables = model.edge_tables(relationships);
+                edge_tables = model.edge_table_ids(relationships);
             }
             if edge_tables.is_empty() {
-                edge_tables.extend(model.shared_edge_table().map(str::to_string));
+                edge_tables.extend(model.shared_edge_table_id());
             }
-            let (start, end) = edge_columns(direction);
+            let (start, end) = id_fields(direction);
             let pinned: Vec<&str> = [(from, start), (to, end)]
                 .into_iter()
                 .filter(|(node, _)| {
                     max_hops == 1 && nodes.get(*node).is_some_and(NodePlan::is_pinned)
                 })
-                .map(|(_, column)| column)
+                .filter_map(|(_, field)| Some(edges?.column(field)))
                 .collect();
             select_edge_layouts(model, &mut edge_tables, &pinned);
             let tested = leaves
@@ -216,7 +269,7 @@ where
                     })
                 })
                 .flatten();
-            let filters = edge_filters(query, facts, step.edge, &edge_tables, model);
+            let filters = edge_filters(facts, step.edge, &edge_tables, model);
             EdgeRelation {
                 input_index,
                 rel_types: types,
@@ -231,34 +284,34 @@ where
                 max_hops,
                 filters,
                 edge_tables,
+                edges: edges.cloned(),
                 fk,
             }
         })
-        .collect()
+        .collect())
 }
 
 /// The filters attached to an edge, bound to the columns its tables store.
 fn edge_filters<B>(
-    query: Query<'_>,
     facts: &[Leaf<'_>],
     edge: Ref,
-    tables: &[String],
+    tables: &[TableId],
     model: &Catalog<B>,
-) -> Vec<(String, BoundFilter)>
+) -> Vec<(Target, BoundFilter)>
 where
     B: SqlBackend,
 {
     let owner = FilterOwner::Tables(tables);
-    let mut filters: Vec<(String, BoundFilter)> = facts
+    let mut filters: Vec<(Target, BoundFilter)> = facts
         .iter()
-        .filter(|fact| fact.attached() && fact.binding() == edge)
+        .filter(|fact| fact.attached() && fact.binding() == edge && !fact.edge_kind())
         .filter_map(|fact| {
-            let name = query.column_name(fact.left())?.to_string();
+            let target = target(fact.left())?;
             if fact.right().is_some() {
                 return None;
             }
-            let bound = bind_filter(&name, (*fact.predicate).clone(), None, &owner, model);
-            Some((name, bound))
+            let bound = bind_filter(target, (*fact.predicate).clone(), None, &owner, model);
+            Some((target, bound))
         })
         .collect();
     unindex_if_key_narrowed(&mut filters);
@@ -268,27 +321,25 @@ where
 /// Swaps each table for the equivalent layout whose sort key reaches a pinned endpoint column soonest.
 pub(super) fn select_edge_layouts(
     model: &Catalog<impl SqlBackend>,
-    tables: &mut [String],
+    tables: &mut [TableId],
     endpoints: &[&str],
 ) {
     if endpoints.is_empty() {
         return;
     }
     for table in tables {
-        let selected = std::iter::once(table.as_str())
-            .chain(model.copies_of(table))
+        let selected = std::iter::once(*table)
+            .chain(model.copies(*table))
             .min_by_key(|layout| {
-                let key = model.physical_table(layout).map(|table| &table.sort_key);
-                key.map_or(usize::MAX, |key| {
-                    endpoints
-                        .iter()
-                        .filter_map(|endpoint| key.iter().position(|column| column == endpoint))
-                        .min()
-                        .unwrap_or(usize::MAX)
-                })
+                let key = &model.table_at(*layout).sort_key;
+                endpoints
+                    .iter()
+                    .filter_map(|endpoint| key.iter().position(|column| column == endpoint))
+                    .min()
+                    .unwrap_or(usize::MAX)
             });
         if let Some(selected) = selected {
-            *table = selected.to_string();
+            *table = selected;
         }
     }
 }

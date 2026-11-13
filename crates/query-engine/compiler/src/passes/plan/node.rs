@@ -9,6 +9,7 @@ use crate::logical::Query;
 use crate::logical::anchors::Anchor;
 use crate::logical::columns::{identity_column, redaction_column};
 use crate::passes::codegen::SqlBackend;
+use query_data_model::implementations::relational::Target;
 
 pub(crate) struct Node<'p> {
     pub alias: &'p str,
@@ -19,7 +20,7 @@ pub(crate) struct Node<'p> {
     pub redaction: &'p str,
     pub pinned: Option<Vec<orbit_authorization::Key>>,
     pub range: Option<(i64, i64)>,
-    pub filters: Vec<(String, BoundFilter)>,
+    pub filters: Vec<(Target, BoundFilter)>,
     pub has_traversal_path: bool,
 }
 
@@ -33,7 +34,7 @@ impl<'p> Node<'p> {
         let id = identity_column(model, binding.entity)?;
         let graph = query.model.graph();
         let source = model.source(binding.entity).map(|(_, source)| source);
-        let mut filters = bind_facts(query, &anchor, binding.name, model);
+        let mut filters = bind_facts(&anchor, model);
         unindex_if_key_narrowed(&mut filters);
         Ok(Self {
             alias: binding.name,

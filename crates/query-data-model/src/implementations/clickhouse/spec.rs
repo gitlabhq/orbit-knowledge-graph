@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::implementations::relational::EdgeColumns;
 use crate::spec::WrittenBlock;
 use crate::{DenormalizedDirection, TraversalPathKind};
 
@@ -18,6 +19,7 @@ pub struct ClickHouseOptions {
     pub columns: IndexMap<String, ColumnSpec>,
     pub settings: Settings,
     pub edge_tables: IndexMap<String, EdgeTable>,
+    pub edge_columns: Option<EdgeColumns>,
     pub denormalized: Vec<DenormalizedSpec>,
     pub copies: IndexMap<String, CopySpec>,
     pub joins: IndexMap<String, JoinSpec>,

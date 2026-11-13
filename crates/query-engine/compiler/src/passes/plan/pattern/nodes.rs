@@ -2,7 +2,7 @@
 //! as a table read or only narrows an edge scan.
 
 use crate::passes::codegen::SqlBackend;
-use query_data_model::Catalog;
+use query_data_model::{Catalog, GraphCatalog};
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::plan::logical::{Columns, Expr, Measure};
@@ -19,7 +19,6 @@ use crate::passes::plan::rows::ReadScope;
 
 impl NodePlan {
     fn new<B>(
-        query: Query<'_>,
         anchor: &Anchor<'_>,
         selection: Option<&Columns>,
         model: &Catalog<B>,
@@ -39,8 +38,12 @@ impl NodePlan {
                 .and_then(|property| model.lookup(property))
                 .is_none()
         };
-        let mut filters = bind_facts(query, anchor, binding.name, model);
-        filters.retain(|(property, _)| stored(property));
+        let mut filters = bind_facts(anchor, model);
+        filters.retain(|(_, filter)| {
+            filter
+                .property()
+                .is_some_and(|property| model.lookup(property).is_none())
+        });
         unindex_if_key_narrowed(&mut filters);
         let has_traversal_path = model.has_path_column(entity);
         Ok(Self {
@@ -107,11 +110,11 @@ impl NodePlan {
     }
 
     /// Every predicate the node's table read applies: filters, bound conditions, ids, and liveness.
-    pub fn conditions(&self) -> Vec<Predicate> {
+    pub fn conditions(&self, graph: &GraphCatalog) -> Vec<Predicate> {
         let mut predicates: Vec<_> = self
             .filters
             .iter()
-            .map(|(property, filter)| property_filter(&self.alias, property, filter))
+            .filter_map(|(_, filter)| property_filter(&self.alias, filter, graph))
             .collect();
         predicates.extend(self.predicates.iter().cloned());
         predicates.extend(self.id_predicates(Column::new(&self.alias, &self.id_column)));
@@ -148,7 +151,7 @@ where
         .iter()
         .map(|anchor| {
             let selection = selected.get(&anchor.binding.output).copied();
-            let node = NodePlan::new(query, anchor, selection, model)?;
+            let node = NodePlan::new(anchor, selection, model)?;
             Ok((node.alias.clone(), node))
         })
         .collect()
