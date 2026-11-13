@@ -987,7 +987,10 @@ mod tests {
         test_service_on(&test_config())
     }
 
+    /// A service on `clickhouse` with the embedded query settings installed, as `main` installs
+    /// the loaded ones before it serves.
     fn test_service_on(clickhouse: &ClickHouseConfiguration) -> OrbitServiceImpl {
+        orbit_server_config::query::init_embedded_defaults();
         OrbitServiceImpl::new(
             Arc::new(mock_validator()),
             ActiveSchema::pinned(test_model()),
