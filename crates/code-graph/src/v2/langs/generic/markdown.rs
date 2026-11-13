@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use orbit_utils::markdown::{FQN_SEPARATOR, LineIndex, sections, segment_path};
+use orbit_utils::markdown::{
+    Document, FQN_SEPARATOR, FRONT_MATTER_NAME, LineIndex, parse, segment_path,
+};
 
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
@@ -32,30 +34,61 @@ fn parse_markdown(
         .and_then(|s| s.to_str())
         .unwrap_or(file_path);
     let lines = LineIndex::new(source);
-    let position = |(line, column)| Position::new(line, column);
-    let sections = sections(source);
-    let definitions = sections
-        .iter()
-        .enumerate()
-        .map(|(index, section)| {
-            let parts: Vec<&str> = std::iter::once(stem)
-                .chain(segment_path(&sections, index))
-                .collect();
-            CanonicalDefinition {
-                definition_type: "Section",
-                kind: DefKind::Module,
-                name: section.name.clone(),
-                fqn: Fqn::from_segments(&parts, FQN_SEPARATOR),
-                range: Range::new(
-                    position(lines.position(section.start)),
-                    position(lines.end_position(source, section.end)),
-                    (section.start, section.end),
-                ),
-                is_top_level: section.parent.is_none(),
-                metadata: None,
-            }
-        })
-        .collect();
+    let range = |start: usize, end: usize| {
+        let position = |(line, column)| Position::new(line, column);
+        Range::new(
+            position(lines.position(start)),
+            position(lines.end_position(source, end)),
+            (start, end),
+        )
+    };
+    let Document {
+        front_matter,
+        sections,
+    } = parse(source);
+    let mut definitions = Vec::new();
+    if let Some(front_matter) = front_matter {
+        definitions.push(CanonicalDefinition {
+            definition_type: "FrontMatter",
+            kind: DefKind::Other,
+            name: FRONT_MATTER_NAME.to_string(),
+            fqn: Fqn::from_segments(&[stem, FRONT_MATTER_NAME], FQN_SEPARATOR),
+            range: range(front_matter.start, front_matter.end),
+            is_top_level: true,
+            metadata: None,
+        });
+        definitions.extend(
+            front_matter
+                .fields
+                .into_iter()
+                .map(|field| CanonicalDefinition {
+                    definition_type: "FrontMatterField",
+                    kind: DefKind::Property,
+                    fqn: Fqn::from_segments(
+                        &[stem, FRONT_MATTER_NAME, &field.segment],
+                        FQN_SEPARATOR,
+                    ),
+                    name: field.key,
+                    range: range(field.start, field.end),
+                    is_top_level: false,
+                    metadata: None,
+                }),
+        );
+    }
+    definitions.extend(sections.iter().enumerate().map(|(index, section)| {
+        let parts: Vec<&str> = std::iter::once(stem)
+            .chain(segment_path(&sections, index))
+            .collect();
+        CanonicalDefinition {
+            definition_type: "Section",
+            kind: DefKind::Module,
+            name: section.name.clone(),
+            fqn: Fqn::from_segments(&parts, FQN_SEPARATOR),
+            range: range(section.start, section.end),
+            is_top_level: section.parent.is_none(),
+            metadata: None,
+        }
+    }));
     (definitions, Vec::new())
 }
 
@@ -155,12 +188,64 @@ mod tests {
     }
 
     #[test]
-    fn front_matter_does_not_become_a_section() {
-        let result =
-            parse("---\ntitle: \"ADR 000\"\nauthors: [ \"@x\" ]\n---\n\n# Real Heading\n\nBody.\n")
-                .unwrap();
-        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
-        assert_eq!(names, vec!["Real Heading"]);
+    fn front_matter_becomes_a_block_and_one_field_per_top_level_key() {
+        let src = "---\ntitle: \"ADR 000\"\nauthors:\n  - \"@x\"\n---\n\n# Real Heading\n\nBody.\n";
+        let result = parse(src).unwrap();
+        let rows: Vec<(&str, &str, String, &str, bool)> = result
+            .definitions
+            .iter()
+            .map(|d| {
+                let (start, end) = d.range.byte_offset;
+                (
+                    d.definition_type,
+                    d.name.as_str(),
+                    d.fqn.to_string(),
+                    &src[start..end],
+                    d.is_top_level,
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "FrontMatter",
+                    "front_matter",
+                    "guide#front_matter".to_string(),
+                    "---\ntitle: \"ADR 000\"\nauthors:\n  - \"@x\"\n---\n",
+                    true,
+                ),
+                (
+                    "FrontMatterField",
+                    "title",
+                    "guide#front_matter#title".to_string(),
+                    "title: \"ADR 000\"\n",
+                    false,
+                ),
+                (
+                    "FrontMatterField",
+                    "authors",
+                    "guide#front_matter#authors".to_string(),
+                    "authors:\n  - \"@x\"\n",
+                    false,
+                ),
+                (
+                    "Section",
+                    "Real Heading",
+                    "guide#Real Heading".to_string(),
+                    "# Real Heading\n\nBody.\n",
+                    true,
+                ),
+            ]
+        );
+        let block = &result.definitions[0];
+        assert_eq!(block.kind, DefKind::Other);
+        assert_eq!((block.range.start.line, block.range.end.line), (0, 4));
+        assert!(
+            result.definitions[1..3]
+                .iter()
+                .all(|d| d.kind == DefKind::Property)
+        );
     }
 
     #[test]
@@ -192,6 +277,7 @@ mod tests {
             "Setext \u{e9}\n===\n\ntext\n\nSub\n---\n",
             "\u{feff}# BOM lead\n",
             "# No trailing newline",
+            "\u{feff}---\r\nt\u{e9}: \u{4f60}\r\n---\r\n\r\n# H\n",
         ];
         for src in cases {
             let (definitions, _) = super::parse_markdown(src, "g.md");

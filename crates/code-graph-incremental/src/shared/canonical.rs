@@ -189,6 +189,16 @@ pub enum Canonical {
     /// A definition's FQN segment when it differs from its name.
     #[strum(serialize = "__fqn_segment")]
     FqnSegment,
+    #[strum(
+        serialize = "__front_matter",
+        props(def_type = "true", display = "FrontMatter")
+    )]
+    FrontMatter,
+    #[strum(
+        serialize = "__front_matter_field",
+        props(def_type = "true", display = "FrontMatterField")
+    )]
+    FrontMatterField,
 }
 
 impl From<Canonical> for u16 {
