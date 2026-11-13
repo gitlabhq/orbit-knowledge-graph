@@ -1,4 +1,5 @@
 name: "Dockerfile: unparsed files keep their own language label"
+pipeline: dockerfile
 
 fixtures:
   - path: Dockerfile

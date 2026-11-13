@@ -29,10 +29,12 @@ cases:
       gql: |
         MATCH (start:Definition)-[:CALLS*2..2]->(callee:Definition) WHERE start.id >= 12000 AND start.id <= 12999 AND callee.id = 12003 RETURN start, callee LIMIT 10
     expect:
-      skip_requirements: ["node_ids", "node_count", "relationship:CALLS"]
       nodes:
         Definition:
           ids: [12001, 12003]
+      edge_exists:
+        CALLS:
+          - { from: Definition, from_id: 12001, to: Definition, to_id: 12003 }
 
   - name: hop_project_denied
     description: The middle hop is owned by the denied project, so the whole row is redacted
@@ -54,7 +56,9 @@ cases:
       gql: |
         MATCH (start:Definition)-[:CALLS*2..2]->(callee:Definition) WHERE start.id >= 12000 AND start.id <= 12999 AND callee.id = 12003 RETURN start, callee LIMIT 10
     expect:
-      skip_requirements: ["node_ids", "node_count", "relationship:CALLS"]
       nodes:
         Definition:
           absent: [12001, 12003]
+      edge_absent:
+        CALLS:
+          - { from: Definition, from_id: 12001, to: Definition, to_id: 12003 }
