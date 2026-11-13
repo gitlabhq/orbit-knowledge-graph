@@ -28,29 +28,33 @@ const TASK_NAME: &str = "analytics.graph_stats";
 const ATTEMPTS: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_secs(60);
 
-const GRAPH_BYTES_SQL: &str = "\
-SELECT toInt64(sum(bytes_on_disk)) AS bytes \
-FROM system.parts \
-WHERE active AND database = currentDatabase() AND table IN {tables:Array(String)}";
+const GRAPH_BYTES_SQL: &str = r#"SELECT toInt64(sum(bytes_on_disk)) AS bytes
+FROM system.parts
+WHERE active
+  AND database = currentDatabase()
+  AND table IN {tables:Array(String)}"#;
 
-const LIVE_ROWS_SQL: &str =
-    "SELECT toInt64(count()) AS live_rows FROM {table:Identifier} FINAL WHERE _deleted = false";
+const LIVE_ROWS_SQL: &str = r#"SELECT toInt64(count()) AS live_rows
+FROM {table:Identifier} FINAL
+WHERE _deleted = false"#;
 
 static ELIGIBLE_PROJECTS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "SELECT DISTINCT id \
-FROM project_namespace_traversal_paths FINAL \
-WHERE deleted = false \
-AND extract(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}') IN {{paths:Array(String)}}"
+        r#"SELECT DISTINCT id
+FROM project_namespace_traversal_paths FINAL
+WHERE deleted = false
+  AND extract(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}') IN {{paths:Array(String)}}"#
     )
 });
 
 static INDEXED_PROJECTS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "SELECT DISTINCT project_id \
-FROM {{table:Identifier}} FINAL \
-WHERE _deleted = false AND is_default_branch AND indexed_at IS NOT NULL \
-AND extract(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}') IN {{paths:Array(String)}}"
+        r#"SELECT DISTINCT project_id
+FROM {{table:Identifier}} FINAL
+WHERE _deleted = false
+  AND is_default_branch
+  AND indexed_at IS NOT NULL
+  AND extract(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}') IN {{paths:Array(String)}}"#
     )
 });
 
