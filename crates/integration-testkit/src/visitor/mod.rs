@@ -186,9 +186,14 @@ impl ResponseView {
             );
         }
 
+        let required = input
+            .requirements()
+            .into_iter()
+            .filter(|requirement| requirement.checkable(input, &response))
+            .collect();
         Self {
             response,
-            tracker: AssertionTracker::new(input.requirements()),
+            tracker: AssertionTracker::new(required),
             asserted_edge_types: RefCell::new(HashSet::new()),
         }
     }
@@ -234,13 +239,8 @@ impl ResponseView {
         self.response.nodes.len()
     }
 
-    /// Assert exact node count. Satisfies [`Requirement::NodeCount`] and
-    /// [`Requirement::Skip`].
-    ///
-    /// Does NOT satisfy [`Requirement::NodeIds`] — use [`node_ids`](Self::node_ids)
-    /// or [`assert_node_order`](Self::assert_node_order) to verify which IDs were returned.
+    /// Assert exact node count. Satisfies [`Requirement::Skip`].
     pub fn assert_node_count(&self, expected: usize) {
-        self.tracker.satisfy(Requirement::NodeCount);
         self.tracker.satisfy(Requirement::Skip);
         assert_eq!(
             self.response.nodes.len(),
@@ -269,9 +269,7 @@ impl ResponseView {
             .collect()
     }
 
-    /// Satisfies [`Requirement::NodeIds`].
     pub fn node_ids(&self, entity_type: &str) -> MustInspect<HashSet<i64>> {
-        self.tracker.satisfy(Requirement::NodeIds);
         let ids = self
             .response
             .nodes
@@ -417,20 +415,8 @@ impl ResponseView {
         );
     }
 
-    /// Assert that an aggregation response returned zero rows. Satisfies
-    /// [`Requirement::Aggregation`] along with NodeCount/Filter/NodeIds,
-    /// since all of those are vacuously true when the response is empty.
-    /// Use this for security tests where an aggregation is expected to
-    /// return no rows (e.g. a Reporter-only user querying Vulnerability
-    /// counts should see an empty response, not a hang or a compile error).
+    /// Assert that an aggregation response returned zero rows.
     pub fn assert_empty_aggregation(&self) {
-        self.tracker.satisfy(Requirement::Aggregation);
-        self.tracker.satisfy(Requirement::NodeCount);
-        self.tracker.satisfy(Requirement::NodeIds);
-        self.tracker.satisfy(Requirement::Skip);
-        // Any Filter requirements accumulated from the query are implicitly
-        // satisfied — an empty result cannot violate a filter predicate.
-        self.tracker.satisfy_all_filters();
         assert!(
             self.response.nodes.is_empty(),
             "expected empty aggregation, got {} nodes: {:?}",
@@ -471,7 +457,6 @@ impl ResponseView {
 
     pub fn assert_group_node_count(&self, group_key: &str, expected: usize) {
         self.tracker.satisfy(Requirement::Aggregation);
-        self.tracker.satisfy(Requirement::NodeCount);
         self.tracker.satisfy(Requirement::Skip);
         let actual = self
             .rows()
@@ -488,7 +473,6 @@ impl ResponseView {
 
     pub fn assert_group_node_ids(&self, group_key: &str, entity_type: &str, expected: &[i64]) {
         self.tracker.satisfy(Requirement::Aggregation);
-        self.tracker.satisfy(Requirement::NodeIds);
         let actual: HashSet<i64> = self
             .rows()
             .iter()
@@ -514,7 +498,6 @@ impl ResponseView {
     ) {
         self.tracker.satisfy(Requirement::Aggregation);
         self.tracker.satisfy(Requirement::OrderBy);
-        self.tracker.satisfy(Requirement::NodeIds);
         self.tracker.satisfy(Requirement::AggregationSort);
         let actual = self.group_node_ids_ordered(group_key, entity_type);
         assert_eq!(
@@ -664,6 +647,30 @@ impl ResponseView {
             Some(expected),
             "grouped node {entity_type}:{id} column '{key}' mismatch"
         );
+    }
+
+    /// Assert row values by position. Satisfies [`Requirement::AggregationSort`]
+    /// when every row is listed.
+    pub fn assert_row_values(
+        &self,
+        expected: &[std::collections::BTreeMap<String, Value>],
+        label: &str,
+    ) {
+        for (index, row) in expected.iter().enumerate() {
+            for (column, value) in row {
+                match value {
+                    Value::Number(number) if number.is_i64() => {
+                        self.assert_row_value_i64(index, column, number.as_i64().unwrap());
+                    }
+                    Value::String(text) => self.assert_row_value_str(index, column, text),
+                    Value::Null => self.assert_row_value_null(index, column),
+                    _ => panic!("{label}: unsupported row_values type for {column}"),
+                }
+            }
+        }
+        if expected.len() == self.rows().len() {
+            self.tracker.satisfy(Requirement::AggregationSort);
+        }
     }
 
     pub fn assert_row_value_i64(&self, row_index: usize, key: &str, expected: i64) {
@@ -824,9 +831,7 @@ impl ResponseView {
     }
 
     /// Assert that the IDs of nodes with `entity_type` match `expected` exactly (unordered).
-    /// Satisfies [`Requirement::NodeIds`].
     pub fn assert_node_ids(&self, entity_type: &str, expected: &[i64]) {
-        self.tracker.satisfy(Requirement::NodeIds);
         let actual: HashSet<i64> = self
             .response
             .nodes
@@ -882,11 +887,9 @@ impl ResponseView {
     }
 
     /// Assert that nodes of the given type appear in exactly this ID order.
-    /// Satisfies [`Requirement::OrderBy`], [`Requirement::NodeIds`], and
-    /// [`Requirement::AggregationSort`].
+    /// Satisfies [`Requirement::OrderBy`] and [`Requirement::AggregationSort`].
     pub fn assert_node_order(&self, entity_type: &str, expected_ids: &[i64]) {
         self.tracker.satisfy(Requirement::OrderBy);
-        self.tracker.satisfy(Requirement::NodeIds);
         self.tracker.satisfy(Requirement::AggregationSort);
         let actual = self.node_ids_ordered(entity_type);
         assert_eq!(actual, expected_ids, "{entity_type} nodes in wrong order");

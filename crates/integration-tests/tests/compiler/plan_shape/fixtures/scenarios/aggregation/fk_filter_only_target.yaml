@@ -1,0 +1,30 @@
+---
+cases:
+  - name: FK aggregation filters through the referenced target key without projecting the target
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest"},
+            {"id": "p", "entity": "Project", "filters": {"name": "Public Project"}}
+          ],
+          "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+          "aggregations": [{"count": "mr", "as": "c"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {name: 'Public Project'})
+        RETURN count(mr) AS c LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS p FINAL
+            - p.name = 'Public Project'
+            - mr.project_id IN (SELECT id FROM _orbit_relation_
+          not_contains:
+            - gl_edge

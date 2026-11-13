@@ -21,5 +21,4 @@ query:
     RETURN u.id, p.id
 
 expect:
-  skip_requirements: ["node_ids", "relationship:*"]
   node_count: 2

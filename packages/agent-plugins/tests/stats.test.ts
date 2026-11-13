@@ -21,6 +21,28 @@ test('the raw JSON format counts nodes and edges', () => {
   expect(parseResponse(text)).toMatchObject({ nodes: 2, edges: 1, byEntity: { User: 2 } })
 })
 
+const rawAggregation = (body: object) => JSON.stringify({ result: { query_type: 'aggregation', nodes: [], edges: [], ...body } })
+
+test('a grouped raw JSON aggregation counts its rows instead of reading as an empty traversal', () => {
+  const text = rawAggregation({
+    columns: [{ name: 'n', function: 'count', target: 'mr' }],
+    group_columns: [{ name: 'mr_state', kind: 'property', node: 'mr', property: 'state' }],
+    rows: [{ mr_state: 'merged', n: 2450 }, { mr_state: 'closed', n: 690 }, { mr_state: 'opened', n: 76 }],
+  })
+  expect(parseResponse(text)).toMatchObject({ kind: 'aggregation', grouped: true, nodes: 0, aggregated: 3216 })
+})
+
+test('an ungrouped raw JSON aggregation leaves out a DISTINCT count', () => {
+  const text = rawAggregation({
+    columns: [
+      { name: 'count_mr', function: 'count', target: 'mr' },
+      { name: 'count_distinct_mr_author_id', function: 'count', target: 'mr', property: 'author_id' },
+    ],
+    rows: [{ count_mr: 3222, count_distinct_mr_author_id: 111 }],
+  })
+  expect(parseResponse(text)).toMatchObject({ kind: 'aggregation', grouped: false, aggregated: 3222, counted: [{ target: 'mr', total: 3222 }] })
+})
+
 test('an aggregation counts the nodes its count columns cover', () => {
   const text = [
     'query_type: aggregation',
@@ -134,6 +156,32 @@ test('the query is read from the command, quotes undone', () => {
   expect(queryOf('orbit query --response-format raw "MATCH (n) RETURN n"')).toBe('MATCH (n) RETURN n')
   expect(queryOf('orbit query --file q.json')).toBe('')
   expect(queryOf('echo "glab orbit query \\"MATCH (n) RETURN n\\""')).toBe('')
+})
+
+test('the query of a --file - call is read from its heredoc envelope', () => {
+  const query = "MATCH (p:Project {full_path: 'a/b'})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN count(mr) AS n"
+  expect(queryOf(`orbit query --file - <<'EOF2'\n${JSON.stringify({ query })}\nEOF2`)).toBe(query)
+  expect(queryOf(`glab orbit query --response-format raw --file - <<EOF\n${JSON.stringify({ query })}\nEOF\n`)).toBe(query)
+  expect(queryOf(`orbit query --file - <<-EOF\n\t${JSON.stringify({ query })}\n\tEOF`)).toBe(query)
+})
+
+test('a --file - query is read from the heredoc of its own command', () => {
+  const users = JSON.stringify({ query: 'MATCH (u:User) RETURN u' })
+  const mrs = JSON.stringify({ query: 'MATCH (mr:MergeRequest) RETURN mr' })
+  expect(queryOf(`cat > notes.json <<'EOF'\n${users}\nEOF\norbit query --file - <<'EOF'\n${mrs}\nEOF`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`orbit query --file - <<'END-JSON'\n${mrs}\nEND-JSON`)).toBe('MATCH (mr:MergeRequest) RETURN mr')
+  expect(queryOf(`cat <<'EOF'\n${users}\nEOF\norbit query --file - < q.json`)).toBe('')
+  expect(queryOf(`cat > notes.json <<'EOF'\n${users}\nEOF\norbit query --file -`)).toBe('')
+  expect(queryOf(`orbit query --file - <<'EOF' < q.json\n${mrs}\nEOF`)).toBe('')
+  expect(queryOf(`orbit query --file - <<EOF\n${mrs}\n\tEOF`)).toBe('')
+})
+
+test('a --file call with no readable envelope has no query', () => {
+  expect(queryOf('orbit query --file -')).toBe('')
+  expect(queryOf('cat q.json | orbit query --file -')).toBe('')
+  expect(queryOf("orbit query --file - <<'EOF'\nnot json\nEOF")).toBe('')
+  expect(queryOf(`orbit query --file - <<'EOF'\n${JSON.stringify({ query: 7 })}\nEOF`)).toBe('')
+  expect(queryOf(`orbit query --file q.json <<'EOF'\n${JSON.stringify({ query: 'MATCH (n) RETURN n' })}\nEOF`)).toBe('')
 })
 
 test('the graph total sums every entity in every domain of graph-status', () => {

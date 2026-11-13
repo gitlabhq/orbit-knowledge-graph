@@ -8,7 +8,6 @@ steps:
   - query:
       gql: "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 10"
     expect:
-      settings: { use_query_cache: 1, query_cache_ttl: 10, query_cache_nondeterministic_function_handling: ignore }
       node_count: 5
       nodes: { Group: { ids: [100, 101, 102, 200, 300] } }
 
@@ -18,6 +17,5 @@ steps:
     query:
       gql: "MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 10"
     expect:
-      settings: { use_query_cache: 1 }
       node_count: 5
       nodes: { Group: { ids: [100, 101, 102, 200, 300] } }

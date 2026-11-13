@@ -61,7 +61,7 @@ rails-contract-export:
       alias: postgres
   variables:
     POSTGRES_USER: git
-    POSTGRES_PASSWORD: secure password
+    POSTGRES_PASSWORD: secure password # gitleaks:allow
     POSTGRES_DB: gitlabhq_production
     RAILS_ENV: production
     GITLAB_LICENSE_MODE: test
