@@ -1,0 +1,53 @@
+cases:
+  - name: allowed
+    description: Three stages chain ClickHouse, DuckDB and ClickHouse again - merge requests, their Jira issues and projects, then the GitLab projects those map to
+    config:
+      security: default
+    query: |
+      MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue)-[:IN_JIRA_PROJECT]->(jp:JiraProject)-[:MAPPED_TO]->(p:Project) WHERE mr.id <= 2002 RETURN mr.title, i.key, jp.key, p.name ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 10
+      skip_requirements: ["filter:id", "relationship:DEVELOPED_IN", "relationship:IN_JIRA_PROJECT", "relationship:MAPPED_TO"]
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001, 2002]
+        JiraIssue:
+          order: [10100, 10101, 10200]
+        JiraProject:
+          rows:
+            - { id: "10000", key: ORB }
+            - { id: "10001", key: SEC }
+        Project:
+          ids: [1000, 1001]
+          rows:
+            - { id: 1000, name: Public Project }
+            - { id: 1001, name: Private Project }
+
+  - name: partly_denied
+    description: A group reader follows the chain inside its group only; the private group's issue, Jira project and project drop
+    config:
+      security: group_100
+    query: |
+      MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue)-[:IN_JIRA_PROJECT]->(jp:JiraProject)-[:MAPPED_TO]->(p:Project) WHERE mr.id <= 2002 RETURN mr.title, i.key, jp.key, p.name ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 6
+      skip_requirements: ["filter:id", "relationship:DEVELOPED_IN", "relationship:IN_JIRA_PROJECT", "relationship:MAPPED_TO"]
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001]
+        JiraIssue:
+          order: [10100, 10101]
+        JiraProject:
+          count: 1
+        Project:
+          ids: [1000]
+
+  - name: empty
+    description: A caller who reads none of the chain's first stage gets an empty chain
+    config:
+      security: no_jira_rows
+    query: |
+      MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue)-[:IN_JIRA_PROJECT]->(jp:JiraProject)-[:MAPPED_TO]->(p:Project) WHERE mr.id <= 2002 RETURN mr.title, i.key, jp.key, p.name LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: ["filter:id", "relationship:DEVELOPED_IN", "relationship:IN_JIRA_PROJECT", "relationship:MAPPED_TO"]

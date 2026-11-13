@@ -199,3 +199,11 @@ jira:
   jira_gitlab_ref:
     - { id: ref-1, kind: merge_request, project_path: public-group/public-project, iid: 1, url: "https://gitlab.example.com/public-group/public-project/-/merge_requests/1", issue_id: "10100", traversal_path: "1/100/", _siphon_replicated_at: "2026-11-04 09:00:00", _siphon_watermark: "2026-11-04 09:00:00", _siphon_deleted: false }
     - { id: ref-2, kind: merge_request, project_path: private-group/private-project, iid: 3, url: "https://gitlab.example.com/private-group/private-project/-/merge_requests/3", issue_id: "10200", traversal_path: "1/101/", _siphon_replicated_at: "2026-11-04 10:00:00", _siphon_watermark: "2026-11-04 10:00:00", _siphon_deleted: false }
+
+slack:
+  gl_slack_workspace:
+    - { id: T01, name: Orbit, group_id: 100, traversal_path: "1/100/" }
+    - { id: T02, name: Vault, group_id: 101, traversal_path: "1/101/" }
+  gl_incident:
+    - { id: 500, title: Deploy outage, message_id: M01, traversal_path: "1/100/" }
+    - { id: 501, title: Leaked signing key, message_id: M02, traversal_path: "1/101/" }

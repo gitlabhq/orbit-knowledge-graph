@@ -16,6 +16,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use compiler::dag::Peer;
+use compiler::orbit_authorization::Checks;
 use format::ExpectedIndex;
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
@@ -583,7 +584,7 @@ async fn execute_output(
     let dag = DagStage {
         executors,
         peers: peers.clone(),
-        checks: Default::default(),
+        checks: Checks::default().with("rails", Arc::new(redaction.clone())),
     };
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);

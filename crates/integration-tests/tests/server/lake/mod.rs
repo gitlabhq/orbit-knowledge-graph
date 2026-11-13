@@ -21,10 +21,35 @@ const PRESETS: &str = concat!(
     "/tests/server/data_correctness/presets"
 );
 
-async fn scenarios(mode: Mode) {
+/// The data-correctness graph, plus the ClickHouse tables of the demo packages' check-less
+/// Slack entities and their rows.
+async fn graph() -> TestContext {
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    let schema = integration_testkit::graph_schema(
+        &query_data_model::testkit::with_demo()
+            .fragments()
+            .and_then(|fragments| {
+                fragments.deployment(&query_data_model::testkit::deployments(), SHAPE)
+            })
+            .unwrap(),
+    );
+    for name in ["gl_incident", "gl_slack_workspace"] {
+        let table = schema
+            .tables
+            .iter()
+            .find(|table| table.name == name)
+            .unwrap_or_else(|| panic!("the {SHAPE} shape stores {name}"));
+        ctx.execute(&table.to_create_sql(&integration_testkit::TABLE_PREFIX))
+            .await;
+    }
     load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
+    load_yaml_seed(&ctx, PRESETS, "slack").await;
     ctx.optimize_if_needed().await;
+    ctx
+}
+
+async fn scenarios(mode: Mode) {
+    let ctx = graph().await;
     run_lake_dir(
         &ctx,
         (SCENARIOS, PRESETS),

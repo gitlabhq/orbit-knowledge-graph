@@ -10,6 +10,7 @@ expect:
   node_count: 2
   nodes:
     JiraComment:
+      ids: [20000]
       count: 1
       rows:
         - { id: "20000", body: Fixed in the linked merge request }

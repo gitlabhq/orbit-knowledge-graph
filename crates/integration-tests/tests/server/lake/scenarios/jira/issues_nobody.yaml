@@ -8,3 +8,6 @@ query: |
 
 expect:
   node_count: 0
+  nodes:
+    JiraIssue:
+      ids: []

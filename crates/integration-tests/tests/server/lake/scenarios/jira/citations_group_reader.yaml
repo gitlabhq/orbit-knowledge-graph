@@ -10,6 +10,7 @@ expect:
   node_count: 2
   nodes:
     JiraIssue:
+      ids: [10100]
       count: 1
       order: [10100]
       rows:

@@ -1,0 +1,46 @@
+cases:
+  - name: allowed
+    description: The bounded Jira stage on DuckDB feeds its merge request keys to the ClickHouse stage, which reads those merge requests
+    config:
+      security: default
+    query: |
+      MATCH (i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest) WHERE i.status_category <> 'new' RETURN i.key, mr.title ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 6
+      skip_requirements: ["relationship:DEVELOPED_IN", "filter:status_category"]
+      nodes:
+        JiraIssue:
+          order: [10100, 10101, 10200]
+          rows:
+            - { id: "10100", key: ORB-1 }
+            - { id: "10200", key: SEC-1 }
+        MergeRequest:
+          ids: [2000, 2001, 2002]
+          rows:
+            - { id: 2000, title: Add feature A }
+            - { id: 2001, title: Fix bug B }
+
+  - name: partly_denied
+    description: A group reader's Jira stage drops the private group's issue, so its merge request is never asked for
+    config:
+      security: group_100
+    query: |
+      MATCH (i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest) WHERE i.status_category <> 'new' RETURN i.key, mr.title ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 4
+      skip_requirements: ["relationship:DEVELOPED_IN", "filter:status_category"]
+      nodes:
+        JiraIssue:
+          order: [10100, 10101]
+        MergeRequest:
+          ids: [2000, 2001]
+
+  - name: empty
+    description: A caller who reads no Jira rows hands no keys to the merge request stage
+    config:
+      security: no_jira_rows
+    query: |
+      MATCH (i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest) WHERE i.status_category <> 'new' RETURN i.key, mr.title LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: ["relationship:DEVELOPED_IN", "filter:status_category"]

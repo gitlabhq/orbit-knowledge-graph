@@ -1,0 +1,39 @@
+cases:
+  - name: allowed
+    description: A Slack workspace declares no row check, so its proved traversal_path filter alone returns it to an org reader
+    config:
+      security: default
+    query: |
+      MATCH (w:SlackWorkspace) WHERE w.id IN ['T01', 'T02'] RETURN w.name ORDER BY w.name LIMIT 20
+    expect:
+      node_count: 2
+      nodes:
+        SlackWorkspace:
+          rows:
+            - { id: T01, name: Orbit }
+            - { id: T02, name: Vault }
+      skip_requirements: [node_ids, order_by]
+
+  - name: partly_denied
+    description: A group reader keeps its group's workspace and loses the private group's
+    config:
+      security: group_100
+    query: |
+      MATCH (w:SlackWorkspace) WHERE w.id IN ['T01', 'T02'] RETURN w.name ORDER BY w.name LIMIT 20
+    expect:
+      node_count: 1
+      nodes:
+        SlackWorkspace:
+          rows:
+            - { id: T01, name: Orbit }
+      skip_requirements: [node_ids, order_by]
+
+  - name: empty
+    description: A caller whose group holds no workspace reads none
+    config:
+      security: no_jira_rows
+    query: |
+      MATCH (w:SlackWorkspace) WHERE w.id IN ['T01', 'T02'] RETURN w.name LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: [node_ids]

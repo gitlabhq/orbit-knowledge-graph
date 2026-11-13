@@ -1,0 +1,40 @@
+cases:
+  - name: allowed
+    description: An incident declares no row check, so its proved traversal_path filter alone returns it to an org reader
+    config:
+      security: default
+    query: |
+      MATCH (n:Incident) WHERE n.id IN [500, 501] RETURN n.title ORDER BY n.id LIMIT 20
+    expect:
+      node_count: 2
+      nodes:
+        Incident:
+          ids: [500, 501]
+          order: [500, 501]
+          rows:
+            - { id: 500, title: Deploy outage }
+
+  - name: partly_denied
+    description: A group reader keeps its group's incident and loses the private group's
+    config:
+      security: group_100
+    query: |
+      MATCH (n:Incident) WHERE n.id IN [500, 501] RETURN n.title ORDER BY n.id LIMIT 20
+    expect:
+      node_count: 1
+      nodes:
+        Incident:
+          ids: [500]
+          order: [500]
+
+  - name: empty
+    description: A caller whose group holds no incident reads none
+    config:
+      security: no_jira_rows
+    query: |
+      MATCH (n:Incident) WHERE n.id IN [500, 501] RETURN n.title LIMIT 20
+    expect:
+      node_count: 0
+      nodes:
+        Incident:
+          ids: []
