@@ -146,7 +146,7 @@ relationships:
 In each deployment's model, every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. Every other store is partial and lists exactly the properties it holds. A partial store holds a subset of the columns, or it offers an operation that the complete store does not. `File`'s Orbit Next store is partial: it holds a few `File` columns and offers the structural search that the complete ClickHouse store lacks.
 A store whose backend has no writer capability holds no table, for example a live or code store. It lists the properties it serves, and its backend checks its own fields.
 
-A query's needs from a node are the properties it reads, its filter operators and its search modes. Placement reads the node from its complete store when that store serves every need. Otherwise it reads from the one partial store that serves every need. If no store does, the query fails, and the error names the unmet need. If the deployment does not serve the chosen store's connection, the query fails with an error that names the entity and the connection.
+A query's needs from a node are the properties it reads, its filter operators and its search modes. Placement reads the node from its complete store when that store serves every need. Otherwise it reads from the one partial store that serves every need. Otherwise it splits the node across the fewest stores that together serve every need, and their stages cross on the entity's identity. [Add an integration's live store](#add-an-integrations-live-store) shows a split node. If no combination of stores serves every need, the query fails, and the error names the unmet need. If the deployment does not serve the chosen store's connection, the query fails with an error that names the entity and the connection.
 
 `AUTHORED` is a foreign key: the `author_id` column on the `MergeRequest` row holds the author. `APPROVED` is many-to-many, so its rows live in an edge table. Every variant binds to one of the two, or the load fails.
 
@@ -322,7 +322,7 @@ entities:
 
 Its authorization adds a `live` policy and the check: `live: {scope_key: {via: IN_JIRA_PROJECT}}` next to the `duckdb` policy, and `checks: [{provider: jira, kind: delegated}]`.
 
-Slack keeps its history in a lake store and adds a live store for search. `MENTIONS` links a message to the Jira issue it names, so `integration.slack` requires `integration.jira`:
+Slack keeps its history in a lake store and adds a live store for search. `MENTIONS` links a message to the Jira issue it names, so `integration.slack` requires `integration.jira`. `DISCUSSES` links a message to a merge request, so it also requires `gitlab.code_review`:
 
 ```yaml
 # packages/integration.slack/graph.yaml
@@ -341,6 +341,7 @@ entities:
       text: {type: string}
       sent_at: {type: timestamp}
       issue_id: {type: string?}
+      merge_request_id: {type: int64?}
       traversal_path: {type: string}
   SlackWorkspace:
     identity: id
@@ -358,6 +359,8 @@ relationships:
     variants: {SlackWorkspace -> Group: {cardinality: many_to_one}}
   MENTIONS:
     variants: {SlackMessage -> JiraIssue: {cardinality: many_to_one}}
+  DISCUSSES:
+    variants: {SlackMessage -> MergeRequest: {cardinality: many_to_one}}
 ```
 
 ```yaml
@@ -374,7 +377,7 @@ entities:
     checks:
       - {provider: slack, kind: delegated}
     properties:
-      open: [id, channel, author, text, sent_at, issue_id]
+      open: [id, channel, author, text, sent_at, issue_id, merge_request_id]
       exact: [workspace]
       hidden: [traversal_path]
   SlackWorkspace:
@@ -395,6 +398,10 @@ relationships:
     permission: read
     enforce: {duckdb: {scope_key: traversal_path, of: holder}}
   MENTIONS:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}
+  DISCUSSES:
     scope: namespace
     permission: read
     enforce: {duckdb: {scope_key: traversal_path, of: source}}
@@ -422,6 +429,7 @@ entities:
       text: {backend: {type: VARCHAR}}
       sent_at: {immutable: true, backend: {type: TIMESTAMP}}
       issue_id: {backend: {type: VARCHAR}}
+      merge_request_id: {backend: {type: BIGINT}}
       traversal_path: {backend: {type: VARCHAR}}
     accepts: [id, workspace, issue_id]
     access: {filter: [workspace, channel, author, sent_at], order: [id]}
@@ -442,6 +450,8 @@ relationships:
     SlackWorkspace -> Group: {fk: {on: source, column: namespace_id}}
   MENTIONS:
     SlackMessage -> JiraIssue: {fk: {on: source, column: issue_id}}
+  DISCUSSES:
+    SlackMessage -> MergeRequest: {fk: {on: source, column: merge_request_id}}
 ```
 
 The live store is partial. It lists the columns the API returns and declares the full-text search:
@@ -522,6 +532,18 @@ RETURN i.summary, m.channel, m.text LIMIT 20
 
 `JiraIssue` reads from the Jira lake store, which serves the filter on `key` and the `summary` column. `SlackMessage` reads from the Slack live store, because only it serves `CONTAINS` on `text`.
 The lake stage hands the issue IDs to the live stage, which takes them on `issue_id` from its `accepts:`. The combine stage combines both stages' rows on `MENTIONS`.
+
+One node can also read from two stores:
+
+```cypher
+MATCH (m:SlackMessage)-[:DISCUSSES]->(mr:MergeRequest)
+WHERE m.text CONTAINS 'rollback'
+RETURN mr.iid, m.author
+```
+
+No single store serves every need of `m`. Only the live store serves `CONTAINS` on `text`, and only the lake store holds `merge_request_id` for `DISCUSSES`. So placement splits `m` across both.
+The live stage runs the full-text search and returns message IDs. The lake stage reads `merge_request_id` and `author` for those IDs, which it takes on `id` from its `accepts:`.
+The combine stage joins the two parts on the identity of `m` and follows `DISCUSSES` to the merge request.
 
 ## Add a backend
 
@@ -908,7 +930,7 @@ The loader collects every error with its package and fails once. A missing decla
 - A user-scoped entity whose owner relationship does not reach `User` or allows more than one owner per row. The owner relationship must be a foreign key on the entity's row.
 - An unknown deployment shape.
 - A stored entity with no `complete: true` store in the deployment's model, or with two.
-- Two partial stores of one entity that could both serve needs that its complete store cannot serve.
+- Two different minimal combinations of one entity's stores that serve the same needs, unless only one of them includes the complete store.
 - A store entry without `accepts:`, or an `accepts:` column that the store does not list.
 - A relationship variant with no binding, or with two. A foreign key binds in the store whose table holds the column, and an edge table binds in the store that declares it.
 - An edge table whose two endpoints are not both on its connection.
