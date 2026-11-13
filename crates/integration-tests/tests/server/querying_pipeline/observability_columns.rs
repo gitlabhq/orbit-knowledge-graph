@@ -9,6 +9,11 @@ use query_engine::shared::content::{
 
 const SERVICE: &str = "observability";
 
+/// SeededColumnResolver yields every value as a string, so these cover the
+/// compiler and hydration path rather than the typing ObservabilityService
+/// applies. The int64 columns are Int64 in production; server/observability_resolver.rs
+/// covers that.
+
 fn registry() -> ColumnResolverRegistry {
     let mut registry = ColumnResolverRegistry::new();
     registry.register(SERVICE, Arc::new(SeededColumnResolver::from_seed_file()));
@@ -94,9 +99,20 @@ async fn resolves_several_pipeline_columns_in_one_pass() {
     )
     .await;
 
-    assert!(column(&map, "Pipeline", 3000, "observability_trace_id").is_some());
-    assert!(column(&map, "Pipeline", 3000, "observability_trace_duration_nano").is_some());
-    assert!(column(&map, "Pipeline", 3000, "observability_trace_error_count").is_some());
+    assert_eq!(
+        column(&map, "Pipeline", 3000, "observability_trace_id"),
+        Some(&ColumnValue::String(
+            "4bf92f3577b34da6a3ce929d0e0e4736".into()
+        ))
+    );
+    assert_eq!(
+        column(&map, "Pipeline", 3000, "observability_trace_duration_nano"),
+        Some(&ColumnValue::String("412000000".into()))
+    );
+    assert_eq!(
+        column(&map, "Pipeline", 3000, "observability_trace_error_count"),
+        Some(&ColumnValue::String("2".into()))
+    );
 }
 
 /// A seeded null and an unseeded row both resolve to nothing, so the seed is
