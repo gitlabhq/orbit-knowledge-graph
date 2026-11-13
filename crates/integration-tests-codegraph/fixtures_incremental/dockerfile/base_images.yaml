@@ -1,0 +1,30 @@
+name: "Dockerfile: base images are imported symbols"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      FROM --platform=$BUILDPLATFORM registry.gitlab.com/group/project/base:1.0@sha256:abc AS build
+      FROM golang:1.22 AS compile
+      FROM scratch
+
+tests:
+  - name: "every FROM image is an ImportedSymbol, with or without a stage name"
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN i.import_path AS image
+      ORDER BY image
+    assert:
+      - { row_count: 3 }
+      - { row: { image: "golang" } }
+      - { row: { image: "registry.gitlab.com/group/project/base" } }
+      - { row: { image: "scratch" } }
+
+  - name: "a stage calls its base image"
+    query: |
+      MATCH (s:Definition)-[:CALLS]->(i:ImportedSymbol)
+      RETURN s.name AS stage, i.import_path AS image
+      ORDER BY stage
+    assert:
+      - { row_count: 2 }
+      - { row: { stage: "build", image: "registry.gitlab.com/group/project/base" } }
+      - { row: { stage: "compile", image: "golang" } }

@@ -1,0 +1,43 @@
+name: "Dockerfile: files are recognized by name"
+
+fixtures:
+  - path: Dockerfile
+    content: "FROM alpine AS a\n"
+
+  - path: Containerfile
+    content: "FROM alpine AS b\n"
+
+  - path: Dockerfile.dev
+    content: "FROM alpine AS c\n"
+
+  - path: services/api/Containerfile.prod
+    content: "FROM alpine AS d\n"
+
+  - path: build/app.dockerfile
+    content: "FROM alpine AS e\n"
+
+  - path: ci/DOCKERFILE
+    content: "FROM alpine AS f\n"
+
+  - path: tools/build.Containerfile
+    content: "FROM alpine AS g\n"
+
+  - path: Dockerfile.erb
+    content: "FROM <%= base %> AS template\n"
+
+tests:
+  - name: "names match in any case and templates define nothing"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Class'
+      RETURN d.file_path AS path
+      ORDER BY path
+    assert:
+      - { row_count: 7 }
+      - { row: { path: "Dockerfile" } }
+      - { row: { path: "Containerfile" } }
+      - { row: { path: "Dockerfile.dev" } }
+      - { row: { path: "services/api/Containerfile.prod" } }
+      - { row: { path: "build/app.dockerfile" } }
+      - { row: { path: "ci/DOCKERFILE" } }
+      - { row: { path: "tools/build.Containerfile" } }
