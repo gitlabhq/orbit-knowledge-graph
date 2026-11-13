@@ -24,8 +24,8 @@ use super::correlation;
 use super::helpers::send_query_result;
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationStage, HydrationStage, RedactionStage, RoutingOutput, RoutingStage, SecurityStage,
-    graph_executors,
+    AuthorizationStage, HydrationStage, PeerExecutors, RedactionStage, RoutingOutput, RoutingStage,
+    SecurityStage, graph_executors,
 };
 
 pub struct RawQuery {
@@ -41,6 +41,7 @@ pub enum QueryServiceOutput {
 #[derive(Clone)]
 pub struct QueryPipelineService {
     client: Arc<ArrowClickHouseClient>,
+    peers: PeerExecutors,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
     billing_tracker: Option<Arc<dyn BillingTracker>>,
     analytics_tracker: Option<Arc<dyn AnalyticsTracker>>,
@@ -56,6 +57,7 @@ impl QueryPipelineService {
     ) -> Self {
         Self {
             client,
+            peers: PeerExecutors::default(),
             resolver_registry: None,
             billing_tracker: None,
             analytics_tracker: None,
@@ -64,9 +66,39 @@ impl QueryPipelineService {
         }
     }
 
+    pub fn with_peers(mut self, peers: PeerExecutors) -> Self {
+        self.peers = peers;
+        self
+    }
+
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
         self.resolver_registry = Some(registry);
         self
+    }
+
+    /// The routing and DAG stages of one query, over every connection the snapshot serves.
+    fn stages(
+        &self,
+        schema: &SchemaSnapshot,
+        log_comment: String,
+        settings: Vec<(String, String)>,
+    ) -> (RoutingStage, DagStage) {
+        let graph = graph_executors(
+            Arc::clone(&self.client),
+            &schema.data_model,
+            "base",
+            log_comment,
+            settings,
+        );
+        let routing = RoutingStage {
+            connections: schema.connections.clone(),
+        };
+        let dag = DagStage {
+            executors: self.peers.with_graph(graph),
+            connections: schema.connections.clone(),
+            checks: schema.authorization.checks().clone(),
+        };
+        (routing, dag)
     }
 
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
@@ -106,19 +138,10 @@ impl QueryPipelineService {
             )),
         ]);
 
-        let dag = DagStage::relational(
-            graph_executors(
-                Arc::clone(&self.client),
-                &schema.data_model,
-                "base",
-                correlation::log_comment_base(
-                    claims.user_id,
-                    &query.text,
-                    schema.migration_version,
-                ),
-                query.settings,
-            ),
-            schema.authorization.checks().clone(),
+        let (routing, dag) = self.stages(
+            schema,
+            correlation::log_comment_base(claims.user_id, &query.text, schema.migration_version),
+            query.settings,
         );
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
@@ -147,7 +170,7 @@ impl QueryPipelineService {
         // timed-out queries invisible to every metric.
         let pipeline = async {
             let route = PipelineRunner::start(&mut ctx, &mut obs)
-                .then(&RoutingStage::default())
+                .then(&routing)
                 .await?
                 .finish()
                 .ok_or_else(|| PipelineError::custom("RoutingStage produced no output"))
@@ -209,4 +232,33 @@ async fn deliver(
     };
     send_query_result(responses, render(output)?).await?;
     Ok(counts)
+}
+
+#[cfg(test)]
+mod tests {
+    use clickhouse_client::ClickHouseConfigurationExt;
+    use orbit_server_config::AppConfig;
+    use query_data_model::{Catalog, ClickHouse, Packages};
+    use query_engine::compiler::dag::Connections;
+
+    use super::*;
+    use crate::active_schema::ActiveSchema;
+
+    #[test]
+    fn routing_and_the_dag_plan_over_the_connections_of_the_model_in_its_order() {
+        let model = Packages::embedded().deployment("demo").unwrap();
+        let graph = Arc::new(Catalog::<ClickHouse>::from_model(&model).unwrap());
+        let schema = ActiveSchema::pinned(Arc::clone(&graph)).snapshot().unwrap();
+        let config = AppConfig::embedded_defaults();
+        let service = QueryPipelineService::new(
+            Arc::new(config.graph.build_client("graph")),
+            Arc::new(config.analytics),
+            Duration::from_secs(1),
+        );
+        let (routing, dag) = service.stages(&schema, String::new(), Vec::new());
+        let expected = Connections::of(&model).unwrap();
+        assert_ne!(expected.names()[0], graph.connection());
+        assert_eq!(routing.connections.names(), expected.names());
+        assert_eq!(dag.connections.names(), expected.names());
+    }
 }

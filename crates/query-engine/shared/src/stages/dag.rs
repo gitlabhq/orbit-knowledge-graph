@@ -15,24 +15,12 @@ use compiler::orbit_authorization::Checks;
 use crate::dag::{Executed, Executors, Outcome, Runner, Silent};
 use crate::types::{ExecutionOutput, QueryExecutionLog};
 
-/// The executors a deployment registers, the connections it serves next to its graph
-/// connection, and the providers that check each stage's rows.
+/// The executors a deployment registers, every connection it serves, and the providers that
+/// check each stage's rows.
 pub struct DagStage {
     pub executors: Executors,
-    pub peers: Vec<compiler::dag::Peer>,
+    pub connections: Connections,
     pub checks: Checks,
-}
-
-impl DagStage {
-    /// A deployment that serves its graph connection alone, checking rows through the
-    /// deployment's providers.
-    pub fn relational(executors: Executors, checks: Checks) -> Self {
-        Self {
-            executors,
-            peers: Vec::new(),
-            checks,
-        }
-    }
 }
 
 fn data_model(ctx: &QueryPipelineContext) -> Result<Arc<Catalog<ClickHouse>>, PipelineError> {
@@ -82,15 +70,10 @@ impl PipelineStage for DagStage {
         let data_model = data_model(ctx).inspect_err(|e| obs.record_error(e))?;
         let grants = ctx.grants().inspect_err(|e| obs.record_error(e))?;
         let limits = ctx.limits().inspect_err(|e| obs.record_error(e))?;
-        let connections = Connections::new(
-            std::iter::once(compiler::dag::Peer::ClickHouse(Arc::clone(&data_model)))
-                .chain(self.peers.iter().cloned())
-                .collect(),
-        );
         let frontend = Frontend::Server(data_model);
         let env = Env {
             frontend: &frontend,
-            connections: &connections,
+            connections: &self.connections,
             grants,
             limits,
             trace: false,

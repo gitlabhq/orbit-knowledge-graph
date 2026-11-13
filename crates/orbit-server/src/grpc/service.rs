@@ -192,6 +192,11 @@ impl OrbitServiceImpl {
         self
     }
 
+    pub fn with_peers(mut self, peers: crate::pipeline::PeerExecutors) -> Self {
+        self.pipeline = self.pipeline.with_peers(peers);
+        self
+    }
+
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
         self.pipeline = self.pipeline.with_resolver_registry(registry);
         self

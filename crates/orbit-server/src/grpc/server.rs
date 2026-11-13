@@ -14,6 +14,7 @@ use crate::active_schema::ActiveSchema;
 use crate::analytics::AnalyticsTracker;
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
+use crate::pipeline::PeerExecutors;
 use crate::proto::orbit_service_server::OrbitServiceServer;
 use orbit_billing::{BillingTracker, QuotaService};
 
@@ -57,6 +58,11 @@ impl GrpcServer {
             tls_config,
             grpc_config,
         }
+    }
+
+    pub fn with_peers(mut self, peers: PeerExecutors) -> Self {
+        self.service = self.service.with_peers(peers);
+        self
     }
 
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {

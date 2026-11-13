@@ -1,5 +1,6 @@
-//! Executors run the requests of compiled stages, one per connection. Production registers
-//! ClickHouse, the local CLI DuckDB; code and live connections run only behind test fakes.
+//! Executors run the requests of compiled stages, one per connection. The server registers
+//! ClickHouse and DuckDB, the local CLI DuckDB; code and live connections run only behind test
+//! fakes.
 
 use std::collections::HashMap;
 use std::sync::Arc;

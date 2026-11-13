@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use orbit_server::pipeline::{HydrationStage, RoutingStage};
+use orbit_server::pipeline::{HydrationStage, PeerExecutors, RoutingStage};
 use orbit_server::redaction::QueryResult;
 use query_data_model::testkit::limits;
 use query_data_model::{Catalog, ClickHouse};
@@ -28,12 +28,7 @@ fn served_stage(model: &Arc<query_data_model::Model>, graph: Arc<SeededGraph>) -
             .expect("the dag deployment binds the DAG model");
     DagStage {
         executors: dag_executors(&connections, graph, "alice"),
-        peers: connections
-            .peers()
-            .iter()
-            .filter(|peer| !matches!(peer, compiler::dag::Peer::ClickHouse(_)))
-            .cloned()
-            .collect(),
+        connections,
         checks: bound.checks().clone(),
     }
 }
@@ -69,7 +64,7 @@ async fn the_server_checks_remote_rows_through_the_deployments_providers() {
     let mut ctx = context(&model, query);
     let mut obs = NoOpObserver;
     RoutingStage {
-        peers: dag.peers.clone(),
+        connections: dag.connections.clone(),
     }
     .execute(&mut ctx, &mut obs)
     .await
@@ -78,6 +73,21 @@ async fn the_server_checks_remote_rows_through_the_deployments_providers() {
     let rows = super::json_rows(&executed.batches);
     let projects: Vec<&serde_json::Value> = rows.iter().map(|row| &row["f_project_id"]).collect();
     assert_eq!(projects, [&json!(42), &json!(42)]);
+}
+
+#[test]
+fn a_second_clickhouse_connection_fails_server_startup() {
+    let model = crate::dag_fakes::peer_packages()
+        .deployed(&query_data_model::testkit::deployments(), "peers")
+        .unwrap();
+    let error = match PeerExecutors::open(&model, &Default::default()) {
+        Ok(_) => panic!("the shape opened"),
+        Err(error) => error.to_string(),
+    };
+    assert_eq!(
+        error,
+        "invalid query data model: clickhouse stores sit on connections main and releases"
+    );
 }
 
 async fn served_output() -> PipelineOutput {
@@ -94,7 +104,7 @@ async fn served_output() -> PipelineOutput {
     let mut ctx = context(&model, DISCUSSED);
     let mut obs = NoOpObserver;
     RoutingStage {
-        peers: dag.peers.clone(),
+        connections: dag.connections.clone(),
     }
     .execute(&mut ctx, &mut obs)
     .await
