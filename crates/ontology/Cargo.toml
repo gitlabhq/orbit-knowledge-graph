@@ -17,3 +17,6 @@ strum = { workspace = true }
 tar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
+
+[lints]
+workspace = true

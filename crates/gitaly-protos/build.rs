@@ -41,12 +41,10 @@ fn regenerate_protos() {
         format!("{proto_dir}/blob.proto"),
     ];
 
+    let mut config = prost_build::Config::new();
     if let Ok(protoc) = protoc_bin_vendored::protoc_bin_path() {
         println!("cargo:warning=Using vendored protoc at {protoc:?}");
-        // SAFETY: build script runs single-threaded before compilation
-        unsafe {
-            std::env::set_var("PROTOC", protoc);
-        }
+        config.protoc_executable(protoc);
     }
 
     let out_dir =
@@ -54,7 +52,7 @@ fn regenerate_protos() {
 
     tonic_prost_build::configure()
         .out_dir(&out_dir)
-        .compile_protos(&protos, &[proto_dir])
+        .compile_with_config(config, &protos, &[proto_dir])
         .expect("Failed to compile Gitaly protos");
 
     println!("cargo:warning=Regenerated protos to {}", out_dir.display());

@@ -40,7 +40,7 @@ pub(super) fn add_capped(
 ) -> Result<u64, CapExceeded> {
     let cap = cap.unwrap_or(u64::MAX);
     total
-        .fetch_update(Relaxed, Relaxed, |before| {
+        .try_update(Relaxed, Relaxed, |before| {
             before.checked_add(n).filter(|&count| count <= cap)
         })
         .map_err(|before| CapExceeded {
