@@ -215,6 +215,7 @@ secrecy = "0.10.3"
 kube = { version = "4.2", default-features = false, features = ["client", "rustls-tls", "aws-lc-rs"] }
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls-no-provider"] }
+httpdate = "1.0.3"
 rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs"] }
 aws-lc-rs = { version = "1.18.1", default-features = false }
 health-check = { path = "crates/health-check" }

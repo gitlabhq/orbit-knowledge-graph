@@ -13,6 +13,7 @@ use orbit_utils::fs_walk::{
     CapExceeded, ContentClass, Counter, Decision, FileInventoryEntry, FileLabel, FileStreamHooks,
     SkipReason,
 };
+use orbit_utils::vfs_policies::in_excluded_directory;
 use rustc_hash::FxHashMap;
 
 use super::Language;
@@ -102,7 +103,11 @@ impl FileStreamHooks for CodeFilter {
         if self.max_file_size.is_some_and(|cap| file.size > cap) {
             return Some(self.record(file, SkipReason::Oversize, ContentClass::Unknown));
         }
-        if is_excluded_from_indexing(Path::new(&file.path)) {
+        let path = Path::new(&file.path);
+        if in_excluded_directory(&file.path) {
+            return Some(self.record(file, SkipReason::ExcludedDirectory, ContentClass::Unknown));
+        }
+        if is_excluded_from_indexing(path) {
             return Some(self.record(file, SkipReason::ExcludedExtension, ContentClass::Unknown));
         }
         None
@@ -201,7 +206,8 @@ fn is_lfs_pointer(content: &[u8]) -> bool {
 /// The single denylist of files recorded as a bare node but never loaded or
 /// parsed: globs matched case-insensitively on the basename, grouped by line.
 /// Source (including tests), manifests, lockfiles, and dotfiles are absent so
-/// resolver inputs survive — this is the one place to add an exclusion.
+/// resolver inputs survive — file-name exclusions go here, directory-subtree
+/// exclusions in [`orbit_utils::vfs_policies::EXCLUDED_INDEXING_DIRS`].
 pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     // Raster + vector images.
     "*.{png,jpg,jpeg,gif,bmp,ico,webp,avif,tiff,tif,svg}",
@@ -331,6 +337,18 @@ mod tests {
     }
 
     #[test]
+    fn dockerfiles_are_parse_candidates() {
+        let mut f = filter();
+        for path in ["Dockerfile", "svc/api.Containerfile", "Dockerfile.dev"] {
+            let (decision, label) = f.on_content(&entry(path, 100), b"FROM alpine\n");
+            assert_eq!(decision, Decision::Parse, "{path}");
+            assert_eq!(label.content, ContentClass::Code, "{path}");
+        }
+        let (decision, _) = f.on_content(&entry("Dockerfile.erb", 100), b"FROM <%= base %>\n");
+        assert_ne!(decision, Decision::Parse);
+    }
+
+    #[test]
     fn list_only_for_excluded_oversize_binary_minified() {
         let mut f = CodeFilter::new(Some(50), None, detect_language_from_path);
         assert_eq!(
@@ -379,7 +397,7 @@ mod tests {
             ),
             ("oversize.csv", oversize),
             (
-                "docs/lfs.md",
+                "docs/lfs.txt",
                 b"Pointers start with `version https://git-lfs.github.com/spec/v1`.\n".to_vec(),
             ),
         ] {
@@ -477,6 +495,30 @@ mod tests {
                 !is_excluded_from_indexing(&p(path)),
                 "should NOT be excluded: {path}"
             );
+        }
+    }
+
+    #[test]
+    fn excluded_directory_subtrees_settle_in_header() {
+        let mut f = filter();
+        for path in [
+            "docs-locale/ja/README.md",
+            "docs-locale/guide.md",
+            "doc-locale/ja-jp/user/project.md",
+            "nested/docs-locale/zh/setup.md",
+            "Docs-Locale/de/intro.md",
+        ] {
+            let (decision, label) = f.on_header(&entry(path, 100)).expect(path);
+            assert_eq!(decision, Decision::ListOnly, "{path}");
+            assert_eq!(label.skip, Some(SkipReason::ExcludedDirectory), "{path}");
+        }
+        for path in [
+            "docs-locale",
+            "docs/locale.md",
+            "my-docs-locale-notes/x.md",
+            "docs-locale.md",
+        ] {
+            assert_eq!(hd(f.on_header(&entry(path, 100))), None, "{path}");
         }
     }
 
