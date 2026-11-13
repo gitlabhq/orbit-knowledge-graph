@@ -206,6 +206,7 @@ engine:
         columns: { source_id: { type: Int64 }, target_id: { type: Int64 } }
 entities:
   MergeRequest:
+    accepts: [id, project_id]
     table: mr_export
     path_column: trav_path
     columns:
@@ -1232,8 +1233,8 @@ fn graph_defaults_match_the_property_type() {
 fn stores_that_hold_no_rows_name_no_table() {
     let packages = query_data_model::testkit::patched([(
         "gitlab.source_code/storage/orbit_code.yaml",
-        "  File:\n    columns:",
-        "  File:\n    table: gl_file\n    columns:",
+        "  File:\n    accepts: [project_id, branch]\n    columns:",
+        "  File:\n    accepts: [project_id, branch]\n    table: gl_file\n    columns:\n      id: {immutable: true}",
     )]);
     let errors = spec_errors(packages.deployment("demo"));
     assert_eq!(
@@ -1377,7 +1378,7 @@ fn variants_on_the_same_composite_key_columns_clash() {
         ),
         (
             "overlay/storage/orbit_code.yaml",
-            "kind: storage\npackage: overlay\nstore: code\nentities:\n  Head: {complete: true, columns: {project_id: {immutable: true}, branch: {immutable: true}}}\n  Tip: {complete: true, columns: {project_id: {immutable: true}, branch: {immutable: true}}}\n",
+            "kind: storage\npackage: overlay\nstore: code\nentities:\n  Head: {complete: true, accepts: [project_id, branch], columns: {project_id: {immutable: true}, branch: {immutable: true}}, backend: {repository: {project: project_id, branch: branch}}}\n  Tip: {complete: true, accepts: [project_id, branch], columns: {project_id: {immutable: true}, branch: {immutable: true}}, backend: {repository: {project: project_id, branch: branch}}}\n",
         ),
         (
             "overlay/storage/clickhouse.yaml",
@@ -1393,6 +1394,42 @@ fn variants_on_the_same_composite_key_columns_clash() {
         errors,
         [
             "overlay: store graph keys SOURCE_HEAD(MergeRequest -> Head) and SOURCE_TIP(MergeRequest -> Tip) on project_id, source_branch without distinct type values"
+        ]
+    );
+}
+
+#[test]
+fn every_store_names_the_stored_columns_it_takes_key_sets_on() {
+    let group = |accepts: &str| {
+        query_data_model::testkit::patched([(
+            "gitlab.core/storage/clickhouse.yaml",
+            "  Group:\n    complete: true\n    accepts: [id]\n",
+            accepts,
+        )])
+        .deployment("server")
+    };
+    assert_eq!(
+        spec_errors(group("  Group:\n    complete: true\n")),
+        ["gitlab.core: store graph declares no accepts for Group"]
+    );
+    assert_eq!(
+        spec_errors(group(
+            "  Group:\n    complete: true\n    accepts: [visibility]\n"
+        )),
+        ["gitlab.core: store graph accepts keys on Group.visibility, which it does not store"]
+    );
+    let mut sources = query_data_model::testkit::with_demo().sources().clone();
+    let live = sources
+        .get_mut("integration.slack/storage/live.yaml")
+        .unwrap();
+    *live = live.replace(
+        "accepts: [id, merge_request_id]",
+        "accepts: [id, workspace]",
+    );
+    assert_eq!(
+        spec_errors(Packages::new(query_data_model::Tier::Platform, sources).deployment("demo")),
+        [
+            "integration.slack: store slack accepts keys on SlackMessage.workspace, which its operation does not filter on"
         ]
     );
 }

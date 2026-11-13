@@ -76,7 +76,7 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
             pattern: "compile($$$ARGS)".into(),
             limit: Some(1001),
             fields: vec![
-                RequestField::Path,
+                RequestField::Column("path".into()),
                 RequestField::Repository("project_id".into()),
                 RequestField::Line,
                 RequestField::Capture("ARGS".into()),

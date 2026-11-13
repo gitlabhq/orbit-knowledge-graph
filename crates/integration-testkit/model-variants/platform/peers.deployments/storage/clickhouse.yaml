@@ -4,6 +4,7 @@ store: graph
 entities:
   Rollout:
     complete: true
+    accepts: [id, release_id]
     table: gl_rollout
     columns:
       id: {immutable: true, backend: {type: Int64}}

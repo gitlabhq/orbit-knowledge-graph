@@ -4,6 +4,7 @@ store: acme
 entities:
   Message:
     complete: true
+    accepts: [id]
     table: acme_message
     columns:
       id: {immutable: true, backend: {type: String}}

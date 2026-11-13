@@ -15,6 +15,7 @@ engine:
 entities:
   Release:
     complete: true
+    accepts: [id, merge_request_id]
     table: gl_release
     columns:
       id: {immutable: true, backend: {type: UUID}}

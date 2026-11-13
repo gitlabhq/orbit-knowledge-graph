@@ -194,6 +194,14 @@ impl Store {
             }
         }
         let access = self.access(entity, name, &spec.access, package, graph, diagnostics);
+        let accepts = self.resolve_accepts(
+            entity,
+            name,
+            spec.accepts.as_deref(),
+            package,
+            graph,
+            diagnostics,
+        );
         let identity = graph.entity(entity).identity.clone();
         if identity.is_empty() {
             return None;
@@ -208,17 +216,23 @@ impl Store {
             );
             return None;
         }
-        let mut key = Vec::new();
-        for part in identity {
-            let column = diagnostics.require(self.column(part), package, || {
-                format!(
-                    "store {} does not store {name}.{}, its identity",
-                    self.name,
-                    graph.property(part).name
-                )
-            })?;
-            key.push(column.to_string());
-        }
+        let stored: Vec<Option<&str>> = identity.iter().map(|part| self.column(*part)).collect();
+        let key: Vec<String> = match stored.iter().all(Option::is_some) {
+            true => stored.into_iter().flatten().map(str::to_string).collect(),
+            false if spec.table.is_some() => {
+                let part = identity[stored.iter().position(Option::is_none)?];
+                diagnostics.error(
+                    package,
+                    format!(
+                        "store {} does not store {name}.{}, its identity",
+                        self.name,
+                        graph.property(part).name
+                    ),
+                );
+                return None;
+            }
+            false => Vec::new(),
+        };
         let path_column = spec
             .path_column
             .clone()
@@ -238,6 +252,8 @@ impl Store {
             entity,
             package: package.to_string(),
             complete: spec.complete,
+            accepts,
+            returned: columns.iter().map(|(id, _, _)| *id).collect(),
             table: spec.table.clone(),
             key,
             path_column,
@@ -249,6 +265,36 @@ impl Store {
             options: spec.backend.as_ref(),
             columns,
         })
+    }
+
+    fn resolve_accepts(
+        &self,
+        entity: EntityId,
+        name: &str,
+        written: Option<&[String]>,
+        package: &str,
+        graph: &GraphCatalog,
+        diagnostics: &mut Diagnostics,
+    ) -> Vec<PropertyId> {
+        let Some(written) = diagnostics.require(written, package, || {
+            format!("store {} declares no accepts for {name}", self.name)
+        }) else {
+            return Vec::new();
+        };
+        written
+            .iter()
+            .filter_map(|property| {
+                let id = graph
+                    .property_id(entity, property)
+                    .filter(|id| self.column(*id).is_some());
+                diagnostics.require(id, package, || {
+                    format!(
+                        "store {} accepts keys on {name}.{property}, which it does not store",
+                        self.name
+                    )
+                })
+            })
+            .collect()
     }
 
     fn access(

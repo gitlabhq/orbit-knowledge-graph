@@ -10,6 +10,7 @@ engine:
 entities:
   Folder:
     complete: true
+    accepts: [id]
     table: acme_folder
     columns:
       id: {immutable: true, backend: {type: Int64}}
@@ -18,6 +19,7 @@ entities:
     access: {order: [id]}
   Person:
     complete: true
+    accepts: [id]
     table: acme_person
     columns:
       id: {immutable: true, backend: {type: Int64}}

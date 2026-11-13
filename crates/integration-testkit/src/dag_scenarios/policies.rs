@@ -52,7 +52,7 @@ fn listing(policy: &str) -> Packages {
         ),
         (
             "test.listing/storage/live.yaml",
-            "kind: storage\npackage: test.listing\nstore: slack\nentities:\n  Listed:\n    complete: true\n    columns:\n      id: {immutable: true}\n      channel: {}\n      text: {}\n    backend:\n      operation: search.messages\n      filters: [id, channel]\n".to_string(),
+            "kind: storage\npackage: test.listing\nstore: slack\nentities:\n  Listed:\n    complete: true\n    accepts: [id]\n    columns:\n      id: {immutable: true}\n      channel: {}\n      text: {}\n    backend:\n      operation: search.messages\n      filters: [id, channel]\n".to_string(),
         ),
     ];
     let sources = files
@@ -110,24 +110,17 @@ async fn a_global_live_entity_reads_with_its_permission_alone() {
     assert_eq!(texts(ran), [json!("deploy memes")]);
 }
 
-/// A code store whose entity enforces `none` still names its repositories through the property
+/// A code store whose entity enforces `none` still names its repositories through the columns
 /// its store declares, and the `read_code` check decides the rows.
 #[tokio::test]
 async fn a_code_read_under_none_searches_the_named_repositories_through_its_check() {
     let model = edited(
         dag_packages(),
-        &[
-            (
-                "gitlab.source_code/authorization.yaml",
-                "orbit_code: {scope_key: {via: IN_PROJECT}}",
-                "orbit_code: none",
-            ),
-            (
-                "gitlab.source_code/storage/orbit_code.yaml",
-                "    backend:\n",
-                "    backend:\n      repository: project_id\n",
-            ),
-        ],
+        &[(
+            "gitlab.source_code/authorization.yaml",
+            "orbit_code: {scope_key: {via: IN_PROJECT}}",
+            "orbit_code: none",
+        )],
     )
     .deployment("demo")
     .unwrap();

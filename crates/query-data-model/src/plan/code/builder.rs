@@ -1,6 +1,7 @@
 use super::{
     CodeError, CodeLanguage, CodeOperation, CodePlan, CodeValue, Index, Language, Pattern,
 };
+use crate::PropertyId;
 use crate::catalog::Catalog;
 use crate::implementations::orbit_code::{OrbitCode, SearchMode};
 use crate::plan::tracking::{self, Construction, Declared, Ref};
@@ -29,12 +30,25 @@ pub struct Matches {
 }
 
 impl Matches {
-    pub fn field(&self, name: &str) -> Result<Field, CodeError> {
-        self.find(name, |value| value != CodeValue::Capture)
+    /// The column of the index's store that holds `property`.
+    pub fn column(&self, property: PropertyId) -> Result<Field, CodeError> {
+        self.fields
+            .iter()
+            .find(|field| field.value == CodeValue::Column(property))
+            .cloned()
             .ok_or_else(|| CodeError::UnknownField {
-                name: name.to_string(),
-                available: self.names(|value| value != CodeValue::Capture),
+                name: format!("{property:?}"),
+                available: self.names(|value| matches!(value, CodeValue::Column(_))),
             })
+    }
+
+    /// The line each match starts at.
+    pub fn line(&self) -> Result<Field, CodeError> {
+        self.fields
+            .iter()
+            .find(|field| field.value == CodeValue::Line)
+            .cloned()
+            .ok_or(CodeError::Incomplete("a structural match before its line"))
     }
 
     pub fn capture(&self, name: &str) -> Result<Field, CodeError> {

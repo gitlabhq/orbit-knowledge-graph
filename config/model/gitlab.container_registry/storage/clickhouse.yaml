@@ -4,6 +4,7 @@ store: graph
 entities:
   ContainerRepository:
     complete: true
+    accepts: [id, project_id]
     table: gl_container_repository
     columns:
       id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}

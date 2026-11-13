@@ -81,14 +81,30 @@ impl Cut<'_> {
         Ok(needed)
     }
 
-    pub(super) fn keys(&self, crossing: &Crossing, order: &[usize]) -> KeyInput {
+    /// The key set a crossing hands its consumer, on properties the consumer's store accepts.
+    pub(super) fn keys(&self, crossing: &Crossing, order: &[usize]) -> Result<KeyInput> {
         let stage = |group: usize| order.iter().position(|g| *g == group).unwrap_or_default();
         let (producer, consumer) = crossing.sides(order, |binding| self.group(binding));
         let producer_group = self.group(producer[0].0);
         let binding = self.query.name(consumer[0].0).to_string();
         let graph = self.query.model.graph();
+        let peer = &self.connections.peers()[self.groups[self.group(consumer[0].0)].place];
+        for (bound, property) in &consumer {
+            let entity = self.query.entity(*bound).ok_or_else(|| {
+                QueryError::PipelineInvariant("a crossing's endpoint has no entity".into())
+            })?;
+            if !peer.accepts(entity, *property) {
+                return Err(QueryError::Validation(format!(
+                    "{} on connection {} takes no key set on {}.{}, so the query cannot cross into it there",
+                    self.query.name(*bound),
+                    peer.connection(),
+                    graph.entity(entity).name,
+                    graph.property(*property).name
+                )));
+            }
+        }
         let name = |property: PropertyId| graph.property(property).name.clone();
-        KeyInput {
+        Ok(KeyInput {
             from: stage(producer_group),
             columns: producer
                 .iter()
@@ -106,7 +122,7 @@ impl Cut<'_> {
                 .iter()
                 .map(|(_, property)| graph.property(*property).data_type)
                 .collect(),
-        }
+        })
     }
 
     pub(super) fn group(&self, binding: Ref) -> usize {

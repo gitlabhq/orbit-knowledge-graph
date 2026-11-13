@@ -60,18 +60,16 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
 fn a_code_plan_renders_a_structural_search_request() {
     let model = model();
     let code = model.physical::<OrbitCode>("code_indexing").unwrap();
+    let file = model.entity("File").unwrap();
+    let path = model.property(file, "path").unwrap().id;
     let plan = code
         .build(|q| {
-            let files = q.repositories(code.index("code", "File")?, [42])?;
+            let files = q.repositories(code.index(file)?, [42])?;
             let files = q.languages(files, [Language::Rust])?;
             let files = q.prefilter(files, Trigrams::of(["compile"]))?;
             let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)")?)?;
             let hits = q.top(hits, 50)?;
-            let fields = [
-                hits.field("path")?,
-                hits.field("line")?,
-                hits.capture("ARGS")?,
-            ];
+            let fields = [hits.column(path)?, hits.line()?, hits.capture("ARGS")?];
             q.select(hits, fields)
         })
         .unwrap();
@@ -85,7 +83,7 @@ fn a_code_plan_renders_a_structural_search_request() {
             pattern: "compile($$$ARGS)".into(),
             limit: Some(50),
             fields: vec![
-                RequestField::Path,
+                RequestField::Column("path".into()),
                 RequestField::Line,
                 RequestField::Capture("ARGS".into())
             ],
@@ -97,7 +95,7 @@ fn a_code_plan_renders_a_structural_search_request() {
 fn code_construction_rejects_unknown_captures_and_misplaced_steps() {
     let model = model();
     let code = model.physical::<OrbitCode>("code_indexing").unwrap();
-    let index = code.index("code", "File").unwrap();
+    let index = code.index(model.entity("File").unwrap()).unwrap();
     let unknown = code.build(|q| {
         let files = q.repositories(index, [42])?;
         let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)")?)?;
@@ -143,7 +141,7 @@ fn code_construction_rejects_unknown_captures_and_misplaced_steps() {
         .deployment("demo")
         .unwrap();
     let foreign = other.physical::<OrbitCode>("code_indexing").unwrap();
-    let foreign = foreign.index("code", "File").unwrap();
+    let foreign = foreign.index(other.entity("File").unwrap()).unwrap();
     let rejected = code.build(|q| q.repositories(foreign, [42]));
     assert_eq!(
         rejected.unwrap_err(),
@@ -155,11 +153,13 @@ fn code_construction_rejects_unknown_captures_and_misplaced_steps() {
 fn a_rewrite_restricts_repositories_through_the_builder() {
     let model = model();
     let code = model.physical::<OrbitCode>("code_indexing").unwrap();
+    let file = model.entity("File").unwrap();
+    let path = model.property(file, "path").unwrap().id;
     let plan = code
         .build(|q| {
-            let files = q.repositories(code.index("code", "File")?, [7, 42])?;
+            let files = q.repositories(code.index(file)?, [7, 42])?;
             let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)")?)?;
-            let path = hits.field("path")?;
+            let path = hits.column(path)?;
             q.select(hits, [path])
         })
         .unwrap();
@@ -174,7 +174,7 @@ fn a_rewrite_restricts_repositories_through_the_builder() {
         .unwrap();
     let request = code.render(&restricted).unwrap();
     assert_eq!(request.repositories, [42]);
-    assert_eq!(request.fields, [RequestField::Path]);
+    assert_eq!(request.fields, [RequestField::Column("path".into())]);
 }
 
 #[test]
@@ -328,42 +328,41 @@ fn a_via_step_whose_key_type_differs_from_the_target_id_fails_the_load() {
 }
 
 #[test]
-fn a_code_store_names_the_repository_of_an_entity_no_via_chain_scopes() {
+fn a_code_store_names_the_repository_and_branch_columns_of_each_entity() {
     let model = model();
     let code = model.physical::<OrbitCode>("code_indexing").unwrap();
     let file = model.graph().entity_id("File").unwrap();
     let repository = code.repository(file).unwrap();
-    assert_eq!(model.graph().property(repository).name, "project_id");
+    assert_eq!(
+        model.graph().property(repository.project).name,
+        "project_id"
+    );
+    assert_eq!(model.graph().property(repository.branch).name, "branch");
 
-    let load = |policy: &str, backend: &str| {
+    let load = |declared: &str| {
         let mut sources = Packages::embedded().sources().clone();
-        let access = sources
-            .get_mut("gitlab.source_code/authorization.yaml")
-            .unwrap();
-        *access = access.replace("orbit_code: {scope_key: {via: IN_PROJECT}}", policy);
         let storage = sources
             .get_mut("gitlab.source_code/storage/orbit_code.yaml")
             .unwrap();
-        *storage = storage.replace("    backend:\n", &format!("    backend:\n{backend}"));
-        Packages::new(Tier::Platform, sources).deployment("demo")
+        *storage = storage.replace(
+            "      repository: {project: project_id, branch: branch}\n",
+            declared,
+        );
+        Packages::new(Tier::Platform, sources)
+            .deployment("demo")
+            .unwrap_err()
+            .to_string()
     };
-    let declared = load("orbit_code: none", "      repository: project_id\n").unwrap();
-    let code = declared.physical::<OrbitCode>("code_indexing").unwrap();
-    assert_eq!(code.repository(file), Some(repository));
-    let error = |result: Result<Arc<Model>, query_data_model::DataModelError>| {
-        result.unwrap_err().to_string()
-    };
-    let missing = error(load("orbit_code: none", ""));
+    let missing = load("");
     assert!(
-        missing.contains("store code names no repository property for File"),
+        missing.contains("store code names no repository columns for File"),
         "{missing}"
     );
-    let twice = error(load(
-        "orbit_code: {scope_key: {via: IN_PROJECT}}",
-        "      repository: project_id\n",
-    ));
+    let untyped = load("      repository: {project: path, branch: branch}\n");
     assert!(
-        twice.contains("store code names a repository property for File, whose via chain names it"),
-        "{twice}"
+        untyped.contains(
+            "store code names File.path as a repository column, which is no stored Int property"
+        ),
+        "{untyped}"
     );
 }

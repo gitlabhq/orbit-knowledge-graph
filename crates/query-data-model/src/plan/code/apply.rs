@@ -30,18 +30,18 @@ impl CodeBuilder<'_> {
         match operation {
             CodeOperation::Repositories { projects, index } => match projects.is_empty() {
                 true => Err(CodeError::NoRepositories),
-                false => Ok(Outputs::extend(
-                    [
-                        Declare::named("path", CodeValue::Path),
-                        Declare::named("branch", CodeValue::Branch),
-                    ]
-                    .into_iter()
-                    .chain(
-                        self.catalog
-                            .repository_key(*index)
-                            .map(|key| Declare::named(key, CodeValue::Repository)),
-                    ),
-                )),
+                false => {
+                    let graph = self.catalog.graph();
+                    let store = &self.catalog.model().stores()[index.store];
+                    Ok(Outputs::extend(store.returns(index.entity).map(
+                        |property| {
+                            Declare::named(
+                                graph.property(property).name.as_str(),
+                                CodeValue::Column(property),
+                            )
+                        },
+                    )))
+                }
             },
             CodeOperation::Branches(heads) => {
                 Self::files(inputs, "a branch restriction")?;
@@ -72,7 +72,7 @@ impl CodeBuilder<'_> {
                 self.searchable(index, SearchMode::Structural)?;
                 let captures = pattern.captures().iter();
                 let captures = captures.map(|capture| Declare::named(capture, CodeValue::Capture));
-                let line = Declare::named("line", CodeValue::Line);
+                let line = Declare::named(crate::plan::logical::MATCH_LINE, CodeValue::Line);
                 Ok(Outputs::extend(std::iter::once(line).chain(captures)))
             }
             CodeOperation::Top(count) => preserve(*count == 0, CodeError::EmptyTop),

@@ -7,6 +7,7 @@ engine:
 entities:
   SlackMessage:
     complete: true
+    accepts: [id, merge_request_id]
     columns:
       id: {immutable: true}
       workspace: {immutable: true}
@@ -20,6 +21,7 @@ entities:
       filters: [id, channel, author, sent_at, merge_request_id]
       text: text
   SlackWorkspace:
+    accepts: []
     columns:
       id: {immutable: true}
       name: {}

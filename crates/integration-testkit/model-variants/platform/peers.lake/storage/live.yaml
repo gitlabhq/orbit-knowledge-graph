@@ -4,6 +4,7 @@ store: slack
 entities:
   TeamMessage:
     complete: true
+    accepts: [id]
     columns:
       id: {immutable: true}
       team: {immutable: true}

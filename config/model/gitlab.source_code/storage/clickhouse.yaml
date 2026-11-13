@@ -4,6 +4,7 @@ store: graph
 entities:
   Branch:
     complete: true
+    accepts: [id, project_id]
     table: gl_branch
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -22,6 +23,7 @@ entities:
 
   Commit:
     complete: true
+    accepts: [id, project_id]
     table: gl_commit
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [Delta(8), LZ4]}}
@@ -39,6 +41,7 @@ entities:
 
   Definition:
     complete: true
+    accepts: [id, project_id]
     table: gl_definition
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -71,6 +74,7 @@ entities:
 
   Directory:
     complete: true
+    accepts: [id, project_id]
     table: gl_directory
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -93,6 +97,7 @@ entities:
 
   File:
     complete: true
+    accepts: [id, project_id]
     table: gl_file
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -119,6 +124,7 @@ entities:
 
   ImportedSymbol:
     complete: true
+    accepts: [id, project_id]
     table: gl_imported_symbol
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}

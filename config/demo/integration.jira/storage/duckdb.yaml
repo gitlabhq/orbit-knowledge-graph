@@ -8,6 +8,7 @@ engine:
 entities:
   JiraProject:
     complete: true
+    accepts: [id, project_id]
     table: jira_project
     columns:
       id: {immutable: true, backend: {type: VARCHAR}}
@@ -19,6 +20,7 @@ entities:
     access: {filter: [id, key, project_id], order: [id]}
   JiraIssue:
     complete: true
+    accepts: [id, jira_project_id, merge_request_id, assignee_id]
     table: jira_issue
     columns:
       id: {immutable: true, backend: {type: VARCHAR}}
@@ -34,6 +36,7 @@ entities:
     access: {filter: [id, key, merge_request_id], text: [summary], order: [id]}
   JiraUser:
     complete: true
+    accepts: [account_id]
     table: jira_user
     columns:
       account_id: {immutable: true, backend: {type: VARCHAR}}
@@ -42,6 +45,7 @@ entities:
     access: {filter: [account_id], order: [account_id]}
   JiraComment:
     complete: true
+    accepts: [id, issue_id, author_id]
     table: jira_comment
     columns:
       id: {immutable: true, backend: {type: VARCHAR}}
@@ -53,6 +57,7 @@ entities:
     access: {filter: [id, issue_id], order: [id]}
   GitLabRef:
     complete: true
+    accepts: [id, issue_id]
     table: jira_gitlab_ref
     columns:
       id: {immutable: true, backend: {type: VARCHAR}}

@@ -379,6 +379,7 @@ engine:
 entities:
   CustomNode:
     complete: true
+    accepts: [id]
     table: gl_custom_node
     columns: {id: {immutable: true, backend: {type: Int64}}}
     access: {order: [id]}

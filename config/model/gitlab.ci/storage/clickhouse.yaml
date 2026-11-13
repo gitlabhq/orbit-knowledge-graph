@@ -4,6 +4,7 @@ store: graph
 entities:
   Deployment:
     complete: true
+    accepts: [id, user_id, environment_id, project_id]
     table: gl_deployment
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -41,6 +42,7 @@ entities:
 
   Environment:
     complete: true
+    accepts: [id, merge_request_id, project_id]
     table: gl_environment
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -80,6 +82,7 @@ entities:
 
   Job:
     complete: true
+    accepts: [id, auto_canceled_by_id, stage_id, pipeline_id, project_id, runner_id, user_id, upstream_pipeline_id]
     table: gl_job
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -138,6 +141,7 @@ entities:
 
   Pipeline:
     complete: true
+    accepts: [id, auto_canceled_by_id, project_id, user_id, merge_request_id]
     table: gl_pipeline
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -182,6 +186,7 @@ entities:
 
   Runner:
     complete: true
+    accepts: [id]
     table: gl_runner
     path_column:
     columns:
@@ -206,6 +211,7 @@ entities:
 
   Stage:
     complete: true
+    accepts: [id, pipeline_id, project_id]
     table: gl_stage
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}

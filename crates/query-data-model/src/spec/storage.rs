@@ -71,6 +71,8 @@ pub struct EntityStorage<K: Blocks = Erased> {
     /// This store holds or excludes every graph property of the entity, and plans read it here.
     #[serde(default)]
     pub complete: bool,
+    /// The stored properties a stage takes key sets on.
+    pub accepts: Option<Vec<String>>,
     pub table: Option<String>,
     #[serde(default, deserialize_with = "explicit_null")]
     pub path_column: Option<Option<String>>,
@@ -133,6 +135,7 @@ impl<K: Typed> StorageFragment<K> {
         };
         let entity = |entity: EntityStorage<K>| EntityStorage {
             complete: entity.complete,
+            accepts: entity.accepts,
             table: entity.table,
             path_column: entity.path_column,
             columns: entity

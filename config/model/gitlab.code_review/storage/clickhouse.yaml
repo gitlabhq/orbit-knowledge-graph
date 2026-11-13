@@ -4,6 +4,7 @@ store: graph
 entities:
   MergeRequest:
     complete: true
+    accepts: [id, author_id, closed_by_id, head_pipeline_id, latest_merge_request_diff_id, milestone_id, project_id, last_edited_by_id, merge_user_id, merged_commit_id, source_project_id, updated_by_id, source_branch]
     table: gl_merge_request
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -98,6 +99,7 @@ entities:
 
   MergeRequestDiff:
     complete: true
+    accepts: [id, merge_request_id, project_id]
     table: gl_merge_request_diff
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -131,6 +133,7 @@ entities:
 
   MergeRequestDiffFile:
     complete: true
+    accepts: [id, merge_request_diff_id, project_id]
     table: gl_merge_request_diff_file
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}

@@ -20,11 +20,14 @@ pub struct StructuralSearchRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RequestField {
-    Path,
+    /// A file column the searched store lists, by its stored name.
+    Column(String),
+    /// The repository each match is in, under the store's repository column.
+    Repository(String),
+    /// The branch whose head each match is at, under the store's branch column.
+    Branch(String),
     Line,
     Capture(String),
-    Repository(String),
-    Branch(String),
 }
 
 impl Render for Catalog<OrbitCode> {
@@ -44,11 +47,17 @@ impl Render for Catalog<OrbitCode> {
             });
         };
         let (mut languages, mut trigrams, mut heads) = (Vec::new(), Vec::new(), Vec::new());
-        let (mut pattern, mut limit) = (None, None::<u64>);
+        let (mut pattern, mut limit, mut index) = (None, None::<u64>, None);
         for node in plan.nodes() {
             match plan.operation(node) {
-                CodeOperation::Repositories { projects, .. }
-                | CodeOperation::Restrict(projects) => narrow(projects),
+                CodeOperation::Repositories {
+                    projects,
+                    index: read,
+                } => {
+                    index = Some(*read);
+                    narrow(projects)
+                }
+                CodeOperation::Restrict(projects) => narrow(projects),
                 CodeOperation::Languages(named) => languages.extend(
                     named
                         .iter()
@@ -70,19 +79,32 @@ impl Render for Catalog<OrbitCode> {
                 .is_some_and(|kept| kept.contains(&head.0))
         };
         heads.retain(readable);
+        let index = index.ok_or(CodeError::Incomplete("repositories"))?;
+        let store = &self.model().stores()[index.store];
+        let repository = self
+            .repository(index.entity)
+            .ok_or(CodeError::Incomplete("repository columns"))?;
         let fields = plan
             .outputs(plan.root())
             .map(|output| {
                 let name = plan.name(output).unwrap_or_default();
-                match plan.value(output) {
-                    CodeValue::Path => RequestField::Path,
+                Ok(match plan.value(output) {
+                    CodeValue::Column(property) => {
+                        let column = store
+                            .column(*property)
+                            .ok_or(CodeError::Incomplete("a stored column"))?
+                            .to_string();
+                        match *property {
+                            held if held == repository.project => RequestField::Repository(column),
+                            held if held == repository.branch => RequestField::Branch(column),
+                            _ => RequestField::Column(column),
+                        }
+                    }
                     CodeValue::Line => RequestField::Line,
                     CodeValue::Capture => RequestField::Capture(name.to_string()),
-                    CodeValue::Repository => RequestField::Repository(name.to_string()),
-                    CodeValue::Branch => RequestField::Branch(name.to_string()),
-                }
+                })
             })
-            .collect();
+            .collect::<Result<_, CodeError>>()?;
         Ok(StructuralSearchRequest {
             repositories: repositories.ok_or(CodeError::NoReadableRepository)?,
             heads,

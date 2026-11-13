@@ -4,6 +4,7 @@ store: lake
 entities:
   Team:
     complete: true
+    accepts: [id]
     table: gl_team
     columns:
       id: {immutable: true, backend: {type: VARCHAR}}
@@ -12,6 +13,7 @@ entities:
     access: {order: [id]}
   Escalation:
     complete: true
+    accepts: [id, message_id]
     table: gl_escalation
     columns:
       id: {immutable: true, backend: {type: BIGINT}}

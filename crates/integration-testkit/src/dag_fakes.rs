@@ -50,9 +50,9 @@ impl Executor for CodeExecutor {
             .fields
             .iter()
             .map(|field| match field {
-                RequestField::Path => "path".to_string(),
                 RequestField::Line => "line".to_string(),
-                RequestField::Capture(name)
+                RequestField::Column(name)
+                | RequestField::Capture(name)
                 | RequestField::Repository(name)
                 | RequestField::Branch(name) => name.clone(),
             })
@@ -241,23 +241,15 @@ pub fn edited(
         .expect("at least one package")
 }
 
-/// `packages` with `Head` enforcing only its `read_code` check on the code store, which then
-/// names `Head`'s repository property itself.
+/// `packages` with `Head` enforcing only its `read_code` check on the code store.
 pub fn heads_under_none(packages: query_data_model::Packages) -> query_data_model::Packages {
     edited(
         packages,
-        &[
-            (
-                "orbit_next.heads/authorization.yaml",
-                "enforce: {orbit_code: {scope_key: {via: HEAD_IN}}}",
-                "enforce: {orbit_code: none}\n    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]",
-            ),
-            (
-                "orbit_next.heads/storage/orbit_code.yaml",
-                "      branch: {immutable: true}\nrelationships:",
-                "      branch: {immutable: true}\n    backend: {repository: project_id}\nrelationships:",
-            ),
-        ],
+        &[(
+            "orbit_next.heads/authorization.yaml",
+            "enforce: {orbit_code: {scope_key: {via: HEAD_IN}}}",
+            "enforce: {orbit_code: none}\n    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]",
+        )],
     )
 }
 

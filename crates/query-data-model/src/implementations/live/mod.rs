@@ -79,12 +79,24 @@ impl StorageBackend for Live {
                     format!("store {store} pushes down unknown property {name}.{property}")
                 })
             };
-            let filters = options
+            let filters: Vec<PropertyId> = options
                 .filters
                 .iter()
                 .filter_map(|property| resolve(property))
                 .collect();
             let text = options.text.as_deref().and_then(&mut resolve);
+            let accepted = input.store.source(source.entity).map(|held| &held.accepts);
+            for property in accepted.into_iter().flatten() {
+                if !filters.contains(property) {
+                    diagnostics.error(
+                        source.package,
+                        format!(
+                            "store {store} accepts keys on {name}.{}, which its operation does not filter on",
+                            graph.property(*property).name
+                        ),
+                    );
+                }
+            }
             endpoints.push(Endpoint {
                 entity: source.entity,
                 operation: options.operation.clone(),

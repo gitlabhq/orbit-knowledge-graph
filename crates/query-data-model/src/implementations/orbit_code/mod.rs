@@ -9,7 +9,7 @@ use crate::catalog::{
     Diagnostics, ExecuteError, NoOptions, PolicyKind, Row, StorageBackend, StoreInput,
     check_unrelational,
 };
-use crate::{EntityId, PropertyId};
+use crate::{DataType, EntityId, PropertyId};
 
 #[derive(Debug, Clone)]
 pub struct OrbitCode;
@@ -29,19 +29,33 @@ pub enum SearchMode {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CodeSource {
-    /// The property that names the repository each row is in, for an entity that reaches no
-    /// scope through a `via` chain, whose first step names the repository otherwise.
-    pub repository: Option<String>,
+    pub repository: Option<RepositorySpec>,
     #[serde(default)]
     pub search: IndexMap<String, Vec<SearchMode>>,
 }
 
-/// One entity a code store indexes: the property its store declares names its repository, and
-/// the search modes of each searched property.
+/// The columns that name the repository and the branch each row is in.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepositorySpec {
+    pub project: String,
+    pub branch: String,
+}
+
+/// The properties a code store names each row's repository and branch by: Orbit Next names a
+/// repository by its integer project and a head by its branch name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Repository {
+    pub project: PropertyId,
+    pub branch: PropertyId,
+}
+
+/// One entity a code store indexes: its repository columns, and the search modes of each
+/// searched property.
 #[derive(Debug)]
 struct Indexed {
     entity: EntityId,
-    repository: Option<PropertyId>,
+    repository: Repository,
     searched: Vec<(PropertyId, Vec<SearchMode>)>,
 }
 
@@ -68,12 +82,11 @@ impl CodeStore {
             .map(|(property, _)| *property)
     }
 
-    /// The property the store declares names the repository of each row of `entity`.
-    pub fn repository(&self, entity: EntityId) -> Option<PropertyId> {
+    pub fn repository(&self, entity: EntityId) -> Option<Repository> {
         self.indexes
             .iter()
             .find(|indexed| indexed.entity == entity)
-            .and_then(|indexed| indexed.repository)
+            .map(|indexed| indexed.repository)
     }
 }
 
@@ -92,34 +105,34 @@ impl StorageBackend for OrbitCode {
         check_unrelational(&input, diagnostics);
         for source in &input.entities {
             let name = &graph.entity(source.entity).name;
-            let repository = source.options.repository.as_deref().and_then(|property| {
+            let mut column = |written: &str, data_type: DataType| {
                 let id = graph
-                    .property_id(source.entity, property)
-                    .filter(|id| input.store.column(*id).is_some());
+                    .property_id(source.entity, written)
+                    .filter(|id| input.store.column(*id).is_some())
+                    .filter(|id| graph.property(*id).data_type == data_type);
                 diagnostics.require(id, source.package, || {
-                    format!("store {store_name} names unstored repository {name}.{property}")
-                })
-            });
-            let via = matches!(
-                input.store.guard(source.entity),
-                Some(crate::catalog::Guard {
-                    rule: crate::catalog::Rule::Via(_),
-                    ..
-                })
-            );
-            match (via, &source.options.repository) {
-                (true, Some(_)) => diagnostics.error(
-                    source.package,
                     format!(
-                        "store {store_name} names a repository property for {name}, whose via chain names it"
-                    ),
-                ),
-                (false, None) => diagnostics.error(
-                    source.package,
-                    format!("store {store_name} names no repository property for {name}"),
-                ),
-                _ => {}
-            }
+                        "store {store_name} names {name}.{written} as a repository column, which is no stored {data_type:?} property"
+                    )
+                })
+            };
+            let repository = source.options.repository.as_ref().map(|written| {
+                (
+                    column(&written.project, DataType::Int),
+                    column(&written.branch, DataType::String),
+                )
+            });
+            let repository = match repository {
+                Some((Some(project), Some(branch))) => Some(Repository { project, branch }),
+                Some(_) => None,
+                None => {
+                    diagnostics.error(
+                        source.package,
+                        format!("store {store_name} names no repository columns for {name}"),
+                    );
+                    None
+                }
+            };
             let mut properties = Vec::new();
             for (property, modes) in &source.options.search {
                 let id = graph.property_id(source.entity, property);
@@ -141,11 +154,13 @@ impl StorageBackend for OrbitCode {
                     ),
                 );
             }
-            store.indexes.push(Indexed {
-                entity: source.entity,
-                repository,
-                searched: properties,
-            });
+            if let Some(repository) = repository {
+                store.indexes.push(Indexed {
+                    entity: source.entity,
+                    repository,
+                    searched: properties,
+                });
+            }
         }
         store
     }

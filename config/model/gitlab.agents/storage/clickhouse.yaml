@@ -4,6 +4,7 @@ store: graph
 entities:
   AgentSession:
     complete: true
+    accepts: [id, project_id]
     table: gl_agent_session
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [Delta(8), LZ4]}}

@@ -16,6 +16,7 @@ engine:
 entities:
   Group:
     complete: true
+    accepts: [id]
     table: gl_group
     columns:
       id: { immutable: true, backend: { type: Int64 } }
@@ -25,6 +26,7 @@ entities:
     access: { order: [id] }
   Project:
     complete: true
+    accepts: [id]
     table: gl_project
     columns:
       id: { immutable: true, backend: { type: Int64 } }
@@ -34,6 +36,7 @@ entities:
     access: { order: [id] }
   User:
     complete: true
+    accepts: [id]
     table: gl_user
     path_column: null
     columns:
@@ -43,6 +46,7 @@ entities:
     access: { order: [id] }
   MergeRequest:
     complete: true
+    accepts: [id, project_id, author_id]
     table: gl_merge_request
     columns:
       id: { immutable: true, backend: { type: Int64 } }
@@ -57,6 +61,7 @@ entities:
       indexes: { title: text, state: set, project_id: bloom_filter, id: [bloom_filter, minmax] }
   Note:
     complete: true
+    accepts: [id, project_id, author_id]
     table: gl_note
     columns:
       id: { immutable: true, backend: { type: Int64 } }

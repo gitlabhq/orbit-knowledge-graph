@@ -4,6 +4,7 @@ store: graph
 entities:
   Incident:
     complete: true
+    accepts: [id, message_id]
     table: gl_incident
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -15,6 +16,7 @@ entities:
       primary_key: [traversal_path, id]
   SlackWorkspace:
     complete: true
+    accepts: [id, group_id]
     table: gl_slack_workspace
     columns:
       id: {immutable: true, backend: {type: String, codec: [ZSTD(1)]}}

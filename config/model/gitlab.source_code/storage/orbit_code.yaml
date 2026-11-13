@@ -6,17 +6,11 @@ engine:
   connection: code_indexing
 entities:
   File:
+    accepts: [project_id, branch]
     columns:
-      id: {immutable: true}
-      traversal_path: {}
       project_id: {immutable: true}
       branch: {immutable: true}
-      commit_sha: {}
       path: {immutable: true}
-      name: {immutable: true}
-      extension: {immutable: true, selectivity: low}
-      language: {immutable: true, selectivity: low}
-      size_bytes: {}
-      reason: {selectivity: low}
     backend:
+      repository: {project: project_id, branch: branch}
       search: {content: [trigram, structural], path: [trigram]}

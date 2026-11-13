@@ -83,6 +83,28 @@ impl Peer {
         }
     }
 
+    /// Whether a stage on this connection takes a key set on `property` of `entity`.
+    pub fn accepts(&self, entity: EntityId, property: PropertyId) -> bool {
+        self.home(entity)
+            .is_some_and(|store| store.accepts(entity, property))
+    }
+
+    fn home(&self, entity: EntityId) -> Option<&query_data_model::catalog::Store> {
+        match self {
+            Self::ClickHouse(catalog) => catalog.home(entity).map(|(store, _)| store),
+            Self::DuckDb(catalog) => catalog.home(entity).map(|(store, _)| store),
+            Self::Remote(Target::Live(live)) => live.home(entity).map(|(store, _)| store),
+            Self::Remote(Target::Code(code)) => code.home(entity).map(|(store, _)| store),
+        }
+    }
+
+    /// Whether this connection's reads of `entity` return its identity: its home store here
+    /// lists every identity column.
+    pub fn returns_identity(&self, entity: EntityId) -> bool {
+        self.home(entity)
+            .is_some_and(|store| store.returns_identity(entity))
+    }
+
     fn model(&self) -> &Model {
         match self {
             Self::ClickHouse(catalog) => catalog.model(),

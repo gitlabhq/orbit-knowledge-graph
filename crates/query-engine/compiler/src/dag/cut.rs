@@ -88,13 +88,13 @@ impl Cut<'_> {
                         checks[index].push(check);
                     }
                 }
-                let Some(target) = remote else {
+                if remote.is_none() {
                     continue;
-                };
+                }
                 let [identity] = graph.entity(entity).identity[..] else {
                     continue;
                 };
-                if !target.returns_identity(entity, identity) {
+                if !self.peer(group.place).returns_identity(entity) {
                     continue;
                 }
                 push(needed.entry(*binding).or_default(), identity);
@@ -127,8 +127,8 @@ impl Cut<'_> {
                 .crossings
                 .iter()
                 .filter(|crossing| crossing.consumer(&order) == *group)
-                .map(|crossing| Input::Keys(self.keys(crossing, &order)))
-                .collect();
+                .map(|crossing| self.keys(crossing, &order).map(Input::Keys))
+                .collect::<Result<_>>()?;
             let group = &self.groups[*group];
             let plan = super::sub::plan(
                 self.query,

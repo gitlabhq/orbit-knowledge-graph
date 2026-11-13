@@ -5,10 +5,11 @@ mod pattern;
 pub use builder::{CodeBuilder, Field, Matches, Trigrams};
 pub use pattern::{Language, Pattern};
 
-use crate::EntityId;
 use crate::catalog::Catalog;
 use crate::implementations::orbit_code::OrbitCode;
+use crate::implementations::orbit_code::Repository;
 use crate::plan::tracking::{self, Declared, Each, Plan, Ref, Rejected, Step};
+use crate::{EntityId, PropertyId};
 
 #[derive(Debug)]
 pub struct CodeLanguage;
@@ -17,13 +18,10 @@ pub type CodePlan = Plan<CodeLanguage>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeValue {
-    /// The repository a match is in, named after the property the code store declares.
-    Repository,
-    Path,
+    /// A column the index's store lists, which every match carries.
+    Column(PropertyId),
     Line,
     Capture,
-    /// The branch whose head a match is at.
-    Branch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,59 +97,28 @@ pub enum CodeError {
 }
 
 impl Catalog<OrbitCode> {
-    pub fn index(&self, store: &str, entity: &str) -> Result<Declared<Index>, CodeError> {
+    /// The index of `entity` in its home store on this connection.
+    pub fn index(&self, entity: EntityId) -> Result<Declared<Index>, CodeError> {
         let model = self.model();
-        let found = model
+        let (home, _) = self.home(entity).ok_or_else(|| CodeError::UnknownIndex {
+            name: model.graph().entity(entity).name.clone(),
+            available: self
+                .stores()
+                .flat_map(|(store, _)| store.sources().map(|source| source.entity))
+                .map(|indexed| model.graph().entity(indexed).name.clone())
+                .collect(),
+        })?;
+        let store = model
             .stores()
             .iter()
-            .position(|candidate| {
-                candidate.name == store && candidate.connection == self.connection()
-            })
-            .and_then(|index| {
-                let entity = model.graph().entity_id(entity)?;
-                model.stores()[index].source(entity)?;
-                Some(Index {
-                    store: index,
-                    entity,
-                })
-            });
-        found
-            .map(|index| Declared::new(model.id(), index))
-            .ok_or_else(|| CodeError::UnknownIndex {
-                name: format!("{store}.{entity}"),
-                available: self
-                    .stores()
-                    .flat_map(|(store, _)| {
-                        store.sources().map(move |source| {
-                            format!(
-                                "{}.{}",
-                                store.name,
-                                model.graph().entity(source.entity).name
-                            )
-                        })
-                    })
-                    .collect(),
-            })
+            .position(|candidate| std::ptr::eq(candidate, home))
+            .ok_or(CodeError::Incomplete("an index store"))?;
+        Ok(Declared::new(model.id(), Index { store, entity }))
     }
 
-    /// The key that names a match's repository: the foreign key the read's `via` chain starts
-    /// from; none for a read only its checks restrict.
-    /// The property that names the repository of each row of `entity`: the one its store
-    /// declares, or the foreign key its `via` chain starts from.
-    pub fn repository(&self, entity: EntityId) -> Option<crate::PropertyId> {
-        let (store, facts) = self.home(entity)?;
-        match &store.guard(entity)?.rule {
-            crate::catalog::Rule::Via(hops) => {
-                let key = self.model().foreign_key(hops.first()?.variant)?;
-                (key.holder == crate::Endpoint::Source).then_some(key.property)
-            }
-            _ => facts.repository(entity),
-        }
-    }
-
-    pub fn repository_key(&self, index: Index) -> Option<&str> {
-        let property = self.repository(index.entity)?;
-        Some(self.graph().property(property).name.as_str())
+    /// The columns that name the repository and branch of each row of `entity`.
+    pub fn repository(&self, entity: EntityId) -> Option<Repository> {
+        self.home(entity)?.1.repository(entity)
     }
 
     pub fn build<'c>(

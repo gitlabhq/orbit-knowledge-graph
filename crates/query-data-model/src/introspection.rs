@@ -416,6 +416,7 @@ engine:
 entities:
   Project:
     complete: true
+    accepts: [id]
     table: gl_project
     columns:
       id: {immutable: true, backend: {type: Int64}}
@@ -424,6 +425,7 @@ entities:
     access: {order: [id]}
   MergeRequest:
     complete: true
+    accepts: [id, project_id]
     table: gl_merge_request
     columns:
       id: {immutable: true, backend: {type: Int64}}
@@ -465,6 +467,7 @@ engine:
 entities:
   MergeRequest:
     complete: true
+    accepts: [id, project_id]
     exclude: [body]
     table: gl_merge_request
     columns:

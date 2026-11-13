@@ -13,7 +13,7 @@ use query_data_model::implementations::live::Live;
 use query_data_model::implementations::orbit_code::OrbitCode;
 use query_data_model::plan::code::CodePlan;
 use query_data_model::plan::live::LivePlan;
-use query_data_model::{Catalog, EntityId, PropertyId};
+use query_data_model::{Catalog, EntityId};
 
 use crate::error::QueryError;
 
@@ -53,17 +53,6 @@ impl Target {
         match self {
             Self::Code(code) => code.guard(entity),
             Self::Live(live) => live.guard(entity),
-        }
-    }
-
-    /// Whether the connection's rows carry `identity`, the one identity property of `entity`: a
-    /// live call returns the columns its store holds, a code search returns matches.
-    pub fn returns_identity(&self, entity: EntityId, identity: PropertyId) -> bool {
-        match self {
-            Self::Code(_) => false,
-            Self::Live(live) => live
-                .home(entity)
-                .is_some_and(|(store, _)| store.column(identity).is_some()),
         }
     }
 }

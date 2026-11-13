@@ -4,6 +4,7 @@ store: acme
 entities:
   Binder:
     complete: true
+    accepts: [id]
     table: acme_binder
     columns:
       id: {immutable: true, backend: {type: Int64}}
@@ -12,6 +13,7 @@ entities:
     access: {order: [id]}
   Document:
     complete: true
+    accepts: [id]
     table: acme_document
     columns:
       id: {immutable: true, backend: {type: Int64}}

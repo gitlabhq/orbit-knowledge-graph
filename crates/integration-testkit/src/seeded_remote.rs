@@ -34,6 +34,16 @@ struct SeededMatch {
     branch: String,
 }
 
+impl SeededMatch {
+    /// The file column a request names; the seed holds each file's path alone.
+    fn column(&self, name: &str) -> Value {
+        match name {
+            "path" => Value::from(self.path.as_str()),
+            _ => Value::Null,
+        }
+    }
+}
+
 fn main() -> String {
     "main".to_string()
 }
@@ -85,9 +95,7 @@ impl CodeSearch for SeededCodeSearch {
                     .fields
                     .iter()
                     .map(|field| match field {
-                        RequestField::Path => {
-                            ("path".to_string(), Value::from(found.path.as_str()))
-                        }
+                        RequestField::Column(name) => (name.clone(), found.column(name)),
                         RequestField::Line => ("line".to_string(), Value::from(found.line)),
                         RequestField::Repository(name) => (name.clone(), Value::from(project)),
                         RequestField::Branch(name) => {

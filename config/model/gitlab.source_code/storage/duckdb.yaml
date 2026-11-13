@@ -4,6 +4,7 @@ store: local
 entities:
   Definition:
     complete: true
+    accepts: [id]
     exclude: [content]
     table: gl_definition
     columns:
@@ -26,6 +27,7 @@ entities:
 
   Directory:
     complete: true
+    accepts: [id]
     table: gl_directory
     columns:
       id: {immutable: true, backend: {type: BIGINT}}
@@ -39,6 +41,7 @@ entities:
 
   File:
     complete: true
+    accepts: [id]
     exclude: [content]
     table: gl_file
     columns:
@@ -57,6 +60,7 @@ entities:
 
   ImportedSymbol:
     complete: true
+    accepts: [id]
     table: gl_imported_symbol
     columns:
       id: {immutable: true, backend: {type: BIGINT}}

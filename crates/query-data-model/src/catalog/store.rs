@@ -21,8 +21,13 @@ pub struct Source {
     pub package: String,
     /// The store holds or excludes every property, and plans read the entity here.
     pub complete: bool,
+    /// The stored properties a stage takes key sets on.
+    pub accepts: Vec<PropertyId>,
+    /// Every property the store lists, in declaration order.
+    pub returned: Vec<PropertyId>,
     pub table: Option<String>,
-    /// The columns of the entity's identity, one per part.
+    /// The columns of the entity's identity, one per part; empty when the store returns no
+    /// identity.
     pub key: Vec<String>,
     pub path_column: Option<String>,
     pub access: AccessHints<Resolved>,
@@ -82,6 +87,25 @@ impl Store {
         self.columns[property.index()]
             .as_ref()
             .is_some_and(|column| column.stored_as_text)
+    }
+
+    /// Every property of `entity` the store lists, each of which its reads return.
+    pub fn returns(&self, entity: EntityId) -> impl Iterator<Item = PropertyId> + '_ {
+        self.source(entity)
+            .into_iter()
+            .flat_map(|source| source.returned.iter().copied())
+    }
+
+    /// Whether the store's reads of `entity` return its whole identity.
+    pub fn returns_identity(&self, entity: EntityId) -> bool {
+        self.source(entity)
+            .is_some_and(|source| !source.key.is_empty())
+    }
+
+    /// Whether a stage on this store takes a key set on `property`.
+    pub fn accepts(&self, entity: EntityId, property: PropertyId) -> bool {
+        self.source(entity)
+            .is_some_and(|source| source.accepts.contains(&property))
     }
 
     pub fn complete(&self, entity: EntityId) -> bool {

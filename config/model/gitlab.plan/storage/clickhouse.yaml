@@ -4,6 +4,7 @@ store: graph
 entities:
   Label:
     complete: true
+    accepts: [id, group_id, project_id]
     table: gl_label
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -31,6 +32,7 @@ entities:
 
   Milestone:
     complete: true
+    accepts: [id, group_id, project_id]
     table: gl_milestone
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -62,6 +64,7 @@ entities:
 
   WorkItem:
     complete: true
+    accepts: [id, author_id, closed_by_id, namespace_id, milestone_id, project_id]
     table: gl_work_item
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}

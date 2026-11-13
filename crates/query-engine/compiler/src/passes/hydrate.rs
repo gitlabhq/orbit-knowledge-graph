@@ -418,7 +418,7 @@ entities:
 
     fn model(dependencies: &[&str], disabled: bool) -> Catalog<ClickHouse> {
         stored_model(
-            "TestNode: {complete: true, table: gl_test_node, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, project_id: {backend: {type: String}}, branch: {backend: {type: String}}, path: {backend: {type: String}}}}",
+            "TestNode: {complete: true, accepts: [id], table: gl_test_node, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, project_id: {backend: {type: String}}, branch: {backend: {type: String}}, path: {backend: {type: String}}}}",
             dependencies,
             disabled,
         )
@@ -515,7 +515,7 @@ lookups:
     #[test]
     fn inject_skips_keys_the_store_does_not_hold() {
         let model = stored_model(
-            "TestNode: {complete: true, table: gl_test_node, exclude: [path], access: {order: [id]}, columns: {id: {backend: {type: Int64}}, project_id: {backend: {type: String}}, branch: {backend: {type: String}}}}",
+            "TestNode: {complete: true, accepts: [id], table: gl_test_node, exclude: [path], access: {order: [id]}, columns: {id: {backend: {type: Int64}}, project_id: {backend: {type: String}}, branch: {backend: {type: String}}}}",
             &["branch", "path"],
             false,
         );
@@ -586,7 +586,7 @@ entities:
     properties: {open: [id, username, state], admin: [is_admin, is_auditor]}
 "#;
         catalog(
-            "User: {complete: true, table: gl_user, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, username: {backend: {type: String}}, state: {backend: {type: String}}, is_admin: {backend: {type: Bool}}, is_auditor: {backend: {type: Bool}}}}",
+            "User: {complete: true, accepts: [id], table: gl_user, access: {order: [id]}, columns: {id: {backend: {type: Int64}}, username: {backend: {type: String}}, state: {backend: {type: String}}, is_admin: {backend: {type: Bool}}, is_auditor: {backend: {type: Bool}}}}",
             &graph,
             &[access],
         )

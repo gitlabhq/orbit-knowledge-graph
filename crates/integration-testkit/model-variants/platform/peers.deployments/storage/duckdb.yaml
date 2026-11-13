@@ -8,6 +8,7 @@ engine:
 entities:
   Review:
     complete: true
+    accepts: [id, merge_request_id]
     table: gl_review
     columns:
       id: {immutable: true, backend: {type: BIGINT}}
