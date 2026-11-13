@@ -2810,6 +2810,8 @@ dependencies = [
  "circuit-breaker",
  "flate2",
  "futures",
+ "http",
+ "hyper-util",
  "jsonwebtoken",
  "opentelemetry",
  "opentelemetry_sdk",

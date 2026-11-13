@@ -7,6 +7,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use circuit_breaker::{CircuitBreaker, CircuitConfig};
 use futures::{Stream, StreamExt};
+use hyper_util::client::proxy::matcher::Matcher as ProxyMatcher;
 use jsonwebtoken::dangerous::insecure_decode;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use opentelemetry::KeyValue;
@@ -79,15 +80,20 @@ enum Channel {
     PublicAddress,
     Unresolved,
     InvalidUrl,
+    Proxied,
 }
 
 impl Channel {
-    fn classify(base_url: &str, dialled: Option<IpAddr>) -> Self {
+    fn classify(base_url: &str, dialled: Option<IpAddr>, proxy: &ProxyMatcher) -> Self {
         let Ok(url) = reqwest::Url::parse(base_url) else {
             return Self::InvalidUrl;
         };
         if url.scheme() == "https" {
             return Self::Tls;
+        }
+        let uri = url.as_str().parse::<http::Uri>();
+        if uri.is_ok_and(|uri| proxy.intercept(&uri).is_some()) {
+            return Self::Proxied;
         }
         let addresses: Vec<IpAddr> = match url.host() {
             None => return Self::InvalidUrl,
@@ -143,7 +149,11 @@ impl GitlabClient {
         let signing_key = BASE64.decode(&config.signing_key)?;
         let dns_override = Self::dns_override(&config)?;
         let http = Self::build_http_client(dns_override.as_ref())?;
-        let channel = Channel::classify(&config.base_url, dns_override.map(|o| o.ip));
+        let channel = Channel::classify(
+            &config.base_url,
+            dns_override.map(|o| o.ip),
+            &ProxyMatcher::from_system(),
+        );
         let reason: &'static str = channel.into();
         if channel.is_tls_or_private() {
             info!(
@@ -1106,6 +1116,51 @@ mod tests {
         assert_eq!(
             channel_of("http://localhost:8080", Some("127.0.0.1")),
             Channel::PrivateAddress
+        );
+    }
+
+    fn http_proxy(no_proxy: &str) -> ProxyMatcher {
+        ProxyMatcher::builder()
+            .http("http://user:secret@proxy.invalid:3128")
+            .no(no_proxy)
+            .build()
+    }
+
+    #[test]
+    fn a_proxy_that_applies_makes_the_channel_insecure() {
+        let channel = Channel::classify("http://127.0.0.1:8080", None, &http_proxy(""));
+        assert_eq!(channel, Channel::Proxied);
+        assert!(!channel.is_tls_or_private());
+    }
+
+    #[test]
+    fn a_proxy_excluded_by_no_proxy_leaves_the_channel_private() {
+        assert_eq!(
+            Channel::classify("http://127.0.0.1:8080", None, &http_proxy("127.0.0.1")),
+            Channel::PrivateAddress
+        );
+    }
+
+    #[test]
+    fn without_a_proxy_the_address_decides() {
+        assert_eq!(
+            Channel::classify(
+                "http://127.0.0.1:8080",
+                None,
+                &ProxyMatcher::builder().build()
+            ),
+            Channel::PrivateAddress
+        );
+    }
+
+    #[test]
+    fn https_through_a_proxy_is_tls() {
+        let proxy = ProxyMatcher::builder()
+            .https("http://proxy.invalid:3128")
+            .build();
+        assert_eq!(
+            Channel::classify("https://gitlab.example.com", None, &proxy),
+            Channel::Tls
         );
     }
 
