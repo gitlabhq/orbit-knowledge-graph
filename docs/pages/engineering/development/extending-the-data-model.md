@@ -231,7 +231,7 @@ Publish the new package version to the registry. The registry diffs its storage 
 ## Add an integration's lake store
 
 An integration combines a lake store and a live store for the same entities. The lake store is the complete store: it holds the full history and every column.
-The live store is a partial store that calls the service's API at query time, for what the API adds. Placement reads from the lake unless a node needs a live-only column or operation.
+The live store is a partial store that calls the service's API at query time. Placement reads from the lake unless a node needs what the lake does not declare. That is an operation such as full-text search, or a column that the ETL does not extract.
 
 An integration ships a package with graph, authorization, storage and source fragments. The Data Extraction Service writes the Jira rows to S3, and a DuckDB store reads them there:
 
@@ -294,7 +294,8 @@ connections:
 
 ## Add an integration's live store
 
-A live store is the integration's partial store, on a backend that neither joins nor has writers. It holds no rows and declares no writer. It calls the service's API at query time, through a `Credentials` check, so the service runs each call with the caller's own sign-in.
+A live store is the integration's partial store, on a backend that delegates and neither joins nor has writers. It holds no rows and declares no writer.
+Because the backend delegates, a `Credentials` check governs its calls, and the service runs each call with the caller's own sign-in. Lake reads of the same entity rely on their scope filter.
 
 Jira gains a live store that adds full-text search on `description`, which the lake store does not index:
 
@@ -524,7 +525,7 @@ The lake stage hands the issue IDs to the live stage, which takes them on `issue
 
 ## Add a backend
 
-A backend implements `StorageBackend`, which parses its `backend` blocks and resolves each store. It also declares its [capabilities](../adr/024_pluggable_data_model.md#4-catalogs-give-each-connection-a-typed-view): joins, writer and search.
+A backend implements `StorageBackend`, which parses its `backend` blocks and resolves each store. It also declares its [capabilities](../adr/024_pluggable_data_model.md#4-catalogs-give-each-connection-a-typed-view): joins, writer, search and delegates.
 
 ```rust
 pub trait StorageBackend: Sized {
@@ -902,6 +903,7 @@ The loader collects every error with its package and fails once. A missing decla
 - A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.
 - A `via` chain that does not reach an entity that holds the scope key, or a step with more than one target.
 - An `enforce` entry of `none` with no `checks`.
+- A `Credentials` check on an entity that no delegating backend stores.
 - A provider name the deployment does not bind, or one bound to a module that does not answer the query the check needs.
 - A user-scoped entity whose owner relationship does not reach `User` or allows more than one owner per row. The owner relationship must be a foreign key on the entity's row.
 - An unknown deployment shape.

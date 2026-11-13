@@ -225,8 +225,8 @@ Storage rules:
 - An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
 - An integration combines two stores for the same entities. Its lake store is the complete store, on a backend that joins and has writers.
 - The extraction service's ETL writes the lake store and supplies `traversal_path`. The lake store holds the full history and every column, and its policy is `scope_key: traversal_path`.
-- The integration's live store is a partial store, on a backend without joins or writers. It calls the service's API at query time.
-- The live store offers only what the API adds: full-text search, fields that are current right now, and data not yet extracted. Its read uses a `Credentials` check, so the service runs the call with the caller's own sign-in.
+- The integration's live store is a partial store, on a backend that delegates and has no joins or writers. It calls the service's API at query time.
+- The live store offers only what the lake does not declare. That is an operation such as full-text search, or a column that the ETL does not extract. Its read uses a `Credentials` check, so the service runs the call with the caller's own sign-in.
 - For example, Jira and Slack each keep a DuckDB lake store over S3 and a live store.
 - Every edge has five structural fields that the model defines, the `EdgeField` values: source ID, source kind, target ID, target kind and relationship kind. They are not relationship attributes.
 - Each store with edge tables declares `edge_columns:` once, mapping every edge field to its column. Every edge table in the store uses it, so a table whose columns differ belongs in a separate store. Every field is required and none has a default, so no column name is a convention. Edge-owned attributes stay per relationship.
@@ -252,7 +252,7 @@ Four fixed places hold every fact, and nothing lives outside them:
 |---|---|
 | Packages | data: entities, identity, storage, bindings, writers, policies |
 | Deployment config | connections and deployment shapes, providers, limits such as row and node caps, engine settings |
-| Backends, in Rust | capabilities: joins, writer, search, operators, functions, match modes, how each scope kind renders |
+| Backends, in Rust | capabilities: joins, writer, search, delegates, operators, functions, match modes, how each scope kind renders |
 | Compiler phases | decisions: routing, foreign key or edge, how to read the latest row, stage splits |
 
 Each boundary between components has one typed API, and nothing crosses outside it:
@@ -260,7 +260,7 @@ Each boundary between components has one typed API, and nothing crosses outside 
 | Boundary | API | What crosses |
 |---|---|---|
 | Model to engine | `Model` and its typed `*Id` handles | entity, store and edge facts |
-| Backend capabilities | the `StorageBackend` trait per backend kind | joins, writer, search, operators, functions, scope rendering |
+| Backend capabilities | the `StorageBackend` trait per backend kind | joins, writer, search, delegates, operators, functions, scope rendering |
 | Planner decisions | the phase API per (frontend, backend) | FINAL or LIMIT BY, settings, stage order |
 | Execution | the `Executor` trait, with a wire codec | requests out, typed key sets and rows in |
 | Deployment | the deployment config | connections, shapes, limits, providers |
@@ -361,7 +361,8 @@ An entity declares its scope, the permission that a read needs, and one `enforce
 An entity with no row checks comes back on its scope filter alone. A `Credentials` check is not a row check. Its node comes back only when its stage's security check proved that filter on the read. Otherwise the query engine redacts the node, so the read fails closed.
 An entity's `checks:` is either a list of checks or the word `open`. A global entity has no scope filter, so it needs a check or `checks: open`. Without either, the load fails.
 With `checks: open`, the rows that a global read admits come back without a row check.
-Rows that the Data Extraction Service writes carry `traversal_path` from its ETL, and that path is their scope key. A third-party read that an external service serves at query time uses a `Credentials` check, for example a Slack message read.
+Rows that the Data Extraction Service writes carry `traversal_path` from its ETL, and that path is their scope key. A `Credentials` check is answered only on a backend that delegates, for example the live backend for a Slack message read.
+Reads of the same entity on other backends rely on their scope filter, so a lake read uses `scope_key: traversal_path`.
 
 Every property and edge attribute has exactly one access class. If it has none or two, the load fails. The security phase enforces the classes on every plan, including plans that a phase builds directly.
 
@@ -478,8 +479,9 @@ Every rule that depends on a backend names a capability, never a backend kind. E
 | joins | evaluates scope filters and relationships inside its own query | takes typed key sets and returns rows |
 | writer | holds tables that a declared source writes, from Orbit or an external service | reads data that its own service writes or serves |
 | search | evaluates its stores' declared search modes, such as trigram and structural, and can search by repository | declares no search modes |
+| delegates | calls an external service with the caller's own sign-in and answers `Credentials` checks | relies on the scope filter of each read |
 
-For example, ClickHouse and DuckDB join and have writers. Orbit Next searches by repository and has no writer. The live backend for Slack has none of the three.
+For example, ClickHouse and DuckDB join and have writers. Orbit Next searches by repository and has no writer. The live backend for Slack delegates and has none of the other three. Orbit Next does not delegate, because it is Orbit's own service, restricted by the scope filter.
 A stage targets one connection and can read every store on it.
 DuckDB reads a local file or S3. On S3, the deployment config sets the connection's mode. `parquet` takes a bucket and a prefix, and `ducklake` takes a catalog and a data path. The package is the same in both modes.
 
@@ -572,7 +574,7 @@ pub enum ScopeSet { All, Keys(Vec<Key>), Subtrees(Vec<ScopePath>) }
 pub enum Key { Int(i64), Text(String), Uuid(Uuid), Composite(Vec<Key>) }
 ```
 
-`Identify` returns the caller, `Scopes` a scope set, and `Credentials` the caller's sign-in for a delegated service. `Check` answers a batch of requests with the allowed keys of each.
+`Identify` returns the caller, `Scopes` a scope set, and `Credentials` the caller's sign-in for a delegated service. Only a backend that delegates asks for `Credentials`. `Check` answers a batch of requests with the allowed keys of each.
 Every ID that crosses the contract is a typed `Key`, so no provider assumes integer IDs.
 A `Module` trait builds a module from its options. When the deployment binds, it tells each module the scopes and permissions that the model needs. The module returns the queries it answers, and whether its `Scopes` answers are exact.
 The deployment config binds each provider name to a module, as it binds store connections, and names one `Identify` provider.
@@ -639,7 +641,7 @@ Placement picks each node's store with one call, `model.get_store(entity, &needs
 2. Otherwise, it returns the one partial store that serves every need. For example, a `File` read with a structural match on `content` reads from the Orbit Next store.
 3. If no store serves every need, the query fails, and the error names the unmet need.
 
-An integration's entity reads from its lake store unless a node needs a live-only column or operation. So one query can read the lake for one node and live for another.
+An integration's entity reads from its lake store unless a node needs what the lake does not declare. That is an operation such as full-text search, or a column that the ETL does not extract. So one query can read the lake for one node and live for another.
 
 A store serves a need only through declared facts: its listed columns, its backend's capabilities, its search modes and its `accepts:`.
 Two partial stores that could both serve needs the complete store cannot serve are a load error, so placement never depends on order. Search is one kind of need, not a special case.
