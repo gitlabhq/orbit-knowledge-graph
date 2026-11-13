@@ -1093,6 +1093,51 @@ mod tests {
         }
 
         #[test]
+        fn a_check_less_node_passes_only_once_its_read_was_proved() {
+            let ctx = || {
+                let mut ctx = test_ctx();
+                ctx.add_node("i", "JiraIssue");
+                ctx
+            };
+            let batch = || {
+                make_batch(vec![
+                    ("_orbit_i_id", Arc::new(Int64Array::from(vec![7, 8, 9]))),
+                    (
+                        "_orbit_i_type",
+                        Arc::new(StringArray::from(vec!["JiraIssue"; 3])),
+                    ),
+                    ("_orbit_u_id", Arc::new(Int64Array::from(vec![1, 2, 3]))),
+                    (
+                        "_orbit_u_type",
+                        Arc::new(StringArray::from(vec!["User"; 3])),
+                    ),
+                    (
+                        "_orbit_p_id",
+                        Arc::new(Int64Array::from(vec![100, 200, 300])),
+                    ),
+                    (
+                        "_orbit_p_type",
+                        Arc::new(StringArray::from(vec!["Project"; 3])),
+                    ),
+                ])
+            };
+            let unproved = ctx();
+            let mut result = QueryResult::from_batches(&[batch()], &unproved).unwrap();
+            assert_eq!(result.apply_authorizations(&full_auth()), 3);
+
+            let mut proved = ctx();
+            proved.mark_proved(&std::collections::BTreeSet::from([
+                "i".to_string(),
+                "u".to_string(),
+            ]));
+            assert!(proved.stage_checked("i"));
+            assert!(!proved.stage_checked("u"), "a node with checks keeps them");
+            let mut result = QueryResult::from_batches(&[batch()], &proved).unwrap();
+            assert_eq!(result.apply_authorizations(&full_auth()), 0);
+            assert_eq!(result.authorized_count(), 3);
+        }
+
+        #[test]
         fn every_check_of_an_entity_must_allow_its_row() {
             let mut ctx = test_ctx();
             ctx.add_entity_auth(

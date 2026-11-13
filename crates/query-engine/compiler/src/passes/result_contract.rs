@@ -142,7 +142,8 @@ pub struct ResultContext {
     edges: Vec<EdgeMeta>,
     neighbors_center: Option<(String, orbit_authorization::Key)>,
     labels: HashMap<String, String>,
-    /// Nodes whose rows a remote stage already put through every check of their entity.
+    /// Nodes whose rows a remote stage already put through every check of their entity, and
+    /// nodes of entities that declare no row check whose read's scope policy a stage proved.
     stage_checked: HashSet<String>,
 }
 
@@ -174,6 +175,20 @@ impl ResultContext {
     pub fn add_stage_checked_node(&mut self, alias: &str, entity_type: &str) {
         self.add_node(alias, entity_type);
         self.stage_checked.insert(alias.to_string());
+    }
+
+    /// Every node in `proved` whose entity declares no row check needs none: the security
+    /// check proved its read's scope filter, the only policy the entity has.
+    pub fn mark_proved(&mut self, proved: &std::collections::BTreeSet<String>) {
+        let unchecked: Vec<String> = self
+            .nodes
+            .values()
+            .filter(|node| {
+                proved.contains(&node.alias) && self.entity_checks(&node.entity_type).is_empty()
+            })
+            .map(|node| node.alias.clone())
+            .collect();
+        self.stage_checked.extend(unchecked);
     }
 
     pub fn stage_checked(&self, alias: &str) -> bool {

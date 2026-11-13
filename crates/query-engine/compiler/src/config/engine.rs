@@ -115,7 +115,10 @@ pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Engine>) -> R
     let mut redacted = Vec::new();
     for (stage, context) in contexts {
         for node in context.nodes() {
-            result.add_node(&node.alias, &node.entity_type);
+            match context.stage_checked(&node.alias) {
+                true => result.add_stage_checked_node(&node.alias, &node.entity_type),
+                false => result.add_node(&node.alias, &node.entity_type),
+            }
             for check in context.entity_checks(&node.entity_type) {
                 result.add_entity_auth(node.entity_type.clone(), check.clone());
             }

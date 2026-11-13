@@ -280,6 +280,36 @@ fn a_module_that_does_not_answer_the_needed_query_fails_the_bind() {
     );
 }
 
+#[test]
+fn a_check_less_entity_fails_the_bind_when_its_scope_answer_is_not_exact() {
+    let model = query_data_model::testkit::with_demo()
+        .deployment("demo")
+        .unwrap();
+    let Err(BindError(errors)) = Deployment::bind(&deployment("cached"), &model, &registry())
+    else {
+        panic!("a cached scope answer is not exact");
+    };
+    let entities = [
+        "GitLabRef",
+        "Incident",
+        "JiraComment",
+        "JiraIssue",
+        "JiraProject",
+        "JiraUser",
+        "SlackWorkspace",
+    ];
+    let expected: Vec<String> = entities
+        .iter()
+        .map(|entity| {
+            format!("{entity} declares no row check, but provider gitlab_session answers its Hierarchy scope namespace inexactly")
+        })
+        .collect();
+    let mut errors = errors;
+    errors.sort();
+    assert_eq!(errors, expected);
+    assert!(Deployment::bind(&deployment("slack"), &model, &registry()).is_ok());
+}
+
 #[tokio::test]
 async fn a_check_answers_string_keyed_rows_with_text_keys() {
     let (_, deployment) = bind("messages", &["acme", "acme.messages"]);

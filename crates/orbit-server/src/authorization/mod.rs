@@ -199,7 +199,8 @@ impl Deployment {
     }
 }
 
-/// An entity whose scope answer is not exact must declare a check to confirm its rows.
+/// An entity without a row check is returned on its proved scope filter alone, so its scope
+/// answer must be exact.
 fn inexact_without_checks(
     model: &Model,
     answers: &BTreeMap<&str, (&str, Answers)>,
@@ -208,14 +209,17 @@ fn inexact_without_checks(
     let access = model.access();
     for entity in model.graph().entities() {
         let declared = access.entity(entity.id);
-        let provider = &access.scope(declared.scope).provider;
+        let scope = access.scope(declared.scope);
+        let provider = &scope.provider;
         let exact = answers
             .get(provider.as_str())
             .is_some_and(|(_, a)| a.scopes_exact);
         if !exact && answers.contains_key(provider.as_str()) && declared.checks.is_empty() {
             errors.push(format!(
-                "{}'s scope answer from {provider} is not exact, so it needs a check",
-                entity.name
+                "{} declares no row check, but provider {provider} answers its {:?} scope {} inexactly",
+                entity.name,
+                kind(scope.kind),
+                scope.name
             ));
         }
     }

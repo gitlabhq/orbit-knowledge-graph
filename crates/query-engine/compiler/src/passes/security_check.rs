@@ -4,7 +4,7 @@
 //! scope set allows, or a fail-closed false predicate, among the filters that directly consume
 //! its join tree.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use orbit_authorization::{Grants, Key, ScopeSet};
 use orbit_utils::traversal_path::TraversalPath;
@@ -20,12 +20,14 @@ use super::guards::{scan, scope_set};
 use super::security::key_value;
 use crate::error::{QueryError, Result};
 
+/// The aliases of the reads that carry at least one scope policy, every one proved.
 pub fn verify<B: RelationalBackend>(
     plan: &RelationalPlan<B>,
     catalog: &Catalog<B>,
     grants: &Grants,
-) -> Result<()> {
+) -> Result<BTreeSet<String>> {
     let graph = &plan.plan;
+    let mut proved = BTreeSet::new();
     let consumers: HashMap<NodeId, NodeId> = graph
         .nodes()
         .flat_map(|node| graph.inputs(node).iter().map(move |input| (*input, node)))
@@ -41,6 +43,9 @@ pub fn verify<B: RelationalBackend>(
             )));
         };
         let filters = join_filters(graph, &consumers, node);
+        if !guards.is_empty() {
+            proved.insert(alias.clone());
+        }
         for guard in guards {
             let allowed = match scope_set(grants, catalog.model(), guard.scope, guard.permission)? {
                 ScopeSet::All => continue,
@@ -68,7 +73,7 @@ pub fn verify<B: RelationalBackend>(
             }
         }
     }
-    Ok(())
+    Ok(proved)
 }
 
 enum Allowed<'g> {
@@ -265,7 +270,7 @@ relationships:
     }
 
     fn check(plan: &ClickHousePlan, context: &Grants, model: &Catalog<ClickHouse>) -> Result<()> {
-        verify(plan, model, context)
+        verify(plan, model, context).map(drop)
     }
 
     fn scan(q: Builder<'_, '_>, table: &str, alias: &str) -> Built<Relation> {
@@ -362,6 +367,16 @@ relationships:
     fn passes_after_security_injection() {
         let ctx = grants(&["42/43/"]);
         assert!(secured(project(|_| None), &ctx, model()).is_ok());
+    }
+
+    #[test]
+    fn reports_the_reads_whose_scope_policy_it_proved() {
+        let ctx = grants(&["42/43/"]);
+        let plan =
+            crate::passes::security::apply_security_context(project(|_| None), model(), &ctx)
+                .unwrap();
+        let proved = verify(&plan, model(), &ctx).unwrap();
+        assert_eq!(proved, std::collections::BTreeSet::from(["p".to_string()]));
     }
 
     #[test]

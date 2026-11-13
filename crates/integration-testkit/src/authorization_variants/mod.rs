@@ -44,6 +44,7 @@ pub fn deployment(name: &str) -> AuthorizationConfig {
 pub fn registry() -> Registry {
     Registry::gitlab()
         .with::<fakes::OidcGroups>()
+        .with::<fakes::CachedPaths>()
         .with::<fakes::Zanzibar>()
         .with::<fakes::Cedar>()
         .with::<slack::SlackSignIn>()

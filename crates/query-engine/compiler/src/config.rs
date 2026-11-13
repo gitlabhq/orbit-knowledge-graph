@@ -144,7 +144,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         security_check {
             reads_env: [grants, data_model]
             reads_state: [relational]
-            mutates: [proved]
+            mutates: [proved, result_ctx]
         }
         codegen {
             reads_env: [data_model]
@@ -263,7 +263,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         hydration_clickhouse {
             backend: query_data_model::ClickHouse
             env: [grants, limits, trace]
-            state: [tp_bounds, hydration, plan_metadata, query_config, relational, hydration_query, planned, proved]
+            state: [tp_bounds, hydration, plan_metadata, result_ctx, query_config, relational, hydration_query, planned, proved]
             phases: [restrict_hydration, plan, settings, security, security_check, codegen]
         }
     }
@@ -439,7 +439,11 @@ fn paginate(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
 fn security_check(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let model = ctx.data_model();
-    security_check::verify(plan, model, ctx.grants())?;
+    let proved = security_check::verify(plan, model, ctx.grants())?;
+    if let Some(mut result) = ctx.take_result_ctx() {
+        result.mark_proved(&proved);
+        ctx.set_result_ctx(result);
+    }
     ctx.set_proved(true);
     Ok(())
 }
