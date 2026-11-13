@@ -59,5 +59,5 @@ Before you create or edit a skill, follow the [`authoring-skills`](https://gitla
 ## Writing docs
 
 For user docs (`docs/docs-gitlab-com/`), follow the [`gitlab-docs-change`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-change/SKILL.md) skill.
-The docs-write flow (`.gitlab/duo/catalog/flows/`) follows the `docs-write` skill from
+The docs-write flow (`.gitlab/duo/catalog/flows/`) follows the `docs-write` and `docs-review` skills from
 [`gitlab-org/orbit/team/skills`](https://gitlab.com/gitlab-org/orbit/team/skills) instead.
