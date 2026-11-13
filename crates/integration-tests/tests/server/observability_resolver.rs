@@ -53,8 +53,8 @@ fn reader_profile(ctx: &TestContext) -> String {
 /// clickhouse_configs/users.xml, and the user and grants
 /// ClickhouseMigrationRunner#grant_orbit_reader_script creates against it.
 /// Production also restricts the user with HOST IP, which a container test
-/// cannot reproduce. What this does reproduce is the readonly profile, which
-/// rejects any session setting it does not fix with code 164.
+/// cannot reproduce, and caps concurrency and log_queries, which this profile
+/// leaves out because neither affects a single query.
 async fn create_orbit_reader(ctx: &TestContext) {
     let user = reader_user(ctx);
     let profile = reader_profile(ctx);
@@ -262,11 +262,12 @@ async fn a_span_outside_the_time_window_is_not_returned() {
     assert!(rows.is_empty());
 }
 
-/// The reader runs under a READONLY settings profile, so a client that sends
-/// any setting outside it is rejected with code 164 and the lookup resolves to
-/// null for every row.
+/// Every limit the profile fixes is READONLY, so a client that tries to raise
+/// one is rejected with code 452 and the lookup resolves to null for every
+/// row. Settings the profile does not fix are accepted under readonly = 2;
+/// readonly = 1 rejects those with code 164, which is why it is not used.
 #[tokio::test]
-async fn a_lookup_succeeds_under_the_readonly_settings_profile() {
+async fn a_lookup_succeeds_as_the_provisioned_reader() {
     let ctx = seeded_pipeline().await;
 
     let rows = traces::fetch(
@@ -276,7 +277,7 @@ async fn a_lookup_succeeds_under_the_readonly_settings_profile() {
         &[key("3000")],
     )
     .await
-    .expect("a query as orbit_reader must not be rejected by its own profile");
+    .expect("a query as the provisioned reader must not be rejected by its own profile");
 
     assert!(!rows.is_empty(), "the profile rejected the query");
 }
