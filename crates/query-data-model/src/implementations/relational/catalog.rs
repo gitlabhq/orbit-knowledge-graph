@@ -51,6 +51,11 @@ where
         }
     }
 
+    /// The sort key of the entity's table in its home store on this connection.
+    pub fn sort_key(&self, entity: EntityId) -> Option<&[String]> {
+        self.home(entity)?.1.relational().sort_key(entity)
+    }
+
     pub fn table_of(&self, entity: EntityId) -> Option<&str> {
         self.source(entity)?.1.table.as_deref()
     }

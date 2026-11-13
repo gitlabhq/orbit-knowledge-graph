@@ -207,12 +207,14 @@ pub fn dag_packages() -> query_data_model::Packages {
 }
 
 /// The DAG packages, plus releases on a second ClickHouse connection keyed by UUID, the
-/// deployments that name them on the graph connection, and reviews on a DuckDB connection.
+/// deployments that name them on the graph connection, reviews on a DuckDB connection, and
+/// snippets that a code store on their own connection searches.
 pub fn peer_packages() -> query_data_model::Packages {
     let peers = crate::authorization_variants::platform(&[
         "peers.releases",
         "peers.deployments",
         "peers.lake",
+        "peers.snippets",
     ]);
     dag_packages().with(peers)
 }

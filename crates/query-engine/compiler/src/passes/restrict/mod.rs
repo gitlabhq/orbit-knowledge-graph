@@ -37,8 +37,12 @@ pub fn restrict(
 ) -> Result<()> {
     let query = Query::new(plan, logical);
     let entities = entities(query);
-    for (_, entity) in &entities {
-        readable(*entity, connections.guard(*entity), model, grants)?;
+    let places = crate::dag::places(query, connections)?;
+    for (binding, entity) in &entities {
+        let guard = places
+            .get(binding)
+            .and_then(|place| logical.store(place.store).guard(*entity));
+        readable(*entity, guard, model, grants)?;
     }
     let admin = grants.caller().admin();
     if !admin && query.kind() == Kind::Aggregation {

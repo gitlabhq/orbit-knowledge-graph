@@ -36,8 +36,8 @@ fn declared_in(
         "relationship",
         graph.relationships().map(|r| r.name.as_str()),
     );
-    for store in model.stores() {
-        add(names, "store", [store.name.as_str()]);
+    for store in query_data_model::testkit::stores(model) {
+        add(names, "store", [store.name()]);
         add(
             names,
             "connection",

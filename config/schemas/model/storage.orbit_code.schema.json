@@ -305,6 +305,7 @@
       "description": "One written value or a list of them."
     },
     "SearchMode": {
+      "description": "A search a store's backend runs over a property.",
       "enum": [
         "trigram",
         "structural"

@@ -7,6 +7,7 @@ mod guards;
 mod layout;
 mod lookups;
 mod names;
+mod placement;
 pub mod sources;
 mod store;
 mod writers;
@@ -25,6 +26,7 @@ pub use guards::{Guard, PolicyKind, Rule};
 pub use lookups::{Lookup, Lookups};
 pub use names::Names;
 pub use names::{Reversed, Unresolved};
+pub use placement::{Need, Needs, Operation, SearchMode, Unplaced};
 pub use sources::Sources;
 pub use store::{Source, Store, StoredColumn};
 
@@ -34,7 +36,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::packages::{Tier, directory};
 use crate::spec::{Fragment, Fragments};
-use crate::{DataModelError, EntityId, GraphCatalog, PropertyId};
+use crate::{DataModelError, GraphCatalog, PropertyId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModelId([u8; 32]);
@@ -150,6 +152,7 @@ impl Model {
         };
         let mut diagnostics = Diagnostics::default();
         model.resolve_backends(&blocks, &mut diagnostics);
+        model.check_placement(&mut diagnostics);
         diagnostics.finish()?;
         Ok(model)
     }
@@ -170,8 +173,15 @@ impl Model {
         self.lookups.get(property)
     }
 
-    pub fn stores(&self) -> &[Store] {
+    pub(crate) fn stores(&self) -> &[Store] {
         &self.stores
+    }
+
+    /// The stores on `connection`.
+    pub fn stores_on(&self, connection: crate::ConnectionId) -> impl Iterator<Item = &Store> {
+        self.stores
+            .iter()
+            .filter(move |store| store.connection_id == connection)
     }
 
     /// Every connection the deployment serves, in name order.
@@ -185,14 +195,6 @@ impl Model {
 
     pub fn connection(&self, id: crate::ConnectionId) -> &Connection {
         &self.connections[id.index()]
-    }
-
-    /// The store whose backend searches `property` of `entity` structurally: the placement of a
-    /// structural match, which need not be the entity's complete store.
-    pub fn searching(&self, entity: EntityId, property: PropertyId) -> Option<&Store> {
-        self.stores
-            .iter()
-            .find(|store| store.searches(entity, property))
     }
 
     pub fn sources(&self) -> &Sources {
@@ -228,16 +230,11 @@ impl Model {
         })
     }
 
-    /// The one store that holds or excludes every property of the entity.
-    pub fn complete_store(&self, entity: EntityId) -> Option<&Store> {
-        self.stores.iter().find(|store| store.complete(entity))
-    }
-
     /// How the entity's complete store keeps an enum property: as labels or as integer codes.
     pub fn enum_type(&self, property: PropertyId) -> crate::EnumType {
         let entity = self.graph.property(property).entity;
         match self
-            .complete_store(entity)
+            .complete(entity)
             .is_some_and(|store| store.stored_as_text(property))
         {
             true => crate::EnumType::String,

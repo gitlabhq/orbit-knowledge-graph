@@ -7,6 +7,7 @@ use serde::de::DeserializeOwned;
 use super::access::EdgeScope;
 use super::guards::Guard;
 use super::guards::PolicyKind;
+use super::placement::Operation;
 use super::store::Facts;
 use super::{Access, Diagnostics, Model, Source, Sources, Store};
 use crate::implementations::{
@@ -33,9 +34,15 @@ pub trait StorageBackend: Sized + 'static {
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
 
-    /// The property a structural pattern over `entity` runs on, in a store that searches.
-    fn structural(_store: &Self::Store, _entity: EntityId) -> Option<PropertyId> {
-        None
+    /// Whether the store runs `operation` on `property` of `entity` itself, beyond what its
+    /// capabilities and accepts already serve.
+    fn serves(
+        _store: &Self::Store,
+        _entity: EntityId,
+        _property: PropertyId,
+        _operation: Operation,
+    ) -> bool {
+        false
     }
 }
 
@@ -206,15 +213,10 @@ impl<B: StorageBackend> Catalog<B> {
         })
     }
 
-    pub fn store(&self, name: &str) -> Option<&Store> {
+    /// The backend facts of `store`, when it sits on this connection.
+    pub fn facts(&self, store: crate::StoreId) -> Option<&B::Store> {
         self.stores()
-            .find(|(store, _)| store.name == name)
-            .map(|(store, _)| store)
-    }
-
-    pub fn backend(&self, name: &str) -> Option<&B::Store> {
-        self.stores()
-            .find(|(store, _)| store.name == name)
+            .find(|(held, _)| held.id() == store)
             .map(|(_, facts)| facts)
     }
 
@@ -225,7 +227,7 @@ impl<B: StorageBackend> Catalog<B> {
 
     /// The store on this connection that plans read the entity from: its complete store when the
     /// connection holds it, else the one partial store here.
-    pub fn home(&self, entity: EntityId) -> Option<(&Store, &B::Store)> {
+    pub(crate) fn home(&self, entity: EntityId) -> Option<(&Store, &B::Store)> {
         let mut holders = self
             .stores()
             .filter(|(store, _)| store.source(entity).is_some());
@@ -343,7 +345,13 @@ pub(crate) trait Registered {
 
     fn capabilities(&self) -> Capabilities;
 
-    fn structural(&self, facts: &Facts, entity: EntityId) -> Option<PropertyId>;
+    fn serves(
+        &self,
+        facts: &Facts,
+        entity: EntityId,
+        property: PropertyId,
+        operation: Operation,
+    ) -> bool;
 
     fn policies(&self) -> &'static [PolicyKind];
 
@@ -387,9 +395,16 @@ impl<B: StorageBackend> Registered for Entry<B> {
         B::CAPABILITIES
     }
 
-    fn structural(&self, facts: &Facts, entity: EntityId) -> Option<PropertyId> {
-        let store = (facts.as_ref() as &dyn std::any::Any).downcast_ref::<B::Store>()?;
-        B::structural(store, entity)
+    fn serves(
+        &self,
+        facts: &Facts,
+        entity: EntityId,
+        property: PropertyId,
+        operation: Operation,
+    ) -> bool {
+        (facts.as_ref() as &dyn std::any::Any)
+            .downcast_ref::<B::Store>()
+            .is_some_and(|store| B::serves(store, entity, property, operation))
     }
 
     fn policies(&self) -> &'static [PolicyKind] {

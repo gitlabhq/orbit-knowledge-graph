@@ -16,9 +16,10 @@ pub use combine::{CombineColumn, CombineEdge, CombineJoin, CombineNode, CombineQ
 pub use compile::{
     Compiled, Env, Frontend, Inputs, Source, compile, compile_hydration, split_query,
 };
-pub use connections::{Connections, Peer, Placement, Unplaced};
+pub use connections::{Connections, Peer, Placement};
 pub use keys::{KeySet, bind};
 pub use request::{Rendered, Request, describe};
+pub(crate) use split::places;
 pub use split::split;
 
 use query_data_model::implementations::live::Live;
@@ -78,18 +79,6 @@ pub enum Backend {
     OrbitCode,
     Live,
     Combine,
-}
-
-/// The error of a binding of `entity` that no served connection reads.
-pub(crate) fn unplaced(entity: &str, unplaced: Unplaced) -> QueryError {
-    match unplaced {
-        Unplaced::Unstored => QueryError::AllowlistRejected(format!(
-            "entity '{entity}' is not available in this data model"
-        )),
-        Unplaced::Unserved(connection) => QueryError::AllowlistRejected(format!(
-            "{entity}'s complete store is on connection {connection}, which this deployment does not serve"
-        )),
-    }
 }
 
 pub type StageId = usize;

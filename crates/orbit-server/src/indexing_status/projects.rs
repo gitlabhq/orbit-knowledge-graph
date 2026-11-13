@@ -110,9 +110,9 @@ pub async fn read_project_coverage(
 /// for.
 pub(super) fn repository_entity(model: &Model) -> Result<EntityId, Status> {
     let mut ends = model
-        .stores()
-        .iter()
-        .filter(|store| model.connection(store.connection()).capabilities().search)
+        .connections()
+        .filter(|connection| connection.capabilities().search)
+        .flat_map(|connection| model.stores_on(connection.id()))
         .flat_map(|store| {
             store
                 .sources()

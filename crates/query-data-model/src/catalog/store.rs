@@ -46,14 +46,14 @@ pub struct StoredColumn {
 
 #[derive(Debug)]
 pub struct Store {
-    pub name: String,
+    pub(crate) name: String,
     pub(crate) connection_name: String,
     pub(crate) connection_id: ConnectionId,
     pub(crate) id: StoreId,
     pub(crate) kind: String,
-    pub trusted: bool,
-    pub path_column: Option<String>,
-    pub package: String,
+    pub(crate) trusted: bool,
+    pub(crate) path_column: Option<String>,
+    pub(crate) package: String,
     pub(super) sources: Vec<Option<Source>>,
     pub(super) columns: Vec<Option<StoredColumn>>,
     pub(super) excluded: HashSet<PropertyId>,
@@ -67,6 +67,15 @@ pub struct Store {
 impl Store {
     pub fn id(&self) -> StoreId {
         self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Nothing restricts the store's reads.
+    pub fn trusted(&self) -> bool {
+        self.trusted
     }
 
     /// The connection the store sits on.
@@ -193,14 +202,6 @@ impl Store {
     /// The guard of an edge table the store holds.
     pub fn edge_guard(&self, table: &str) -> Option<&Guard> {
         self.edge_guards.get(table)
-    }
-
-    /// Whether this store's backend runs structural patterns over `property` of `entity`.
-    pub fn searches(&self, entity: EntityId, property: PropertyId) -> bool {
-        let (Some(facts), Some(backend)) = (&self.facts, super::registered(&self.kind)) else {
-            return false;
-        };
-        backend.structural(facts, entity) == Some(property)
     }
 
     pub(super) fn facts<T: 'static>(&self) -> Option<&T> {

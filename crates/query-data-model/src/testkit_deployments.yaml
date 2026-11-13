@@ -4,3 +4,5 @@ lake:
   connections: [main, lake, data_extraction]
 jira:
   connections: [main, jira_lake]
+snippets:
+  connections: [main, snippet_search]

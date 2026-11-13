@@ -7,9 +7,8 @@ mod selectivity;
 
 use crate::passes::codegen::SqlBackend;
 use orbit_server_config::QueryLimits;
-use query_data_model::implementations::orbit_code::OrbitCode;
-use query_data_model::plan::logical::{Expr, LogicalOperation, Predicate, TimeUnit};
-use query_data_model::{Catalog, StorageBackend};
+use query_data_model::Catalog;
+use query_data_model::plan::logical::{Expr, Predicate, TimeUnit};
 
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
@@ -20,26 +19,9 @@ use crate::logical::anchors::Anchor;
 pub fn admit(
     query: Query<'_>,
     model: &Catalog<impl SqlBackend>,
-    connections: &crate::dag::Connections,
     limits: &QueryLimits,
     selectivity: bool,
 ) -> Result<()> {
-    let searched =
-        |structural: &query_data_model::plan::logical::Structural| match structural.target {
-            Expr::Property { binding, property } => query
-                .entity(binding)
-                .is_some_and(|entity| connections.searching(entity, property).is_some()),
-            _ => false,
-        };
-    if query
-        .operations()
-        .any(|(_, operation)| matches!(operation, LogicalOperation::Structural(structural) if !searched(structural)))
-    {
-        return Err(QueryError::Validation(format!(
-            "structural matches run on an {} connection, not in SQL",
-            OrbitCode::KIND
-        )));
-    }
     let facts = query.leaves();
     let anchors = query.anchors(&facts);
     self::limits::predicates(&facts, limits.predicates)?;

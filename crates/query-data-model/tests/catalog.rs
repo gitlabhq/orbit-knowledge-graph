@@ -139,8 +139,12 @@ fn a_clickhouse_catalog_resolves_tables_columns_and_routes() {
     let catalog = model
         .physical::<ClickHouse>(model.names().connection("main").unwrap())
         .unwrap();
-    let store = catalog.store("graph").unwrap();
-    let facts = catalog.backend("graph").unwrap();
+    let store = catalog
+        .model()
+        .store(catalog.names().store("graph").unwrap());
+    let facts = catalog
+        .facts(catalog.names().store("graph").unwrap())
+        .unwrap();
     let request = model.names().entity("MergeRequest").unwrap();
     let title = model.names().property(request, "title").unwrap();
     let diff = model.names().property(request, "diff").unwrap();
@@ -184,12 +188,7 @@ fn virtual_columns_come_from_the_lookup_registry() {
         ("gitaly", "mr_raw_patch")
     );
     assert_eq!(keys, ["project_id", "iid"]);
-    assert!(
-        model
-            .stores()
-            .iter()
-            .all(|store| store.column(diff).is_none())
-    );
+    assert!(query_data_model::testkit::stores(&model).all(|store| store.column(diff).is_none()));
 }
 
 /// A partial store of merge requests on the graph store's connection, under its own names.
@@ -248,18 +247,15 @@ fn one_query_can_join_stores_on_the_same_connection() {
 
     let tables: Vec<_> = catalog
         .sources(request)
-        .map(|(store, source)| {
-            (
-                store.name.as_str(),
-                source.table.as_deref().unwrap_or_default(),
-            )
-        })
+        .map(|(store, source)| (store.name(), source.table.as_deref().unwrap_or_default()))
         .collect();
     assert_eq!(
         tables,
         [("graph", "gl_merge_request"), ("lake", "mr_export")]
     );
-    let lake = catalog.store("lake").unwrap();
+    let lake = catalog
+        .model()
+        .store(catalog.names().store("lake").unwrap());
     assert_eq!(lake.source(request).unwrap().key, ["mr_id"]);
     assert_eq!(lake.column(title), Some("mr_title"));
     assert_eq!(
@@ -321,7 +317,9 @@ fn guards_read_the_declared_scope_key_of_each_store() {
     let catalog = model
         .physical::<ClickHouse>(model.names().connection("main").unwrap())
         .unwrap();
-    let store = catalog.store("graph").unwrap();
+    let store = catalog
+        .model()
+        .store(catalog.names().store("graph").unwrap());
     let request = model.names().entity("MergeRequest").unwrap();
 
     let guard = store.guard(request).unwrap();
@@ -1002,7 +1000,11 @@ fn a_managed_store_resolves_its_physical_schema() {
     let catalog = model
         .physical::<ClickHouse>(model.names().connection("main").unwrap())
         .unwrap();
-    let schema = catalog.backend("graph").unwrap().schema().unwrap();
+    let schema = catalog
+        .facts(catalog.names().store("graph").unwrap())
+        .unwrap()
+        .schema()
+        .unwrap();
     let requests = schema.table("gl_merge_request").unwrap();
     let columns: Vec<_> = requests
         .columns
@@ -1121,7 +1123,7 @@ fn every_guard_carries_the_declared_scope_and_permission() {
         (testkit::with_demo(), "demo"),
     ] {
         let model = packages.deployment(shape).unwrap();
-        for store in model.stores() {
+        for store in query_data_model::testkit::stores(&model) {
             for source in store.sources() {
                 let entity = model.graph().entity(source.entity);
                 let declared = model.access().entity(source.entity);
@@ -1130,10 +1132,10 @@ fn every_guard_carries_the_declared_scope_and_permission() {
                     (guard.scope, guard.permission),
                     (declared.scope, declared.permission),
                     "{} {}",
-                    store.name,
+                    store.name(),
                     entity.name
                 );
-                assert_eq!(store.trusted, guard.rule == Rule::Trusted);
+                assert_eq!(store.trusted(), guard.rule == Rule::Trusted);
             }
         }
     }

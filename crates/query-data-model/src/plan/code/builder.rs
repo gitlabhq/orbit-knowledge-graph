@@ -3,7 +3,8 @@ use super::{
 };
 use crate::PropertyId;
 use crate::catalog::Catalog;
-use crate::implementations::orbit_code::{OrbitCode, SearchMode};
+use crate::catalog::SearchMode;
+use crate::implementations::orbit_code::OrbitCode;
 use crate::plan::logical::Literal;
 use crate::plan::tracking::{self, Construction, Declared, Ref};
 
@@ -136,11 +137,11 @@ impl<'c> CodeBuilder<'c> {
 
     pub(super) fn searchable(&self, index: Index, mode: SearchMode) -> Result<(), CodeError> {
         let graph = self.catalog.graph();
-        let store = &self.catalog.model().stores()[index.store];
-        let facts = self.catalog.backend(&store.name);
+        let store = self.catalog.model().stores()[index.store].id();
+        let facts = self.catalog.facts(store);
         let property = facts.and_then(|facts| facts.structural(index.entity));
         match (facts, property) {
-            (Some(facts), Some(property)) if facts.supports(property, mode) => Ok(()),
+            (Some(facts), Some(property)) if facts.supports(index.entity, property, mode) => Ok(()),
             _ => Err(CodeError::Unsupported(
                 graph.entity(index.entity).name.clone(),
                 match mode {

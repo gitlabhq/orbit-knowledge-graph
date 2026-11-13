@@ -6,9 +6,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::catalog::{
-    Capabilities, Diagnostics, ExecuteError, NoOptions, PolicyKind, Row, StorageBackend,
+    Capabilities, Diagnostics, ExecuteError, NoOptions, Operation, PolicyKind, Row, StorageBackend,
     StoreInput, check_unrelational,
 };
+use crate::plan::logical::Matching;
 use crate::{EntityId, PropertyId};
 
 #[derive(Debug, Clone)]
@@ -62,6 +63,23 @@ impl StorageBackend for Live {
     type SourceOptions = Option<LiveSource>;
     type ColumnOptions = NoOptions;
     type Store = LiveStore;
+
+    fn serves(
+        store: &LiveStore,
+        entity: EntityId,
+        property: PropertyId,
+        operation: Operation,
+    ) -> bool {
+        store
+            .endpoint(entity)
+            .is_some_and(|endpoint| match operation {
+                Operation::Equal | Operation::OneOf | Operation::Bound => {
+                    endpoint.filters.contains(&property)
+                }
+                Operation::Text(Matching::Contains) => endpoint.text == Some(property),
+                _ => false,
+            })
+    }
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> LiveStore {
         let graph = input.graph;
