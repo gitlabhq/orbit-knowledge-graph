@@ -73,7 +73,7 @@ Cause: your user has the feature flag, but belongs to no top-level group with Or
 
 ## Exit 5: rate limited
 
-Cause: the `orbit_query` rate limit. Fix: back off. For bulk agent work, lower the row limit, add a short sleep between queries, or combine related lookups into one query.
+Cause: the `orbit_query` rate limit. The CLI already retried with backoff and honored `Retry-After`. Exit 5 means the retries ran out or the server asked for a wait beyond the retry budget. Do not add your own retry loop: it doubles the wait. Wait the time the error message gives, then run the command again. For bulk work, lower the row limit or combine related lookups into one query. `--retries N` or `ORBIT_RETRIES` sets the retry count, and `0` lets you handle 429 yourself.
 
 ## Exit 1: generic error
 
