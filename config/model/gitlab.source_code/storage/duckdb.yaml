@@ -4,6 +4,7 @@ store: local
 entities:
   Definition:
     complete: true
+    exclude: [content]
     table: gl_definition
     columns:
       id: {immutable: true, backend: {type: BIGINT}}
@@ -38,6 +39,7 @@ entities:
 
   File:
     complete: true
+    exclude: [content]
     table: gl_file
     columns:
       id: {immutable: true, backend: {type: BIGINT}}
