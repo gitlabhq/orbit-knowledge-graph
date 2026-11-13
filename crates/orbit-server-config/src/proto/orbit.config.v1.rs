@@ -642,6 +642,23 @@ impl ::prost::Name for NamespaceFreshness {
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GraphStats {
+    #[prost(string, optional, tag = "1")]
+    pub cron: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(uint64, optional, tag = "2")]
+    pub run_timeout_secs: ::core::option::Option<u64>,
+}
+impl ::prost::Name for GraphStats {
+    const NAME: &'static str = "GraphStats";
+    const PACKAGE: &'static str = "orbit.config.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "orbit.config.v1.GraphStats".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/orbit.config.v1.GraphStats".into()
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ScheduledTasks {
     #[prost(message, optional, tag = "1")]
     pub global: ::core::option::Option<GlobalDispatcher>,
@@ -661,6 +678,8 @@ pub struct ScheduledTasks {
     pub stale_edge_reconciliation: ::core::option::Option<StaleEdgeReconciliation>,
     #[prost(message, optional, tag = "9")]
     pub namespace_freshness: ::core::option::Option<NamespaceFreshness>,
+    #[prost(message, optional, tag = "10")]
+    pub graph_stats: ::core::option::Option<GraphStats>,
 }
 impl ::prost::Name for ScheduledTasks {
     const NAME: &'static str = "ScheduledTasks";

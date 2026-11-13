@@ -11,10 +11,10 @@ use crate::clickhouse_setup::ClickHouseSetupConfig;
 use crate::engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
     CronSchedule, DatalakeRetryConfig, EngineConfiguration, EntityHandlerConfig,
-    GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
-    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, NamespaceFreshnessConfig,
-    ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
-    StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
+    GlobalDispatcherConfig, GraphStatsConfig, HandlersConfiguration, IndexerModule,
+    MigrationCompletionConfig, NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig,
+    NamespaceFreshnessConfig, ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
+    SiphonRouterConfig, StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
 };
 use crate::features::{Feature, FeatureScope, FeaturesConfig};
 use crate::gitlab::{GitlabConfig, JwtConfig};
@@ -301,6 +301,7 @@ fn schedule_config(value: proto::Schedule) -> Result<ScheduleConfig> {
     let migration_completion = present(tasks.migration_completion);
     let stale_edge = present(tasks.stale_edge_reconciliation);
     let namespace_freshness = present(tasks.namespace_freshness);
+    let graph_stats = present(tasks.graph_stats);
 
     Ok(ScheduleConfig {
         tasks: ScheduledTasksConfiguration {
@@ -366,6 +367,13 @@ fn schedule_config(value: proto::Schedule) -> Result<ScheduleConfig> {
                     present(namespace_freshness.cron),
                     present(namespace_freshness.run_timeout_secs),
                     "namespace-freshness",
+                )?,
+            },
+            graph_stats: GraphStatsConfig {
+                schedule: cron(
+                    present(graph_stats.cron),
+                    present(graph_stats.run_timeout_secs),
+                    "graph-stats",
                 )?,
             },
         },
