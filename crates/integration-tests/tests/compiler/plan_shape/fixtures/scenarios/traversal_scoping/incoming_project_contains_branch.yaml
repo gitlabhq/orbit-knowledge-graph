@@ -1,0 +1,26 @@
+---
+cases:
+  - name: Incoming containment does not count the project's outgoing branches
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "p", "entity": "Project", "node_ids": [7000]},
+            {"id": "b", "entity": "Branch"}
+          ],
+          "relationships": [{"type": "CONTAINS", "from": "p", "to": "b", "direction": "incoming"}],
+          "aggregations": [{"count": "b", "as": "c"}],
+          "limit": 10
+        }
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_code_edge
+          not_contains: []
+    missing_frontends:
+      gql: The original query scenario supplies only JSON.

@@ -29,6 +29,12 @@ struct MigrationAssets;
 #[folder = "$SKILLS_DIR/orbit-start"]
 struct StartAssets;
 
+const PACKAGE_REGISTRY_SKILL_NAME: &str = "orbit-package-registry";
+
+#[derive(Embed)]
+#[folder = "$SKILLS_DIR/orbit-package-registry"]
+struct PackageRegistryAssets;
+
 static JSON_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
     SkillCatalog::load_embedded(Frontend::JsonDsl)
         .expect("embedded skills passed full frontmatter and tree validation in tests")
@@ -104,7 +110,9 @@ impl SkillCatalog {
         })?;
         let migration = load_skill::<MigrationAssets>(MIGRATION_SKILL_NAME, |path| Some(path))?;
         let start = load_skill::<StartAssets>(START_SKILL_NAME, |path| Some(path))?;
-        let skills = [orbit, migration, start]
+        let package_registry =
+            load_skill::<PackageRegistryAssets>(PACKAGE_REGISTRY_SKILL_NAME, |path| Some(path))?;
+        let skills = [orbit, migration, start, package_registry]
             .into_iter()
             .map(|skill| (skill.metadata.name.clone(), skill))
             .collect();
@@ -205,7 +213,12 @@ mod tests {
                 .iter()
                 .map(|skill| skill.name.as_str())
                 .collect::<Vec<_>>(),
-            [SKILL_NAME, MIGRATION_SKILL_NAME, START_SKILL_NAME]
+            [
+                SKILL_NAME,
+                MIGRATION_SKILL_NAME,
+                PACKAGE_REGISTRY_SKILL_NAME,
+                START_SKILL_NAME
+            ]
         );
         let skill = &skills[0];
         assert_eq!(skill.name, "orbit");
@@ -377,7 +390,12 @@ mod tests {
         assert_eq!(error.name, "unknown");
         assert_eq!(
             error.known_names,
-            [SKILL_NAME, MIGRATION_SKILL_NAME, START_SKILL_NAME]
+            [
+                SKILL_NAME,
+                MIGRATION_SKILL_NAME,
+                PACKAGE_REGISTRY_SKILL_NAME,
+                START_SKILL_NAME
+            ]
         );
     }
 
@@ -403,5 +421,32 @@ mod tests {
         assert_eq!(manifest.content.as_bytes(), source.data.as_ref());
         assert!(manifest.content.contains("glab orbit skills get orbit"));
         assert!(manifest.content.contains("Do not use `glab orbit`"));
+    }
+
+    #[test]
+    fn package_registry_skill_is_served_unchanged_in_both_modes() {
+        let json = get_skill(PACKAGE_REGISTRY_SKILL_NAME, Frontend::JsonDsl, false).unwrap();
+        let gql = get_skill(PACKAGE_REGISTRY_SKILL_NAME, Frontend::Gql, false).unwrap();
+        assert_eq!(json, gql);
+        assert_eq!(json.metadata.name, PACKAGE_REGISTRY_SKILL_NAME);
+        assert!(!json.metadata.version.contains("+gql"));
+        assert!(
+            json.metadata
+                .description
+                .starts_with("Use Orbit graph queries")
+        );
+
+        let files = json.files.unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            [MANIFEST]
+        );
+        let manifest = &files[0];
+        assert_eq!(manifest.sha256, sha256_hex(manifest.content.as_bytes()));
+        let source = PackageRegistryAssets::get(MANIFEST).unwrap();
+        assert_eq!(manifest.content.as_bytes(), source.data.as_ref());
     }
 }

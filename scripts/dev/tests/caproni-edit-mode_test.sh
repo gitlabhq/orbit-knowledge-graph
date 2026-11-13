@@ -102,7 +102,15 @@ check "first watcher takes the lock" "0" "$(acquire_watch_lock >/dev/null 2>&1; 
 bash -c "ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' source '$SCRIPT'; sleep 60; :" & live_pid=$!
 sleep 0.5; echo "$live_pid" >"$WATCH_LOCK"
 check "second watcher is refused while the first lives" "1" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
+# A racer that read the same dead pid, but claims only after the winner replaced the lock.
+check "a late takeover leaves the new holder alone" "1" "$(replace_stale_lock "$WATCH_LOCK" 999999999 >/dev/null 2>&1; echo $?)"
+check "the new holder keeps the lock" "$live_pid" "$(cat "$WATCH_LOCK")"
+echo 999999999 >"$WATCH_LOCK"; echo "$live_pid" >"$WATCH_LOCK.stale.999999999"
+check "a stale lock claimed by a live watcher is refused" "1" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
+check "the claimed stale lock is left to its claimant" "999999999" "$(cat "$WATCH_LOCK")"
 kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null || true
+check "a claim left by a killed watcher is taken over" "0" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
+check "no claim left behind" "0" "$(ls "$TMP"/.dev/gkg-build.pid.stale.* 2>/dev/null | wc -l | tr -d ' ')"
 echo 999999999 >"$WATCH_LOCK"
 check "stale lock from a dead pid is taken over" "0" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
 sleep 60 & reused_pid=$!

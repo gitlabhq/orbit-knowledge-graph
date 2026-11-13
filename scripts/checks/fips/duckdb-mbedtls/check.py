@@ -118,6 +118,11 @@ def read_pins() -> tuple[str, set[str], dict[tuple[str, str], tuple[str, int]]]:
     return version, categories, pins
 
 
+def category_if_unchanged(pins: dict[tuple[str, str], tuple[str, int]], entry: tuple[str, str], count: int) -> str:
+    category, pinned = pins.get(entry, (UNREVIEWED, 0))
+    return category if pinned == count else UNREVIEWED
+
+
 def write_pins(version: str, found: Counter[tuple[str, str]], pins: dict[tuple[str, str], tuple[str, int]]) -> None:
     comments = [
         line
@@ -125,7 +130,7 @@ def write_pins(version: str, found: Counter[tuple[str, str]], pins: dict[tuple[s
         if line.startswith("#") and not line.startswith("# libduckdb-sys ")
     ]
     rows = [
-        f"{pins.get(entry, (UNREVIEWED, 0))[0]}\t{entry[0]}\t{entry[1]}\t{count}"
+        f"{category_if_unchanged(pins, entry, count)}\t{entry[0]}\t{entry[1]}\t{count}"
         for entry, count in sorted(found.items())
     ]
     PINS.write_text("\n".join([f"# libduckdb-sys {version}", *comments, *rows]) + "\n")
@@ -143,7 +148,7 @@ def main() -> int:
 
     if args.update:
         write_pins(version, found, pins)
-        print(f"wrote {len(found)} entry points for libduckdb-sys {version} to {PINS.name}")
+        print(f"wrote {len(found)} entry points for libduckdb-sys {version} to {PINS.name}; set a category on each unreviewed row")
         return 0
 
     failures = []

@@ -1,0 +1,18 @@
+---
+cases:
+  - name: A FINAL read over two matching versions of a merge request returns the latest one once
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE mr.source_branch = 'feature-zz' RETURN mr.title, mr.source_branch, p LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS mr FINAL
+          not_contains:
+            - tuple(mr.traversal_path, mr.id) IN
+    missing_frontends:
+      json: The original query scenario supplies only GQL.

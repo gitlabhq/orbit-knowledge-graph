@@ -163,6 +163,11 @@ dir = "packages/agent-plugins"
 run = ["bun run typecheck", "bun run test", "bun run test:claude", "bun run test:differential --count 100", "bun run build"]
 description = "Typecheck, test, and build the Claude Code and OpenCode plugins; needs Claude Code 2.1.287+"
 
+[tasks."test:agent-plugins-nightly"]
+dir = "packages/agent-plugins-nightly"
+run = "bun run test"
+description = "Test the nightly plugins that `ORBIT_NIGHTLY=1 orbit setup` installs"
+
 [tasks."test:integration"]
 run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers --test indexer_containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
@@ -301,6 +306,10 @@ description = "Run a measured code indexing benchmark"
 extends = "bench:engine"
 vars = { action = "smoke" }
 description = "Run one code indexing pass against each benchmark repository"
+
+[tasks."proto:config"]
+run = "cargo xtask proto-config"
+description = "Regenerate the config prost types and descriptor set"
 
 [tasks."proto:go"]
 run = "scripts/dev/proto-go.sh generate"

@@ -341,6 +341,8 @@ the later pages move by one row, so a row can repeat or be missing.
 - Names, such as variables, aliases, labels, and properties, have at most 64 characters.
 - Strings have at most 1024 characters.
 - The query text is at most 32 KiB.
+- By default, a query runs for at most 30 seconds, and a shortest path query for at most 15 seconds.
+  If a query runs longer, GitLab Orbit stops it and returns a timeout error.
 
 ## Debug a query
 

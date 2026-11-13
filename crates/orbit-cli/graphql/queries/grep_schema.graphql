@@ -1,0 +1,33 @@
+query GrepSchema {
+  orbit @gl_introduced(version: "19.4.0") {
+    schema {
+      nodes(first: 100) {
+        nodes {
+          name
+          properties(first: 100) {
+            nodes {
+              name
+              textSearchable @gl_introduced(version: "19.6.0")
+              defaultColumn @gl_introduced(version: "19.6.0")
+            }
+          }
+        }
+      }
+      edges(first: 100) {
+        nodes {
+          name
+          endpoints(first: 100) {
+            nodes {
+              source {
+                name
+              }
+              target {
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

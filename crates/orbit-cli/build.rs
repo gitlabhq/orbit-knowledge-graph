@@ -11,6 +11,7 @@ fn main() {
             .display()
     );
     println!("cargo:rerun-if-changed=../../packages/agent-plugins");
+    println!("cargo:rerun-if-changed=../../packages/agent-plugins-nightly");
 
     // Publish strips the leading `v` (scripts/release/upload-local-cli-release.sh uses
     // `${CI_COMMIT_TAG#v}`), so the package-registry version glab downloads and

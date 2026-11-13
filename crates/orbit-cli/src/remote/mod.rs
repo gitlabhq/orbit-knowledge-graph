@@ -14,6 +14,7 @@ pub(crate) mod ontology;
 pub(crate) mod origin;
 pub(crate) mod query;
 pub(crate) mod sdlc;
+pub(crate) mod server_schema;
 pub(crate) mod status;
 pub(crate) mod token;
 
