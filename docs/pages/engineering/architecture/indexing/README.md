@@ -21,3 +21,5 @@ pages in this section follow that work from the data to the graph:
   no downtime.
 - [Resiliency](resiliency.md) explains how all of them recover from crashes,
   retries, and outages.
+- [Indexing engine](indexing-engine.md) plans, runs, scales, and records all
+  indexing work. It is being built now.

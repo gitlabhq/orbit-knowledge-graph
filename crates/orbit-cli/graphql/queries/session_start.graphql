@@ -1,0 +1,30 @@
+query SessionStart($fullPath: ID!, $scoped: Boolean!, $withSchema: Boolean!) {
+  orbit @gl_introduced(version: "19.4.0") {
+    serviceStatus @skip(if: $scoped) {
+      state
+    }
+    schema @include(if: $withSchema) {
+      nodes(first: 100) {
+        nodes {
+          name
+        }
+      }
+    }
+  }
+  group(fullPath: $fullPath) @include(if: $scoped) {
+    orbit @gl_introduced(version: "19.4.0") {
+      ...ScopeIndexing
+    }
+  }
+  project(fullPath: $fullPath) @include(if: $scoped) {
+    orbit @gl_introduced(version: "19.4.0") {
+      ...ScopeIndexing
+    }
+  }
+}
+
+fragment ScopeIndexing on OrbitNamespace {
+  indexing {
+    state
+  }
+}

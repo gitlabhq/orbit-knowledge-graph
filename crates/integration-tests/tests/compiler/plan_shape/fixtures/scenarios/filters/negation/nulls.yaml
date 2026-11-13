@@ -1,0 +1,55 @@
+---
+cases:
+  - name: transform_null_in_pinned_for_not_tree
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3]
+        RETURN wi.weight LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - transform_null_in = 0
+          not_contains: []
+
+  - name: transform_null_in_absent_without_not
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight IN [3]
+        RETURN wi.weight LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains: []
+          not_contains:
+            - transform_null_in
+
+  - name: transform_null_in_absent_when_not_folds
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":3},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight = 3
+        RETURN wi.weight LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains: []
+          not_contains:
+            - transform_null_in

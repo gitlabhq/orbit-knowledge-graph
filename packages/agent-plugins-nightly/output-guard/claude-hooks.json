@@ -1,0 +1,14 @@
+{
+  "PostToolUse": [
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/features/output-guard/claude.mjs\"",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}

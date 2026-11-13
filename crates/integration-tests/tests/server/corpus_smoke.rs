@@ -51,6 +51,7 @@ const DOC_MARKDOWN_DIRS: &[&str] = &[
     "docs/pages/engineering/architecture",
     "docs/pages/engineering/adr",
     "skills/orbit",
+    "skills/orbit-package-registry",
     "crates/integration-testkit",
 ];
 const DOC_QUERY_MARKER: &str = "orbit-query";

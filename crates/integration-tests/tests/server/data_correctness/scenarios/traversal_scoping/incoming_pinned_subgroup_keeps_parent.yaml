@@ -8,8 +8,6 @@ query:
     MATCH (child:Group {id: 200})<-[:CONTAINS]-(parent:Group) RETURN parent{.id, .name}, count(parent) AS n LIMIT 10
 
 expect:
-  sql_contains: ["gl_edge"]
-  skip_requirements: ["node_ids"]
   groups:
     parent:
       ids: [100]

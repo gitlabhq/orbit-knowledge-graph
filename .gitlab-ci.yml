@@ -22,7 +22,7 @@ workflow:
         on_new_commit: interruptible
       variables:
         DEV_PREFIX: "sec"
-    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       variables:
@@ -38,7 +38,7 @@ workflow:
       variables:
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       variables:
@@ -58,7 +58,7 @@ workflow:
         on_new_commit: interruptible
       variables:
         DOCS_ONLY: "true"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     # Security-template jobs can't reference .skip-on-solo-schedule, so solo
     # schedules mute them through their documented kill-switch variables.
@@ -408,8 +408,30 @@ agent-plugins:
     - bun run test:claude
     - bun run test:differential --count 100
     - bun run build
-    - git add --intent-to-add ../../config/setup/agents/opencode_ui
-    - git diff --exit-code -- ../../config/setup/agents/opencode_ui core/lib.js
+    - git add --intent-to-add ../../config/setup/agents/opencode_ui ../../config/setup/agents/pi_ui
+    - git diff --exit-code -- ../../config/setup/agents/opencode_ui ../../config/setup/agents/pi_ui core/lib.js
+
+agent-plugins-nightly:
+  stage: lint
+  image: oven/bun:1.4.4
+  tags:
+    - saas-linux-medium-amd64
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - packages/agent-plugins-nightly/**/*
+        - package.json
+        - bun.lock
+  needs: []
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq nodejs > /dev/null
+    - bun install --frozen-lockfile --ignore-scripts
+  script:
+    - cd packages/agent-plugins-nightly
+    - bun run test
 
 generate-config-schema:
   stage: lint
@@ -425,6 +447,17 @@ generate-config-schema:
     paths:
       - config/schemas/config.schema.json
     expire_in: 24 hours
+
+generate-config-proto:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run proto:config
+    - git diff --exit-code crates/orbit-server-config/src/proto || (echo "crates/orbit-server-config/src/proto is out of date. Run 'mise proto:config' and commit." && exit 1)
 
 rust-toolchain-sync-check:
   stage: lint
@@ -651,7 +684,7 @@ fips-check:
   script:
     - ./scripts/checks/fips/aws-lc/check-graph.sh
     - mise run fips:duckdb:check
-    - cargo build -p orbit-server --locked
+    - cargo build -p orbit-server --locked --features libduckdb-sys/bundled
     - ./scripts/checks/fips/aws-lc/check-binary.sh target/debug/gkg-server
     - sccache --show-stats || true
 

@@ -1,0 +1,41 @@
+---
+cases:
+  - name: is_null_on_date
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.due_date IS NULL
+        RETURN wi.title, wi.due_date ORDER BY wi.id LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - nullIf(wi.due_date, toDate32('1970-01-01'))
+            - wi.due_date = toDate32('1970-01-01')
+          not_contains:
+            - toDateTime64('1970-01-01
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
+
+  - name: is_not_null_on_date
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id IN [4000, 4001, 99030] AND wi.due_date IS NOT NULL
+        RETURN wi.title, wi.due_date LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - nullIf(wi.due_date, toDate32('1970-01-01'))
+            - wi.due_date != toDate32('1970-01-01')
+          not_contains:
+            - toDateTime64('1970-01-01
+    missing_frontends:
+      json: The original query scenario supplies only GQL.

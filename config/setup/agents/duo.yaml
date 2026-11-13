@@ -1,10 +1,30 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
 name: duo
 title: GitLab Duo
-detect: ["~/.gitlab/duo"]
+# Duo creates its config dir on first run, so the binary glab installs counts too.
+detect:
+  - "$XDG_CONFIG_HOME/gitlab/duo"
+  - "~/.gitlab/duo"
+  - "$GLAB_CONFIG_DIR/bin/duo"
+  - "$XDG_CONFIG_HOME/glab-cli/bin/duo"
+  - "~/.config/glab-cli/bin/duo"
+  - "~/Library/Application Support/glab-cli/bin/duo"
 instruction_file:
   project: AGENTS.md
   global: "~/.gitlab/duo/AGENTS.md"
+json_merges:
+  - file:
+      project: .gitlab/duo/hooks.json
+      global: "~/.gitlab/duo/hooks.json"
+    path: [hooks, SessionStart]
+    marker: hook-guard instructions
+    review_note:
+      project: GitLab Duo runs project hooks only with --enable-project-hooks or GITLAB_ENABLE_PROJECT_HOOKS=true; without it, Duo gets no Orbit instructions in this project
+    entries:
+      - hooks:
+          - type: command
+            command: "{{orbit}} hook-guard instructions{{hook_gitlab}}"
+            timeout: 10
 skills:
   dir:
     project: .agents/skills

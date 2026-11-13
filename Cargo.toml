@@ -10,7 +10,7 @@ members = [
   "crates/code-graph-incremental",
   "crates/clickhouse-client",
   "crates/indexer",
-  "crates/indexer/datafusion",
+  "crates/indexer/duckdb",
   "crates/query-engine",
   "crates/query-engine/compiler",
   "crates/query-engine/types",
@@ -55,9 +55,10 @@ orbit-observability = { path = "crates/orbit-observability" }
 orbit-log-fields = { path = "crates/orbit-log-fields" }
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0" }
 labkit-fields = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0" }
+labkit-config = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0" }
 # No bundled ring provider: every binary installs its rustls provider before building a Tracker.
 labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0", default-features = false }
-arrow = "60.0.0"
+arrow = { version = "60.0.0", default-features = false }
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
 cpu-time = "1.0.0"
@@ -65,8 +66,7 @@ cargo-util-schemas = "0.14.0"
 cargo_metadata = "0.23.1"
 enum-as-inner = "0.7.0"
 either = "1.15.0"
-datafusion = { version = "55.2.0", default-features = false, features = ["sql", "nested_expressions"] }
-clap = { version = "4.5.57", features = ["derive", "env"] }
+clap = { version = "4.5.57", default-features = false, features = ["std", "help", "usage", "error-context", "derive", "env"] }
 cliclack = "0.5"
 comrak = { version = "0.53.0", default-features = false }
 dirs = "6"
@@ -79,7 +79,7 @@ cynic = { version = "3.14.0", features = ["rkyv"] }
 cynic-codegen = { version = "3.14.0", features = ["rkyv"] }
 cynic-querygen = { version = "3.14.0", default-features = false }
 croner = "3.0.1"
-futures = "0.3.31"
+futures = { version = "0.3.31", default-features = false, features = ["std"] }
 mimalloc = { version = "0.1.48", default-features = false }
 parking_lot = "0.12.5"
 petgraph = "0.8.3"
@@ -94,7 +94,7 @@ schemars = "1.2.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde-saphyr = "1.1.0"
-sha2 = "0.11.0"
+sha2 = { version = "0.11.0", default-features = false }
 smallvec = "1.15.1"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 stacker = "0.1.23"
@@ -103,7 +103,6 @@ typed-path = "0.12.3"
 
 # Indexer dependencies
 anyhow = "1.0.100"
-config = { version = "0.15", default-features = false, features = ["yaml"] }
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
 tokio = { version = "1.49.0", features = ["full"] }
 strum = { version = "0.28.0", features = ["derive"] }
@@ -129,7 +128,6 @@ toml_edit = "0.25"
 toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
-# Build-time fetch over plain HTTP; integrity comes from pinned checksums.
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
 # Drop transitive crypto providers; hint aws-lc usage so orbit-server's `fips` feature
 # resolves it implicitly. Do not add `fips` here: it would leak into build scripts,
@@ -144,7 +142,6 @@ async-nats = { version = "0.49.0", default-features = false, features = [
   "kv",
   "object-store",
   "crypto",
-  "nuid",
   "aws-lc-rs",
 ] }
 arrow-ipc = "60.0.0"
@@ -165,7 +162,7 @@ proc-macro2 = "1.0.106"
 
 # Iglu schema codegen (build-time only; consumed by orbit-analytics/build.rs)
 prettyplease = "0.2.37"
-typify = "0.7.0"
+typify = { version = "0.7.0", default-features = false }
 
 # JS/TS ecosystem (v2 custom pipeline)
 oxc = { git = "https://github.com/oxc-project/oxc", rev = "45a17c25d188bf1b289638483e2bc61adbadd364", features = ["semantic", "ast_visit"] }
@@ -175,7 +172,7 @@ oxc_resolver = "11.24.2"
 # Simulator dependencies
 rand = "0.10"
 sqlformat = "0.5"
-tabled = "0.22"
+tabled = { version = "0.22", default-features = false, features = ["std", "derive"] }
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
@@ -191,6 +188,8 @@ ra_ap_vfs = "0.0.358"
 sqlparser = { version = "0.62.0", features = ["visitor"] }
 prost = "0.14.3"
 prost-build = "0.14.3"
+prost-protovalidate-types = "0.6.0"
+prost-reflect = "0.16.5"
 prost-types = "0.14.3"
 protoc-bin-vendored = "3.2.0"
 tar = "0.4.44"
@@ -207,13 +206,13 @@ minijinja = "2.21.0"
 
 # Server dependencies
 axum = { version = "0.8.8", features = ["macros"] }
-jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "10.2.0", default-features = false, features = ["aws_lc_rs"] }
 rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
 semver = { version = "1.0", features = ["serde"] }
 secrecy = "0.10.3"
 
 # Health check dependencies
-kube = { version = "4.2", default-features = false, features = ["client", "runtime", "ws", "rustls-tls", "aws-lc-rs"] }
+kube = { version = "4.2", default-features = false, features = ["client", "rustls-tls", "aws-lc-rs"] }
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls-no-provider"] }
 rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs"] }

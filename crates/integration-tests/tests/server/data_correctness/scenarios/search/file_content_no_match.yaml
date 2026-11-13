@@ -17,8 +17,4 @@ query:
     MATCH (f:File) WHERE f.id IN [13000, 13001, 13002, 13003, 13004] AND f.project_id = 1000 AND f.content CONTAINS 'zqxj_nonexistent_token' RETURN f.path, f.content LIMIT 10
 
 expect:
-  skip_requirements:
-    - "filter:content"
-    - "filter:project_id"
-    - node_ids
   node_count: 0

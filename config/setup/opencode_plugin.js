@@ -1,3 +1,4 @@
+import { execFile } from "child_process";
 import { existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -11,6 +12,20 @@ const SHELL_TOOLS = ["bash", "shell"];
 function hasGraph() {
   const root = process.env.ORBIT_DATA_DIR || join(homedir(), ".gitlab", "orbit");
   return existsSync(join(root, "local", "manifest.duckdb"));
+}
+
+const LAUNCHERS = [["glab", ["orbit"]], ["orbit", []]];
+const RETRY_AFTER_MS = 60000;
+
+function run(command, args) {
+  return new Promise((resolve) => {
+    execFile(command, args, { timeout: 9000 }, (error, stdout) => resolve(error ? "" : String(stdout).trim()));
+  });
+}
+
+async function loadInstructions() {
+  const texts = await Promise.all(LAUNCHERS.map(([command, prefix]) => run(command, [...prefix, "hook-guard", "instructions"])));
+  return texts.find(Boolean) ?? "";
 }
 
 function withReminder(result) {
@@ -35,7 +50,17 @@ export default {
   },
   async server() {
     let reminded = false;
+    let instructions = loadInstructions();
+    let loadedAt = Date.now();
     return {
+      "experimental.chat.system.transform": async (_input, output) => {
+        const text = await instructions;
+        if (!text && Date.now() - loadedAt > RETRY_AFTER_MS) {
+          instructions = loadInstructions();
+          loadedAt = Date.now();
+        }
+        if (text && !output.system.includes(text)) output.system.push(text);
+      },
       "tool.execute.after": async (input, output) => {
         if (reminded || !SHELL_TOOLS.includes(input.tool) || !hasGraph()) return;
         output.output = output.output + "\n\n" + REMINDER;

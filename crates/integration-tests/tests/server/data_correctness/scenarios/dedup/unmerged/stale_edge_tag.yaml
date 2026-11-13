@@ -21,7 +21,6 @@ cases:
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'blocked' RETURN u, g LIMIT 10
     expect:
-      skip_requirements: ["node_ids", "filter:state", "relationship:MEMBER_OF"]
       node_count: 0
 
   - name: latest_tag_included
@@ -30,7 +29,6 @@ cases:
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'active' RETURN u.state, g LIMIT 10
     expect:
-      skip_requirements: [node_count]
       nodes:
         User:
           ids: [1, 2, 6, 9020]
@@ -48,7 +46,6 @@ cases:
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'blocked' RETURN count(u) AS n
     expect:
-      skip_requirements: ["node_ids", "filter:state"]
       row_count: 1
       row_values: [{ n: 0 }]
 
@@ -58,6 +55,5 @@ cases:
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'active' RETURN count(u) AS n
     expect:
-      skip_requirements: ["node_ids", "filter:state"]
       row_count: 1
       row_values: [{ n: 4 }]

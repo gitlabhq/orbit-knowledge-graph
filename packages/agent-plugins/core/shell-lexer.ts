@@ -3,10 +3,13 @@ export type Token =
   | { kind: 'separator'; pipe: boolean }
   | { kind: 'redirect'; operator: '<' | '>' }
   | { kind: 'substitution' }
+  | HeredocToken
+
+type HeredocToken = { kind: 'heredoc'; body: string }
 
 export type Lexed = { tokens: Token[]; unparsed: boolean }
 
-type Heredoc = { delimiter: string; stripTabs: boolean; quoted: boolean }
+type Heredoc = { delimiter: string; stripTabs: boolean; quoted: boolean; token: HeredocToken }
 type QuoteForm = { close: string; escapes: boolean; substitutions: boolean; lineContinuation: boolean }
 
 const QUOTE_FORMS = {
@@ -128,17 +131,20 @@ function scanHeredocOperand(src: string, start: number): { delimiter: string; qu
   return { delimiter, quoted, end: i }
 }
 
-function scanHeredocBody(src: string, start: number, heredoc: Heredoc): { end: number; closed: boolean; substitutes: boolean } {
+function scanHeredocBody(src: string, start: number, heredoc: Heredoc): { end: number; closed: boolean; substitutes: boolean; body: string } {
   let at = start
   let substitutes = false
+  const lines: string[] = []
   while (at < src.length) {
     const newline = src.indexOf('\n', at)
-    const line = src.slice(at, newline < 0 ? src.length : newline)
+    const raw = src.slice(at, newline < 0 ? src.length : newline)
+    const line = heredoc.stripTabs ? raw.replace(/^\t+/, '') : raw
     at = newline < 0 ? src.length : newline + 1
-    if ((heredoc.stripTabs ? line.replace(/^\t+/, '') : line) === heredoc.delimiter) return { end: at, closed: true, substitutes }
+    if (line === heredoc.delimiter) return { end: at, closed: true, substitutes, body: lines.join('\n') }
     if (!heredoc.quoted && SUBSTITUTION.test(line)) substitutes = true
+    lines.push(line)
   }
-  return { end: at, closed: false, substitutes }
+  return { end: at, closed: false, substitutes, body: lines.join('\n') }
 }
 
 class Lexer {
@@ -282,8 +288,11 @@ class Lexer {
     const stripTabs = this.src[this.pos + 2] === '-'
     const operandStart = this.pos + (stripTabs ? 3 : 2)
     const { delimiter, quoted, end } = scanHeredocOperand(this.src, operandStart + (this.src.slice(operandStart).match(/^[ \t]*/)?.[0].length ?? 0))
-    if (delimiter) this.heredocs.push({ delimiter, stripTabs, quoted })
-    else this.unparsed = true
+    if (delimiter) {
+      const token: HeredocToken = { kind: 'heredoc', body: '' }
+      this.tokens.push(token)
+      this.heredocs.push({ delimiter, stripTabs, quoted, token })
+    } else this.unparsed = true
     this.pos = end
   }
 
@@ -306,6 +315,7 @@ class Lexer {
       const body = scanHeredocBody(this.src, at, heredoc)
       if (body.substitutes) this.tokens.push({ kind: 'substitution' })
       if (!body.closed) this.unparsed = true
+      heredoc.token.body = body.body
       at = body.end
     }
     this.pos = at - 1

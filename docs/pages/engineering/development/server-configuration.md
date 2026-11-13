@@ -5,14 +5,24 @@
 
 ## Load order
 
-1. The embedded `config/default.yaml`. It declares every key, so a removed key stops startup.
+1. The embedded `config/default.yaml`. It declares every key, and the schema marks each one
+   required, so a removed key stops startup with a "value is required" error.
 2. One overlay file: `--config <path>`, or else `config/config.yaml` when it exists.
 3. Secret files under `/etc/secrets/`, for example `/etc/secrets/billing/quota/api_token`.
 
 The server reads only two environment variables: `RUST_LOG`, when `metrics.log_level` is
-unset, and `GKG_VERSION`. To add a setting, add the field to
-`crates/orbit-server-config/` and its value to `config/default.yaml`. For the local overlay
-files, see [local development](local-development.md).
+unset, and `GKG_VERSION`. For the local overlay files, see
+[local development](local-development.md).
+
+The loader merges the layers into one document. It rejects enum names and closed-section keys the
+schema does not declare, then decodes and validates the document, reporting every violation at once.
+
+To add a setting, add:
+
+- a field to `crates/orbit-server-config/proto/orbit/config/v1/config.proto`, marked
+  `(buf.validate.field).required = true` unless it is optional, then run `mise proto:config`
+- a field to the Rust struct in `crates/orbit-server-config/`, and its arm in `convert.rs`
+- its value in `config/default.yaml`
 
 ## Modes
 
@@ -231,17 +241,19 @@ Check: the pods are ready and Prometheus scrapes `/-/metrics`.
 
 ### Query settings
 
-`query.default` applies to all queries. A query type key, for example `query.aggregation`,
-overrides it for that type.
+`query.default` applies to all queries. A query type key under `query.overrides`, for example
+`query.overrides.aggregation`, overrides it for that type.
 
 | Key | Effect |
 | --- | --- |
-| `query.<type>.max_execution_time` | ClickHouse `max_execution_time` in seconds |
-| `query.<type>.max_memory_usage`, `max_bytes_to_read`, `max_rows_to_read` | ClickHouse limits |
-| `query.<type>.max_rows_in_set` | Limit of an `IN` subquery |
-| `query.<type>.max_ast_elements`, `max_expanded_ast_elements`, `max_ast_depth` | ClickHouse query size limits |
-| `query.<type>.use_query_cache` | ClickHouse query cache. Indexing reads and queries that pin every node by ID skip it. |
-| `query.<type>.query_cache_ttl` | Maximum age of a cached result in seconds |
+| `query.<scope>.max_execution_time` | ClickHouse `max_execution_time` in seconds |
+| `query.<scope>.max_memory_usage`, `max_bytes_to_read`, `max_rows_to_read` | ClickHouse limits |
+| `query.<scope>.max_rows_in_set` | Limit of an `IN` subquery |
+| `query.<scope>.max_ast_elements`, `max_expanded_ast_elements`, `max_ast_depth` | ClickHouse query size limits |
+| `query.<scope>.use_query_cache` | ClickHouse query cache. Indexing reads and queries that pin every node by ID skip it. |
+| `query.<scope>.query_cache_ttl` | Maximum age of a cached result in seconds |
+
+`<scope>` is `default` or `overrides.<type>`.
 
 ## Schema
 

@@ -404,11 +404,14 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 .collect(),
         ),
     };
-    let emitted = match ast {
+    (planned, emitted(ast))
+}
+
+pub fn emitted(ast: &Node) -> Tree {
+    match ast {
         Node::Query(value) => query(value),
         Node::Insert(_) => leaf(Operator::Insert, ""),
-    };
-    (planned, emitted)
+    }
 }
 
 fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {

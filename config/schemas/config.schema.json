@@ -66,7 +66,13 @@
       "$ref": "#/$defs/BillingConfig"
     },
     "features": {
-      "$ref": "#/$defs/FeaturesConfig"
+      "type": "object",
+      "properties": {
+        "code_graph_incremental": {
+          "$ref": "#/$defs/FeatureScope"
+        }
+      },
+      "additionalProperties": false
     },
     "object_storage": {
       "$ref": "#/$defs/ObjectStorageConfig"
@@ -227,13 +233,13 @@
           "minimum": 0
         },
         "consumer_inactive_threshold_secs": {
-          "description": "Inactive threshold for versioned durable consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nApplied to Siphon dispatch consumers and to subscribe consumers on the\nversioned work streams, so a retired release's consumers reap\nthemselves and stop vetoing release GC. A connected consumer's fetch\nloop keeps it active. Clamped to a minimum of 60 seconds.",
+          "description": "Inactive threshold for versioned durable consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nApplied to Siphon dispatch consumers and to subscribe consumers on the\nversioned work streams, so a retired release's consumers reap\nthemselves and stop vetoing release GC. A connected consumer's fetch\nloop keeps it active. At least 60 seconds.",
           "type": "integer",
           "format": "uint64",
           "minimum": 60
         },
         "release_gc_idle_threshold_secs": {
-          "description": "How long another release's streams must show no activity (creation,\npublishes, attached consumers) before a starting dispatcher deletes\nthem. A live release's dispatcher publishes every minute, so activity\ndoubles as liveness. Clamped to a minimum of 600 seconds.",
+          "description": "How long another release's streams must show no activity (creation,\npublishes, attached consumers) before a starting dispatcher deletes\nthem. A live release's dispatcher publishes every minute, so activity\ndoubles as liveness. At least 600 seconds.",
           "type": "integer",
           "format": "uint64",
           "minimum": 600
@@ -1266,19 +1272,25 @@
       "additionalProperties": false
     },
     "QuerySettings": {
-      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: true\n    query_cache_ttl: 10\n  aggregation:\n    max_execution_time: 60\n```",
+      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: true\n    query_cache_ttl: 10\n  overrides:\n    aggregation:\n      max_execution_time: 60\n```",
       "type": "object",
       "properties": {
         "default": {
           "$ref": "#/$defs/QueryConfig"
+        },
+        "overrides": {
+          "description": "Per-query-type overrides. Keys must match `QueryType` variant names\nin snake_case. Validated at startup by the server.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/QueryConfig"
+          },
+          "default": {}
         }
       },
+      "additionalProperties": false,
       "required": [
         "default"
-      ],
-      "additionalProperties": {
-        "$ref": "#/$defs/QueryConfig"
-      }
+      ]
     },
     "QueryConfig": {
       "description": "Query execution settings. All fields map to ClickHouse query-level\nsettings. The closed set of fields prevents arbitrary user input from\nreaching the SETTINGS clause (CWE-89).\n\n`None` means \"not specified at this layer\" -- the merge logic in\n[`QuerySettings::resolve`] fills in from the default. The derived\n`Default` is therefore all-`None`: nothing specified, nothing emitted.",
@@ -1498,6 +1510,10 @@
         "collector_url": {
           "type": "string"
         },
+        "local_collector_url": {
+          "type": "string",
+          "default": ""
+        },
         "deployment": {
           "$ref": "#/$defs/DeploymentConfig"
         }
@@ -1635,16 +1651,6 @@
           "const": "license_checksum"
         }
       ]
-    },
-    "FeaturesConfig": {
-      "description": "An unrecognized key fails deserialization as an unknown [`Feature`] variant,\nrather than being silently ignored.",
-      "type": "object",
-      "properties": {
-        "code_graph_incremental": {
-          "$ref": "#/$defs/FeatureScope"
-        }
-      },
-      "additionalProperties": false
     },
     "FeatureScope": {
       "description": "A feature flag scoped to root namespaces: `enabled` toggles it, an empty\n`namespaces` list means every namespace, otherwise only those ids.",

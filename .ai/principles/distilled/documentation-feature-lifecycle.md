@@ -1,6 +1,6 @@
 ---
-source_checksum: bba6373d18de99ee
-distilled_at_sha: a12edd3cd641812cf27868b59ce605d439d981b5
+source_checksum: 7d6ef05a9497fe68
+distilled_at_sha: b0b7e1628f9fb689a18cee2ec91c621c6a26dd2d
 ---
 <!-- Auto-generated from docs.gitlab.com by gitlab-ai-principles-distiller — do not edit manually -->
 
@@ -47,10 +47,16 @@ distilled_at_sha: a12edd3cd641812cf27868b59ce605d439d981b5
 ### Release Notes — Feature Release Notes
 
 - Create each feature release note as a separate Markdown file inside the appropriate release directory (e.g., `doc/releases/19/gitlab-19-1-released/`); use the `Release Notes Item` MR template and assign to an Engineering Manager and Technical Writer for review.
+- Name each feature release note file with a short, hyphenated slug based on the release note title (not the work item title) that is unique in the release directory; the filename breaks ties between notes with the same `weight`.
 - Keep release note body text to 125 words or fewer; DO NOT include images or videos; use relative links for documentation links; ensure work item links are not confidential.
+- Write release note text that explains the value of the change ("In previous versions of GitLab, you couldn't... Now you can..."); keep sentences under 25 words, use second person and present tense, DO NOT use "we", DO NOT include implementation details (syntax, variable names, API parameters), use a bulleted list for several distinct capabilities, and give links meaningful text (DO NOT use "here").
 - Set all required metadata fields: `title` (seven words or fewer), `tier`, `offering`, `documentation_link` (relative URL, no `.md` extension), `work_item` (absolute, non-confidential URL), `categories`, and `stage`.
+- Use a relative `documentation_link` without the `.md` extension or `_index` (starting with `../../../` from a release directory); keep the `.md` extension and any anchor on relative links inside the note body — mixing the two formats breaks the CI pipeline.
+- Set `stage` to a value that matches an entry in `release_post_groupings.yaml` in `docs-gitlab-com` (a `devops::` label does not always map); an unrecognized value silently places the note in the `Scale and Deployments` section.
 - Use `level: primary` to place a feature in the `Primary features` section; use `weight` (multiples of 10) to control ordering within a section; omit both when defaults are acceptable.
 - Merge all feature release notes by 23:59 UTC on the Friday before release day.
+- List `tier` and `offering` values in the documented order (`Free, Premium, Ultimate`; `gitlab_com, self_managed, gitlab_dedicated, gitlab_dedicated_for_government`) and use case-sensitive category `Name` values.
+- Set `co_create: true` for community contributions and Co-Create program features to place them in the `Co-created contributions` section (the `level` value is then ignored).
 
 ### Release Notes — Publishing
 
@@ -78,10 +84,13 @@ distilled_at_sha: a12edd3cd641812cf27868b59ce605d439d981b5
 - When an item affects multiple minor versions, link each version index entry to the same anchor; use an affected-versions table in the upgrade note body when the item spans two or more minor versions.
 - Use a descriptive, unique H3 heading for each upgrade note (DO NOT include version numbers in the heading); list `Affects` and `Affected versions` directly after the heading.
 - When a required upgrade stop applies to a specific patch, add a note in the version index; for conditional required stops, include the condition and a way for administrators to check if they are affected.
+- When a minor version is a required upgrade stop, add a `> [!note]` below `### Upgrade to X.Y`, before the "Before upgrading to GitLab X.Y" sentence; say that this required stop must be installed before later versions, and link to `../upgrade_paths.md#required-upgrade-stops`.
 - If an item applies only to specific installation methods, add the installation type(s) in parentheses (e.g., `(Geo)`, `(Linux package)`, `(Helm chart)`).
 - For Geo items, include a `{{< details >}}` tier block before the affected versions list.
 - Document a known bug before a fix is available only when it has significant impact on upgrades or operations; when the fix ships, update the list item to the affected range and add the fixed patch level to the `Affected versions` field — DO NOT create separate upgrade notes for the bug and the fix.
 - When an issue spans two major versions, document full details on the newer major version page and link from the older page; if cross-page linking becomes confusing due to many affected versions, duplicate the item on both pages.
+- For upgrade notes requiring extensive reference material (SQL queries, data descriptions, configuration options), use H4 sub-headings for internal structure.
+- Add every upgrade note as an H3 in the `## Upgrade notes` section, regardless of length or how many versions it affects.
 
 ## Authoritative sources
 
