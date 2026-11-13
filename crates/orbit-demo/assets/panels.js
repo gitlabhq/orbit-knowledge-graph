@@ -19,6 +19,12 @@
   // Rewrites renumber plan ids, so lines compare with their ids masked.
   const shape = (line) => line.replace(/PlanId\(\d+\)/g, "PlanId");
 
+  function sql(text) {
+    const block = node("pre", undefined, "code code-sql");
+    Highlight.render(block, Highlight.sql(text));
+    return block;
+  }
+
   function code(lines, added) {
     const block = node("pre", undefined, "code");
     if (!lines || !lines.length) { block.textContent = "(none)"; return block; }
@@ -48,8 +54,8 @@
   }
 
   function request(r) {
-    if (r.kind === "sql") return [heading("ClickHouse SQL"), code([r.sql]), heading("Parameters"), table(r.params.map(([name, value]) => ({ name, value })))];
-    if (r.kind === "engine") return [heading("Engine plan"), code(r.plan)];
+    if (r.kind === "sql") return [heading("ClickHouse SQL"), sql(r.sql), heading("Parameters"), table(r.params.map(([name, value]) => ({ name, value })))];
+    if (r.kind === "engine") return [heading("Join plan: join the stages' rows, apply the response policy, page the result"), code(r.plan)];
     const { kind, ...body } = r;
     return [heading(kind === "code" ? "Orbit Next structural search request" : "Slack extraction request"), code(JSON.stringify(body, null, 2).split("\n"))];
   }
@@ -87,11 +93,14 @@
         if (s.error) { const alert = node("div", s.error, "alert alert-danger"); parts.push(alert); }
         const keys = s.keys.map((k) => ({ from: `stage ${k.from}`, binding: k.binding, count: k.count, sample: k.sample }));
         parts.push(heading("Key sets this stage read"), keys.length ? table(keys) : empty("No key sets", "This stage reads no keys from earlier stages."));
+        const flows = run.edges.filter((e) => e.kind === "rows" && (e.from === s.id || e.to === s.id))
+          .map((e) => ({ from: `stage ${e.from}`, to: `stage ${e.to}`, rows: e.count ?? "", columns: (e.columns || []).join(", ") }));
+        if (flows.length) parts.push(heading(Dag.kind(s.backend) === "engine" ? "Rows this join reads" : "Rows this stage hands to the join"), table(flows));
         return parts;
       }
       default:
         if (s.samples.length) return s.samples.flatMap((x) => [heading(`${x.request}: ${x.count} rows before the stage's checks`), table(x.rows)]);
-        return s.id === run.stages[run.stages.length - 1]?.id ? [heading("Engine output"), table(run.rows)] : [empty("No executor call", "This stage read nothing.")];
+        return s.id === run.stages[run.stages.length - 1]?.id ? [heading("Join output"), table(run.rows)] : [empty("No executor call", "This stage read nothing.")];
     }
   }
 
@@ -143,9 +152,9 @@
       return;
     }
     run.tab = run.tab || TABS[0];
-    title.textContent = `Stage ${s.id} · ${Dag.NAMES[s.backend] || s.backend}${s.hydration ? " hydration" : ""}`;
+    title.textContent = `Stage ${s.id} · ${Dag.NAMES[s.backend] || s.backend}`;
     const kind = Dag.kind(s.backend);
-    meta.replaceChildren(badge(kind === "engine" ? "Query engine" : kind === "relational" ? "Relational" : "Remote", KIND_TONES[kind]), badge(Dag.STATES[s.status] || s.status, TONES[s.status]));
+    meta.replaceChildren(badge(Dag.KINDS[kind], KIND_TONES[kind]), badge(Dag.STATES[s.status] || s.status, TONES[s.status]));
     tabs(run, s);
     detail.replaceChildren(...body(run, s, run.tab));
   }

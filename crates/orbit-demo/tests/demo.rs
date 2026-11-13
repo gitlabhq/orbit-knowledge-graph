@@ -200,6 +200,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     let index = exchange(page, &get("/", &host, "")).await;
     assert_eq!(index.status, 200);
     assert_eq!(index.header("content-security-policy"), Some(CSP));
+    assert!(index.body.contains("Execution plan") && index.body.contains("Join (in process)"));
     let rebound = exchange(
         page,
         &get(

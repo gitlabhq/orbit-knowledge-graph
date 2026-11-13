@@ -20,7 +20,7 @@ use crate::run::{RunLog, run};
 
 const KEPT_RUNS: u64 = 64;
 
-const ASSETS: [(&str, &str, &[u8]); 15] = [
+const ASSETS: [(&str, &str, &[u8]); 14] = [
     (
         "/",
         "text/html; charset=utf-8",
@@ -57,6 +57,11 @@ const ASSETS: [(&str, &str, &[u8]); 15] = [
         include_bytes!("../assets/dag.js"),
     ),
     (
+        "/assets/highlight.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../assets/highlight.js"),
+    ),
+    (
         "/assets/panels.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../assets/panels.js"),
@@ -65,11 +70,6 @@ const ASSETS: [(&str, &str, &[u8]); 15] = [
         "/assets/tanuki.svg",
         "image/svg+xml",
         include_bytes!("../assets/tanuki.svg"),
-    ),
-    (
-        "/assets/vendor/cytoscape.min.js",
-        "text/javascript; charset=utf-8",
-        include_bytes!("../assets/vendor/cytoscape.min.js"),
     ),
     (
         "/assets/vendor/fonts/GitLabSans.woff2",
@@ -90,11 +90,6 @@ const ASSETS: [(&str, &str, &[u8]); 15] = [
         "/assets/vendor/fonts/GitLabMono-OFL.txt",
         "text/plain; charset=utf-8",
         include_bytes!("../assets/vendor/fonts/GitLabMono-OFL.txt"),
-    ),
-    (
-        "/assets/vendor/cytoscape.LICENSE",
-        "text/plain; charset=utf-8",
-        include_bytes!("../assets/vendor/cytoscape.LICENSE"),
     ),
 ];
 

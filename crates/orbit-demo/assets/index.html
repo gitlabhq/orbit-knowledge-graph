@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/assets/components.css">
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/theme.js"></script>
-  <script src="/assets/vendor/cytoscape.min.js" defer></script>
+  <script src="/assets/highlight.js" defer></script>
   <script src="/assets/dag.js" defer></script>
   <script src="/assets/panels.js" defer></script>
   <script src="/assets/app.js" defer></script>
@@ -53,16 +53,21 @@
           </div>
           <div class="section-body">
             <label class="visually-hidden" for="query">GQL query</label>
-            <textarea id="query" class="input query-editor" spellcheck="false" rows="4"></textarea>
+            <div class="editor">
+              <pre id="query-highlight" class="editor-layer editor-highlight" aria-hidden="true"></pre>
+              <textarea id="query" class="editor-layer editor-input" spellcheck="false" autocomplete="off" autocapitalize="off" rows="4"></textarea>
+            </div>
           </div>
         </section>
         <section class="section">
           <div class="section-header">
-            <h2>Execution DAG <span id="dag-summary" class="section-count"></span></h2>
+            <h2>Execution plan <span id="dag-summary" class="section-count"></span></h2>
             <div id="legend" class="legend">
               <span class="badge badge-info"><span class="badge-dot"></span>Relational</span>
               <span class="badge badge-review"><span class="badge-dot"></span>Remote</span>
-              <span class="badge badge-warning"><span class="badge-dot"></span>Query engine</span>
+              <span class="badge badge-warning"><span class="badge-dot"></span>Join (in process)</span>
+              <span class="legend-edge legend-keys">Keys drive the next stage</span>
+              <span class="legend-edge legend-rows">Rows flow into the join</span>
             </div>
           </div>
           <div class="dag-canvas"><svg id="dag" role="img" aria-label="The stage DAG of the last query"></svg></div>

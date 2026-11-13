@@ -11,20 +11,18 @@ function fresh() {
 }
 
 function stage(id) {
-  let found = run.stages.find((s) => s.id === id);
-  if (!found) {
-    found = { id, backend: "clickhouse", connection: "main", status: "waiting", rendered: [], samples: [], keys: [], checks: [], hydration: true };
-    run.stages.push(found);
-    const last = run.stages.filter((s) => s.id < id && !s.hydration).pop();
-    if (last) run.edges.push({ id: `e${last.id}-${id}`, from: last.id, to: id, kind: "rows", label: "rows: checked ids" });
-  }
-  return found;
+  return run.stages.find((s) => s.id === id);
 }
 
-function edgeLabel(edge) {
-  if (edge.kind === "keys") return `keys: (${edge.properties.join(", ")})` + (edge.count === undefined ? "" : ` · ${edge.count}`);
-  const cols = edge.columns ? edge.columns.slice(0, 2).join(", ") + (edge.columns.length > 2 ? ", …" : "") : "";
-  return `rows${edge.count === undefined ? "" : " · " + edge.count}${cols ? ": " + cols : ""}`;
+function describe(edge) {
+  const count = edge.count === undefined ? "" : ` · ${Dag.plural(edge.count, edge.kind === "keys" ? "key" : "row")}`;
+  if (edge.kind === "keys") {
+    edge.label = `(${edge.properties.join(", ")})`;
+    edge.title = `Keys on ${edge.properties.join(", ")} from stage ${edge.from} drive stage ${edge.to}${count}`;
+  } else {
+    edge.label = "rows";
+    edge.title = `Rows of stage ${edge.from} into the join${count}${edge.columns ? `: ${edge.columns.join(", ")}` : ""}`;
+  }
 }
 
 function apply(event) {
@@ -50,12 +48,12 @@ function apply(event) {
     case "keys": {
       stage(event.to).keys.push(event);
       const edge = run.edges.find((e) => e.from === event.from && e.to === event.to && e.kind === "keys");
-      if (edge) { edge.count = event.count; edge.state = event.count ? "flowing" : "empty"; }
+      if (edge) edge.count = event.count;
       break;
     }
     case "rows": {
       stage(event.stage).rows = event.count;
-      for (const edge of run.edges.filter((e) => e.from === event.stage && e.kind === "rows")) { edge.count = event.count; edge.state = "flowing"; }
+      for (const edge of run.edges.filter((e) => e.from === event.stage && e.kind === "rows")) edge.count = event.count;
       break;
     }
     case "samples": stage(event.stage).samples = event.samples; break;
@@ -80,7 +78,7 @@ function markRows(id, plan) {
 }
 
 function render() {
-  for (const edge of run.edges) edge.label = edgeLabel(edge);
+  for (const edge of run.edges) describe(edge);
   Dag.draw($("dag"), run, run.selected, (id) => { run.selected = id; run.tab = null; render(); });
   const done = run.stages.filter((s) => s.status === "done").length;
   $("dag-summary").textContent = run.stages.length ? `${done} of ${run.stages.length} stages finished` : "";
@@ -135,9 +133,20 @@ function hint() {
   $("caller-hint").textContent = caller ? (caller.declared.deployment === "zanzibar" ? "Zanzibar-style provider" : "GitLab session") : "";
 }
 
+function paint() {
+  Highlight.render($("query-highlight"), Highlight.gql($("query").value + "\n"));
+  scrollSync();
+}
+
+function scrollSync() {
+  $("query-highlight").scrollTop = $("query").scrollTop;
+  $("query-highlight").scrollLeft = $("query").scrollLeft;
+}
+
 function choose(index) {
   const example = examples[index];
   $("query").value = example.query;
+  paint();
   $("caller").value = example.caller;
   $("example-title").textContent = example.title;
   for (const [i, item] of [...$("examples").children].entries()) item.firstElementChild.classList.toggle("example-active", i === index);
@@ -188,6 +197,9 @@ async function boot() {
 }
 
 document.addEventListener("orbit:render", render);
+$("query").addEventListener("input", paint);
+$("query").addEventListener("scroll", scrollSync);
+new ResizeObserver(scrollSync).observe($("query"));
 $("run").addEventListener("click", () => start().catch((e) => status(e.message, "danger")));
 $("caller").addEventListener("change", hint);
 $("pace-step").addEventListener("click", () => pace(true));

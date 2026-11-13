@@ -1,4 +1,4 @@
-- title: "Query 4: open merge requests, their branch heads in Orbit Next, joined in the engine"
+- title: "Query 4: open merge requests, the TODOs on their branch heads in Orbit Next, joined"
   caller: maintainer
   query: >-
     MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
@@ -21,3 +21,9 @@
 - title: Neighbors of a live merge request, for contrast
   caller: maintainer
   query: MATCH (mr:MergeRequest)--(n) WHERE mr.id = 3000 RETURN mr, n LIMIT 50
+- title: Open merge requests with their Slack threads and the TODOs on their branch heads
+  caller: maintainer
+  query: >-
+    MATCH (m:SlackMessage)-[:DISCUSSES]->(mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
+    WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust')
+    RETURN mr.iid, m.text, f.path, match.MSG ORDER BY mr.iid LIMIT 20

@@ -42,7 +42,7 @@ the fakes and the callers.
 | Host header | `lockdown::guard` rejects any Host other than `localhost:<port>` or `127.0.0.1:<port>`. | `tests/lockdown.rs`, `tests/demo.rs` |
 | Origin | A request whose Origin is not this server, or whose `Sec-Fetch-Site` is `cross-site`, is rejected. | `tests/lockdown.rs` |
 | Writes | Non-GET requests need `Content-Type: application/json`. No `Access-Control-Allow-*` header is ever sent. | `tests/lockdown.rs` |
-| CSP | Every response carries `lockdown::CSP`. Every asset is embedded with `include_bytes!`: the JS and CSS, cytoscape, and the GitLab Sans and GitLab Mono fonts with their OFL licences under `assets/vendor/`. | `tests/lockdown.rs`, `tests/demo.rs` |
+| CSP | Every response carries `lockdown::CSP`. Every asset is embedded with `include_bytes!`: the JS and CSS and the GitLab Sans and GitLab Mono fonts with their OFL licences under `assets/vendor/`. | `tests/lockdown.rs`, `tests/demo.rs` |
 | Config | `Config::check` accepts only IP literals and `localhost` that resolve to 127.0.0.0/8 or ::1, and rejects 0.0.0.0 and ::. | `tests/lockdown.rs` |
 | Client | `client::post` connects only to a loopback `SocketAddr` and resolves no name. | |
 | ClickHouse | `remote_url_allow_hosts` allows nothing. The query user is read-only, with SELECT on the demo databases only. The seed user can only create, truncate and insert. | `lockdown-tests.sh` |
