@@ -23,7 +23,7 @@ function stage(id) {
 
 function edgeLabel(edge) {
   if (edge.kind === "keys") return `keys: (${edge.properties.join(", ")})` + (edge.count === undefined ? "" : ` · ${edge.count}`);
-  const cols = edge.columns ? edge.columns.slice(0, 3).join(", ") + (edge.columns.length > 3 ? ", …" : "") : "";
+  const cols = edge.columns ? edge.columns.slice(0, 2).join(", ") + (edge.columns.length > 2 ? ", …" : "") : "";
   return `rows${edge.count === undefined ? "" : " · " + edge.count}${cols ? ": " + cols : ""}`;
 }
 
@@ -60,12 +60,11 @@ function apply(event) {
     case "finished": {
       const s = stage(event.stage);
       s.status = "done"; s.elapsed = event.elapsed_ms;
-      s.summary = `${s.rows ?? 0} rows · ${event.elapsed_ms.toFixed(1)} ms`;
       break;
     }
-    case "failed": { const s = stage(event.stage); s.status = "failed"; s.error = event.error; s.summary = "failed"; break; }
-    case "done": run.rows = event.rows; run.done = true; status(`${event.count} rows`); break;
-    case "error": run.error = event.error; run.done = true; status(event.error, true); break;
+    case "failed": { const s = stage(event.stage); s.status = "failed"; s.error = event.error; break; }
+    case "done": run.rows = event.rows; run.done = true; status(Dag.plural(event.count, "row"), "success"); break;
+    case "error": run.error = event.error; run.done = true; status("Query failed", "danger"); break;
   }
 }
 
@@ -80,8 +79,9 @@ function markRows(id, plan) {
 
 function render() {
   for (const edge of run.edges) edge.label = edgeLabel(edge);
-  for (const s of run.stages) if (s.status === "running") s.summary = "running";
   Dag.draw($("dag"), run, run.selected, (id) => { run.selected = id; run.tab = null; render(); });
+  const done = run.stages.filter((s) => s.status === "done").length;
+  $("dag-summary").textContent = run.stages.length ? `${done} of ${run.stages.length} stages finished` : "";
   Panels.render(run);
 }
 
@@ -91,15 +91,15 @@ function pump() {
     apply(queue.shift());
     render();
   } catch (error) {
-    status(`page error: ${error.message}`, true);
+    status(`Page error: ${error.message}`, "danger");
     console.error(error);
   }
-  timer = setTimeout(pump, $("slow").checked ? STEP_MS : 0);
+  timer = setTimeout(pump, stepping ? STEP_MS : 0);
 }
 
-function status(text, error) {
-  $("status").textContent = text;
-  $("status").className = error ? "error" : "";
+function status(text, tone) {
+  $("status").className = `signal signal-${tone || "neutral"}`;
+  $("status").lastElementChild.textContent = text;
 }
 
 async function post(path, body) {
@@ -111,38 +111,88 @@ async function post(path, body) {
 
 async function start() {
   if (timer) clearTimeout(timer);
+  if (stream) stream.close();
   queue = []; timer = null; run = fresh(); render();
-  status("Running");
+  status("Running", "info");
+  const started = ++generation;
   const { run: id } = await post("/api/runs", { query: $("query").value, caller: $("caller").value });
-  const source = new EventSource(`/api/runs/${id}/events`);
-  source.onmessage = (message) => {
+  if (started !== generation) return;
+  const events = new EventSource(`/api/runs/${id}/events`);
+  stream = events;
+  events.onmessage = (message) => {
     const event = JSON.parse(message.data);
     queue.push(event);
-    if (event.event === "done" || event.event === "error") source.close();
+    if (event.event === "done" || event.event === "error") events.close();
     if (!timer) pump();
   };
-  source.onerror = () => source.close();
+  events.onerror = () => events.close();
 }
+
+function hint() {
+  const caller = callers.find((c) => c.name === $("caller").value);
+  $("caller-hint").textContent = caller ? (caller.declared.deployment === "zanzibar" ? "Zanzibar-style provider" : "GitLab session") : "";
+}
+
+function choose(index) {
+  const example = examples[index];
+  $("query").value = example.query;
+  $("caller").value = example.caller;
+  $("example-title").textContent = example.title;
+  for (const [i, item] of [...$("examples").children].entries()) item.firstElementChild.classList.toggle("example-active", i === index);
+  hint();
+}
+
+function examplesList() {
+  return examples.map((example, index) => {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "example";
+    button.textContent = example.title;
+    const who = document.createElement("span");
+    who.className = "example-caller";
+    who.textContent = `as ${example.caller}`;
+    button.appendChild(who);
+    button.addEventListener("click", () => { choose(index); start().catch((e) => status(e.message, "danger")); });
+    item.appendChild(button);
+    return item;
+  });
+}
+
+function pace(step) {
+  stepping = step;
+  $("pace-step").classList.toggle("segmented-active", step);
+  $("pace-instant").classList.toggle("segmented-active", !step);
+}
+
+function themeLabel() { $("theme").textContent = Theme.current() === "dark" ? "Light" : "Dark"; }
+
+let stream = null;
+let generation = 0;
+let callers = [];
+let examples = [];
+let stepping = true;
 
 async function boot() {
   run = fresh();
   const meta = await (await fetch("/api/meta")).json();
-  $("caller").replaceChildren(...meta.callers.map((c) => new Option(c.label, c.name)));
-  $("examples").replaceChildren(...meta.examples.map((example) => {
-    const item = document.createElement("li");
-    item.textContent = example.title;
-    const who = document.createElement("small");
-    who.textContent = `as ${example.caller}`;
-    item.appendChild(who);
-    item.addEventListener("click", () => { $("query").value = example.query; $("caller").value = example.caller; start(); });
-    return item;
-  }));
-  if (meta.examples.length) { $("query").value = meta.examples[0].query; $("caller").value = meta.examples[0].caller; }
+  callers = meta.callers;
+  examples = meta.examples;
+  $("caller").replaceChildren(...callers.map((c) => new Option(c.label, c.name)));
+  $("examples").replaceChildren(...examplesList());
+  if (examples.length) choose(0);
   status("Ready");
   render();
 }
 
 document.addEventListener("orbit:render", render);
-$("run").addEventListener("click", () => start().catch((e) => status(e.message, true)));
-$("reload").addEventListener("click", () => post("/api/reload", {}).then((r) => status(`Reloaded ${r.rows} seed rows`)).catch((e) => status(e.message, true)));
-boot().catch((e) => status(e.message, true));
+$("run").addEventListener("click", () => start().catch((e) => status(e.message, "danger")));
+$("caller").addEventListener("change", hint);
+$("pace-step").addEventListener("click", () => pace(true));
+$("pace-instant").addEventListener("click", () => pace(false));
+$("theme").addEventListener("click", () => { Theme.toggle(); themeLabel(); render(); });
+$("reload").addEventListener("click", () => post("/api/reload", {})
+  .then((r) => boot().then(() => status(`Reloaded ${r.rows} seed rows`, "success")))
+  .catch((e) => status(e.message, "danger")));
+themeLabel();
+boot().catch((e) => status(e.message, "danger"));

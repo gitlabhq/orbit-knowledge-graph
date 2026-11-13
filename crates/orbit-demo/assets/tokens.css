@@ -1,0 +1,55 @@
+/* Pajamas tokens and Lab's spacing and type scale, as the Data Extraction Service POC UI uses them. */
+@font-face { font-family: "GitLab Sans"; src: url("/assets/vendor/fonts/GitLabSans.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "GitLab Mono"; src: url("/assets/vendor/fonts/GitLabMono.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+
+:root {
+  --bg-default: #fff; --bg-subtle: #f7f7f5; --bg-strong: #ecebea; --bg-chrome: #f4f4f2; --bg-nav-active: #e6e5e2;
+  --border-default: #dcdbd9; --border-subtle: #ecebea; --border-strong: #c1bfbe;
+  --text-default: #3a383d; --text-subtle: #646163; --text-heading: #18171d; --text-link: #27599f; --text-link-hover: #1d4277;
+  --action-confirm: #1f75cb; --action-confirm-hover: #1068bf; --text-on-confirm: #fff;
+  --success: #0d8070; --success-bg: #c3e6cd; --success-text: #0b645a;
+  --danger: #de1d4b; --danger-bg: #fdd4cd; --danger-text: #ac203a;
+  --warning: #c74816; --warning-bg: #fada9c; --warning-text: #7d2d0e;
+  --info: #1f73ca; --info-bg: #cbe2f9; --info-text: #27599f;
+  --review: #7862c8; --review-bg: #e9e3fa; --review-text: #4f3a9e;
+  --neutral: #747273; --neutral-bg: #ecebea; --neutral-text: #3a383d;
+  --diff-added-bg: #ecfdf0; --diff-added-gutter: #ddfbe6; --diff-removed-bg: #fbe9eb; --diff-removed-gutter: #f9d7dc; --diff-target: #1f75cb;
+  --shadow-card: 0 0 0 1px rgba(5, 5, 6, 0.06), 0 1px 2px rgba(5, 5, 6, 0.08);
+
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px;
+  --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px; --radius-xl: 12px; --radius-full: 9999px;
+  --font-xs: 12px; --font-sm: 13px; --font-md: 14px; --font-lg: 16px; --font-xl: 20px; --font-2xl: 28px;
+  --sans: "GitLab Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: "GitLab Mono", "JetBrains Mono", Menlo, monospace;
+  --control-height: 32px; --control-height-sm: 28px;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg-default: #18171d; --bg-subtle: #222127; --bg-strong: #2f2e34; --bg-chrome: #111014; --bg-nav-active: #2f2e34;
+  --border-default: #3a383d; --border-subtle: #2a292f; --border-strong: #4d4b4e;
+  --text-default: #ecebea; --text-subtle: #a9a7a7; --text-heading: #fff; --text-link: #9dc8f2; --text-link-hover: #c8e0f9;
+  --action-confirm: #428fdc; --action-confirm-hover: #63a6e9; --text-on-confirm: #fff;
+  --success: #35b597; --success-bg: #0d4a3f; --success-text: #84d4b6;
+  --danger: #fc7988; --danger-bg: #5c1a28; --danger-text: #ffafb8;
+  --warning: #fb8017; --warning-bg: #5c2a0b; --warning-text: #f7b951;
+  --info: #64a7e9; --info-bg: #1d3a6b; --info-text: #9dc8f2;
+  --review: #ac99f2; --review-bg: #3a2f6b; --review-text: #d6cbff;
+  --neutral: #a5a3a3; --neutral-bg: #2f2e34; --neutral-text: #c1bfbe;
+  --diff-added-bg: #12291f; --diff-added-gutter: #173a2a; --diff-removed-bg: #33171d; --diff-removed-gutter: #451d25; --diff-target: #63a6e9;
+  --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg-chrome); color: var(--text-default); font: var(--font-md)/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: var(--text-link); text-decoration: none; }
+a:hover { color: var(--text-link-hover); text-decoration: underline; }
+button, input, textarea, select { font: inherit; color: inherit; }
+h1, h2, h3, h4, p, ol, ul, dl, dd { margin: 0; }
+ol, ul { padding: 0; list-style: none; }
+code, pre, .mono { font-family: var(--mono); font-size: var(--font-xs); }
+:focus-visible { outline: 2px solid var(--action-confirm); outline-offset: 2px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

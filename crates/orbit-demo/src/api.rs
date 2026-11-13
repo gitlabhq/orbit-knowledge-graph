@@ -20,36 +20,81 @@ use crate::run::{RunLog, run};
 
 const KEPT_RUNS: u64 = 64;
 
-const ASSETS: [(&str, &str, &str); 6] = [
+const ASSETS: [(&str, &str, &[u8]); 15] = [
     (
         "/",
         "text/html; charset=utf-8",
-        include_str!("../assets/index.html"),
+        include_bytes!("../assets/index.html"),
     ),
     (
-        "/assets/app.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../assets/app.js"),
+        "/assets/tokens.css",
+        "text/css; charset=utf-8",
+        include_bytes!("../assets/tokens.css"),
     ),
     (
-        "/assets/dag.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../assets/dag.js"),
-    ),
-    (
-        "/assets/panels.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../assets/panels.js"),
+        "/assets/components.css",
+        "text/css; charset=utf-8",
+        include_bytes!("../assets/components.css"),
     ),
     (
         "/assets/app.css",
         "text/css; charset=utf-8",
-        include_str!("../assets/app.css"),
+        include_bytes!("../assets/app.css"),
+    ),
+    (
+        "/assets/theme.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../assets/theme.js"),
+    ),
+    (
+        "/assets/app.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../assets/app.js"),
+    ),
+    (
+        "/assets/dag.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../assets/dag.js"),
+    ),
+    (
+        "/assets/panels.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../assets/panels.js"),
+    ),
+    (
+        "/assets/tanuki.svg",
+        "image/svg+xml",
+        include_bytes!("../assets/tanuki.svg"),
     ),
     (
         "/assets/vendor/cytoscape.min.js",
         "text/javascript; charset=utf-8",
-        include_str!("../assets/vendor/cytoscape.min.js"),
+        include_bytes!("../assets/vendor/cytoscape.min.js"),
+    ),
+    (
+        "/assets/vendor/fonts/GitLabSans.woff2",
+        "font/woff2",
+        include_bytes!("../assets/vendor/fonts/GitLabSans.woff2"),
+    ),
+    (
+        "/assets/vendor/fonts/GitLabMono.woff2",
+        "font/woff2",
+        include_bytes!("../assets/vendor/fonts/GitLabMono.woff2"),
+    ),
+    (
+        "/assets/vendor/fonts/GitLabSans-LICENSE.txt",
+        "text/plain; charset=utf-8",
+        include_bytes!("../assets/vendor/fonts/GitLabSans-LICENSE.txt"),
+    ),
+    (
+        "/assets/vendor/fonts/GitLabMono-OFL.txt",
+        "text/plain; charset=utf-8",
+        include_bytes!("../assets/vendor/fonts/GitLabMono-OFL.txt"),
+    ),
+    (
+        "/assets/vendor/cytoscape.LICENSE",
+        "text/plain; charset=utf-8",
+        include_bytes!("../assets/vendor/cytoscape.LICENSE"),
     ),
 ];
 
