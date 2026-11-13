@@ -373,7 +373,7 @@ mod tests {
     use super::*;
 
     fn lifetime() -> (Catalog<ClickHouse>, Lifetime) {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let lifetime = Lifetime::from_catalog(&catalog).expect("lifetime");
         (catalog, lifetime)
     }

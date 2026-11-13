@@ -31,14 +31,22 @@ struct Peers {
 }
 
 fn model() -> Arc<Model> {
-    let fragments = versioned(peer_packages().fragments().unwrap(), &TABLE_PREFIX).unwrap();
+    let fragments = peer_packages()
+        .fragments()
+        .and_then(|fragments| {
+            fragments.deployment(&query_data_model::testkit::deployments(), "peers")
+        })
+        .unwrap();
+    let fragments = versioned(fragments, &TABLE_PREFIX).unwrap();
     Arc::new(Model::load(&fragments).unwrap())
 }
 
 /// Creates and fills the rollout and release tables on the container and the review table in an
 /// in-memory DuckDB, on top of the DAG seed.
 pub(super) async fn seed(ctx: &TestContext) {
-    let unprefixed = peer_packages().load().unwrap();
+    let unprefixed = peer_packages()
+        .deployed(&query_data_model::testkit::deployments(), "peers")
+        .unwrap();
     for (connection, table) in [("main", "gl_rollout"), ("releases", "gl_release")] {
         let catalog = unprefixed.physical::<ClickHouse>(connection).unwrap();
         let schema = catalog.schema().unwrap();
@@ -74,7 +82,7 @@ fn lake(model: &Arc<Model>) -> DuckDbClient {
 
 fn peers(ctx: &TestContext) -> Peers {
     let model = model();
-    let connections = Connections::serving(&model, &["main", "releases", "lake"]).unwrap();
+    let connections = Connections::of(&model).unwrap();
     let main = Arc::new(model.physical::<ClickHouse>("main").unwrap());
     let releases = model.physical::<ClickHouse>("releases").unwrap();
     let client = Arc::new(ctx.create_client());

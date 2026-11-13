@@ -47,7 +47,6 @@ pub struct Store {
     pub(super) sources: Vec<Option<Source>>,
     pub(super) columns: Vec<Option<StoredColumn>>,
     pub(super) excluded: HashSet<PropertyId>,
-    pub(super) searched: HashSet<PropertyId>,
     pub(super) bindings: Vec<Option<(String, Binding<Resolved>)>>,
     pub(super) declared: HashSet<RelationshipVariantId>,
     pub(super) guards: Vec<Option<Guard>>,
@@ -91,11 +90,6 @@ impl Store {
 
     pub fn excludes(&self, property: PropertyId) -> bool {
         self.excluded.contains(&property)
-    }
-
-    /// Whether the store searches the property without holding it as a column.
-    pub fn searches(&self, property: PropertyId) -> bool {
-        self.searched.contains(&property)
     }
 
     pub fn binding(&self, variant: RelationshipVariantId) -> Option<&Binding<Resolved>> {

@@ -48,20 +48,22 @@ pub enum CatalogError {
 #[derive(Clone)]
 pub struct ModelCatalog {
     client: Arc<NatsClient>,
+    /// The deployment shape whose connections each archive's model loads.
+    deployment: String,
 }
 
 impl ModelCatalog {
-    pub async fn open(client: Arc<NatsClient>) -> Result<Self, CatalogError> {
+    pub async fn open(client: Arc<NatsClient>, deployment: String) -> Result<Self, CatalogError> {
         for bucket in [ACTIVE_VERSION_BUCKET, MODEL_ARCHIVES_BUCKET] {
             client
                 .ensure_kv_bucket_exists(bucket, KvBucketConfig::default())
                 .await?;
         }
-        Ok(Self { client })
+        Ok(Self { client, deployment })
     }
 
     pub async fn publish(&self, archive: &ModelArchive) -> Result<Arc<Model>, CatalogError> {
-        let model = archive.packages().load()?;
+        let model = archive.packages().deployment(&self.deployment)?;
         let version = archive.schema_version();
         let bytes = archive.bytes();
         let limit = self.client.nats_client().max_payload();
@@ -106,8 +108,17 @@ impl ModelCatalog {
         Ok(ModelArchive::from_bytes(version, &bytes)?)
     }
 
+    /// The model of the archive `version`, as this deployment loads it.
+    pub async fn model(&self, version: u32) -> Result<Arc<Model>, CatalogError> {
+        Ok(self
+            .load(version)
+            .await?
+            .packages()
+            .deployment(&self.deployment)?)
+    }
+
     pub async fn verify_archive(&self, version: u32) -> Result<(), CatalogError> {
-        self.load(version).await?.packages().load()?;
+        self.model(version).await?;
         Ok(())
     }
 

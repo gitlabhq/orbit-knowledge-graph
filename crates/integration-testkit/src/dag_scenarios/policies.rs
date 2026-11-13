@@ -89,7 +89,7 @@ fn calls(run: &Run) -> Vec<Workspaces> {
 #[tokio::test]
 async fn a_live_read_under_none_reads_every_workspace_its_check_allows() {
     let model = listing("scope: namespace\n    enforce: {live: none}")
-        .load()
+        .deployment("demo")
         .unwrap();
     let ran = run_on(&model, LISTED, Vec::new(), &Checks::default()).await;
     assert_eq!(calls(&ran), [Workspaces::Any]);
@@ -104,7 +104,7 @@ async fn a_live_read_under_none_reads_every_workspace_its_check_allows() {
 /// A global live entity needs only the permission: it reads every workspace, with no lookup.
 #[tokio::test]
 async fn a_global_live_entity_reads_with_its_permission_alone() {
-    let model = listing("scope: global").load().unwrap();
+    let model = listing("scope: global").deployment("demo").unwrap();
     let ran = run_on(&model, LISTED, Vec::new(), &Checks::default()).await;
     assert_eq!(calls(&ran), [Workspaces::Any]);
     assert_eq!(texts(ran), [json!("deploy memes")]);
@@ -129,7 +129,7 @@ async fn a_code_read_under_none_searches_the_named_repositories_through_its_chec
             ),
         ],
     )
-    .load()
+    .deployment("demo")
     .unwrap();
     let allowed = AllowedKeys::checks("project", [Key::Int(42)]);
     let ran = run_on(&model, CODE, Vec::new(), &allowed).await;
@@ -146,7 +146,7 @@ async fn a_code_read_under_none_searches_the_named_repositories_through_its_chec
 #[tokio::test]
 async fn a_none_entity_before_a_via_entity_keeps_the_readable_repositories() {
     let model = crate::dag_fakes::heads_under_none(dag_packages())
-        .load()
+        .deployment("demo")
         .unwrap();
     let merge_requests = vec![
         json!({"mr_iid": 1, "mr_id": 2000, "mr_project_id": 42, "mr_source_branch": "feature-a", "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),

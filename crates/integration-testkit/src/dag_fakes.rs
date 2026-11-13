@@ -12,10 +12,8 @@ use compiler::orbit_authorization::{Answers, AuthError, Check, Checks, Module, N
 use compiler::remote::Resolves;
 use query_data_model::catalog::Row;
 use query_data_model::implementations::live::DataExtraction;
-use query_data_model::implementations::live::Live;
-use query_data_model::implementations::orbit_code::OrbitCode;
 use query_data_model::implementations::orbit_code::{CodeSearch, RequestField};
-use query_data_model::{Catalog, ClickHouse, Model, StorageBackend};
+use query_data_model::{Catalog, ClickHouse, Model};
 use query_engine::shared::dag::{
     DagError, Event, Executed, Executor, ExecutorError, Executors, Outcome, Recording, Runner,
     from_rows,
@@ -264,43 +262,30 @@ pub fn heads_under_none(packages: query_data_model::Packages) -> query_data_mode
 }
 
 pub fn dag_model() -> Arc<query_data_model::Model> {
-    dag_packages().load().unwrap()
+    dag_packages().deployment("demo").unwrap()
 }
 
-/// A deployment over `model` as the DAG scenarios serve it: the ClickHouse graph connection
-/// first, then every code and live connection the model declares.
+/// Every connection of a deployment's model, and its ClickHouse graph connection.
 pub fn dag_connections(model: &Arc<Model>) -> (Arc<Catalog<ClickHouse>>, Connections) {
-    let graph = model
-        .stores()
+    let connections = Connections::of(model).unwrap();
+    let graph = connections
+        .peers()
         .iter()
-        .find(|store| store.kind == ClickHouse::KIND)
-        .map(|store| store.connection.clone())
-        .expect("the model stores a graph on ClickHouse");
-    let graph = Arc::new(model.physical::<ClickHouse>(&graph).unwrap());
-    let mut remotes: Vec<&str> = model
-        .stores()
-        .iter()
-        .filter(|store| [OrbitCode::KIND, Live::KIND].contains(&store.kind.as_str()))
-        .map(|store| store.connection.as_str())
-        .collect();
-    remotes.sort_unstable();
-    remotes.dedup();
-    let peers = std::iter::once(Peer::ClickHouse(Arc::clone(&graph)))
-        .chain(
-            remotes
-                .into_iter()
-                .map(|connection| Peer::of(model, connection).unwrap()),
-        )
-        .collect();
-    (graph, Connections::new(peers))
+        .find_map(|peer| match peer {
+            Peer::ClickHouse(catalog) => Some(Arc::clone(catalog)),
+            _ => None,
+        })
+        .expect("the deployment stores a graph on ClickHouse");
+    (graph, connections)
 }
 
-/// `graph` on the first connection and the seeded code and live fakes on every served remote,
-/// signed in to the live service as `user`.
+/// `graph` on the ClickHouse connection and the seeded code and live fakes on every served
+/// remote, signed in to the live service as `user`.
 pub fn dag_executors(connections: &Connections, graph: Arc<dyn Executor>, user: &str) -> Executors {
-    let mut executors = Executors::default().with(connections.names()[0].clone(), graph);
+    let mut executors = Executors::default();
     for peer in connections.peers() {
         let executor = match peer.backend() {
+            Backend::ClickHouse => Arc::clone(&graph),
             Backend::OrbitCode => seeded_code(),
             Backend::Live => seeded_live(user),
             _ => continue,

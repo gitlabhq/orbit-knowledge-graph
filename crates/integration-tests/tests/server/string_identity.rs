@@ -28,7 +28,10 @@ fn schema_sql(fragments: &query_data_model::spec::Fragments) -> Vec<String> {
 
 #[tokio::test]
 async fn graph_formatter_string_identity_e2e() {
-    let fragments = query_data_model::testkit::with_demo().fragments().unwrap();
+    let fragments = query_data_model::testkit::with_demo()
+        .fragments()
+        .and_then(|fragments| fragments.deploy("demo"))
+        .unwrap();
     let sql = schema_sql(&fragments);
     let statements: Vec<&str> = sql.iter().map(String::as_str).collect();
     let ctx = TestContext::new(&statements).await;
@@ -114,6 +117,7 @@ async fn graph_formatter_named_identity_e2e() {
     let fragments =
         integration_testkit::authorization_variants::platform(&["acme", "acme.threads"])
             .fragments()
+            .and_then(|fragments| fragments.deploy("server"))
             .unwrap();
     let sql = schema_sql(&fragments);
     let statements: Vec<&str> = sql.iter().map(String::as_str).collect();

@@ -225,7 +225,7 @@ async fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture(
     let relational = compiler::compile(
         CODE,
         &std::sync::Arc::new(
-            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
         ),
         &ctx,
         query_data_model::testkit::limits(),

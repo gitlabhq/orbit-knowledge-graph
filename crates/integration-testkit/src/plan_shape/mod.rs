@@ -406,8 +406,8 @@ pub fn run_dir(directory: &Path) {
 }
 
 fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
-    let remote = Catalog::<ClickHouse>::embedded().unwrap();
-    let local = Catalog::<DuckDb>::embedded().unwrap();
+    let remote = Catalog::<ClickHouse>::embedded("server").unwrap();
+    let local = Catalog::<DuckDb>::embedded("local").unwrap();
     let mut paths = Vec::new();
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
@@ -429,10 +429,11 @@ fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
             continue;
         }
         let overlay = scenario.model_overlay.as_ref().map(|name| {
-            let model = Arc::new(Model::load(&crate::overlay_fragments(name)).unwrap());
+            let model =
+                |shape| Arc::new(Model::load(&crate::overlay_fragments(name, shape)).unwrap());
             (
-                Catalog::<ClickHouse>::from_model(&model).unwrap(),
-                Catalog::<DuckDb>::from_model(&model).unwrap(),
+                Catalog::<ClickHouse>::from_model(&model("server")).unwrap(),
+                Catalog::<DuckDb>::from_model(&model("local")).unwrap(),
             )
         });
         let (remote, local) = overlay
@@ -770,7 +771,7 @@ reject:
 
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     for (count, dynamic, budget, set, expected_paths) in [
         (256, true, None, false, 256),
         (257, true, None, true, 257),

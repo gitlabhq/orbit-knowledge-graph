@@ -12,7 +12,7 @@ use indexer::modules::namespace_deletion::{
 const ROOT: &str = "1/100/";
 
 fn store(context: &TestContext) -> ClickHouseNamespaceDeletionStore {
-    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
         .expect("embedded catalog");
     ClickHouseNamespaceDeletionStore::new(
         Arc::new(context.config.build_client("graph")),

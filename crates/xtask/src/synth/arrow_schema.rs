@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn edge_columns_exist_in_the_model_edge_table() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("must load");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("must load");
         let edge_table = catalog.shared_edge_table().expect("shared edge table");
         let table = catalog.schema().unwrap().table(edge_table).unwrap();
         for column in EDGE_COLUMNS {

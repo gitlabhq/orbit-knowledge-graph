@@ -652,7 +652,9 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#,
 
     #[test]
     fn model_reindex_triggers_cover_data_tables_not_the_enabled_table() {
-        let model = query_data_model::Packages::embedded().load().unwrap();
+        let model = query_data_model::Packages::embedded()
+            .deployment("server")
+            .unwrap();
         let sources = model.sources().reindex_triggers();
         let tables: BTreeSet<&str> = sources.iter().map(|s| s.table.as_str()).collect();
         assert!(tables.contains("work_items"));

@@ -199,7 +199,7 @@ async fn run_case(
     let ctx = if let Some(database) = database {
         let forked = ctx.fork(database).await;
         if let Some(overlay) = &cfg.model_overlay {
-            let schema = crate::graph_schema(&crate::overlay_fragments(overlay));
+            let schema = crate::graph_schema(&crate::overlay_fragments(overlay, "server"));
             let credentials = orbit_migrations::schema::DictionaryCredentials {
                 database: forked.config.database.clone(),
                 user: forked.config.username.clone(),
@@ -258,7 +258,7 @@ async fn run_case(
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
     let data_model = match &cfg.model_overlay {
-        Some(name) => crate::versioned_data_model(crate::overlay_fragments(name)),
+        Some(name) => crate::versioned_data_model(crate::overlay_fragments(name, "server")),
         None => load_data_model(),
     };
 

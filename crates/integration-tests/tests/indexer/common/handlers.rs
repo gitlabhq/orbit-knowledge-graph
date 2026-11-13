@@ -70,7 +70,7 @@ async fn build_fan_out(
         ctx.config.clone().build_client("graph"),
         Arc::new(EngineMetrics::default()),
     ));
-    let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog must load");
+    let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog must load");
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
@@ -165,6 +165,7 @@ async fn entity_handler_for_config(
 fn catalog_with_partition_count(entity_name: &str, partitions: u32) -> Catalog<ClickHouse> {
     let mut fragments = Packages::embedded()
         .fragments()
+        .and_then(|fragments| fragments.deploy("server"))
         .expect("embedded packages must parse");
     for fragment in fragments.iter_mut() {
         if let Fragment::Source(source) = fragment
@@ -207,7 +208,7 @@ pub fn namespace_envelope_with_targets(
 pub fn stale_edge_task(
     ctx: &TestContext,
 ) -> indexer::orchestrator::scheduled::StaleEdgeReconciliation {
-    let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog must load");
+    let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog must load");
     let checkpoint_store = Arc::new(indexer::testkit::checkpoint_store(Arc::new(
         ctx.config.build_client("graph"),
     )));

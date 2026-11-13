@@ -28,7 +28,12 @@ fn served_stage(model: &Arc<query_data_model::Model>, graph: Arc<SeededGraph>) -
             .expect("the dag deployment binds the DAG model");
     DagStage {
         executors: dag_executors(&connections, graph, "alice"),
-        peers: connections.peers()[1..].to_vec(),
+        peers: connections
+            .peers()
+            .iter()
+            .filter(|peer| !matches!(peer, compiler::dag::Peer::ClickHouse(_)))
+            .cloned()
+            .collect(),
         checks: bound.checks().clone(),
     }
 }

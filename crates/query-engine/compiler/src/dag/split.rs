@@ -107,16 +107,18 @@ fn places(query: Query<'_>, connections: &Connections) -> Result<HashMap<Ref, Pl
         .into_iter()
         .map(|binding| {
             let entity = binding.entity;
+            let name = &query.model.graph().entity(entity).name;
             let place = match searched.get(&binding.output) {
-                Some(property) => connections.searching(entity, *property),
-                None => connections.holding(entity),
+                Some(property) => connections.searching(entity, *property).ok_or_else(|| {
+                    QueryError::AllowlistRejected(format!(
+                        "no served connection searches {name}.{}",
+                        query.model.graph().property(*property).name
+                    ))
+                })?,
+                None => connections
+                    .holding(entity)
+                    .map_err(|unplaced| super::unplaced(name, unplaced))?,
             };
-            let place = place.ok_or_else(|| {
-                QueryError::AllowlistRejected(format!(
-                    "no served connection reads {}",
-                    query.model.graph().entity(entity).name
-                ))
-            })?;
             Ok((binding.output, place))
         })
         .collect()

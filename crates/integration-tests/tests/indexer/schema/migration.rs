@@ -37,7 +37,7 @@ fn dictionary_credentials(
 
 async fn setup() -> (TestContext, Arc<Model>, MigrationMetrics) {
     let ctx = TestContext::new(&[]).await;
-    let model = Packages::embedded().load().unwrap();
+    let model = Packages::embedded().deployment("server").unwrap();
     let metrics = MigrationMetrics::new();
 
     // Mirror indexer startup: version table must exist before migration runs.
@@ -68,9 +68,9 @@ fn campaign() -> indexer::campaign::CampaignState {
 
 #[test]
 fn reordered_table_declarations_do_not_change_deployed_schema() {
-    let base = Packages::embedded().load().unwrap();
+    let base = Packages::embedded().deployment("server").unwrap();
     let overlay = query_data_model::testkit::overlay("reordered_edges")
-        .load()
+        .deployment("server")
         .unwrap();
     let base_schema = test_schema(&base);
     let overlay_schema = test_schema(&overlay);

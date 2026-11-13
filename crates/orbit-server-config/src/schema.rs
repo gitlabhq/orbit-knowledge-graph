@@ -26,6 +26,10 @@ pub struct SchemaConfig {
     /// least 1.
     #[schemars(range(min = 1))]
     pub indexer_schema_wait_timeout_secs: u64,
+
+    /// The deployment shape in `config/deployments.yaml` this deployment runs as. Its model
+    /// loads only the storage fragments of stores on that shape's connections.
+    pub deployment: String,
 }
 
 impl SchemaConfig {

@@ -4,16 +4,15 @@
 use std::sync::{Arc, Mutex};
 
 use compiler::dag::{Connections, Frontend, Rendered};
-use compiler::orbit_authorization::{Checks, Grants, Key};
+use compiler::orbit_authorization::{Checks, Grants};
 use duckdb_client::dag::DuckDbExecutor;
 use duckdb_client::{DuckDbClient, OpenMode};
 use query_data_model::plan::live::Workspaces;
-use query_data_model::{DuckDb, Model, StorageBackend};
+use query_data_model::{DuckDb, Model};
 use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 use query_engine::shared::dag::Executors;
 use serde_json::{Value, json};
 
-use super::single::CODE;
 use super::{Run, json_rows};
 use crate::dag_fakes::{peer_packages, run_served, seeded_live};
 
@@ -37,7 +36,9 @@ struct Lake {
 }
 
 fn lake() -> Lake {
-    let model = peer_packages().load().unwrap();
+    let model = peer_packages()
+        .deployed(&query_data_model::testkit::deployments(), "lake")
+        .unwrap();
     let catalog = Arc::new(model.physical::<DuckDb>("lake").unwrap());
     let client = DuckDbClient::open(OpenMode::InMemory).unwrap();
     client.initialize_schema(&catalog.create_sql()).unwrap();
@@ -47,7 +48,7 @@ fn lake() -> Lake {
     ] {
         client.execute(statement, &[]).unwrap();
     }
-    let connections = Connections::serving(&model, &["lake", "data_extraction"]).unwrap();
+    let connections = Connections::of(&model).unwrap();
     let executors = Executors::default()
         .with(
             "lake",
@@ -179,50 +180,4 @@ async fn a_duckdb_stage_feeds_its_keys_to_a_live_stage() {
     let none = lake.run(ESCALATED, &["1/101/"]).await;
     assert!(calls(&none, 1).is_empty());
     assert!(column(none, "e_id").is_empty());
-}
-
-/// The local DuckDB frontend parses a structural match on `File.content`, which only the code
-/// connection searches, and plans the code stage; its `via` lookup needs a relational connection
-/// that stores `Project`, so it fails closed without one and runs on the graph connection when
-/// the deployment serves it.
-#[tokio::test]
-async fn a_duckdb_frontend_plans_a_code_stage_and_runs_its_lookup_where_the_chain_lives() {
-    let model = crate::dag_fakes::dag_model();
-    let local = Arc::new(model.physical::<DuckDb>("local").unwrap());
-    let frontend = Frontend::Local(local);
-    let grants = grants(&model, &["1/9970/"]);
-    let checks = crate::dag_fakes::AllowedKeys::checks("project", [Key::Int(42)]);
-    let executors = Executors::default().with("code_indexing", crate::dag_fakes::seeded_code());
-
-    let alone = Connections::serving(&model, &["local", "code_indexing"]).unwrap();
-    let (_, outcome) = run_served(&frontend, &alone, &executors, CODE, &grants, &checks).await;
-    let error = outcome
-        .err()
-        .map(|error| error.to_string())
-        .unwrap_or_default();
-    assert_eq!(
-        error,
-        "security error: no served relational connection stores File's via chain"
-    );
-
-    let graph = model
-        .stores()
-        .iter()
-        .find(|store| store.kind == query_data_model::ClickHouse::KIND)
-        .map(|store| store.connection.clone())
-        .unwrap();
-    let served = Connections::serving(&model, &["local", &graph, "code_indexing"]).unwrap();
-    let executors = executors.with(graph, Arc::new(crate::dag_fakes::SeededGraph(Vec::new())));
-    let (events, outcome) =
-        run_served(&frontend, &served, &executors, CODE, &grants, &checks).await;
-    let run = Run { events, outcome };
-    let code = run
-        .rendered(0)
-        .into_iter()
-        .find_map(|request| match request {
-            Rendered::Code(code) => Some(code.repositories),
-            _ => None,
-        });
-    assert_eq!(code, Some(vec![42]));
-    assert_eq!(column(run, "f_path").len(), 2);
 }

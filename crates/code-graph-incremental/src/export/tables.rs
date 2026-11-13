@@ -71,7 +71,7 @@ impl ExportTables {
 
     pub fn embedded() -> &'static Self {
         static TABLES: std::sync::LazyLock<ExportTables> = std::sync::LazyLock::new(|| {
-            let catalog = Catalog::<DuckDb>::embedded().expect("embedded model must load");
+            let catalog = Catalog::<DuckDb>::embedded("local").expect("embedded model must load");
             ExportTables::from_catalog(&catalog).expect("embedded local store must export")
         });
         &TABLES

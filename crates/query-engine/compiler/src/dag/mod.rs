@@ -15,7 +15,7 @@ mod sub;
 pub use compile::{
     Compiled, Env, Frontend, Inputs, Source, compile, compile_hydration, split_query,
 };
-pub use connections::{Connections, Peer};
+pub use connections::{Connections, Peer, Unplaced};
 pub use engine::{EngineColumn, EngineJoin, EngineNode, EngineQuery};
 pub use keys::{KeySet, bind};
 pub use request::{Rendered, Request, describe};
@@ -78,6 +78,18 @@ pub enum Backend {
     OrbitCode,
     Live,
     Engine,
+}
+
+/// The error of a binding of `entity` that no served connection reads.
+pub(crate) fn unplaced(entity: &str, unplaced: Unplaced) -> QueryError {
+    match unplaced {
+        Unplaced::Unstored => QueryError::AllowlistRejected(format!(
+            "entity '{entity}' is not available in this data model"
+        )),
+        Unplaced::Unserved(connection) => QueryError::AllowlistRejected(format!(
+            "{entity}'s complete store is on connection {connection}, which this deployment does not serve"
+        )),
+    }
 }
 
 impl Backend {

@@ -223,7 +223,7 @@ mod tests {
     use orbit_utils::traversal_path::TraversalPath;
 
     fn catalog() -> Catalog<ClickHouse> {
-        Catalog::<ClickHouse>::embedded().expect("embedded catalog")
+        Catalog::<ClickHouse>::embedded("server").expect("embedded catalog")
     }
 
     #[test]

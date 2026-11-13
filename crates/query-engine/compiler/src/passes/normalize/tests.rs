@@ -9,11 +9,11 @@ use crate::QueryError;
 use crate::surface;
 
 static MODEL: LazyLock<Catalog<ClickHouse>> =
-    LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
+    LazyLock::new(|| Catalog::<ClickHouse>::embedded("server").unwrap());
 
 static CONNECTIONS: LazyLock<crate::dag::Connections> = LazyLock::new(|| {
     crate::graph_only(&std::sync::Arc::new(
-        Catalog::<ClickHouse>::embedded().unwrap(),
+        Catalog::<ClickHouse>::embedded("server").unwrap(),
     ))
 });
 

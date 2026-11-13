@@ -4,7 +4,7 @@
 
 # Graph schema version; prefixes every versioned ClickHouse table (vN_).
 # Bump with `mise schema:bump`, which also appends a migration ledger entry.
-schema: 119
+schema: 120
 
 # Accepted query shape. Bump when the GQL grammar changes what queries are
 # accepted.

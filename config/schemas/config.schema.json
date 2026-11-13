@@ -1709,13 +1709,18 @@
           "type": "integer",
           "format": "uint64",
           "minimum": 1
+        },
+        "deployment": {
+          "description": "The deployment shape in `config/deployments.yaml` this deployment runs as. Its model\nloads only the storage fragments of stores on that shape's connections.",
+          "type": "string"
         }
       },
       "additionalProperties": false,
       "required": [
         "max_retained_versions",
         "version_poll_interval_secs",
-        "indexer_schema_wait_timeout_secs"
+        "indexer_schema_wait_timeout_secs",
+        "deployment"
       ]
     },
     "AnalyticsConfig": {

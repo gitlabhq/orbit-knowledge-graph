@@ -16,7 +16,7 @@
 //! use compiler::orbit_authorization::{Caller, Grants, ScopeSet};
 //! use query_data_model::{Catalog, ClickHouse};
 //!
-//! let data_model = Arc::new(Catalog::<ClickHouse>::embedded().unwrap());
+//! let data_model = Arc::new(Catalog::<ClickHouse>::embedded("server").unwrap());
 //!
 //! let grants = Grants::new(Caller::new("user:1", false, ()))
 //!     .with("global", "read", ScopeSet::All);
@@ -268,8 +268,11 @@ pub(crate) mod testkit {
     use orbit_authorization::Grants;
     use query_data_model::Model;
 
-    static MODEL: LazyLock<std::sync::Arc<Model>> =
-        LazyLock::new(|| query_data_model::Packages::embedded().load().unwrap());
+    static MODEL: LazyLock<std::sync::Arc<Model>> = LazyLock::new(|| {
+        query_data_model::Packages::embedded()
+            .deployment("server")
+            .unwrap()
+    });
 
     pub fn non_admin_ctx() -> Grants {
         crate::test_grants::reporter(&MODEL, &["1/"])
@@ -297,10 +300,11 @@ mod tests {
     use query_data_model::spec::{ColumnStorage, Fragment, Fragments};
     use std::sync::LazyLock;
 
-    static MODEL: LazyLock<Arc<Catalog<ClickHouse>>> =
-        LazyLock::new(|| Arc::new(Catalog::<ClickHouse>::embedded().expect("model must load")));
+    static MODEL: LazyLock<Arc<Catalog<ClickHouse>>> = LazyLock::new(|| {
+        Arc::new(Catalog::<ClickHouse>::embedded("server").expect("model must load"))
+    });
     static LOCAL: LazyLock<Arc<Catalog<DuckDb>>> =
-        LazyLock::new(|| Arc::new(Catalog::<DuckDb>::embedded().expect("model must load")));
+        LazyLock::new(|| Arc::new(Catalog::<DuckDb>::embedded("local").expect("model must load")));
 
     fn security_ctx() -> orbit_authorization::Grants {
         crate::testkit::non_admin_ctx()
@@ -383,6 +387,7 @@ mod tests {
     fn embedded_fragments() -> Fragments {
         query_data_model::Packages::embedded()
             .fragments()
+            .and_then(|fragments| fragments.deploy("server"))
             .expect("packages must parse")
     }
 

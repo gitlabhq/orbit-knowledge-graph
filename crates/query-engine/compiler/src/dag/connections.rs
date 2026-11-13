@@ -83,22 +83,25 @@ impl Peer {
         }
     }
 
-    /// Whether the connection's home store of `entity` marks it complete.
-    fn complete(&self, entity: EntityId) -> bool {
-        let complete = |source: Option<(_, &query_data_model::catalog::Source)>| {
-            source.is_some_and(|(_, source)| source.complete)
-        };
+    fn model(&self) -> &Model {
         match self {
-            Self::ClickHouse(catalog) => complete(catalog.source(entity)),
-            Self::DuckDb(catalog) => complete(catalog.source(entity)),
-            Self::Remote(Target::Code(code)) => complete(code.source(entity)),
-            Self::Remote(Target::Live(live)) => complete(live.source(entity)),
+            Self::ClickHouse(catalog) => catalog.model(),
+            Self::DuckDb(catalog) => catalog.model(),
+            Self::Remote(target) => target.model(),
         }
     }
 }
 
-/// Every connection a deployment serves, in the order it prefers them when several hold an
-/// entity and none marks it complete.
+/// Why a binding has no connection to run on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unplaced {
+    /// No store of the deployment marks the entity complete.
+    Unstored,
+    /// The entity's complete store sits on a connection the deployment does not serve.
+    Unserved(String),
+}
+
+/// Every connection a deployment serves.
 #[derive(Debug, Clone)]
 pub struct Connections {
     peers: Arc<Vec<Peer>>,
@@ -126,10 +129,17 @@ impl Connections {
         Self::new(vec![B::peer(Arc::new(catalog))])
     }
 
-    /// The connections of `model` named in `served`, each as the peer of its kind.
-    pub fn serving(model: &Arc<Model>, served: &[&str]) -> Result<Self, DataModelError> {
-        let peers = served
+    /// Every connection of a deployment's model, each as the peer of its kind.
+    pub fn of(model: &Arc<Model>) -> Result<Self, DataModelError> {
+        let mut connections: Vec<&str> = model
+            .stores()
             .iter()
+            .map(|store| store.connection.as_str())
+            .collect();
+        connections.sort_unstable();
+        connections.dedup();
+        let peers = connections
+            .into_iter()
             .map(|connection| Peer::of(model, connection))
             .collect::<Result<_, _>>()?;
         Ok(Self::new(peers))
@@ -163,22 +173,25 @@ impl Connections {
         })
     }
 
-    /// The connection a read of `entity` runs on: the one whose store marks it complete, else
-    /// the first that holds it.
-    pub fn holding(&self, entity: EntityId) -> Option<usize> {
-        let holders = || {
-            self.peers
-                .iter()
-                .enumerate()
-                .filter(|(_, peer)| peer.holds(entity))
-        };
-        holders()
-            .find(|(_, peer)| peer.complete(entity))
-            .or_else(|| holders().next())
-            .map(|(index, _)| index)
+    /// The connection a read of `entity` runs on: the one its `complete: true` store sits on.
+    pub fn holding(&self, entity: EntityId) -> Result<usize, Unplaced> {
+        let model = self
+            .peers
+            .first()
+            .map(Peer::model)
+            .ok_or(Unplaced::Unstored)?;
+        let store = model
+            .stores()
+            .iter()
+            .find(|store| store.complete(entity))
+            .ok_or(Unplaced::Unstored)?;
+        self.peers
+            .iter()
+            .position(|peer| peer.connection() == store.connection)
+            .ok_or_else(|| Unplaced::Unserved(store.connection.clone()))
     }
 
     pub fn guard(&self, entity: EntityId) -> Option<&Guard> {
-        self.peers[self.holding(entity)?].guard(entity)
+        self.peers[self.holding(entity).ok()?].guard(entity)
     }
 }

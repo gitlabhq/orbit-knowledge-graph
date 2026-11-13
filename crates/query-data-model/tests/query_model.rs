@@ -6,7 +6,7 @@ use query_data_model::testkit::overlay;
 use query_data_model::{Catalog, ClickHouse, DuckDb, Model, Packages};
 
 fn overlay_model(name: &str) -> Arc<Model> {
-    overlay(name).load().unwrap()
+    overlay(name).deployment("server").unwrap()
 }
 
 #[test]
@@ -31,9 +31,9 @@ fn reordered_tables_retain_source_columns_and_dependencies() {
 
 #[test]
 fn catalog_routes_preserve_variant_endpoints_on_each_backend() {
-    let overlay = overlay_model("variant_routes");
-    let remote = Catalog::<ClickHouse>::from_model(&overlay).unwrap();
-    let local = Catalog::<DuckDb>::from_model(&overlay).unwrap();
+    let remote = Catalog::<ClickHouse>::from_model(&overlay_model("variant_routes")).unwrap();
+    let local = overlay("variant_routes").deployment("local").unwrap();
+    let local = Catalog::<DuckDb>::from_model(&local).unwrap();
     for (source, target, table) in [
         ("Definition", "Definition", "gl_code_edge"),
         ("File", "Definition", "gl_edge"),
@@ -52,7 +52,7 @@ fn catalog_routes_preserve_variant_endpoints_on_each_backend() {
 
 #[test]
 fn writer_catalog_tracks_exact_node_mapping_routes() {
-    let storage = Schema::from_model(&Packages::embedded().load().unwrap()).unwrap();
+    let storage = Schema::from_model(&Packages::embedded().deployment("server").unwrap()).unwrap();
 
     let code_writers = storage.writers("gl_code_edge").unwrap();
     assert!(code_writers.contains("Branch"));
@@ -137,8 +137,8 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
 
 #[test]
 fn loads_remote_and_local_models_from_the_same_packages() {
-    let remote = Catalog::<ClickHouse>::embedded().unwrap();
-    let local = Catalog::<DuckDb>::embedded().unwrap();
+    let remote = Catalog::<ClickHouse>::embedded("server").unwrap();
+    let local = Catalog::<DuckDb>::embedded("local").unwrap();
 
     let definition = remote.graph().entity_id("Definition").unwrap();
 
@@ -151,8 +151,8 @@ fn loads_remote_and_local_models_from_the_same_packages() {
 
 #[test]
 fn hides_traversal_path_in_remote_and_local_models() {
-    let remote = Catalog::<ClickHouse>::embedded().unwrap();
-    let local = Catalog::<DuckDb>::embedded().unwrap();
+    let remote = Catalog::<ClickHouse>::embedded("server").unwrap();
+    let local = Catalog::<DuckDb>::embedded("local").unwrap();
     let graph = remote.graph();
     let definition = graph.entity_id("Definition").unwrap();
     let property = graph.property_id(definition, "traversal_path").unwrap();
@@ -163,7 +163,7 @@ fn hides_traversal_path_in_remote_and_local_models() {
 
 #[test]
 fn resolves_relationship_variants_and_foreign_keys_to_ids() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     let graph = model.graph();
     let relationship = graph.relationship_id("IN_PROJECT").unwrap();
     let source = graph.entity_id("Vulnerability").unwrap();
@@ -178,7 +178,7 @@ fn resolves_relationship_variants_and_foreign_keys_to_ids() {
 
 #[test]
 fn keeps_extraction_sources_separate_from_query_columns() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     let entity = model.graph().entity_id("MergeRequest").unwrap();
     let property = model.graph().property_id(entity, "project_id").unwrap();
     let table = model.table_of(entity).unwrap();
@@ -204,7 +204,7 @@ fn keeps_extraction_sources_separate_from_query_columns() {
 
 #[test]
 fn exposes_storage_columns_as_query_identifiers() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     let entity = model.graph().entity_id("Job").unwrap();
     let property = model.graph().property_id(entity, "when").unwrap();
     let table = model.table_of(entity).unwrap();
@@ -219,7 +219,7 @@ fn exposes_storage_columns_as_query_identifiers() {
 fn foreign_keys_identify_the_endpoint_and_referenced_key() {
     use query_data_model::Endpoint;
 
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     for (relationship, source, target, holder, property) in [
         (
             "AUTHORED",
@@ -273,8 +273,8 @@ fn foreign_keys_identify_the_endpoint_and_referenced_key() {
 
 #[test]
 fn property_realization_reports_backend_availability() {
-    let remote = Catalog::<ClickHouse>::embedded().unwrap();
-    let local = Catalog::<DuckDb>::embedded().unwrap();
+    let remote = Catalog::<ClickHouse>::embedded("server").unwrap();
+    let local = Catalog::<DuckDb>::embedded("local").unwrap();
     let remote_entity = remote.graph().entity_id("MergeRequest").unwrap();
     let local_entity = local.graph().entity_id("MergeRequest").unwrap();
     let remote_property = remote.graph().property_id(remote_entity, "title").unwrap();

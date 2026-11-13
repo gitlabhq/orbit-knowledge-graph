@@ -410,7 +410,9 @@ entities:
                 .enumerate()
                 .map(|(index, yaml)| (["test/extra.yaml", "test/more.yaml"][index], *yaml)),
         );
-        let model = Arc::new(Model::from_yaml(query_data_model::Tier::Platform, sources).unwrap());
+        let model = Arc::new(
+            Model::from_yaml(query_data_model::Tier::Platform, "server", sources).unwrap(),
+        );
         Catalog::<ClickHouse>::from_model(&model).unwrap()
     }
 

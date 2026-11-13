@@ -29,7 +29,7 @@ const DELETED_NAMESPACE_ID: i64 = 100;
 #[tokio::test]
 async fn deletes_namespace_data_and_marks_schedule_complete() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
-    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
         .expect("embedded catalog must load");
 
     seed_graph_data(&context).await;
@@ -263,7 +263,7 @@ const LIVE_CURRENT_PATH: &str = "1/300/7/";
 #[tokio::test]
 async fn reconcile_tombstones_old_path_rows_left_by_a_move() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
-    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
         .expect("embedded catalog must load");
 
     seed_moved_and_live_graph_rows(&context).await;
@@ -280,7 +280,7 @@ async fn reconcile_tombstones_old_path_rows_left_by_a_move() {
 #[tokio::test]
 async fn reconcile_is_a_noop_when_root_has_no_current_routes() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
-    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
         .expect("embedded catalog must load");
 
     seed_moved_and_live_graph_rows(&context).await;
@@ -299,7 +299,7 @@ const CONTROL_PROJECT_ID: i64 = 2;
 #[tokio::test]
 async fn reconcile_tombstones_old_path_after_move() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
-    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
         .expect("embedded catalog must load");
 
     seed_duplicated_across_old_and_new_path(&context).await;
@@ -329,7 +329,7 @@ const LARGE_ROOT_STALE_PREFIX: &str = "1/400/20/";
 #[tokio::test]
 async fn reconcile_handles_route_sets_larger_than_a_request_uri() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
-    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
         .expect("embedded catalog must load");
 
     context
@@ -464,7 +464,7 @@ async fn index_moved_root(context: &TestContext) {
 }
 
 async fn run_namespace_deletion_scheduler(context: &TestContext) {
-    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
         .expect("embedded catalog must load");
     let graph = Arc::new(context.config.build_client("graph"));
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(

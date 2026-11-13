@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn lookups_read_within_the_subtrees_the_caller_holds_the_permission_in() {
-        let model = Packages::embedded().load().unwrap();
+        let model = Packages::embedded().deployment("server").unwrap();
         let grants = Grants::new(Caller::new("user:1", false, ())).with(
             "namespace",
             "read",

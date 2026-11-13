@@ -12,6 +12,7 @@ pub(super) fn assign(
     stores: &[Store],
     sources: &mut Sources,
     packages: &[String],
+    elsewhere: &crate::spec::Elsewhere,
     diagnostics: &mut Diagnostics,
 ) {
     let (mut entities, mut variants) = candidates(graph, sources);
@@ -33,7 +34,7 @@ pub(super) fn assign(
                 &package,
                 format!("stored entity {} has no writer", entity.name),
             ),
-            (None, [writer]) if !bound => diagnostics.error(
+            (None, [writer]) if !bound && !elsewhere.holds(&entity.name) => diagnostics.error(
                 &package,
                 format!(
                     "{} writes entity {}, which no store holds",

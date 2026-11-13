@@ -13,7 +13,7 @@ use query_data_model::surface::{SurfaceError, gql};
 use query_data_model::{Model, Packages, Tier, testkit};
 
 fn model() -> Arc<Model> {
-    testkit::with_demo().load().unwrap()
+    testkit::with_demo().deployment("demo").unwrap()
 }
 
 #[test]
@@ -24,7 +24,13 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
             .sources()
             .contains_key("gitlab.source_code/storage/orbit_code.yaml")
     );
-    assert!(embedded.load().unwrap().entity("SlackMessage").is_err());
+    assert!(
+        embedded
+            .deployment("server")
+            .unwrap()
+            .entity("SlackMessage")
+            .is_err()
+    );
     let demo = testkit::with_demo();
     assert!(
         demo.sources()
@@ -134,7 +140,7 @@ fn code_construction_rejects_unknown_captures_and_misplaced_steps() {
             Tier::Integration,
             extra.into_iter().collect(),
         ))
-        .load()
+        .deployment("demo")
         .unwrap();
     let foreign = other.physical::<OrbitCode>("code_indexing").unwrap();
     let foreign = foreign.index("code", "File").unwrap();
@@ -310,7 +316,7 @@ fn a_via_step_whose_key_type_differs_from_the_target_id_fails_the_load() {
         .partition(|(path, _)| !path.starts_with("integration.slack/"));
     let error = Packages::new(Tier::Platform, platform.into_iter().collect())
         .with(Packages::new(Tier::Integration, demo.into_iter().collect()))
-        .load()
+        .deployment("demo")
         .unwrap_err()
         .to_string();
     for expected in [
@@ -339,7 +345,7 @@ fn a_code_store_names_the_repository_of_an_entity_no_via_chain_scopes() {
             .get_mut("gitlab.source_code/storage/orbit_code.yaml")
             .unwrap();
         *storage = storage.replace("    backend:\n", &format!("    backend:\n{backend}"));
-        Packages::new(Tier::Platform, sources).load()
+        Packages::new(Tier::Platform, sources).deployment("demo")
     };
     let declared = load("orbit_code: none", "      repository: project_id\n").unwrap();
     let code = declared.physical::<OrbitCode>("code_indexing").unwrap();

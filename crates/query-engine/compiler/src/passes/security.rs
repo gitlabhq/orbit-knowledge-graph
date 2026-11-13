@@ -246,7 +246,7 @@ mod tests {
 
     fn model() -> &'static Catalog<ClickHouse> {
         static MODEL: LazyLock<Catalog<ClickHouse>> =
-            LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
+            LazyLock::new(|| Catalog::<ClickHouse>::embedded("server").unwrap());
         &MODEL
     }
 

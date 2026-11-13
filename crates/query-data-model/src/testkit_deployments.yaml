@@ -1,0 +1,4 @@
+peers:
+  connections: [main, releases, lake]
+lake:
+  connections: [main, lake, data_extraction]

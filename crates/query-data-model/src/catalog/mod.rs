@@ -49,9 +49,10 @@ pub struct Model {
 }
 
 impl Model {
-    /// A model of package files that were all loaded at `tier`.
+    /// A model of package files that were all loaded at `tier`, as the deployment shape `shape`.
     pub fn from_yaml<'a>(
         tier: Tier,
+        shape: &str,
         sources: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Result<Self, DataModelError> {
         let sources: Vec<(&str, &str)> = sources.into_iter().collect();
@@ -59,10 +60,16 @@ impl Model {
             .iter()
             .map(|(path, _)| (directory(path).to_string(), tier))
             .collect();
-        Self::load(&Fragments::parse(sources, &tiers)?)
+        Self::load(&Fragments::parse(sources, &tiers)?.deploy(shape)?)
     }
 
+    /// The model of one deployment, from the fragments of the connections it serves.
     pub fn load(fragments: &Fragments) -> Result<Self, DataModelError> {
+        if fragments.served().is_none() {
+            return Err(DataModelError::Invalid(
+                "a model loads for the connections one deployment serves".into(),
+            ));
+        }
         let mut diagnostics = Diagnostics::default();
         let (mut graphs, mut authorizations, mut storages, mut services, mut sources) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -82,7 +89,9 @@ impl Model {
         composition::check(fragments, &access, &mut diagnostics);
         let lookups = Lookups::resolve(&graph, &services, &mut diagnostics);
         let served: HashSet<PropertyId> = lookups.served().collect();
-        let (mut stores, blocks) = layout::resolve(&graph, &storages, &served, &mut diagnostics);
+        let elsewhere = fragments.elsewhere();
+        let (mut stores, blocks) =
+            layout::resolve(&graph, &storages, &served, elsewhere, &mut diagnostics);
         let complete = access.covers(&graph);
         if complete {
             guards::resolve(&graph, &access, &mut stores, &mut diagnostics);
@@ -94,6 +103,7 @@ impl Model {
             &sources,
             &served,
             &stores,
+            elsewhere,
             &mut diagnostics,
         );
         diagnostics.finish()?;

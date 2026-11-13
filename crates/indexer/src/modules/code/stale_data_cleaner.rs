@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn node_tombstones_carry_the_unchanging_columns() {
         let names = CodeTableNames::from_catalog(
-            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
         )
         .expect("code tables");
         let carried = names.immutable_columns(&names.file);

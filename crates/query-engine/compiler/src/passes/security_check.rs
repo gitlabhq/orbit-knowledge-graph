@@ -176,7 +176,7 @@ mod tests {
 
     fn model() -> &'static Catalog<ClickHouse> {
         static MODEL: LazyLock<Catalog<ClickHouse>> = LazyLock::new(|| {
-            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap()
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap()
         });
         &MODEL
     }
@@ -220,7 +220,10 @@ relationships:
 
     /// The embedded model with security-manager merge requests and a reviewer-to-project join.
     fn reviewer_project_model() -> Catalog<ClickHouse> {
-        let mut fragments = Packages::embedded().fragments().unwrap();
+        let mut fragments = Packages::embedded()
+            .fragments()
+            .and_then(|fragments| fragments.deploy("server"))
+            .unwrap();
         for fragment in fragments.iter_mut() {
             match fragment {
                 Fragment::Authorization(access) => {

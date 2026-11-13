@@ -52,7 +52,7 @@ mod tests {
 
     fn pinned_schema() -> Arc<ActiveSchema> {
         ActiveSchema::pinned(Arc::new(
-            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
         ))
     }
 

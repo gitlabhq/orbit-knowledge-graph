@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn a_composite_key_set_renders_as_a_tuple_in_on_clickhouse_and_duckdb() {
-        let clickhouse = Arc::new(Catalog::<ClickHouse>::embedded().unwrap());
+        let clickhouse = Arc::new(Catalog::<ClickHouse>::embedded("server").unwrap());
         let clickhouse = rendered(
             Frontend::Server(Arc::clone(&clickhouse)),
             Peer::ClickHouse(clickhouse),
@@ -165,7 +165,7 @@ mod tests {
             clickhouse.contains("(f.project_id, f.path) IN (({p"),
             "{clickhouse}"
         );
-        let duckdb = Arc::new(Catalog::<DuckDb>::embedded().unwrap());
+        let duckdb = Arc::new(Catalog::<DuckDb>::embedded("local").unwrap());
         let duckdb = rendered(Frontend::Local(Arc::clone(&duckdb)), Peer::DuckDb(duckdb));
         assert!(duckdb.contains("(f.project_id, f.path) IN (($"), "{duckdb}");
     }

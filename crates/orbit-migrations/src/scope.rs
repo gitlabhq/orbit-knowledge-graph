@@ -453,12 +453,17 @@ mod tests {
     }
 
     fn classify(scope: MigrationScope) -> BTreeMap<String, TableMigrationAction> {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         classify_tables_for_scope(&catalog, &embedded_schema(), &scope)
     }
 
     fn embedded_schema() -> Schema {
-        Schema::from_model(&query_data_model::Packages::embedded().load().unwrap()).unwrap()
+        Schema::from_model(
+            &query_data_model::Packages::embedded()
+                .deployment("server")
+                .unwrap(),
+        )
+        .unwrap()
     }
 
     fn action(map: &BTreeMap<String, TableMigrationAction>, table: &str) -> TableMigrationAction {
@@ -468,7 +473,7 @@ mod tests {
 
     #[test]
     fn shared_edge_writers_force_scope_widening() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let layout = embedded_schema();
 
         assert_eq!(
@@ -585,7 +590,7 @@ mod tests {
 
     #[test]
     fn none_scope_clones_everything_and_invalidates_nothing() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
 
         let map = classify(MigrationScope::None);
         for (table, table_action) in &map {
@@ -607,7 +612,7 @@ mod tests {
 
     #[test]
     fn fk_edge_kind_invalidates_its_emitting_pipeline() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let pipelines = find_invalidated_pipelines(&catalog, &sdlc_scope(&["HAS_NOTE"]));
         assert!(
             pipelines.namespaced.contains(&"Note".to_string()),
@@ -618,7 +623,7 @@ mod tests {
 
     #[test]
     fn full_scope_has_no_orphans_and_skips_code_entities() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let descriptors = catalog.model().sources().descriptors(catalog.graph());
         let invalidated = invalidated_entities(&catalog, &MigrationScope::Full);
         assert!(!code_entity_names(&catalog).is_empty());

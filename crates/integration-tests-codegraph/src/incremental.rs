@@ -117,7 +117,7 @@ fn index_and_check(yaml: &str) {
         .map(|(path, _)| path)
         .collect();
     let lang_id = detect_lang(&suite, &paths);
-    let data_model = Arc::new(Catalog::<DuckDb>::embedded().expect("embedded model"));
+    let data_model = Arc::new(Catalog::<DuckDb>::embedded("local").expect("embedded model"));
     let env = Env::with_limits(lang_id, suite_limits(&suite)).expect("rules compile");
 
     let repository = Arc::new(

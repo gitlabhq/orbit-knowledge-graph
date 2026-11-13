@@ -10,7 +10,7 @@ use crate::logical::Query;
 use crate::surface;
 
 static MODEL: LazyLock<Catalog<ClickHouse>> =
-    LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
+    LazyLock::new(|| Catalog::<ClickHouse>::embedded("server").unwrap());
 
 fn plan(gql: &str) -> LogicalPlan {
     let model = MODEL.model();

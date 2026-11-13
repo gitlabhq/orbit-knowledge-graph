@@ -79,6 +79,30 @@ pub struct Fragments {
     fragments: Vec<Fragment>,
     tiers: BTreeMap<String, Tier>,
     id: ModelId,
+    /// The connections one deployment serves, whose storage fragments alone these keep.
+    served: Option<Vec<String>>,
+    /// What the storage fragments of the stores on unserved connections hold.
+    elsewhere: Elsewhere,
+}
+
+/// The entities and relationship variants the stores of a deployment's unserved connections hold:
+/// they belong to other deployments, not to none.
+#[derive(Debug, Clone, Default)]
+pub struct Elsewhere {
+    entities: std::collections::HashSet<String>,
+    variants: std::collections::HashSet<(String, String)>,
+}
+
+impl Elsewhere {
+    pub fn holds(&self, entity: &str) -> bool {
+        self.entities.contains(entity)
+    }
+
+    /// Whether an unserved store binds the variant `source -> target` of `relationship`.
+    pub fn binds(&self, relationship: &str, source: &str, target: &str) -> bool {
+        self.variants
+            .contains(&(relationship.to_string(), format!("{source}->{target}")))
+    }
 }
 
 impl Fragments {
@@ -165,7 +189,75 @@ impl Fragments {
             fragments,
             tiers,
             id,
+            served: None,
+            elsewhere: Elsewhere::default(),
         })
+    }
+
+    /// Only the storage fragments whose store sits on a connection the deployment shape `shape`
+    /// of `deployments` serves; the model's id names the shape's connections.
+    pub fn deployment(
+        self,
+        deployments: &crate::Deployments,
+        shape: &str,
+    ) -> Result<Self, crate::DataModelError> {
+        Ok(self.serving(deployments.connections(shape)?))
+    }
+
+    /// Only the storage fragments of the shape `shape` in `config/deployments.yaml`.
+    pub fn deploy(self, shape: &str) -> Result<Self, crate::DataModelError> {
+        self.deployment(&crate::Deployments::embedded(), shape)
+    }
+
+    fn serving(mut self, connections: &[String]) -> Self {
+        let mut served = connections.to_vec();
+        served.sort();
+        served.dedup();
+        let on: HashMap<String, String> = self
+            .fragments
+            .iter()
+            .filter_map(|fragment| match fragment {
+                Fragment::Storage(storage) => storage
+                    .engine
+                    .as_ref()
+                    .map(|engine| (storage.store.clone(), engine.connection.clone())),
+                _ => None,
+            })
+            .collect();
+        let mut elsewhere = Elsewhere::default();
+        self.fragments.retain(|fragment| match fragment {
+            Fragment::Storage(storage) => {
+                let kept = on
+                    .get(&storage.store)
+                    .is_some_and(|connection| served.contains(connection));
+                if !kept {
+                    elsewhere.entities.extend(storage.entities.keys().cloned());
+                    for (relationship, variants) in &storage.relationships {
+                        for variant in variants.keys() {
+                            let variant: String =
+                                variant.chars().filter(|c| !c.is_whitespace()).collect();
+                            elsewhere.variants.insert((relationship.clone(), variant));
+                        }
+                    }
+                }
+                kept
+            }
+            _ => true,
+        });
+        self.elsewhere = elsewhere;
+        self.id = self.id.tagged(&format!("serving {}", served.join(",")));
+        self.served = Some(served);
+        self
+    }
+
+    /// What the stores on the connections the deployment does not serve hold.
+    pub fn elsewhere(&self) -> &Elsewhere {
+        &self.elsewhere
+    }
+
+    /// The connections the deployment these fragments describe serves.
+    pub fn served(&self) -> Option<&[String]> {
+        self.served.as_deref()
     }
 
     pub fn id(&self) -> ModelId {

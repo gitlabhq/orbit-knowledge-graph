@@ -55,6 +55,12 @@ pub fn with_demo() -> Packages {
     Packages::embedded().with(demo)
 }
 
+/// The deployment shapes tests run as, from `testkit_deployments.yaml`.
+pub fn deployments() -> crate::Deployments {
+    crate::Deployments::parse(include_str!("testkit_deployments.yaml"))
+        .expect("testkit_deployments.yaml is valid")
+}
+
 /// The `query.limits` of the embedded `config/default.yaml`; its query settings are installed
 /// too, as the server installs its loaded ones at startup.
 pub fn limits() -> &'static orbit_server_config::QueryLimits {

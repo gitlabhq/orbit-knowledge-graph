@@ -28,11 +28,6 @@ pub trait StorageBackend: Sized + 'static {
     type Store: Debug + Send + Sync + std::panic::RefUnwindSafe + 'static;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
-
-    /// The properties the store searches without holding them as columns.
-    fn searched(_store: &Self::Store) -> Vec<PropertyId> {
-        Vec::new()
-    }
 }
 
 impl<B: StorageBackend> Blocks for B {
@@ -154,8 +149,9 @@ impl<B: StorageBackend> Catalog<B> {
         model.physical(connection)
     }
 
-    pub fn embedded() -> Result<Self, DataModelError> {
-        Self::from_model(&Packages::embedded().load()?)
+    /// The catalog of the embedded packages as a deployment of the shape `shape` reads them.
+    pub fn embedded(shape: &str) -> Result<Self, DataModelError> {
+        Self::from_model(&Packages::embedded().deployment(shape)?)
     }
 
     pub fn model(&self) -> &Model {
@@ -304,9 +300,6 @@ impl Model {
             })
             .collect();
         for (store, facts) in self.stores.iter_mut().zip(facts) {
-            if let (Some(facts), Some(backend)) = (&facts, registered(&store.kind)) {
-                store.searched = backend.searched(facts).into_iter().collect();
-            }
             store.facts = facts;
         }
     }
@@ -327,8 +320,6 @@ pub(crate) trait Registered {
         blocks: &StoreBlocks<'_>,
         diagnostics: &mut Diagnostics,
     ) -> Option<Facts>;
-
-    fn searched(&self, facts: &Facts) -> Vec<PropertyId>;
 }
 
 struct Entry<B>(PhantomData<fn() -> B>);
@@ -409,11 +400,5 @@ impl<B: StorageBackend> Registered for Entry<B> {
             entities,
         };
         Some(Box::new(B::resolve(input, diagnostics)))
-    }
-
-    fn searched(&self, facts: &Facts) -> Vec<PropertyId> {
-        (facts.as_ref() as &dyn std::any::Any)
-            .downcast_ref::<B::Store>()
-            .map_or_else(Vec::new, B::searched)
     }
 }

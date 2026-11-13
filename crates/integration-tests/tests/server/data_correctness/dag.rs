@@ -26,7 +26,12 @@ const BOUNDED: &str = "MATCH (f:File) WHERE f.project_id IN [42, 77] AND f.conte
 /// fake indexes; an open merge request on project 42's indexed head, and one on project 43,
 /// which the graph does not hold.
 pub(super) async fn seed(ctx: &TestContext) {
-    let schema = integration_testkit::graph_schema(&dag_packages().fragments().unwrap());
+    let schema = integration_testkit::graph_schema(
+        &dag_packages()
+            .fragments()
+            .and_then(|fragments| fragments.deploy("demo"))
+            .unwrap(),
+    );
     let table = schema
         .tables
         .iter()
@@ -75,7 +80,10 @@ async fn run_with(
     paths: &[&str],
     checks: &Checks,
 ) -> (Vec<Event>, Result<Outcome, DagError>) {
-    let fragments = packages.fragments().unwrap();
+    let fragments = packages
+        .fragments()
+        .and_then(|fragments| fragments.deploy("demo"))
+        .unwrap();
     let graph = integration_testkit::versioned_data_model(fragments);
     let model = Arc::clone(graph.shared_model());
     let executors = graph_executors(

@@ -13,63 +13,67 @@ use query_data_model::{DuckDb, Packages};
 
 use crate::collisions::COLLISIONS;
 
-/// Every entity, relationship, table, store, connection, source and provider name, with its kind.
+/// Every entity, relationship, table, store, connection, source and provider name, with its
+/// kind, across the model of every deployment shape.
 fn declared() -> BTreeMap<String, &'static str> {
-    let model = Packages::embedded().load().unwrap();
-    let graph = model.graph();
+    let deployments = query_data_model::Deployments::embedded();
     let mut names = BTreeMap::new();
+    for shape in deployments.shapes() {
+        let model = Packages::embedded().deployment(shape).unwrap();
+        declared_in(&model, &mut names);
+    }
+    names
+}
+
+fn declared_in(
+    model: &std::sync::Arc<query_data_model::Model>,
+    names: &mut BTreeMap<String, &'static str>,
+) {
+    let graph = model.graph();
+    add(names, "entity", graph.entities().map(|e| e.name.as_str()));
     add(
-        &mut names,
-        "entity",
-        graph.entities().map(|e| e.name.as_str()),
-    );
-    add(
-        &mut names,
+        names,
         "relationship",
         graph.relationships().map(|r| r.name.as_str()),
     );
     for store in model.stores() {
-        add(&mut names, "store", [store.name.as_str()]);
-        add(&mut names, "connection", [store.connection.as_str()]);
+        add(names, "store", [store.name.as_str()]);
+        add(names, "connection", [store.connection.as_str()]);
         add(
-            &mut names,
+            names,
             "table",
             store.sources().filter_map(|s| s.table.as_deref()),
         );
         let edges = store
             .bindings()
             .filter_map(|(variant, _, _)| store.edge_table(variant));
-        add(&mut names, "table", edges);
+        add(names, "table", edges);
         match store.kind.as_str() {
             "clickhouse" => {
                 let catalog = model.physical::<ClickHouse>(&store.connection).unwrap();
                 let schema = catalog.schema().unwrap();
-                add(&mut names, "table", schema.table_names());
+                add(names, "table", schema.table_names());
                 add(
-                    &mut names,
+                    names,
                     "table",
                     schema.dictionaries().iter().map(|d| d.name.as_str()),
                 );
                 add(
-                    &mut names,
+                    names,
                     "table",
                     schema.views().iter().map(|v| v.name.as_str()),
                 );
                 let refreshable = schema.refreshable_views().iter().map(|v| v.name.as_str());
-                add(&mut names, "table", refreshable);
+                add(names, "table", refreshable);
                 add(
-                    &mut names,
+                    names,
                     "table",
                     schema.graph_tables().iter().map(|t| t.name.as_str()),
                 );
             }
             "duckdb" => {
                 let catalog = model.physical::<DuckDb>(&store.connection).unwrap();
-                add(
-                    &mut names,
-                    "table",
-                    catalog.tables().map(|t| t.name.as_str()),
-                );
+                add(names, "table", catalog.tables().map(|t| t.name.as_str()));
             }
             _ => {}
         }
@@ -77,25 +81,20 @@ fn declared() -> BTreeMap<String, &'static str> {
     let sources = model.sources();
     for pipeline in sources.pipelines() {
         let source = sources.data_source(pipeline);
-        add(&mut names, "source", [source.name.as_str()]);
-        add(&mut names, "connection", [source.connection.as_str()]);
+        add(names, "source", [source.name.as_str()]);
+        add(names, "connection", [source.connection.as_str()]);
+        add(names, "table", pipeline.tables.iter().map(String::as_str));
         add(
-            &mut names,
-            "table",
-            pipeline.tables.iter().map(String::as_str),
-        );
-        add(
-            &mut names,
+            names,
             "table",
             pipeline.lookups.iter().map(|l| l.table.as_str()),
         );
     }
     add(
-        &mut names,
+        names,
         "provider",
         model.access().providers().into_iter().map(|(p, _)| p),
     );
-    names
 }
 
 fn add<'a>(

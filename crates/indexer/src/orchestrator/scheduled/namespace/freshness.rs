@@ -193,14 +193,7 @@ impl NamespaceFreshness {
         else {
             return Ok(());
         };
-        let model = self
-            .catalog
-            .load(version)
-            .await
-            .map_err(TaskError::new)?
-            .packages()
-            .load()
-            .map_err(TaskError::new)?;
+        let model = self.catalog.model(version).await.map_err(TaskError::new)?;
         let (siphon, _) = model
             .sources()
             .enabled_namespaces()

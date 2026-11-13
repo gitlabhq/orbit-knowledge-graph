@@ -116,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
                 let indexer_config = IndexerConfig::from(&config);
                 indexer::run(
                     &indexer_config,
-                    query_data_model::Packages::embedded().load()?,
+                    query_data_model::Packages::embedded().deployment(&config.schema.deployment)?,
                     serving,
                     shutdown,
                     indexer_datafusion::sql_transform(),
@@ -201,7 +201,9 @@ async fn run_webserver(
             .await
             .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
     );
-    let catalog = orbit_migrations::catalog::ModelCatalog::open(nats).await?;
+    let catalog =
+        orbit_migrations::catalog::ModelCatalog::open(nats, config.schema.deployment.clone())
+            .await?;
     ActiveSchema::spawn(
         &active_schema,
         Arc::new(graph.clone()),

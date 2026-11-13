@@ -85,15 +85,6 @@ impl StorageBackend for OrbitCode {
     type ColumnOptions = NoOptions;
     type Store = CodeStore;
 
-    fn searched(store: &CodeStore) -> Vec<PropertyId> {
-        store
-            .indexes
-            .iter()
-            .flat_map(|indexed| &indexed.searched)
-            .map(|(property, _)| *property)
-            .collect()
-    }
-
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> CodeStore {
         let graph = input.graph;
         let store_name = &input.store.name;

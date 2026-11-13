@@ -124,8 +124,12 @@ mod tests {
 
     #[test]
     fn replicated_schema_renders_replicated_engines_everywhere() {
-        let physical =
-            Schema::from_model(&query_data_model::Packages::embedded().load().unwrap()).unwrap();
+        let physical = Schema::from_model(
+            &query_data_model::Packages::embedded()
+                .deployment("server")
+                .unwrap(),
+        )
+        .unwrap();
         let plain = GraphSchema::new(physical.clone(), false);
         let replicated = GraphSchema::new(physical, true);
 

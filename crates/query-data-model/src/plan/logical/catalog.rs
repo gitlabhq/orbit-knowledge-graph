@@ -93,8 +93,7 @@ impl<'m> LogicalCatalog<'m> {
             .filter(move |store| self.served.contains(&store.connection))
     }
 
-    /// The entity's home store among the served ones holds the property, or a served store
-    /// searches it.
+    /// The entity's home store among the served ones holds the property.
     pub(super) fn realized(self, entity: EntityId, property: PropertyId) -> bool {
         if !self.restricted {
             return true;
@@ -107,13 +106,9 @@ impl<'m> LogicalCatalog<'m> {
             .chain(holders)
             .find(|store| store.complete(entity))
             .unwrap_or(first);
-        let searched = self
-            .stores()
-            .any(|store| store.source(entity).is_some() && store.searches(property));
-        searched
-            || !home.excludes(property)
-                && (home.complete(entity) && self.model.lookup(property).is_some()
-                    || home.column(property).is_some())
+        !home.excludes(property)
+            && (home.complete(entity) && self.model.lookup(property).is_some()
+                || home.column(property).is_some())
     }
 
     /// Every variant keeps its rows in an edge table, which the loader checks holds each

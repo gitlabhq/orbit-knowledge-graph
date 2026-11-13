@@ -82,10 +82,13 @@ fn read_model_archive(version: u32) -> Result<ModelArchive> {
     Ok(ModelArchive::from_bytes(version, &bytes)?)
 }
 
+/// Archives and the ledger describe the server deployment.
+const SERVER: &str = "server";
+
 fn load(archive: &ModelArchive) -> Result<Arc<Model>> {
     archive
         .packages()
-        .load()
+        .deployment(SERVER)
         .with_context(|| format!("loading the v{} model archive", archive.schema_version()))
 }
 
@@ -181,7 +184,8 @@ fn check_against_base(ledger: &MigrationLedger, schema_version: u32, base: &str)
         );
     }
     let previous = load(&read_model_archive(base_version)?)?;
-    verify_entry_covers_derived_scope(ledger, &previous, schema_version).map_err(|e| anyhow!(e))?;
+    verify_entry_covers_derived_scope(ledger, &previous, SERVER, schema_version)
+        .map_err(|e| anyhow!(e))?;
     Ok(())
 }
 
@@ -223,7 +227,7 @@ pub fn bump(
              for a change the model cannot show, such as indexer code."
         );
     }
-    let derived = derive_scope(&load(&previous)?, &packages.load()?)?;
+    let derived = derive_scope(&load(&previous)?, &packages.deployment(SERVER)?)?;
     let declared = declared_scope(&derived.scope, explicit)?;
 
     let mut ledger = read_ledger()?;
@@ -243,7 +247,7 @@ pub fn bump(
         *latest = MigrationEntry::new(final_version, &widened, note.or(latest.note.take()));
     }
 
-    let catalog = Catalog::<ClickHouse>::from_model(&packages.load()?)?;
+    let catalog = Catalog::<ClickHouse>::from_model(&packages.deployment(SERVER)?)?;
     ledger
         .validate(&catalog, final_version)
         .map_err(|e| anyhow!(e))?;

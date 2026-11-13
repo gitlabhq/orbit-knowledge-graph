@@ -269,6 +269,7 @@ impl Sources {
         fragments: &[&SourceFragment],
         served: &HashSet<PropertyId>,
         stores: &[Store],
+        elsewhere: &crate::spec::Elsewhere,
         diagnostics: &mut Diagnostics,
     ) -> Self {
         let mut resolver = Resolver {
@@ -282,7 +283,14 @@ impl Sources {
         resolver.declare_sources(fragments);
         let packages = resolver.resolve(fragments);
         let mut sources = resolver.sources;
-        super::writers::assign(graph, stores, &mut sources, &packages, diagnostics);
+        super::writers::assign(
+            graph,
+            stores,
+            &mut sources,
+            &packages,
+            elsewhere,
+            diagnostics,
+        );
         sources
     }
 }

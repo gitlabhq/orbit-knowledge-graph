@@ -962,7 +962,7 @@ mod tests {
 
     #[test]
     fn edge_batches_follow_their_table_column_order() {
-        let catalog = Catalog::<ClickHouse>::embedded().unwrap();
+        let catalog = Catalog::<ClickHouse>::embedded("server").unwrap();
         let specs = super::super::test_helpers::embedded_specs();
         let edges = BatchBuilder::new(&specs.edge, 0).unwrap().finish().unwrap();
         for (table, batch) in [

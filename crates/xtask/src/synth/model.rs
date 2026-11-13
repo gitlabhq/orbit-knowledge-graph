@@ -32,7 +32,9 @@ pub fn load_catalog(path: impl AsRef<Path>) -> Result<Catalog<ClickHouse>> {
     let path = path.as_ref();
     let packages = Packages::read_dir(path, query_data_model::Tier::Platform)
         .with_context(|| format!("failed to read model packages from {}", path.display()))?;
-    Ok(Catalog::<ClickHouse>::from_model(&packages.load()?)?)
+    Ok(Catalog::<ClickHouse>::from_model(
+        &packages.deployment("server")?,
+    )?)
 }
 
 impl Graph {
@@ -47,7 +49,7 @@ impl Graph {
 
     #[cfg(test)]
     pub fn embedded() -> Result<Self> {
-        Self::from_catalog(&Catalog::<ClickHouse>::embedded()?)
+        Self::from_catalog(&Catalog::<ClickHouse>::embedded("server")?)
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {

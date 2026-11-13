@@ -414,11 +414,14 @@ async fn main() -> Result<()> {
     eprintln!("using table prefix: {prefix:?}");
     let packages = Packages::read_dir(&cli.model, query_data_model::Tier::Platform)
         .context("failed to read model packages")?;
-    let data_model = Arc::new(Catalog::<ClickHouse>::versioned(&packages, &prefix)?);
+    let config = orbit_server_config::AppConfig::embedded_defaults();
+    let data_model = Arc::new(Catalog::<ClickHouse>::versioned(
+        &packages,
+        &config.schema.deployment,
+        &prefix,
+    )?);
     orbit_server_config::query::init_embedded_defaults();
-    let limits = orbit_server_config::AppConfig::embedded_defaults()
-        .query
-        .limits;
+    let limits = config.query.limits;
 
     let authorized_paths = cli
         .traversal_paths

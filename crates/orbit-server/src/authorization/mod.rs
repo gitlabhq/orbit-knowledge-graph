@@ -237,13 +237,17 @@ pub(crate) mod tests {
     use super::*;
 
     pub(crate) fn deployment() -> Deployment {
-        let model = query_data_model::Packages::embedded().load().unwrap();
+        let model = query_data_model::Packages::embedded()
+            .deployment("server")
+            .unwrap();
         let config = AppConfig::embedded_defaults().authorization;
         Deployment::bind(&config, &model, &Registry::gitlab()).unwrap()
     }
 
     fn bind_errors(edit: impl FnOnce(&mut AuthorizationConfig)) -> Vec<String> {
-        let model = query_data_model::Packages::embedded().load().unwrap();
+        let model = query_data_model::Packages::embedded()
+            .deployment("server")
+            .unwrap();
         let mut config = AppConfig::embedded_defaults().authorization;
         edit(&mut config);
         match Deployment::bind(&config, &model, &Registry::gitlab()) {
