@@ -14,16 +14,7 @@ Orbit reports each billable query.
 Orbit also checks quota before it runs a query.
 Both parts live in the Orbit server, because the server executes the work.
 Rails only proxies the request and does not emit billing events.
-
-[ADR 007](../adr/007_monetization_engineering.md) records the decisions and the phases of the work.
 The sections below cover the design as built.
-
-## Design goals
-
-- **Accurate.** Usage events match billable activity.
-- **Auditable.** Billing code stays small and separate, so reviewers can see all of it.
-- **Not caller-controlled.** Billing attribution comes from the signed token that GitLab sends. It does not come from a field that the caller sets.
-- **Priced elsewhere.** Orbit reports usage and does not hold pricing.
 
 ## How the parts fit together
 
@@ -49,11 +40,15 @@ flowchart LR
     DIP --> CDot
 ```
 
-## Facts, not prices
+### The billing observer
 
-Orbit reports what happened: one request, with the attribution that billing needs.
-CustomersDot, the GitLab billing system, decides what that usage costs.
-Orbit holds no pricing, so pricing can change without a change to Orbit.
+The generic query pipeline does not depend on billing.
+A billing observer hooks into the pipeline and sees each graph query when it finishes.
+The observer builds the event and hands it to a tracker.
+The tracker owns the queue and the delivery.
+The pipeline still decides when a query succeeded or failed.
+So the observer interface and the code that attaches the observer are hook points.
+They get the same review as the billing code.
 
 ## Request lifecycle
 
@@ -101,16 +96,6 @@ When the server shuts down, it tries to send the queued events before it exits.
 When Orbit cannot build a valid event, it counts the case.
 Operators can then see the gap.
 
-## Billing as an observer
-
-The generic query pipeline does not depend on billing.
-A billing observer hooks into the pipeline and sees each graph query when it finishes.
-The observer builds the event and hands it to a tracker.
-The tracker owns the queue and the delivery.
-The pipeline still decides when a query succeeded or failed.
-So the observer interface and the code that attaches the observer are hook points.
-They get the same review as the billing code.
-
 ## Quota check
 
 Before Orbit runs a metered query, it checks whether the caller still has quota.
@@ -143,7 +128,6 @@ flowchart LR
     CI["CI boundary test"] -.->|"checks dependents"| Billing
 ```
 
-[ADR 020](../adr/020_billing_sox_scope.md) explains the SOX scope.
 The [merge gates](../testing/merge-gates.md) page describes the checks that protect billing code.
 
 ## Monitoring
@@ -152,6 +136,16 @@ Orbit publishes counters for each stage of the event pipeline: events queued, dr
 Operators watch these counters to catch a pipeline that fails silently.
 Orbit also records each quota decision and the latency of the CustomersDot call.
 
-## What this page leaves out
+## Why we built it this way
+
+- **Accurate.** Usage events match billable activity.
+- **Auditable.** Billing code stays small and separate, so reviewers can see all of it.
+- **Not caller-controlled.** Billing attribution comes from the signed token that GitLab sends. It does not come from a field that the caller sets.
+- **Priced elsewhere.** Orbit reports what happened: one request, with the attribution that billing needs. CustomersDot, the GitLab billing system, decides what that usage costs. Orbit holds no pricing, so pricing can change without a change to Orbit.
 
 This repository does not decide pricing or credit rates, so this page does not describe them.
+
+## Decisions
+
+- [ADR 007: Monetization engineering](../adr/007_monetization_engineering.md)
+- [ADR 020: SOX scoping for billing event emission](../adr/020_billing_sox_scope.md)
