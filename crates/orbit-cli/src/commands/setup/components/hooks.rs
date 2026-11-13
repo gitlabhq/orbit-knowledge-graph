@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -48,7 +48,7 @@ impl Installer for Hooks {
                 .resolve(&merge.file)
                 .is_ok_and(|(path, _)| file_mentions(&path, &merge.marker))
         });
-        let templated = agent.ui_files(false).any(|template_file| {
+        let templated = agent.all_ui_files(false).any(|template_file| {
             target
                 .resolve(&template_file.path)
                 .is_ok_and(|(path, _)| path.exists())
@@ -58,12 +58,13 @@ impl Installer for Hooks {
 }
 
 fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Result<()> {
+    let hook_gitlab = spec::hook_gitlab_arg();
     for merge in &agent.json_merges {
         let (path, label) = target.resolve(&merge.file)?;
         let entries: Vec<Value> = merge
             .entries
             .iter()
-            .map(substitute_tokens_in_json)
+            .map(|entry| substitute_tokens_in_json(entry, hook_gitlab))
             .collect();
         let mut root = json::read_object(&path)?;
         if !file_mentions(&path, &merge.marker) {
@@ -72,7 +73,15 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
         json::replace_marked_entries(&mut root, &merge.path, &merge.marker, &entries)
             .with_context(|| format!("failed to update {}", path.display()))?;
         let installed = json::render(&root)?;
+        let changed = std::fs::read(&path).map_or(true, |current| current != installed.as_bytes());
         write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
+        let note = merge.review_note.as_ref().and_then(|note| match target {
+            Target::Project(_) => note.project.as_ref(),
+            Target::Global(_) => note.global.as_ref(),
+        });
+        if let Some(note) = note.filter(|_| changed) {
+            report.note(&label, format!("WARNING: {note}"));
+        }
     }
 
     install_files(
@@ -97,17 +106,31 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
     }
 
     remove_files(
-        agent.ui_files(false).map(|file| &file.path),
+        agent
+            .ui_files(false)
+            .filter(|file| file.feature.is_none())
+            .map(|file| &file.path),
         agent.ui_registrations(false),
         target,
         report,
     )?;
-    remove_retired(agent, false, target, report)
+    remove_by_feature(agent.feature_files(false), target, report)?;
+    remove_retired_only(agent, false, target, report)
 }
 
 /// Removes what an earlier release installed. A config file is read only when it names a retired
 /// value, so a config Orbit never wrote to, such as one with comments, is left alone.
 pub(super) fn remove_retired(
+    agent: Agent,
+    ui: bool,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    remove_by_feature(agent.switched_off_files(ui), target, report)?;
+    remove_retired_only(agent, ui, target, report)
+}
+
+pub(super) fn remove_retired_only(
     agent: Agent,
     ui: bool,
     target: &Target,
@@ -131,10 +154,52 @@ pub(super) fn remove_retired(
     Ok(())
 }
 
+/// Removes feature files together or not at all: an edited file kept without its siblings, such
+/// as an extension entry point without the module it imports, would stop working.
+pub(super) fn remove_by_feature<'a>(
+    files: impl Iterator<Item = &'a TemplateFile>,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    let mut by_feature: BTreeMap<&str, Vec<&ScopedPath>> = BTreeMap::new();
+    for file in files {
+        by_feature
+            .entry(file.feature.as_deref().unwrap_or_default())
+            .or_default()
+            .push(&file.path);
+    }
+    for group in by_feature.into_values() {
+        remove_group(group, target, report)?;
+    }
+    Ok(())
+}
+
+fn remove_group(files: Vec<&ScopedPath>, target: &Target, report: &mut Report) -> Result<()> {
+    let mut edited = false;
+    for file in &files {
+        let (path, _) = target.resolve(file)?;
+        if let Ok(current) = std::fs::read_to_string(&path) {
+            edited |= !TemplateFile::is_unmodified(&current);
+        }
+    }
+    for file in files {
+        if edited {
+            let (path, label) = target.resolve(file)?;
+            if path.exists() {
+                report.note(&label, KEPT_FEATURE);
+            }
+        } else {
+            remove_file(file, KEPT_FEATURE, target, report)?;
+        }
+    }
+    Ok(())
+}
+
 /// The labels of the retired files and config files that setup would touch to clean up.
 pub(super) fn retired_labels(agent: Agent, ui: bool, target: &Target) -> Result<Vec<String>> {
     let mut labels = Vec::new();
-    for file in agent.retired_files(ui) {
+    let switched_off = agent.switched_off_files(ui).map(|file| &file.path);
+    for file in agent.retired_files(ui).chain(switched_off) {
         let (path, label) = target.resolve(file)?;
         if path.exists() {
             labels.push(label);
@@ -183,6 +248,8 @@ pub(super) fn install_files<'a>(
 
 pub(in crate::commands::setup) const KEPT_RETIRED: &str =
     "kept (no longer used by Orbit; delete it by hand)";
+pub(in crate::commands::setup) const KEPT_FEATURE: &str =
+    "kept (feature file, edited or next to an edited one; delete it by hand)";
 const KEPT_EDITED: &str = "kept (edited since install; delete it by hand)";
 
 fn remove_file(
@@ -229,20 +296,21 @@ pub(super) fn remove_files<'a>(
     Ok(())
 }
 
-fn substitute_tokens_in_json(value: &Value) -> Value {
+fn substitute_tokens_in_json(value: &Value, hook_gitlab: &str) -> Value {
     match value {
-        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher()).replace(
-            "{{hook_gitlab}}",
-            if spec::reaches_gitlab() {
-                " --gitlab"
-            } else {
-                ""
-            },
-        )),
-        Value::Array(items) => Value::Array(items.iter().map(substitute_tokens_in_json).collect()),
+        Value::String(s) => Value::String(
+            s.replace("{{orbit}}", spec::launcher())
+                .replace("{{hook_gitlab}}", hook_gitlab),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| substitute_tokens_in_json(item, hook_gitlab))
+                .collect(),
+        ),
         Value::Object(map) => Value::Object(
             map.iter()
-                .map(|(k, v)| (k.clone(), substitute_tokens_in_json(v)))
+                .map(|(k, v)| (k.clone(), substitute_tokens_in_json(v, hook_gitlab)))
                 .collect(),
         ),
         other => other.clone(),
@@ -273,5 +341,93 @@ mod tests {
         assert!(retired.is_file());
         assert_eq!(report.outcomes.len(), 1);
         assert_eq!(report.outcomes[0].action, KEPT_RETIRED);
+    }
+
+    #[test]
+    fn no_gitlab_reaches_every_hook_guard_command_a_template_marks() {
+        let mut commands = Vec::new();
+        for agent in spec::agents() {
+            for merge in &agent.json_merges {
+                for entry in &merge.entries {
+                    if entry.to_string().contains("{{hook_gitlab}}") {
+                        let rendered = substitute_tokens_in_json(entry, " --no-gitlab");
+                        commands.push((agent.name.clone(), rendered.to_string()));
+                    }
+                }
+            }
+        }
+
+        let names: Vec<&str> = commands.iter().map(|(name, _)| name.as_str()).collect();
+        assert!(
+            names.contains(&"duo") && names.contains(&"claude"),
+            "{names:?}"
+        );
+        for (agent, rendered) in &commands {
+            assert!(rendered.contains("hook-guard"), "{agent}: {rendered}");
+            assert!(rendered.contains(" --no-gitlab\""), "{agent}: {rendered}");
+            assert!(!rendered.contains("{{"), "{agent}: {rendered}");
+        }
+    }
+
+    #[test]
+    fn review_notes_show_for_their_scope_only_when_the_hook_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
+        let notes = |agent: &str| {
+            let mut report = Report::default();
+            install_for_agent(spec::agent_named(agent).unwrap(), &target, &mut report).unwrap();
+            report
+                .outcomes
+                .iter()
+                .filter(|outcome| outcome.action.starts_with("WARNING: "))
+                .map(|outcome| outcome.action.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let codex = notes("codex");
+        assert_eq!(codex.len(), 1, "{codex:?}");
+        assert!(codex[0].contains("/hooks in Codex"), "{codex:?}");
+        assert!(
+            notes("codex").is_empty(),
+            "an unchanged hook file asks nothing again"
+        );
+        let duo = notes("duo");
+        assert!(duo[0].contains("--enable-project-hooks"), "{duo:?}");
+    }
+
+    #[test]
+    fn an_edited_feature_file_keeps_its_siblings_but_not_other_features() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
+        let file = |feature: &str, name: &str| TemplateFile {
+            path: ScopedPath {
+                project: format!(".pi/extensions/orbit-{feature}/{name}"),
+                global: format!("unused/{feature}/{name}"),
+            },
+            template: "output-guard/core.mjs".to_string(),
+            ui: true,
+            feature: Some(feature.to_string()),
+        };
+        let files = [
+            file("a", "index.js"),
+            file("a", "core.mjs"),
+            file("b", "index.js"),
+        ];
+        for file in &files {
+            let (path, _) = target.resolve(&file.path).unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, file.render()).unwrap();
+        }
+        let (edited, _) = target.resolve(&files[0].path).unwrap();
+        std::fs::write(&edited, "// my own edit\n").unwrap();
+        let mut report = Report::default();
+
+        remove_by_feature(files.iter(), &target, &mut report).unwrap();
+
+        let exists = |file: &TemplateFile| target.resolve(&file.path).unwrap().0.exists();
+        assert!(exists(&files[0]) && exists(&files[1]) && !exists(&files[2]));
+        let kept = report.outcomes.iter().filter(|o| o.action == KEPT_FEATURE);
+        assert_eq!(kept.count(), 2);
+        assert!(!KEPT_FEATURE.contains("ORBIT_NIGHTLY"));
     }
 }

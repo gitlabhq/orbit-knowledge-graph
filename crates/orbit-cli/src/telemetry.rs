@@ -20,6 +20,7 @@ pub const AGENTS_CONFIGURED_ACTION: &str = "agents_configured";
 pub const AGENTS_REMOVED_ACTION: &str = "agents_removed";
 
 const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
+const INVOCATION_ID_ENV: &str = "ORBIT_INVOCATION_ID";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
 const DISTRIBUTION_ENV: &str = "GITLAB_ORBIT_DISTRIBUTION";
 const GLAB_DISTRIBUTION: &str = "glab";
@@ -31,10 +32,16 @@ pub fn is_safe_identifier(value: &str) -> bool {
     SAFE_IDENTIFIER_RE.is_match(value)
 }
 
-/// Shared with the request trace id so analytics and server spans join.
+/// Shared with the request trace id; a detached `send-event` child inherits its parent's.
 pub(crate) fn invocation_id() -> String {
     static ID: OnceLock<String> = OnceLock::new();
-    ID.get_or_init(|| Uuid::new_v4().to_string()).clone()
+    ID.get_or_init(|| {
+        std::env::var(INVOCATION_ID_ENV)
+            .ok()
+            .filter(|id| Uuid::parse_str(id).is_ok())
+            .unwrap_or_else(|| Uuid::new_v4().to_string())
+    })
+    .clone()
 }
 
 pub struct TelemetryConfig {
@@ -52,9 +59,9 @@ impl TelemetryConfig {
     }
 }
 
-/// Hands one command event to a detached `orbit send-event` child, so a hook that runs on every
-/// tool call returns without waiting on the collector. Does nothing when telemetry is off.
-pub fn spawn_detached_event(command: &str, duration: Duration) {
+/// Hands one command event to a detached `orbit send-event` child, so a command returns
+/// without waiting on the collector. Does nothing when telemetry is off.
+pub fn spawn_detached_event(command: &str, exit_code: i32, duration: Duration) {
     if !resolve_from_env().enabled {
         return;
     }
@@ -65,6 +72,8 @@ pub fn spawn_detached_event(command: &str, duration: Duration) {
     child
         .args(["send-event", command, "--duration-ms"])
         .arg(duration.as_millis().to_string())
+        .arg(format!("--exit-code={exit_code}"))
+        .env(INVOCATION_ID_ENV, invocation_id())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());

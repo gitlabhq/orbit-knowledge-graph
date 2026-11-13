@@ -14,7 +14,6 @@ cases:
         WHERE mr.id IN [99020, 99021, 99022] AND mr.merged_at > mr.created_at
         RETURN mr.title LIMIT 10
     expect:
-      skip_requirements: ["filter:merged_at"]
       node_count: 1
       nodes:
         MergeRequest:
@@ -36,7 +35,6 @@ cases:
         WHERE mr.id IN [99020, 99021, 99022] AND NOT mr.merged_at > mr.created_at
         RETURN mr.title LIMIT 10
     expect:
-      skip_requirements: ["filter:merged_at", node_ids]
       node_count: 0
       nodes:
         MergeRequest:

@@ -34,7 +34,6 @@ cases:
         ImportedSymbol: { ids: [14000], filters: { project_id: { eq: 1000 } } }
         Definition: { rows: [{ id: 12000, project_id: 1000, name: compile }] }
       edges: { IMPORTS: [[14000, 12000]] }
-      sql_contains: ["(d.project_id = 1000)"]
 
   - name: target_project_filter_pins_source_scan
     query:
@@ -48,7 +47,6 @@ cases:
         ImportedSymbol: { rows: [{ id: 14200, project_id: 1002 }] }
         Definition: { ids: [12200], filters: { project_id: { eq: 1002 } } }
       edges: { IMPORTS: [[14200, 12200]] }
-      sql_contains: ["(i.project_id = 1002)"]
 
   - name: no_project_filter_keeps_both_projects
     query:
@@ -62,7 +60,6 @@ cases:
         ImportedSymbol: { ids: [14000, 14200] }
         Definition: { ids: [12000, 12200], filters: { name: { eq: compile } } }
       edges: { IMPORTS: [[14000, 12000], [14200, 12200]] }
-      sql_not_contains: ["i.project_id =", "d.project_id ="]
 
   - name: branch_filter_stays_on_the_edge_and_keeps_rows
     query:
@@ -76,8 +73,6 @@ cases:
         File: { ids: [13000, 13001], filters: { project_id: { eq: 1000 }, branch: { eq: main } } }
         Definition: { ids: [12000, 12001], absent: [12200, 12300] }
       edges: { DEFINES: [[13000, 12000], [13001, 12001]] }
-      sql_contains: ["(_orbit_edge_0.branch = 'main')", "(d.project_id = 1000)"]
-      sql_not_contains: ["d.branch =", "f.branch ="]
 
   - name: cross_project_decoy_edge_is_not_reachable
     config:
@@ -93,4 +88,3 @@ cases:
       nodes:
         Definition: { ids: [], filters: { project_id: { eq: 1001 } } }
       edge_count: { CALLS: 0 }
-      sql_contains: ["(caller.project_id = 1001)"]

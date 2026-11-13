@@ -1011,7 +1011,7 @@
     {
       "otel_name": "gkg.indexer.sdlc.transform.duration",
       "prom_name": "gkg_indexer_sdlc_transform_duration_seconds",
-      "description": "Duration of DataFusion SQL transform per batch.",
+      "description": "Duration of the SQL transform per batch.",
       "kind": "histogram_f64",
       "unit": "s",
       "labels": [],

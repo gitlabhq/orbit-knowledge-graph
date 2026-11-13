@@ -15,10 +15,5 @@ query:
     MATCH (d:MergeRequestDiff)<-[:HAS_DIFF]-(n) WHERE d.head_commit_sha = 'no-such-sha' RETURN d, n
 
 expect:
-  skip_requirements:
-    - node_ids
-    - "filter:head_commit_sha"
-    - "relationship:HAS_DIFF"
-    - neighbors
   node_count: 0
   total_edge_count: 0

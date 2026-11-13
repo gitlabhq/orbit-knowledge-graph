@@ -6,7 +6,6 @@ query:
     RETURN mr.merged_at AS merged, count(mr) AS n ORDER BY merged
 
 expect:
-  skip_requirements: [node_ids, aggregation_sort]
   row_count: 4
   row_values:
     - { merged: "2024-03-15T12:00:00Z", n: 1 }

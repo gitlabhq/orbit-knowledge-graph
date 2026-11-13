@@ -1,14 +1,30 @@
-import { orbitInvocations } from './command.ts'
+import { orbitRuns } from './command.ts'
 import { sumBy, uniqBy } from './lib.js'
 
+function envelopeQuery(stdin: string): string {
+  try {
+    const query: unknown = (JSON.parse(stdin) as { query?: unknown } | null)?.query
+    return typeof query === 'string' ? query : ''
+  } catch {
+    return ''
+  }
+}
+
+export function queryText(args: readonly string[], stdin: string): string {
+  const file = args.indexOf('--file')
+  if (file >= 0) return args[file + 1] === '-' ? envelopeQuery(stdin) : ''
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? ''
+    if (arg === '--response-format') i++
+    else if (!arg.startsWith('-')) return arg
+  }
+  return ''
+}
+
 export function queryOf(command: string): string {
-  for (const words of orbitInvocations(command)) {
-    if (words[0] !== 'query' || words.includes('--file')) continue
-    for (let i = 1; i < words.length; i++) {
-      const word = words[i] ?? ''
-      if (word === '--response-format') i++
-      else if (!word.startsWith('-')) return word
-    }
+  for (const { words, stdin } of orbitRuns(command)) {
+    const query = words[0] === 'query' ? queryText(words.slice(1), stdin) : ''
+    if (query) return query
   }
   return ''
 }

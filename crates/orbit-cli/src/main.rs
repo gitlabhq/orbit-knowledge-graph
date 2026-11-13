@@ -645,14 +645,22 @@ enum Commands {
         #[arg(long, value_enum, value_name = "COMPONENT")]
         install: Vec<commands::setup::Component>,
 
-        /// Leave a component out (repeatable). By default setup installs instructions, hooks,
-        /// skill, and agent-plugins, which shows Orbit calls in Claude Code and OpenCode.
+        /// Leave a component out (repeatable). By default setup installs hooks, through which
+        /// each agent loads the Orbit instructions, skill, and agent-plugins, which show Orbit
+        /// calls in Claude Code, OpenCode, and Pi. `instructions` removes the
+        /// instruction block an earlier release wrote to CLAUDE.md or AGENTS.md.
         #[arg(long, value_enum, value_name = "COMPONENT")]
         skip: Vec<commands::setup::Component>,
 
         /// Do not index the current repository after configuring.
         #[arg(long)]
         no_index: bool,
+
+        /// Keep GitLab Duo and Claude Code on local Orbit: setup does not
+        /// contact GitLab, and their hooks print local-only instructions even
+        /// when signed in.
+        #[arg(long, env = "ORBIT_NO_GITLAB", value_parser = clap::builder::FalseyValueParser::new())]
+        no_gitlab: bool,
 
         /// What to install as the `orbit` skill. `wrapper` loads the real
         /// skill when the agent reads it. `full` writes the skill tree now,
@@ -690,8 +698,11 @@ enum Commands {
         /// Also point glab calls at Orbit's GitLab search and context; setup adds it when Orbit reaches GitLab.
         #[arg(long, hide = true)]
         gitlab: bool,
+
+        #[arg(long, hide = true, conflicts_with = "gitlab")]
+        no_gitlab: bool,
     },
-    /// Sends one command event; `hook-guard` runs it detached so hooks never wait on telemetry.
+    /// Sends one command event; every command runs it detached so none waits on telemetry.
     #[command(hide = true)]
     SendEvent {
         #[arg(value_name = "COMMAND")]
@@ -699,6 +710,9 @@ enum Commands {
 
         #[arg(long, value_name = "MS")]
         duration_ms: u64,
+
+        #[arg(long, value_name = "CODE", default_value_t = 0)]
+        exit_code: i32,
     },
     /// Refreshes edited files into the incremental graph; `grep` and `context` run it detached.
     #[command(hide = true)]
@@ -789,19 +803,26 @@ async fn main() -> Result<()> {
     }
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
     match &cli.command {
-        Commands::HookGuard { kind, gitlab, .. } => {
+        Commands::HookGuard {
+            kind,
+            gitlab,
+            no_gitlab,
+            ..
+        } => {
             let started = Instant::now();
-            if commands::hook_guard::run(*kind, *gitlab) {
-                telemetry::spawn_detached_event(&subcommand_path(&matches), started.elapsed());
+            if commands::hook_guard::run(*kind, *gitlab, *no_gitlab) {
+                telemetry::spawn_detached_event(&subcommand_path(&matches), 0, started.elapsed());
             }
             return Ok(());
         }
         Commands::SendEvent {
             command,
             duration_ms,
+            exit_code,
         } => {
-            send_event(command, Duration::from_millis(*duration_ms)).await;
-            return Ok(());
+            send_event(command, *exit_code, Duration::from_millis(*duration_ms)).await;
+            // Skips the runtime's wait on blocking DNS lookups past the flush timeout.
+            std::process::exit(0);
         }
         Commands::Refresh { repo, db, files } => {
             return commands::index::incremental::refresh_now(
@@ -817,7 +838,12 @@ async fn main() -> Result<()> {
 
     // labkit-events ships no TLS provider; the tracker below builds an HTTPS client.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    let tracker = telemetry::resolve_from_env().build_tracker();
+    let tracker = match cli.command {
+        Commands::Setup { .. } | Commands::Uninstall { .. } => {
+            telemetry::resolve_from_env().build_tracker()
+        }
+        _ => None,
+    };
 
     let started = Instant::now();
     let result = dispatch(cli.command, tracker.clone(), coding_agent.clone())
@@ -828,15 +854,7 @@ async fn main() -> Result<()> {
         });
     let exit_code = result.as_ref().map_or_else(exit_code_for, |()| 0);
 
-    if let Some(tracker) = &tracker {
-        telemetry::emit_command_event(
-            tracker,
-            &subcommand_path(&matches),
-            exit_code,
-            started.elapsed(),
-            coding_agent.as_deref(),
-        );
-    }
+    telemetry::spawn_detached_event(&subcommand_path(&matches), exit_code, started.elapsed());
     flush_telemetry(tracker.as_ref()).await;
 
     let Err(err) = &result else {
@@ -887,13 +905,19 @@ fn subcommand_path(matches: &clap::ArgMatches) -> String {
     path.replace('-', "_")
 }
 
-async fn send_event(command: &str, duration: Duration) {
+async fn send_event(command: &str, exit_code: i32, duration: Duration) {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let Some(tracker) = telemetry::resolve_from_env().build_tracker() else {
         return;
     };
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
-    telemetry::emit_command_event(&tracker, command, 0, duration, coding_agent.as_deref());
+    telemetry::emit_command_event(
+        &tracker,
+        command,
+        exit_code,
+        duration,
+        coding_agent.as_deref(),
+    );
     let _ = tokio::time::timeout(DETACHED_FLUSH_TIMEOUT, tracker.shutdown()).await;
 }
 
@@ -951,9 +975,13 @@ async fn dispatch(
             install,
             skip,
             no_index,
+            no_gitlab,
             skill,
             flags,
         } => {
+            if no_gitlab {
+                commands::setup::spec::keep_local();
+            }
             let components = commands::setup::Component::from_flags(&install, &skip)?;
             let agent_plugins = commands::setup::Component::AgentPlugins;
             let ask_agent_plugins =
@@ -1009,8 +1037,9 @@ async fn dispatch(
             graph_first: _,
             mode: _,
             gitlab,
+            no_gitlab,
         } => {
-            commands::hook_guard::run(kind, gitlab);
+            commands::hook_guard::run(kind, gitlab, no_gitlab);
             Ok(())
         }
         Commands::SendEvent { .. } | Commands::Refresh { .. } => Ok(()),
@@ -1329,6 +1358,23 @@ mod tests {
     }
 
     #[test]
+    fn send_event_carries_the_parent_exit_code() {
+        let Commands::SendEvent { exit_code, .. } = Cli::parse_from([
+            "orbit",
+            "send-event",
+            "grep",
+            "--duration-ms",
+            "5",
+            "--exit-code=130",
+        ])
+        .command
+        else {
+            panic!("expected send-event");
+        };
+        assert_eq!(exit_code, 130);
+    }
+
+    #[test]
     fn every_subcommand_emits_a_telemetry_event() {
         let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
         let actions: Vec<String> = Cli::command()
@@ -1524,6 +1570,39 @@ mod tests {
                 "{removed}"
             );
         }
+    }
+
+    #[test]
+    fn no_gitlab_keeps_setup_and_its_hooks_local() {
+        let Commands::Setup { no_gitlab, .. } =
+            Cli::parse_from(["orbit", "setup", "duo", "--no-gitlab"]).command
+        else {
+            panic!("expected setup");
+        };
+        assert!(no_gitlab);
+        let command = Cli::command();
+        let setup = command.find_subcommand("setup").unwrap();
+        let flag = setup
+            .get_arguments()
+            .find(|arg| arg.get_id() == "no_gitlab")
+            .unwrap();
+        assert_eq!(
+            flag.get_env(),
+            Some(std::ffi::OsStr::new("ORBIT_NO_GITLAB"))
+        );
+
+        assert!(matches!(
+            Cli::parse_from(["orbit", "hook-guard", "instructions", "--no-gitlab"]).command,
+            Commands::HookGuard {
+                no_gitlab: true,
+                gitlab: false,
+                ..
+            }
+        ));
+        assert!(
+            Cli::try_parse_from(["orbit", "hook-guard", "search", "--gitlab", "--no-gitlab"])
+                .is_err()
+        );
     }
 
     #[test]

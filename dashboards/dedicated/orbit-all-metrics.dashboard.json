@@ -3869,7 +3869,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Duration of DataFusion SQL transform per batch.",
+      "description": "Duration of the SQL transform per batch.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -3938,7 +3938,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Duration of DataFusion SQL transform per batch.",
+      "description": "Duration of the SQL transform per batch.",
       "fieldConfig": {
         "defaults": {
           "custom": {
