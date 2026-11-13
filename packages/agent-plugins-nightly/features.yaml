@@ -8,3 +8,15 @@ output-guard:
     files:
       index.js: output-guard/pi.mjs
       core.mjs: output-guard/core.mjs
+
+search-guard:
+  nightly: true
+  stable: false
+  claude:
+    hooks: search-guard/claude-hooks.json
+    files: [search-guard/claude.mjs, search-guard/core.mjs, search-guard/parse.mjs]
+  pi:
+    files:
+      index.js: search-guard/pi.mjs
+      core.mjs: search-guard/core.mjs
+      parse.mjs: search-guard/parse.mjs

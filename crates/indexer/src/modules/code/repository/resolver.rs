@@ -480,8 +480,8 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        assert_eq!(extracted.parseable_files(), 4);
-        assert_eq!(loaded.parseable_files(), 4);
+        assert_eq!(extracted.parseable_files(), 5);
+        assert_eq!(loaded.parseable_files(), 5);
     }
 
     struct LegacyResolver(RepositoryResolver);

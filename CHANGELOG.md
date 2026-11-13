@@ -1,3 +1,26 @@
+## [1.5.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.4.0...v1.5.0) (2026-11-13)
+
+### Features
+
+* **code-graph:** index Markdown files as queryable context ([2189138](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2189138a370a9ba588267fc9e537ea0232d4e22a)) by Dmitry Gruzd
+* **config:** load server configuration through labkit-config ([0546c16](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0546c16766dddfcaa47dd1244f56ea178a902334)) by Luke Hollinda
+* **team-dashboard:** track backport labels on team bug MRs ([b74ccac](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b74ccac48a68a6eef3b5ed1b8c006b89057a7823)) by Dmitry Gruzd
+
+### Fixes
+
+* **ci:** retry local-cli release jobs on infra failures ([a10cda5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a10cda55e411c8cd066259f5f792cb690cdb621d)) by Dmitry Gruzd
+* **setup:** detect GitLab Duo before its first run and under XDG_CONFIG_HOME ([88b990e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/88b990e45d3c256b4226c5c92c5741daf4bd3f92)) by Gabriel Engel
+
+### Other
+
+* **config:** describe loading through the schema ([6870244](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/68702446719b242834f4f7cd4e99f202da9ad050)) by Luke Hollinda
+* **config:** show query overrides under query.overrides ([2dbded8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2dbded8efdf48225169c56ce8f9289c8fbb2947a)) by Luke Hollinda
+* **duo:** drop npm install and target cache from Duo agent config ([49e447a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/49e447ac911eabb57b6c6e06802536559c4238cd)) by Dmitry Gruzd
+* point agents at MR template and labels in AGENTS.md ([393173d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/393173d069a26b8dfa936f655543d10fae9a1744)) by Dmitry Gruzd
+* **query:** separate result and plan assertions ([6ac0e59](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6ac0e59695df105d673ffe85ab50735d7650f936)) by Michael Usachenko
+* **self-managed:** add GitLab 19.4.7 and 19.5.5 to version requirements ([ee86765](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ee86765239ef09763b7a7171efb02d9fabbc8147)) by Gabriel Engel
+* sync documentation principles from gitlab-org/gitlab ([019ffdc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/019ffdc78e6ac2801f856ea1c169815a4376f59b)) by Orbit automation bot
+
 ## [1.4.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.3.0...v1.4.0) (2026-11-12)
 
 ### Features

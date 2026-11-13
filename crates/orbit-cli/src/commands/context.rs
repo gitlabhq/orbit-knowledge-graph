@@ -218,7 +218,10 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
         {
             println!("repo: {}", repo.display());
         }
-        print!("{}", run_local(repo, args.db.clone(), &targets)?);
+        print!(
+            "{}",
+            run_local(repo, args.db.clone(), &targets, args.no_index)?
+        );
     }
     if !sdlc_notes.is_empty() {
         if printed {
@@ -525,17 +528,24 @@ fn run_local(
     repo: Option<std::path::PathBuf>,
     db: Option<std::path::PathBuf>,
     targets: &[String],
+    no_index: bool,
 ) -> Result<String> {
     use crate::commands::index::incremental::{Freshness, refresh};
-    let (out, git, shown) = render_local(repo.clone(), db.clone(), targets)?;
+    let (out, git, shown) = render_local(repo.clone(), db.clone(), targets, no_index)?;
     let mut files: Vec<&str> = shown.iter().map(String::as_str).collect();
     files.sort_unstable();
     files.dedup();
-    let edited = match refresh(&git.repo_path, db.clone(), &files) {
-        Ok(Freshness::Fresh) => Default::default(),
-        Ok(Freshness::Refreshed) => return Ok(render_local(repo, db, targets)?.0),
-        Ok(Freshness::Stale(changed)) => changed.into_iter().collect(),
-        _ => workspace::edited_since_index(&git.repo_path, &files),
+    let refreshed = match no_index {
+        true => None,
+        false => refresh(&git.repo_path, db.clone(), &files).ok(),
+    };
+    let edited = match refreshed {
+        Some(Freshness::Fresh) => Default::default(),
+        Some(Freshness::Refreshed) => return Ok(render_local(repo, db, targets, no_index)?.0),
+        Some(Freshness::Stale(changed)) => changed.into_iter().collect(),
+        Some(Freshness::NotIncremental) | None => {
+            workspace::edited_since_index(&git.repo_path, &files)
+        }
     };
     Ok(format!("{}{out}", edited_note(&git, edited)))
 }
@@ -544,8 +554,12 @@ fn render_local(
     repo: Option<std::path::PathBuf>,
     db: Option<std::path::PathBuf>,
     targets: &[String],
+    no_index: bool,
 ) -> Result<(String, workspace::GitInfo, Vec<String>)> {
-    let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
+    let workspace::IndexedRepo { git, client } = match no_index {
+        true => workspace::open_indexed_without_indexing(repo, db)?,
+        false => workspace::open_indexed(repo, db)?,
+    };
     let hydrator = NodeHydrator::embedded("Definition")?;
     let targets = resolve_targets(&client, &git, &hydrator, targets)?;
     let mut out = missing_note(&targets.missing);

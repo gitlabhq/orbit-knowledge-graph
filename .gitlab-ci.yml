@@ -427,7 +427,7 @@ agent-plugins-nightly:
         - bun.lock
   needs: []
   before_script:
-    - apt-get update -qq && apt-get install -y -qq nodejs > /dev/null
+    - apt-get update -qq && apt-get install -y -qq nodejs git > /dev/null
     - bun install --frozen-lockfile --ignore-scripts
   script:
     - cd packages/agent-plugins-nightly
@@ -1023,7 +1023,7 @@ cli-integration-test:
     - cargo build -p orbit-cli
     - cargo nextest run --profile ci --test cli --test outside_repository --no-fail-fast
     - mv target/nextest/ci/junit.xml target/nextest/ci/junit-cli.xml
-    - cargo nextest run --profile ci -p orbit-cli --test remote_cli --no-fail-fast
+    - cargo nextest run --profile ci -p orbit-cli --test remote_cli --test no_index --no-fail-fast
     - sccache --show-stats || true
   artifacts:
     reports:

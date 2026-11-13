@@ -153,9 +153,7 @@ pub struct IndexedRepo {
 }
 
 pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Option<IndexedRepo> {
-    let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
-    let git = git_info(&git_toplevel(&repo_path).ok()?).ok()?;
-    let db_path = resolve_db_path(db, &git).ok()?;
+    let (git, db_path) = locate_graph(repo, &db).ok()?;
     if graph_lacks_commit(&db_path, &git.commit_sha).unwrap_or(true) {
         return None;
     }
@@ -195,12 +193,7 @@ fn already_indexed(db: &Option<PathBuf>, top_level: &Path) -> Result<bool> {
 }
 
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
-    let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
-    let top_level = git_toplevel(&repo_path)
-        .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
-    let git = git_info(&top_level)
-        .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
-    let db_path = resolve_db_path(db.clone(), &git)?;
+    let (git, db_path) = locate_graph(repo, &db)?;
 
     if graph_lacks_commit(&db_path, &git.commit_sha)? {
         crate::commands::index::index_before_first_query(git.repo_path.clone(), db)
@@ -214,6 +207,31 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     }
     let client = GraphReader::open(Some(db_path))?;
     Ok(IndexedRepo { git, client })
+}
+
+pub fn open_indexed_without_indexing(
+    repo: Option<PathBuf>,
+    db: Option<PathBuf>,
+) -> Result<IndexedRepo> {
+    let (git, db_path) = locate_graph(repo, &db)?;
+    anyhow::ensure!(
+        !graph_lacks_commit(&db_path, &git.commit_sha)?,
+        "commit {} has no complete index in {}; --no-index does not build one",
+        git.commit_sha,
+        db_path.display()
+    );
+    let client = GraphReader::open(Some(db_path))?;
+    Ok(IndexedRepo { git, client })
+}
+
+fn locate_graph(repo: Option<PathBuf>, db: &Option<PathBuf>) -> Result<(GitInfo, PathBuf)> {
+    let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
+    let top_level = git_toplevel(&repo_path)
+        .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
+    let git = git_info(&top_level)
+        .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
+    let db_path = resolve_db_path(db.clone(), &git)?;
+    Ok((git, db_path))
 }
 
 /// The repo-relative `files` whose working-tree contents differ from the indexed commit:

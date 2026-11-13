@@ -13,6 +13,7 @@ mod legacy;
 pub(crate) mod ontology;
 pub(crate) mod origin;
 pub(crate) mod query;
+pub(crate) mod retry;
 pub(crate) mod sdlc;
 pub(crate) mod server_schema;
 pub(crate) mod status;
