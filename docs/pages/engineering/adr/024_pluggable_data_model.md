@@ -223,7 +223,7 @@ Storage rules:
 - Access hints are backend-neutral. Each backend turns them into indexes and sort keys, and a platform `backend` block can override that.
 - An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
 - Every edge has five structural fields that the model defines, the `EdgeField` values: source ID, source kind, target ID, target kind and relationship kind. They are not relationship attributes.
-- Each store with edge tables declares `edge_columns:` once, mapping every edge field to its column. Every field is required and none has a default, so no column name is a convention. Edge-owned attributes stay per relationship.
+- Each store with edge tables declares `edge_columns:` once, mapping every edge field to its column. Every edge table in the store uses it, so a table whose columns differ belongs in a separate store. Every field is required and none has a default, so no column name is a convention. Edge-owned attributes stay per relationship.
 - In a store whose backend has the writer capability, each entity and edge-table variant has exactly one declared writer.
 - A store whose backend lacks it declares no writer. Its own service writes or serves the data, for example Orbit Next or the live source. The loader rejects a writer that targets such a store.
 
