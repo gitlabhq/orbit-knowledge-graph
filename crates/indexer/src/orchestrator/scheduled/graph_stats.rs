@@ -156,7 +156,6 @@ impl GraphStatsSnapshot {
         first_count(&batches)
     }
 
-    /// One table at a time, so the daily `FINAL` scans never stack up on the graph.
     async fn entity_counts(
         &self,
         ontology: &ontology::Ontology,
@@ -180,7 +179,6 @@ impl GraphStatsSnapshot {
         Ok(counts)
     }
 
-    /// A project counts as indexed only while the datalake still lists it.
     async fn projects_indexed(&self, version: u32, paths: &[String]) -> Result<u64, TaskError> {
         if paths.is_empty() {
             return Ok(0);
