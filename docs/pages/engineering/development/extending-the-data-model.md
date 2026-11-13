@@ -196,6 +196,13 @@ An edge table can also copy endpoint properties into its sort key, so a filter o
 
 ```yaml
 # packages/gitlab.source_code/storage/clickhouse.yaml
+engine:
+  edge_columns:
+    source_id: source_id
+    source_kind: source_kind
+    target_id: target_id
+    target_kind: target_kind
+    relationship_kind: relationship_kind
 relationships:
   CALLS:
     Definition -> Definition:
@@ -204,6 +211,9 @@ relationships:
 ```
 
 A filter on `a.branch` in `(a)-[:CALLS]->(b)` then also filters the edge read on its `branch` column.
+
+`edge_columns:` maps each of the five edge fields to its column, once for every edge table in the store. Every field is required, so no column name is a convention.
+An edge row stores each endpoint's kind as the entity's graph name, such as `Definition`. The storage codec decodes it into a handle, and it fails on an unknown kind.
 
 In a store whose backend has the writer capability, each entity and edge-table variant has exactly one declared writer. The code indexer writes the code entities in the graph store, and its source fragment looks like any other:
 
@@ -643,6 +653,7 @@ engine:
       columns:
         source_id: {backend: {type: String}}
         target_id: {backend: {type: Int64}}
+        source_kind: {backend: {type: LowCardinality(String)}}
         target_kind: {backend: {type: LowCardinality(String)}}
         relationship_kind: {backend: {type: LowCardinality(String)}}
         traversal_path: {backend: {type: String}}
@@ -829,6 +840,7 @@ The loader collects every error with its package and fails once. A missing decla
 - A writer that targets a store whose backend has no writer capability.
 - A foreign key binding on a many-to-many variant, on the wrong side of a one-to-many variant, or on a column its table does not hold.
 - An edge table copy that names no property of that endpoint, or a graph attribute with no edge column.
+- A store with edge tables whose `edge_columns:` misses an edge field.
 - Two backends, or a trusted and an untrusted store, on one connection.
 
 ### Composition rules

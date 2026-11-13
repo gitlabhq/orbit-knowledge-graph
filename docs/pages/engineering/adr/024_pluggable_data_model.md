@@ -222,6 +222,8 @@ Storage rules:
 - Each variant is bound once, in the store that holds its rows. A foreign key lives in the store whose table holds the column, and an edge table in the store that declares it. A foreign key's store can differ from the other endpoint's, as with `IN_WORKSPACE` from a live message to an indexed workspace. The two endpoints of an edge table share its connection.
 - Access hints are backend-neutral. Each backend turns them into indexes and sort keys, and a platform `backend` block can override that.
 - An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
+- Every edge has five structural fields that the model defines, the `EdgeField` values: source ID, source kind, target ID, target kind and relationship kind. They are not relationship attributes.
+- Each store with edge tables declares `edge_columns:` once, mapping every edge field to its column. Every field is required and none has a default, so no column name is a convention. Edge-owned attributes stay per relationship.
 - In a store whose backend has the writer capability, each entity and edge-table variant has exactly one declared writer.
 - A store whose backend lacks it declares no writer. Its own service writes or serves the data, for example Orbit Next or the live source. The loader rejects a writer that targets such a store.
 
@@ -230,6 +232,8 @@ Key rules:
 - Keys are typed, and nothing casts them. An identity is one property such as `id`, or a list of properties for a composite. A Jira site and key is one composite, and the `Head` of a branch, `[project_id, branch]`, is another. Each part's type is its property's type: integer, string or UUID.
 - A foreign key column has the type of the identity it points to. An edge table declares its endpoint ID columns. A variant binds to an edge table only if both endpoint identities match its ID columns. An integration with string IDs declares its own edge table.
 - A `via` step or a join between different key types needs a declared relationship or a service lookup. The loader rejects a mismatch and never casts.
+- An edge row stores each endpoint's kind as the entity's declared graph name, and so does a result `_type` column. The name stays stable across model versions, and handles do not.
+- One codec at the storage boundary decodes kind values into handles. An unknown kind value is an error, never a dropped row.
 
 Two model rules need no configuration:
 
