@@ -194,12 +194,8 @@ fn repository_matches(repository: &Repository, destination: &Path) -> bool {
     if let Some(expected) = &repository.commit_sha {
         return head.starts_with(expected) || expected.starts_with(&head);
     }
-    if git_output(destination, ["describe", "--tags", "--exact-match", "HEAD"])
+    git_output(destination, ["describe", "--tags", "--exact-match", "HEAD"])
         .is_some_and(|tag| tag == repository.version)
-    {
-        return true;
-    }
-    false
 }
 
 fn git_output<const N: usize>(directory: &Path, arguments: [&str; N]) -> Option<String> {

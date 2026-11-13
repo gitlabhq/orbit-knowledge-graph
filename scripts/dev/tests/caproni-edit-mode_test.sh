@@ -53,11 +53,10 @@ check "no overlay left behind" "no" "$([[ -f "$TMP/.dev/caproni-dispatcher.yaml"
 out="$(ORBIT_POD_CONFIG="$TMP/does-not-exist.yaml" bash "$SCRIPT" webserver 2>&1 || true)"
 check "missing pod config names caproni run" "yes" "$(grep -q 'caproni run' <<<"$out" && echo yes || echo no)"
 
-# build_stamps_only_on_relink: the stamp the mirrord-side processes watch follows the linked
-# artifact under deps/, so a no-op build restarts nothing, a failed build leaves the running
+# build_stamps_only_on_relink: the stamp the mirrord-side processes watch follows the size and
+# mtime of the binary, so a no-op build restarts nothing, a failed build leaves the running
 # servers alone, and a relink by any cargo (the watcher's or one run by hand) is noticed.
-FAKE_ARTIFACT="$FAKE_TARGET/deps/gkg_server-0123456789abcdef"
-mkdir -p "$FAKE_TARGET/deps"; printf 'linked once\n' >"$FAKE_ARTIFACT"
+FAKE_ARTIFACT="$FAKE_BINARY"
 fake_cargo() { # ok|fail -> prints what cargo's JSON stream would say
   case "$1" in
     fail) echo '{"reason":"build-finished","success":false}'; return 101 ;;
@@ -79,7 +78,7 @@ cargo_build() { fake_cargo ok; }
 printf 'linked again by some cargo\n' >"$FAKE_ARTIFACT" # an external relink, then a fresh watcher build
 build >/dev/null
 check "relink by any cargo refreshes the stamp" "yes" "$([[ "$STAMP" -nt "$TMP/marker" ]] && echo yes || echo no)"
-cp "$FAKE_BINARY" "$FAKE_BINARY.new" && mv "$FAKE_BINARY.new" "$FAKE_BINARY" # macOS re-copies the uplifted binary every build
+cp -p "$FAKE_BINARY" "$FAKE_BINARY.new" && mv "$FAKE_BINARY.new" "$FAKE_BINARY" # macOS re-copies the uplifted binary every build
 touch "$TMP/marker2"; sleep 1
 build >/dev/null
 check "re-copied uplift without a relink leaves the stamp alone" "no" "$([[ "$STAMP" -nt "$TMP/marker2" ]] && echo yes || echo no)"

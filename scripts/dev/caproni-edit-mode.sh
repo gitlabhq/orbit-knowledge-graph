@@ -92,17 +92,12 @@ cargo_build() {
   (cd "$REPO_ROOT" && mise exec -- cargo build --bin gkg-server --message-format=json-render-diagnostics)
 }
 
-# Identity of the linker's output for gkg-server, read from the message stream in the given
-# file: the artifact under target/debug/deps that rustc writes only when it relinks. That file
-# changes whenever any cargo relinks the binary, including one run by hand in another
-# terminal, and stays put on a no-op build. target/debug/gkg-server itself would not do: on
-# macOS cargo copies it from deps on every build, so it has a new inode each time, while on
-# Linux it is a hard link and keeps the inode.
+# Size and mtime, not inode: on macOS cargo re-copies the binary on every no-op build.
 artifact_identity() { # path to the message stream
   local artifact
   artifact="$(yq -p json -o json -r 'select(.reason == "compiler-artifact" and .target.name == "gkg-server") | .filenames[0]' "$1" 2>/dev/null | tail -1)"
   [[ -n "$artifact" && -e "$artifact" ]] || return 1
-  stat -c '%i:%s:%Y' "$artifact" 2>/dev/null || stat -f '%i:%z:%m' "$artifact"
+  stat -c '%s:%Y' "$artifact" 2>/dev/null || stat -f '%z:%m' "$artifact"
 }
 
 # One build. Rewrites the stamp only when the linked artifact changed since the stamp was

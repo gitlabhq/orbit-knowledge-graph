@@ -4,12 +4,11 @@ use std::process::Command;
 use serde_json::Value;
 
 pub fn orbit_bin() -> PathBuf {
-    let mut p = std::env::current_exe().unwrap();
-    p.pop(); // deps
-    p.pop(); // debug
-    p.push("orbit");
-    assert!(p.exists(), "orbit not found at {}", p.display());
-    p
+    let exe = std::env::current_exe().unwrap();
+    exe.ancestors()
+        .map(|dir| dir.join("orbit"))
+        .find(|candidate| candidate.is_file())
+        .unwrap_or_else(|| panic!("orbit not found above {}", exe.display()))
 }
 
 pub fn orbit_cmd() -> Command {
