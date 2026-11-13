@@ -51,3 +51,21 @@ tests:
       - { row: { stage: "stage:alpine", image: "alpine" } }
       - { row: { stage: "stage:build", image: "build" } }
       - { row: { stage: "stage:golang", image: "golang" } }
+
+  - name: "the named stage keeps its own ARG and base image calls"
+    query: |
+      MATCH (s:Definition)-[:CALLS]->(v:Definition)
+      WHERE s.name = 'build' AND v.definition_type = 'Variable'
+      RETURN v.name AS variable
+    assert:
+      - { row_count: 1 }
+      - { row: { variable: "GO_VERSION" } }
+
+  - name: "the named stage calls its base image"
+    query: |
+      MATCH (s:Definition)-[:CALLS]->(i:ImportedSymbol)
+      WHERE s.name = 'build'
+      RETURN i.import_path AS image
+    assert:
+      - { row_count: 1 }
+      - { row: { image: "golang" } }
