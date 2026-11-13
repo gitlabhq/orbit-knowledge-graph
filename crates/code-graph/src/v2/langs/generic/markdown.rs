@@ -6,7 +6,9 @@ use orbit_utils::markdown::{
 
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
-use crate::v2::types::{CanonicalDefinition, CanonicalImport, DefKind, Fqn, Position, Range};
+use crate::v2::types::{
+    CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, Position, Range,
+};
 
 #[derive(Default)]
 pub struct MarkdownDsl;
@@ -55,7 +57,10 @@ fn parse_markdown(
             fqn: Fqn::from_segments(&[stem, FRONT_MATTER_NAME], FQN_SEPARATOR),
             range: range(front_matter.start, front_matter.end),
             is_top_level: true,
-            metadata: None,
+            metadata: Some(Box::new(DefinitionMetadata {
+                front_matter: Some(Box::new(front_matter.values)),
+                ..Default::default()
+            })),
         });
     }
     definitions.extend(sections.iter().enumerate().map(|(index, section)| {

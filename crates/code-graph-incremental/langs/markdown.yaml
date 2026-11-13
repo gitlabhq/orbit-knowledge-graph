@@ -8,8 +8,8 @@ stages:
     rules:
       - match: '(section $N:heading $K:section_key $$$C)'
         replace: '(__def (__defname @$N) (__section) (__fqn_segment @$K) $$$C)'
-      - match: '(front_matter $N:name $K:segment)'
-        replace: '(__def (__defname @$N) (__front_matter) (__fqn_segment @$K))'
+      - match: '(front_matter $N:name $K:segment $$$C)'
+        replace: '(__def (__defname @$N) (__front_matter) (__fqn_segment @$K) $$$C)'
 
   - name: tag-defs
     rules:

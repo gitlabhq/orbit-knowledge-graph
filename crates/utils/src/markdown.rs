@@ -1,6 +1,10 @@
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+
 use comrak::nodes::{AstNode, LineColumn, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use rustc_hash::{FxHashMap, FxHashSet};
+use serde_saphyr::granit_parser::{Event, Parser, ScalarStyle};
 
 /// Separator between FQN segments. A `#` or `\` inside heading text is
 /// escaped with `\` in the segment, so the FQN splits unambiguously.
@@ -12,6 +16,39 @@ pub const FRONT_MATTER_NAME: &str = "front_matter";
 
 const FRONT_MATTER_DELIMITER: &str = "---";
 
+const MAX_FRONT_MATTER_YAML_BYTES: usize = 64 * 1024;
+
+pub const MAX_FRONT_MATTER_VALUE_BYTES: usize = 4 * 1024;
+
+const METADATA_KEY: &str = "metadata";
+
+#[derive(Debug)]
+pub struct FrontMatterField {
+    pub key: &'static str,
+    pub column: &'static str,
+}
+
+const fn field(key: &'static str, column: &'static str) -> FrontMatterField {
+    FrontMatterField { key, column }
+}
+
+pub const FRONT_MATTER_FIELDS: [FrontMatterField; 12] = [
+    field("name", "front_matter_name"),
+    field("description", "front_matter_description"),
+    field("license", "front_matter_license"),
+    field("compatibility", "front_matter_compatibility"),
+    field("allowed-tools", "front_matter_allowed_tools"),
+    field(METADATA_KEY, "front_matter_metadata"),
+    field("title", "front_matter_title"),
+    field("stage", "front_matter_stage"),
+    field("group", "front_matter_group"),
+    field("info", "front_matter_info"),
+    field("version", "front_matter_version"),
+    field("category", "front_matter_category"),
+];
+
+pub type FrontMatterValues = [String; FRONT_MATTER_FIELDS.len()];
+
 #[derive(Debug)]
 pub struct Document {
     pub front_matter: Option<FrontMatter>,
@@ -22,6 +59,7 @@ pub struct Document {
 pub struct FrontMatter {
     pub start: usize,
     pub end: usize,
+    pub values: FrontMatterValues,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,10 +144,142 @@ fn parse_front_matter(source: &str, block: &str) -> FrontMatter {
     } else {
         usize::from(line_ending.starts_with('\n'))
     };
+    let yaml = through_delimiter
+        .strip_suffix(FRONT_MATTER_DELIMITER)
+        .and_then(|inner| inner.split_once('\n'))
+        .map_or("", |(_, yaml)| yaml);
     FrontMatter {
         start,
         end: start + through_delimiter.len() + line_ending,
+        values: front_matter_values(yaml),
     }
+}
+
+fn front_matter_values(yaml: &str) -> FrontMatterValues {
+    if yaml.len() > MAX_FRONT_MATTER_YAML_BYTES {
+        return FrontMatterValues::default();
+    }
+    let mut events = YamlEvents(Parser::new_from_str(yaml));
+    read_values(&mut events)
+        .filter(|_| events.all_valid())
+        .map(|values| values.map(truncate_value))
+        .unwrap_or_default()
+}
+
+fn read_values(events: &mut YamlEvents<'_>) -> Option<FrontMatterValues> {
+    let mut values = FrontMatterValues::default();
+    let Event::StreamStart = events.next()? else {
+        return None;
+    };
+    match events.next()? {
+        Event::StreamEnd => return Some(values),
+        Event::DocumentStart(..) => {}
+        _ => return None,
+    }
+    let Event::MappingStart(..) = events.next()? else {
+        return None;
+    };
+    while let Entry::Pair(key, value) = events.entry()? {
+        let slot = key
+            .as_deref()
+            .and_then(|key| FRONT_MATTER_FIELDS.iter().position(|f| f.key == key));
+        let Some(slot) = slot else {
+            events.skip(value)?;
+            continue;
+        };
+        values[slot] = if FRONT_MATTER_FIELDS[slot].key == METADATA_KEY {
+            events.metadata_json(value)?
+        } else {
+            events.scalar_text(value)?
+        };
+    }
+    Some(values)
+}
+
+fn truncate_value(mut value: String) -> String {
+    value.truncate(value.floor_char_boundary(MAX_FRONT_MATTER_VALUE_BYTES));
+    value
+}
+
+enum Entry<'a> {
+    End,
+    Pair(Option<Cow<'a, str>>, Event<'a>),
+}
+
+struct YamlEvents<'a>(Parser<'a, serde_saphyr::granit_parser::StrInput<'a>>);
+
+impl<'a> YamlEvents<'a> {
+    fn next(&mut self) -> Option<Event<'a>> {
+        loop {
+            match self.0.next()? {
+                Ok((Event::Comment(..), _)) => continue,
+                Ok((event, _)) => return Some(event),
+                Err(_) => return None,
+            }
+        }
+    }
+
+    fn all_valid(&mut self) -> bool {
+        self.0.all(|event| event.is_ok())
+    }
+
+    fn entry(&mut self) -> Option<Entry<'a>> {
+        let key = match self.next()? {
+            Event::MappingEnd => return Some(Entry::End),
+            Event::Scalar(key, ..) => Some(key),
+            other => {
+                self.skip(other)?;
+                None
+            }
+        };
+        Some(Entry::Pair(key, self.next()?))
+    }
+
+    fn skip(&mut self, first: Event<'a>) -> Option<()> {
+        let mut depth = 0usize;
+        let mut event = first;
+        loop {
+            match event {
+                Event::SequenceStart(..) | Event::MappingStart(..) => depth += 1,
+                Event::SequenceEnd | Event::MappingEnd => depth -= 1,
+                _ => {}
+            }
+            if depth == 0 {
+                return Some(());
+            }
+            event = self.next()?;
+        }
+    }
+
+    fn scalar_text(&mut self, value: Event<'a>) -> Option<String> {
+        match value {
+            Event::Scalar(text, style, ..) if !is_null(&text, style) => Some(text.into_owned()),
+            other => self.skip(other).map(|()| String::new()),
+        }
+    }
+
+    fn metadata_json(&mut self, value: Event<'a>) -> Option<String> {
+        let Event::MappingStart(..) = value else {
+            return self.skip(value).map(|()| String::new());
+        };
+        let mut metadata = BTreeMap::new();
+        while let Entry::Pair(key, value) = self.entry()? {
+            let text = self.scalar_text(value)?;
+            if let Some(key) = key
+                && !text.is_empty()
+            {
+                metadata.insert(key.into_owned(), text);
+            }
+        }
+        if metadata.is_empty() {
+            return Some(String::new());
+        }
+        serde_json::to_string(&metadata).ok()
+    }
+}
+
+fn is_null(text: &str, style: ScalarStyle) -> bool {
+    style == ScalarStyle::Plain && matches!(text, "" | "~" | "null" | "Null" | "NULL")
 }
 
 pub fn segment_path(sections: &[Section], index: usize) -> Vec<&str> {
@@ -425,7 +595,7 @@ mod tests {
             "---\n\u{e9}: x\n  \u{4f60}\n---",
             "---\r\n\"\u{e9}\": 1\r\n---\r\n\r\n",
         ] {
-            let FrontMatter { start, end } = front_matter(source);
+            let FrontMatter { start, end, .. } = front_matter(source);
             assert!(
                 start <= end && end <= source.len(),
                 "{start}..{end} in {source:?}"
@@ -435,5 +605,102 @@ mod tests {
                 "{start}..{end} in {source:?}"
             );
         }
+    }
+
+    fn values(source: &str) -> Vec<(&'static str, String)> {
+        let values = front_matter(source).values;
+        FRONT_MATTER_FIELDS
+            .iter()
+            .zip(values)
+            .filter(|(_, value)| !value.is_empty())
+            .map(|(field, value)| (field.column, value))
+            .collect()
+    }
+
+    fn owned(pairs: &[(&'static str, &str)]) -> Vec<(&'static str, String)> {
+        pairs.iter().map(|&(c, v)| (c, v.to_string())).collect()
+    }
+
+    #[test]
+    fn agent_skills_fields_are_read_verbatim() {
+        let source = "---\nname: review-mr\ndescription: >-\n  Review a merge\n  request.\nlicense: MIT\ncompatibility: Requires git\nallowed-tools: Bash(git:*) Read\nmetadata:\n  author: example-org\n  version: 1.0\n  tags: [a, b]\n  nested: {k: v}\n  empty: ~\nversion: 2.1.0\ncategory: Development Workflow\nunknown: ignored\n---\n# Review\n";
+        assert_eq!(
+            values(source),
+            owned(&[
+                ("front_matter_name", "review-mr"),
+                ("front_matter_description", "Review a merge request."),
+                ("front_matter_license", "MIT"),
+                ("front_matter_compatibility", "Requires git"),
+                ("front_matter_allowed_tools", "Bash(git:*) Read"),
+                (
+                    "front_matter_metadata",
+                    r#"{"author":"example-org","version":"1.0"}"#
+                ),
+                ("front_matter_version", "2.1.0"),
+                ("front_matter_category", "Development Workflow"),
+            ])
+        );
+    }
+
+    #[test]
+    fn gitlab_docs_fields_are_read_verbatim() {
+        let source = "---\r\nstage: Verify\r\ngroup: Pipeline Authoring\r\ninfo: To determine the technical writer, see https://example.com\r\ntitle: 'CI/CD: \"YAML\" syntax'\r\ndescription: Configure pipelines.\r\n---\r\n";
+        assert_eq!(
+            values(source),
+            owned(&[
+                ("front_matter_description", "Configure pipelines."),
+                ("front_matter_title", "CI/CD: \"YAML\" syntax"),
+                ("front_matter_stage", "Verify"),
+                ("front_matter_group", "Pipeline Authoring"),
+                (
+                    "front_matter_info",
+                    "To determine the technical writer, see https://example.com"
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn non_string_scalars_keep_their_source_text_and_collections_are_skipped() {
+        let source = "---\nversion: 1.10\nname: 0x1F\nstage: true\ngroup: null\ntitle: [a, b]\ninfo:\n  k: v\ncategory: '~'\nmetadata: [a]\n---\n";
+        assert_eq!(
+            values(source),
+            owned(&[
+                ("front_matter_name", "0x1F"),
+                ("front_matter_stage", "true"),
+                ("front_matter_version", "1.10"),
+                ("front_matter_category", "~"),
+            ])
+        );
+        assert!(values("---\nmetadata: plain\n---\n").is_empty());
+        assert!(values("---\nmetadata: {list: [1]}\n---\n").is_empty());
+    }
+
+    #[test]
+    fn long_values_are_truncated_on_a_char_boundary() {
+        let long = "\u{e9}".repeat(MAX_FRONT_MATTER_VALUE_BYTES);
+        let source = format!("---\ndescription: a{long}\n---\n");
+        let [(_, value)] = values(&source).try_into().unwrap();
+        assert_eq!(value.len(), MAX_FRONT_MATTER_VALUE_BYTES - 1);
+        assert!(value.starts_with("a\u{e9}"));
+    }
+
+    #[test]
+    fn invalid_or_non_mapping_yaml_stores_no_values() {
+        for source in [
+            "---\nname: [unclosed\n---\n",
+            "---\nname: a\nbad: \"unterminated\n---\n",
+            "---\n- name\n- title\n---\n",
+            "---\njust text\n---\n",
+            "---\n\n---\n",
+        ] {
+            assert!(values(source).is_empty(), "{source:?}");
+            assert!(parse(source).front_matter.is_some(), "{source:?}");
+        }
+        let huge = format!(
+            "---\nname: a\nfiller: {}\n---\n",
+            "x".repeat(MAX_FRONT_MATTER_YAML_BYTES)
+        );
+        assert!(values(&huge).is_empty());
     }
 }

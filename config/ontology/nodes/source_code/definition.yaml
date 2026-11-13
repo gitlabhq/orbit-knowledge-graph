@@ -128,6 +128,78 @@ properties:
     mutable: false
     description: "End column."
 
+  front_matter_name:
+    type: string
+    source: front_matter_name
+    nullable: false
+    description: "Front matter `name` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
+  front_matter_description:
+    type: string
+    source: front_matter_description
+    nullable: false
+    description: "Front matter `description` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
+  front_matter_license:
+    type: string
+    source: front_matter_license
+    nullable: false
+    description: "Front matter `license` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
+  front_matter_compatibility:
+    type: string
+    source: front_matter_compatibility
+    nullable: false
+    description: "Front matter `compatibility` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
+  front_matter_allowed_tools:
+    type: string
+    source: front_matter_allowed_tools
+    nullable: false
+    description: "Front matter `allowed-tools` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
+  front_matter_metadata:
+    type: string
+    source: front_matter_metadata
+    nullable: false
+    description: "Front matter `metadata` map as compact JSON with sorted keys and scalar values; empty when absent or not a map. Set only on FrontMatter definitions."
+
+  front_matter_title:
+    type: string
+    source: front_matter_title
+    nullable: false
+    description: "Front matter `title` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
+  front_matter_stage:
+    type: string
+    source: front_matter_stage
+    nullable: false
+    description: "Front matter `stage` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
+  front_matter_group:
+    type: string
+    source: front_matter_group
+    nullable: false
+    description: "Front matter `group` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
+  front_matter_info:
+    type: string
+    source: front_matter_info
+    nullable: false
+    description: "Front matter `info` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
+  front_matter_version:
+    type: string
+    source: front_matter_version
+    nullable: false
+    description: "Front matter `version` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
+  front_matter_category:
+    type: string
+    source: front_matter_category
+    nullable: false
+    description: "Front matter `category` value; empty when absent or not a scalar. Set only on FrontMatter definitions."
+
   content:
     type: string
     virtual:
@@ -156,6 +228,18 @@ storage:
     - {name: end_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: start_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: end_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: front_matter_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: front_matter_description, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: front_matter_license, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: front_matter_compatibility, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: front_matter_allowed_tools, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: front_matter_metadata, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: front_matter_title, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: front_matter_stage, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: front_matter_group, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: front_matter_info, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: front_matter_version, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: front_matter_category, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}

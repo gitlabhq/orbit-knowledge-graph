@@ -1,4 +1,4 @@
-use orbit_utils::markdown::{Document, FRONT_MATTER_NAME, LineIndex};
+use orbit_utils::markdown::{Document, FRONT_MATTER_FIELDS, FRONT_MATTER_NAME, LineIndex};
 
 use crate::intern::Lang;
 use crate::tree::{Node, Tree};
@@ -39,6 +39,12 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
         let name = lang.syms.intern(FRONT_MATTER_NAME);
         tree.append(id, node("name", name, start, end));
         tree.append(id, node("segment", name, start, end));
+        for (field, value) in FRONT_MATTER_FIELDS.iter().zip(&block.values) {
+            if !value.is_empty() {
+                let kind = format!("__{}", field.column);
+                tree.append(id, node(&kind, lang.syms.intern(value), start, end));
+            }
+        }
     }
 
     let mut ids = Vec::with_capacity(sections.len());

@@ -1,6 +1,7 @@
 use super::fqn::Fqn;
 use super::range::Range;
 use crate::v2::config::Language;
+use orbit_utils::markdown::FrontMatterValues;
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
 /// Canonical definition categories used by the linker for
@@ -67,6 +68,7 @@ pub struct DefinitionMetadata {
     /// If this is a companion object, the FQN of the owning class.
     pub companion_of: Option<String>,
     pub is_exported: bool,
+    pub front_matter: Option<Box<FrontMatterValues>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
