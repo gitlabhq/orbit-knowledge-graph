@@ -1,3 +1,8 @@
+config:
+  extra_seed:
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12102, target_kind: Definition }
+
 cases:
   - name: allowed_project
     description: Path between Definitions authorizes through the owning project
@@ -46,5 +51,53 @@ cases:
         }
       gql: |
         MATCH p = ANY SHORTEST (a:Definition {id: 12000})-[:CALLS*1..2]->(b:Definition {id: 12001}) RETURN p
+    expect:
+      path_count: 0
+
+  - name: cross_project_allowed
+    description: Path crossing into a second project is returned when both owning projects are allowed
+    config:
+      redaction:
+        allow:
+          project: [1000, 1001]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "a", "entity": "Definition", "node_ids": [12000]},
+            {"id": "b", "entity": "Definition", "node_ids": [12102]}
+          ],
+          "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3,
+                   "rel_types": ["CALLS"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (a:Definition {id: 12000})-[:CALLS*1..3]->(b:Definition {id: 12102}) RETURN p
+    expect:
+      referential_integrity: true
+      path_count: 1
+      nodes:
+        Definition:
+          ids: [12000, 12001, 12102]
+
+  - name: cross_project_denied_second_project
+    description: Path crossing into a second project is redacted when only the first project is allowed
+    config:
+      redaction:
+        allow:
+          project: [1000]
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "a", "entity": "Definition", "node_ids": [12000]},
+            {"id": "b", "entity": "Definition", "node_ids": [12102]}
+          ],
+          "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3,
+                   "rel_types": ["CALLS"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (a:Definition {id: 12000})-[:CALLS*1..3]->(b:Definition {id: 12102}) RETURN p
     expect:
       path_count: 0

@@ -183,6 +183,12 @@ pub enum Canonical {
     Dispatch,
     #[strum(serialize = "__qualifier")]
     Qualifier,
+    // New variants go last: snapshots store these discriminants as kind ids.
+    #[strum(serialize = "__section", props(def_type = "true", display = "Section"))]
+    Section,
+    /// A definition's FQN segment when it differs from its name.
+    #[strum(serialize = "__fqn_segment")]
+    FqnSegment,
 }
 
 impl From<Canonical> for u16 {

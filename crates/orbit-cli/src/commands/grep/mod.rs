@@ -48,6 +48,8 @@ pub(crate) struct Options {
     pub(crate) types_not: Vec<String>,
     pub(crate) max_columns: Option<usize>,
     pub(crate) output: Output,
+    /// Read the existing index as is: never build or refresh it.
+    pub(crate) no_index: bool,
 }
 
 /// A search that found nothing; exits 1 without a message, as rg does.
@@ -338,16 +340,22 @@ fn local(
             files.sort();
             files.dedup();
             use crate::commands::index::incremental::{Freshness, refresh};
-            let edited = match refresh(&root, db.clone(), &files) {
-                Ok(Freshness::Fresh | Freshness::Refreshed) => Default::default(),
-                Ok(Freshness::Stale(changed)) => changed.into_iter().collect(),
-                _ => crate::workspace::edited_since_index(&root, &files),
+            let refreshed = match options.no_index {
+                true => None,
+                false => refresh(&root, db.clone(), &files).ok(),
+            };
+            let edited = match refreshed {
+                Some(Freshness::Fresh | Freshness::Refreshed) => Default::default(),
+                Some(Freshness::Stale(changed)) => changed.into_iter().collect(),
+                Some(Freshness::NotIncremental) | None => {
+                    crate::workspace::edited_since_index(&root, &files)
+                }
             };
             Some((hits, edited))
         }
         false => None,
     };
-    let backend = LocalBackend::open(repo, db, &paths)?;
+    let backend = LocalBackend::open(repo, db, &paths, options.no_index)?;
     let paths = backend.paths().to_vec();
     let kinds = resolve_kinds(&backend, &filter.kinds)?;
     if let (Some(shape), Output::Lines) = (kinds.output, options.output) {

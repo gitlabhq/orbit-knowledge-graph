@@ -389,9 +389,8 @@ impl CodeGraph {
             self.indexes.by_fqn.insert(gdef.fqn, def_node);
             self.indexes.by_name.insert(gdef.name, def_node);
 
-            let fqn_str = self.strings.get(gdef.fqn).to_string();
-            if let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) {
-                let parent_id = self.strings.alloc(&fqn_str[..sep_pos]);
+            if let Some(parent_fqn) = definitions[i].fqn.parent() {
+                let parent_id = self.strings.alloc(parent_fqn);
                 self.indexes.nested.insert(parent_id, gdef.name, def_node);
             }
             definition_ranges.push((gdef.range, def_node));
@@ -408,16 +407,25 @@ impl CodeGraph {
             DefinitionRangeIndex::from_ranges(definition_ranges),
         );
 
-        for (i, gdef) in graph_defs.iter().enumerate() {
-            let fqn_str = self.strings.get(gdef.fqn);
-            let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) else {
+        let mut defs_by_fqn: FxHashMap<&str, SmallVec<[usize; 1]>> = FxHashMap::default();
+        for (i, definition) in definitions.iter().enumerate() {
+            defs_by_fqn
+                .entry(definition.fqn.as_str())
+                .or_default()
+                .push(i);
+        }
+        for (i, definition) in definitions.iter().enumerate() {
+            let Some(parents) = definition
+                .fqn
+                .parent()
+                .and_then(|parent_fqn| defs_by_fqn.get(parent_fqn))
+            else {
                 continue;
             };
-            let parent_fqn = &fqn_str[..sep_pos];
-            for (j, parent_def) in graph_defs.iter().enumerate() {
+            for &j in parents {
                 if j != i
-                    && self.strings.get(parent_def.fqn) == parent_fqn
-                    && let Some(rel) = containment_relationship(parent_def.kind, gdef.kind)
+                    && let Some(rel) =
+                        containment_relationship(graph_defs[j].kind, graph_defs[i].kind)
                 {
                     self.graph.add_edge(
                         def_nodes[j],
@@ -1393,6 +1401,39 @@ mod tests {
             is_top_level: fqn_parts.len() == 1,
             metadata: None,
         }
+    }
+
+    #[test]
+    fn a_name_ending_in_a_backslash_still_contains_its_children() {
+        let cg = build_graph(
+            "/repo/values.py",
+            vec![
+                make_def("root", &["root"], DefKind::Module),
+                make_def(r"win\", &["root", r"win\"], DefKind::Class),
+                make_def("child", &["root", r"win\", "child"], DefKind::Method),
+            ],
+        );
+
+        let fqn = |node: &GraphNode| match node {
+            GraphNode::Definition { id, .. } => cg.str(cg.defs[id.0 as usize].fqn).to_string(),
+            _ => String::new(),
+        };
+        let mut containment: Vec<(String, String)> = cg
+            .edges()
+            .filter(|(_, _, e)| {
+                e.relationship.source_node == NodeKind::Definition
+                    && e.relationship.target_node == NodeKind::Definition
+            })
+            .map(|(source, target, _)| (fqn(source), fqn(target)))
+            .collect();
+        containment.sort();
+        assert_eq!(
+            containment,
+            vec![
+                ("root".to_string(), r"root.win\".to_string()),
+                (r"root.win\".to_string(), r"root.win\.child".to_string()),
+            ]
+        );
     }
 
     #[test]

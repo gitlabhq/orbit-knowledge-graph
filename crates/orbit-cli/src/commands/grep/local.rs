@@ -16,8 +16,12 @@ impl LocalBackend {
         repo: Option<PathBuf>,
         db: Option<PathBuf>,
         paths: &[String],
+        no_index: bool,
     ) -> Result<Self> {
-        let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
+        let workspace::IndexedRepo { git, client } = match no_index {
+            true => workspace::open_indexed_without_indexing(repo, db)?,
+            false => workspace::open_indexed(repo, db)?,
+        };
         let paths = workspace::repo_relative_paths(&git.repo_path, paths);
         Ok(Self { client, paths, git })
     }

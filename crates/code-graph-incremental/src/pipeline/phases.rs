@@ -332,7 +332,7 @@ impl ItemPhase<Parsed> for Rewrite {
             tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
         }
         for stage in &env.rules_for(&tree.label).rewrite_stages {
-            pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
+            pattern::apply_stage(&mut tree, &env.lang, stage, &[run, &budget])?;
         }
         if !tree.root().is(crate::canonical::Canonical::SourceFile) {
             tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
