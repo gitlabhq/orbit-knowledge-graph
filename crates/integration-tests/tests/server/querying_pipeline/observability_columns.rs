@@ -9,10 +9,10 @@ use query_engine::shared::content::{
 
 const SERVICE: &str = "observability";
 
-/// SeededColumnResolver yields every value as a string, so these cover the
-/// compiler and hydration path rather than the typing ObservabilityService
-/// applies. The int64 columns are Int64 in production; server/observability_resolver.rs
-/// covers that.
+// SeededColumnResolver yields every value as a string, so these cover the
+// compiler and hydration path rather than the typing ObservabilityService
+// applies. The int64 columns are Int64 in production; server/observability_resolver.rs
+// covers that.
 
 fn registry() -> ColumnResolverRegistry {
     let mut registry = ColumnResolverRegistry::new();
