@@ -123,8 +123,8 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
     assert!(keys.keys().all(|key| ontology.get_node(key).is_some()));
 
     assert_eq!(
-        stats["projects_eligible"], 3,
-        "a deleted project and a project outside the enabled namespace do not count"
+        stats["top_level_groups_indexed"], 1,
+        "a namespace without Orbit enabled does not count"
     );
     assert_eq!(
         stats["projects_indexed"], 2,

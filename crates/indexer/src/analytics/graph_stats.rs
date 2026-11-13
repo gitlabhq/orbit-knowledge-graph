@@ -20,14 +20,12 @@ const ACTION_GRAPH_STATS: &str = "orbit_graph_stats";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphStats {
     pub graph_bytes: u64,
-    /// Live rows per ontology node type name.
     pub entity_counts: BTreeMap<String, u64>,
     pub projects_indexed: u64,
-    pub projects_eligible: u64,
+    pub top_level_groups_indexed: u64,
     pub snapshot_at: DateTime<Utc>,
 }
 
-/// Sends [`GraphStats`] snapshots through the indexing analytics trackers.
 #[derive(Clone)]
 pub struct GraphStatsReporter {
     tracker: Arc<dyn AnalyticsTracker>,
@@ -64,7 +62,7 @@ impl GraphStatsReporter {
             graph_bytes: saturating_i64(stats.graph_bytes),
             entity_counts,
             projects_indexed: saturating_i64(stats.projects_indexed),
-            projects_eligible: saturating_i64(stats.projects_eligible),
+            top_level_groups_indexed: saturating_i64(stats.top_level_groups_indexed),
             snapshot_at: stats.snapshot_at,
         });
 
@@ -104,7 +102,7 @@ mod tests {
                 ("Project".to_string(), 202_930),
             ]),
             projects_indexed: 207_587,
-            projects_eligible: 207_587,
+            top_level_groups_indexed: 412,
             snapshot_at: "2026-11-11T04:30:00Z".parse().unwrap(),
         }
     }
@@ -129,7 +127,7 @@ mod tests {
             .data;
         assert_eq!(data["graph_bytes"], 437_763_723_476_i64);
         assert_eq!(data["entity_counts"]["Project"], 202_930);
-        assert_eq!(data["projects_eligible"], 207_587);
+        assert_eq!(data["top_level_groups_indexed"], 412);
         assert_eq!(data["snapshot_at"], "2026-11-11T04:30:00Z");
 
         let validator = jsonschema::validator_for(&load_schema_json("orbit_graph_stats")).unwrap();

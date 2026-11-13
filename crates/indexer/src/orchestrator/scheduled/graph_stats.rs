@@ -88,17 +88,17 @@ impl GraphStatsSnapshot {
             return Ok(None);
         };
         let paths = self.enabled_paths().await?;
-        let (graph_bytes, entity_counts, (projects_indexed, projects_eligible)) = tokio::try_join!(
+        let (graph_bytes, entity_counts, projects_indexed) = tokio::try_join!(
             self.graph_bytes(&ontology, version),
             self.entity_counts(&ontology, version),
-            self.project_coverage(version, &paths),
+            self.projects_indexed(version, &paths),
         )?;
 
         Ok(Some(GraphStats {
             graph_bytes,
             entity_counts,
             projects_indexed,
-            projects_eligible,
+            top_level_groups_indexed: paths.len() as u64,
             snapshot_at: Utc::now(),
         }))
     }
@@ -168,14 +168,10 @@ impl GraphStatsSnapshot {
         Ok(counts)
     }
 
-    /// `(indexed, eligible)`. A project counts as indexed only while the datalake still lists it.
-    async fn project_coverage(
-        &self,
-        version: u32,
-        paths: &[String],
-    ) -> Result<(u64, u64), TaskError> {
+    /// A project counts as indexed only while the datalake still lists it.
+    async fn projects_indexed(&self, version: u32, paths: &[String]) -> Result<u64, TaskError> {
         if paths.is_empty() {
-            return Ok((0, 0));
+            return Ok(0);
         }
         let code_checkpoint = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, version);
         let (eligible, indexed) = tokio::try_join!(
@@ -193,7 +189,7 @@ impl GraphStatsSnapshot {
             .filter(|id| eligible.contains(id))
             .collect::<HashSet<_>>()
             .len();
-        Ok((indexed as u64, eligible.len() as u64))
+        Ok(indexed as u64)
     }
 
     async fn project_ids(

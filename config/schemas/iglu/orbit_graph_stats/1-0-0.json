@@ -13,7 +13,7 @@
     "graph_bytes",
     "entity_counts",
     "projects_indexed",
-    "projects_eligible",
+    "top_level_groups_indexed",
     "snapshot_at"
   ],
   "properties": {
@@ -38,13 +38,13 @@
       "additionalProperties": false
     },
     "projects_indexed": {
-      "description": "Eligible projects whose default branch has a completed code index.",
+      "description": "Projects under the Orbit-enabled top-level groups whose default branch has a completed code index.",
       "type": "integer",
       "minimum": 0,
       "maximum": 9223372036854775807
     },
-    "projects_eligible": {
-      "description": "Projects under the Orbit-enabled top-level namespaces. Projects not indexed is projects_eligible minus projects_indexed.",
+    "top_level_groups_indexed": {
+      "description": "Top-level groups with Orbit enabled.",
       "type": "integer",
       "minimum": 0,
       "maximum": 9223372036854775807

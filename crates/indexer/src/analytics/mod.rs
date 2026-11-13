@@ -80,7 +80,6 @@ impl IndexingAnalytics {
         ))
     }
 
-    /// The GitLab collector behind the consent gate, plus the local collector, which gets every event.
     fn composed_tracker(&self) -> Option<Arc<dyn AnalyticsTracker>> {
         if !self.is_enabled() {
             return None;
