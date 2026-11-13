@@ -1,0 +1,20 @@
+---
+key_path: orbit.graph_stats.graph_bytes
+description: Bytes on disk of the active graph node and edge tables, from the latest daily gkg_graph_stats snapshot
+product_group: context_systems
+product_categories:
+- knowledge_graph
+performance_indicator_type: []
+value_type: number
+status: active
+milestone: '19.7'
+introduced_by_url: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3382
+time_frame: none
+data_source: internal_events
+data_category: optional
+tiers:
+- premium
+- ultimate
+events:
+- name: gkg_graph_stats
+  operator: last(graph_bytes)
