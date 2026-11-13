@@ -518,6 +518,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         }
         if let Some(field) = self.property(entity, property)
             && !model.property_is_hidden(field.id)
+            && !model.property_is_unresolvable(field.id)
         {
             if model.property_realization(field.id).is_none()
                 && model.entity_table(entity).is_some()
@@ -533,6 +534,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             .into_iter()
             .flat_map(|entity| &entity.properties)
             .filter(|property| !model.property_is_hidden(**property))
+            .filter(|property| !model.property_is_unresolvable(**property))
             .map(|property| model.graph().property(*property).name.as_str())
             .collect();
         Err(QueryError::AllowlistRejected(format!(
@@ -2201,6 +2203,33 @@ mod tests {
         assert!(
             err.to_string().contains("field is virtual"),
             "expected virtual field rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_disabled_virtual_field() {
+        let ontology = test_ontology()
+            .modify_field("Project", "name", |field| {
+                field.source = FieldSource::Virtual(VirtualSource {
+                    service: "example".into(),
+                    lookup: "project_name".into(),
+                    disabled: true,
+                    depends_on: vec![],
+                    allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                });
+            })
+            .unwrap();
+
+        let err = validator(&ontology)
+            .check_field("Project", "name")
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("does not exist"),
+            "expected the disabled field to be rejected, got: {err}"
         );
     }
 
