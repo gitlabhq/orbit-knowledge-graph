@@ -108,7 +108,7 @@ A check can ask about another entity. A `Commit` row holds its project's path as
       hidden: [traversal_path]
 ```
 
-A code or live store can reach its scope key through a relationship with `via` instead, as `File` does in [Add a backend](#add-a-backend).
+A store whose backend does not join reaches its scope key through a relationship with `via` instead. `File` in Orbit Next is an example, in [Add a backend](#add-a-backend).
 
 The storage fragment lays out the entity in a store. The loader infers nothing, so it catches a forgotten column before any query runs. Shared fields work on every backend. A `backend` block holds fields that only its backend understands and validates.
 
@@ -139,11 +139,11 @@ relationships:
     User -> MergeRequest: {edge_table: gl_edge}
 ```
 
-`access` says how queries use the columns, in terms that every backend understands. ClickHouse derives its skip indexes and sort key from it, so no package writes index or sort-key details. Column storage types stay explicit. The `backend` block overrides the derived indexes only where a platform package needs it to.
+`access` says how queries use the columns, in terms that every backend understands. For example, ClickHouse derives its skip indexes and sort key from it, so no package writes index or sort-key details. Column storage types stay explicit. The `backend` block overrides the derived indexes only where a platform package needs it to.
 
-`accepts` names the columns that the store takes key sets on, when another stage hands it keys. Every store declares it. A store returns every column it lists, so listing `id` is what makes it return the identity.
+`accepts` names the columns that the store takes key sets on, when another stage hands it keys. Every store declares it, whatever its backend's capabilities. A store returns every column it lists, so listing `id` is what makes it return the identity.
 
-In each deployment's model, every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. A query reads the entity on that store's connection. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. Only a structural match reads elsewhere, on the code connection that searches its property. Every other store is partial and lists exactly the properties it holds. A live or code store holds no table. It lists the properties it serves, and its backend checks its own fields.
+In each deployment's model, every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. A query reads the entity on that store's connection. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. Only a structural match reads elsewhere, on the connection whose backend searches that property structurally. Every other store is partial and lists exactly the properties it holds. A store whose backend has no writer capability holds no table, for example a live or code store. It lists the properties it serves, and its backend checks its own fields.
 
 `AUTHORED` is a foreign key: the `author_id` column on the `MergeRequest` row holds the author. `APPROVED` is many-to-many, so its rows live in an edge table. Every variant binds to one of the two, or the load fails.
 
@@ -202,7 +202,7 @@ relationships:
 
 A filter on `a.branch` in `(a)-[:CALLS]->(b)` then also filters the edge read on its `branch` column.
 
-In every store that Orbit writes, each entity and edge-table variant has exactly one declared writer. The code indexer writes the code entities in the graph store, and its source fragment looks like any other:
+In a store whose backend has the writer capability, each entity and edge-table variant has exactly one declared writer. The code indexer writes the code entities in the graph store, and its source fragment looks like any other:
 
 ```yaml
 # packages/gitlab.source_code/sources/code_indexer.yaml
@@ -372,7 +372,7 @@ relationships:
     SlackMessage -> SlackWorkspace: {fk: {on: source, column: workspace}}
 ```
 
-A live store keeps no edge rows, so `IN_WORKSPACE` declares no edge policy. The message's own policy decides whether the caller sees it. The workspaces live in the graph store, so `INSTALLED_IN` is a foreign key on a `SlackWorkspace` row:
+The live backend does not join, so `IN_WORKSPACE` declares no edge policy. The message's own policy decides whether the caller sees it. The workspaces live in the graph store, so `INSTALLED_IN` is a foreign key on a `SlackWorkspace` row:
 
 ```yaml
 # packages/integration.slack/storage/clickhouse.yaml
@@ -395,7 +395,7 @@ relationships:
     SlackWorkspace -> Group: {fk: {on: source, column: namespace_id}}
 ```
 
-The integration's data lake source writes the workspaces from its installation records. `SlackMessage` lives in a live store, which the live source serves, so it declares no writer:
+The integration's data lake source writes the workspaces from its installation records. The live backend has no writer capability, because the live source serves `SlackMessage`. So `SlackMessage` declares no writer:
 
 ```yaml
 # packages/integration.slack/sources/data_lake.yaml
@@ -434,7 +434,7 @@ The `live` policy follows each message to the namespace that installed its works
 
 ## Add a backend
 
-A backend implements `StorageBackend`, which parses its `backend` blocks and resolves each store:
+A backend implements `StorageBackend`, which parses its `backend` blocks and resolves each store. It also declares its [capabilities](../adr/024_pluggable_data_model.md#4-catalogs-give-each-connection-a-typed-view): joins, writer and search.
 
 ```rust
 pub trait StorageBackend: Sized {
@@ -500,7 +500,7 @@ entities:
       search: {content: [trigram, structural], path: [trigram]}
 ```
 
-`access` marks `path` and `content` as searchable. `repository` names the columns that hold each row's project and branch.
+`access` marks `path` and `content` as searchable. `repository` names the columns that hold each row's project and branch. Orbit Next searches by repository, so its stores require `repository`.
 
 An identity can be composite. A `Head` is the head of a branch, and its identity is its project and branch:
 
@@ -792,17 +792,17 @@ The loader collects every error with its package and fails once. A missing decla
 
 - An unknown entity, property, relationship, variant, permission, scope, provider, field or template.
 - An entity or variant declared twice, or a second authorization entry.
-- A field that its fragment's schema does not know, or a missing required backend field. A live store requires `operation`, and a code store requires `repository`.
+- A field that its fragment's schema does not know, or a missing required backend field. For example, the live backend requires `operation`, and a backend that searches by repository requires `repository`.
 - A reference that resolves to no declared fact, or to a fact of the wrong type.
 - A declared fact that no backend reads.
 - An entity with no `id`, `identity`, `default_columns` or authorization entry, or with an `identity` property that does not exist.
-- A property that its complete store neither stores nor excludes. In a relational store, a column without a storage type or an entity without a table.
+- A property that its complete store neither stores nor excludes. In a store whose backend has the writer capability, a column without a storage type or an entity without a table.
 - A property or relationship attribute with no access class, or with two.
 - A scope without a `provider`, or a row check without a `resource`.
 - A global entity with an `enforce` entry, or with no checks and no `checks: open`.
-- A relationship without a scope or a permission, or a relational edge policy without a `scope_key` and an `of:`.
+- A relationship without a scope or a permission. On a backend that joins, an edge policy without a `scope_key` and an `of:`.
 - A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none`, `checks: open` or checks by any provider. An integration package may declare only `Credentials` checks. A namespace overlay declares no checks, and its entities must be namespace- or user-scoped.
-- A backend that stores a non-global entity but has no `enforce` entry for it, or a relational store that binds a relationship without one.
+- A backend that stores a non-global entity but has no `enforce` entry for it. A store whose backend joins and that binds a relationship without one.
 - A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.
 - A `via` chain that does not reach an entity that holds the scope key, or a step with more than one target.
 - An `enforce` entry of `none` with no `checks`.
@@ -815,7 +815,7 @@ The loader collects every error with its package and fails once. A missing decla
 - An edge table whose two endpoints are not both on its connection.
 - A foreign key column, `via` step or edge-table ID column whose type differs from the identity it points to. The loader casts nothing.
 - In a store that Orbit writes, an entity or edge-table variant with no writer, or with two.
-- A writer that targets a code or live store.
+- A writer that targets a store whose backend has no writer capability.
 - A foreign key binding on a many-to-many variant, on the wrong side of a one-to-many variant, or on a column its table does not hold.
 - An edge table copy that names no property of that endpoint, or a graph attribute with no edge column.
 - Two backends, or a trusted and an untrusted store, on one connection.

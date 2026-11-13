@@ -216,14 +216,14 @@ Nothing is inferred, so a forgotten column, an unbound variant or a backend with
 Storage rules:
 
 - In each deployment's model, every stored entity marks exactly one store `complete: true`, even with one store. That store lists or excludes every property. Other stores list only what they hold.
-- Every store declares `accepts:` for each entity, relational stores included. It names the columns that the store takes key sets on.
+- Every store declares `accepts:` for each entity, whatever its backend's [capabilities](#4-catalogs-give-each-connection-a-typed-view). It names the columns that the store takes key sets on.
 - A store returns every column it lists. So its columns decide whether it returns an entity's identity, and no other flag says so.
-- A code store declares `repository: {project: <column>, branch: <column>}` for each entity. A live store declares the `operation` it calls.
+- A store whose backend searches by repository declares `repository: {project: <column>, branch: <column>}` for each entity. Orbit Next is an example. Each backend kind's schema names its other required fields, for example `operation` for the live backend.
 - Each variant is bound once, in the store that holds its rows. A foreign key lives in the store whose table holds the column, and an edge table in the store that declares it. A foreign key's store can differ from the other endpoint's, as with `IN_WORKSPACE` from a live message to an indexed workspace. The two endpoints of an edge table share its connection.
 - Access hints are backend-neutral. Each backend turns them into indexes and sort keys, and a platform `backend` block can override that.
 - An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
-- In every store that Orbit writes, each entity and edge-table variant has exactly one declared writer.
-- Code and live stores declare no writer, because their own service writes or serves them: Orbit Next or the live source. The loader rejects a writer that targets a code or live store.
+- In a store whose backend has the writer capability, each entity and edge-table variant has exactly one declared writer.
+- A store whose backend lacks it declares no writer. Its own service writes or serves the data, for example Orbit Next or the live source. The loader rejects a writer that targets such a store.
 
 Key rules:
 
@@ -242,7 +242,7 @@ Four fixed places hold every fact, and nothing lives outside them:
 |---|---|
 | Packages | data: entities, identity, storage, bindings, writers, policies |
 | Deployment config | connections and deployment shapes, providers, limits such as row and node caps, engine settings |
-| Backends, in Rust | capabilities: operators, functions, match modes, how each scope kind renders |
+| Backends, in Rust | capabilities: joins, writer, search, operators, functions, match modes, how each scope kind renders |
 | Compiler phases | decisions: routing, foreign key or edge, how to read the latest row, stage splits |
 
 Each boundary between components has one typed API, and nothing crosses outside it:
@@ -250,7 +250,7 @@ Each boundary between components has one typed API, and nothing crosses outside 
 | Boundary | API | What crosses |
 |---|---|---|
 | Model to engine | `ResolvedModel` handles | entity, store and edge facts |
-| Backend capabilities | the `StorageBackend` trait per backend kind | operators, functions, scope rendering |
+| Backend capabilities | the `StorageBackend` trait per backend kind | joins, writer, search, operators, functions, scope rendering |
 | Planner decisions | the phase API per (frontend, backend) | FINAL or LIMIT BY, settings, stage order |
 | Execution | the `Executor` trait, with a wire codec | requests out, typed key sets and rows in |
 | Deployment | the deployment config | connections, shapes, limits, providers |
@@ -307,7 +307,7 @@ endif
 
 Every load names a deployment shape. `config/deployments.yaml` names each shape and the connections it serves, such as `server`, `local` and `demo`. The loader keeps only the storage fragments of the stores on that shape's connections, and then it runs every check. An unknown shape fails the load, and no load skips this filter. The runtime config selects the shape with `schema.deployment`.
 
-Each fragment kind and each engine kind has one schema, generated from the spec types. The schemas reject unknown fields and enforce each backend's required fields, such as `operation` for a live store and `repository` for a code store. CI validates every package against them, and editors read the published schemas.
+Each fragment kind and each engine kind has one schema, generated from the spec types. The schemas reject unknown fields and enforce each backend's required fields, for example `operation` for the live backend and `repository` for Orbit Next. CI validates every package against them, and editors read the published schemas.
 
 Every reference in a fragment must resolve to a declared fact of the right type. Every declared fact must also have a reader. Each backend states which fragment fields it reads, and a declaration that nothing reads fails the load. A missing declaration is always a load error, never a default.
 
@@ -351,7 +351,7 @@ An entity declares its scope, the permission that a read needs, and one `enforce
 An entity with no checks comes back on its scope filter alone. Its node comes back only when its stage's security check proved that filter on the read. Otherwise the query engine redacts the node, so the read fails closed.
 An entity's `checks:` is either a list of checks or the word `open`. A global entity has no scope filter, so it needs a check or `checks: open`. Without either, the load fails.
 With `checks: open`, the rows that a global read admits come back without a row check.
-Rows that the Data Extraction Service writes carry `traversal_path` from its ETL, and that path is their scope key. A live third-party read uses a `Credentials` check.
+Rows that the Data Extraction Service writes carry `traversal_path` from its ETL, and that path is their scope key. A third-party read that an external service serves at query time uses a `Credentials` check, for example a Slack message read.
 
 Every property and edge attribute has exactly one access class. If it has none or two, the load fails. The security phase enforces the classes on every plan, including plans that a phase builds directly.
 
@@ -376,6 +376,7 @@ A relationship declares its own scope and permission. Each variant states, with 
 | `own` | the edge's own key, which neither endpoint is known to share | `WorkItem -> WorkItem` across projects |
 
 With `of: own`, the key is a relationship attribute that the graph declares and classes like any property. The planner reads `of:` for the security filter on an edge read and for its path bounds.
+An edge policy applies only on a backend that joins. A store whose backend does not join declares no edge policy, and its entities' policies decide what the caller sees.
 
 ### 3. A new version goes live after its backfill
 
@@ -460,8 +461,17 @@ end note
 A catalog holds the declarations for one model and one plan language, plus the API that builds plans in it.
 The model exposes one logical catalog and one physical catalog per connection.
 Each backend implements `StorageBackend`, owns its schema and renderer, and declares its capabilities as facts.
+Every rule that depends on a backend names a capability, never a backend kind. Each backend kind declares these capabilities:
+
+| Capability | A backend with it | A backend without it |
+|---|---|---|
+| joins | evaluates scope filters and relationships inside its own query | takes typed key sets and returns rows |
+| writer | holds tables that a declared source writes, from Orbit or an external service | reads data that its own service writes or serves |
+| search | evaluates its stores' declared search modes, such as trigram and structural, and can search by repository | declares no search modes |
+
+For example, ClickHouse and DuckDB join and have writers. Orbit Next searches by repository and has no writer. The live backend for Slack has none of the three.
 A stage targets one connection and can read every store on it.
-DuckDB is a relational store on a local file or on S3. On S3, the deployment config sets the connection's mode. `parquet` takes a bucket and a prefix, and `ducklake` takes a catalog and a data path. The package is the same in both modes.
+DuckDB reads a local file or S3. On S3, the deployment config sets the connection's mode. `parquet` takes a bucket and a prefix, and `ducklake` takes a catalog and a data path. The package is the same in both modes.
 
 ### 5. A query becomes a request
 
@@ -596,9 +606,10 @@ The planning phase turns one logical plan into the physical plan of the connecti
 | Orbit Next | code | a trigram prefilter before the ast-grep pass | repository restriction | gRPC structural search |
 | Slack | live | a push-down filter | workspace precondition, then the provider check | Data Extraction Service call |
 
-A code or live policy reaches its scope key through a `via` chain. Before the remote request goes out, a scope lookup resolves that chain.
+A store whose backend does not join reaches its scope key through a `via` chain. So its read needs a scope lookup stage, which resolves the chain before the read's request goes out.
 The scope lookup is an ordinary stage, planned like any read. It runs on the connection of the complete store of the chain's first entity, never by connection order.
-It returns the repositories or workspaces in the caller's scope set, and the remote request names only those. A `none` or `global` read needs no lookup and admits every repository or workspace.
+It returns the keys of that entity in the caller's scope set, and the request names only those keys. For example, the keys are repositories for Orbit Next and workspaces for Slack.
+A `none` or `global` read needs no lookup and admits every key.
 
 ### 8. A query that spans connections runs as a DAG of stages
 
@@ -611,7 +622,7 @@ WHERE f.content CONTAINS EXACT 'TODO(security)'
 RETURN mr.iid, b.name, f.path
 ```
 
-Each binding reads on the connection of its entity's `complete: true` store. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. No order or fallback rule picks another store. Only a structural match reads elsewhere, on the code connection that searches its property.
+Each binding reads on the connection of its entity's `complete: true` store. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. No order or fallback rule picks another store. Only a structural match reads elsewhere, on the connection whose backend searches that property structurally.
 
 The planner splits the logical plan into one stage per connection and connects them in a DAG:
 
@@ -633,7 +644,7 @@ flowchart LR
     class S3 combine
 ```
 
-Every connection runs as a peer stage, relational connections included. No connection hosts the others.
+Every connection runs as a peer stage, whether its backend joins or not. No connection hosts the others.
 Each stage is an ordinary physical plan in its catalog's language. An edge carries a key set, which the next stage reads as an `IN` input, or rows that a later stage combines.
 A stage accepts a typed key set only on a column that its store lists in `accepts:`. It returns every column that its store lists, and the key columns of its outgoing boundaries must be among them.
 The key types on the two sides of a boundary must match, and the loader checks them.
@@ -644,7 +655,7 @@ The combine stage combines the stages' rows on their keys in process, applies th
 A relationship that crosses a stage boundary returns its edges. Each edge comes from a key pair of the crossing. An edge stays only when both of its endpoints survive redaction.
 
 Every stage carries its own policy. Every node that a stage reads adds its declared checks to that stage.
-A remote stage runs its row checks through `Provider<Check>` in the deployment's modules, the same contract as every other check.
+Every stage runs its row checks through `Provider<Check>` in the deployment's modules, whatever its backend.
 A producer's checks run before its keys cross a boundary.
 Plan tests assert the logical plan, the planned DAG and the emitted DAG.
 
