@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,7 +9,10 @@ use circuit_breaker::{CircuitBreaker, CircuitConfig};
 use futures::{Stream, StreamExt};
 use jsonwebtoken::dangerous::insecure_decode;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use orbit_log_fields::{debug, info};
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::Counter;
+use orbit_log_fields::{debug, info, warn};
+use orbit_observability::gitlab_client::{INSECURE_CREDENTIAL_REQUESTS, labels};
 use orbit_observability::resilience::MetricsObserver;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -66,17 +69,101 @@ struct CloudConnectorTokenClaims {
     exp: i64,
 }
 
+/// Whether the channel to GitLab may carry a credential: TLS, or a host whose
+/// addresses are all loopback or private. Rails checks its channel to Orbit
+/// before it forwards its JWT; this rule is at least as strict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+enum Channel {
+    Tls,
+    Localhost,
+    PrivateAddress,
+    PublicAddress,
+    Unresolved,
+    InvalidUrl,
+}
+
+impl Channel {
+    /// `dialled` is the `resolve_host` address, which reqwest dials in place of
+    /// a domain host. It does not apply when the host is an IP literal.
+    fn classify(base_url: &str, dialled: Option<IpAddr>) -> Self {
+        let Ok(url) = reqwest::Url::parse(base_url) else {
+            return Self::InvalidUrl;
+        };
+        if url.scheme() == "https" {
+            return Self::Tls;
+        }
+        let Some(host) = url.host_str() else {
+            return Self::InvalidUrl;
+        };
+        if host == "localhost" {
+            return Self::Localhost;
+        }
+        let literal = host.trim_start_matches('[').trim_end_matches(']');
+        let addresses: Vec<IpAddr> = match (literal.parse::<IpAddr>(), dialled) {
+            (Ok(ip), _) => vec![ip],
+            (Err(_), Some(ip)) => vec![ip],
+            (Err(_), None) => (host, 0)
+                .to_socket_addrs()
+                .map(|addrs| addrs.map(|addr| addr.ip()).collect())
+                .unwrap_or_default(),
+        };
+        if addresses.is_empty() {
+            Self::Unresolved
+        } else if addresses.into_iter().all(is_loopback_or_private) {
+            Self::PrivateAddress
+        } else {
+            Self::PublicAddress
+        }
+    }
+
+    fn is_tls_or_private(self) -> bool {
+        matches!(self, Self::Tls | Self::Localhost | Self::PrivateAddress)
+    }
+}
+
+/// Link-local addresses are not private.
+fn is_loopback_or_private(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
+        IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local(),
+    }
+}
+
+struct DnsOverride {
+    domain: String,
+    ip: IpAddr,
+}
+
 pub struct GitlabClient {
     http: reqwest::Client,
     base_url: String,
     signing_key: Vec<u8>,
     circuit_breaker: CircuitBreaker,
+    channel: Channel,
+    insecure_credential_requests: Counter<u64>,
 }
 
 impl GitlabClient {
     pub fn new(config: GitlabClientConfiguration) -> Result<Self, GitlabClientError> {
         let signing_key = BASE64.decode(&config.signing_key)?;
-        let http = Self::build_http_client(&config)?;
+        let dns_override = Self::dns_override(&config)?;
+        let http = Self::build_http_client(dns_override.as_ref())?;
+        let channel = Channel::classify(&config.base_url, dns_override.map(|o| o.ip));
+        let reason: &'static str = channel.into();
+        if channel.is_tls_or_private() {
+            info!(
+                safe(REASON) = reason,
+                expanded(URL) = config.base_url.as_str(),
+                "GitLab channel is TLS or private"
+            );
+        } else {
+            warn!(
+                safe(REASON) = reason,
+                expanded(URL) = config.base_url.as_str(),
+                "GitLab channel is neither TLS nor private; credentials are sent over it unprotected"
+            );
+        }
         Ok(Self {
             http,
             base_url: config.base_url,
@@ -86,6 +173,9 @@ impl GitlabClient {
                 CircuitConfig::default(),
                 Arc::new(MetricsObserver::new()),
             ),
+            channel,
+            insecure_credential_requests: INSECURE_CREDENTIAL_REQUESTS
+                .build_counter_u64(&orbit_observability::meter()),
         })
     }
 
@@ -95,8 +185,57 @@ impl GitlabClient {
         self
     }
 
-    fn build_http_client(
+    #[cfg(test)]
+    fn with_channel(mut self, channel: Channel) -> Self {
+        self.channel = channel;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_meter(mut self, meter: &opentelemetry::metrics::Meter) -> Self {
+        self.insecure_credential_requests = INSECURE_CREDENTIAL_REQUESTS.build_counter_u64(meter);
+        self
+    }
+
+    fn dns_override(
         config: &GitlabClientConfiguration,
+    ) -> Result<Option<DnsOverride>, GitlabClientError> {
+        let Some(resolve_host) = &config.resolve_host else {
+            return Ok(None);
+        };
+        let parsed = reqwest::Url::parse(&config.base_url)
+            .map_err(|e| GitlabClientError::Unexpected(format!("invalid base_url: {e}")))?;
+        let domain = parsed
+            .host_str()
+            .ok_or_else(|| GitlabClientError::Unexpected("base_url has no host".into()))?;
+        let port = parsed.port_or_known_default().ok_or_else(|| {
+            GitlabClientError::Unexpected("base_url has no known default port".into())
+        })?;
+
+        let addr = (resolve_host.as_str(), port)
+            .to_socket_addrs()
+            .map_err(|e| {
+                GitlabClientError::Unexpected(format!("failed to resolve {resolve_host}: {e}"))
+            })?
+            .next()
+            .ok_or_else(|| {
+                GitlabClientError::Unexpected(format!("no addresses found for {resolve_host}"))
+            })?;
+
+        debug!(
+            expanded(HOST) = domain,
+            expanded(RESOLVE_HOST) = resolve_host.as_str(),
+            expanded(REMOTE_ADDR) = %addr,
+            "overriding DNS for base_url host"
+        );
+        Ok(Some(DnsOverride {
+            domain: domain.to_string(),
+            ip: addr.ip(),
+        }))
+    }
+
+    fn build_http_client(
+        dns_override: Option<&DnsOverride>,
     ) -> Result<reqwest::Client, GitlabClientError> {
         // reqwest is compiled with `rustls-no-provider`, so a CryptoProvider
         // must be installed before building any client. The `install_default`
@@ -104,35 +243,12 @@ impl GitlabClient {
         // installed a provider.
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        let mut builder = reqwest::Client::builder();
+        // A redirect could carry the credential header to a host that was never classified.
+        let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
 
-        if let Some(resolve_host) = &config.resolve_host {
-            let parsed = reqwest::Url::parse(&config.base_url)
-                .map_err(|e| GitlabClientError::Unexpected(format!("invalid base_url: {e}")))?;
-            let domain = parsed
-                .host_str()
-                .ok_or_else(|| GitlabClientError::Unexpected("base_url has no host".into()))?;
-            let port = parsed.port_or_known_default().ok_or_else(|| {
-                GitlabClientError::Unexpected("base_url has no known default port".into())
-            })?;
-
-            let addr = std::net::ToSocketAddrs::to_socket_addrs(&(resolve_host.as_str(), port))
-                .map_err(|e| {
-                    GitlabClientError::Unexpected(format!("failed to resolve {resolve_host}: {e}"))
-                })?
-                .next()
-                .ok_or_else(|| {
-                    GitlabClientError::Unexpected(format!("no addresses found for {resolve_host}"))
-                })?;
-
-            debug!(
-                expanded(HOST) = domain,
-                expanded(RESOLVE_HOST) = resolve_host.as_str(),
-                expanded(REMOTE_ADDR) = %addr,
-                "overriding DNS for base_url host"
-            );
+        if let Some(dns_override) = dns_override {
             // Port 0 tells reqwest to use the port from the request URL.
-            builder = builder.resolve(domain, SocketAddr::new(addr.ip(), 0));
+            builder = builder.resolve(&dns_override.domain, SocketAddr::new(dns_override.ip, 0));
         }
 
         builder
@@ -376,7 +492,7 @@ impl GitlabClient {
         url: impl reqwest::IntoUrl,
     ) -> Result<reqwest::Response, GitlabClientError> {
         let token = self.sign_jwt()?;
-        self.send(self.http.get(url).header(AUTH_HEADER, &token))
+        self.send("GET", self.http.get(url).header(AUTH_HEADER, &token))
             .await
     }
 
@@ -386,16 +502,26 @@ impl GitlabClient {
         body: &impl serde::Serialize,
     ) -> Result<reqwest::Response, GitlabClientError> {
         let token = self.sign_jwt()?;
-        self.send(self.http.post(url).header(AUTH_HEADER, &token).json(body))
-            .await
+        self.send(
+            "POST",
+            self.http.post(url).header(AUTH_HEADER, &token).json(body),
+        )
+        .await
     }
 
     async fn send(
         &self,
+        method: &'static str,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, GitlabClientError> {
         self.circuit_breaker
-            .call_transient(|| async { Ok(request.send().await?) })
+            .call_transient(|| async {
+                if !self.channel.is_tls_or_private() {
+                    self.insecure_credential_requests
+                        .add(1, &[KeyValue::new(labels::METHOD, method)]);
+                }
+                Ok(request.send().await?)
+            })
             .await
     }
 
@@ -553,32 +679,32 @@ mod tests {
     #[test]
     fn build_http_client_without_resolve_host() {
         let config = config_with_resolve("https://gitlab.example.com", None);
-        assert!(GitlabClient::build_http_client(&config).is_ok());
+        assert!(GitlabClient::new(config).is_ok());
     }
 
     #[test]
     fn build_http_client_with_resolve_host_localhost() {
         let config = config_with_resolve("https://gitlab.example.com:11443", Some("localhost"));
-        assert!(GitlabClient::build_http_client(&config).is_ok());
+        assert!(GitlabClient::new(config).is_ok());
     }
 
     #[test]
     fn build_http_client_with_resolve_host_and_path() {
         let config = config_with_resolve("https://gitlab.example.com/backend", Some("localhost"));
-        assert!(GitlabClient::build_http_client(&config).is_ok());
+        assert!(GitlabClient::new(config).is_ok());
     }
 
     #[test]
     fn build_http_client_rejects_invalid_base_url() {
         let config = config_with_resolve("not a url", Some("localhost"));
-        let err = GitlabClient::build_http_client(&config).unwrap_err();
+        let err = GitlabClient::new(config).err().unwrap();
         assert!(err.to_string().contains("invalid base_url"));
     }
 
     #[test]
     fn build_http_client_rejects_unknown_scheme() {
         let config = config_with_resolve("custom://gitlab.example.com", Some("localhost"));
-        let err = GitlabClient::build_http_client(&config).unwrap_err();
+        let err = GitlabClient::new(config).err().unwrap();
         assert!(err.to_string().contains("no known default port"));
     }
 
@@ -588,7 +714,7 @@ mod tests {
             "https://gitlab.example.com",
             Some("this-host-definitely-does-not-exist.invalid"),
         );
-        let err = GitlabClient::build_http_client(&config).unwrap_err();
+        let err = GitlabClient::new(config).err().unwrap();
         assert!(err.to_string().contains("failed to resolve"));
     }
 
@@ -910,5 +1036,175 @@ mod tests {
             err(client.download_archive(2, "main").await),
             GitlabClientError::RateLimited { .. }
         ));
+    }
+
+    fn channel_of(base_url: &str, resolve_host: Option<&str>) -> Channel {
+        GitlabClient::new(config_with_resolve(base_url, resolve_host))
+            .ok()
+            .unwrap()
+            .channel
+    }
+
+    #[test]
+    fn https_is_tls_without_resolving_the_host() {
+        assert_eq!(channel_of("https://gitlab.invalid", None), Channel::Tls);
+    }
+
+    #[test]
+    fn loopback_and_private_hosts_are_private() {
+        assert_eq!(
+            channel_of("http://localhost:8080", None),
+            Channel::Localhost
+        );
+        for base_url in [
+            "http://127.0.0.1",
+            "http://10.0.0.5",
+            "http://[::1]",
+            "http://[fd00::1]",
+            "http://[::ffff:10.0.0.5]",
+        ] {
+            assert_eq!(
+                channel_of(base_url, None),
+                Channel::PrivateAddress,
+                "{base_url}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_and_link_local_addresses_are_insecure() {
+        for base_url in [
+            "http://203.0.113.10",
+            "http://169.254.0.1",
+            "http://[fe80::1]",
+        ] {
+            let channel = channel_of(base_url, None);
+            assert_eq!(channel, Channel::PublicAddress, "{base_url}");
+            assert!(!channel.is_tls_or_private(), "{base_url}");
+        }
+    }
+
+    #[test]
+    fn an_unresolvable_host_is_insecure() {
+        let channel = channel_of("http://gitlab.invalid", None);
+        assert_eq!(channel, Channel::Unresolved);
+        assert!(!channel.is_tls_or_private());
+    }
+
+    #[test]
+    fn resolve_host_decides_the_channel_of_a_domain() {
+        assert_eq!(
+            channel_of("http://gitlab.example.com", Some("127.0.0.1")),
+            Channel::PrivateAddress
+        );
+        assert_eq!(
+            channel_of("http://gitlab.example.com", Some("203.0.113.10")),
+            Channel::PublicAddress
+        );
+    }
+
+    #[test]
+    fn resolve_host_does_not_apply_to_an_ip_literal() {
+        assert_eq!(
+            channel_of("http://203.0.113.10", Some("127.0.0.1")),
+            Channel::PublicAddress
+        );
+    }
+
+    #[tokio::test]
+    async fn redirects_are_not_followed() {
+        use axum::Router;
+        use axum::http::StatusCode as AxumStatus;
+        use axum::http::header::LOCATION;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let target_hits = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&target_hits);
+        let target = Router::new().fallback(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async { axum::Json(serde_json::json!({"project_id": 1, "default_branch": "main"})) }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, target).await.unwrap() });
+
+        let location = format!("http://{target_addr}/api/v4/internal/orbit/project/1/info");
+        let redirector = Router::new().fallback(move || {
+            let location = location.clone();
+            async move { (AxumStatus::TEMPORARY_REDIRECT, [(LOCATION, location)]) }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, redirector).await.unwrap() });
+
+        let client =
+            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+
+        assert!(client.project_info(1).await.is_err());
+        assert_eq!(target_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn credentialed_requests_on_an_insecure_channel_succeed_and_are_counted() {
+        use axum::Router;
+        use axum::routing::get;
+        use opentelemetry::metrics::MeterProvider;
+        use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+        use opentelemetry_sdk::metrics::{
+            InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
+        };
+
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/project/{id}/info",
+            get(|| async {
+                axum::Json(serde_json::json!({"project_id": 1, "default_branch": "main"}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(exporter.clone()).build())
+            .build();
+        let meter = provider.meter("test");
+        let base_url = format!("http://{addr}");
+        let private = GitlabClient::new(config_with_resolve(&base_url, None))
+            .unwrap()
+            .with_meter(&meter);
+        let insecure = GitlabClient::new(config_with_resolve(&base_url, None))
+            .unwrap()
+            .with_meter(&meter)
+            .with_channel(Channel::PublicAddress);
+
+        private.project_info(1).await.unwrap();
+        insecure.project_info(1).await.unwrap();
+        insecure.project_info(1).await.unwrap();
+        provider.force_flush().unwrap();
+
+        let counted: Vec<(u64, String)> = exporter
+            .get_finished_metrics()
+            .unwrap()
+            .iter()
+            .flat_map(|resource| resource.scope_metrics())
+            .flat_map(|scope| scope.metrics())
+            .filter(|metric| metric.name() == INSECURE_CREDENTIAL_REQUESTS.otel_name)
+            .flat_map(|metric| match metric.data() {
+                AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
+                    .data_points()
+                    .map(|point| {
+                        let method = point
+                            .attributes()
+                            .find(|kv| kv.key.as_str() == labels::METHOD)
+                            .map(|kv| kv.value.as_str().into_owned())
+                            .unwrap_or_default();
+                        (point.value(), method)
+                    })
+                    .collect::<Vec<_>>(),
+                _ => panic!("insecure credential requests is not a u64 sum"),
+            })
+            .collect();
+        assert_eq!(counted, vec![(2, "GET".to_string())]);
     }
 }
