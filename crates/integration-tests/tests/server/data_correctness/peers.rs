@@ -16,7 +16,7 @@ use query_data_model::implementations::clickhouse::versioned;
 use query_data_model::{ClickHouse, DuckDb, Model};
 use query_engine::shared::dag::{Event, Executors, Outcome};
 
-use super::dag::{grants, ints, strings};
+use super::dag::{edges, grants, ints, strings};
 
 const RELEASE_A: &str = "61f0c404-5cb3-11e7-907b-a6006ad3dba0";
 const RELEASE_B: &str = "0b8e4f5a-1d2c-4e3f-9a8b-7c6d5e4f3a2b";
@@ -113,6 +113,11 @@ fn peers(ctx: &TestContext) -> Peers {
 
 impl Peers {
     async fn run(&self, query: &str, paths: &[&str]) -> (Vec<Event>, Vec<RecordBatch>) {
+        let (events, outcome) = self.joined(query, paths).await;
+        (events, outcome.executed.batches)
+    }
+
+    async fn joined(&self, query: &str, paths: &[&str]) -> (Vec<Event>, Outcome) {
         let grants = grants(&self.model, paths);
         let (events, outcome) = run_served(
             &self.frontend,
@@ -124,7 +129,7 @@ impl Peers {
         )
         .await;
         match outcome {
-            Ok(Outcome { executed, .. }) => (events, executed.batches),
+            Ok(outcome) => (events, outcome),
             Err(error) => panic!("{query} failed for {paths:?}: {error}"),
         }
     }
@@ -258,4 +263,44 @@ pub(super) async fn merge_requests_on_clickhouse_join_their_reviews_on_duckdb(ct
     let (events, none) = peers.run(REVIEWED, &["1/101/"]).await;
     assert!(sql(&events, 1).is_empty());
     assert_eq!(pairs(&none), []);
+}
+
+/// Every peer join returns the edge of the relationship it crosses, between the endpoints both
+/// connections return; a release outside the caller's scope or a merge request the redaction
+/// service denies takes its edge with it.
+pub(super) async fn peer_joins_carry_the_edges_they_cross(ctx: &TestContext) {
+    let peers = peers(ctx);
+    let (all, wide) = (&[2010, 2011], &["1/100/", "1/555/"]);
+    let deploys = [
+        format!("Rollout:1 -DEPLOYS-> Release:{RELEASE_A}"),
+        format!("Rollout:2 -DEPLOYS-> Release:{RELEASE_B}"),
+    ];
+    let (_, both) = peers.joined(ROLLED_OUT, wide).await;
+    assert_eq!(edges(&both, all), deploys);
+    let (_, one) = peers.joined(ROLLED_OUT, &["1/100/"]).await;
+    assert_eq!(edges(&one, all), [deploys[0].clone()]);
+    let (_, none) = peers.joined(ROLLED_OUT, &["1/101/"]).await;
+    assert_eq!(edges(&none, all), Vec::<String>::new());
+
+    let ships = [
+        format!("Release:{RELEASE_B} -SHIPS-> MergeRequest:2011"),
+        format!("Release:{RELEASE_A} -SHIPS-> MergeRequest:2010"),
+    ];
+    let (_, both) = peers.joined(SHIPPED, wide).await;
+    assert_eq!(edges(&both, all), ships);
+    assert_eq!(edges(&both, &[2010]), [ships[1].clone()]);
+    let (_, none) = peers.joined(SHIPPED, &["1/101/"]).await;
+    assert_eq!(edges(&none, all), Vec::<String>::new());
+
+    let reviews = [
+        "Review:1 -REVIEWS-> MergeRequest:2010",
+        "Review:2 -REVIEWS-> MergeRequest:2011",
+        "Review:3 -REVIEWS-> MergeRequest:2010",
+    ];
+    let (_, both) = peers.joined(REVIEWED, wide).await;
+    assert_eq!(edges(&both, all), reviews);
+    let (_, narrow) = peers.joined(REVIEWED, &["1/100/"]).await;
+    assert_eq!(edges(&narrow, &[2010]), [reviews[0]]);
+    let (_, none) = peers.joined(REVIEWED, &["1/101/"]).await;
+    assert_eq!(edges(&none, all), Vec::<String>::new());
 }

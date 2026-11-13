@@ -49,12 +49,10 @@ cases:
     description: The default caller's rows carry the edge of every relationship the pattern follows
     config:
       security: default
-      expected_failure:
-        reason: "A relationship that crosses a stage boundary returns no edges, because the engine's result contract carries no crossing edge metadata. round3-core is fixing it."
-        message: DEVELOPED_IN edge set mismatch
     query: |
       MATCH (i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest) WHERE i.status_category <> 'new' RETURN i.key, mr.title ORDER BY i.key LIMIT 20
     expect:
+      node_count: 6
       skip_requirements: ["filter:status_category", node_ids, order_by]
       edges:
         DEVELOPED_IN:
@@ -66,12 +64,10 @@ cases:
     description: The group_100 caller's rows carry the edge of every relationship the pattern follows
     config:
       security: group_100
-      expected_failure:
-        reason: "A relationship that crosses a stage boundary returns no edges, because the engine's result contract carries no crossing edge metadata. round3-core is fixing it."
-        message: DEVELOPED_IN edge set mismatch
     query: |
       MATCH (i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest) WHERE i.status_category <> 'new' RETURN i.key, mr.title ORDER BY i.key LIMIT 20
     expect:
+      node_count: 4
       skip_requirements: ["filter:status_category", node_ids, order_by]
       edges:
         DEVELOPED_IN:

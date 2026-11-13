@@ -9,7 +9,8 @@ use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use compiler::dag::Rendered;
 use compiler::orbit_authorization::{Checks, Grants, Key};
-use integration_testkit::dag_fakes::{AllowedKeys, dag_packages, run_dag};
+use integration_testkit::dag_fakes::{AllowedKeys, dag_packages, response_edges, run_dag};
+use integration_testkit::mock_redaction::MockRedactionService;
 use integration_testkit::{TestContext, t};
 use orbit_server::pipeline::graph_executors;
 use query_engine::pipeline::{AuthorizedPath, SecurityContext};
@@ -65,11 +66,31 @@ async fn run(
     paths: &[&str],
     allowed: &[i64],
 ) -> (Vec<Event>, Vec<RecordBatch>) {
+    let (events, outcome) = joined(ctx, query, paths, allowed).await;
+    (events, outcome.executed.batches)
+}
+
+/// The same run, returning the whole outcome.
+async fn joined(
+    ctx: &TestContext,
+    query: &str,
+    paths: &[&str],
+    allowed: &[i64],
+) -> (Vec<Event>, Outcome) {
     let checks = AllowedKeys::checks("project", allowed.iter().copied().map(Key::Int));
     match run_with(ctx, dag_packages(), query, paths, &checks).await {
-        (events, Ok(Outcome { executed, .. })) => (events, executed.batches),
+        (events, Ok(outcome)) => (events, outcome),
         (_, Err(error)) => panic!("{query} failed for {paths:?}: {error}"),
     }
+}
+
+/// The graph response's edges when the redaction service allows `readable` of the merge
+/// requests and every user.
+pub(super) fn edges(outcome: &Outcome, readable: &[i64]) -> Vec<String> {
+    let mut redaction = MockRedactionService::new();
+    redaction.allow("merge_request", readable);
+    redaction.allow("user", &[1, 2, 3]);
+    response_edges(outcome, &redaction)
 }
 
 /// One run of `query` over `packages` through the server's ClickHouse executor.
@@ -218,6 +239,23 @@ pub(super) async fn merge_requests_join_the_slack_messages_that_discuss_them(ctx
     let (events, none) = run(ctx, DISCUSSED, &["1/100/1000/"], &[]).await;
     assert!(remote_requests(&events, 1).is_empty());
     assert_eq!(pairs(&none), []);
+}
+
+/// The joined rows carry the DISCUSSES edge between the endpoints the engine joins: a message
+/// outside the caller's workspaces never comes back, a merge request the redaction service
+/// denies takes its edges with it, and a caller who reads nothing gets no edge.
+pub(super) async fn the_joined_rows_carry_the_edges_they_cross(ctx: &TestContext) {
+    let discusses = [
+        "SlackMessage:m1 -DISCUSSES-> MergeRequest:2000",
+        "SlackMessage:m4 -DISCUSSES-> MergeRequest:2001",
+        "SlackMessage:m5 -DISCUSSES-> MergeRequest:2000",
+    ];
+    let (_, all) = joined(ctx, DISCUSSED, &["1/100/", "1/101/"], &[]).await;
+    assert_eq!(edges(&all, &[2000, 2001]), discusses);
+    let (_, part) = joined(ctx, DISCUSSED, &["1/100/"], &[]).await;
+    assert_eq!(edges(&part, &[2000]), [discusses[0]]);
+    let (_, none) = joined(ctx, DISCUSSED, &["1/100/1000/"], &[]).await;
+    assert_eq!(edges(&none, &[2000, 2001]), Vec::<String>::new());
 }
 
 /// A code search names projects 42 and 77; each caller searches only the repositories its scope
