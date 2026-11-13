@@ -8,18 +8,14 @@ stages:
     rules:
       - match: '(section $N:heading $K:section_key $$$C)'
         replace: '(__def (__defname @$N) (__section) (__fqn_segment @$K) $$$C)'
-      - match: '(front_matter $N:name $K:segment $$$C)'
-        replace: '(__def (__defname @$N) (__front_matter) (__fqn_segment @$K) $$$C)'
-      - match: '(front_matter_field $N:name $K:segment)'
-        replace: '(__def (__defname @$N) (__front_matter_field) (__fqn_segment @$K))'
+      - match: '(front_matter $N:name $K:segment)'
+        replace: '(__def (__defname @$N) (__front_matter) (__fqn_segment @$K))'
 
   - name: tag-defs
     rules:
       - match: '(__def (__section))'
         tag: { scoped: "true", definition_span: "true" }
       - match: '(__def (__front_matter))'
-        tag: { scoped: "true", definition_span: "true" }
-      - match: '(__def (__front_matter_field))'
         tag: { definition_span: "true" }
 
 resolve:
@@ -45,5 +41,3 @@ display:
         tag: { def_type: Section }
       - match: '(__def (__front_matter))'
         tag: { def_type: FrontMatter }
-      - match: '(__def (__front_matter_field))'
-        tag: { def_type: FrontMatterField }

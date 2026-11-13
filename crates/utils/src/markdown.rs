@@ -8,8 +8,6 @@ pub const FQN_SEPARATOR: &str = "#";
 
 pub const MAX_SECTIONS_PER_FILE: usize = 10_000;
 
-pub const MAX_FRONT_MATTER_FIELDS: usize = 1_000;
-
 /// Name and FQN segment of the front matter block. A top-level section whose
 /// heading is the same text gets a suffixed segment instead.
 pub const FRONT_MATTER_NAME: &str = "front_matter";
@@ -26,18 +24,6 @@ pub struct Document {
 /// of its closing `---`. Blank lines after the block are not part of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontMatter {
-    pub start: usize,
-    pub end: usize,
-    pub fields: Vec<FrontMatterField>,
-}
-
-/// A top-level key of the front matter, with its whole value: nested maps,
-/// lists and block scalars included, trailing blank and comment lines not.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FrontMatterField {
-    pub key: String,
-    /// The escaped key, suffixed `-N` when an earlier key already uses it.
-    pub segment: String,
     pub start: usize,
     pub end: usize,
 }
@@ -125,70 +111,10 @@ fn parse_front_matter(source: &str, block: &str) -> FrontMatter {
     } else {
         usize::from(line_ending.starts_with('\n'))
     };
-    let yaml_start = block.find('\n').map_or(block.len(), |i| i + 1);
-    let yaml_end = through_delimiter.len() - FRONT_MATTER_DELIMITER.len();
     FrontMatter {
         start,
         end: start + through_delimiter.len() + line_ending,
-        fields: front_matter_fields(&block[yaml_start..yaml_end], start + yaml_start),
     }
-}
-
-/// Top-level keys come from a line scan, not a YAML parser: a field starts at
-/// a column-0 `key:` line and ends at the last content line before the next
-/// one. Anything that is not a block mapping yields no fields.
-fn front_matter_fields(yaml: &str, offset: usize) -> Vec<FrontMatterField> {
-    let mut fields: Vec<FrontMatterField> = Vec::new();
-    let mut line_start = offset;
-    for line in yaml.split_inclusive('\n') {
-        let line_end = line_start + line.len();
-        if let Some(key) = top_level_key(line) {
-            if fields.len() == MAX_FRONT_MATTER_FIELDS {
-                break;
-            }
-            fields.push(FrontMatterField {
-                segment: escape_segment(key),
-                key: key.to_string(),
-                start: line_start,
-                end: line_end,
-            });
-        } else if let Some(field) = fields.last_mut()
-            && !line.trim().is_empty()
-            && !line.starts_with('#')
-        {
-            field.end = line_end;
-        }
-        line_start = line_end;
-    }
-    let mut keys = SiblingSegments::default();
-    keys.used
-        .extend(fields.iter().map(|field| field.segment.clone()));
-    for field in &mut fields {
-        field.segment = keys.claim(std::mem::take(&mut field.segment));
-    }
-    fields
-}
-
-/// The key of a column-0 `key: value` line, plain or quoted. Lines that start
-/// with whitespace, a comment or another YAML indicator are not keys.
-fn top_level_key(line: &str) -> Option<&str> {
-    let line = line.trim_end_matches(['\r', '\n']);
-    let (key, rest) = match line.chars().next()? {
-        quote @ ('"' | '\'') => {
-            let close = line[1..].find(quote)? + 1;
-            (&line[1..close], line[close + 1..].trim_start())
-        }
-        first if first.is_whitespace() || "-?:,[]{}#&*!|>%@`".contains(first) => return None,
-        _ => {
-            let colon = line
-                .match_indices(':')
-                .map(|(i, _)| i)
-                .find(|&i| line[i + 1..].is_empty() || line[i + 1..].starts_with([' ', '\t']))?;
-            (line[..colon].trim_end(), &line[colon..])
-        }
-    };
-    let after = rest.strip_prefix(':')?;
-    (!key.is_empty() && (after.is_empty() || after.starts_with([' ', '\t']))).then_some(key)
 }
 
 pub fn segment_path(sections: &[Section], index: usize) -> Vec<&str> {
@@ -322,14 +248,6 @@ mod tests {
 
     fn front_matter(source: &str) -> FrontMatter {
         parse(source).front_matter.expect("front matter")
-    }
-
-    fn fields(source: &str) -> Vec<(String, &str)> {
-        front_matter(source)
-            .fields
-            .into_iter()
-            .map(|field| (field.segment, &source[field.start..field.end]))
-            .collect()
     }
 
     fn fqns(source: &str) -> Vec<String> {
@@ -479,10 +397,6 @@ mod tests {
         let source = "---\r\ntitle: Doc\r\n---\r\n\r\n# Real\r\n";
         let crlf = front_matter(source);
         assert_eq!(crlf.end, "---\r\ntitle: Doc\r\n---\r\n".len());
-        assert_eq!(
-            fields(source),
-            vec![("title".to_string(), "title: Doc\r\n")]
-        );
 
         let at_eof = "---\ntitle: Doc\n---";
         assert_eq!(front_matter(at_eof).end, at_eof.len());
@@ -490,70 +404,13 @@ mod tests {
         let with_bom = "\u{feff}---\ntitle: Doc\n---\n";
         let bom = front_matter(with_bom);
         assert_eq!((bom.start, bom.end), (3, with_bom.len()));
-        assert_eq!(
-            fields(with_bom),
-            vec![("title".to_string(), "title: Doc\n")]
-        );
     }
 
     #[test]
-    fn a_blank_front_matter_block_has_no_fields_and_adjacent_delimiters_are_not_one() {
+    fn a_blank_front_matter_block_counts_and_adjacent_delimiters_do_not() {
         let blank = "---\n\n---\n\nBody\n";
-        let parsed = front_matter(blank);
-        assert_eq!(parsed.end, "---\n\n---\n".len());
-        assert!(parsed.fields.is_empty());
+        assert_eq!(front_matter(blank).end, "---\n\n---\n".len());
         assert!(parse("---\n---\n\nBody\n").front_matter.is_none());
-    }
-
-    #[test]
-    fn fields_keep_nested_values_and_drop_trailing_blank_and_comment_lines() {
-        let source = "---\n# leading: comment\ntitle: Doc\n\ndescription: >-\n  Folded\n  text\n# note: hi\ntags:\n- a\n- b\nmetadata:\n  owner: x\n\n---\n";
-        assert_eq!(
-            fields(source),
-            vec![
-                ("title".to_string(), "title: Doc\n"),
-                (
-                    "description".to_string(),
-                    "description: >-\n  Folded\n  text\n"
-                ),
-                ("tags".to_string(), "tags:\n- a\n- b\n"),
-                ("metadata".to_string(), "metadata:\n  owner: x\n"),
-            ]
-        );
-    }
-
-    #[test]
-    fn keys_are_plain_or_quoted_and_values_may_hold_colons() {
-        let source = "---\nurl: https://x.test/a:b\n\"quoted key\": 1\n'single': 2\nkey:value\n- item: 3\n  indented: 4\n---\n";
-        let keys: Vec<String> = fields(source).into_iter().map(|(key, _)| key).collect();
-        assert_eq!(keys, vec!["url", "quoted key", "single"]);
-        assert_eq!(
-            fields(source)[2].1,
-            "'single': 2\nkey:value\n- item: 3\n  indented: 4\n"
-        );
-    }
-
-    #[test]
-    fn duplicate_and_hash_keys_get_unique_escaped_segments() {
-        let parsed = front_matter("---\na: 1\na: 2\na-1: 3\nc#: 4\n---\n");
-        let keys: Vec<(&str, &str)> = parsed
-            .fields
-            .iter()
-            .map(|field| (field.key.as_str(), field.segment.as_str()))
-            .collect();
-        assert_eq!(
-            keys,
-            vec![("a", "a"), ("a", "a-2"), ("a-1", "a-1"), ("c#", "c\\#")]
-        );
-    }
-
-    #[test]
-    fn front_matter_fields_are_capped() {
-        let keys: String = (0..MAX_FRONT_MATTER_FIELDS + 5)
-            .map(|i| format!("k{i}: v\n"))
-            .collect();
-        let parsed = front_matter(&format!("---\n{keys}---\n"));
-        assert_eq!(parsed.fields.len(), MAX_FRONT_MATTER_FIELDS);
     }
 
     #[test]
@@ -573,19 +430,15 @@ mod tests {
             "---\n\u{e9}: x\n  \u{4f60}\n---",
             "---\r\n\"\u{e9}\": 1\r\n---\r\n\r\n",
         ] {
-            let parsed = front_matter(source);
-            let offsets = std::iter::once((parsed.start, parsed.end))
-                .chain(parsed.fields.iter().map(|field| (field.start, field.end)));
-            for (start, end) in offsets {
-                assert!(
-                    start <= end && end <= source.len(),
-                    "{start}..{end} in {source:?}"
-                );
-                assert!(
-                    source.get(start..end).is_some(),
-                    "{start}..{end} in {source:?}"
-                );
-            }
+            let FrontMatter { start, end } = front_matter(source);
+            assert!(
+                start <= end && end <= source.len(),
+                "{start}..{end} in {source:?}"
+            );
+            assert!(
+                source.get(start..end).is_some(),
+                "{start}..{end} in {source:?}"
+            );
         }
     }
 }

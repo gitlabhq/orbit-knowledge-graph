@@ -57,23 +57,6 @@ fn parse_markdown(
             is_top_level: true,
             metadata: None,
         });
-        definitions.extend(
-            front_matter
-                .fields
-                .into_iter()
-                .map(|field| CanonicalDefinition {
-                    definition_type: "FrontMatterField",
-                    kind: DefKind::Property,
-                    fqn: Fqn::from_segments(
-                        &[stem, FRONT_MATTER_NAME, &field.segment],
-                        FQN_SEPARATOR,
-                    ),
-                    name: field.key,
-                    range: range(field.start, field.end),
-                    is_top_level: false,
-                    metadata: None,
-                }),
-        );
     }
     definitions.extend(sections.iter().enumerate().map(|(index, section)| {
         let parts: Vec<&str> = std::iter::once(stem)
@@ -188,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn front_matter_becomes_a_block_and_one_field_per_top_level_key() {
+    fn front_matter_becomes_one_definition_covering_the_whole_block() {
         let src = "---\ntitle: \"ADR 000\"\nauthors:\n  - \"@x\"\n---\n\n# Real Heading\n\nBody.\n";
         let result = parse(src).unwrap();
         let rows: Vec<(&str, &str, String, &str, bool)> = result
@@ -216,20 +199,6 @@ mod tests {
                     true,
                 ),
                 (
-                    "FrontMatterField",
-                    "title",
-                    "guide#front_matter#title".to_string(),
-                    "title: \"ADR 000\"\n",
-                    false,
-                ),
-                (
-                    "FrontMatterField",
-                    "authors",
-                    "guide#front_matter#authors".to_string(),
-                    "authors:\n  - \"@x\"\n",
-                    false,
-                ),
-                (
                     "Section",
                     "Real Heading",
                     "guide#Real Heading".to_string(),
@@ -241,11 +210,6 @@ mod tests {
         let block = &result.definitions[0];
         assert_eq!(block.kind, DefKind::Other);
         assert_eq!((block.range.start.line, block.range.end.line), (0, 4));
-        assert!(
-            result.definitions[1..3]
-                .iter()
-                .all(|d| d.kind == DefKind::Property)
-        );
     }
 
     #[test]
