@@ -40,7 +40,7 @@ relationships:
     variants: {User -> MergeRequest: {cardinality: many_to_many}}
 ```
 
-The authorization fragment declares the entity's scope and the permission that a read needs. `enforce` holds the policy for each backend that stores the entity. Each entry in `checks` names a provider that checks the returned rows:
+The authorization fragment declares the entity's scope and the permission that a read needs. `enforce` holds the policy for each backend that stores the entity. Each entry in `checks` names a provider, a permission and the provider's resource type, and that provider checks the returned rows:
 
 ```yaml
 # packages/gitlab.code_review/authorization.yaml
@@ -53,7 +53,7 @@ entities:
     enforce:
       clickhouse: {scope_key: traversal_path}
     checks:
-      - {provider: rails, permission: read_merge_request}
+      - {provider: rails, permission: read_merge_request, resource: merge_request}
     properties:
       open: [id, iid, title, state, author_id]
       hidden: [traversal_path]
@@ -72,7 +72,7 @@ The ClickHouse policy limits every `MergeRequest` read to the paths where the ca
 
 `properties` puts every property in one access class. A query can read and filter `open` properties freely, and it never sees `hidden` ones. `of: target` means that the caller must hold the merge request's scope, wherever the user sits.
 
-The platform package declares the permissions and scope kinds that every package uses:
+The platform package declares the permissions and the scopes that every package uses. Each scope names its kind and the provider that answers it:
 
 ```yaml
 # packages/gitlab/authorization.yaml
@@ -80,33 +80,35 @@ kind: authorization
 package: gitlab
 permissions: [read, read_user, read_code, read_merge_request, read_vulnerability]
 scopes:
-  namespace: {kind: hierarchy}
-  user: {kind: owner, entity: User}
+  namespace: {kind: hierarchy, provider: gitlab_session}
+  user: {kind: owner, entity: User, provider: gitlab_session}
+  global: {kind: global, provider: gitlab_session}
 entities:
   User:
     scope: global
     permission: read
     checks:
-      - {provider: rails, permission: read_user}
+      - {provider: rails, permission: read_user, resource: user}
     properties:
       open: [id, username, name]
 ```
 
-An entity without its own scope key reaches one through a relationship. A `Commit` takes its project's path:
+A check can ask about another entity. A `Commit` row holds its project's path as its scope key, and its Rails check asks about the commit's project:
 
 ```yaml
   Commit:
     scope: namespace
     permission: read
     enforce:
-      clickhouse: {scope_key: {via: IN_PROJECT}}
+      clickhouse: {scope_key: traversal_path}
     checks:
-      - {provider: rails, permission: read_code, object: Project, id: project_id}
+      - {provider: rails, permission: read_code, resource: project, object: Project, id: project_id}
     properties:
       open: [id, sha, message, project_id]
+      hidden: [traversal_path]
 ```
 
-`of: holder` on `IN_PROJECT` makes the project that holds the commit the scope entity.
+A code or live store can reach its scope key through a relationship with `via` instead, as `File` does in [Add a backend](#add-a-backend).
 
 The storage fragment lays out the entity in a store. The loader infers nothing, so it catches a forgotten column before any query runs. Shared fields work on every backend. A `backend` block holds fields that only its backend understands and validates.
 
@@ -126,6 +128,7 @@ entities:
       state: {backend: {type: LowCardinality(String)}}
       author_id: {backend: {type: Nullable(Int64)}}
       traversal_path: {backend: {type: String}}
+    accepts: [id, author_id]
     access: {filter: [state, author_id], text: [title], order: [id]}
     backend:
       primary_key: [traversal_path, id]
@@ -137,6 +140,8 @@ relationships:
 ```
 
 `access` says how queries use the columns, in terms that every backend understands. ClickHouse derives its skip indexes and sort key from it, so no package writes index or sort-key details. Column storage types stay explicit. The `backend` block overrides the derived indexes only where a platform package needs it to.
+
+`accepts` names the columns that the store takes key sets on, when another stage hands it keys. Every store declares it. A store returns every column it lists, so listing `id` is what makes it return the identity.
 
 In each deployment's model, every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. A query reads the entity on that store's connection. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. Only a structural match reads elsewhere, on the code connection that searches its property. Every other store is partial and lists exactly the properties it holds. A live or code store holds no table. It lists the properties it serves, and its backend checks its own fields.
 
@@ -212,24 +217,53 @@ Publish the new package version to the registry. The registry diffs its storage 
 
 ## Add an indexed third-party source
 
-An integration that lands rows in the data lake ships a package with graph, authorization, storage and source fragments. Jira issues live in the graph store, like GitLab entities:
+An integration that lands rows in the data lake ships a package with graph, authorization, storage and source fragments. The Data Extraction Service writes the Jira rows to S3, and a DuckDB store reads them there:
 
 ```yaml
-# packages/integration.jira/sources/data_lake.yaml
+# packages/integration.jira/sources/des.yaml
 kind: source
 package: integration.jira
-source: data_lake
+source: des
+declare:
+  connection: jira_lake
+  version: _siphon_replicated_at
+  watermark: _siphon_watermark
+  deleted: _siphon_deleted
 entities:
   JiraIssue:
-    tables: [jira_issues]
+    tables: [jira_issue]
     order_by: [traversal_path, id]
     query: generated
 ```
 
-The ETL of the Data Extraction Service writes the `traversal_path` of the namespace that installed the integration on every row. That path is the scope key, so the authorization enforces a scope filter like any other entity: `enforce: {clickhouse: {scope_key: traversal_path}}`.
+`declare` names the connection that holds the source's tables and its lifecycle columns: the row version, the watermark and the deleted flag.
+
+```yaml
+# packages/integration.jira/storage/duckdb.yaml
+kind: storage
+package: integration.jira
+store: jira
+engine:
+  kind: duckdb
+  connection: jira_lake
+entities:
+  JiraIssue:
+    complete: true
+    table: jira_issue
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      key: {backend: {type: VARCHAR}}
+      summary: {backend: {type: VARCHAR}}
+      merge_request_id: {backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+    accepts: [id, merge_request_id]
+    access: {filter: [id, key, merge_request_id], text: [summary], order: [id]}
+```
+
+The ETL of the Data Extraction Service writes the `traversal_path` of the namespace that installed the integration on every row. That path is the scope key, so the authorization enforces a scope filter like any other entity: `enforce: {duckdb: {scope_key: traversal_path}}`.
 `JiraIssue` declares no check. Its node comes back only when its stage's security check proved the scope filter on the read, and otherwise the query engine redacts it.
 
-A DuckDB store over S3 can hold the rows instead, with a `duckdb` storage fragment and a `duckdb` policy. The connection's `location` in deployment config sets its mode, and the package is the same in both modes:
+The connection's `location` in deployment config sets the DuckDB mode, and the package is the same in both modes:
 
 ```yaml
 connections:
@@ -269,6 +303,7 @@ entities:
       id: {type: string}
       name: {type: string}
       namespace_id: {type: int64}
+      traversal_path: {type: string}
 relationships:
   IN_WORKSPACE:
     variants: {SlackMessage -> SlackWorkspace: {cardinality: many_to_one}}
@@ -295,15 +330,15 @@ entities:
     scope: namespace
     permission: read
     enforce:
-      clickhouse: {scope_key: {via: INSTALLED_IN}}
+      clickhouse: {scope_key: traversal_path}
     properties:
       open: [id, name]
-      hidden: [namespace_id]
+      hidden: [namespace_id, traversal_path]
 relationships:
   IN_WORKSPACE:
     scope: namespace
     permission: read
-    enforce: {live: {scope_key: {via: INSTALLED_IN}, of: holder}}
+    enforce: {}
   INSTALLED_IN:
     scope: namespace
     permission: read
@@ -328,6 +363,7 @@ entities:
       author: {}
       text: {}
       sent_at: {}
+    accepts: [workspace]
     access: {filter: [workspace, channel, author, sent_at], text: [text]}
     backend:
       operation: search.messages
@@ -336,7 +372,7 @@ relationships:
     SlackMessage -> SlackWorkspace: {fk: {on: source, column: workspace}}
 ```
 
-The workspaces live in the graph store, so `INSTALLED_IN` is a foreign key on a `SlackWorkspace` row:
+A live store keeps no edge rows, so `IN_WORKSPACE` declares no edge policy. The message's own policy decides whether the caller sees it. The workspaces live in the graph store, so `INSTALLED_IN` is a foreign key on a `SlackWorkspace` row:
 
 ```yaml
 # packages/integration.slack/storage/clickhouse.yaml
@@ -351,6 +387,8 @@ entities:
       id: {immutable: true, backend: {type: String}}
       name: {backend: {type: String}}
       namespace_id: {backend: {type: Int64}}
+      traversal_path: {backend: {type: String}}
+    accepts: [id]
     access: {order: [id]}
 relationships:
   INSTALLED_IN:
@@ -369,7 +407,7 @@ entities:
     tables: [slack_installations]
     order_by: [id]
     query: generated
-    columns: {id: workspace_id, name: workspace_name, namespace_id: namespace_id}
+    columns: {id: workspace_id, name: workspace_name, namespace_id: namespace_id, traversal_path: traversal_path}
 ```
 
 The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit. The `access` hints say which filters the operation pushes down, and any other filter is a construction error.
@@ -381,16 +419,18 @@ RETURN m.author, m.text LIMIT 20
 ```
 
 ```rust
-let live = model.physical::<Live>("data_extraction")?;
+let live = model.physical::<Live>(data_extraction)?;
 let plan = live.build(|q| {
-    let messages = q.call(live.operation("slack", "SlackMessage")?)?;
+    let messages = q.call(live.operation(slack, message)?)?;
     let messages = q.filter(messages, channel.eq("orbit-dev").and(text.contains("deploy")))?;
     q.select(q.limit(messages, 20)?, [author, text])
 })?;
 let request = live.render(&plan);
 ```
 
-The `live` policy follows each message to the namespace that installed its workspace. The live backend sends the request only for workspaces in namespaces where the caller holds `read`. The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through that sign-in.
+The variables `data_extraction`, `slack`, `message`, `channel`, `text` and `author` are handles, which the frontend resolved from the query's names.
+
+The `live` policy follows each message to the namespace that installed its workspace. A scope lookup on the graph connection resolves that chain first, because the complete store of `SlackWorkspace` is there. The live backend sends the request only for workspaces in namespaces where the caller holds `read`. The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through that sign-in.
 
 ## Add a backend
 
@@ -449,14 +489,53 @@ engine:
 entities:
   File:
     columns:
+      project_id: {}
+      branch: {}
       path: {}
       content: {}
+    accepts: [project_id, branch]
     access: {text: [path, content]}
     backend:
+      repository: {project: project_id, branch: branch}
       search: {content: [trigram, structural], path: [trigram]}
 ```
 
-`access` marks `path` and `content` as searchable.
+`access` marks `path` and `content` as searchable. `repository` names the columns that hold each row's project and branch.
+
+An identity can be composite. A `Head` is the head of a branch, and its identity is its project and branch:
+
+```yaml
+# packages/gitlab.source_code/graph.yaml
+entities:
+  Head:
+    identity: [project_id, branch]
+    label: branch
+    default_columns: [project_id, branch]
+    properties:
+      project_id: {type: int64}
+      branch: {type: string}
+relationships:
+  HEAD_FILE:
+    variants: {Head -> File: {cardinality: one_to_many}}
+```
+
+```yaml
+# packages/gitlab.source_code/storage/orbit_code.yaml
+entities:
+  Head:
+    complete: true
+    columns:
+      project_id: {immutable: true}
+      branch: {immutable: true}
+    accepts: [project_id, branch]
+    backend:
+      repository: {project: project_id, branch: branch}
+relationships:
+  HEAD_FILE:
+    Head -> File: {fk: {on: target, column: [project_id, branch]}}
+```
+
+A key set on `Head` holds `(project_id, branch)` pairs, and the `HEAD_FILE` foreign key joins on both columns.
 
 A store's connection serves only in the deployment shapes that list it. `config/deployments.yaml` names each shape and the connections it serves:
 
@@ -481,19 +560,19 @@ RETURN f.path, match.line, match.ARGS LIMIT 50
 ```
 
 ```rust
-let code = model.physical::<OrbitCode>("code_indexing")?;
+let code = model.physical::<OrbitCode>(code_indexing)?;
 let plan = code.build(|q| {
-    let files = q.repositories(code.index("code", "File")?, [project])?;
+    let files = q.repositories(code.index(code_store, file)?, [project])?;
     let files = q.languages(files, [Language::Rust])?;
     let files = q.prefilter(files, Trigrams::of(["compile"]))?;
     let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)"))?;
     let hits = q.top(hits, 50)?;
-    q.select(hits, [hits.field("path")?, hits.field("line")?, hits.capture("ARGS")?])
+    q.select(hits, [hits.field(path)?, hits.field("line")?, hits.capture("ARGS")?])
 })?;
 let request = code.render(&plan);
 ```
 
-The planner adds the trigram prefilter: it takes the pattern's literal atoms and narrows the candidate files before the structural pass. The request goes over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. `File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction.
+The planner adds the trigram prefilter: it takes the pattern's literal atoms and narrows the candidate files before the structural pass. The request goes over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures. As in the live example, `code_indexing`, `code_store`, `file` and `path` are handles that the frontend resolved. `File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction. `of: holder` on `IN_PROJECT` makes the project that holds the file the scope entity.
 
 ## Add a namespace overlay
 
@@ -565,6 +644,7 @@ entities:
       id: {immutable: true, backend: {type: String}}
       summary: {backend: {type: String, codec: [ZSTD(3)]}}
       traversal_path: {backend: {type: String}}
+    accepts: [id]
     access: {text: [summary], order: [traversal_path, id]}
 relationships:
   ABOUT:
@@ -597,15 +677,16 @@ entities:
       clickhouse: {owner: OWNS}
     properties:
       open: [id, title, state]
+      hidden: [user_id]
 relationships:
   OWNS:
     scope: user
     permission: read
     enforce:
-      clickhouse: {of: target}
+      clickhouse: {scope_key: user_id, of: target}
 ```
 
-The graph must give `OWNS` one owner per todo, and storage decides whether the owner check reads a column or an edge. `OWNS` itself takes `of: target`, so a caller sees the edge only when they may see the todo.
+The graph must give `OWNS` one owner per todo. Storage binds `OWNS` as a foreign key on the todo row, and the owner check reads that column. `OWNS` itself takes `scope_key: user_id` and `of: target`, so a caller sees the edge only when they may see the todo.
 
 ## Add an authorization provider
 
@@ -615,7 +696,7 @@ A provider is a Rust module that answers one or more authorization queries. Each
 |---|---|---|
 | `Identify` | who sent this request | `Caller` |
 | `Scopes` | which scope keys the caller holds a permission in | `ScopeSet`: `All`, `Keys` or `Subtrees` |
-| `Check` | which of these rows the caller may use with a permission | the allowed rows |
+| `Check` | which of these rows the caller may use with a permission | the allowed keys of each request, in one batch |
 | `Credentials` | the caller's sign-in for a delegated service | `Credential` |
 
 ```rust
@@ -627,8 +708,11 @@ pub trait Module: Sized {
     const KIND: &'static str;
     type Options: DeserializeOwned;
     fn build(options: Self::Options) -> Result<Self, AuthError>;
+    fn answers(self: Arc<Self>, needs: &[Need]) -> Result<Answers, AuthError>;
 }
 ```
+
+`answers` receives the scopes and permissions that the model needs. It returns the queries that the module answers, and whether its `Scopes` answers are exact.
 
 The GitLab modules wrap the Rails session and redaction calls that already exist:
 
@@ -708,20 +792,27 @@ The loader collects every error with its package and fails once. A missing decla
 
 - An unknown entity, property, relationship, variant, permission, scope, provider, field or template.
 - An entity or variant declared twice, or a second authorization entry.
+- A field that its fragment's schema does not know, or a missing required backend field. A live store requires `operation`, and a code store requires `repository`.
+- A reference that resolves to no declared fact, or to a fact of the wrong type.
+- A declared fact that no backend reads.
 - An entity with no `id`, `identity`, `default_columns` or authorization entry, or with an `identity` property that does not exist.
 - A property that its complete store neither stores nor excludes. In a relational store, a column without a storage type or an entity without a table.
 - A property or relationship attribute with no access class, or with two.
-- A relationship without a scope, a permission, or an `of:` on each variant's policy.
+- A scope without a `provider`, or a row check without a `resource`.
+- A global entity with an `enforce` entry.
+- A relationship without a scope or a permission, or a relational edge policy without a `scope_key` and an `of:`.
 - A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none` or checks by any provider. An integration package may declare only `Credentials` checks. A namespace overlay declares no checks, and its entities must be namespace- or user-scoped.
-- A backend that stores a non-global entity or a relationship but has no `enforce` entry for it.
+- A backend that stores a non-global entity but has no `enforce` entry for it, or a relational store that binds a relationship without one.
 - A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.
 - A `via` chain that does not reach an entity that holds the scope key, or a step with more than one target.
 - An `enforce` entry of `none` with no `checks`.
 - A provider name the deployment does not bind, or one bound to a module that does not answer the query the check needs.
-- A user-scoped entity whose owner relationship does not reach `User`, or allows more than one owner per row.
+- A user-scoped entity whose owner relationship does not reach `User` or allows more than one owner per row. The owner relationship must be a foreign key on the entity's row.
 - An unknown deployment shape.
 - A stored entity with no `complete: true` store in the deployment's model, or with two.
+- A store entry without `accepts:`, or an `accepts:` column that the store does not list.
 - A relationship variant with no binding, or with two. A foreign key binds in the store whose table holds the column, and an edge table binds in the store that declares it.
+- An edge table whose two endpoints are not both on its connection.
 - A foreign key column, `via` step or edge-table ID column whose type differs from the identity it points to. The loader casts nothing.
 - A stored entity or edge-table variant with no writer, or with two.
 - A foreign key binding on a many-to-many variant, on the wrong side of a one-to-many variant, or on a column its table does not hold.

@@ -39,9 +39,9 @@ The next projects make these problems larger:
 
 **Versioned packages replace the ontology. A loader checks them once, and every plan is built, rewritten and rendered through the model's checked catalogs.**
 
-1. **Packages declare everything.** Code knows no entity, relationship, table, connection, permission or domain by name. It holds no default for a fact that a package can declare. A missing declaration fails the load.
+1. **Packages declare everything.** Code knows no entity, relationship, table, connection, permission or domain by name. It holds no default for a fact that a package can declare. A missing declaration fails the load, and so does a declaration that nothing reads.
 2. **A package is a set of layered fragments:** graph, storage, service, authorization and source. Each layer names only the layers inside it.
-3. **The loader works once and infers nothing.** Packages declare every column, relationship binding and access policy. Each load names a deployment shape and keeps only the storage on that shape's connections. The loader resolves every name to an ID, checks every rule, and fails once with every error. A hash of the packages and the shape's connections identifies the model, and every plan carries it.
+3. **The loader works once and infers nothing.** Packages declare every column, relationship binding and access policy. Each load names a deployment shape and keeps only the storage on that shape's connections. The loader resolves every name to a typed handle, checks every rule, and fails once with every error. It seals one resolved model per deployment shape, and code reads facts only through its handles. A hash of the packages and the shape's connections identifies the model, and every plan carries it.
 4. **Packages load at runtime from a registry.** Each package has its own version line, and a new version needs no rebuild or deploy. The publisher's tier limits what a package can declare. A version goes live after its backfill, and the query engine then swaps models atomically.
 5. **Each backend implements one trait.** Its catalog is the typed view of one connection: its stores, its physical schema and the facts of its engine. There is one logical plan language, and one physical plan language per kind of backend. The catalog builds, checks and renders plans into SQL with parameters or a native request. Shared code never checks a backend name.
 6. **Frontends parse, and compiler phases plan.** A frontend builds a logical plan, and construction errors replace the validation pass. The planning phase builds the physical plan in one step. Shared tracking checks every connection when the builder makes it. Rewrites use the same builder, so no phase can leave an invalid plan.
@@ -65,13 +65,13 @@ RETURN u.username, mr.title LIMIT 10
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 45, "rankSpacing": 55}}}%%
 flowchart TB
     accTitle: The data model in one picture
-    accDescr: The package registry feeds the loader, which checks packages once into the model. The model exposes a logical catalog and one physical catalog per connection, both built on shared tracking. The query engine parses through the frontends and builds and rewrites physical plans through the catalogs, which send SQL, gRPC or live calls to the backends. The indexing engine reads sources and storage from the model and writes rows to ClickHouse.
+    accDescr: The package registry feeds the loader, which checks packages once into the resolved model. The model exposes a logical catalog and one physical catalog per connection, both built on shared tracking. The query engine parses through the frontends and builds and rewrites physical plans through the catalogs, which send SQL, gRPC or live calls to the backends. The indexing engine reads sources and storage from the model and writes rows to ClickHouse.
     REG[("Package registry<br/>gitlab.*, integration.jira,<br/>integration.slack, overlay.agent_memory")]
     E["Query engine<br/>(compiler phases)"]
     L["Loader"]
     IX["Indexing engine<br/>(ADR 023)"]
     S["Frontends (GQL)"]
-    M["Model<br/>(graph, stores, policies,<br/>sources, ModelId)"]
+    M["Resolved model<br/>(typed handles for graph, stores,<br/>policies and sources, ModelId)"]
     LC["Logical catalog"]
     PC["Physical catalogs<br/>(one per connection)"]
     T["Shared tracking"]
@@ -148,9 +148,9 @@ packages/
 │   ├── graph.yaml
 │   ├── authorization.yaml
 │   ├── storage/
-│   │   └── clickhouse.yaml
+│   │   └── duckdb.yaml
 │   └── sources/
-│       └── data_lake.yaml
+│       └── des.yaml
 ├── integration.slack/
 │   ├── package.yaml
 │   ├── graph.yaml
@@ -189,8 +189,8 @@ rectangle "<b>Namespace model</b>  (one ModelId)\nthe active version of every pa
   }
   rectangle "<b>Platform packages</b>\nmay declare anything" as T1 #F8FAFC {
     rectangle "<b>package gitlab.code_review</b>\npackage.yaml: requires gitlab" as P #F1F5F9 {
-      rectangle "<b>Layer 2: authorization, source</b>\npermission: read, enforce: clickhouse scope_key\nchecks: rails read_merge_request\nsource: siphon tables, query, column map" as L2 #E2E8F0 {
-        rectangle "<b>Layer 1: storage, service</b>\ntable gl_merge_request, every column and type\nAUTHORED: foreign key author_id\naccess hints, immutable columns" as L1 #CBD5E1 {
+      rectangle "<b>Layer 2: authorization, source</b>\npermission: read, enforce: clickhouse scope_key\nchecks: rails read_merge_request, resource merge_request\nsource: siphon tables, query, column map" as L2 #E2E8F0 {
+        rectangle "<b>Layer 1: storage, service</b>\ntable gl_merge_request, every column and type\nAUTHORED: foreign key author_id\naccepts: id, author_id\naccess hints, immutable columns" as L1 #CBD5E1 {
           rectangle "<b>Layer 0: graph</b>\nMergeRequest: properties, types, defaults\nAUTHORED: User -> MergeRequest, one to many" as L0 #FFFFFF
         }
       }
@@ -204,11 +204,11 @@ Each layer names only the layers inside it, and the loader checks them from the 
 
 | Layer | Fragment | Names | Owns |
 |---|---|---|---|
-| 0 | graph | nothing | entities with identity, properties, types and defaults; relationship variants with cardinality and edge attributes |
-| 1 | storage | the graph | tables, typed columns, immutable columns, access and statistics hints, a foreign key or edge table for every variant |
+| 0 | graph | nothing | entities with an identity of one property or a list, properties, types and defaults; relationship variants with cardinality and edge attributes |
+| 1 | storage | the graph | tables, typed columns, immutable columns, the columns each store accepts key sets on, access and statistics hints, a foreign key or edge table for every variant |
 | 1 | service | the graph | lookups for virtual properties |
-| 2 | authorization | the graph, backends, providers | scope, permission, one policy per backend, checks by provider |
-| 2 | source | the graph | every writer: source tables, templates and a column map, or the code indexer; rows land in the tables that storage binds |
+| 2 | authorization | the graph, backends, providers | scope kinds and their providers, scope, permission, one policy per backend, checks by provider and resource |
+| 2 | source | the graph | every writer: its connection and lifecycle columns, source tables, templates and a column map, or the code indexer; rows land in the tables that storage binds |
 | package | `package.yaml` | other packages | name, `requires` |
 
 Nothing is inferred, so a forgotten column, an unbound variant or a backend without a policy fails the load.
@@ -216,13 +216,16 @@ Nothing is inferred, so a forgotten column, an unbound variant or a backend with
 Storage rules:
 
 - In each deployment's model, every stored entity marks exactly one store `complete: true`, even with one store. That store lists or excludes every property. Other stores list only what they hold.
-- Each variant is bound once, in the store that holds its rows. A foreign key lives in the store whose table holds the column, and an edge table in the store that declares it. That store can differ from the other endpoint's, as with `IN_WORKSPACE` from a live message to an indexed workspace.
+- Every store declares `accepts:` for each entity, relational stores included. It names the columns that the store takes key sets on.
+- A store returns every column it lists. So its columns decide whether it returns an entity's identity, and no other flag says so.
+- A code store declares `repository: {project: <column>, branch: <column>}` for each entity. A live store declares the `operation` it calls.
+- Each variant is bound once, in the store that holds its rows. A foreign key lives in the store whose table holds the column, and an edge table in the store that declares it. A foreign key's store can differ from the other endpoint's, as with `IN_WORKSPACE` from a live message to an indexed workspace. The two endpoints of an edge table share its connection.
 - Access hints are backend-neutral. Each backend turns them into indexes and sort keys, and a platform `backend` block can override that.
 - An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
 
 Key rules:
 
-- Keys are typed, and nothing casts them. An identity is one property such as `id`, or a composite such as a Jira site and key. Its type is that property's type: integer, string or UUID.
+- Keys are typed, and nothing casts them. An identity is one property such as `id`, or a list of properties for a composite. A Jira site and key is one composite, and the `Head` of a branch, `[project_id, branch]`, is another. Each part's type is its property's type: integer, string or UUID.
 - A foreign key column has the type of the identity it points to. An edge table declares its endpoint ID columns. A variant binds to an edge table only if both endpoint identities match its ID columns. An integration with string IDs declares its own edge table.
 - A `via` step or a join between different key types needs a declared relationship or a service lookup. The loader rejects a mismatch and never casts.
 
@@ -239,6 +242,19 @@ Four fixed places hold every fact, and nothing lives outside them:
 | Deployment config | connections and deployment shapes, providers, limits such as row and node caps, engine settings |
 | Backends, in Rust | capabilities: operators, functions, match modes, how each scope kind renders |
 | Compiler phases | decisions: routing, foreign key or edge, how to read the latest row, stage splits |
+
+Each boundary between components has one typed API, and nothing crosses outside it:
+
+| Boundary | API | What crosses |
+|---|---|---|
+| Model to engine | `ResolvedModel` handles | entity, store and edge facts |
+| Backend capabilities | the `StorageBackend` trait per backend kind | operators, functions, scope rendering |
+| Planner decisions | the phase API per (frontend, backend) | FINAL or LIMIT BY, settings, stage order |
+| Execution | the `Executor` trait, with a wire codec | requests out, typed key sets and rows in |
+| Deployment | the deployment config | connections, shapes, limits, providers |
+| Authorization | `Provider<Q>` | identity, scopes, checks, credentials |
+
+If a component needs a fact that no boundary API exposes, the fact goes into the API of the boundary it crosses, declared and typed. It never becomes a local workaround.
 
 The registry records each package's tier from its publisher, and the loader enforces it:
 
@@ -261,9 +277,9 @@ Composition rules:
 set separator none
 skinparam shadowing false
 start
-:Read the fragments of every package;
+:Read every fragment and validate it\nagainst the schema of its kind;
 :Keep the storage fragments\non the deployment shape's connections;
-:Resolve every name to an ID;
+:Resolve every name to a typed handle;
 :Check every rule\n(names, duplicates, foreign keys, connections);
 :Check every access policy;
 note right
@@ -275,12 +291,13 @@ note right
   4. providers the deployment binds,
      within the package's trust tier
 end note
+:Check that every declared fact has a reader;
 if (Any errors?) then (yes)
   :Fail once, with every error\nand the package that caused it;
   stop
 else (no)
   :Hash the packages and the shape's\nconnections into a ModelId;
-  :Publish the checked Model;
+  :Seal and publish the resolved model;
   stop
 endif
 @enduml
@@ -288,9 +305,28 @@ endif
 
 Every load names a deployment shape. `config/deployments.yaml` names each shape and the connections it serves, such as `server`, `local` and `demo`. The loader keeps only the storage fragments of the stores on that shape's connections, and then it runs every check. An unknown shape fails the load, and no load skips this filter. The runtime config selects the shape with `schema.deployment`.
 
-Code after the loader reads facts by ID, and every plan carries the `ModelId` it was built against. A missing declaration is always a load error, never a default.
+Each fragment kind and each engine kind has one schema, generated from the spec types. The schemas reject unknown fields and enforce each backend's required fields, such as `operation` for a live store and `repository` for a code store. CI validates every package against them, and editors read the published schemas.
 
-The platform package declares the permissions and the scope kinds. Every backend can render each scope kind:
+Every reference in a fragment must resolve to a declared fact of the right type. Every declared fact must also have a reader. Each backend states which fragment fields it reads, and a declaration that nothing reads fails the load. A missing declaration is always a load error, never a default.
+
+The loader seals its output into one resolved model per deployment shape. The model holds typed handles: `Entity`, `Store`, `Edge`, `Connection` and `Identity`, with typed keys and columns. The raw spec types are private to the data model crate. The model's API returns only handles. It has no lookup by name and no access to the raw spec, so no phase can read an undeclared fact. Compiler phases, the stage split, the runner and the executors read entity facts only through the resolved model. Every plan carries the `ModelId` it was built against.
+
+```mermaid
+%%{init: {"flowchart": {"curve": "linear"}}}%%
+flowchart LR
+    accTitle: The sealed model
+    accDescr: Fragments and their raw spec types stay private to the data model crate. The loader validates and resolves them, then seals the resolved model. The GQL frontend turns names into handles once. Compiler phases, the stage split, the runner and the executors read only handles.
+    F["Fragments<br/>(raw spec types,<br/>private to the crate)"] -->|validate, resolve| L["Loader"]
+    L -->|seals| RM["Resolved model<br/>(typed handles)"]
+    RM -->|handles| G["GQL frontend<br/>(names to handles, once)"]
+    RM -->|handles| C["Compiler phases, stage split,<br/>runner, executors"]
+    G -->|logical plan| C
+
+    classDef qdm fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    class F,L,RM qdm
+```
+
+The platform package declares the permissions and the scopes. Each scope names its kind and the provider that answers it. Every backend can render each scope kind:
 
 | Scope kind | Meaning | Example |
 |---|---|---|
@@ -299,7 +335,7 @@ The platform package declares the permissions and the scope kinds. Every backend
 | `owner` | one entity owns the row, and the caller must be that entity | a todo owned by its `User` |
 | `global` | no scope, only the permission | `User` |
 
-An entity declares its scope, the permission that a read needs, and one `enforce` policy per backend that stores it. Policies name graph properties and relationships, never columns:
+An entity declares its scope, the permission that a read needs, and one `enforce` policy per backend that stores it. A global entity declares no `enforce` entry. Policies name graph properties and relationships, never columns:
 
 | Policy | Example |
 |---|---|
@@ -308,9 +344,9 @@ An entity declares its scope, the permission that a read needs, and one `enforce
 | `owner` through a relationship | todo: `{clickhouse: {owner: OWNS}}` |
 | `none`, only with a check | a check-only entity |
 
-`checks` name a provider and a permission and run on returned rows. A row comes back only if every check allows it. Each check derives its own key from the row through its declared object and ID property. So a Rails check on a commit's project and a Cedar check on the commit itself can share one entity.
+`checks` name a provider, a permission and the provider's resource type, and they run on returned rows. A row comes back only if every check allows it. Each check derives its own key from the row through its declared object and ID property. So a Rails check on a commit's project and a Cedar check on the commit itself can share one entity.
 
-An entity with no checks comes back on its scope filter alone. Its node comes back only when its stage's security check proved that filter on the read. Otherwise the query engine redacts the node, so the read fails closed.
+An entity with no checks comes back on its scope filter alone. Its node comes back only when its stage's security check proved that filter on the read. Otherwise the query engine redacts the node, so the read fails closed. A global entity's filter is its permission admission.
 Rows that the Data Extraction Service writes carry `traversal_path` from its ETL, and that path is their scope key. A live third-party read uses a `Credentials` check.
 
 Every property and edge attribute has exactly one access class. If it has none or two, the load fails. The security phase enforces the classes on every plan, including plans that a phase builds directly.
@@ -458,7 +494,7 @@ CH --> Caller : rows
 @enduml
 ```
 
-The frontend records what the caller asked for and makes no planning decisions.
+The frontend records what the caller asked for and makes no planning decisions. It resolves every name to a handle once, as it parses the GQL text. After that, nothing looks anything up by name.
 The planning phase decides and builds in one step, with no intermediate plan description. Later phases rewrite through the same builder under four rules:
 
 - Inputs come before consumers.
@@ -488,7 +524,7 @@ SC --> Q : ScopeSet
 Q -> C : security: render each read's policy\nwith its ScopeSet
 Q -> B : execute
 B --> Q : rows
-Q -> CK : Check(caller, read_merge_request, keys)
+Q -> CK : Check(caller, [read_merge_request,\nmerge_request, keys])
 CK --> Q : allowed rows
 @enduml
 ```
@@ -504,16 +540,17 @@ pub trait Provider<Q: Query>: Send + Sync {
 
 pub struct Identify<'a> { pub request: &'a RequestContext }
 pub struct Scopes<'a> { pub caller: &'a Caller, pub scope: ScopeId, pub permission: PermissionId }
-pub struct Check<'a> { pub caller: &'a Caller, pub permission: PermissionId, pub object: EntityId, pub keys: &'a [Key] }
+pub struct Check<'a> { pub caller: &'a Caller, pub requests: &'a [CheckRequest] }
+pub struct CheckRequest { pub permission: PermissionId, pub resource: String, pub keys: Vec<Key> }
 pub struct Credentials<'a> { pub caller: &'a Caller, pub service: ServiceId }
 
 pub enum ScopeSet { All, Keys(Vec<Key>), Subtrees(Vec<ScopePath>) }
 pub enum Key { Int(i64), Text(String), Uuid(Uuid), Composite(Vec<Key>) }
 ```
 
-`Identify` returns the caller, `Scopes` a scope set, `Check` the allowed rows, and `Credentials` the caller's sign-in for a delegated service.
+`Identify` returns the caller, `Scopes` a scope set, and `Credentials` the caller's sign-in for a delegated service. `Check` answers a batch of requests with the allowed keys of each.
 Every ID that crosses the contract is a typed `Key`, so no provider assumes integer IDs.
-A module implements the queries it answers, and a `Module` trait builds it from its options.
+A `Module` trait builds a module from its options. When the deployment binds, it tells each module the scopes and permissions that the model needs. The module returns the queries it answers, and whether its `Scopes` answers are exact.
 The deployment config binds each provider name to a module, as it binds store connections, and names one `Identify` provider.
 Each backend renders a scope set its own way: `Subtrees` as a prefix filter, `Keys` as an `IN` list, `All` as no filter.
 Every provider fails closed, and a key set over the cap fails the query.
@@ -555,6 +592,10 @@ The planning phase turns one logical plan into the physical plan of the connecti
 | Orbit Next | code | a trigram prefilter before the ast-grep pass | repository restriction | gRPC structural search |
 | Slack | live | a push-down filter | workspace precondition, then the provider check | Data Extraction Service call |
 
+A code or live policy reaches its scope key through a `via` chain. Before the remote request goes out, a scope lookup resolves that chain.
+The scope lookup is an ordinary stage, planned like any read. It runs on the connection of the complete store of the chain's first entity, never by connection order.
+It returns the repositories or workspaces in the caller's scope set, and the remote request names only those. A `none` or `global` read needs no lookup and admits every repository or workspace.
+
 ### 8. A query that spans connections runs as a DAG of stages
 
 This query combines open merge requests in ClickHouse with code that Orbit Next keeps on S3 in its trigram index, commit manifests and code graph:
@@ -590,12 +631,12 @@ flowchart LR
 
 Every connection runs as a peer stage, relational connections included. No connection hosts the others.
 Each stage is an ordinary physical plan in its catalog's language. An edge carries a key set, which the next stage reads as an `IN` input, or rows that a later stage combines.
-A stage accepts a typed key set on any column that its store binds. It returns the key columns that its outgoing boundaries need.
+A stage accepts a typed key set only on a column that its store lists in `accepts:`. It returns every column that its store lists, and the key columns of its outgoing boundaries must be among them.
 The key types on the two sides of a boundary must match, and the loader checks them.
 The planner orders stages by selectivity: the few open merge requests limit the code search to their branches.
 The content match runs before order, limit and pagination, so those apply to matched rows only.
 
-The combine stage combines the stages' rows on their keys in process, applies the response policy, and orders, limits and pages the result. The combine stage pipeline is `[plan, result_contract, response_policy, paginate]`.
+The combine stage combines the stages' rows on their keys in process, applies the response policy, and orders, limits and pages the result. The combine stage pipeline is `[plan, result_contract, response_policy, paginate]`. Its result contract selects the result columns, tags nodes and edges, and excerpts text.
 A relationship that crosses a stage boundary returns its edges. Each edge comes from a key pair of the crossing. An edge stays only when both of its endpoints survive redaction.
 
 Every stage carries its own policy. Every node that a stage reads adds its declared checks to that stage.
@@ -608,7 +649,7 @@ Plan tests assert the logical plan, the planned DAG and the emitted DAG.
 ## Consequences
 
 - A package that fails its checks is rejected, and the previous model keeps serving. Publishing must run the same checks, so authors see errors first.
-- The loader is strict, so a fragment cannot carry unknown fields for later use.
+- The loader is strict, so a fragment cannot carry unknown fields or unread declarations for later use.
 - A CI test loads every shipped package and collects the names that the packages own: entities, relationships, tables, stores, connections, sources and providers. It fails if one appears as a literal in the non-test source of the query engine, indexer, migrations or server. It exempts property names such as `id` or `state`, because they are ordinary words in code.
 - Every scoped entity declares a policy for each backend that stores it. So a new backend for an existing entity needs a storage change and an authorization change.
 - The query engine has no built-in authorization system. A deployment without Rails supplies its own `Identify` and `Scopes` modules, plus a `Check` module if its scopes are not exact.
