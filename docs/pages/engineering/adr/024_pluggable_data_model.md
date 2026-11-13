@@ -508,7 +508,7 @@ CH --> Caller : rows
 @enduml
 ```
 
-The frontend records what the caller asked for and makes no planning decisions. It resolves the query's names, its entities and properties, to handles once, as it parses the GQL text. Everything else comes from those handles through the model. Only placement picks a read's connection and store, and the stage hands them to the backend. Nothing looks anything up by name, and tests resolve names with the explicit `Names` resolver.
+The frontend records what the caller asked for and makes no planning decisions. It resolves the query's names, its entities and properties, to handles once, as it parses the GQL text. Everything else comes from those handles through the model. Only placement picks a read's store and connection, through `complete_store(entity)` or `searching(entity, property)` and then `store.connection()`. The stage hands them to the backend. Nothing looks anything up by name, and tests resolve names with the explicit `Names` resolver.
 The planning phase decides and builds in one step, with no intermediate plan description. Later phases rewrite through the same builder under four rules:
 
 - Inputs come before consumers.
@@ -622,7 +622,7 @@ WHERE f.content CONTAINS EXACT 'TODO(security)'
 RETURN mr.iid, b.name, f.path
 ```
 
-Only placement picks a binding's connection and store, and each stage hands them to its backend. No backend calls placement. Each binding reads on the connection of its entity's `complete: true` store. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. No order or fallback rule picks another store. Only a structural match reads elsewhere, on the connection whose backend searches that property structurally.
+Only placement picks a binding's store and connection, and each stage hands them to its backend. No backend calls placement. Each binding reads its entity's `complete: true` store, from `complete_store(entity)`, on that store's `store.connection()`. If the deployment does not serve that connection, the query fails with an error that names the entity and the connection. No order or fallback rule picks another store. Only a structural match reads elsewhere, on the store that `searching(entity, property)` returns, whose backend searches that property structurally.
 
 The planner splits the logical plan into one stage per connection and connects them in a DAG:
 
