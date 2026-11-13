@@ -1,0 +1,24 @@
+---
+key_path: orbit.counts.count_total_orbit_query_executed_from_ui_weekly
+description: Weekly count of Orbit queries that came from the GitLab UI, including Code Intelligence (source_type `frontend` or `code_intelligence`)
+product_group: context_systems
+product_categories:
+- knowledge_graph
+performance_indicator_type: []
+value_type: number
+status: active
+milestone: '19.6'
+introduced_by_url: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3353
+time_frame: 7d
+data_source: internal_events
+data_category: optional
+tiers:
+- premium
+- ultimate
+events:
+- name: gkg_query_executed
+  filter:
+    orbit_query.source_type: frontend
+- name: gkg_query_executed
+  filter:
+    orbit_query.source_type: code_intelligence

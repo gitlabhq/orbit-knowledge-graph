@@ -16,13 +16,16 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
-- version: 119
+- version: 120
   scope: none
   note: >-
     Observability virtual properties on Pipeline and Job. The fingerprint hashes the
     node YAML, so declaring them reads as drift, but every one is disabled and
     resolved at query time: no stored column, no DDL, no extract SQL, and every
     indexed row is byte-identical.
+- version: 119
+  scope: none
+  note: "Finding declares extract.partition_count: 5 so its first full load splits into five id ranges, as Job does. The partition count only changes how the indexer pages the datalake, not the rows it writes, so no table DDL or indexed row changes."
 - version: 118
   scope: "*"
   note: >-

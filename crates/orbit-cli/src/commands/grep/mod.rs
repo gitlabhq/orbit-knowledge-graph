@@ -8,6 +8,7 @@ mod render;
 mod scan;
 mod term;
 
+pub(crate) use qualifier::gitlab_prefixes;
 pub(crate) use rank::is_test;
 
 use std::io::Write;
@@ -16,7 +17,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use orbit_search::{RecallFilter, query_alternatives};
 
-use crate::remote::grep::{Outcome, searched_kind};
+use crate::remote::grep::{Outcome, graph_kind, searched_kind};
 use local::LocalBackend;
 
 /// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
@@ -73,6 +74,7 @@ pub(crate) async fn run(
         false => query.map(|query| or_word(&query)),
     };
     let sections = qualifier::apply(query, &mut options, &mut paths);
+    let budget = crate::remote::grep::Budget::default();
     let mut found = false;
     for section in sections {
         if found {
@@ -92,6 +94,7 @@ pub(crate) async fn run(
             paths.clone(),
             filter,
             options,
+            &budget,
         )
         .await
         {
@@ -106,9 +109,6 @@ pub(crate) async fn run(
     }
 }
 
-/// How long a plain grep waits for the implicit `origin` GitLab search once local code has matched.
-const IMPLICIT_GITLAB_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
-
 async fn search(
     query: Option<String>,
     repo: Option<PathBuf>,
@@ -116,6 +116,7 @@ async fn search(
     paths: Vec<String>,
     mut filter: RecallFilter,
     options: Options,
+    budget: &crate::remote::grep::Budget,
 ) -> Result<()> {
     let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new("."))).ok();
     let exists = |path: &str| {
@@ -132,6 +133,7 @@ async fn search(
             exists: &exists,
             indexed: &indexed,
         },
+        budget,
     )?;
     for reason in &route.skipped {
         eprintln!("orbit: {reason}");
@@ -140,14 +142,12 @@ async fn search(
     let pending: Vec<_> = route
         .remote
         .into_iter()
-        .map(|request| {
-            let explicit = request.target.explicit();
-            let search = crate::remote::grep::search(request, label.clone());
-            (explicit, tokio::spawn(search))
-        })
+        .map(|request| tokio::spawn(crate::remote::grep::search(request, label.clone())))
         .collect();
     if !pending.is_empty() {
-        filter.kinds.retain(|kind| searched_kind(kind).is_none());
+        filter
+            .kinds
+            .retain(|kind| searched_kind(kind).is_none() && graph_kind(kind).is_none());
         if route.local.is_empty() && !filter.kinds.is_empty() {
             eprintln!(
                 "orbit: skipping hosted {}; use `{} query`",
@@ -156,8 +156,6 @@ async fn search(
             );
         }
     }
-    let remote_only = route.local.is_empty();
-    let deadline = tokio::time::Instant::now() + IMPLICIT_GITLAB_BUDGET;
     let (mut found, mut printed) = (false, false);
     for target in route.local {
         if printed {
@@ -173,21 +171,11 @@ async fn search(
         )?;
         printed = true;
     }
-    let found_locally = found;
-    for (explicit, task) in pending {
-        // The `origin` group search runs beside the local one; once code matched, it gets a short budget.
-        let outcome = match explicit || remote_only || !found_locally {
-            true => task.await,
-            false => match tokio::time::timeout_at(deadline, task).await {
-                Ok(outcome) => outcome,
-                Err(_) => Ok(Outcome::Skipped(format!(
-                    "GitLab took over {}s; `{} grep 'mr:words'` searches it alone",
-                    IMPLICIT_GITLAB_BUDGET.as_secs(),
-                    crate::commands::setup::spec::launcher()
-                ))),
-            },
-        };
-        match outcome.unwrap_or_else(|error| Outcome::Failed(error.to_string())) {
+    for task in pending {
+        match task
+            .await
+            .unwrap_or_else(|error| Outcome::Failed(error.to_string()))
+        {
             Outcome::Found(text) => {
                 let mut out = std::io::stdout().lock();
                 if printed {
@@ -197,17 +185,10 @@ async fn search(
                 out.flush()?;
                 (found, printed) = (true, true);
             }
-            Outcome::NoMatches(reason) if explicit || remote_only => {
-                eprintln!("orbit: {reason}");
-            }
-            Outcome::Skipped(reason) if explicit || remote_only => {
-                eprintln!("orbit: GitLab search skipped: {reason}");
-            }
-            Outcome::Skipped(reason) if found_locally && reason.starts_with("GitLab took over") => {
-                eprintln!("orbit: GitLab search skipped: {reason}");
-            }
+            Outcome::NoMatches(reason) => eprintln!("orbit: {reason}"),
+            Outcome::Skipped(reason) => eprintln!("orbit: GitLab search skipped: {reason}"),
             Outcome::Failed(reason) => eprintln!("orbit: GitLab search failed: {reason}"),
-            Outcome::Empty | Outcome::NoMatches(_) | Outcome::Skipped(_) => {}
+            Outcome::Empty => {}
         }
     }
     match found {
@@ -595,16 +576,27 @@ fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::K
             "pipeline" | "job" | "stage"
         )
     });
+    let graph = kinds
+        .hosted
+        .iter()
+        .find(|kind| searched_kind(kind).is_none())
+        .map(|kind| {
+            format!(
+                ", or `{launcher} grep gitlab:{}:words`",
+                kind.to_ascii_lowercase()
+            )
+        })
+        .unwrap_or_default();
     anyhow::ensure!(
         !ci || kinds.hosted.len() < requested.len(),
-        "{hosted} isn't searchable; read CI with `{launcher} context` (the current branch's MR and \
-         CI), `{launcher} context branch:name`, `pipeline:ID`, or `job:ID`"
+        "{hosted} isn't searchable here; read CI with `{launcher} context` (the current branch's MR \
+         and CI), `{launcher} context branch:name`, `pipeline:ID`, or `job:ID`{graph}"
     );
     anyhow::ensure!(
         kinds.hosted.is_empty() || kinds.hosted.len() < requested.len(),
         "{hosted} lives in the hosted graph; `{launcher} grep` searches GitLab for work items, \
          merge requests, commits, notes, milestones, users, projects, and groups only without \
-         paths or file filters. Otherwise use `{launcher} query`"
+         paths or file filters{graph}. Otherwise use `{launcher} query`"
     );
     if !kinds.hosted.is_empty() {
         eprintln!("orbit: skipping hosted {hosted}; use `{launcher} query`");

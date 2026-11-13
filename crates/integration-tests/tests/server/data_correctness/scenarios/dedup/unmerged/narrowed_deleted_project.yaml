@@ -27,6 +27,4 @@ query:
     WHERE mr.id >= 9710 AND mr.id <= 9710 AND mr.title = 'a' RETURN d.state, count(d) AS c LIMIT 10
 
 expect:
-  skip_requirements: ["node_ids", "filter:name", "filter:title"]
-  sql_contains: ["AS p FINAL", "p.name = 'project'", "p._deleted = false"]
   row_count: 0

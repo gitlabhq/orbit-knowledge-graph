@@ -5,7 +5,7 @@ use orbit_search::query_alternatives;
 
 use super::term::Term;
 use super::{Options, Output, kind};
-use crate::remote::grep::{Request, Target, searched_kind};
+use crate::remote::grep::{Budget, Request, Target, graph_kind, searched_kind};
 use crate::remote::token;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -55,6 +55,7 @@ pub(super) fn route(
     kinds: &[String],
     options: &Options,
     checkouts: Checkouts<'_>,
+    budget: &Budget,
 ) -> Result<Route> {
     let (mut local_paths, mut targets) = (Vec::new(), Vec::new());
     for path in paths {
@@ -81,10 +82,13 @@ pub(super) fn route(
             }
         }
     }
+    if let Some(kind) = kinds.iter().find(|kind| graph_kind(kind).is_some()) {
+        return graph_route(query, repo, targets, local_paths, kind, options, budget);
+    }
     let searchable = searchable(query, kinds, options);
     let remote_only = searchable.is_some() && !kinds.is_empty() && every_kind_hosted(kinds);
     let explicit = !targets.is_empty();
-    if targets.is_empty() && local_paths.is_empty() {
+    if targets.is_empty() && local_paths.is_empty() && !searched_kinds(kinds).is_empty() {
         targets.push(Target::Origin(
             repo.map_or_else(|| PathBuf::from("."), Path::to_path_buf),
         ));
@@ -123,9 +127,59 @@ pub(super) fn route(
             target,
             keywords: keywords.clone(),
             kinds: searched_kinds(kinds),
+            graph: None,
+            budget: budget.clone(),
         });
     }
     Ok(route)
+}
+
+fn graph_route(
+    query: Option<&str>,
+    repo: Option<&Path>,
+    mut targets: Vec<Target>,
+    local_paths: Vec<String>,
+    kind: &str,
+    options: &Options,
+    budget: &Budget,
+) -> Result<Route> {
+    let launcher = crate::commands::setup::spec::launcher();
+    let entity = graph_kind(kind).unwrap_or(kind);
+    anyhow::ensure!(
+        local_paths.is_empty(),
+        "{entity} is searched in GitLab, not in {}; name a GitLab project or group with repo:",
+        local_paths.join(", ")
+    );
+    let literal = Options {
+        fixed: true,
+        ..options.clone()
+    };
+    let keywords = searchable(query, &[], &literal)
+        .filter(|_| !options.word)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "{entity} search matches text inside fields, without -w, -l, -c, -q, -v, -g, or -t; use `{launcher} query`"
+            )
+        })?;
+    if targets.is_empty() {
+        targets.push(Target::Origin(
+            repo.map_or_else(|| PathBuf::from("."), Path::to_path_buf),
+        ));
+    }
+    let remote = targets
+        .into_iter()
+        .map(|target| Request {
+            target,
+            keywords: keywords.clone(),
+            kinds: Vec::new(),
+            graph: Some(kind.to_string()),
+            budget: budget.clone(),
+        })
+        .collect();
+    Ok(Route {
+        remote,
+        ..Route::default()
+    })
 }
 
 fn target_name(target: &Target) -> String {

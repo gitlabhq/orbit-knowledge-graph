@@ -13,13 +13,11 @@ use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
 
-use format::ExpectedIndex;
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
-use query_engine::compiler::passes::codegen::clickhouse::cte_statements;
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery,
-    ResultContext, SecurityContext,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
+    SecurityContext,
 };
 use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
@@ -35,7 +33,7 @@ use response::{
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
-use crate::visitor::{NodeExt, Requirement, ResponseView};
+use crate::visitor::{NodeExt, ResponseView};
 use crate::{
     SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
 };
@@ -341,14 +339,6 @@ async fn run_frontend(
         return;
     };
 
-    if expect.compile_only {
-        return;
-    }
-
-    if !expect.indexes_used.is_empty() {
-        assert_indexes_used(ctx, &compiled, &expect.indexes_used, label).await;
-    }
-
     if !expect.pages.is_empty() {
         run_pages(
             ctx,
@@ -379,9 +369,6 @@ async fn run_frontend(
         let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
         let compiled = assert_compilation(compiled, expect, frontend_key, label)
             .expect("repeated query should compile");
-        if !expect.indexes_used.is_empty() {
-            assert_indexes_used(ctx, &compiled, &expect.indexes_used, label).await;
-        }
         let output = execute_output(
             ctx,
             frontend,
@@ -393,113 +380,6 @@ async fn run_frontend(
         .await;
         let rerun = assert_output(&output, frontend, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
-    }
-}
-
-async fn assert_indexes_used(
-    ctx: &TestContext,
-    compiled: &CompiledQueryContext,
-    expected: &[ExpectedIndex],
-    label: &str,
-) {
-    let query = &compiled.base;
-    let plan = ctx.explain_plan(query).await;
-    let ctes = cte_statements(&compiled.ast).expect("CTE statements render");
-    for ExpectedIndex { table, index } in expected {
-        let mut cte_plans = Vec::new();
-        let mut scans = Vec::new();
-        read_from_merge_tree(&plan, table, &mut scans);
-        if !scans.iter().any(|scan| skip_index(scan, index).is_some()) {
-            for (_, sql, params) in &ctes {
-                let statement = ParameterizedQuery {
-                    sql: sql.clone(),
-                    params: params.clone(),
-                    result_context: query.result_context.clone(),
-                    query_config: query.query_config.clone(),
-                    dialect: query.dialect,
-                };
-                cte_plans.push(ctx.explain_plan(&statement).await);
-            }
-            for cte_plan in &cte_plans {
-                read_from_merge_tree(cte_plan, table, &mut scans);
-            }
-        }
-        assert!(
-            !scans.is_empty(),
-            "{label}: no ReadFromMergeTree step for table {table}"
-        );
-        assert!(
-            scans.iter().any(|scan| skip_index(scan, index).is_some()),
-            "{label}: skip index {index} not applied on any {table} scan"
-        );
-        assert!(
-            scans.iter().any(|scan| index_pruned(scan, index)),
-            "{label}: skip index {index} did not prune granules on any {table} scan"
-        );
-    }
-}
-
-fn index_pruned(value: &serde_json::Value, index: &str) -> bool {
-    let pruned = |entry: &serde_json::Value| {
-        let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
-        let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
-        selected < initial
-    };
-    skip_index(value, index).is_some()
-        && [index, "<Combined skip indexes>"]
-            .iter()
-            .any(|name| skip_index(value, name).is_some_and(pruned))
-}
-
-fn unversioned_table(description: &str) -> &str {
-    let table = description.rsplit('.').next().unwrap_or(description);
-    match table
-        .strip_prefix('v')
-        .and_then(|rest| rest.split_once('_'))
-    {
-        Some((version, unversioned)) if version.chars().all(|c| c.is_ascii_digit()) => unversioned,
-        _ => table,
-    }
-}
-
-fn read_from_merge_tree<'a>(
-    value: &'a serde_json::Value,
-    table: &str,
-    scans: &mut Vec<&'a serde_json::Value>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            let is_scan = map.get("Node Type").and_then(serde_json::Value::as_str)
-                == Some("ReadFromMergeTree");
-            let scans_table = map
-                .get("Description")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|description| unversioned_table(description) == table);
-            if is_scan && scans_table {
-                scans.push(value);
-            }
-            map.values()
-                .for_each(|child| read_from_merge_tree(child, table, scans));
-        }
-        serde_json::Value::Array(items) => items
-            .iter()
-            .for_each(|child| read_from_merge_tree(child, table, scans)),
-        _ => {}
-    }
-}
-
-fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
-    match value {
-        serde_json::Value::Object(map) => {
-            if map.get("Type").and_then(serde_json::Value::as_str) == Some("Skip")
-                && map.get("Name").and_then(serde_json::Value::as_str) == Some(name)
-            {
-                return Some(value);
-            }
-            map.values().find_map(|v| skip_index(v, name))
-        }
-        serde_json::Value::Array(items) => items.iter().find_map(|v| skip_index(v, name)),
-        _ => None,
     }
 }
 
@@ -711,11 +591,6 @@ fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) 
 }
 
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
-    for req_name in &expect.skip_requirements {
-        if let Some(req) = parse_requirement(req_name) {
-            view.skip_requirement(req);
-        }
-    }
     if let Some(n) = expect.node_count {
         view.assert_node_count(n);
     }
@@ -750,6 +625,27 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                     continue;
                 }
                 assert_property(found, prop, expected, entity, id, label);
+            }
+        }
+        let row_ids: std::collections::HashSet<i64> = ne
+            .rows
+            .iter()
+            .filter_map(|row| row["id"].as_i64())
+            .collect();
+        let rows_cover_every_node = view
+            .nodes_of_type(entity)
+            .iter()
+            .all(|node| row_ids.contains(&node.id));
+        if let Some(first) = ne.rows.first().filter(|_| rows_cover_every_node) {
+            for field in first.keys().filter(|field| {
+                *field != "id" && ne.rows.iter().all(|row| row.contains_key(*field))
+            }) {
+                view.assert_filter(entity, field, |node| {
+                    ne.rows.iter().any(|row| {
+                        row["id"].as_i64() == Some(node.id)
+                            && property_matches(node, field, &row[field.as_str()], label)
+                    })
+                });
             }
         }
         for prop in &ne.prop_present {
@@ -1008,20 +904,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if let Some(n) = expect.row_count {
         view.assert_row_count(n);
     }
-    for (i, row) in expect.row_values.iter().enumerate() {
-        for (col, expected) in row {
-            match expected {
-                serde_json::Value::Number(n) if n.is_i64() => {
-                    view.assert_row_value_i64(i, col, n.as_i64().unwrap());
-                }
-                serde_json::Value::String(s) => {
-                    view.assert_row_value_str(i, col, s);
-                }
-                serde_json::Value::Null => view.assert_row_value_null(i, col),
-                _ => panic!("{label}: unsupported row_values type for {col}"),
-            }
-        }
-    }
+    view.assert_row_values(&expect.row_values, label);
     if let Some(expected) = expect.has_more {
         let pagination = view.response.pagination.as_ref();
         assert!(
@@ -1106,34 +989,39 @@ fn try_expand_repeat(obj: &serde_json::Map<String, serde_json::Value>) -> Option
 }
 
 fn assert_property(
-    node: &dyn NodeExt,
+    node: &query_engine::formatters::GraphNode,
     prop: &str,
     expected: &serde_json::Value,
     entity: &str,
     id: i64,
     label: &str,
 ) {
+    assert!(
+        property_matches(node, prop, expected, label),
+        "{label}: {entity}/{id}.{prop} expected {expected}, got {:?}",
+        node.properties.get(prop)
+    );
+}
+
+fn property_matches(
+    node: &query_engine::formatters::GraphNode,
+    prop: &str,
+    expected: &serde_json::Value,
+    label: &str,
+) -> bool {
     match expected {
-        serde_json::Value::String(s) => node.assert_str(prop, s),
+        serde_json::Value::String(s) => node.prop_str(prop) == Some(s.as_str()),
         serde_json::Value::Object(m) if m.contains_key("repeat") => {
             let expanded = try_expand_repeat(m).unwrap_or_else(|| {
-                panic!("{label}: {entity}/{id}.{prop}: invalid repeat object, expected {{repeat: \"str\", count: N}}")
+                panic!(
+                    "{label}: {prop}: invalid repeat object, expected {{repeat: \"str\", count: N}}"
+                )
             });
-            node.assert_str(prop, &expanded);
+            node.prop_str(prop) == Some(expanded.as_str())
         }
-        serde_json::Value::Number(n) if n.is_i64() => {
-            node.assert_i64(prop, n.as_i64().unwrap());
-        }
-        serde_json::Value::Bool(b) => {
-            assert_eq!(
-                node.prop_bool(prop),
-                Some(*b),
-                "{label}: {entity}/{id}.{prop} expected {b}",
-            );
-        }
-        serde_json::Value::Null => {
-            node.assert_prop(prop, &serde_json::Value::Null);
-        }
+        serde_json::Value::Number(n) if n.is_i64() => node.prop_i64(prop) == n.as_i64(),
+        serde_json::Value::Bool(b) => node.prop_bool(prop) == Some(*b),
+        serde_json::Value::Null => node.properties.get(prop) == Some(&serde_json::Value::Null),
         _ => panic!("{label}: unsupported property value type for {prop}"),
     }
 }
@@ -1162,7 +1050,7 @@ fn resolve_preset<T: Clone + serde::de::DeserializeOwned>(
     }
 }
 
-fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
+pub(crate) fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
     let Some(ov) = overrides else {
         return SecurityContext::new(1, vec!["1/".into()]).unwrap();
     };
@@ -1202,30 +1090,6 @@ fn build_redaction(config: &Option<RedactionConfig>) -> MockRedactionService {
         }
     }
     svc
-}
-
-fn parse_requirement(name: &str) -> Option<Requirement> {
-    if let Some(field) = name.strip_prefix("filter:") {
-        return Some(Requirement::Filter {
-            field: field.to_string(),
-        });
-    }
-    if let Some(edge_type) = name.strip_prefix("relationship:") {
-        return Some(Requirement::Relationship {
-            edge_type: edge_type.to_string(),
-        });
-    }
-    match name {
-        "node_ids" => Some(Requirement::NodeIds),
-        "node_count" => Some(Requirement::NodeCount),
-        "order_by" => Some(Requirement::OrderBy),
-        "skip" => Some(Requirement::Skip),
-        "aggregation" => Some(Requirement::Aggregation),
-        "aggregation_sort" => Some(Requirement::AggregationSort),
-        "neighbors" => Some(Requirement::Neighbors),
-        "path_finding" => Some(Requirement::PathFinding),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

@@ -1,9 +1,20 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
-# Pi reads AGENTS.md natively (project root, or ~/.pi/agent/AGENTS.md for user scope), so the
-# instruction file is the whole integration.
 name: pi
 title: Pi
 detect: ["~/.pi/agent"]
 instruction_file:
   project: AGENTS.md
   global: "~/.pi/agent/AGENTS.md"
+template_files:
+  - path:
+      project: .pi/extensions/orbit.ts
+      global: "~/.pi/agent/extensions/orbit.ts"
+    template: pi_extension.ts
+  - path:
+      project: .pi/extensions/orbit-ui/index.js
+      global: "~/.pi/agent/extensions/orbit-ui/index.js"
+    template: agents/pi_ui/index.js
+    ui: true
+feature_dir:
+  project: .pi/extensions
+  global: "~/.pi/agent/extensions"

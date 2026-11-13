@@ -10,7 +10,7 @@ use super::{
 };
 use super::{hooks, json};
 use crate::commands::setup::plan::Plan;
-use crate::commands::setup::spec::{Agent, PluginSpec};
+use crate::commands::setup::spec::{Agent, PluginSpec, nightly_enabled};
 use crate::commands::setup::{Component, Target};
 
 const MANIFEST: &str = ".orbit-setup.json";
@@ -56,12 +56,16 @@ impl Installer for AgentPlugins {
                 remove_plugin(plugin, target, report)?;
             }
             hooks::remove_files(
-                agent.ui_files(true).map(|file| &file.path),
+                agent
+                    .ui_files(true)
+                    .filter(|file| file.feature.is_none())
+                    .map(|file| &file.path),
                 agent.ui_registrations(true),
                 target,
                 report,
             )?;
-            hooks::remove_retired(*agent, true, target, report)?;
+            hooks::remove_by_feature(agent.feature_files(true), target, report)?;
+            hooks::remove_retired_only(*agent, true, target, report)?;
         }
         Ok(())
     }
@@ -73,7 +77,7 @@ impl Installer for AgentPlugins {
                 .is_ok_and(|(dir, _)| dir.join(MANIFEST).is_file())
         });
         plugin
-            || agent.ui_files(true).any(|file| {
+            || agent.all_ui_files(true).any(|file| {
                 target
                     .resolve(&file.path)
                     .is_ok_and(|(path, _)| path.exists())
@@ -92,7 +96,7 @@ fn skip_reason(agent: Agent, plugin: &PluginSpec, target: &Target) -> Option<Str
         return None;
     }
     Some(format!(
-        "Orbit UI skipped: needs {} {}+ (you have {})",
+        "WARNING: Orbit plugin requires {} {}+ (you have {})",
         agent.title,
         plugin.min_version,
         found.as_deref().unwrap_or("none")
@@ -147,7 +151,7 @@ fn install_plugin(
     let mut manifest = BTreeMap::new();
     let mut written = 0;
     let name = plugin.marketplace_for(target);
-    for (relative, contents) in plugin.files(&name) {
+    for (relative, contents) in plugin.files(&name, nightly_enabled()) {
         let path = dir.join(&relative);
         if !inside(&dir, &path) {
             bail!(

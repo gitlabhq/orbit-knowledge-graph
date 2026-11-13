@@ -399,6 +399,15 @@ impl NodeEntity {
             !field.hidden && !matches!(&field.source, FieldSource::Virtual(v) if v.disabled)
         })
     }
+
+    pub fn is_default_column(&self, field: &Field) -> bool {
+        !field.admin_only
+            && (self.default_columns.is_empty()
+                || self
+                    .default_columns
+                    .iter()
+                    .any(|column| column == &field.name))
+    }
 }
 
 impl fmt::Display for NodeEntity {
@@ -647,6 +656,14 @@ impl Field {
 
     pub fn is_virtual(&self) -> bool {
         matches!(self.source, FieldSource::Virtual(_))
+    }
+
+    pub fn is_text_searchable(&self) -> bool {
+        self.like_allowed
+            && self.filterable
+            && !self.is_virtual()
+            && !self.admin_only
+            && matches!(self.data_type, DataType::String | DataType::Uuid)
     }
 }
 

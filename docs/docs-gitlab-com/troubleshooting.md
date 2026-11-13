@@ -146,7 +146,7 @@ Sign in with `glab auth login`, then run the command again.
 | `4` | `Orbit isn't enabled for any of your groups` | No top-level group that you belong to has GitLab Orbit turned on. | Ask a user with the Owner role for the group to [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit). |
 | `4` | `Orbit is not turned on for <scope>, or your role is below Reporter.` | `glab orbit status` found the group or project, but GitLab Orbit is not turned on for it, or you have a role lower than Reporter. | Ask a user with the Owner role for the top-level group to [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit), or ask for the Reporter role. |
 | `4` | `Orbit access denied` | The API rejected the request with HTTP `403` for another reason. For example, the instance has no license for GitLab Orbit, or the token does not have the GitLab Orbit permission. | Check the message after `HTTP 403` in the output. |
-| `5` | `rate limited` | You sent too many requests in a short time. | Wait for the time in the `Retry-After` header. Combine small queries into one aggregation. |
+| `5` | `rate limited` | You exceeded the [rate limit](queries/_index.md#rate-limits). | Wait for the time in the `Retry-After` header. Combine small queries into one aggregation. |
 
 For all exit codes, see [exit codes](cli.md#exit-codes).
 

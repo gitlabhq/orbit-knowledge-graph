@@ -794,6 +794,8 @@ impl OrbitServiceImpl {
                                 .map(|ev| ev.values().cloned().collect())
                                 .unwrap_or_default(),
                             description: f.description.clone().unwrap_or_default(),
+                            text_searchable: Some(f.is_text_searchable()),
+                            default_column: Some(n.is_default_column(f)),
                         })
                         .collect()
                 } else {
@@ -1335,6 +1337,51 @@ mod tests {
                 domain.name
             );
         }
+    }
+
+    #[test]
+    fn test_structured_schema_text_searchable_matches_the_query_validator() {
+        let ontology = test_ontology();
+        let model = compiler::data_model::clickhouse(Arc::clone(&ontology)).unwrap();
+        let ctx = compiler::SecurityContext::new_with_roles(
+            1,
+            vec![compiler::AuthorizedPath::new(
+                "1/",
+                compiler::AccessLevel::Owner as u32,
+            )],
+        )
+        .unwrap();
+        let response = OrbitServiceImpl::build_structured_schema(&ontology, &["*".to_string()]);
+
+        for node in &response.nodes {
+            for property in node.properties.iter().filter(|p| p.data_type != "Enum") {
+                let query = format!(
+                    "MATCH (n:{}) WHERE n.{} CONTAINS 'abc' RETURN n.id LIMIT 1",
+                    node.name, property.name
+                );
+                let compiles =
+                    compiler::compile_model(&query, compiler::Frontend::Gql, &model, &ctx).is_ok();
+                assert_eq!(property.text_searchable, Some(compiles), "{query}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_structured_schema_flags_default_columns() {
+        let response =
+            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["Pipeline".to_string()]);
+        let pipeline = response
+            .nodes
+            .iter()
+            .find(|n| n.name == "Pipeline")
+            .unwrap();
+        let flagged: Vec<&str> = pipeline
+            .properties
+            .iter()
+            .filter(|p| p.default_column == Some(true))
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(flagged, ["id", "iid", "ref", "status", "source"]);
     }
 
     #[test]

@@ -7,6 +7,3 @@ query:
       "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
       "neighbors": {"direction": "both"}
     }
-
-expect:
-  compile_only: true

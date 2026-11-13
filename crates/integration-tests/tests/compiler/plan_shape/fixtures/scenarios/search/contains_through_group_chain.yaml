@@ -1,0 +1,23 @@
+---
+cases:
+  - name: A text filter at the end of a group chain prunes with the ngram index inside a materialized CTE that reads another CTE
+    query:
+      gql: |
+        MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)
+        WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS 'SHIP FEAT'
+        RETURN mr.title ORDER BY mr.id LIMIT 10
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS MATERIALIZED
+            - multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])
+          not_contains: []
+        indexes:
+          - table: gl_merge_request
+            name: idx_title_ngram
+    missing_frontends:
+      json: The original query scenario supplies only GQL.

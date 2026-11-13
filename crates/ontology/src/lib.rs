@@ -2738,6 +2738,44 @@ style:
     }
 
     #[test]
+    fn text_searchable_and_default_column_follow_field_rules() {
+        let ontology = Ontology::load_embedded().expect("embedded ontology loads");
+        let field = |node: &str, name: &str| {
+            ontology
+                .get_node(node)
+                .and_then(|n| n.fields.iter().find(|f| f.name == name))
+                .unwrap_or_else(|| panic!("{node}.{name}"))
+        };
+        for (node, name, searchable) in [
+            ("User", "username", true),
+            ("User", "email", false),
+            ("Vulnerability", "title", false),
+            ("File", "content", false),
+            ("Pipeline", "ref", true),
+            ("Pipeline", "status", false),
+            ("Pipeline", "id", false),
+        ] {
+            assert_eq!(
+                field(node, name).is_text_searchable(),
+                searchable,
+                "{node}.{name}"
+            );
+        }
+
+        let ontology = Ontology::load_embedded()
+            .expect("embedded ontology loads")
+            .with_default_columns("User", ["id", "username", "email"]);
+        let user = ontology.get_node("User").expect("User exists");
+        let flagged: Vec<&str> = user
+            .fields
+            .iter()
+            .filter(|f| user.is_default_column(f))
+            .map(|f| f.name.as_str())
+            .collect();
+        assert_eq!(flagged, ["id", "username"]);
+    }
+
+    #[test]
     fn default_columns_rejects_unknown_property() {
         let yaml = r#"
 node_type: TestNode
