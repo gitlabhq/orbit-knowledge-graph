@@ -212,19 +212,48 @@ pub fn path_scope(col: &str, paths: &[String], include_excluded: bool) -> String
 }
 
 pub fn excluded_path_predicate(col: &str) -> String {
-    let directory_likes = EXCLUDED_INDEXING_DIRS
-        .iter()
-        .flat_map(|dir| [format!("{dir}/%"), format!("%/{dir}/%")]);
     let likes = EXCLUDE_LIKE
         .iter()
-        .map(|pat| pat.to_string())
-        .chain(directory_likes)
-        .map(|pat| format!("{col} LIKE {}", sql_lit(&pat)));
+        .map(|pat| format!("{col} LIKE {}", sql_lit(pat)));
+    // The indexers skip these directories case-insensitively, so search hides them the same way.
+    let directory_likes = EXCLUDED_INDEXING_DIRS
+        .iter()
+        .flat_map(|dir| [format!("{dir}/%"), format!("%/{dir}/%")])
+        .map(|pat| format!("{col} ILIKE {}", sql_lit(&pat)));
     let regexes = EXCLUDE_REGEX
         .iter()
         .map(|re| format!("regexp_matches({col}, {})", sql_lit(re)));
     format!(
         "({})",
-        likes.chain(regexes).collect::<Vec<_>>().join(" OR ")
+        likes
+            .chain(directory_likes)
+            .chain(regexes)
+            .collect::<Vec<_>>()
+            .join(" OR ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_excluded(path: &str) -> bool {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        let sql = format!("SELECT {}", excluded_path_predicate(&sql_lit(path)));
+        conn.query_row(&sql, [], |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn excluded_directories_match_without_case() {
+        for path in [
+            "docs-locale/ja/README.md",
+            "Docs-Locale/de/intro.md",
+            "nested/DOC-LOCALE/zh/setup.md",
+        ] {
+            assert!(is_excluded(path), "{path} should be excluded");
+        }
+        for path in ["docs-locale.md", "my-docs-locale/x.md", "docs/intro.md"] {
+            assert!(!is_excluded(path), "{path} should stay searchable");
+        }
+    }
 }
