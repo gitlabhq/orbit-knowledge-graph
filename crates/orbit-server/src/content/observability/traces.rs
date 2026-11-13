@@ -58,7 +58,9 @@ impl TraceLookup {
             Self::PipelineTraceDuration | Self::JobSpanDuration => {
                 "toString(max(duration_nano)) AS value"
             }
-            Self::PipelineTraceErrorCount => "toString(uniqExactIf(span_id, has_error)) AS value",
+            Self::PipelineTraceErrorCount => {
+                unreachable!("the error count has its own query, see build_error_count_sql")
+            }
         }
     }
 
