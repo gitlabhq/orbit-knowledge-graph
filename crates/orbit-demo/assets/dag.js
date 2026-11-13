@@ -3,7 +3,7 @@
 (function () {
   const NS = "http://www.w3.org/2000/svg";
   const W = 264, H = 92, GAP = 232, VGAP = 116, PAD = 18, ABOVE = 44, CHAR = 6.7;
-  const NAMES = { clickhouse: "ClickHouse", duckdb: "DuckDB", orbit_code: "Orbit Next", live: "Slack (live)", engine: "Join" };
+  const NAMES = { clickhouse: "ClickHouse", duckdb: "DuckDB", orbit_code: "Orbit Next", live: "Slack (live)", engine: "Combine" };
   const KINDS = { relational: "Relational", remote: "Remote", engine: "In process" };
   const STATES = { waiting: "Waiting", running: "Running", done: "Finished", failed: "Failed" };
   const ARROW = { keys: 2, rows: 1.5 };
@@ -36,16 +36,16 @@
 
   function layout(stages, edges) {
     const data = stages.filter((s) => kind(s.backend) !== "engine").sort((a, b) => a.id - b.id);
-    const joins = stages.filter((s) => kind(s.backend) === "engine");
+    const combines = stages.filter((s) => kind(s.backend) === "engine");
     const column = Object.fromEntries(data.map((s, i) => [s.id, i]));
     const above = edges.some((e) => e.kind === "keys" && column[e.to] - column[e.from] > 1);
     const top = PAD + (above ? ABOVE : 0);
     const row = Math.max(1, data.length) * W + Math.max(0, data.length - 1) * GAP;
     const positions = {};
     data.forEach((s, i) => { positions[s.id] = { x: PAD + i * (W + GAP), y: top }; });
-    joins.forEach((s, i) => { positions[s.id] = { x: PAD + (row - W) / 2 + i * (W + GAP), y: top + H + VGAP }; });
-    const width = 2 * PAD + Math.max(row, joins.length * W + Math.max(0, joins.length - 1) * GAP);
-    return { positions, width, height: top + H + (joins.length ? VGAP + H : 0) + PAD };
+    combines.forEach((s, i) => { positions[s.id] = { x: PAD + (row - W) / 2 + i * (W + GAP), y: top + H + VGAP }; });
+    const width = 2 * PAD + Math.max(row, combines.length * W + Math.max(0, combines.length - 1) * GAP);
+    return { positions, width, height: top + H + (combines.length ? VGAP + H : 0) + PAD };
   }
 
   function markers(defs) {
@@ -102,7 +102,7 @@
     el("rect", { class: "accent", x: 10, y: 12, width: 4, height: H - 24, rx: 2 }, group);
     text(group, 26, 25, `Stage ${stage.id} · ${KINDS[k]}`, "kind");
     text(group, 26, 44, NAMES[stage.backend] || stage.backend, "title");
-    text(group, 26, 60, k === "engine" ? "joins rows · policy · paging" : `connection ${stage.connection}`, "meta");
+    text(group, 26, 60, k === "engine" ? "combines rows · policy · paging" : `connection ${stage.connection}`, "meta");
     badge(group, 26, 77, STATES[stage.status] || stage.status, "pill");
     if (stage.status === "done") text(group, W - 14, 81, `${plural(stage.rows ?? 0, "row")} · ${stage.elapsed.toFixed(1)} ms`, "stats", "end");
     group.addEventListener("click", () => onSelect(stage.id));

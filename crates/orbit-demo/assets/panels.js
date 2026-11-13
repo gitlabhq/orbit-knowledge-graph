@@ -55,7 +55,7 @@
 
   function request(r) {
     if (r.kind === "sql") return [heading("ClickHouse SQL"), sql(r.sql), heading("Parameters"), table(r.params.map(([name, value]) => ({ name, value })))];
-    if (r.kind === "engine") return [heading("Join plan: join the stages' rows, apply the response policy, page the result"), code(r.plan)];
+    if (r.kind === "engine") return [heading("Combine plan: combine the stages' rows, apply the response policy, page the result"), code(r.plan)];
     const { kind, ...body } = r;
     return [heading(kind === "code" ? "Orbit Next structural search request" : "Slack extraction request"), code(JSON.stringify(body, null, 2).split("\n"))];
   }
@@ -95,12 +95,12 @@
         parts.push(heading("Key sets this stage read"), keys.length ? table(keys) : empty("No key sets", "This stage reads no keys from earlier stages."));
         const flows = run.edges.filter((e) => e.kind === "rows" && (e.from === s.id || e.to === s.id))
           .map((e) => ({ from: `stage ${e.from}`, to: `stage ${e.to}`, rows: e.count ?? "", columns: (e.columns || []).join(", ") }));
-        if (flows.length) parts.push(heading(Dag.kind(s.backend) === "engine" ? "Rows this join reads" : "Rows this stage hands to the join"), table(flows));
+        if (flows.length) parts.push(heading(Dag.kind(s.backend) === "engine" ? "Rows Combine reads" : "Rows this stage hands to Combine"), table(flows));
         return parts;
       }
       default:
         if (s.samples.length) return s.samples.flatMap((x) => [heading(`${x.request}: ${x.count} rows before the stage's checks`), table(x.rows)]);
-        return s.id === run.stages[run.stages.length - 1]?.id ? [heading("Join output"), table(run.rows)] : [empty("No executor call", "This stage read nothing.")];
+        return s.id === run.stages[run.stages.length - 1]?.id ? [heading("Combine output"), table(run.rows)] : [empty("No executor call", "This stage read nothing.")];
     }
   }
 

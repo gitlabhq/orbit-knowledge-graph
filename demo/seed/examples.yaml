@@ -1,4 +1,4 @@
-- title: "Query 4: open merge requests, the TODOs on their branch heads in Orbit Next, joined"
+- title: "Query 4: open merge requests, the TODOs on their branch heads in Orbit Next, combined"
   caller: maintainer
   query: >-
     MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)

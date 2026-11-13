@@ -21,7 +21,7 @@ function describe(edge) {
     edge.title = `Keys on ${edge.properties.join(", ")} from stage ${edge.from} drive stage ${edge.to}${count}`;
   } else {
     edge.label = "rows";
-    edge.title = `Rows of stage ${edge.from} into the join${count}${edge.columns ? `: ${edge.columns.join(", ")}` : ""}`;
+    edge.title = `Rows of stage ${edge.from} into Combine${count}${edge.columns ? `: ${edge.columns.join(", ")}` : ""}`;
   }
 }
 
