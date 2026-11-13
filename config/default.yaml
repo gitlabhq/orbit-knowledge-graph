@@ -269,8 +269,8 @@ object_storage:
   # service_account_key: ""     # gcs static, JSON key content
 
 observability:
-  # provisioner_url: ""
-  # provisioner_api_key: ""     # both unset leaves resolution off; one without the other is an error
+  # provisioner_url: ""          # https, or http only on loopback
+  # provisioner_api_key: ""      # both unset leaves resolution off; one without the other is an error
   host_map_refresh_seconds: 300
   host_map_retry_after_seconds: 30
   request_timeout_seconds: 10
