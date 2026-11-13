@@ -5193,6 +5193,7 @@ dependencies = [
 name = "orbit-utils"
 version = "0.1.0"
 dependencies = [
+ "comrak",
  "dunce",
  "flate2",
  "ignore",

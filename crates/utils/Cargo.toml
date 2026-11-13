@@ -4,7 +4,11 @@ version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
+[features]
+markdown = ["dep:comrak"]
+
 [dependencies]
+comrak = { workspace = true, optional = true }
 dunce = { workspace = true }
 flate2 = { workspace = true }
 ignore = { workspace = true }
