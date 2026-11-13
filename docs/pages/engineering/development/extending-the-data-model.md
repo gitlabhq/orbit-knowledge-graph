@@ -145,7 +145,6 @@ relationships:
 
 In each deployment's model, every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. Every other store is partial and lists exactly the properties it holds. A partial store holds a subset of the columns, or it offers an operation that the complete store does not. `File`'s Orbit Next store is partial: it holds a few `File` columns and offers the structural search that the complete ClickHouse store lacks.
 A store whose backend has no writer capability holds no table, for example a live or code store. It lists the properties it serves, and its backend checks its own fields.
-An edge table's `copies:` is a related case. It holds copies of endpoint properties such as `branch`, so a filter on them prunes the edge read.
 
 A query's needs from a node are the properties it reads, its filter operators and its search modes. Placement reads the node from its complete store when that store serves every need. Otherwise it reads from the one partial store that serves every need. If no store does, the query fails, and the error names the unmet need. If the deployment does not serve the chosen store's connection, the query fails with an error that names the entity and the connection.
 
