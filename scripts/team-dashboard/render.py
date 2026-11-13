@@ -185,8 +185,8 @@ def status_text(mr: dict) -> str:
 
 
 def item_line(web_url: str, created: str, now: datetime, suffix: str = "") -> str:
-    """One list line; GitLab renders the title from the trailing plus."""
-    return f"- {web_url}+ · {age_days(created, now)}d" + (f" · {suffix}" if suffix else "")
+    """One merge request line; the trailing +s makes GitLab render the title, assignees, and milestone."""
+    return f"- {web_url}+s · {age_days(created, now)}d" + (f" · {suffix}" if suffix else "")
 
 
 def triage_labels(mr: dict) -> Dict[str, str]:
