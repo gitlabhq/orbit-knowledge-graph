@@ -205,6 +205,24 @@ async fn resolves_a_job_span() {
 }
 
 #[tokio::test]
+async fn resolves_a_job_span_duration() {
+    let map = resolve(
+        "Job",
+        &[4000],
+        &[request(
+            "observability_span_duration_nano",
+            "job_span_duration",
+        )],
+    )
+    .await;
+
+    assert_eq!(
+        column(&map, "Job", 4000, "observability_span_duration_nano"),
+        Some(&ColumnValue::String("118000000".into()))
+    );
+}
+
+#[tokio::test]
 async fn an_unknown_lookup_resolves_to_null() {
     let map = resolve(
         "Pipeline",
