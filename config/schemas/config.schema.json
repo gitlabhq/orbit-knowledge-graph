@@ -1079,7 +1079,7 @@
       ]
     },
     "GraphStatsConfig": {
-      "description": "Sends the daily `orbit_graph_stats` snapshot. Runs only when analytics is on.",
+      "description": "Sends the daily `orbit_graph_stats` snapshot. Runs when analytics is on, or on self-managed when `local_collector_url` is set.",
       "type": "object",
       "properties": {
         "cron": {
