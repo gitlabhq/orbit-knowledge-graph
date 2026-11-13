@@ -202,7 +202,7 @@ relationships:
 
 A filter on `a.branch` in `(a)-[:CALLS]->(b)` then also filters the edge read on its `branch` column.
 
-Every stored entity and every edge-table variant has exactly one declared writer. The code indexer writes the code entities, and its source fragment looks like any other:
+In every store that Orbit writes, each entity and edge-table variant has exactly one declared writer. The code indexer writes the code entities in the graph store, and its source fragment looks like any other:
 
 ```yaml
 # packages/gitlab.source_code/sources/code_indexer.yaml
@@ -395,7 +395,7 @@ relationships:
     SlackWorkspace -> Group: {fk: {on: source, column: namespace_id}}
 ```
 
-The integration's data lake source writes the workspaces from its installation records. `SlackMessage` has no rows to write, so it needs no writer:
+The integration's data lake source writes the workspaces from its installation records. `SlackMessage` lives in a live store, which the live source serves, so it declares no writer:
 
 ```yaml
 # packages/integration.slack/sources/data_lake.yaml
@@ -799,9 +799,9 @@ The loader collects every error with its package and fails once. A missing decla
 - A property that its complete store neither stores nor excludes. In a relational store, a column without a storage type or an entity without a table.
 - A property or relationship attribute with no access class, or with two.
 - A scope without a `provider`, or a row check without a `resource`.
-- A global entity with an `enforce` entry.
+- A global entity with an `enforce` entry, or with no checks and no `checks: open`.
 - A relationship without a scope or a permission, or a relational edge policy without a `scope_key` and an `of:`.
-- A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none` or checks by any provider. An integration package may declare only `Credentials` checks. A namespace overlay declares no checks, and its entities must be namespace- or user-scoped.
+- A declaration above the package's trust tier. Only a platform package may declare permissions, scope kinds, a trusted store, `none`, `checks: open` or checks by any provider. An integration package may declare only `Credentials` checks. A namespace overlay declares no checks, and its entities must be namespace- or user-scoped.
 - A backend that stores a non-global entity but has no `enforce` entry for it, or a relational store that binds a relationship without one.
 - A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.
 - A `via` chain that does not reach an entity that holds the scope key, or a step with more than one target.
@@ -814,7 +814,8 @@ The loader collects every error with its package and fails once. A missing decla
 - A relationship variant with no binding, or with two. A foreign key binds in the store whose table holds the column, and an edge table binds in the store that declares it.
 - An edge table whose two endpoints are not both on its connection.
 - A foreign key column, `via` step or edge-table ID column whose type differs from the identity it points to. The loader casts nothing.
-- A stored entity or edge-table variant with no writer, or with two.
+- In a store that Orbit writes, an entity or edge-table variant with no writer, or with two.
+- A writer that targets a code or live store.
 - A foreign key binding on a many-to-many variant, on the wrong side of a one-to-many variant, or on a column its table does not hold.
 - An edge table copy that names no property of that endpoint, or a graph attribute with no edge column.
 - Two backends, or a trusted and an untrusted store, on one connection.

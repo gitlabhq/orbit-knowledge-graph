@@ -222,6 +222,8 @@ Storage rules:
 - Each variant is bound once, in the store that holds its rows. A foreign key lives in the store whose table holds the column, and an edge table in the store that declares it. A foreign key's store can differ from the other endpoint's, as with `IN_WORKSPACE` from a live message to an indexed workspace. The two endpoints of an edge table share its connection.
 - Access hints are backend-neutral. Each backend turns them into indexes and sort keys, and a platform `backend` block can override that.
 - An edge table can copy endpoint properties into its sort key for pruning, and storage declares each copy.
+- In every store that Orbit writes, each entity and edge-table variant has exactly one declared writer.
+- Code and live stores declare no writer, because their own service writes or serves them: Orbit Next or the live source. The loader rejects a writer that targets a code or live store.
 
 Key rules:
 
@@ -260,9 +262,9 @@ The registry records each package's tier from its publisher, and the loader enfo
 
 | Tier | May declare | May not declare |
 |---|---|---|
-| Platform | permissions, scope kinds, checks by any provider, `none` | |
-| Integration | entities in a platform scope, `Credentials` checks | permissions, scope kinds, other checks, `none`, global scope, trusted stores |
-| Namespace overlay | namespace- and user-scoped entities | permissions, scope kinds, any check, `none`, trusted stores |
+| Platform | permissions, scope kinds, checks by any provider, `none`, `checks: open` | |
+| Integration | entities in a platform scope, `Credentials` checks | permissions, scope kinds, other checks, `none`, `checks: open`, global scope, trusted stores |
+| Namespace overlay | namespace- and user-scoped entities | permissions, scope kinds, any check, `none`, `checks: open`, trusted stores |
 
 Composition rules:
 
@@ -346,7 +348,9 @@ An entity declares its scope, the permission that a read needs, and one `enforce
 
 `checks` name a provider, a permission and the provider's resource type, and they run on returned rows. A row comes back only if every check allows it. Each check derives its own key from the row through its declared object and ID property. So a Rails check on a commit's project and a Cedar check on the commit itself can share one entity.
 
-An entity with no checks comes back on its scope filter alone. Its node comes back only when its stage's security check proved that filter on the read. Otherwise the query engine redacts the node, so the read fails closed. A global entity's filter is its permission admission.
+An entity with no checks comes back on its scope filter alone. Its node comes back only when its stage's security check proved that filter on the read. Otherwise the query engine redacts the node, so the read fails closed.
+An entity's `checks:` is either a list of checks or the word `open`. A global entity has no scope filter, so it needs a check or `checks: open`. Without either, the load fails.
+With `checks: open`, the rows that a global read admits come back without a row check.
 Rows that the Data Extraction Service writes carry `traversal_path` from its ETL, and that path is their scope key. A live third-party read uses a `Credentials` check.
 
 Every property and edge attribute has exactly one access class. If it has none or two, the load fails. The security phase enforces the classes on every plan, including plans that a phase builds directly.
