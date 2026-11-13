@@ -1,0 +1,20 @@
+---
+cases:
+  - name: negation_far_node_scan_keeps_scope
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","not":{"name":{"contains":"secret"}},"columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":30}
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
+        WHERE NOT g.name CONTAINS 'secret'
+        RETURN g.name
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_group AS g WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _orbit_relation_
+            - LIMIT 1 BY g.traversal_path, g.id) AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')])) AND (g._deleted = false))
+          not_contains: []

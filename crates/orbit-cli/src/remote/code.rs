@@ -172,7 +172,7 @@ fn file_query(project_id: i64, branch: &str, path: &str, content: bool) -> Strin
     )
 }
 
-fn gql_string(value: &str) -> String {
+pub(crate) fn gql_string(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 

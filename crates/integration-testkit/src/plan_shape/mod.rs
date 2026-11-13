@@ -8,22 +8,27 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use compiler::Frontend;
 use compiler::input::Input;
 use compiler::passes::{frontend, lower, normalize, page, plan, response_policy};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
 use serde::Deserialize;
 
+use crate::query_scenario::SecurityOverride;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Scenario {
-    name: String,
+    name: Option<String>,
     ontology_overlay: Option<String>,
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
+    #[serde(default)]
     logical: Assertions,
     physical: BTreeMap<String, PhysicalAssertions>,
     hydration: Option<HydrationSetup>,
+    security: Option<SecurityOverride>,
 }
 
 impl Scenario {
@@ -59,11 +64,62 @@ struct HydrationSetup {
     paths: BTreeMap<String, Vec<String>>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 struct PhysicalAssertions {
     planned: Option<Assertions>,
     emitted: Option<Assertions>,
+    final_ast: Option<Assertions>,
+    point_lookup: Option<bool>,
+    sql: Option<SqlAssertions>,
+    indexes: Vec<IndexAssertion>,
+    hydration: Option<compiler::HydrationKind>,
+}
+
+impl PhysicalAssertions {
+    fn is_empty(&self) -> bool {
+        self.planned.is_none()
+            && self.emitted.is_none()
+            && self.point_lookup.is_none()
+            && !self.needs_final_output()
+    }
+
+    fn needs_final_output(&self) -> bool {
+        self.final_ast.is_some()
+            || self.sql.is_some()
+            || !self.indexes.is_empty()
+            || self.hydration.is_some()
+    }
+}
+
+impl SqlAssertions {
+    fn check(&self, sql: &str, label: &str) -> Vec<String> {
+        let missing = self
+            .contains
+            .iter()
+            .filter(|value| !sql.contains(value.as_str()))
+            .map(|value| format!("{label} missing '{value}'\n{sql}"));
+        let present = self
+            .not_contains
+            .iter()
+            .filter(|value| sql.contains(value.as_str()))
+            .map(|value| format!("{label} contains '{value}'\n{sql}"));
+        missing.chain(present).collect()
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SqlAssertions {
+    contains: Vec<String>,
+    not_contains: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IndexAssertion {
+    table: String,
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -92,6 +148,15 @@ struct CteAssertions {
 }
 
 impl Assertions {
+    fn is_empty(&self) -> bool {
+        self.bind.is_empty()
+            && self.expect.is_empty()
+            && self.reject.is_empty()
+            && self.occurrences.is_empty()
+            && self.ctes.is_none()
+            && self.exact.is_none()
+    }
+
     fn check(&self, actual: &pattern::Expression, label: &str) -> Result<(), String> {
         let cte_order = match &self.ctes {
             None => None,
@@ -232,13 +297,14 @@ fn check<M: OrbitQueryModel>(
     backend: &str,
     path: &Path,
     build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
+    final_model: Option<&Arc<ClickHouseDataModel>>,
 ) -> Result<(), Vec<String>> {
     let mut failures = Vec::new();
     for (language, raw) in &scenario.query {
         let label = format!(
             "{}: {} [{language}/{backend}]",
             path.display(),
-            scenario.name
+            scenario.name.as_deref().unwrap_or("unnamed")
         );
         let input = match language.as_str() {
             "json" => frontend::json_dsl::parse(raw, model),
@@ -275,9 +341,10 @@ fn check<M: OrbitQueryModel>(
                 path_segment_budget: hydration.path_segment_budget,
             };
         }
-        if let Err(error) = scenario
-            .logical
-            .check(&explain::logical(&input), &format!("{label}.logical"))
+        if !scenario.logical.is_empty()
+            && let Err(error) = scenario
+                .logical
+                .check(&explain::logical(&input), &format!("{label}.logical"))
         {
             failures.push(error);
             continue;
@@ -306,7 +373,7 @@ fn check<M: OrbitQueryModel>(
         }
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
         let assertions = &scenario.physical[backend];
-        if assertions.planned.is_none() && assertions.emitted.is_none() {
+        if assertions.is_empty() {
             failures.push(format!("{label}: missing assertion targets"));
             continue;
         }
@@ -336,12 +403,99 @@ fn check<M: OrbitQueryModel>(
             }
             _ => unreachable!(),
         }
+        if let Some(expected) = assertions.point_lookup
+            && plan.is_point_lookup() != expected
+        {
+            failures.push(format!("{label}: point lookup is not {expected}"));
+        }
+        if assertions.needs_final_output() {
+            match final_model {
+                Some(model) => failures.extend(check_final_output(
+                    scenario, language, raw, input, options, model, &label,
+                )),
+                None => failures.push(format!(
+                    "{label}: final output assertions require ClickHouse"
+                )),
+            }
+        }
     }
     if failures.is_empty() {
         Ok(())
     } else {
         Err(failures)
     }
+}
+
+fn check_final_output(
+    scenario: &Scenario,
+    language: &str,
+    raw: &str,
+    input: Input,
+    options: plan::HydrationCompileOptions,
+    model: &Arc<ClickHouseDataModel>,
+    label: &str,
+) -> Vec<String> {
+    let security = crate::query_scenario::build_security(&scenario.security);
+    let compiled = if scenario.hydration.is_some() {
+        compiler::compile_input_model(input, options, model, &security)
+    } else {
+        language
+            .parse::<Frontend>()
+            .map_err(|error| compiler::QueryError::PipelineInvariant(error.to_string()))
+            .and_then(|frontend| compiler::compile_model(raw, frontend, model, &security))
+    };
+    let compiled = match compiled {
+        Ok(compiled) => compiled,
+        Err(error) => return vec![format!("{label}: {error}")],
+    };
+    let assertions = &scenario.physical["clickhouse"];
+    let mut failures = Vec::new();
+    if let Some(final_ast) = &assertions.final_ast
+        && let Err(error) = final_ast.check(
+            &explain::emitted(&compiled.ast),
+            &format!("{label}.physical.clickhouse.final_ast"),
+        )
+    {
+        failures.push(error);
+    }
+    if let Some(expected) = assertions.hydration
+        && compiled.hydration.kind() != expected
+    {
+        failures.push(format!(
+            "{label}: hydration is {:?}, expected {expected:?}",
+            compiled.hydration.kind()
+        ));
+    }
+    let sql = compiled.base.render();
+    if let Some(checks) = &assertions.sql {
+        failures.extend(checks.check(&sql, &format!("{label}: SQL")));
+    }
+    let scans = explain::emitted(&compiled.ast).to_string();
+    for index in &assertions.indexes {
+        let declared = model
+            .layout()
+            .schema()
+            .table(&index.table)
+            .is_some_and(|table| {
+                table
+                    .options
+                    .indexes
+                    .iter()
+                    .any(|item| item.name == index.name)
+            });
+        if !declared {
+            failures.push(format!(
+                "{label}: table {} has no index {}",
+                index.table, index.name
+            ));
+        } else if !scans.contains(&format!("Scan Table({}) ", index.table)) {
+            failures.push(format!(
+                "{label}: query does not scan indexed table {}\n{scans}",
+                index.table
+            ));
+        }
+    }
+    failures
 }
 
 pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
@@ -355,7 +509,7 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
 }
 
 fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
-    let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
+    let remote = Arc::new(ClickHouseDataModel::derive(ontology.clone()).unwrap());
     let local = DuckDbDataModel::derive(ontology.clone()).unwrap();
     let mut paths = Vec::new();
     crate::scenario::discover(directory, &mut paths);
@@ -384,7 +538,7 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
         let overlay = scenario.ontology_overlay.as_ref().map(|name| {
             let ontology = Arc::new(crate::load_ontology_overlay(name));
             (
-                ClickHouseDataModel::derive(ontology.clone()).unwrap(),
+                Arc::new(ClickHouseDataModel::derive(ontology.clone()).unwrap()),
                 DuckDbDataModel::derive(ontology.clone()).unwrap(),
             )
         });
@@ -395,18 +549,26 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
         for backend in scenario.physical.keys() {
             match backend.as_str() {
                 "clickhouse" => {
-                    if let Err(errors) =
-                        check(&scenario, remote, backend, path, |input, options| {
-                            plan::plan_clickhouse(input, remote, options)
-                        })
-                    {
+                    if let Err(errors) = check(
+                        &scenario,
+                        remote.as_ref(),
+                        backend,
+                        path,
+                        |input, options| plan::plan_clickhouse(input, remote, options),
+                        Some(remote),
+                    ) {
                         failures.extend(errors);
                     }
                 }
                 "duckdb" => {
-                    if let Err(errors) = check(&scenario, local, backend, path, |input, options| {
-                        plan::plan_duckdb(input, local, options)
-                    }) {
+                    if let Err(errors) = check(
+                        &scenario,
+                        local,
+                        backend,
+                        path,
+                        |input, options| plan::plan_duckdb(input, local, options),
+                        None,
+                    ) {
                         failures.extend(errors);
                     }
                 }
@@ -415,7 +577,7 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
         }
         if failures.len() == failure_count {
             passed += 1;
-            println!("PASS {}", scenario.name);
+            println!("PASS {}", scenario.name.as_deref().unwrap_or("unnamed"));
         }
     }
     println!("{passed}/{cases} plan fixtures passed");

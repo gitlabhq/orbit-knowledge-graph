@@ -16,10 +16,10 @@ export function displayName(name: string): string {
   return /[,\s']/.test(text) ? `'${text.replaceAll("'", "\\'")}'` : text
 }
 
-type SimpleCommand = { piped: boolean; words: string[]; readsInput: boolean; writes: string[]; substitutes: boolean }
+type SimpleCommand = { piped: boolean; words: string[]; readsInput: boolean; writes: string[]; substitutes: boolean; stdin: string }
 
 function emptyCommand(piped: boolean): SimpleCommand {
-  return { piped, words: [], readsInput: false, writes: [], substitutes: false }
+  return { piped, words: [], readsInput: false, writes: [], substitutes: false, stdin: '' }
 }
 
 function isEmpty(command: SimpleCommand): boolean {
@@ -40,9 +40,13 @@ function groupCommands(tokens: readonly Token[]): SimpleCommand[] {
     const token = tokens[i]
     if (token?.kind === 'word') current.words.push(token.text)
     else if (token?.kind === 'substitution') current.substitutes = true
+    else if (token?.kind === 'heredoc') current.stdin = token.body
     else if (token?.kind === 'redirect') {
       const { target, end } = redirectTarget(tokens, i + 1)
-      if (token.operator === '<') current.readsInput = true
+      if (token.operator === '<') {
+        current.readsInput = true
+        current.stdin = ''
+      }
       else if (target !== undefined) current.writes.push(target)
       current.substitutes ||= tokens.slice(i + 1, end + 1).some((skipped) => skipped.kind === 'substitution')
       i = end
@@ -97,10 +101,17 @@ function runnable(command: string): { runs: SimpleCommand[]; unparsed: boolean }
   return { runs, unparsed }
 }
 
+export type OrbitRun = { words: string[]; stdin: string }
+
+export function orbitRuns(command: string): OrbitRun[] {
+  return runnable(command).runs.flatMap(({ words, stdin }) => {
+    const orbit = orbitWords(words)
+    return orbit ? [{ words: orbit, stdin }] : []
+  })
+}
+
 export function orbitInvocations(command: string): string[][] {
-  return runnable(command)
-    .runs.map(({ words }) => orbitWords(words))
-    .filter((words) => words !== null)
+  return orbitRuns(command).map(({ words }) => words)
 }
 
 const SHELL_WORDS = new Set(['cd', 'pushd', 'popd', 'true', ':', 'fi', 'done', 'esac', '}'])

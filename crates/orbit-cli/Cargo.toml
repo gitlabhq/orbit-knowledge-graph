@@ -19,7 +19,7 @@ ignored = ["libduckdb-sys"]
 [dependencies]
 mimalloc = { workspace = true }
 tempfile = { workspace = true }
-arrow = { workspace = true, features = ["prettyprint"] }
+arrow = { workspace = true, features = ["prettyprint", "csv", "json"] }
 code-graph-incremental = { path = "../code-graph-incremental" }
 duckdb-client = { path = "../duckdb-client" }
 libduckdb-sys = { workspace = true }
@@ -32,7 +32,7 @@ orbit-utils = { path = "../utils" }
 orbit-arrow = { path = "../utils/arrow" }
 ontology = { path = "../ontology" }
 gitalisk-core = { workspace = true }
-clap = { workspace = true }
+clap = { workspace = true, features = ["color", "suggestions"] }
 cliclack = { workspace = true }
 cynic = { workspace = true }
 tokio = { workspace = true }

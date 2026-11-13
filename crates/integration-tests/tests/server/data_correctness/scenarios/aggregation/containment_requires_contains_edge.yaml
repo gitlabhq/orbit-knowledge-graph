@@ -22,7 +22,6 @@ cases:
       gql: |
         MATCH (g:Group {id: 700})-[:CONTAINS]->(p:Project) RETURN count(p) AS c
     expect:
-      skip_requirements: ["node_ids"]
       row_count: 1
       row_values: [{ c: 1 }]
 
@@ -32,7 +31,6 @@ cases:
       gql: |
         MATCH (g:Group {id: 700})-[:CONTAINS]->(p:Project) RETURN p, count(g) AS n LIMIT 10
     expect:
-      skip_requirements: ["node_ids"]
       groups:
         p:
           entity: Project

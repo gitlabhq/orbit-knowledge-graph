@@ -152,4 +152,12 @@ cases:
       gql: |
         MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE g.visibility_level = p.visibility_level AND g.visibility_level <> 'private' RETURN p
     expect:
-      compile_only: true
+      nodes:
+        Group:
+          ids: [100]
+          filters:
+            visibility_level: public
+        Project:
+          ids: [1000]
+      edges:
+        CONTAINS: [[100, 1000]]

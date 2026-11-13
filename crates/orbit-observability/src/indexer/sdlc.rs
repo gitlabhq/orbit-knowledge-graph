@@ -64,7 +64,7 @@ pub const DATALAKE_QUERY_BYTES: MetricSpec = MetricSpec::counter(
 
 pub const TRANSFORM_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.indexer.sdlc.transform.duration",
-    "Duration of DataFusion SQL transform per batch.",
+    "Duration of the SQL transform per batch.",
     Some("s"),
     &[],
     LATENCY_FAST_FINE,

@@ -80,5 +80,4 @@ cases:
       gql: |
         MATCH (g:Group {id: 99322})<-[:MEMBER_OF]-(n) RETURN g, n
     expect:
-      skip_requirements: [node_ids, neighbors, "relationship:MEMBER_OF"]
       node_count: 0

@@ -10,7 +10,7 @@ pub use context::{
     orbit_code_indexing, orbit_common, orbit_query, orbit_sdlc_indexing, parse_opt, validation,
 };
 pub use gitlab_instance::{ConsentGate, GitlabInstanceWatch};
-pub use tracker::{AnalyticsTracker, SnowplowAnalyticsTracker};
+pub use tracker::{AnalyticsTracker, ComposedAnalyticsTracker, SnowplowAnalyticsTracker};
 
 #[cfg(any(test, feature = "testkit"))]
 pub use context::load_schema_json;

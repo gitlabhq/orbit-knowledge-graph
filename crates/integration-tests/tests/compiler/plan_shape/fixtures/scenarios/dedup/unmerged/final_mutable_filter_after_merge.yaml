@@ -1,0 +1,69 @@
+---
+cases:
+  - name: stale_status_excluded
+    query:
+      gql: |
+        MATCH (p:Pipeline) WHERE p.status = 'running' AND p.finished_at >= '2024-01-01' AND p.finished_at < '2024-02-01' RETURN p.id, p.status, p.finished_at
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS p FINAL
+            - use_skip_indexes_if_final_exact_mode = 1
+          not_contains:
+            - tuple(p.traversal_path, p.id) IN
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
+
+  - name: latest_status_once
+    query:
+      gql: |
+        MATCH (p:Pipeline) WHERE p.status = 'success' AND p.finished_at >= '2024-01-01' AND p.finished_at < '2024-02-01' RETURN p.id, p.status, p.finished_at
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS p FINAL
+          not_contains: []
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
+
+  - name: unpinned_high_fan_out_child_reads_final
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.status = 'running' AND j.finished_at >= '2024-01-01' AND j.finished_at < '2024-02-01' RETURN j.id, j.status, j.finished_at
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS j FINAL
+          not_contains:
+            - tuple(j.traversal_path, j.id) IN
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
+
+  - name: pinned_high_fan_out_child_finds_then_checks
+    query:
+      gql: |
+        MATCH (j:Job {pipeline_id: 9910}) WHERE j.status = 'running' AND j.finished_at >= '2024-01-01' AND j.finished_at < '2024-02-01' RETURN j.id, j.status, j.finished_at
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - tuple(j.traversal_path, j.id) IN
+          not_contains:
+            - AS j FINAL
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
