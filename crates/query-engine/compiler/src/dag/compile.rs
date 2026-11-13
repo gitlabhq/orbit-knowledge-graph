@@ -205,9 +205,9 @@ pub enum Source<'a> {
 /// across its served connections.
 pub fn split_query(source: Source<'_>, env: &Env<'_>) -> Result<super::Dag> {
     let connections = env.connections.clone();
+    let grants = env.grants.clone();
     match env.frontend {
         Frontend::Server(catalog) => {
-            let grants = env.grants.clone();
             let mut ctx = config::GqlQueryCtx::new(
                 grants,
                 *env.limits,
@@ -224,8 +224,13 @@ pub fn split_query(source: Source<'_>, env: &Env<'_>) -> Result<super::Dag> {
                 .count_err()
         }
         Frontend::Local(catalog) => {
-            let mut ctx =
-                config::GqlLocalCtx::new(*env.limits, connections, env.trace, Arc::clone(catalog));
+            let mut ctx = config::GqlLocalCtx::new(
+                grants,
+                *env.limits,
+                connections,
+                env.trace,
+                Arc::clone(catalog),
+            );
             match source {
                 Source::Text(raw) => ctx.set_raw(raw.to_string()),
                 Source::Parsed(statement) => ctx.set_statement(statement),

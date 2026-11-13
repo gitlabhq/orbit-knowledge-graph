@@ -57,10 +57,13 @@ impl Cut<'_> {
                         )
                     })?;
                     let entity = graph.entity(entity);
+                    let implicit = |property: &PropertyId| !access.property(*property).admin_only;
                     let listed: Vec<PropertyId> = match columns {
                         Columns::Listed(listed) => listed.clone(),
-                        Columns::Default => defaults(entity).collect(),
-                        Columns::All => entity.properties.clone(),
+                        Columns::Default => defaults(entity).filter(implicit).collect(),
+                        Columns::All => {
+                            entity.properties.iter().copied().filter(implicit).collect()
+                        }
                     };
                     let readable = listed
                         .into_iter()

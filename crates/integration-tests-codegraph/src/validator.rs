@@ -135,6 +135,7 @@ fn execute_cypher(
         client,
         data_model,
         &clean_query,
+        &compiler::local_admin(),
         query_data_model::testkit::limits(),
     )?;
     let compiled = outcome.compiled;

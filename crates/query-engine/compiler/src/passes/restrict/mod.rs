@@ -1,9 +1,9 @@
 //! Access restriction on the logical plan.
 //!
-//! Rejects entities for which the caller holds the entity's permission in no scope, and, for
-//! callers that are not instance administrators, every read of an `admin_only` property and
-//! every aggregation in which an entity without a scope key is not reachable from one with a
-//! scope key, since aggregation bypasses the row checks.
+//! Rejects entities for which the caller holds the entity's permission in no scope unless a
+//! trusted connection reads them, and, for callers that are not instance administrators, every
+//! read of an `admin_only` property and every aggregation in which an entity without a scope key
+//! is not reachable from one with a scope key, since aggregation bypasses the row checks.
 
 mod hydration;
 mod properties;
@@ -42,7 +42,7 @@ pub fn restrict(
     }
     let admin = grants.caller().admin();
     if !admin && query.kind() == Kind::Aggregation {
-        aggregation_scope(query, &entities, model)?;
+        aggregation_scope(query, &entities, model, connections)?;
     }
     properties::fields(query, model, admin)
 }
@@ -55,8 +55,8 @@ fn entities(query: Query<'_>) -> Vec<(Ref, EntityId)> {
         .collect()
 }
 
-/// The caller holds the entity's permission in at least one scope; `guard` is the policy of the
-/// connection that reads it.
+/// The caller holds the entity's permission in at least one scope, unless a trusted connection
+/// reads it; `guard` is the policy of the connection that reads it.
 pub(super) fn readable(
     entity: EntityId,
     guard: Option<&query_data_model::catalog::Guard>,
@@ -70,6 +70,9 @@ pub(super) fn readable(
             model.connection()
         ))
     })?;
+    if guard.rule == Rule::Trusted {
+        return Ok(());
+    }
     if scope_set(grants, model.model(), guard.scope, guard.permission)?.is_empty() {
         let access = model.model().access();
         return Err(QueryError::Authorization(format!(
@@ -81,8 +84,8 @@ pub(super) fn readable(
     Ok(())
 }
 
-fn scoped(model: &Catalog<impl SqlBackend>, entity: EntityId) -> bool {
-    model
+fn scoped(connections: &Connections, entity: EntityId) -> bool {
+    connections
         .guard(entity)
         .is_some_and(|guard| matches!(guard.rule, Rule::Column(_) | Rule::Owner(_)))
 }
@@ -91,10 +94,11 @@ fn aggregation_scope(
     query: Query<'_>,
     entities: &[(Ref, EntityId)],
     model: &Catalog<impl SqlBackend>,
+    connections: &Connections,
 ) -> Result<()> {
     let mut reachable: HashSet<Ref> = entities
         .iter()
-        .filter(|(_, entity)| scoped(model, *entity))
+        .filter(|(_, entity)| scoped(connections, *entity))
         .map(|(output, _)| *output)
         .collect();
     if reachable.is_empty() {

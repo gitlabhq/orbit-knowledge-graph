@@ -171,28 +171,38 @@ pub fn compile(
     compile_stage(stage, data_model, grants, limits)
 }
 
-/// Compile a graph query into DuckDB SQL for local execution, as a caller who holds no scope:
-/// local stores are trusted, so their reads need none.
+/// Compile a graph query into DuckDB SQL for local execution, as the `grants` caller.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(
     raw: &str,
     data_model: &Arc<Catalog<DuckDb>>,
+    grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
     let connections = dag::Connections::new(vec![dag::Peer::DuckDb(Arc::clone(data_model))]);
-    let mut top = config::GqlLocalCtx::new(*limits, connections, false, Arc::clone(data_model));
+    let mut top = config::GqlLocalCtx::new(
+        grants.clone(),
+        *limits,
+        connections,
+        false,
+        Arc::clone(data_model),
+    );
     top.set_raw(raw.to_string());
     let stage = config::run_gql_local(&mut top)
         .and_then(|()| output(top.take_dag()))
         .and_then(dag::Dag::into_single)
         .and_then(statement)
         .count_err()?;
-    let grants = Grants::new(orbit_authorization::Caller::new("cli", true, ()));
-    let mut ctx = config::GqlDuckdbCtx::new(grants, *limits, false, Arc::clone(data_model));
+    let mut ctx = config::GqlDuckdbCtx::new(grants.clone(), *limits, false, Arc::clone(data_model));
     ctx.set_statement(stage);
     config::run_gql_duckdb(&mut ctx)
         .and_then(|()| output(ctx.take_output()))
         .count_err()
+}
+
+/// The grants of a local CLI user, who administers the local database they read.
+pub fn local_admin() -> Grants {
+    Grants::new(orbit_authorization::Caller::new("cli", true, ()))
 }
 
 /// Parse and admit a query without a caller, as startup checks of shipped queries do.
@@ -907,7 +917,7 @@ mod tests {
         ] {
             let query = format!("MATCH (f:File) WHERE f.path {operator} 'ALI' RETURN f LIMIT 10");
 
-            let sql = compile_local(&query, &LOCAL, crate::testkit::limits())
+            let sql = compile_local(&query, &LOCAL, &local_admin(), crate::testkit::limits())
                 .expect("should compile")
                 .base
                 .render();

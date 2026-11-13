@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use compiler::dag::{Connections, Env, Frontend, Peer, Request, Source};
-use compiler::orbit_authorization::{Caller, Checks, Grants};
+use compiler::orbit_authorization::{Checks, Grants};
 use orbit_server_config::QueryLimits;
 use query_data_model::{Catalog, DuckDb};
 use shared::dag::{
@@ -71,12 +71,13 @@ impl Executor for DuckDbExecutor {
     }
 }
 
-/// Runs `query` through the DAG runner on the local database: local mode trusts its data, so
-/// the caller holds no grants and no remote connection is served.
+/// Runs `query` through the DAG runner on the local database as the `grants` caller; no
+/// remote connection is served.
 pub fn run_local(
     client: &Arc<Mutex<DuckDbClient>>,
     data_model: &Arc<Catalog<DuckDb>>,
     query: &str,
+    grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<Outcome, DagError> {
     let executor = DuckDbExecutor {
@@ -85,11 +86,10 @@ pub fn run_local(
     let executors = Executors::default().with(data_model.connection(), Arc::new(executor));
     let frontend = Frontend::Local(Arc::clone(data_model));
     let connections = Connections::new(vec![Peer::DuckDb(Arc::clone(data_model))]);
-    let grants = Grants::new(Caller::new("local", true, ()));
     let env = Env {
         frontend: &frontend,
         connections: &connections,
-        grants: &grants,
+        grants,
         limits,
         trace: false,
     };

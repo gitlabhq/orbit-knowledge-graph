@@ -2,7 +2,7 @@
 
 use crate::compiler::setup::embedded_local_model;
 use crate::compiler::utils::ParsedSql;
-use compiler::compile_local;
+use compiler::{compile_local, local_admin};
 use orbit_utils::query_types::{SqlType, TimeZone};
 use query_data_model::implementations::duckdb::DuckDb;
 use query_data_model::implementations::relational::plan::{
@@ -13,7 +13,7 @@ use query_data_model::plan::tracking::Declare;
 use query_data_model::testkit::limits;
 
 fn compile(query: &str) -> compiler::passes::codegen::CompiledQueryContext {
-    compile_local(query, &embedded_local_model(), limits()).unwrap()
+    compile_local(query, &embedded_local_model(), &local_admin(), limits()).unwrap()
 }
 
 fn parse_duckdb(query: &str) -> ParsedSql {
@@ -88,7 +88,7 @@ fn variable() -> Expr {
 #[test]
 fn cycles_are_rejected() {
     let local = embedded_local_model();
-    let error = compile_local("MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(a) RETURN a.id, b.id, c.id", &local, limits()).unwrap_err();
+    let error = compile_local("MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(a) RETURN a.id, b.id, c.id", &local, &local_admin(), limits()).unwrap_err();
     assert!(error.to_string().contains("cycles are unsupported"));
 }
 
@@ -110,6 +110,7 @@ fn local_starts_with_folds_unicode_case() {
     let compiled = compile_local(
         "MATCH (f:File) WHERE f.path STARTS WITH 'ÄRG' RETURN f{.path} LIMIT 10",
         &local,
+        &local_admin(),
         limits(),
     )
     .unwrap();
@@ -474,7 +475,7 @@ fn group_by_truncate_all_units_emit_duckdb_date_trunc() {
         let query = format!(
             "MATCH (u:Note {{id: 1}}) RETURN date_trunc('{unit}', u.created_at), count(u) AS n LIMIT 10"
         );
-        let result = compile_local(&query, &embedded_local_model(), limits())
+        let result = compile_local(&query, &embedded_local_model(), &local_admin(), limits())
             .unwrap_or_else(|e| panic!("compile_local failed for unit {unit}: {e:?}"));
         let rendered = result.base.render();
         let expected = if unit == "week" {
@@ -499,7 +500,8 @@ fn node_ids_expand_params() {
 }
 
 fn compile_gql(cypher: &str) -> Result<compiler::passes::codegen::CompiledQueryContext, String> {
-    compile_local(cypher, &embedded_local_model(), limits()).map_err(|e| e.to_string())
+    compile_local(cypher, &embedded_local_model(), &local_admin(), limits())
+        .map_err(|e| e.to_string())
 }
 
 #[ignore = "asserts the shape of the removed fixture ontology, not the embedded model"]

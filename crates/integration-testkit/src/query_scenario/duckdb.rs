@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
 use query_data_model::{Catalog, DuckDb};
-use query_engine::compiler::{compile_local, generate_local_ddl};
+use query_engine::compiler::{compile_local, generate_local_ddl, local_admin};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::shared::PipelineOutput;
 
@@ -76,7 +76,7 @@ fn run_step(
     let label = format!("{name} [duckdb]");
     let expect = &step.expect;
     expect.validate_pages_exclusive(&label);
-    let compiled = compile_local(query, data_model, limits()).map(Arc::new);
+    let compiled = compile_local(query, data_model, &local_admin(), limits()).map(Arc::new);
     if assert_compilation(compiled, expect, &label).is_none() {
         return;
     }
@@ -97,7 +97,7 @@ fn run_step(
     for (index, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", index + 1);
         let paged = page_query(query, index);
-        compile_local(&paged, data_model, limits())
+        compile_local(&paged, data_model, &local_admin(), limits())
             .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}"));
         let output = execute(database, data_model, &paged, &page_label);
         let response = assert_output(&output, page_expect, &page_label);
@@ -110,7 +110,7 @@ fn run_step(
         if all_pages.matches_unpaginated {
             let query = unpaginated(query);
             let compiled = Arc::new(
-                compile_local(&query, data_model, limits())
+                compile_local(&query, data_model, &local_admin(), limits())
                     .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}")),
             );
             let output = execute(database, data_model, &query, &label);
@@ -129,8 +129,9 @@ fn execute(
     query: &str,
     label: &str,
 ) -> PipelineOutput {
-    let outcome = duckdb_client::dag::run_local(database, data_model, query, limits())
-        .unwrap_or_else(|error| panic!("{label}: {error}"));
+    let outcome =
+        duckdb_client::dag::run_local(database, data_model, query, &local_admin(), limits())
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
     let compiled = outcome.compiled;
     let sql = compiled.base.render();
     let batches = outcome.executed.batches;
