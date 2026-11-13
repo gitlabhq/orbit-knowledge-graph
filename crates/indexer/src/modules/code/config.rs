@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn edge_tables_are_the_code_variant_tables_and_the_shared_table() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let names = CodeTableNames::from_catalog(&catalog).expect("code tables must resolve");
         let gl_code_edge = prefixed_table_name("gl_code_edge", *SCHEMA_VERSION);
         let gl_edge = prefixed_table_name("gl_edge", *SCHEMA_VERSION);

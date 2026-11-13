@@ -1,10 +1,10 @@
 description: An issue cites the GitLab references found in its text, inside the caller's scope
 
 config:
-  security: group
+  security: group_100
 
 query: |
-  MATCH (i:JiraIssue)-[:CITES]->(r:GitLabRef) RETURN i.key, r.url ORDER BY i.key LIMIT 20
+  MATCH (i:JiraIssue)-[:CITES]->(r:GitLabRef) WHERE i.id IN ['10100', '10200'] RETURN i.key, r.url ORDER BY i.key LIMIT 20
 
 expect:
   node_count: 2

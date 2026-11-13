@@ -14,18 +14,20 @@ fn local_dictionary_credentials() -> DictionaryCredentials {
     }
 }
 
-fn load_model(model_path: Option<&PathBuf>) -> Result<Arc<Model>> {
+/// The model of the packages at `model_path`, else the embedded ones, as a deployment of the
+/// shape `shape` loads it.
+fn load_model(model_path: Option<&PathBuf>, shape: &str) -> Result<Arc<Model>> {
     let packages = match model_path {
         Some(path) => Packages::read_dir(path, query_data_model::Tier::Platform)
             .context("failed to read model packages")?,
         None => Packages::embedded(),
     };
-    Ok(packages.load()?)
+    Ok(packages.deployment(shape)?)
 }
 
 fn load_schema(model_path: Option<&PathBuf>) -> Result<GraphSchema> {
     Ok(GraphSchema::new(
-        Schema::from_model(&load_model(model_path)?)?,
+        Schema::from_model(&load_model(model_path, "server")?)?,
         false,
     ))
 }
@@ -87,7 +89,7 @@ CREATE OR REPLACE MACRO def_name(fqn) AS
     regexp_replace(fqn, '^.*[:.#/]', '');";
 
 pub fn run_local(model_path: Option<PathBuf>) -> Result<()> {
-    let catalog = Catalog::<DuckDb>::from_model(&load_model(model_path.as_ref())?)?;
+    let catalog = Catalog::<DuckDb>::from_model(&load_model(model_path.as_ref(), "local")?)?;
     print!(
         "{}",
         query_engine::compiler::generate_local_ddl(&catalog, LOCAL_DDL)
@@ -301,7 +303,7 @@ mod tests {
 
     #[test]
     fn local_ddl_contains_graph_tables_without_manifest() {
-        let catalog = Catalog::<DuckDb>::embedded().unwrap();
+        let catalog = Catalog::<DuckDb>::embedded("local").unwrap();
         let ddl = query_engine::compiler::generate_local_ddl(&catalog, LOCAL_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(!ddl.contains("_orbit_manifest"));

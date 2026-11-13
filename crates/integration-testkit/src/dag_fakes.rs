@@ -6,13 +6,18 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use compiler::dag::Request;
+use compiler::dag::{Backend, Connections, Env, Frontend, Peer, Source};
 use compiler::orbit_authorization::Key;
 use compiler::orbit_authorization::{Answers, AuthError, Check, Checks, Module, Need, Provider};
 use compiler::remote::Resolves;
 use query_data_model::catalog::Row;
 use query_data_model::implementations::live::DataExtraction;
 use query_data_model::implementations::orbit_code::{CodeSearch, RequestField};
-use query_engine::shared::dag::{Executed, Executor, ExecutorError, from_rows};
+use query_data_model::{Catalog, ClickHouse, Model};
+use query_engine::shared::dag::{
+    DagError, Event, Executed, Executor, ExecutorError, Executors, Outcome, Recording, Runner,
+    from_rows,
+};
 use serde_json::{Value, json};
 
 use crate::seeded_remote::{SeededCodeSearch, SeededDataExtraction, seeded_scopes};
@@ -201,56 +206,137 @@ pub fn dag_packages() -> query_data_model::Packages {
     query_data_model::testkit::with_demo().with(heads)
 }
 
-pub fn dag_model() -> Arc<query_data_model::Model> {
-    dag_packages().load().unwrap()
+/// The DAG packages, plus releases on a second ClickHouse connection keyed by UUID, the
+/// deployments that name them on the graph connection, and reviews on a DuckDB connection.
+pub fn peer_packages() -> query_data_model::Packages {
+    let peers = crate::authorization_variants::platform(&[
+        "peers.releases",
+        "peers.deployments",
+        "peers.lake",
+    ]);
+    dag_packages().with(peers)
 }
 
-/// `graph` on the relational connection and the seeded code and live fakes on every served
+/// `packages` with text replaced in some fragments, keeping each package's tier.
+pub fn edited(
+    packages: query_data_model::Packages,
+    edits: &[(&str, &str, &str)],
+) -> query_data_model::Packages {
+    use std::collections::BTreeMap;
+    let tiers = packages.tiers().clone();
+    let mut by_tier: BTreeMap<query_data_model::Tier, BTreeMap<String, String>> = BTreeMap::new();
+    for (name, text) in packages.sources() {
+        let mut text = text.clone();
+        for (path, find, with) in edits.iter().filter(|(path, ..)| *path == name) {
+            assert!(text.contains(find), "{path} holds {find}");
+            text = text.replace(find, with);
+        }
+        let tier = tiers[name.split('/').next().unwrap_or_default()];
+        by_tier.entry(tier).or_default().insert(name.clone(), text);
+    }
+    by_tier
+        .into_iter()
+        .map(|(tier, sources)| query_data_model::Packages::new(tier, sources))
+        .reduce(query_data_model::Packages::with)
+        .expect("at least one package")
+}
+
+/// `packages` with `Head` enforcing only its `read_code` check on the code store, which then
+/// names `Head`'s repository property itself.
+pub fn heads_under_none(packages: query_data_model::Packages) -> query_data_model::Packages {
+    edited(
+        packages,
+        &[
+            (
+                "orbit_next.heads/authorization.yaml",
+                "enforce: {orbit_code: {scope_key: {via: HEAD_IN}}}",
+                "enforce: {orbit_code: none}\n    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]",
+            ),
+            (
+                "orbit_next.heads/storage/orbit_code.yaml",
+                "      branch: {immutable: true}\nrelationships:",
+                "      branch: {immutable: true}\n    backend: {repository: project_id}\nrelationships:",
+            ),
+        ],
+    )
+}
+
+pub fn dag_model() -> Arc<query_data_model::Model> {
+    dag_packages().deployment("demo").unwrap()
+}
+
+/// Every connection of a deployment's model, and its ClickHouse graph connection.
+pub fn dag_connections(model: &Arc<Model>) -> (Arc<Catalog<ClickHouse>>, Connections) {
+    let connections = Connections::of(model).unwrap();
+    let graph = connections
+        .peers()
+        .iter()
+        .find_map(|peer| match peer {
+            Peer::ClickHouse(catalog) => Some(Arc::clone(catalog)),
+            _ => None,
+        })
+        .expect("the deployment stores a graph on ClickHouse");
+    (graph, connections)
+}
+
+/// `graph` on the ClickHouse connection and the seeded code and live fakes on every served
 /// remote, signed in to the live service as `user`.
-pub fn dag_executors(
-    remotes: &compiler::dag::Remotes,
-    connection: &str,
-    graph: Arc<dyn Executor>,
-    user: &str,
-) -> query_engine::shared::dag::Executors {
-    let mut executors = query_engine::shared::dag::Executors::default().with(connection, graph);
-    for target in remotes.targets() {
-        let executor = match target.backend() {
-            compiler::dag::Backend::OrbitCode => seeded_code(),
-            _ => seeded_live(user),
+pub fn dag_executors(connections: &Connections, graph: Arc<dyn Executor>, user: &str) -> Executors {
+    let mut executors = Executors::default();
+    for peer in connections.peers() {
+        let executor = match peer.backend() {
+            Backend::ClickHouse => Arc::clone(&graph),
+            Backend::OrbitCode => seeded_code(),
+            Backend::Live => seeded_live(user),
+            _ => continue,
         };
-        executors = executors.with(target.connection(), executor);
+        executors = executors.with(peer.connection(), executor);
     }
     executors
 }
 
-/// Runs a query through the DAG runner with `graph` on the relational connection and the seeded
-/// code and live fakes on theirs, signed in to the live service as `user`.
+/// Runs a query through the DAG runner with `graph` on the graph connection and the seeded code
+/// and live fakes on theirs, signed in to the live service as `user`.
 pub async fn run_dag(
-    model: &Arc<query_data_model::Model>,
+    model: &Arc<Model>,
     graph: Arc<dyn Executor>,
     query: &str,
     grants: &compiler::orbit_authorization::Grants,
     user: &str,
     checks: &Checks,
-) -> (
-    Vec<query_engine::shared::dag::Event>,
-    Result<query_engine::shared::dag::Outcome, query_engine::shared::dag::DagError>,
-) {
-    use compiler::dag::{Env, Primary, Remotes, Source};
-    use query_data_model::{Catalog, ClickHouse};
-    let primary = Primary::ClickHouse(Arc::new(Catalog::<ClickHouse>::from_model(model).unwrap()));
-    let remotes = Remotes::all(model);
-    let executors = dag_executors(&remotes, primary.connection(), graph, user);
+) -> (Vec<Event>, Result<Outcome, DagError>) {
+    let (catalog, connections) = dag_connections(model);
+    let executors = dag_executors(&connections, graph, user);
+    run_served(
+        &Frontend::Server(catalog),
+        &connections,
+        &executors,
+        query,
+        grants,
+        checks,
+    )
+    .await
+}
+
+/// Runs a query through the DAG runner of a deployment that serves `connections` through
+/// `executors`, recording every event.
+pub async fn run_served(
+    frontend: &Frontend,
+    connections: &Connections,
+    executors: &Executors,
+    query: &str,
+    grants: &compiler::orbit_authorization::Grants,
+    checks: &Checks,
+) -> (Vec<Event>, Result<Outcome, DagError>) {
     let env = Env {
-        primary: &primary,
-        remotes: &remotes,
+        frontend,
+        connections,
         grants,
         limits: query_data_model::testkit::limits(),
         trace: true,
     };
-    let mut observer = query_engine::shared::dag::Recording::default();
-    let outcome = query_engine::shared::dag::Runner::new(env, &executors, checks, &mut observer)
+    let mut observer = Recording::default();
+    let outcome = Runner::new(env, executors, checks, &mut observer)
         .run(Source::Text(query))
         .await;
     (observer.0, outcome)

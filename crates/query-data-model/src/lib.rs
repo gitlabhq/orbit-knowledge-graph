@@ -1,5 +1,6 @@
 pub mod catalog;
 pub mod constants;
+mod deployments;
 mod error;
 pub mod generic;
 pub mod implementations;
@@ -15,6 +16,7 @@ mod types;
 
 pub use catalog::{Catalog, Model, StorageBackend};
 pub use constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
+pub use deployments::Deployments;
 pub use error::DataModelError;
 pub use generic::{
     Attribute, Direction, Domain, Endpoint, Entity, EntityId, ForeignKey, GraphCatalog, Hop,

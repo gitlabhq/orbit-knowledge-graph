@@ -1,10 +1,10 @@
 description: A comment joins the issue it comments on inside the caller's group only
 
 config:
-  security: group
+  security: group_100
 
 query: |
-  MATCH (c:JiraComment)-[:COMMENTS_ON]->(i:JiraIssue) RETURN c.body, i.key ORDER BY i.key LIMIT 20
+  MATCH (c:JiraComment)-[:COMMENTS_ON]->(i:JiraIssue) WHERE c.id IN ['20000', '20001', '20002'] RETURN c.body, i.key ORDER BY i.key LIMIT 20
 
 expect:
   node_count: 2

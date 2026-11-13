@@ -22,7 +22,7 @@ fn orbit_skills_match_cli_commands() {
 fn named_queries_render_and_compile() {
     let directory = PathBuf::from(env!("NAMED_QUERIES_DIR"));
     let data_model = Arc::new(
-        query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
             .unwrap_or_else(|error| panic!("embedded model failed to load: {error}")),
     );
     let security_context = compiler::uniform_grants(data_model.model(), false, &["1/"]);

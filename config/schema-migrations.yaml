@@ -1,5 +1,8 @@
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 migrations:
+- version: 120
+  scope: none
+  note: the local DuckDB store is the complete store of the code entities it holds
 - version: 119
   scope: none
   note: >-

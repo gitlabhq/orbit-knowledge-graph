@@ -9,8 +9,8 @@ use crate::{EntityId, Model, PropertyId, RelationshipId, RelationshipVariantId};
 pub struct LogicalCatalog<'m> {
     model: &'m Model,
     admin: bool,
-    connection: Option<&'m str>,
-    remotes: &'m [String],
+    served: &'m [String],
+    restricted: bool,
     limits: &'m QueryLimits,
     all_columns: bool,
 }
@@ -20,8 +20,8 @@ impl Model {
         LogicalCatalog {
             model: self,
             admin: false,
-            connection: None,
-            remotes: &[],
+            served: &[],
+            restricted: false,
             limits,
             all_columns: false,
         }
@@ -65,35 +65,37 @@ impl<'m> LogicalCatalog<'m> {
         self.limits
     }
 
+    /// Reads only what the stores of the `served` connections hold, as a query's frontend does.
     #[must_use]
-    pub fn on(self, connection: &'m str) -> Self {
+    pub fn serving(self, served: &'m [String]) -> Self {
         Self {
-            connection: Some(connection),
+            served,
+            restricted: true,
             ..self
         }
     }
 
-    /// Whether the deployment serves code or live connections, whose stages the engine joins to
-    /// the relational one.
-    pub fn serves_remotes(self) -> bool {
-        !self.remotes.is_empty()
+    /// Plans across the `served` connections, whose stage plans read what the frontend resolved.
+    #[must_use]
+    pub fn across(self, served: &'m [String]) -> Self {
+        Self { served, ..self }
     }
 
-    /// Also reads the stores of the code and live connections the deployment serves.
-    #[must_use]
-    pub fn with_remotes(self, remotes: &'m [String]) -> Self {
-        Self { remotes, ..self }
+    /// Whether the deployment serves several connections, whose stages the engine joins.
+    pub fn serves_peers(self) -> bool {
+        self.served.len() > 1
     }
 
     fn stores(self) -> impl Iterator<Item = &'m Store> {
-        self.model.stores().iter().filter(move |store| {
-            Some(store.connection.as_str()) == self.connection
-                || self.remotes.contains(&store.connection)
-        })
+        self.model
+            .stores()
+            .iter()
+            .filter(move |store| self.served.contains(&store.connection))
     }
 
+    /// The entity's home store among the served ones holds the property.
     pub(super) fn realized(self, entity: EntityId, property: PropertyId) -> bool {
-        if self.connection.is_none() {
+        if !self.restricted {
             return true;
         }
         let mut holders = self.stores().filter(|store| store.source(entity).is_some());
@@ -112,7 +114,7 @@ impl<'m> LogicalCatalog<'m> {
     /// Every variant keeps its rows in an edge table, which the loader checks holds each
     /// attribute of the relationship.
     pub(super) fn attribute_realized(self, variants: &[RelationshipVariantId]) -> bool {
-        self.connection.is_none()
+        !self.restricted
             || variants.iter().all(|variant| {
                 self.stores()
                     .any(|store| store.edge_table(*variant).is_some())

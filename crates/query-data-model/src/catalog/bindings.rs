@@ -349,6 +349,7 @@ pub(super) fn check(
     graph: &GraphCatalog,
     stores: &[Store],
     served: &HashSet<PropertyId>,
+    elsewhere: &crate::spec::Elsewhere,
     diagnostics: &mut Diagnostics,
 ) {
     for entity in graph.entities() {
@@ -414,6 +415,7 @@ pub(super) fn check(
                     });
                     if let Some(referenced) = unstored.filter(|entity| {
                         !stores.iter().any(|store| store.source(*entity).is_some())
+                            && !elsewhere.holds(&graph.entity(*entity).name)
                     }) {
                         diagnostics.error(
                             &store.package,
@@ -450,9 +452,15 @@ pub(super) fn check(
                 None => {}
             }
         }
-        if !stores
-            .iter()
-            .any(|store| store.declared.contains(&variant.id))
+        let bound_elsewhere = elsewhere.binds(
+            &graph.relationship(variant.relationship).name,
+            &graph.entity(variant.source).name,
+            &graph.entity(variant.target).name,
+        );
+        if !bound_elsewhere
+            && !stores
+                .iter()
+                .any(|store| store.declared.contains(&variant.id))
         {
             let package = &graph.entity(variant.source).package;
             let message = format!("{} is bound in no store", label(graph, variant));

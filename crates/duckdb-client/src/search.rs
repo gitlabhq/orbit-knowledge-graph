@@ -69,7 +69,8 @@ impl NodeHydrator {
     }
 
     pub fn embedded(entity_type: &str) -> Result<Self> {
-        let catalog = Catalog::<DuckDb>::embedded().context("failed to load the embedded model")?;
+        let catalog =
+            Catalog::<DuckDb>::embedded("local").context("failed to load the embedded model")?;
         Self::new(&catalog, entity_type)
     }
 

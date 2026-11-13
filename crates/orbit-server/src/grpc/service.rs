@@ -968,7 +968,7 @@ mod tests {
     }
 
     fn test_model() -> Arc<Catalog<ClickHouse>> {
-        Arc::new(Catalog::<ClickHouse>::embedded().expect("model must load"))
+        Arc::new(Catalog::<ClickHouse>::embedded("server").expect("model must load"))
     }
 
     fn test_config() -> ClickHouseConfiguration {

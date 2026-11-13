@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn build_strategies_resolves_composite_key_from_source_partition_count() {
         let model = query_data_model::Packages::embedded()
-            .load()
+            .deployment("server")
             .expect("should load model");
 
         let strategies = build_strategies(model.sources(), PARTITION_MIN_ROWS);

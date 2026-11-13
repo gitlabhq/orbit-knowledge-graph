@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use compiler::dag::{Env, Primary, Remotes, Source};
+use compiler::dag::{Connections, Env, Frontend, Source};
 use compiler::gql::ParsedQuery;
 use compiler::{CompiledQueryContext, QueryError};
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
@@ -15,21 +15,21 @@ use compiler::orbit_authorization::Checks;
 use crate::dag::{Executed, Executors, Outcome, Runner, Silent};
 use crate::types::{ExecutionOutput, QueryExecutionLog};
 
-/// The executors a deployment registers, the code and live connections it serves next to its
-/// relational one, and the providers that check each stage's rows.
+/// The executors a deployment registers, the connections it serves next to its graph
+/// connection, and the providers that check each stage's rows.
 pub struct DagStage {
     pub executors: Executors,
-    pub remotes: Remotes,
+    pub peers: Vec<compiler::dag::Peer>,
     pub checks: Checks,
 }
 
 impl DagStage {
-    /// A deployment that serves its relational connection alone, checking rows through the
+    /// A deployment that serves its graph connection alone, checking rows through the
     /// deployment's providers.
     pub fn relational(executors: Executors, checks: Checks) -> Self {
         Self {
             executors,
-            remotes: Remotes::default(),
+            peers: Vec::new(),
             checks,
         }
     }
@@ -82,10 +82,15 @@ impl PipelineStage for DagStage {
         let data_model = data_model(ctx).inspect_err(|e| obs.record_error(e))?;
         let grants = ctx.grants().inspect_err(|e| obs.record_error(e))?;
         let limits = ctx.limits().inspect_err(|e| obs.record_error(e))?;
-        let primary = Primary::ClickHouse(Arc::clone(&data_model));
+        let connections = Connections::new(
+            std::iter::once(compiler::dag::Peer::ClickHouse(Arc::clone(&data_model)))
+                .chain(self.peers.iter().cloned())
+                .collect(),
+        );
+        let frontend = Frontend::Server(data_model);
         let env = Env {
-            primary: &primary,
-            remotes: &self.remotes,
+            frontend: &frontend,
+            connections: &connections,
             grants,
             limits,
             trace: false,

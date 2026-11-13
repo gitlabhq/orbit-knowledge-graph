@@ -21,7 +21,7 @@ use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::{EntityId, Model};
 
-use crate::dag::Remotes;
+use crate::dag::Connections;
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
 use crate::logical::Query;
@@ -32,13 +32,13 @@ pub fn restrict(
     plan: &LogicalPlan,
     logical: &Model,
     model: &Catalog<impl SqlBackend>,
-    remotes: &Remotes,
+    connections: &Connections,
     grants: &Grants,
 ) -> Result<()> {
     let query = Query::new(plan, logical);
     let entities = entities(query);
     for (_, entity) in &entities {
-        readable(*entity, model, remotes, grants)?;
+        readable(*entity, connections.guard(*entity), model, grants)?;
     }
     let admin = grants.caller().admin();
     if !admin && query.kind() == Kind::Aggregation {
@@ -55,16 +55,16 @@ fn entities(query: Query<'_>) -> Vec<(Ref, EntityId)> {
         .collect()
 }
 
-/// The caller holds the entity's permission in at least one scope.
+/// The caller holds the entity's permission in at least one scope; `guard` is the policy of the
+/// connection that reads it.
 pub(super) fn readable(
     entity: EntityId,
+    guard: Option<&query_data_model::catalog::Guard>,
     model: &Catalog<impl SqlBackend>,
-    remotes: &Remotes,
     grants: &Grants,
 ) -> Result<()> {
     let name = &model.graph().entity(entity).name;
-    let remote = || remotes.holding(entity)?.guard(entity);
-    let guard = model.guard(entity).or_else(remote).ok_or_else(|| {
+    let guard = guard.ok_or_else(|| {
         QueryError::Security(format!(
             "{name} has no guard on connection {}",
             model.connection()

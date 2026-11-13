@@ -5,7 +5,7 @@ use orbit_fuzz::grammar::{Bytes, Grammar};
 use query_data_model::{Catalog, ClickHouse};
 
 static MODEL: LazyLock<Catalog<ClickHouse>> =
-    LazyLock::new(|| Catalog::<ClickHouse>::embedded().expect("embedded packages load"));
+    LazyLock::new(|| Catalog::<ClickHouse>::embedded("server").expect("embedded packages load"));
 
 fn main() {
     let catalog = MODEL.model().logical(query_data_model::testkit::limits());

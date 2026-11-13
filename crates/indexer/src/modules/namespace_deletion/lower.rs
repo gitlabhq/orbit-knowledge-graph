@@ -145,7 +145,7 @@ mod tests {
     use super::*;
 
     fn catalog() -> Catalog<ClickHouse> {
-        Catalog::<ClickHouse>::embedded().expect("embedded catalog")
+        Catalog::<ClickHouse>::embedded("server").expect("embedded catalog")
     }
 
     fn edge_tables() -> Vec<String> {

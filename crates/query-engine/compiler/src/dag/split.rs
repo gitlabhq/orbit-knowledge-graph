@@ -7,17 +7,13 @@ use query_data_model::surface::Statement;
 use query_data_model::{Catalog, Direction, Endpoint, PropertyId};
 
 use super::cut::{Cut, Group};
-use super::{Backend, Dag, Remotes, Stage, StageQuery};
+use super::{Connections, Dag, Stage, StageQuery};
 use crate::error::{QueryError, Result};
 use crate::logical::{Kind, Query, Step};
 use crate::passes::codegen::SqlBackend;
 
-/// The connection a binding reads: the relational one, or a served remote.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(super) enum Place {
-    Primary,
-    Remote(usize),
-}
+/// The served connection a binding reads, by its index among the deployment's connections.
+pub(super) type Place = usize;
 
 /// A relationship step whose endpoints live on different connections, with the key pairs the
 /// engine joins its two sides on.
@@ -26,24 +22,30 @@ pub(super) struct Crossing {
     pub pairs: Vec<((Ref, PropertyId), (Ref, PropertyId))>,
 }
 
-/// Splits a statement into stages, one per connection it reads. A query the relational connection
-/// serves alone is one stage; a remote stage always hands its rows to the engine stage, which
-/// shapes the response.
+/// Splits a statement into stages, one per connection it reads. A query one relational
+/// connection serves alone is one stage on it; otherwise every stage hands its rows to the
+/// engine stage, which shapes the response.
+/// `frontend` is the catalog the deployment's frontend rules read, which the query's statistics
+/// read too.
 pub fn split<B: SqlBackend>(
     statement: Statement,
-    primary: &Catalog<B>,
-    remotes: &Remotes,
+    frontend: &Catalog<B>,
+    connections: &Connections,
     limits: &QueryLimits,
 ) -> Result<Dag> {
-    let query = Query::new(&statement.plan, primary.model());
-    let places = places(query, primary, remotes);
+    let query = Query::new(&statement.plan, frontend.model());
+    let places = places(query, connections)?;
     let distinct: BTreeSet<Place> = places.values().copied().collect();
-    if distinct.iter().all(|place| *place == Place::Primary) {
+    let single = match distinct.iter().collect::<Vec<_>>()[..] {
+        [place] => Some(&connections.peers()[*place]).filter(|peer| peer.remote().is_none()),
+        _ => None,
+    };
+    if let Some(peer) = single {
         return Ok(Dag {
             stages: vec![Stage {
                 id: 0,
-                backend: B::BACKEND,
-                connection: Some(primary.connection().to_string()),
+                backend: peer.backend(),
+                connection: Some(peer.connection().to_string()),
                 query: StageQuery::Gql(statement),
                 inputs: Vec::new(),
                 response: true,
@@ -53,10 +55,14 @@ pub fn split<B: SqlBackend>(
         });
     }
     if query.kind() != Kind::Traversal {
+        let names: Vec<&str> = distinct
+            .iter()
+            .map(|place| connections.peers()[*place].connection())
+            .collect();
         return Err(QueryError::Validation(format!(
             "a {} query reads one connection; this one reads {}",
             <&str>::from(crate::types::QueryType::from(query.kind())),
-            names(&distinct, primary, remotes)
+            names.join(" and ")
         )));
     }
     let groups = groups(query, &places);
@@ -72,23 +78,20 @@ pub fn split<B: SqlBackend>(
         query,
         groups,
         crossings,
-        backends: places_backends(primary.connection(), B::BACKEND, remotes),
         limits,
-        remotes,
+        connections,
     };
     let response = super::Response {
         shape: crate::passes::result_contract::ResultShape::new(query)?,
-        stats: crate::analytics::QueryStats::new(query, primary),
+        stats: crate::analytics::QueryStats::new(query, frontend),
         debug: statement.debug,
     };
     cut.dag(response)
 }
 
-fn places<B: SqlBackend>(
-    query: Query<'_>,
-    primary: &Catalog<B>,
-    remotes: &Remotes,
-) -> HashMap<Ref, Place> {
+/// Each binding's connection: the code connection that searches the property a structural
+/// match runs over, else the connection that holds its entity.
+fn places(query: Query<'_>, connections: &Connections) -> Result<HashMap<Ref, Place>> {
     let searched: HashMap<Ref, PropertyId> = query
         .operations()
         .filter_map(|(_, operation)| match operation {
@@ -99,48 +102,25 @@ fn places<B: SqlBackend>(
             _ => None,
         })
         .collect();
-    let index = |target: &crate::passes::plan::remote::Target| {
-        remotes
-            .targets()
-            .iter()
-            .position(|candidate| std::ptr::eq(candidate, target))
-            .map(Place::Remote)
-    };
     query
         .bindings()
         .into_iter()
         .map(|binding| {
             let entity = binding.entity;
+            let name = &query.model.graph().entity(entity).name;
             let place = match searched.get(&binding.output) {
-                Some(property) => remotes.searching(entity, *property).and_then(index),
-                None if primary.table_of(entity).is_some() => Some(Place::Primary),
-                None => remotes.holding(entity).and_then(index),
+                Some(property) => connections.searching(entity, *property).ok_or_else(|| {
+                    QueryError::AllowlistRejected(format!(
+                        "no served connection searches {name}.{}",
+                        query.model.graph().property(*property).name
+                    ))
+                })?,
+                None => connections
+                    .holding(entity)
+                    .map_err(|unplaced| super::unplaced(name, unplaced))?,
             };
-            (binding.output, place.unwrap_or(Place::Primary))
+            Ok((binding.output, place))
         })
-        .collect()
-}
-
-fn names<B: SqlBackend>(
-    places: &BTreeSet<Place>,
-    primary: &Catalog<B>,
-    remotes: &Remotes,
-) -> String {
-    let name = |place: &Place| match place {
-        Place::Primary => primary.connection(),
-        Place::Remote(index) => remotes.targets()[*index].connection(),
-    };
-    places.iter().map(name).collect::<Vec<_>>().join(" and ")
-}
-
-fn places_backends(primary: &str, backend: Backend, remotes: &Remotes) -> Vec<(String, Backend)> {
-    std::iter::once((primary.to_string(), backend))
-        .chain(
-            remotes
-                .targets()
-                .iter()
-                .map(|target| (target.connection().to_string(), target.backend())),
-        )
         .collect()
 }
 

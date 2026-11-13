@@ -1,0 +1,29 @@
+kind: storage
+package: peers.releases
+store: releases
+engine:
+  kind: clickhouse
+  connection: releases
+  path_column: traversal_path
+  backend:
+    version_column: _version
+    deleted_column: _deleted
+    engine: ReplacingMergeTree(_version, _deleted)
+    columns:
+      _version: {type: "DateTime64(6, 'UTC')", default: now64(6)}
+      _deleted: {type: Bool, default: "false"}
+entities:
+  Release:
+    complete: true
+    table: gl_release
+    columns:
+      id: {immutable: true, backend: {type: UUID}}
+      name: {backend: {type: String}}
+      merge_request_id: {immutable: true, backend: {type: Int64}}
+      traversal_path: {backend: {type: String}}
+    access: {filter: [id], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+relationships:
+  SHIPS:
+    Release -> MergeRequest: {fk: {on: source, column: merge_request_id}}

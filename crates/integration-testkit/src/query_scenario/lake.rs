@@ -1,37 +1,51 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use compiler::dag::Peer;
 use duckdb_client::DuckDbClient;
-use orbit_server::redaction::QueryResult;
-use query_data_model::testkit::limits;
-use query_data_model::{Catalog, DuckDb};
-use query_engine::compiler::orbit_authorization::Grants;
+use duckdb_client::dag::DuckDbExecutor;
+use query_data_model::{DuckDb, Packages};
 
 use super::{
-    QueryStep, assert_compilation, assert_output, build_security, pipeline_output, read_scenarios,
-    resolve_preset, seed_preset, step_label,
+    PresetOr, QueryStep, assert_compilation, assert_output, build_redaction, build_security,
+    execute_output, read_scenarios, resolve_preset, seed_preset, step_label,
 };
+use crate::context::TestContext;
 use crate::lake::{Lake, Mode};
 use crate::scenario::discover;
 
-/// Runs every scenario under `root` against `connection`'s tables landed on a local S3 server in
-/// `mode`, seeded once from the `seed` preset; each scenario's caller comes from its security
-/// preset.
-pub async fn run_lake_dir(root: &str, presets: &str, seed: &str, connection: &str, mode: Mode) {
+/// Runs every scenario under `root` the way the server does, on a deployment of the testkit
+/// shape `shape`: the ClickHouse graph of `ctx`, and `connection`'s DuckDB peer with its tables
+/// landed on a local S3 server in `mode`, seeded once from the `seed` preset.
+pub async fn run_lake_dir(
+    ctx: &TestContext,
+    (root, presets): (&str, &str),
+    packages: Packages,
+    (shape, connection, seed): (&str, &str, &str),
+    mode: Mode,
+) {
     let (root, presets) = (Path::new(root), Path::new(presets));
-    let model = query_data_model::testkit::with_demo().load().unwrap();
-    let catalog = Arc::new(model.physical::<DuckDb>(connection).unwrap());
+    let fragments = packages
+        .fragments()
+        .and_then(|fragments| {
+            fragments.deployment(&query_data_model::testkit::deployments(), shape)
+        })
+        .unwrap();
+    let graph = crate::versioned_data_model(fragments);
+    let lake_catalog = Arc::new(graph.shared_model().physical::<DuckDb>(connection).unwrap());
     let lake = Lake::seed(
         mode,
-        &catalog,
+        &lake_catalog,
         &seed_preset(presets, seed),
         |_, _, declared| declared.to_string(),
     )
     .await;
-    let client = DuckDbClient::open_s3(connection, &lake.connection, &catalog)
+    let client = DuckDbClient::open_s3(connection, &lake.connection, &lake_catalog)
         .unwrap_or_else(|error| panic!("open {connection}: {error}"));
-    let client = Arc::new(Mutex::new(client));
-    let authorization = orbit_server_config::AppConfig::embedded_defaults().authorization;
+    let executor = DuckDbExecutor {
+        client: Arc::new(Mutex::new(client)),
+    };
+    let peers = [(Peer::DuckDb(lake_catalog), Arc::new(executor) as _)];
     let mut files = Vec::new();
     discover(root, &mut files);
     files.sort();
@@ -40,7 +54,7 @@ pub async fn run_lake_dir(root: &str, presets: &str, seed: &str, connection: &st
         let (config, steps) = scenario.into_steps();
         assert!(
             config.extra_seed.is_empty() && steps.iter().all(|step| step.seed.is_empty()),
-            "{name}: lake scenarios read the shared seed"
+            "{name}: lake scenarios read the shared seeds"
         );
         if config.skip.is_some() {
             continue;
@@ -51,15 +65,19 @@ pub async fn run_lake_dir(root: &str, presets: &str, seed: &str, connection: &st
             presets,
             &name,
         ));
-        let grants = orbit_server::authorization::gitlab::session_grants(
-            &authorization,
-            catalog.model(),
-            security,
-        )
-        .unwrap_or_else(|error| panic!("{name}: grants: {error}"));
+        let redaction = config
+            .redaction
+            .clone()
+            .unwrap_or(PresetOr::Preset("allow_all".into()));
+        let redaction = build_redaction(&resolve_preset(
+            "redaction",
+            &Some(redaction),
+            presets,
+            &name,
+        ));
         for (index, step) in steps.iter().enumerate() {
             let label = format!("{} [{mode:?}]", step_label(&name, index, steps.len()));
-            run_step(&client, &catalog, &grants, step, &label).await;
+            run_step(ctx, &graph, &security, &redaction, &peers, step, &label).await;
         }
         ran += 1;
     }
@@ -67,40 +85,20 @@ pub async fn run_lake_dir(root: &str, presets: &str, seed: &str, connection: &st
 }
 
 async fn run_step(
-    client: &Arc<Mutex<DuckDbClient>>,
-    catalog: &Arc<Catalog<DuckDb>>,
-    grants: &Grants,
+    ctx: &TestContext,
+    graph: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
+    security: &query_engine::pipeline::SecurityContext,
+    redaction: &crate::mock_redaction::MockRedactionService,
+    peers: &[(Peer, Arc<dyn query_engine::shared::dag::Executor>)],
     step: &QueryStep,
     label: &str,
 ) {
     let expect = &step.expect;
     assert!(
-        expect.pages.is_empty(),
-        "{label}: lake scenarios read one page"
+        expect.pages.is_empty() && !expect.compile_only,
+        "{label}: lake scenarios run one page"
     );
-    let outcome = duckdb_client::dag::run(client, catalog, &step.query, grants, limits()).await;
-    let outcome = match outcome {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            assert_compilation(Err::<Arc<_>, _>(error), expect, label);
-            return;
-        }
-    };
-    let compiled = Arc::new(outcome.compiled);
-    if assert_compilation(Ok::<_, String>(Arc::clone(&compiled)), expect, label).is_none()
-        || expect.compile_only
-    {
-        return;
-    }
-    let result =
-        QueryResult::from_batches(&outcome.executed.batches, &compiled.base.result_context)
-            .unwrap();
-    let output = pipeline_output(
-        &compiled,
-        result,
-        0,
-        compiled.base.result_context.clone(),
-        compiled.base.render(),
-    );
+    let output = execute_output(ctx, &step.query, graph, security, redaction, peers).await;
+    assert_compilation(Ok::<_, String>(Arc::clone(&output.compiled)), expect, label);
     assert_output(&output, expect, label);
 }

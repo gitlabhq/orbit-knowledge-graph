@@ -543,7 +543,8 @@ mod tests {
 
             let table_names = Arc::new(
                 crate::modules::code::config::CodeTableNames::from_catalog(
-                    &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+                    &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
+                        .unwrap(),
                 )
                 .expect("code tables must resolve"),
             );

@@ -1,0 +1,18 @@
+kind: storage
+package: peers.deployments
+store: graph
+entities:
+  Rollout:
+    complete: true
+    table: gl_rollout
+    columns:
+      id: {immutable: true, backend: {type: Int64}}
+      environment: {backend: {type: String}}
+      release_id: {immutable: true, backend: {type: UUID}}
+      traversal_path: {backend: {type: String}}
+    access: {filter: [id, environment], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+relationships:
+  DEPLOYS:
+    Rollout -> Release: {fk: {on: source, column: release_id}}

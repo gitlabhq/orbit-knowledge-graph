@@ -1,0 +1,20 @@
+kind: storage
+package: peers.deployments
+store: lake
+engine:
+  kind: duckdb
+  connection: lake
+  path_column: traversal_path
+entities:
+  Review:
+    complete: true
+    table: gl_review
+    columns:
+      id: {immutable: true, backend: {type: BIGINT}}
+      verdict: {backend: {type: VARCHAR}}
+      merge_request_id: {immutable: true, backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {order: [id]}
+relationships:
+  REVIEWS:
+    Review -> MergeRequest: {fk: {on: source, column: merge_request_id}}

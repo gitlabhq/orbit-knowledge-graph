@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use compiler::dag::{Env, Primary, Remotes, Request, Source};
+use compiler::dag::{Connections, Env, Frontend, Peer, Request, Source};
 use compiler::orbit_authorization::{Caller, Checks, Grants};
 use orbit_server_config::QueryLimits;
 use query_data_model::{Catalog, DuckDb};
@@ -15,7 +15,8 @@ use shared::{QueryExecution, QueryExecutionStats};
 
 use crate::DuckDbClient;
 
-/// Runs each relational stage's SQL on one local database.
+/// Runs each relational stage's SQL, and each scope lookup a remote stage needs, on one local
+/// database.
 pub struct DuckDbExecutor {
     pub client: Arc<Mutex<DuckDbClient>>,
 }
@@ -23,13 +24,23 @@ pub struct DuckDbExecutor {
 #[async_trait]
 impl Executor for DuckDbExecutor {
     async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
-        let Request::Query(compiled) = request else {
-            return Err(ExecutorError(format!(
-                "DuckDB runs queries, not {request:?}"
-            )));
+        let sql = match request {
+            Request::Query(compiled) => compiled.base.render(),
+            Request::Lookup(lookup) => compiler::ParameterizedQuery {
+                sql: lookup.query.sql.clone(),
+                params: lookup.query.parameters.clone(),
+                result_context: Default::default(),
+                query_config: Default::default(),
+                dialect: compiler::SqlDialect::DuckDb,
+            }
+            .render(),
+            other => {
+                return Err(ExecutorError(format!(
+                    "DuckDB runs queries and lookups, not {other:?}"
+                )));
+            }
         };
         let start = std::time::Instant::now();
-        let sql = compiled.base.render();
         let client = self
             .client
             .lock()
@@ -61,40 +72,29 @@ impl Executor for DuckDbExecutor {
 }
 
 /// Runs `query` through the DAG runner on the local database: local mode trusts its data, so
-/// the caller is an administrator with no scope answers.
+/// the caller holds no grants and no remote connection is served.
 pub fn run_local(
     client: &Arc<Mutex<DuckDbClient>>,
     data_model: &Arc<Catalog<DuckDb>>,
     query: &str,
     limits: &QueryLimits,
 ) -> Result<Outcome, DagError> {
-    let grants = Grants::new(Caller::new("local", true, ()));
-    futures::executor::block_on(run(client, data_model, query, &grants, limits))
-}
-
-/// Runs `query` as the caller of `grants` on one DuckDB connection, with no remote served.
-pub async fn run(
-    client: &Arc<Mutex<DuckDbClient>>,
-    data_model: &Arc<Catalog<DuckDb>>,
-    query: &str,
-    grants: &Grants,
-    limits: &QueryLimits,
-) -> Result<Outcome, DagError> {
     let executor = DuckDbExecutor {
         client: Arc::clone(client),
     };
     let executors = Executors::default().with(data_model.connection(), Arc::new(executor));
-    let primary = Primary::DuckDb(Arc::clone(data_model));
-    let remotes = Remotes::default();
+    let frontend = Frontend::Local(Arc::clone(data_model));
+    let connections = Connections::new(vec![Peer::DuckDb(Arc::clone(data_model))]);
+    let grants = Grants::new(Caller::new("local", true, ()));
     let env = Env {
-        primary: &primary,
-        remotes: &remotes,
-        grants,
+        frontend: &frontend,
+        connections: &connections,
+        grants: &grants,
         limits,
         trace: false,
     };
     let mut silent = Silent;
     let checks = Checks::default();
     let mut runner = Runner::new(env, &executors, &checks, &mut silent);
-    runner.run(Source::Text(query)).await
+    futures::executor::block_on(runner.run(Source::Text(query)))
 }

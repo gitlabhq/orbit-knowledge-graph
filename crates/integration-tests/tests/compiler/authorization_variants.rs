@@ -20,7 +20,7 @@ use query_engine::shared::ExtractionOutput;
 use query_engine::types::QueryResult;
 
 fn bind(variant: &str, packages: &[&str]) -> (Arc<Catalog<ClickHouse>>, Deployment) {
-    let model = platform(packages).load().unwrap();
+    let model = platform(packages).deployment("server").unwrap();
     let deployment = Deployment::bind(&deployment(variant), &model, &registry()).unwrap();
     (
         Arc::new(Catalog::<ClickHouse>::from_model(&model).unwrap()),
@@ -215,7 +215,9 @@ async fn an_oidc_deployment_scopes_with_the_exact_groups_claim_and_no_checks() {
 
 #[tokio::test]
 async fn a_gitlab_deployment_with_slack_answers_the_delegated_check_with_a_sign_in() {
-    let model = query_data_model::testkit::with_demo().load().unwrap();
+    let model = query_data_model::testkit::with_demo()
+        .deployment("demo")
+        .unwrap();
     let deployment = Deployment::bind(&deployment("slack"), &model, &registry()).unwrap();
     let caller = Caller::new("user:1", false, ());
     let credential = deployment
@@ -234,7 +236,9 @@ async fn a_gitlab_deployment_with_slack_answers_the_delegated_check_with_a_sign_
 
 #[test]
 fn a_package_naming_an_unbound_provider_fails_the_bind() {
-    let model = platform(&["acme", "acme.checked"]).load().unwrap();
+    let model = platform(&["acme", "acme.checked"])
+        .deployment("server")
+        .unwrap();
     let Err(BindError(errors)) = Deployment::bind(&deployment("oidc"), &model, &registry()) else {
         panic!("the OIDC deployment binds no checks");
     };
@@ -249,7 +253,9 @@ fn a_package_naming_an_unbound_provider_fails_the_bind() {
 
 #[test]
 fn a_module_that_does_not_answer_the_needed_query_fails_the_bind() {
-    let model = platform(&["acme", "acme.checked"]).load().unwrap();
+    let model = platform(&["acme", "acme.checked"])
+        .deployment("server")
+        .unwrap();
     let mut config = deployment("zanzibar");
     let oidc = config.providers["oidc"].clone();
     config.providers.insert("policy".into(), oidc);
@@ -260,7 +266,9 @@ fn a_module_that_does_not_answer_the_needed_query_fails_the_bind() {
         errors,
         ["provider policy is bound to module fake.oidc, which does not answer Check"]
     );
-    let model = query_data_model::testkit::with_demo().load().unwrap();
+    let model = query_data_model::testkit::with_demo()
+        .deployment("demo")
+        .unwrap();
     let mut config = deployment("slack");
     config.providers.remove("slack");
     let Err(BindError(errors)) = Deployment::bind(&config, &model, &registry()) else {
@@ -360,7 +368,7 @@ fn a_check_that_keys_rows_by_a_boolean_fails_the_load() {
          {provider: slack, permission: read, resource: message, object: Message, id: pinned}]",
     );
     let error = Packages::new(Tier::Platform, sources)
-        .load()
+        .deployment("server")
         .unwrap_err()
         .to_string();
     let expected = "Message check keys rows by pinned, a Bool; a key is an integer, string or uuid";

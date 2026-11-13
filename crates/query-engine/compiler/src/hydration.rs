@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn every_entity_hydrates_within_the_column_cap() {
-        let model = Catalog::<ClickHouse>::embedded().unwrap();
+        let model = Catalog::<ClickHouse>::embedded("server").unwrap();
         let columns = crate::testkit::limits().columns;
         for entity in model.model().graph().entities() {
             assert!(

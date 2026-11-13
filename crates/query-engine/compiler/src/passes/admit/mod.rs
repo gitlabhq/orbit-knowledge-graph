@@ -20,7 +20,7 @@ use crate::logical::anchors::Anchor;
 pub fn admit(
     query: Query<'_>,
     model: &Catalog<impl SqlBackend>,
-    remotes: &crate::dag::Remotes,
+    connections: &crate::dag::Connections,
     limits: &QueryLimits,
     selectivity: bool,
 ) -> Result<()> {
@@ -28,7 +28,7 @@ pub fn admit(
         |structural: &query_data_model::plan::logical::Structural| match structural.target {
             Expr::Property { binding, property } => query
                 .entity(binding)
-                .is_some_and(|entity| remotes.searching(entity, property).is_some()),
+                .is_some_and(|entity| connections.searching(entity, property).is_some()),
             _ => false,
         };
     if query

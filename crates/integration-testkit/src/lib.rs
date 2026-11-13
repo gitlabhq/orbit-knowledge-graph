@@ -5,6 +5,8 @@ mod context;
 pub mod dag_fakes;
 #[cfg(test)]
 mod dag_scenarios;
+#[cfg(test)]
+mod deployment_shapes;
 pub mod lake;
 pub mod mock_redaction;
 pub mod plan_shape;
@@ -20,7 +22,8 @@ pub mod visitor;
 #[cfg(test)]
 pub(crate) fn test_stats(query: &str) -> query_engine::compiler::QueryStats {
     use query_engine::compiler::{QueryStats, logical::Query, passes::normalize, surface};
-    let model = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap();
+    let model =
+        query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap();
     let catalog = model
         .model()
         .logical(query_data_model::testkit::limits())
@@ -31,7 +34,7 @@ pub(crate) fn test_stats(query: &str) -> query_engine::compiler::QueryStats {
         statement.plan,
         catalog.model(),
         &model,
-        &Default::default(),
+        &compiler::dag::Connections::single(&model),
         query_data_model::testkit::limits(),
     )
     .unwrap();
@@ -54,17 +57,21 @@ fn overlay_name() -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-pub fn overlay_fragments(name: &str) -> query_data_model::spec::Fragments {
+/// The fragments of the embedded packages under the overlay `name`, as the deployment shape
+/// `shape` keeps them.
+pub fn overlay_fragments(name: &str, shape: &str) -> query_data_model::spec::Fragments {
     query_data_model::testkit::overlay(name)
         .fragments()
+        .and_then(|fragments| fragments.deploy(shape))
         .unwrap_or_else(|e| panic!("model overlay '{name}' does not parse: {e}"))
 }
 
-fn unprefixed_fragments() -> query_data_model::spec::Fragments {
+fn unprefixed_fragments(shape: &str) -> query_data_model::spec::Fragments {
     match overlay_name() {
-        Some(name) => overlay_fragments(&name),
+        Some(name) => overlay_fragments(&name, shape),
         None => query_data_model::Packages::embedded()
             .fragments()
+            .and_then(|fragments| fragments.deploy(shape))
             .expect("embedded packages should parse"),
     }
 }
@@ -84,7 +91,7 @@ fn versioned_fragments(
 
 /// The prefixed fragments behind [`load_data_model`].
 pub fn load_fragments() -> query_data_model::spec::Fragments {
-    versioned_fragments(unprefixed_fragments())
+    versioned_fragments(unprefixed_fragments("server"))
 }
 
 pub fn versioned_data_model(
@@ -110,7 +117,7 @@ pub fn graph_schema(
 pub fn embedded_schema() -> orbit_migrations::schema::Schema {
     orbit_migrations::schema::Schema::from_model(
         &query_data_model::Packages::embedded()
-            .load()
+            .deployment("server")
             .expect("embedded packages should load"),
     )
     .expect("embedded packages should resolve a ClickHouse schema")
@@ -118,14 +125,14 @@ pub fn embedded_schema() -> orbit_migrations::schema::Schema {
 
 pub fn load_data_model() -> std::sync::Arc<query_data_model::Catalog<query_data_model::ClickHouse>>
 {
-    versioned_data_model(unprefixed_fragments())
+    versioned_data_model(unprefixed_fragments("server"))
 }
 
 pub fn load_local_data_model() -> std::sync::Arc<query_data_model::Catalog<query_data_model::DuckDb>>
 {
     std::sync::Arc::new(
         query_data_model::Catalog::<query_data_model::DuckDb>::from_model(&load_model(
-            &unprefixed_fragments(),
+            &unprefixed_fragments("local"),
         ))
         .expect("test model should bind its DuckDB connection"),
     )
@@ -147,7 +154,7 @@ pub fn t(table: &str) -> String {
 /// Generated from the model so integration tests create the same prefixed
 /// tables and materialized views the indexer writes to at runtime.
 pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
-    let schema = graph_schema(&unprefixed_fragments());
+    let schema = graph_schema(&unprefixed_fragments("server"));
 
     let mut stmts: Vec<String> = schema
         .tables

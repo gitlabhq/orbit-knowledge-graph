@@ -172,7 +172,7 @@ fn relationship_attributes_filter_inline_and_in_where() {
 
 #[test]
 fn a_match_declares_its_nodes_in_written_order() {
-    let model = Packages::embedded().load().unwrap();
+    let model = Packages::embedded().deployment("server").unwrap();
     let statement = gql::parse(
         "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest), (pipe:Pipeline), \
          (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe) RETURN *",

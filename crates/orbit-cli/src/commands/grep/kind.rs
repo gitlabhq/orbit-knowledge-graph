@@ -1,5 +1,4 @@
 use anyhow::Result;
-use query_data_model::Packages;
 
 use super::Output;
 
@@ -162,7 +161,7 @@ fn family_of(kind: &str) -> Option<usize> {
 }
 
 pub(super) fn resolve(requested: &[String], known: &[String]) -> Result<Kinds> {
-    let model = Packages::embedded().load()?;
+    let model = crate::deployment::model()?;
     let mut kinds = Kinds::default();
     let mut everything = false;
     for name in requested {

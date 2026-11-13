@@ -1,0 +1,4 @@
+kind: source
+package: peers.releases
+source: release_sync
+entities: [Release]

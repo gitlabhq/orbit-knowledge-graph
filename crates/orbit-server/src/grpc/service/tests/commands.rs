@@ -385,6 +385,7 @@ entities:
 ";
     let model = query_data_model::Model::from_yaml(
         query_data_model::Tier::Platform,
+        "server",
         [
             ("test/package.yaml", "kind: package\nname: test\n"),
             ("test/graph.yaml", graph),

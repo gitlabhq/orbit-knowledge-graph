@@ -1,10 +1,10 @@
 description: A group reader sees the group's issues and is denied the private group and the user scope
 
 config:
-  security: group
+  security: group_100
 
 query: |
-  MATCH (i:JiraIssue) RETURN i.key, i.summary ORDER BY i.key LIMIT 20
+  MATCH (i:JiraIssue) WHERE i.id IN ['10100', '10101', '10102', '10200', '10300'] RETURN i.key, i.summary ORDER BY i.key LIMIT 20
 
 expect:
   node_count: 2

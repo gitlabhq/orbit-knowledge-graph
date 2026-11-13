@@ -5,7 +5,7 @@ use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::{Endpoint, Model, Packages, Tier};
 
 fn model() -> Arc<Model> {
-    Packages::embedded().load().unwrap()
+    Packages::embedded().deployment("server").unwrap()
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn every_package_declares_its_manifest_and_requirements() {
     let mut sources = embedded.sources().clone();
     sources.remove("gitlab.ci/package.yaml");
     let error = Packages::new(Tier::Platform, sources)
-        .load()
+        .deployment("server")
         .unwrap_err()
         .to_string();
     assert!(
@@ -108,7 +108,7 @@ fn load_error(entry: &str) -> String {
             .into(),
     );
     Packages::new(Tier::Platform, sources)
-        .load()
+        .deployment("server")
         .unwrap_err()
         .to_string()
 }

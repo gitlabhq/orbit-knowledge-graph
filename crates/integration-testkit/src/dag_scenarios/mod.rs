@@ -3,6 +3,7 @@
 
 mod heads;
 mod joins;
+mod peers;
 mod policies;
 mod server;
 mod single;

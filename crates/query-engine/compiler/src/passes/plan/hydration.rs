@@ -288,7 +288,7 @@ mod tests {
     use std::sync::LazyLock;
 
     static MODEL: LazyLock<Catalog<ClickHouse>> =
-        LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
+        LazyLock::new(|| Catalog::<ClickHouse>::embedded("server").unwrap());
 
     fn arm(paths: Vec<TraversalPath>) -> HydrationArm {
         let columns = ["title".to_string()];

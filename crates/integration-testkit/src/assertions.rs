@@ -8,8 +8,9 @@ use std::sync::LazyLock;
 use crate::context::TestContext;
 use crate::t;
 
-static CATALOG: LazyLock<Catalog<ClickHouse>> =
-    LazyLock::new(|| Catalog::<ClickHouse>::embedded().expect("embedded packages should load"));
+static CATALOG: LazyLock<Catalog<ClickHouse>> = LazyLock::new(|| {
+    Catalog::<ClickHouse>::embedded("server").expect("embedded packages should load")
+});
 
 pub(crate) fn edge_table(relationship_kind: &str, source_kind: &str, target_kind: &str) -> String {
     let variant = CATALOG

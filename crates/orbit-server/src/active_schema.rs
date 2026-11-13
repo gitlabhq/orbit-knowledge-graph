@@ -41,6 +41,7 @@ impl ActiveSchema {
         let loader = SnapshotLoader {
             authorization: config.authorization.clone(),
             limits: config.query.limits,
+            deployment: config.schema.deployment.clone(),
             graph,
             embedded,
             catalog,
@@ -224,6 +225,7 @@ impl SchemaSnapshot {
 struct SnapshotLoader {
     authorization: AuthorizationConfig,
     limits: QueryLimits,
+    deployment: String,
     graph: Arc<ArrowClickHouseClient>,
     embedded: ModelArchive,
     catalog: ModelCatalog,
@@ -250,6 +252,7 @@ impl SnapshotLoader {
         let prefix = table_prefix(version);
         let data_model = Arc::new(Catalog::<ClickHouse>::versioned(
             &archive.packages(),
+            &self.deployment,
             &prefix,
         )?);
         let physical = data_model.schema()?.clone();

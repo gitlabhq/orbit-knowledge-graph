@@ -180,7 +180,7 @@ pub fn verify_committed(config_dir: &Path, schema_version: u32) -> Result<Migrat
         &std::fs::read_to_string(&path)
             .map_err(|error| format!("reading {}: {error}", path.display()))?,
     )?;
-    let catalog = Catalog::<ClickHouse>::embedded().map_err(|error| error.to_string())?;
+    let catalog = Catalog::<ClickHouse>::embedded("server").map_err(|error| error.to_string())?;
     ledger.validate(&catalog, schema_version)?;
 
     let path = ModelArchive::path(config_dir, schema_version);
@@ -204,10 +204,11 @@ pub fn verify_committed(config_dir: &Path, schema_version: u32) -> Result<Migrat
 pub fn verify_entry_covers_derived_scope(
     ledger: &MigrationLedger,
     previous: &Arc<Model>,
+    deployment: &str,
     schema_version: u32,
 ) -> Result<DerivedScope, String> {
     let next = Packages::embedded()
-        .load()
+        .deployment(deployment)
         .map_err(|error| error.to_string())?;
     let derived = derive_scope(previous, &next).map_err(|error| error.to_string())?;
     let entry = ledger
@@ -313,7 +314,7 @@ mod tests {
 
     #[test]
     fn validation_rejects_malformed_ledgers() {
-        let catalog = Catalog::<ClickHouse>::embedded().unwrap();
+        let catalog = Catalog::<ClickHouse>::embedded("server").unwrap();
 
         let dup = ledger(vec![
             entry(5, LedgerScope::All, &[]),

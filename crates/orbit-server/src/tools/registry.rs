@@ -375,7 +375,9 @@ mod tests {
     }
 
     fn relationship_patterns() -> String {
-        let model = Packages::embedded().load().expect("embedded model loads");
+        let model = Packages::embedded()
+            .deployment("server")
+            .expect("embedded model loads");
         build_relationship_patterns(&model, IntrospectionScope::All).join("\n")
     }
 

@@ -25,7 +25,7 @@ fn with_writers(drop: &[&str], writer: &str) -> Result<std::sync::Arc<Model>, Da
         let fragment = format!("kind: source\npackage: gitlab\n{writer}");
         sources.insert("gitlab/sources/writer.yaml".into(), fragment);
     }
-    Packages::new(query_data_model::Tier::Platform, sources).load()
+    Packages::new(query_data_model::Tier::Platform, sources).deployment("server")
 }
 
 const USER_PIPELINE: &str = "  User: {tables: [users], order_by: [id], query: generated}";
@@ -230,7 +230,7 @@ fn with_lake(
 ) -> Result<std::sync::Arc<Model>, DataModelError> {
     let mut sources = support::packages(&["gitlab"], &edit).sources().clone();
     sources.insert(LAKE_FILE.into(), edit(LAKE_FILE, LAKE.into()));
-    Packages::new(query_data_model::Tier::Platform, sources).load()
+    Packages::new(query_data_model::Tier::Platform, sources).deployment("server")
 }
 
 #[test]
@@ -1087,8 +1087,11 @@ fn join_filters_reject_values_that_are_not_plain_words() {
 fn every_guard_carries_the_declared_scope_and_permission() {
     use query_data_model::testkit;
 
-    for packages in [Packages::embedded(), testkit::with_demo()] {
-        let model = packages.load().unwrap();
+    for (packages, shape) in [
+        (Packages::embedded(), "server"),
+        (testkit::with_demo(), "demo"),
+    ] {
+        let model = packages.deployment(shape).unwrap();
         for store in model.stores() {
             for source in store.sources() {
                 let entity = model.graph().entity(source.entity);
@@ -1232,7 +1235,7 @@ fn stores_that_hold_no_rows_name_no_table() {
         "  File:\n    columns:",
         "  File:\n    table: gl_file\n    columns:",
     )]);
-    let errors = spec_errors(packages.load());
+    let errors = spec_errors(packages.deployment("demo"));
     assert_eq!(
         errors,
         [
@@ -1248,7 +1251,7 @@ fn variants_that_share_a_key_column_name_distinct_types() {
         "type_value: [Epic, Issue]",
         "type_value: [Epic, MergeRequest]",
     )]);
-    let errors = spec_errors(packages.load());
+    let errors = spec_errors(packages.deployment("server"));
     assert_eq!(
         errors,
         [
@@ -1345,7 +1348,7 @@ fn an_engine_table_role_is_held_by_one_table() {
         "role: code_progress",
         "role: plan_progress",
     )]);
-    let errors = spec_errors(packages.load());
+    let errors = spec_errors(packages.deployment("server"));
     assert!(
         errors
             .iter()
@@ -1384,7 +1387,8 @@ fn variants_on_the_same_composite_key_columns_clash() {
     for (path, text) in files {
         sources.insert(path.into(), text.into());
     }
-    let errors = spec_errors(Packages::new(query_data_model::Tier::Platform, sources).load());
+    let errors =
+        spec_errors(Packages::new(query_data_model::Tier::Platform, sources).deployment("demo"));
     assert_eq!(
         errors,
         [

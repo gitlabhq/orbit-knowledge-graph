@@ -1,0 +1,8 @@
+# Each deployment shape and the connections it serves. A deployment's model loads only the
+# storage fragments of stores on its connections, and every load check runs on that model.
+server:
+  connections: [main]
+local:
+  connections: [local]
+demo:
+  connections: [main, code_indexing, data_extraction, jira_lake]

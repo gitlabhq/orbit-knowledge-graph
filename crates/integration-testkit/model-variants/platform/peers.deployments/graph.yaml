@@ -1,0 +1,24 @@
+kind: graph
+package: peers.deployments
+entities:
+  Rollout:
+    identity: id
+    label: environment
+    default_columns: [id, environment]
+    properties:
+      id: {type: int64}
+      environment: {type: string}
+      release_id: {type: uuid}
+      traversal_path: {type: string}
+  Review:
+    identity: id
+    label: verdict
+    default_columns: [id, verdict]
+    properties:
+      id: {type: int64}
+      verdict: {type: string}
+      merge_request_id: {type: int64}
+      traversal_path: {type: string}
+relationships:
+  DEPLOYS: {variants: {Rollout -> Release: {cardinality: many_to_one}}}
+  REVIEWS: {variants: {Review -> MergeRequest: {cardinality: many_to_one}}}

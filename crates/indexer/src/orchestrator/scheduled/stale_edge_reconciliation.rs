@@ -331,7 +331,7 @@ mod tests {
         "traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind";
 
     fn groups() -> Vec<ReconciliationGroup> {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         group_mutable_edges_by_emitting_node(&catalog)
     }
 
@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn polymorphic_endpoint_has_no_emitting_node_row_to_compare() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let graph = catalog.graph();
         let polymorphic = EdgeMapping {
             relationship: graph.relationship_id("HAS_NOTE").unwrap(),

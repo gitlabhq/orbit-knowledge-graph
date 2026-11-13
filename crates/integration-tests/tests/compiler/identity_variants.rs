@@ -9,7 +9,9 @@ use query_data_model::testkit::limits;
 use query_data_model::{Catalog, ClickHouse};
 
 fn catalog() -> Arc<Catalog<ClickHouse>> {
-    let model = platform(&["acme", "acme.threads"]).load().unwrap();
+    let model = platform(&["acme", "acme.threads"])
+        .deployment("server")
+        .unwrap();
     Arc::new(Catalog::<ClickHouse>::from_model(&model).unwrap())
 }
 

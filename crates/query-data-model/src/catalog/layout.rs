@@ -14,6 +14,7 @@ pub(super) fn resolve<'a>(
     graph: &GraphCatalog,
     fragments: &[&'a StorageFragment],
     served: &HashSet<PropertyId>,
+    elsewhere: &crate::spec::Elsewhere,
     diagnostics: &mut Diagnostics,
 ) -> (Vec<Store>, Vec<StoreBlocks<'a>>) {
     let mut grouped = IndexMap::<&str, Vec<&'a StorageFragment>>::new();
@@ -47,7 +48,7 @@ pub(super) fn resolve<'a>(
         })
         .unzip();
     check_connections(&stores, diagnostics);
-    super::bindings::check(graph, &stores, served, diagnostics);
+    super::bindings::check(graph, &stores, served, elsewhere, diagnostics);
     (stores, blocks)
 }
 

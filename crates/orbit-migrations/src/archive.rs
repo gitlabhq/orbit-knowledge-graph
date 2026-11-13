@@ -82,7 +82,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .packages()
-                .load()
+                .deployment("server")
                 .unwrap();
             let catalog = Catalog::<ClickHouse>::from_model(&model).unwrap();
             let schema = catalog.schema().unwrap();

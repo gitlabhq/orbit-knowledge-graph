@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use clickhouse_client::ArrowClickHouseClient;
 use query_data_model::{Catalog, ClickHouse};
-use query_engine::compiler::dag::{Env, Primary, Remotes};
+use query_engine::compiler::dag::{Env, Frontend};
 use query_engine::compiler::orbit_authorization::Checks;
 use query_engine::compiler::{self, HydrationRequest};
 use query_engine::pipeline::{PipelineError, QueryPipelineContext};
@@ -53,11 +53,11 @@ pub(crate) async fn hydrate(
         log_comment,
         Vec::new(),
     );
-    let primary = Primary::ClickHouse(Arc::clone(data_model));
-    let remotes = Remotes::default();
+    let frontend = Frontend::Server(Arc::clone(data_model));
+    let connections = compiler::graph_only(data_model);
     let env = Env {
-        primary: &primary,
-        remotes: &remotes,
+        frontend: &frontend,
+        connections: &connections,
         grants: ctx.grants()?,
         limits: ctx.limits()?,
         trace: false,

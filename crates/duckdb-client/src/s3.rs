@@ -238,7 +238,9 @@ mod tests {
     }
 
     fn jira() -> Catalog<DuckDb> {
-        let model: Arc<Model> = query_data_model::testkit::with_demo().load().unwrap();
+        let model: Arc<Model> = query_data_model::testkit::with_demo()
+            .deployment("demo")
+            .unwrap();
         model.physical::<DuckDb>("jira_lake").unwrap()
     }
 

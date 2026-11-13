@@ -32,7 +32,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     env {
         pub grants: Grants,
         pub limits: QueryLimits,
-        pub remotes: crate::dag::Remotes,
+        pub connections: crate::dag::Connections,
         pub trace: bool,
         pub response: bool,
     }
@@ -63,35 +63,35 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
     phases {
         gql_parse {
-            reads_env: [grants, data_model, limits, remotes]
+            reads_env: [grants, data_model, limits, connections]
             mutates: [raw, statement]
         }
         gql_parse_trusted {
-            reads_env: [data_model, limits, remotes]
+            reads_env: [data_model, limits, connections]
             mutates: [raw, statement]
         }
         gql_parse_local {
-            reads_env: [data_model, limits, remotes]
+            reads_env: [data_model, limits, connections]
             mutates: [raw, statement]
         }
         admit {
-            reads_env: [data_model, limits, remotes]
+            reads_env: [data_model, limits, connections]
             reads_state: [statement]
         }
         admit_local {
-            reads_env: [data_model, limits, remotes]
+            reads_env: [data_model, limits, connections]
             reads_state: [statement]
         }
         split_stages {
-            reads_env: [data_model, remotes, limits, trace]
+            reads_env: [data_model, connections, limits, trace]
             mutates: [statement, dag]
         }
         normalize {
-            reads_env: [data_model, limits, remotes]
+            reads_env: [data_model, limits, connections]
             mutates: [statement]
         }
         restrict {
-            reads_env: [data_model, grants, remotes]
+            reads_env: [data_model, grants, connections]
             reads_state: [statement]
         }
         restrict_hydration {
@@ -214,19 +214,19 @@ compiler_pipeline_macros::define_compiler_ctx! {
     pipelines {
         gql_query {
             backend: query_data_model::ClickHouse
-            env: [grants, limits, remotes, trace]
+            env: [grants, limits, connections, trace]
             state: [raw, statement, dag]
             phases: [gql_parse, normalize, restrict, admit, split_stages]
         }
         gql_local {
             backend: query_data_model::DuckDb
-            env: [limits, remotes, trace]
+            env: [limits, connections, trace]
             state: [raw, statement, dag]
             phases: [gql_parse_local, normalize, admit_local, split_stages]
         }
         gql_check {
             backend: query_data_model::ClickHouse
-            env: [limits, remotes]
+            env: [limits, connections]
             state: [raw, statement]
             phases: [gql_parse_trusted, normalize, admit]
         }
@@ -275,7 +275,7 @@ fn parse<C: CompilerCtx<Backend: SqlBackend>>(
     all_columns: bool,
 ) -> Result<()> {
     if let Some(raw) = ctx.take_raw() {
-        let catalog = surface::catalog(ctx.data_model(), ctx.remotes(), ctx.limits(), admin);
+        let catalog = surface::catalog(ctx.data_model(), ctx.connections(), ctx.limits(), admin);
         let catalog = match all_columns {
             true => catalog.with_all_columns(),
             false => catalog,
@@ -303,7 +303,7 @@ fn admit_with(ctx: &mut impl CompilerCtx<Backend: SqlBackend>, selectivity: bool
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let model = ctx.data_model();
     let query = crate::logical::Query::new(&statement.plan, model.model());
-    admit::admit(query, model, ctx.remotes(), ctx.limits(), selectivity)
+    admit::admit(query, model, ctx.connections(), ctx.limits(), selectivity)
 }
 
 fn admit(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
@@ -320,7 +320,7 @@ fn split_stages(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
         true => crate::dag::describe(&statement.plan),
         false => Vec::new(),
     };
-    let dag = crate::dag::split(statement, ctx.data_model(), ctx.remotes(), ctx.limits())?;
+    let dag = crate::dag::split(statement, ctx.data_model(), ctx.connections(), ctx.limits())?;
     ctx.set_dag(crate::dag::Dag { logical, ..dag });
     Ok(())
 }
@@ -332,7 +332,7 @@ fn normalize(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
         statement.plan,
         model.model(),
         model,
-        ctx.remotes(),
+        ctx.connections(),
         ctx.limits(),
     )?;
     ctx.set_statement(Statement { plan, ..statement });
@@ -346,7 +346,7 @@ fn restrict(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
         &statement.plan,
         model.model(),
         model,
-        ctx.remotes(),
+        ctx.connections(),
         ctx.grants(),
     )
 }

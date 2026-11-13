@@ -149,8 +149,9 @@ impl<B: StorageBackend> Catalog<B> {
         model.physical(connection)
     }
 
-    pub fn embedded() -> Result<Self, DataModelError> {
-        Self::from_model(&Packages::embedded().load()?)
+    /// The catalog of the embedded packages as a deployment of the shape `shape` reads them.
+    pub fn embedded(shape: &str) -> Result<Self, DataModelError> {
+        Self::from_model(&Packages::embedded().deployment(shape)?)
     }
 
     pub fn model(&self) -> &Model {

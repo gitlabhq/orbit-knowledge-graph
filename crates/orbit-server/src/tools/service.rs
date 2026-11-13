@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn compact_node_encodes_as_toon() {
-        let model = Packages::embedded().load().unwrap();
+        let model = Packages::embedded().deployment("local").unwrap();
         let response =
             build_compact_schema_response(&model, IntrospectionScope::Local, Some("Directory"));
         assert_eq!(
@@ -321,7 +321,7 @@ edges[0]:"#
 
     #[test]
     fn full_schema_encodes_expanded_and_named_nodes_as_toon() {
-        let model = Packages::embedded().load().unwrap();
+        let model = Packages::embedded().deployment("local").unwrap();
         let response =
             build_schema_response(&model, IntrospectionScope::Local, &["Directory".into()])
                 .unwrap();

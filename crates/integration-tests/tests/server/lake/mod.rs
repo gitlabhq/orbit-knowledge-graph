@@ -7,27 +7,48 @@ use std::path::Path;
 
 use duckdb_client::DuckDbClient;
 use integration_testkit::lake::{Lake, Mode};
-use integration_testkit::query_scenario::{run_lake_dir, seed_preset};
+use integration_testkit::query_scenario::{load_yaml_seed, run_lake_dir, seed_preset};
+use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext};
 use orbit_server_config::DuckDbLocation;
 use query_data_model::{Catalog, DuckDb};
 
+const SHAPE: &str = "jira";
 const CONNECTION: &str = "jira_lake";
 const SEED: &str = "jira";
 const SCENARIOS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/server/lake/scenarios");
-const PRESETS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/server/lake/presets");
+const PRESETS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/server/data_correctness/presets"
+);
+
+async fn scenarios(mode: Mode) {
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
+    ctx.optimize_if_needed().await;
+    run_lake_dir(
+        &ctx,
+        (SCENARIOS, PRESETS),
+        query_data_model::testkit::with_demo(),
+        (SHAPE, CONNECTION, SEED),
+        mode,
+    )
+    .await;
+}
 
 #[tokio::test]
 async fn jira_parquet_scenarios() {
-    run_lake_dir(SCENARIOS, PRESETS, SEED, CONNECTION, Mode::Parquet).await;
+    scenarios(Mode::Parquet).await;
 }
 
 #[tokio::test]
 async fn jira_ducklake_scenarios() {
-    run_lake_dir(SCENARIOS, PRESETS, SEED, CONNECTION, Mode::Ducklake).await;
+    scenarios(Mode::Ducklake).await;
 }
 
 fn catalog() -> Catalog<DuckDb> {
-    let model = query_data_model::testkit::with_demo().load().unwrap();
+    let model = query_data_model::testkit::with_demo()
+        .deployed(&query_data_model::testkit::deployments(), SHAPE)
+        .unwrap();
     model.physical::<DuckDb>(CONNECTION).unwrap()
 }
 

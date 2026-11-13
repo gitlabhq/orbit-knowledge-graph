@@ -26,7 +26,7 @@ pub fn bind(
     sets: &[KeySet],
     model: &Model,
     limits: &QueryLimits,
-    remotes: &[String],
+    connections: &[String],
 ) -> Result<Statement> {
     let limits = QueryLimits {
         in_values: limits.in_values.max(limits.stage_keys),
@@ -39,7 +39,7 @@ pub fn bind(
         .flat_map(|node| statement.plan.outputs(node))
         .filter_map(|output| Some((output, statement.plan.name(output)?.to_string())))
         .collect();
-    let catalog = model.logical(&limits).as_admin().with_remotes(remotes);
+    let catalog = model.logical(&limits).as_admin().across(connections);
     let plan = catalog.rebuild(statement.plan, |q, step| {
         let binds = matches!(
             step.operation,
@@ -105,15 +105,17 @@ mod tests {
     use query_data_model::{Catalog, ClickHouse, DuckDb};
 
     use super::KeySet;
-    use crate::dag::{Env, Inputs, KeyInput, Primary, Remotes, Request, Source, StageQuery};
+    use crate::dag::{
+        Connections, Env, Frontend, Inputs, KeyInput, Peer, Request, Source, StageQuery,
+    };
 
     /// A composite key set on two columns of `f`, bound into the one stage of a query.
-    fn rendered(primary: Primary) -> String {
-        let remotes = Remotes::default();
+    fn rendered(frontend: Frontend, peer: Peer) -> String {
+        let connections = Connections::new(vec![peer]);
         let grants = crate::testkit::admin_ctx();
         let env = Env {
-            primary: &primary,
-            remotes: &remotes,
+            frontend: &frontend,
+            connections: &connections,
             grants: &grants,
             limits: crate::testkit::limits(),
             trace: false,
@@ -142,7 +144,7 @@ mod tests {
         let StageQuery::Gql(statement) = stage.query else {
             panic!("a GQL stage");
         };
-        let model = primary.model();
+        let model = frontend.model();
         let bound = super::bind(statement, &[keys], model, env.limits, &[]).unwrap();
         stage.query = StageQuery::Gql(bound);
         let compiled = crate::dag::compile(stage, Inputs::default(), &env).unwrap();
@@ -154,16 +156,17 @@ mod tests {
 
     #[test]
     fn a_composite_key_set_renders_as_a_tuple_in_on_clickhouse_and_duckdb() {
-        let clickhouse = rendered(Primary::ClickHouse(Arc::new(
-            Catalog::<ClickHouse>::embedded().unwrap(),
-        )));
+        let clickhouse = Arc::new(Catalog::<ClickHouse>::embedded("server").unwrap());
+        let clickhouse = rendered(
+            Frontend::Server(Arc::clone(&clickhouse)),
+            Peer::ClickHouse(clickhouse),
+        );
         assert!(
             clickhouse.contains("(f.project_id, f.path) IN (({p"),
             "{clickhouse}"
         );
-        let duckdb = rendered(Primary::DuckDb(Arc::new(
-            Catalog::<DuckDb>::embedded().unwrap(),
-        )));
+        let duckdb = Arc::new(Catalog::<DuckDb>::embedded("local").unwrap());
+        let duckdb = rendered(Frontend::Local(Arc::clone(&duckdb)), Peer::DuckDb(duckdb));
         assert!(duckdb.contains("(f.project_id, f.path) IN (($"), "{duckdb}");
     }
 }

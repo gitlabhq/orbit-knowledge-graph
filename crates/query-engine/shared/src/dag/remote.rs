@@ -15,8 +15,9 @@ use super::executor::{Executed, ExecutorError};
 use super::rows;
 use super::runner::{DagError, Runner};
 
-/// Runs the scope lookups of a remote stage on the relational connection, and what its reads'
-/// policies then admit; none when they admit nothing, so the stage reads nothing.
+/// Runs the scope lookups of a remote stage on the relational connections that store their
+/// chains, and what its reads' policies then admit; none when they admit nothing, so the stage
+/// reads nothing.
 pub(super) async fn admitted(
     runner: &mut Runner<'_>,
     stage: compiler::dag::StageId,
@@ -25,12 +26,7 @@ pub(super) async fn admitted(
 ) -> Result<Option<Admitted>, DagError> {
     let grants = runner.env.grants;
     let mut namespaces = Namespaces::default();
-    let lookups = match runner.env.primary {
-        compiler::dag::Primary::ClickHouse(graph) => {
-            lookup(target, &statement.plan, graph, grants)?
-        }
-        compiler::dag::Primary::DuckDb(_) => Vec::new(),
-    };
+    let lookups = lookup(target, &statement.plan, runner.env.connections, grants)?;
     for lookup in lookups {
         let columns = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
         let request = Request::Lookup(lookup.clone());
@@ -38,7 +34,7 @@ pub(super) async fn admitted(
             stage,
             requests: request.rendered(),
         });
-        let executor = runner.executors.get(runner.env.primary.connection())?;
+        let executor = runner.executors.get(&lookup.connection)?;
         let executed = executor.execute(&request).await?;
         let rows = json(&executed.batches, &columns)?;
         compiler::remote::namespaces(&lookup, &rows, &mut namespaces)?;

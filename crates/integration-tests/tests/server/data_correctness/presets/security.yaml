@@ -4,3 +4,12 @@ default:
 admin:
   admin: true
   access_level: 50
+
+group_100:
+  paths: ["1/100/"]
+
+user_42_scope:
+  paths: ["1/9000000000042/"]
+
+no_jira_rows:
+  paths: ["1/102/"]

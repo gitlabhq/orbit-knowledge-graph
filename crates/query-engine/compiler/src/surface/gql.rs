@@ -39,11 +39,11 @@ pub fn prepare(
     scope: IntrospectionScope,
     limits: &QueryLimits,
 ) -> Result<PreparedStatement> {
-    let remotes = crate::dag::Remotes::default();
+    let connections = crate::graph_only(data_model);
     match route(
         raw,
         data_model,
-        &remotes,
+        &connections,
         grants.caller().admin(),
         scope,
         limits,
@@ -57,12 +57,12 @@ pub fn prepare(
 pub fn route(
     raw: &str,
     data_model: &Catalog<ClickHouse>,
-    remotes: &crate::dag::Remotes,
+    connections: &crate::dag::Connections,
     admin: bool,
     scope: IntrospectionScope,
     limits: &QueryLimits,
 ) -> Result<RoutedStatement> {
-    let catalog = super::catalog(data_model, remotes, limits, admin);
+    let catalog = super::catalog(data_model, connections, limits, admin);
     match gql::route(raw, catalog)
         .map_err(QueryError::from)
         .count_err()?
@@ -83,7 +83,6 @@ pub fn compile_query(
     let stage = crate::split(
         crate::dag::Source::Parsed(query.statement),
         data_model,
-        &crate::dag::Remotes::default(),
         grants,
         limits,
     )?

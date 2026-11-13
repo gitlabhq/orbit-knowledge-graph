@@ -15,6 +15,7 @@ use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
 
+use compiler::dag::Peer;
 use format::ExpectedIndex;
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
@@ -26,6 +27,7 @@ use query_engine::pipeline::{
     Realm, SecurityContext, TypeMap,
 };
 use query_engine::shared::content::ColumnResolverRegistry;
+use query_engine::shared::dag::Executor;
 use query_engine::shared::{DagStage, PipelineOutput, RedactionOutput};
 use response::{
     assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
@@ -101,7 +103,7 @@ pub async fn run_query(
     let compiled = compile_like_server(query, &data_model, security)
         .await
         .expect("query should compile");
-    let output = execute_output(ctx, query, &data_model, security, redaction).await;
+    let output = execute_output(ctx, query, &data_model, security, redaction, &[]).await;
     assert_pagination(&output, "run_query");
     let response = validate_response(&compiled.stats, GraphFormatter.format(&output), "run_query");
     ResponseView::for_query(&compiled.stats, response)
@@ -202,7 +204,7 @@ async fn run_case(
     let ctx = if let Some(database) = database {
         let forked = ctx.fork(database).await;
         if let Some(overlay) = &cfg.model_overlay {
-            let schema = crate::graph_schema(&crate::overlay_fragments(overlay));
+            let schema = crate::graph_schema(&crate::overlay_fragments(overlay, "server"));
             let credentials = orbit_migrations::schema::DictionaryCredentials {
                 database: forked.config.database.clone(),
                 user: forked.config.username.clone(),
@@ -261,7 +263,7 @@ async fn run_case(
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
     let data_model = match &cfg.model_overlay {
-        Some(name) => crate::versioned_data_model(crate::overlay_fragments(name)),
+        Some(name) => crate::versioned_data_model(crate::overlay_fragments(name, "server")),
         None => load_data_model(),
     };
 
@@ -341,7 +343,7 @@ async fn run_query_step(
         return;
     }
 
-    let output = execute_output(ctx, query, data_model, security, redaction).await;
+    let output = execute_output(ctx, query, data_model, security, redaction, &[]).await;
     let baseline = assert_output(&output, expect, label);
     let count = repeat_count(expect, label);
     for run in 2..=count {
@@ -358,7 +360,7 @@ async fn run_query_step(
             )
             .await;
         }
-        let output = execute_output(ctx, query, data_model, security, redaction).await;
+        let output = execute_output(ctx, query, data_model, security, redaction, &[]).await;
         let rerun = assert_output(&output, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
     }
@@ -497,7 +499,7 @@ async fn run_pages(
             .await
             .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}"));
 
-        let output = execute_output(ctx, &query_str, data_model, security, redaction).await;
+        let output = execute_output(ctx, &query_str, data_model, security, redaction, &[]).await;
         let response = assert_output(&output, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
@@ -511,7 +513,7 @@ async fn run_pages(
             let compiled = compile_like_server(&query, data_model, security)
                 .await
                 .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
-            let output = execute_output(ctx, &query, data_model, security, redaction).await;
+            let output = execute_output(ctx, &query, data_model, security, redaction, &[]).await;
             assert_pagination(&output, label);
             let response =
                 validate_response(&compiled.stats, GraphFormatter.format(&output), label);
@@ -538,9 +540,7 @@ async fn compile_like_server(
         phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
-    let routing = RoutingStage {
-        remotes: Default::default(),
-    };
+    let routing = RoutingStage::default();
     if let RoutingOutput::Schema(_) = routing.execute(&mut pipeline_ctx, &mut obs).await? {
         return Err(PipelineError::custom("schema calls are not graph queries"));
     }
@@ -555,20 +555,21 @@ async fn compile_like_server(
 }
 
 /// Runs the query the way the server does: routing, then the DAG runner on the test
-/// ClickHouse, then the caller's checks and the hydration stage.
+/// ClickHouse and on `peers` next to it, then the caller's checks and the hydration stage.
 async fn execute_output(
     ctx: &TestContext,
     query: &str,
     data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
+    peers: &[(Peer, Arc<dyn Executor>)],
 ) -> PipelineOutput {
     let resolver = Arc::new(SeededColumnResolver::from_seed_file());
     let mut resolver_registry = ColumnResolverRegistry::new();
     resolver_registry.register("gitaly", resolver as _);
 
     let client = Arc::new(ctx.create_client());
-    let dag = DagStage::relational(
+    let executors = peers.iter().fold(
         graph_executors(
             Arc::clone(&client),
             data_model,
@@ -576,8 +577,14 @@ async fn execute_output(
             "gkg;scenario".into(),
             Vec::new(),
         ),
-        Default::default(),
+        |executors, (peer, executor)| executors.with(peer.connection(), Arc::clone(executor)),
     );
+    let peers: Vec<Peer> = peers.iter().map(|(peer, _)| peer.clone()).collect();
+    let dag = DagStage {
+        executors,
+        peers: peers.clone(),
+        checks: Default::default(),
+    };
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
     server_extensions.insert(Arc::clone(data_model));
@@ -594,12 +601,10 @@ async fn execute_output(
         phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
-    RoutingStage {
-        remotes: Default::default(),
-    }
-    .execute(&mut pipeline_ctx, &mut obs)
-    .await
-    .expect("the query should route");
+    RoutingStage { peers }
+        .execute(&mut pipeline_ctx, &mut obs)
+        .await
+        .expect("the query should route");
     let executed = dag
         .execute(&mut pipeline_ctx, &mut obs)
         .await

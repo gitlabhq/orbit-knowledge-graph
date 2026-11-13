@@ -1,10 +1,10 @@
 description: An org reader sees every live Jira issue at its latest version; the tombstoned ORB-3 never shows
 
 config:
-  security: org
+  security: default
 
 query: |
-  MATCH (i:JiraIssue) RETURN i.key, i.summary ORDER BY i.key LIMIT 20
+  MATCH (i:JiraIssue) WHERE i.id IN ['10100', '10101', '10102', '10200', '10300'] RETURN i.key, i.summary ORDER BY i.key LIMIT 20
 
 expect:
   node_count: 4

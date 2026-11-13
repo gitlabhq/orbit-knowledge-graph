@@ -33,9 +33,9 @@ use std::collections::HashMap;
 
 pub fn embedded_specs() -> ConverterSpecs {
     ConverterSpecs::new(
-        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
             .expect("embedded catalog must load"),
-        &query_data_model::Catalog::<query_data_model::DuckDb>::embedded()
+        &query_data_model::Catalog::<query_data_model::DuckDb>::embedded("local")
             .expect("embedded local catalog must load"),
     )
     .expect("code specs must resolve")
@@ -82,7 +82,7 @@ impl CodeIndexingDeps {
         let graph_client = Arc::new(clickhouse.config.build_client("graph"));
         let table_names = Arc::new(
             CodeTableNames::from_catalog(
-                &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+                &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
                     .expect("embedded catalog must load"),
             )
             .expect("code tables must resolve"),
@@ -158,7 +158,8 @@ impl CodeIndexingDeps {
     ) -> CodeIndexingTaskHandler {
         let table_names = Arc::new(
             CodeTableNames::from_catalog(
-                &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+                &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
+                    .unwrap(),
             )
             .expect("code tables must resolve"),
         );

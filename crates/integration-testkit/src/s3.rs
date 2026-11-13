@@ -117,16 +117,22 @@ impl S3Lake {
             .await
             .expect("sign the bucket request");
         let client = reqwest::Client::new();
+        let mut last = String::new();
         for _ in 0..100 {
             match client.put(url.clone()).send().await {
                 Ok(response) if response.status().is_success() => return,
-                Ok(response) if response.status().is_client_error() => {
-                    panic!("RustFS refused the bucket: {}", response.status())
+                Ok(response) => {
+                    last = format!(
+                        "{}: {}",
+                        response.status(),
+                        response.text().await.unwrap_or_default()
+                    )
                 }
-                _ => tokio::time::sleep(Duration::from_millis(100)).await,
+                Err(error) => last = error.to_string(),
             }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        panic!("RustFS never accepted the bucket");
+        panic!("RustFS never accepted the bucket: {last}");
     }
 
     pub async fn put(&self, key: &str, bytes: Vec<u8>) {

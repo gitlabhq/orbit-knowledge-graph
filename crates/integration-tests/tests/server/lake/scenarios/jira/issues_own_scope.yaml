@@ -1,10 +1,10 @@
 description: A caller who holds only their own pseudo-namespace sees only the issues in it
 
 config:
-  security: own_scope
+  security: user_42_scope
 
 query: |
-  MATCH (i:JiraIssue) RETURN i.key, i.summary ORDER BY i.key LIMIT 20
+  MATCH (i:JiraIssue) WHERE i.id IN ['10100', '10101', '10102', '10200', '10300'] RETURN i.key, i.summary ORDER BY i.key LIMIT 20
 
 expect:
   node_count: 1

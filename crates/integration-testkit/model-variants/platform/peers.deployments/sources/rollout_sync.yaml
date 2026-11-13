@@ -1,0 +1,4 @@
+kind: source
+package: peers.deployments
+source: rollout_sync
+entities: [Rollout, Review]

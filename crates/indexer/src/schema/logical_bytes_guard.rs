@@ -44,7 +44,9 @@ mod tests {
     fn every_ontology_column_type_has_byte_counting_coverage() {
         let schema = orbit_migrations::schema::GraphSchema::new(
             orbit_migrations::schema::Schema::from_model(
-                &query_data_model::Packages::embedded().load().unwrap(),
+                &query_data_model::Packages::embedded()
+                    .deployment("server")
+                    .unwrap(),
             )
             .unwrap(),
             false,

@@ -1,7 +1,7 @@
 description: A status category filter reads the enum label the Parquet rows store, at the latest version
 
 config:
-  security: org
+  security: default
 
 query: |
   MATCH (i:JiraIssue {status_category: 'done'}) RETURN i.key, i.status_category ORDER BY i.key LIMIT 20

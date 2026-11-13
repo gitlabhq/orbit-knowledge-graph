@@ -188,16 +188,16 @@ impl<'r> Runner<'r> {
             ..Inputs::default()
         };
         if let StageQuery::Gql(statement) = stage.query {
-            let remotes = self.env.remotes.connections();
+            let connections = self.env.connections.names();
             let bound = bind(
                 statement,
                 &sets,
-                self.env.primary.model(),
+                self.env.frontend.model(),
                 self.env.limits,
-                remotes,
+                connections,
             )?;
             if let Some(connection) = stage.connection.as_deref()
-                && let Some(target) = self.env.remotes.target(connection)
+                && let Some(target) = self.env.connections.target(connection)
             {
                 match remote::admitted(self, id, target, &bound).await? {
                     Some(admitted) => inputs.admitted = Some(admitted),
@@ -296,7 +296,13 @@ impl<'r> Runner<'r> {
     ) -> Result<(ParameterizedQuery, Executed), DagError> {
         let compiled = compiler::dag::compile_hydration(request, &self.env)?;
         self.trace(id, &compiled);
-        let connection = self.env.primary.connection().to_string();
+        let compiler::dag::Frontend::Server(graph) = self.env.frontend else {
+            return Err(QueryError::PipelineInvariant(
+                "hydration runs on the server frontend's connection".into(),
+            )
+            .into());
+        };
+        let connection = graph.connection().to_string();
         let executor = self.executors.get(&connection)?;
         let executed = executor.execute(&compiled.request).await?;
         let Request::Hydration(query) = compiled.request else {
