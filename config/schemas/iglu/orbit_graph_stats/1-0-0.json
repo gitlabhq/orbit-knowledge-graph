@@ -50,8 +50,8 @@
       "maximum": 9223372036854775807
     },
     "enabled_at": {
-      "description": "Earliest time a top-level group that still has Orbit enabled turned it on, in UTC. Absent when no group has Orbit enabled.",
-      "type": "string",
+      "description": "Earliest time a top-level group that still has Orbit enabled turned it on, in UTC. Null when no group has Orbit enabled.",
+      "type": ["string", "null"],
       "format": "date-time"
     },
     "groups_enabled_at": {
