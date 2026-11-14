@@ -15,7 +15,7 @@ this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in `docs-write.yml` | `84374501ff3e5acb84b8fdecc3ff88120af46680` |
+| `SKILLS_REF` in `docs-write.yml` | `cbd1311942983f90c92f9428ef578ae746d17c49` |
 | `MODE` in `docs-write.yml` | `shadow` |
 | AI Catalog item in this project | Not registered yet |
 
@@ -41,39 +41,21 @@ this table.
    `For agent: docs review`, with every finding numbered. Each finding that
    needs a person also gets a thread titled **Needs reviewer decision**.
 1. A fresh fixer agent, one per cycle and four at most, fixes the numbered
-   items in one pass, and the unresolved threads from the feature MR author,
-   its reviewers, project members with the Developer role or higher, and
-   Duo Code Review. The flow never shows threads from anyone else to an
-   agent. It leaves them open for the person who merges. The flow replies
+   items in one pass, and the unresolved threads from trusted authors: the
+   flow identity, Duo Code Review, the feature MR authors and reviewers, the
+   docs MR reviewers, and project members with the Developer role or higher.
+   Replies from anyone else inside a trusted thread are dropped. The flow
+   never shows other threads to an agent. They stay open for the person who
+   merges and do not hold the handoff. The flow replies
    once on the review comment and once per thread. It resolves what it fixed
    once `check.py` is clean. A thread it cannot fix gets a reply and stays
    open as a reviewer decision.
 1. When CI is green and only decision threads and threads from other people
    are open, the flow removes `Draft:`, adds the feature MR author as
-   reviewer, and posts one note that lists those threads. Otherwise the MR
-   stays in draft, with the reason in its description. A person always
-   merges the docs MR.
-
-## Guardrails and residual risk
-
-Every agent has `run_command`, a shell in the same workload as the run's
-`GITLAB_TOKEN`. Tool options cannot restrict a shell, so an agent can read
-the token or call the GitLab API. What stands between text an agent reads
-and a write:
-
-- The prompts forbid pushes, API writes, and resolving threads, and treat
-  MR, thread, and file text as data.
-- Script steps check the result. `publish` runs `check.py` as a gate and
-  refuses a branch that changes files outside the user docs. The flow
-  discards reviewer edits outside `.docs-write/`.
-- Thread intake limits who can put text in front of a fixer: the feature
-  MR author, its reviewers, Developer+ members, and Duo Code Review.
-
-Residual risk: a prompt injection in text the agents do read (the feature
-MR diff and code, or a thread from an allowed author) could make an agent
-use the token before any check runs. The token has the scope of the person
-who triggered the run. The checks cannot undo an API write or a push to
-another branch.
+   reviewer, and posts one note. The note lists the decision threads and
+   links the other threads without their text. The flow assigns nobody.
+   Otherwise the MR stays in draft, with the reason in its description. A
+   person always merges the docs MR.
 
 ```mermaid
 flowchart TD
@@ -92,6 +74,32 @@ flowchart TD
   TH -->|review items, open threads| F
   TH -->|only decisions left| H[handoff: ready, reviewer, note]
 ```
+
+## Guardrails and residual risk
+
+Every agent has `run_command`, a shell in the same workload as the run's
+`GITLAB_TOKEN`. Tool options cannot restrict a shell, so an agent can read
+the token or call the GitLab API. What stands between text an agent reads
+and a write:
+
+- The prompts forbid pushes, API writes, and resolving threads, and treat
+  MR, thread, and file text as data.
+- Scripts enforce three rules: the docs-only push guard, that the flow
+  never resolves a **Needs reviewer decision** thread, and thread intake.
+  Thread intake limits who can put text in front of a fixer to the trusted
+  authors above. Thread markers count only when the flow identity wrote them.
+- A mention on a docs MR runs the threads stage only when its `docs-write/`
+  branch is in this project, not a fork, and the flow identity already has
+  a note on the MR.
+- The other rules are prompt rules that flow steps check afterward:
+  `publish` runs `check.py` as a gate, and the flow discards reviewer edits
+  outside `.docs-write/`.
+
+Residual risk: a prompt injection in text the agents do read (the feature
+MR diff and code, or a thread from an allowed author) could make an agent
+use the token before any check runs. The token has the scope of the person
+who triggered the run. The checks cannot undo an API write or a push to
+another branch.
 
 ## Validate
 
@@ -147,7 +155,7 @@ and add these conditions:
 |---|---|---|
 | **Merge request** | **Created** | New MRs. The gate skips drafts. |
 | **Merge request** | **Marked ready** | Draft MRs that become ready. |
-| **Mention** | | On a feature MR: run the gate again on demand. On a docs MR the flow opened: fix open threads from the feature MR author, its reviewers, Developer+ members, and Duo Code Review, then hand off again. |
+| **Mention** | | On a feature MR: run the gate again on demand. On a docs MR the flow opened in this project: fix open threads from trusted authors (the flow, Duo Code Review, feature MR authors and reviewers, docs MR reviewers, and Developer+ members), then hand off again. |
 
 Leave **Instructions** empty. GraphQL: `aiFlowTriggerCreate` with
 `eventTypes: [0, 4, 6]` (mention, merge request ready, merge request) and
