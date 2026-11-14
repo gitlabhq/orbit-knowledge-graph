@@ -1,10 +1,10 @@
 mod support;
 
+use query_data_model::EdgeField;
 use query_data_model::catalog::Rule;
 use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::implementations::duckdb::DuckDb;
 use query_data_model::implementations::relational::Target;
-use query_data_model::plan::logical::EdgeField;
 use query_data_model::{DataModelError, Direction, Endpoint, Model, Packages};
 use support::{demo, load_with};
 

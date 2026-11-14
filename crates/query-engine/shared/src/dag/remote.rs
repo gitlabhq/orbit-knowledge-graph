@@ -42,7 +42,7 @@ pub(super) async fn admitted(
             requests: request.rendered(),
         });
         let executor = runner.executors.get(lookup.connection)?;
-        let executed = executor.execute(&request).await?;
+        let executed = executor.execute(&request, None).await?;
         let rows = json(&executed.batches, &columns)?;
         compiler::remote::namespaces(&lookup, &rows, &mut namespaces)?;
     }
@@ -50,14 +50,13 @@ pub(super) async fn admitted(
     Ok((!admitted.is_empty()).then_some(admitted))
 }
 
-/// Lookup rows as JSON rows of their key and scope columns.
+/// Lookup rows as JSON rows of their key and scope, which a lookup returns in that order.
 fn json(batches: &[RecordBatch], columns: &[String]) -> Result<Vec<Row>, ExecutorError> {
     let mut out = Vec::new();
     for batch in batches {
         let mut values = Vec::new();
-        for column in columns {
-            let keys = rows::column_keys(batch, column)?;
-            values.push(keys);
+        for position in 0..columns.len() {
+            values.push(rows::column_keys(batch, position)?);
         }
         for row in 0..batch.num_rows() {
             let mut json = Row::new();
@@ -84,7 +83,7 @@ pub(super) async fn checked(
     mut executed: Executed,
 ) -> Result<Executed, DagError> {
     for check in row_checks {
-        let keys = rows::checked_keys(&executed.batches, &check.column, check.kind)?;
+        let keys = rows::checked_keys(&executed.batches, check.position, check.kind)?;
         let request = CheckRequest {
             permission: check.permission.clone(),
             resource: check.resource.clone(),
@@ -95,7 +94,7 @@ pub(super) async fn checked(
             .await
             .map_err(|error: AuthError| ExecutorError(error.to_string()))?;
         let allowed = allowed.into_iter().next().unwrap_or_default();
-        executed.batches = rows::retain(executed.batches, &check.column, check.kind, &allowed)?;
+        executed.batches = rows::retain(executed.batches, check.position, check.kind, &allowed)?;
     }
     Ok(executed)
 }

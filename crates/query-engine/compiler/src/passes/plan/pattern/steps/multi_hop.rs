@@ -14,7 +14,7 @@ use crate::error::Result;
 use crate::passes::plan::predicates::*;
 use crate::passes::plan::rows::{Reads, Rel};
 use query_data_model::Direction;
-use query_data_model::plan::logical::EdgeField;
+use query_data_model::EdgeField;
 
 impl<B> RelationBuilder<'_, '_, '_, B>
 where

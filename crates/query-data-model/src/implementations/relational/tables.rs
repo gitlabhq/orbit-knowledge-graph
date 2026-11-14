@@ -1,6 +1,6 @@
+use crate::EdgeField;
 use crate::catalog::{Source, Store};
 use crate::generic::AttributeId;
-use crate::plan::logical::EdgeField;
 use crate::{DataType, EntityId, PropertyId, StoreId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

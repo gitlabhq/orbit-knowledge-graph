@@ -237,7 +237,8 @@ fn node_access<B: SqlBackend>(
         && !metric_target
         && !ordered
         && !local_predicate;
-    let joined_as_rows = query.steps().is_empty()
+    let joined_as_rows = pattern.inline
+        || query.steps().is_empty()
         || !B::SQL.deferred_nodes
         || group_target
         || metric_target

@@ -21,7 +21,7 @@ use crate::DataType;
 pub use builder::{InternalName, LogicalBuilder};
 pub use catalog::LogicalCatalog;
 pub use error::{ErrorClass, PlanError};
-pub use expr::{EdgeField, Expr, Literal, Operand, TimeUnit};
+pub use expr::{Expr, Literal, Operand, TimeUnit};
 pub use handle::{Binding, Rows};
 pub use measure::{Columns, Measure, Order, Projection, count};
 pub use predicate::{Comparison, Conjunct, Matching, Operator, Predicate};

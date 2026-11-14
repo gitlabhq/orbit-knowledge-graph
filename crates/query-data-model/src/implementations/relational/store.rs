@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{EdgeColumns, RelationalFacts, Table};
+use crate::EdgeField;
 use crate::catalog::{Diagnostics, Source, SourceInput, StorageBackend, StoreInput};
-use crate::plan::logical::EdgeField;
 use crate::{
     DenormalizedCatalog, EntityId, MaterializedJoin, RelationshipVariantId, TraversalPathKind,
     TraversalPathLookup,

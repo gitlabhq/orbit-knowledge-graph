@@ -3,8 +3,8 @@
 use crate::passes::codegen::SqlBackend;
 use std::collections::HashSet;
 
+use query_data_model::EdgeField;
 use query_data_model::implementations::relational::Target;
-use query_data_model::plan::logical::EdgeField;
 use query_data_model::{
     DenormalizedDirection, DenormalizedProperty, Endpoint, EntityId, PropertyId,
 };

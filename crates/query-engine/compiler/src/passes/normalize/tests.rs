@@ -1,7 +1,8 @@
 use std::sync::LazyLock;
 
+use query_data_model::EdgeField;
 use query_data_model::plan::logical::{
-    EdgeField, Expr, Literal, LogicalOperation, LogicalPlan, Operand, Predicate,
+    Expr, Literal, LogicalOperation, LogicalPlan, Operand, Predicate,
 };
 use query_data_model::{Catalog, ClickHouse};
 

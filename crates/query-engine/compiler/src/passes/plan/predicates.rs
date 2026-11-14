@@ -1,8 +1,8 @@
 //! Predicates and projections the planner attaches to relations, and the facts about a predicate the
 //! planner asks for: selective, a point lookup, or filtering the sort key.
 
+use query_data_model::EdgeField;
 use query_data_model::implementations::relational::Target;
-use query_data_model::plan::logical::EdgeField;
 use query_data_model::{GraphCatalog, PropertyId};
 
 use query_data_model::plan::logical::{Comparison, Predicate as Leaf};

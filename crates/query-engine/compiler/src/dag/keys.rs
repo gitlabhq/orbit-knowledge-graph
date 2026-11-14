@@ -128,7 +128,7 @@ mod tests {
         let keys = KeySet {
             input: KeyInput {
                 from: 0,
-                columns: vec!["project_id".into(), "path".into()],
+                positions: vec![0, 1],
                 binding: "f".into(),
                 properties: {
                     let model = frontend.model();

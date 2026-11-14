@@ -2,8 +2,8 @@ use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::EdgeField;
 use crate::catalog::{Catalog, Field, StorageBackend};
-use crate::plan::logical::EdgeField;
 use crate::{ForeignKey, RelationshipVariantId};
 
 mod capabilities;

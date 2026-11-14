@@ -16,12 +16,8 @@ const BOUNDED: &str = "MATCH (p:Project)<-[:IN_PROJECT]-(f:File) WHERE p.id IN [
 
 fn open_merge_requests() -> Vec<query_data_model::catalog::Row> {
     vec![
-        row(
-            json!({"mr_iid": 1, "mr_title": "Add feature A", "mr_id": 2000, "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),
-        ),
-        row(
-            json!({"mr_iid": 2, "mr_title": "Fix bug B", "mr_id": 2001, "_orbit_mr_id": 2001, "_orbit_mr_type": "MergeRequest"}),
-        ),
+        row(json!({"mr_iid": 1, "mr_title": "Add feature A", "mr_id": 2000})),
+        row(json!({"mr_iid": 2, "mr_title": "Fix bug B", "mr_id": 2001})),
     ]
 }
 
@@ -45,7 +41,7 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
         split[1].inputs,
         [Input::Keys(KeyInput {
             from: 0,
-            columns: vec!["mr_id".into()],
+            positions: vec![2],
             binding: "m".into(),
             properties: super::properties("SlackMessage", &["merge_request_id"]),
             types: vec![query_data_model::DataType::Int],
@@ -59,8 +55,8 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
         panic!("the merge request stage renders SQL");
     };
     assert!(
-        sql.starts_with("SELECT mr.iid AS mr_iid, mr.title AS mr_title, mr.id AS mr_id, "),
-        "a stage that feeds the Combine stage hands its text on whole: {sql}"
+        sql.starts_with("SELECT mr.iid AS mr_iid, mr.title AS mr_title, mr.id AS mr_id FROM "),
+        "a stage that feeds the Combine stage returns exactly its contract, text whole: {sql}"
     );
     assert!(sql.contains("startsWith(mr.traversal_path"), "{sql}");
     let call = ran
@@ -104,12 +100,8 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
 #[tokio::test]
 async fn a_code_search_is_bounded_by_the_callers_readable_projects() {
     let projects = vec![
-        row(
-            json!({"p_full_path": "gitlab-org/orbit", "p_id": 42, "_orbit_p_id": 42, "_orbit_p_type": "Project"}),
-        ),
-        row(
-            json!({"p_full_path": "secret/vault", "p_id": 77, "_orbit_p_id": 77, "_orbit_p_type": "Project"}),
-        ),
+        row(json!({"p_full_path": "gitlab-org/orbit", "p_id": 42})),
+        row(json!({"p_full_path": "secret/vault", "p_id": 77})),
     ];
     let ran = run(BOUNDED, &caller("1/9970/"), projects).await;
     let request = ran
@@ -249,9 +241,7 @@ async fn a_stage_over_the_row_cap_fails_however_few_keys_it_holds() {
         (0..count)
             .map(|n| {
                 let id = 5000 + n % 500;
-                row(
-                    json!({"mr_iid": n, "mr_title": "t", "mr_id": id, "_orbit_mr_id": id, "_orbit_mr_type": "MergeRequest"}),
-                )
+                row(json!({"mr_iid": n, "mr_title": "t", "mr_id": id}))
             })
             .collect()
     };
@@ -269,9 +259,7 @@ async fn a_stage_over_the_row_cap_fails_however_few_keys_it_holds() {
 #[tokio::test]
 async fn joined_text_is_excerpted_like_a_single_stage_response() {
     let title = "a".repeat(200_000);
-    let merge_requests = vec![row(
-        json!({"mr_iid": 1, "mr_title": title, "mr_id": 2000, "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),
-    )];
+    let merge_requests = vec![row(json!({"mr_iid": 1, "mr_title": title, "mr_id": 2000}))];
     let ran = run(MENTIONS, &caller("1/9970/"), merge_requests).await;
     let rows = ran.rows();
     let excerpt = rows[0]["mr_title"].as_str().unwrap();
@@ -287,7 +275,7 @@ const RAISED: &str = "MATCH (i:Incident)-[:RAISED_IN]->(m:SlackMessage) WHERE i.
 #[tokio::test]
 async fn a_single_column_key_crosses_from_a_relational_store() {
     let incidents = vec![row(
-        json!({"i_title": "staging outage", "i_message_id": "m1", "_orbit_i_id": 7, "_orbit_i_type": "Incident"}),
+        json!({"i_title": "staging outage", "i_message_id": "m1", "i_id": 7}),
     )];
     let ran = run(RAISED, &caller("1/9970/"), incidents).await;
     if let Err(error) = &ran.outcome {
@@ -310,7 +298,7 @@ async fn a_single_column_key_crosses_from_a_relational_store() {
         split[1].inputs,
         [Input::Keys(KeyInput {
             from: 0,
-            columns: vec!["i_message_id".into()],
+            positions: vec![1],
             binding: "m".into(),
             properties: super::properties("SlackMessage", &["id"]),
             types: vec![query_data_model::DataType::String],
@@ -330,4 +318,65 @@ async fn a_single_column_key_crosses_from_a_relational_store() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["i_title"], "staging outage");
     assert_eq!(rows[0]["m_text"], "deploy to staging at 5pm");
+}
+
+const AUTHORED: &str = "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN u.username, mr.iid, m.text";
+
+/// A stage that reads two nodes returns both inline, identity included, with the edge between
+/// them: the author is read in the stage, not left to a hydration that never runs.
+#[tokio::test]
+async fn a_relational_stage_returns_every_node_it_reads_inline() {
+    let authored = |username: &str, user: i64, iid: i64, id: i64| {
+        row(json!({
+            "u_username": username, "u_id": user, "mr_iid": iid, "mr_id": id,
+            "_orbit_e0_kind": "AUTHORED", "_orbit_e0_src": user, "_orbit_e0_src_kind": "User",
+            "_orbit_e0_dst": id, "_orbit_e0_dst_kind": "MergeRequest",
+        }))
+    };
+    let rows = vec![authored("ann", 1, 1, 2000), authored("bob", 2, 2, 2001)];
+    let ran = run(AUTHORED, &caller("1/9970/"), rows).await;
+    let Rendered::Sql { sql, .. } = &ran.rendered(0)[0] else {
+        panic!("the merge request stage renders SQL");
+    };
+    assert!(
+        sql.contains(
+            "SELECT u.username AS u_username, u.id AS u_id, mr.iid AS mr_iid, mr.id AS mr_id, "
+        ),
+        "{sql}"
+    );
+    assert!(
+        sql.contains("INNER JOIN (SELECT * FROM (SELECT * FROM gl_user AS u"),
+        "{sql}"
+    );
+    let mut redaction = crate::mock_redaction::MockRedactionService::new();
+    redaction.allow("user", &[1, 2]);
+    redaction.allow("merge_request", &[2000, 2001]);
+    let outcome = ran.outcome.as_ref().expect("the run succeeded");
+    assert_eq!(
+        crate::dag_fakes::response_edges(outcome, &redaction),
+        [
+            "SlackMessage:m1 -DISCUSSES-> MergeRequest:2000",
+            "SlackMessage:m4 -DISCUSSES-> MergeRequest:2001",
+            "User:1 -AUTHORED-> MergeRequest:2000",
+            "User:2 -AUTHORED-> MergeRequest:2001",
+        ]
+    );
+    let joined = |username: &str, user: i64, iid: i64, id: i64, message: &str, text: &str| {
+        row(json!({
+            "u_username": username, "mr_iid": iid, "m_text": text,
+            "_orbit_u_id": user, "_orbit_u_type": "User",
+            "_orbit_mr_id": id, "_orbit_mr_type": "MergeRequest",
+            "_orbit_m_id": message, "_orbit_m_type": "SlackMessage",
+            "_orbit_e0_kind": "AUTHORED", "_orbit_e0_src": user, "_orbit_e0_src_kind": "User",
+            "_orbit_e0_dst": id, "_orbit_e0_dst_kind": "MergeRequest",
+            "_orbit_e1_kind": "DISCUSSES",
+        }))
+    };
+    assert_eq!(
+        ran.rows(),
+        [
+            joined("ann", 1, 1, 2000, "m1", "deploy to staging at 5pm"),
+            joined("bob", 2, 2, 2001, "m4", "deploy memes"),
+        ]
+    );
 }

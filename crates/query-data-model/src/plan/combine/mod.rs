@@ -14,11 +14,19 @@ pub struct CombineLanguage;
 
 pub type CombinePlan = Plan<CombineLanguage>;
 
+/// A column of a stage's output contract: the stage, and the column's position in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Position {
+    pub stage: usize,
+    pub column: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CombineOperation {
-    /// The rows one stage returned, one output per column.
+    /// The rows one stage returned, one output per listed contract position.
     Rows {
         stage: usize,
+        columns: Vec<usize>,
     },
     /// The pairs of left and right rows whose columns are equal on every pair, each pair read as
     /// keys of its declared type.
@@ -33,6 +41,8 @@ pub enum CombineOperation {
     },
     /// Constant text columns, each a name and the value every row holds.
     Tag(Vec<(String, String)>),
+    /// Text columns that each hold a composite key, built from its parts read as their types.
+    Composite(Vec<Vec<(Ref, DataType)>>),
     /// Text columns cut to `chars` characters, with `suffix` after any that were cut.
     Excerpt {
         columns: Vec<Ref>,
@@ -43,7 +53,7 @@ pub enum CombineOperation {
 
 impl Language for CombineLanguage {
     type Operation = CombineOperation;
-    type Value = ();
+    type Value = Option<Position>;
 
     fn references(operation: &mut CombineOperation, visit: &mut dyn FnMut(&mut Ref)) {
         match operation {
@@ -54,6 +64,9 @@ impl Language for CombineLanguage {
             CombineOperation::Select(columns) => columns.iter_mut().for_each(visit),
             CombineOperation::Order(keys) => keys.iter_mut().for_each(|(key, _)| visit(key)),
             CombineOperation::Excerpt { columns, .. } => columns.iter_mut().for_each(visit),
+            CombineOperation::Composite(keys) => {
+                keys.iter_mut().flatten().for_each(|(part, _)| visit(part))
+            }
             CombineOperation::Rows { .. }
             | CombineOperation::Limit { .. }
             | CombineOperation::Tag(_) => {}
@@ -65,15 +78,12 @@ impl Language for CombineLanguage {
 pub enum CombineError {
     #[error(transparent)]
     Rejected(#[from] Rejected),
-    #[error("stage {stage} returns no column {column}")]
-    UnknownColumn { stage: usize, column: String },
+    #[error("the rows read no column {} of stage {}", .0.column, .0.stage)]
+    UnknownColumn(Position),
+    #[error("the rows hold no result column {0}")]
+    UnknownOutput(String),
     #[error("a join matches on at least one column pair")]
     EmptyJoin,
-}
-
-/// The name a stage's column carries in the Combine plan.
-pub fn qualified(stage: usize, column: &str) -> String {
-    format!("{stage}.{column}")
 }
 
 /// Rows of the plan under construction.
@@ -115,29 +125,32 @@ impl CombineBuilder {
         Ok(self.construction.finish(root?.rows)?)
     }
 
-    /// The output that holds `column` of `stage` in `rel`.
-    pub fn column(&self, rel: &Rel, stage: usize, column: &str) -> Result<Ref, CombineError> {
-        let wanted = qualified(stage, column);
+    /// The output that holds the stage column at `position` in `rel`.
+    pub fn column(&self, rel: &Rel, position: Position) -> Result<Ref, CombineError> {
         self.construction
             .outputs(&rel.rows)?
             .into_iter()
             .find(|output| {
                 self.construction
                     .value(*output)
-                    .is_ok_and(|(name, _)| name == Some(wanted.as_str()))
+                    .is_ok_and(|(_, value)| *value == Some(position))
             })
-            .ok_or(CombineError::UnknownColumn {
-                stage,
-                column: column.to_string(),
-            })
+            .ok_or(CombineError::UnknownColumn(position))
     }
 
-    pub fn rows(&mut self, stage: usize, columns: &[String]) -> Result<Rel, CombineError> {
-        let declared = columns
-            .iter()
-            .map(|column| Declare::named(qualified(stage, column), ()));
+    pub fn rows(&mut self, stage: usize, columns: &[usize]) -> Result<Rel, CombineError> {
+        let declared = columns.iter().map(|column| {
+            let position = Position {
+                stage,
+                column: *column,
+            };
+            Declare::named(format!("{stage}.{column}"), Some(position))
+        });
         self.connect(
-            CombineOperation::Rows { stage },
+            CombineOperation::Rows {
+                stage,
+                columns: columns.to_vec(),
+            },
             Vec::new(),
             Outputs::extend(declared),
         )
@@ -166,7 +179,7 @@ impl CombineBuilder {
         let refs = columns.iter().map(|(_, output)| *output).collect();
         let declared = columns
             .into_iter()
-            .map(|(name, _)| Output::Declare(Declare::named(name, ())));
+            .map(|(name, _)| Output::Declare(Declare::named(name, None)));
         self.connect(
             CombineOperation::Select(refs),
             vec![rel],
@@ -183,10 +196,30 @@ impl CombineBuilder {
     }
 
     pub fn tag(&mut self, rel: Rel, columns: Vec<(String, String)>) -> Result<Rel, CombineError> {
-        let declared = columns.iter().map(|(name, _)| Declare::named(name, ()));
-        let declared: Vec<_> = declared.collect();
+        let declared: Vec<_> = columns
+            .iter()
+            .map(|(name, _)| Declare::named(name, None))
+            .collect();
         self.connect(
             CombineOperation::Tag(columns),
+            vec![rel],
+            Outputs::extend(declared),
+        )
+    }
+
+    /// One text column per named composite key, from its parts.
+    pub fn composite(
+        &mut self,
+        rel: Rel,
+        keys: Vec<(String, Vec<(Ref, DataType)>)>,
+    ) -> Result<Rel, CombineError> {
+        let declared: Vec<_> = keys
+            .iter()
+            .map(|(name, _)| Declare::named(name, None))
+            .collect();
+        let parts = keys.into_iter().map(|(_, parts)| parts).collect();
+        self.connect(
+            CombineOperation::Composite(parts),
             vec![rel],
             Outputs::extend(declared),
         )
@@ -217,10 +250,7 @@ impl CombineBuilder {
                     .value(*output)
                     .is_ok_and(|(declared, _)| declared == Some(name))
             })
-            .ok_or(CombineError::UnknownColumn {
-                stage: usize::MAX,
-                column: name.to_string(),
-            })
+            .ok_or_else(|| CombineError::UnknownOutput(name.to_string()))
     }
 
     pub fn limit(&mut self, rel: Rel, rows: u64, skip: u64) -> Result<Rel, CombineError> {
@@ -232,7 +262,7 @@ impl CombineBuilder {
         &mut self,
         operation: CombineOperation,
         inputs: Vec<Rel>,
-        outputs: Outputs<()>,
+        outputs: Outputs<Option<Position>>,
     ) -> Result<Rel, CombineError> {
         let inputs = inputs.into_iter().map(|rel| rel.rows).collect();
         let connected = self.construction.connect(operation, inputs, outputs)?;
@@ -264,7 +294,7 @@ impl Rebuilder for CombineBuilder {
         &mut self,
         operation: CombineOperation,
         inputs: Vec<Rel>,
-        outputs: Outputs<()>,
+        outputs: Outputs<Option<Position>>,
     ) -> Result<Rel, CombineError> {
         self.connect(operation, inputs, outputs)
     }

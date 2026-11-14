@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::TraversalPathKind;
 
 use super::{Column, ColumnId, EdgeColumns, RelationalFacts, Table, TableId, Target};
+use crate::EdgeField;
 use crate::catalog::{Catalog, Check, EdgeScope, Lookup, StorageBackend};
 use crate::implementations::clickhouse::backend::IndexKind;
-use crate::plan::logical::EdgeField;
 use crate::{
     DenormalizedKey, DenormalizedProperty, Endpoint, EntityId, ForeignKey, MaterializedJoin,
     PropertyId, RelationshipId, RelationshipVariant, RelationshipVariantId, TraversalPathLookup,

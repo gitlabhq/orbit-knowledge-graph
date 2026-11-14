@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use compiler::dag::{Connections, Env, Frontend, Peer, Request, Source};
+use compiler::dag::{Connections, Contract, Env, Frontend, Peer, Request, Source};
 use compiler::orbit_authorization::{Caller, Checks, Grants};
 use orbit_server_config::QueryLimits;
 use query_data_model::{Catalog, DuckDb};
@@ -23,12 +23,17 @@ pub struct DuckDbExecutor {
 
 #[async_trait]
 impl Executor for DuckDbExecutor {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
         let sql = match request {
             Request::Query(compiled) => compiled.base.render(),
             Request::Lookup(lookup) => compiler::ParameterizedQuery {
                 sql: lookup.query.sql.clone(),
                 params: lookup.query.parameters.clone(),
+                columns: Vec::new(),
                 result_context: Default::default(),
                 query_config: Default::default(),
                 dialect: compiler::SqlDialect::DuckDb,
@@ -63,6 +68,10 @@ impl Executor for DuckDbExecutor {
             explain_pipeline: None,
             query_log: None,
             processors: None,
+        };
+        let batches = match contract {
+            Some(contract) => shared::dag::decode(batches, contract)?,
+            None => batches,
         };
         Ok(Executed {
             batches,

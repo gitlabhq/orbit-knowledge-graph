@@ -417,6 +417,7 @@ async fn assert_indexes_used(
                 let statement = ParameterizedQuery {
                     sql: sql.clone(),
                     params: params.clone(),
+                    columns: Vec::new(),
                     result_context: query.result_context.clone(),
                     query_config: query.query_config.clone(),
                     dialect: query.dialect,

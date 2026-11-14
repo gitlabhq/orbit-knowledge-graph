@@ -110,6 +110,41 @@ async fn a_global_live_entity_reads_with_its_permission_alone() {
     assert_eq!(texts(ran), [json!("deploy memes")]);
 }
 
+/// A live node whose identity has two parts reads both, and the result carries the composite
+/// key as its id.
+#[tokio::test]
+async fn a_live_node_with_a_composite_identity_carries_both_parts() {
+    let model = edited(
+        listing("scope: global"),
+        &[(
+            "test.listing/graph.yaml",
+            "identity: id",
+            "identity: [channel, id]",
+        )],
+    )
+    .deployment("demo")
+    .unwrap();
+    let ran = run_on(&model, LISTED, Vec::new(), &Checks::default()).await;
+    let call = ran
+        .rendered(0)
+        .into_iter()
+        .find_map(|request| match request {
+            Rendered::Live(call) => Some(call),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(call.fields, ["text", "channel", "id"]);
+    let rows = json_rows(&ran.outcome.unwrap().executed.batches);
+    assert_eq!(
+        rows,
+        [row(json!({
+            "m_text": "deploy memes",
+            "_orbit_m_id": "(random, m4)",
+            "_orbit_m_type": "Listed",
+        }))]
+    );
+}
+
 /// A code store whose entity enforces `none` still names its repositories through the columns
 /// its store declares, and the `read_code` check decides the rows.
 #[tokio::test]
@@ -142,8 +177,8 @@ async fn a_none_entity_before_a_via_entity_keeps_the_readable_repositories() {
         .deployment("demo")
         .unwrap();
     let merge_requests = vec![
-        json!({"mr_iid": 1, "mr_id": 2000, "mr_project_id": 42, "mr_source_branch": "feature-a", "_orbit_mr_id": 2000, "_orbit_mr_type": "MergeRequest"}),
-        json!({"mr_iid": 2, "mr_id": 2001, "mr_project_id": 77, "mr_source_branch": "fix-b", "_orbit_mr_id": 2001, "_orbit_mr_type": "MergeRequest"}),
+        json!({"mr_iid": 1, "mr_id": 2000, "mr_project_id": 42, "mr_source_branch": "feature-a"}),
+        json!({"mr_iid": 2, "mr_id": 2001, "mr_project_id": 77, "mr_source_branch": "fix-b"}),
     ];
     let checks = AllowedKeys::checks("project", [Key::Int(42), Key::Int(77)]);
     let ran = run_on(&model, QUERY_4, merge_requests, &checks).await;

@@ -1,9 +1,10 @@
 use std::borrow::Cow;
 
+use query_data_model::EdgeField;
 use query_data_model::PropertyId;
 use query_data_model::implementations::relational::Target;
 use query_data_model::plan::logical::{
-    Comparison, Conjunct, EdgeField, Expr, Literal, LogicalOperation, Operand, Predicate,
+    Comparison, Conjunct, Expr, Literal, LogicalOperation, Operand, Predicate,
 };
 use query_data_model::plan::tracking::Ref;
 use serde_json::Value;

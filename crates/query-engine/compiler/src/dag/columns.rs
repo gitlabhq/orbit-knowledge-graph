@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use query_data_model::PropertyId;
+use query_data_model::plan::combine::Position;
 use query_data_model::plan::logical::{Columns, Expr, LogicalOperation, MATCH_LINE, Projection};
 use query_data_model::plan::tracking::Ref;
 
 use super::cut::Cut;
 use super::split::Crossing;
-use super::{CombineColumn, KeyInput, StageId};
+use super::{Contract, KeyInput, Output};
 use crate::error::{QueryError, Result};
 use crate::logical::columns::defaults;
 
@@ -43,8 +44,51 @@ impl Crossing {
 }
 
 impl Cut<'_> {
+    /// The properties each binding's stage returns: the query's result columns, the keys of
+    /// each crossing, the keys of the row checks a `checked` stage runs or else the key
+    /// redaction reads, and the order keys.
+    pub(super) fn needed(&self, checked: &[bool]) -> Result<HashMap<Ref, Vec<PropertyId>>> {
+        let mut needed = self.selected()?;
+        let mut push = |binding: Ref, property: PropertyId| {
+            let properties = needed.entry(binding).or_default();
+            if !properties.contains(&property) {
+                properties.push(property);
+            }
+        };
+        for crossing in &self.crossings {
+            for (binding, property) in crossing.pairs.iter().flat_map(|(a, b)| [*a, *b]) {
+                push(binding, property);
+            }
+        }
+        let access = self.query.model.access();
+        for (group, bindings) in self.groups.iter().map(|group| &group.bindings).enumerate() {
+            for binding in bindings {
+                let Some(entity) = self.query.entity(*binding) else {
+                    continue;
+                };
+                if !checked[group] {
+                    self.redaction_key(entity)
+                        .into_iter()
+                        .for_each(|key| push(*binding, key));
+                    continue;
+                }
+                for check in &access.entity(entity).checks {
+                    if let query_data_model::catalog::Check::Rows { id, .. } = check {
+                        push(*binding, *id);
+                    }
+                }
+            }
+        }
+        for (key, _) in self.query.sort_keys() {
+            if let Expr::Property { binding, property } = key {
+                push(binding, property);
+            }
+        }
+        Ok(needed)
+    }
+
     /// The properties each binding's stage returns for the query's result columns.
-    pub(super) fn selected(&self) -> Result<HashMap<Ref, Vec<PropertyId>>> {
+    fn selected(&self) -> Result<HashMap<Ref, Vec<PropertyId>>> {
         let graph = self.query.model.graph();
         let access = self.query.model.access();
         let mut needed: HashMap<Ref, Vec<PropertyId>> = HashMap::new();
@@ -82,7 +126,12 @@ impl Cut<'_> {
     }
 
     /// The key set a crossing hands its consumer, on properties the consumer's store accepts.
-    pub(super) fn keys(&self, crossing: &Crossing, order: &[usize]) -> Result<KeyInput> {
+    pub(super) fn keys(
+        &self,
+        crossing: &Crossing,
+        order: &[usize],
+        contracts: &[Contract],
+    ) -> Result<KeyInput> {
         let stage = |group: usize| order.iter().position(|g| *g == group).unwrap_or_default();
         let (producer, consumer) = crossing.sides(order, |binding| self.group(binding));
         let producer_group = self.group(producer[0].0);
@@ -104,15 +153,18 @@ impl Cut<'_> {
                 )));
             }
         }
+        let positions = producer
+            .iter()
+            .map(|(binding, property)| {
+                let output = self.node(producer_group, *binding, *property)?;
+                contracts[producer_group].position(&output).ok_or_else(|| {
+                    QueryError::PipelineInvariant("a producer returns no key column".into())
+                })
+            })
+            .collect::<Result<_>>()?;
         Ok(KeyInput {
             from: stage(producer_group),
-            columns: producer
-                .iter()
-                .map(|(binding, property)| {
-                    self.column(stage(producer_group), *binding, *property)
-                        .column
-                })
-                .collect(),
+            positions,
             binding,
             properties: consumer.iter().map(|(_, property)| *property).collect(),
             types: consumer
@@ -129,7 +181,6 @@ impl Cut<'_> {
             .unwrap_or_default()
     }
 
-    /// The query's result columns in its RETURN order, each read from the stage that holds it.
     /// The result columns of returned text properties, named as `result_columns` names them;
     /// the keys a lookup resolves other properties by stay whole, as in a relational response.
     pub(super) fn excerpted(&self) -> Result<Vec<String>> {
@@ -161,11 +212,13 @@ impl Cut<'_> {
         Ok(excerpted)
     }
 
+    /// The query's result columns in its RETURN order, each read from the stage that holds it.
     pub(super) fn result_columns(
         &self,
-        stage: &impl Fn(usize) -> StageId,
-        group_of: &impl Fn(Ref) -> usize,
-    ) -> Result<Vec<(String, CombineColumn)>> {
+        position: &impl Fn(Ref, PropertyId) -> Result<Position>,
+        stage: &impl Fn(usize) -> usize,
+        contracts: &[Contract],
+    ) -> Result<Vec<(String, Position)>> {
         let selected = self.selected()?;
         let graph = self.query.model.graph();
         let mut columns = Vec::new();
@@ -180,30 +233,31 @@ impl Cut<'_> {
                 match item {
                     Projection::Graph { binding, .. } => {
                         for property in &selected[binding] {
-                            let column =
-                                self.column(stage(group_of(*binding)), *binding, *property);
                             columns.push((
                                 format!("{name}_{}", graph.property(*property).name),
-                                column,
+                                position(*binding, *property)?,
                             ));
                         }
                     }
                     Projection::Value(Expr::Property { binding, property }) => {
-                        let column = self.column(stage(group_of(*binding)), *binding, *property);
-                        columns.push((name.to_string(), column));
+                        columns.push((name.to_string(), position(*binding, *property)?));
                     }
                     Projection::Value(Expr::Output(output)) => {
-                        let matched = self.query.name(*output);
-                        let column = match matched {
-                            MATCH_LINE => "line",
-                            other => other.strip_prefix("match.").unwrap_or(other),
+                        let matched = match self.query.name(*output) {
+                            MATCH_LINE => Output::Line,
+                            other => Output::Capture(
+                                other.strip_prefix("match.").unwrap_or(other).to_string(),
+                            ),
                         };
                         let holder = self.matched_group(*output)?;
+                        let column = contracts[holder].position(&matched).ok_or_else(|| {
+                            QueryError::PipelineInvariant("a match column has no position".into())
+                        })?;
                         columns.push((
                             name.to_string(),
-                            CombineColumn {
+                            Position {
                                 stage: stage(holder),
-                                column: column.to_string(),
+                                column,
                             },
                         ));
                     }

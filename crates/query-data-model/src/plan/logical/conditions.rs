@@ -1,7 +1,8 @@
 use super::{
-    Comparison, Conjunct, EdgeField, Expr, Literal, Logical, LogicalCatalog, LogicalOperation,
-    LogicalType, Operand, PlanError, Predicate,
+    Comparison, Conjunct, Expr, Literal, Logical, LogicalCatalog, LogicalOperation, LogicalType,
+    Operand, PlanError, Predicate,
 };
+use crate::EdgeField;
 use crate::plan::tracking::Construction;
 use crate::{Direction, EntityId, Model};
 

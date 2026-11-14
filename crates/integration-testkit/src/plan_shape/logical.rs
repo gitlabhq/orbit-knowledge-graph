@@ -1,7 +1,8 @@
 use query_data_model::Direction;
+use query_data_model::EdgeField;
 use query_data_model::plan::logical::{
-    Columns, Comparison, EdgeField, Expr, Literal, LogicalOperation, LogicalPlan, Matching,
-    Measure, Operand, Order, Predicate, Projection,
+    Columns, Comparison, Expr, Literal, LogicalOperation, LogicalPlan, Matching, Measure, Operand,
+    Order, Predicate, Projection,
 };
 use query_data_model::plan::tracking::{NodeId, Ref};
 use query_data_model::{Model, RelationshipId};

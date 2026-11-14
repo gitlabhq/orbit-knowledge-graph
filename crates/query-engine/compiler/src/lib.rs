@@ -130,7 +130,7 @@ fn clickhouse_stage(
     limits: &QueryLimits,
 ) -> Result<config::GqlClickhouseCtx> {
     let mut ctx =
-        config::GqlClickhouseCtx::new(grants.clone(), *limits, false, true, Arc::clone(data_model));
+        config::GqlClickhouseCtx::new(grants.clone(), *limits, false, Arc::clone(data_model));
     ctx.set_statement(statement(stage)?);
     config::run_gql_clickhouse(&mut ctx).count_err()?;
     Ok(ctx)

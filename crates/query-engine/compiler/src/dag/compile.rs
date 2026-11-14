@@ -70,7 +70,7 @@ fn produced<T>(value: Option<T>) -> Result<T> {
 }
 
 pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> {
-    let response = stage.response;
+    let contract = stage.contract;
     let (grants, limits, trace) = (env.grants.clone(), *env.limits, env.trace);
     let statement = match stage.query {
         StageQuery::Gql(statement) => statement,
@@ -93,9 +93,11 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
     })?;
     match peer {
         Peer::ClickHouse(catalog) => {
-            let mut ctx =
-                config::GqlClickhouseCtx::new(grants, limits, trace, response, Arc::clone(catalog));
+            let mut ctx = config::GqlClickhouseCtx::new(grants, limits, trace, Arc::clone(catalog));
             ctx.set_statement(statement);
+            if let Some(contract) = contract {
+                ctx.set_contract(contract);
+            }
             config::run_gql_clickhouse(&mut ctx).count_err()?;
             let emitted = trace_relational(trace, ctx.relational().as_ref());
             Ok(Compiled {
@@ -108,6 +110,9 @@ pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> 
         Peer::DuckDb(catalog) => {
             let mut ctx = config::GqlDuckdbCtx::new(grants, limits, trace, Arc::clone(catalog));
             ctx.set_statement(statement);
+            if let Some(contract) = contract {
+                ctx.set_contract(contract);
+            }
             config::run_gql_duckdb(&mut ctx).count_err()?;
             let emitted = trace_relational(trace, ctx.relational().as_ref());
             Ok(Compiled {
@@ -172,6 +177,7 @@ fn combine(
         base: crate::ParameterizedQuery {
             sql: described.join("\n"),
             params: Default::default(),
+            columns: Vec::new(),
             result_context: produced(ctx.take_result_ctx())?,
             query_config: Default::default(),
             dialect: crate::SqlDialect::ClickHouse,

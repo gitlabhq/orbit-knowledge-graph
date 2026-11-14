@@ -1,12 +1,15 @@
+use std::collections::HashMap;
+
 use orbit_server_config::QueryLimits;
-use query_data_model::PropertyId;
-use query_data_model::plan::logical::{Expr, LogicalOperation};
+use query_data_model::plan::combine::Position;
+use query_data_model::plan::logical::{Expr, LogicalOperation, MATCH_LINE};
 use query_data_model::plan::tracking::Ref;
+use query_data_model::{DataType, Direction, EdgeField, EntityId, PropertyId};
 
 use super::split::Crossing;
 use super::{
-    Backend, CombineColumn, CombineEdge, CombineJoin, CombineNode, CombineQuery, Connections, Dag,
-    Input, Peer, RowCheck, Stage, StageId, StageQuery,
+    Backend, ColumnType, CombineEdge, CombineJoin, CombineNode, CombineQuery, Connections,
+    Contract, Dag, Handle, Input, Output, Peer, RowCheck, Stage, StageQuery,
 };
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
@@ -32,43 +35,42 @@ impl Cut<'_> {
         let debug = response.debug;
         let order = self.order()?;
         let stage = |group: usize| order.iter().position(|g| *g == group).unwrap_or_default();
-        let group_of = |binding: Ref| {
-            self.groups
-                .iter()
-                .position(|group| group.bindings.contains(&binding))
-                .unwrap_or_default()
-        };
-        let mut needed = self.selected()?;
-        for crossing in &self.crossings {
-            for (binding, property) in crossing.pairs.iter().flat_map(|(a, b)| [*a, *b]) {
-                push(needed.entry(binding).or_default(), property);
-            }
-        }
-        let producers: Vec<usize> = self
-            .crossings
-            .iter()
-            .map(|crossing| {
-                let consumer = crossing.consumer(&order);
-                match crossing.groups {
-                    (producer, other) if other == consumer => producer,
-                    (_, producer) => producer,
-                }
+        let checked = self.checked(&order);
+        let needed = self.needed(&checked)?;
+        let contracts = (0..self.groups.len())
+            .map(|group| self.contract(group, &needed))
+            .collect::<Result<Vec<_>>>()?;
+        let position = |binding: Ref, property: PropertyId| {
+            let group = self.group(binding);
+            let output = self.node(group, binding, property)?;
+            let column = contracts[group].position(&output).ok_or_else(|| {
+                QueryError::PipelineInvariant("a stage's contract lacks a needed column".into())
+            })?;
+            Ok::<_, QueryError>(Position {
+                stage: stage(group),
+                column,
             })
-            .collect();
-        let mut checks: Vec<Vec<RowCheck>> = vec![Vec::new(); self.groups.len()];
-        let mut nodes = Vec::new();
+        };
         let graph = self.query.model.graph();
         let access = self.query.model.access();
+        let mut checks: Vec<Vec<RowCheck>> = vec![Vec::new(); self.groups.len()];
+        let mut nodes = Vec::new();
         for (index, group) in self.groups.iter().enumerate() {
             let joins = self.peer(group.place).joins();
-            if joins && !producers.contains(&index) {
-                continue;
-            }
             for binding in &group.bindings {
                 let Some(entity) = self.query.entity(*binding) else {
                     continue;
                 };
-                for check in self.query.model.checks(entity, group.place) {
+                let declared = graph.entity(entity);
+                let key = match joins {
+                    true => self
+                        .redaction_key(entity)
+                        .map(|key| position(*binding, key))
+                        .transpose()?,
+                    false => None,
+                };
+                let own = self.query.model.checks(entity, group.place);
+                for check in own.filter(|_| checked[index]) {
                     let query_data_model::catalog::Check::Rows {
                         provider,
                         permission,
@@ -79,32 +81,32 @@ impl Cut<'_> {
                     else {
                         continue;
                     };
-                    push(needed.entry(*binding).or_default(), *id);
                     let check = RowCheck {
                         provider: provider.clone(),
                         permission: access.permission(*permission).name.clone(),
                         resource: resource.clone(),
-                        column: self.column(stage(index), *binding, *id).column,
+                        position: position(*binding, *id)?.column,
                         kind: crate::KeyKind::of(graph.property(*id).data_type),
                     };
                     if !checks[index].contains(&check) {
                         checks[index].push(check);
                     }
                 }
-                if joins {
+                if !self.returns_identity(index, entity) {
                     continue;
                 }
-                let [identity] = graph.entity(entity).identity[..] else {
-                    continue;
-                };
-                if !self.store(group, entity).returns_identity(entity) {
-                    continue;
-                }
-                push(needed.entry(*binding).or_default(), identity);
+                let identity = declared
+                    .identity
+                    .iter()
+                    .map(|part| Ok((position(*binding, *part)?, graph.property(*part).data_type)))
+                    .collect::<Result<_>>()?;
                 nodes.push(CombineNode {
                     alias: self.query.name(*binding).to_string(),
-                    entity: graph.entity(entity).name.clone(),
-                    id: self.column(stage(index), *binding, identity),
+                    entity: declared.name.clone(),
+                    stage: stage(index),
+                    identity,
+                    key,
+                    checked: !joins,
                 });
             }
         }
@@ -115,28 +117,22 @@ impl Cut<'_> {
                     "a query across connections orders by node properties".into(),
                 ));
             };
-            push(needed.entry(binding).or_default(), property);
-            combine_order.push((
-                self.column(stage(group_of(binding)), binding, property),
-                direction,
-            ));
+            combine_order.push((position(binding, property)?, direction));
         }
         let mut stages = Vec::new();
         for (id, group) in order.iter().enumerate() {
             let peer = self.peer(self.groups[*group].place);
             let (connection, backend) = (peer.connection(), peer.backend());
-            let checks = std::mem::take(&mut checks[*group]);
             let inputs = self
                 .crossings
                 .iter()
                 .filter(|crossing| crossing.consumer(&order) == *group)
-                .map(|crossing| self.keys(crossing, &order).map(Input::Keys))
+                .map(|crossing| self.keys(crossing, &order, &contracts).map(Input::Keys))
                 .collect::<Result<_>>()?;
-            let group = &self.groups[*group];
             let plan = super::sub::plan(
                 self.query,
-                group,
-                &needed,
+                &self.groups[*group],
+                &contracts[*group],
                 self.limits,
                 self.connections.ids(),
             )?;
@@ -145,71 +141,57 @@ impl Cut<'_> {
                 backend,
                 runs: super::Runs::On {
                     connection,
-                    stores: group.stores.clone(),
+                    stores: self.groups[*group].stores.clone(),
                 },
                 query: StageQuery::Gql(query_data_model::surface::Statement { plan, debug }),
                 inputs,
-                response: false,
-                checks,
+                contract: Some(contracts[*group].clone()),
+                checks: std::mem::take(&mut checks[*group]),
             });
         }
         let joins = self
             .crossings
             .iter()
             .map(|crossing| {
-                let (producer, consumer) = crossing.sides(&order, group_of);
-                let side = |pairs: Vec<(Ref, PropertyId)>| {
+                let (producer, consumer) = crossing.sides(&order, |binding| self.group(binding));
+                let side = |pairs: &[(Ref, PropertyId)]| {
                     pairs
-                        .into_iter()
-                        .map(|(binding, property)| {
-                            self.column(stage(group_of(binding)), binding, property)
-                        })
-                        .collect()
+                        .iter()
+                        .map(|(binding, property)| position(*binding, *property))
+                        .collect::<Result<Vec<_>>>()
                 };
-                let graph = self.query.model.graph();
-                CombineJoin {
+                Ok(CombineJoin {
                     types: consumer
                         .iter()
                         .map(|(_, property)| graph.property(*property).data_type)
                         .collect(),
-                    left: side(producer),
-                    right: side(consumer),
-                }
+                    left: side(&producer)?,
+                    right: side(&consumer)?,
+                })
             })
-            .collect();
+            .collect::<Result<_>>()?;
         let (limit, skip) = self
             .query
             .limit()
             .unwrap_or((self.limits.default_rows, None));
-        let edges = self
+        let mut edges: Vec<CombineEdge> = self
             .crossings
             .iter()
-            .map(|crossing| CombineEdge {
+            .map(|crossing| CombineEdge::Crossing {
                 step: crossing.step,
                 relationship: graph.relationship(crossing.relationship).name.clone(),
                 source: self.query.name(crossing.ends.0).to_string(),
                 target: self.query.name(crossing.ends.1).to_string(),
             })
             .collect();
-        let pattern = self.query.steps();
-        let steps = order
-            .iter()
-            .map(|group| {
-                let own = |binding: Ref| group_of(binding) == *group;
-                pattern
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, step)| own(step.from) && own(step.to))
-                    .map(|(index, _)| index)
-                    .collect()
-            })
-            .collect();
+        for (group, contract) in contracts.iter().enumerate() {
+            edges.extend(self.stage_edges(group, stage(group), contract)?);
+        }
         let combine = CombineQuery {
             edges,
-            steps,
             joins,
             excerpted: self.excerpted()?,
-            columns: self.result_columns(&stage, &group_of)?,
+            columns: self.result_columns(&position, &stage, &contracts)?,
             order: combine_order,
             limit,
             skip,
@@ -222,7 +204,7 @@ impl Cut<'_> {
             runs: super::Runs::Combine,
             query: StageQuery::Combine(combine, Box::new(response)),
             inputs,
-            response: true,
+            contract: None,
             checks: Vec::new(),
         });
         Ok(Dag {
@@ -251,26 +233,206 @@ impl Cut<'_> {
         self.query.model.store(*store)
     }
 
-    /// The name of the column a stage returns a binding's property in.
-    pub(super) fn column(
-        &self,
-        stage: StageId,
-        binding: Ref,
-        property: PropertyId,
-    ) -> CombineColumn {
-        let name = &self.query.model.graph().property(property).name;
-        let group = self
+    /// Whether each group's stage puts its rows through their entities' row checks: a remote
+    /// stage does, and a relational stage whose keys cross into another.
+    fn checked(&self, order: &[usize]) -> Vec<bool> {
+        let mut checked: Vec<bool> = self
             .groups
             .iter()
-            .find(|group| group.bindings.contains(&binding));
-        let relational = group.is_some_and(|group| self.peer(group.place).joins());
-        CombineColumn {
-            stage,
-            column: match relational {
-                true => format!("{}_{name}", self.query.name(binding)),
-                false => name.clone(),
-            },
+            .map(|group| !self.peer(group.place).joins())
+            .collect();
+        for crossing in &self.crossings {
+            let consumer = crossing.consumer(order);
+            let producer = match crossing.groups {
+                (producer, other) if other == consumer => producer,
+                (_, producer) => producer,
+            };
+            checked[producer] = true;
         }
+        checked
+    }
+
+    /// The key redaction checks a relational node's rows by when it is not the identity.
+    pub(super) fn redaction_key(&self, entity: EntityId) -> Option<PropertyId> {
+        let identity = &self.query.model.graph().entity(entity).identity;
+        self.query
+            .model
+            .access()
+            .entity(entity)
+            .checks
+            .iter()
+            .find_map(|check| match check {
+                query_data_model::catalog::Check::Rows { id, .. } if *identity != [*id] => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+    }
+
+    /// Whether a group's stage returns the identity of `entity`'s nodes: a relational stage
+    /// always does, a live stage when its store returns it, and a code stage never yet.
+    fn returns_identity(&self, group: usize, entity: EntityId) -> bool {
+        let group = &self.groups[group];
+        match self.peer(group.place).backend() {
+            Backend::ClickHouse | Backend::DuckDb => true,
+            Backend::Live => self.store(group, entity).returns_identity(entity),
+            Backend::OrbitCode | Backend::Combine => false,
+        }
+    }
+
+    /// The contract output that holds a binding's property in its group's stage.
+    pub(super) fn node(&self, group: usize, binding: Ref, property: PropertyId) -> Result<Output> {
+        let entity = self.query.entity(binding).ok_or_else(|| {
+            QueryError::PipelineInvariant("a binding a stage returns has no entity".into())
+        })?;
+        let identity = &self.query.model.graph().entity(entity).identity;
+        let handle = match identity.iter().position(|part| *part == property) {
+            Some(part) if self.returns_identity(group, entity) => Handle::Identity(part),
+            _ => Handle::Property(property),
+        };
+        Ok(Output::Node {
+            binding: self.query.name(binding).to_string(),
+            handle,
+        })
+    }
+
+    /// The columns a group's stage returns: for each node, the properties later stages read and
+    /// its identity when the stage returns it; then each own step's edge, or the match columns.
+    fn contract(&self, group: usize, needed: &HashMap<Ref, Vec<PropertyId>>) -> Result<Contract> {
+        let graph = self.query.model.graph();
+        let mut contract = Contract {
+            columns: Vec::new(),
+        };
+        for binding in &self.groups[group].bindings {
+            let Some(entity) = self.query.entity(*binding) else {
+                continue;
+            };
+            let identity = &graph.entity(entity).identity;
+            let parts = match self.returns_identity(group, entity) {
+                true => identity.as_slice(),
+                false => &[],
+            };
+            let listed = needed.get(binding).map_or(&[][..], Vec::as_slice);
+            for property in listed.iter().chain(parts) {
+                let data_type = ColumnType::Scalar(graph.property(*property).data_type);
+                contract.push(self.node(group, *binding, *property)?, data_type);
+            }
+        }
+        for (step, global) in self.own_steps(group).into_iter().enumerate() {
+            let pattern = &self.query.steps()[global];
+            let (source, target) = match pattern.direction {
+                Direction::Outgoing | Direction::Both => (pattern.from, pattern.to),
+                Direction::Incoming => (pattern.to, pattern.from),
+            };
+            let text = ColumnType::Scalar(DataType::String);
+            for (field, data_type) in [
+                (EdgeField::Kind, text),
+                (EdgeField::SourceId, self.id_type(source)?),
+                (EdgeField::SourceKind, text),
+                (EdgeField::TargetId, self.id_type(target)?),
+                (EdgeField::TargetKind, text),
+            ] {
+                contract.push(Output::Edge { step, field }, data_type);
+            }
+            if pattern.range.max > 1 {
+                contract.push(Output::Path { step }, ColumnType::Path);
+            }
+        }
+        for item in self.query.selected() {
+            let query_data_model::plan::logical::Projection::Value(Expr::Output(output)) = item
+            else {
+                continue;
+            };
+            if self.matched_group(*output)? != group {
+                continue;
+            }
+            let (column, data_type) = match self.query.name(*output) {
+                MATCH_LINE => (Output::Line, DataType::Int),
+                other => (
+                    Output::Capture(other.strip_prefix("match.").unwrap_or(other).to_string()),
+                    DataType::String,
+                ),
+            };
+            contract.push(column, ColumnType::Scalar(data_type));
+        }
+        Ok(contract)
+    }
+
+    /// The pattern steps whose ends a group holds, in the order its stage follows them.
+    fn own_steps(&self, group: usize) -> Vec<usize> {
+        let bindings = &self.groups[group].bindings;
+        let joins = self.peer(self.groups[group].place).joins();
+        self.query
+            .steps()
+            .iter()
+            .enumerate()
+            .filter(|(_, step)| {
+                joins && bindings.contains(&step.from) && bindings.contains(&step.to)
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// The type of the identity an edge's endpoint carries.
+    fn id_type(&self, binding: Ref) -> Result<ColumnType> {
+        let graph = self.query.model.graph();
+        let identity = self
+            .query
+            .entity(binding)
+            .map(|entity| graph.entity(entity).identity.as_slice());
+        match identity {
+            Some([part]) => Ok(ColumnType::Scalar(graph.property(*part).data_type)),
+            _ => Err(QueryError::Validation(format!(
+                "{} has no single identity for an edge to carry",
+                self.query.name(binding)
+            ))),
+        }
+    }
+
+    /// The edges a relational group's stage returns, under the pattern step each stands for.
+    fn stage_edges(
+        &self,
+        group: usize,
+        stage: usize,
+        contract: &Contract,
+    ) -> Result<Vec<CombineEdge>> {
+        let graph = self.query.model.graph();
+        let steps = self.query.steps();
+        let at = |output: Output| {
+            contract
+                .position(&output)
+                .map(|column| Position { stage, column })
+                .ok_or_else(|| {
+                    QueryError::PipelineInvariant("a stage's contract lacks an edge column".into())
+                })
+        };
+        self.own_steps(group)
+            .into_iter()
+            .enumerate()
+            .map(|(local, global)| {
+                let field = |field| at(Output::Edge { step: local, field });
+                let rel_types = match steps[global].relationships {
+                    [] => vec!["*".to_string()],
+                    named => named
+                        .iter()
+                        .map(|relationship| graph.relationship(*relationship).name.clone())
+                        .collect(),
+                };
+                Ok(CombineEdge::Stage {
+                    step: global,
+                    rel_types,
+                    kind: field(EdgeField::Kind)?,
+                    source: field(EdgeField::SourceId)?,
+                    source_kind: field(EdgeField::SourceKind)?,
+                    target: field(EdgeField::TargetId)?,
+                    target_kind: field(EdgeField::TargetKind)?,
+                    path: match steps[global].range.max > 1 {
+                        true => Some(at(Output::Path { step: local })?),
+                        false => None,
+                    },
+                })
+            })
+            .collect()
     }
 
     /// Stages run from the bounded side of each crossing: a stage whose own bindings carry a
@@ -314,12 +476,6 @@ impl Cut<'_> {
             order.push(next);
         }
         Ok(order)
-    }
-}
-
-fn push(properties: &mut Vec<PropertyId>, property: PropertyId) {
-    if !properties.contains(&property) {
-        properties.push(property);
     }
 }
 

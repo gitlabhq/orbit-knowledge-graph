@@ -7,8 +7,9 @@ use super::super::ast::{
 use super::super::errors::invalid;
 use super::Built;
 use super::conditions::column;
+use crate::EdgeField;
 use crate::plan::logical::{
-    Columns, EdgeField, Expr, LogicalBuilder, LogicalType, Measure, Order, Projection, Rows,
+    Columns, Expr, LogicalBuilder, LogicalType, Measure, Order, Projection, Rows,
 };
 use crate::plan::tracking::Named;
 use crate::surface::SurfaceError;

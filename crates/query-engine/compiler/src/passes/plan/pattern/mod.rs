@@ -83,6 +83,8 @@ pub(crate) struct Pattern<'a, B: SqlBackend> {
     pub relations: Vec<EdgeRelation>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     scans: Vec<Option<String>>,
+    /// Every node joins as a table read, so the rows carry each node's columns inline.
+    inline: bool,
 }
 
 impl<B: SqlBackend> Pattern<'_, B> {
@@ -121,7 +123,7 @@ impl<B: SqlBackend> Pattern<'_, B> {
 }
 
 impl<'a, B: SqlBackend> Pattern<'a, B> {
-    pub(crate) fn new(query: Query<'a>, model: &'a Catalog<B>) -> Result<Self> {
+    pub(crate) fn new(query: Query<'a>, model: &'a Catalog<B>, inline: bool) -> Result<Self> {
         let facts = query.leaves();
         let nodes = nodes::build_nodes(query, &query.anchors(&facts), model)?;
         let relations = relations::build_relations(query, &facts, model, &nodes)?;
@@ -133,6 +135,7 @@ impl<'a, B: SqlBackend> Pattern<'a, B> {
             nodes,
             denormalized: super::filters::denormalized_facts(query, model),
             scans: Vec::new(),
+            inline,
         };
         let placement = conditions::place_conditions(&pattern)?;
         conditions::bind_scan_conditions(&mut pattern, &placement)?;

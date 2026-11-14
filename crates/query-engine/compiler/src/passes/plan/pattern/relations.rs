@@ -6,8 +6,8 @@ use query_data_model::Catalog;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use query_data_model::EdgeField;
 use query_data_model::implementations::relational::{EdgeColumns, TableId, Target};
-use query_data_model::plan::logical::EdgeField;
 use query_data_model::plan::tracking::Ref;
 use query_data_model::{Direction, EntityId, GraphCatalog, RelationshipId};
 

@@ -14,8 +14,8 @@ use crate::logical::{Leaf, Query, binding, target};
 use crate::passes::plan::filters::{BoundFilter, FilterOwner, bind_filter};
 use crate::passes::plan::predicates::{Column, Predicate, property_column, tag_filter};
 use crate::passes::plan::rows::BindingSource;
+use query_data_model::EdgeField;
 use query_data_model::implementations::relational::Target;
-use query_data_model::plan::logical::EdgeField;
 
 /// One leaf of a condition tree, bound to the node or edge column it reads.
 #[derive(Clone)]

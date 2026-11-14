@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use crate::DataType;
 
-use super::{EdgeField, Expr, Logical, LogicalOperation, LogicalType, Measure, PlanError};
+use super::{Expr, Logical, LogicalOperation, LogicalType, Measure, PlanError};
+use crate::EdgeField;
 use crate::catalog::PropertyAccess;
 use crate::generic::AttributeId;
 use crate::plan::tracking::{Construction, Ref};

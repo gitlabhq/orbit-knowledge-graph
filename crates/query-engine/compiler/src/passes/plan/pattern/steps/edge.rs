@@ -3,9 +3,9 @@
 
 use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::build::stored;
+use query_data_model::EdgeField;
 use query_data_model::constants::*;
 use query_data_model::implementations::relational::{RelationalBackend, TableId};
-use query_data_model::plan::logical::EdgeField;
 
 use super::super::relations::select_edge_layouts;
 use super::super::{EdgeRelation, Pattern};

@@ -105,7 +105,11 @@ struct ProfilerExecutor {
 
 #[async_trait::async_trait]
 impl Executor for ProfilerExecutor {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&compiler::dag::Contract>,
+    ) -> Result<Executed, ExecutorError> {
         let Request::Query(compiled) = request else {
             return Err(ExecutorError(format!(
                 "the profiler runs queries, not {request:?}"
@@ -149,6 +153,10 @@ impl Executor for ProfilerExecutor {
             explain_pipeline: None,
             query_log: None,
             processors: None,
+        };
+        let batches = match contract {
+            Some(contract) => shared::dag::decode(batches, contract)?,
+            None => batches,
         };
         Ok(Executed {
             batches,

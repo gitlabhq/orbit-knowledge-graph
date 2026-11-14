@@ -34,12 +34,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub limits: QueryLimits,
         pub connections: crate::dag::Connections,
         pub trace: bool,
-        pub response: bool,
     }
 
     state {
         pub raw: String,
         pub statement: Statement,
+        pub contract: crate::dag::Contract,
         pub dag: crate::dag::Dag,
         pub tp_bounds: crate::tp_bounds::TpBounds,
         pub hydration: HydrationRequest,
@@ -106,7 +106,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         plan {
             reads_env: [data_model, limits, trace]
-            reads_state: [statement, tp_bounds, hydration]
+            reads_state: [statement, contract, tp_bounds, hydration]
             mutates: [relational, plan_metadata, planned]
         }
         paginate {
@@ -115,18 +115,18 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [relational]
         }
         response_policy {
-            reads_env: [data_model, response]
-            reads_state: [statement]
+            reads_env: [data_model]
+            reads_state: [statement, contract]
             mutates: [relational]
         }
         result_contract {
             reads_env: [data_model]
-            reads_state: [statement, plan_metadata]
+            reads_state: [statement, contract, plan_metadata]
             mutates: [relational, result_ctx]
         }
         hydrate_plan {
             reads_env: [grants, data_model]
-            reads_state: [statement, relational]
+            reads_state: [statement, contract, relational]
             mutates: [hydration_plan]
         }
         materialize {
@@ -149,7 +149,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         codegen {
             reads_env: [data_model]
-            reads_state: [statement, hydration]
+            reads_state: [statement, contract, hydration]
             mutates: [relational, result_ctx, query_config, hydration_plan, output, hydration_query]
         }
         code::plan {
@@ -233,14 +233,14 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         gql_clickhouse {
             backend: query_data_model::ClickHouse
-            env: [grants, limits, trace, response]
-            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned, proved]
+            env: [grants, limits, trace]
+            state: [statement, contract, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned, proved]
             phases: [tp_bounds, plan, response_policy, result_contract, paginate, hydrate_plan, materialize, settings, security, security_check, codegen]
         }
         gql_duckdb {
             backend: query_data_model::DuckDb
             env: [grants, limits, trace]
-            state: [statement, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned, proved]
+            state: [statement, contract, tp_bounds, hydration, plan_metadata, result_ctx, query_config, hydration_plan, relational, output, planned, proved]
             phases: [plan, result_contract, paginate, materialize, security, security_check, codegen]
         }
         gql_orbit_code {
@@ -264,7 +264,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         hydration_clickhouse {
             backend: query_data_model::ClickHouse
             env: [grants, limits, trace]
-            state: [tp_bounds, hydration, plan_metadata, result_ctx, query_config, relational, hydration_query, planned, proved]
+            state: [contract, tp_bounds, hydration, plan_metadata, result_ctx, query_config, relational, hydration_query, planned, proved]
             phases: [restrict_hydration, plan, settings, security, security_check, codegen]
         }
     }
@@ -373,7 +373,10 @@ fn plan(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
         None => {
             let statement = require(ctx.statement().as_ref(), "statement")?;
             let query = crate::logical::Query::new(&statement.plan, model.model());
-            Request::Query(query)
+            match ctx.contract().as_ref() {
+                Some(contract) => Request::Stage(query, contract),
+                None => Request::Query(query),
+            }
         }
     };
     let planned =
@@ -394,7 +397,7 @@ fn materialize(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
 }
 
 fn response_policy(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
-    if !*ctx.response() {
+    if ctx.contract().is_some() {
         return Ok(());
     }
     let plan = require(ctx.take_relational(), "relational")?;
@@ -412,7 +415,10 @@ fn result_contract(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let query = crate::logical::Query::new(&statement.plan, model.model());
     let metadata = require(ctx.plan_metadata().as_ref(), "plan_metadata")?;
-    let (plan, result_context) = result_contract::apply(plan, query, metadata, model)?;
+    let (plan, result_context) = match ctx.contract() {
+        Some(_) => (plan, result_contract::context(query, model)),
+        None => result_contract::apply(plan, query, metadata, model)?,
+    };
     ctx.set_relational(plan);
     ctx.set_result_ctx(result_context);
     Ok(())
@@ -450,6 +456,9 @@ fn security_check(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()>
 }
 
 fn hydrate_plan(ctx: &mut impl CompilerCtx<Backend = query_data_model::ClickHouse>) -> Result<()> {
+    if ctx.contract().is_some() {
+        return Ok(());
+    }
     let model = ctx.data_model();
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let query = crate::logical::Query::new(&statement.plan, model.model());
@@ -508,6 +517,15 @@ fn codegen(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
     let stats = crate::analytics::QueryStats::new(query, model);
     let plan = require(ctx.relational().as_ref(), "relational")?;
     let base = codegen::render(plan, model, result_context, query_config);
+    if let Some(contract) = ctx.contract()
+        && base.columns.len() != contract.columns.len()
+    {
+        return Err(QueryError::PipelineInvariant(format!(
+            "a stage returns {} columns where its contract lists {}",
+            base.columns.len(),
+            contract.columns.len()
+        )));
+    }
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
         query_type,

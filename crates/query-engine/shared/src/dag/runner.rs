@@ -174,7 +174,7 @@ impl<'r> Runner<'r> {
         let mut sets = Vec::new();
         for input in stage.keys() {
             let produced = results.get(&input.from).map_or(&[][..], Vec::as_slice);
-            let keys = rows::keys(produced, &input.columns, &input.types)?;
+            let keys = rows::keys(produced, &input.positions, &input.types)?;
             self.emit(|| Event::Keys {
                 from: input.from,
                 to: id,
@@ -213,8 +213,8 @@ impl<'r> Runner<'r> {
             }
             stage.query = StageQuery::Gql(bound);
         }
-        let (connection, backend, response) =
-            (stage.runs.connection(), stage.backend, stage.response);
+        let (connection, backend) = (stage.runs.connection(), stage.backend);
+        let contract = stage.contract.clone();
         let checks = std::mem::take(&mut stage.checks);
         let compiled = compile(stage, inputs, &self.env)?;
         self.trace(id, &compiled);
@@ -230,7 +230,10 @@ impl<'r> Runner<'r> {
                 log: Vec::new(),
             },
             (request, Some(connection)) => {
-                self.executors.get(*connection)?.execute(request).await?
+                self.executors
+                    .get(*connection)?
+                    .execute(request, contract.as_ref())
+                    .await?
             }
             (_, None) => {
                 return Err(QueryError::PipelineInvariant(format!(
@@ -241,7 +244,7 @@ impl<'r> Runner<'r> {
         };
         let rows: usize = executed.batches.iter().map(RecordBatch::num_rows).sum();
         let cap = self.env.limits.stage_keys;
-        if !response && rows > cap {
+        if contract.is_some() && rows > cap {
             return Err(QueryError::LimitExceeded(format!(
                 "stage {id} returned more than {cap} rows; a stage hands at most {cap} rows to the next"
             ))
@@ -312,7 +315,7 @@ impl<'r> Runner<'r> {
             .into());
         };
         let executor = self.executors.get(graph.connection())?;
-        let executed = executor.execute(&compiled.request).await?;
+        let executed = executor.execute(&compiled.request, None).await?;
         let Request::Hydration(query) = compiled.request else {
             return Err(QueryError::PipelineInvariant(
                 "the hydration stage compiled no hydration query".into(),

@@ -4,7 +4,8 @@ use super::super::ast::{
 };
 use super::super::errors::invalid;
 use super::{Built, Conditions};
-use crate::plan::logical::{EdgeField, Expr, LogicalBuilder, LogicalType, Predicate, Rows};
+use crate::EdgeField;
+use crate::plan::logical::{Expr, LogicalBuilder, LogicalType, Predicate, Rows};
 use crate::surface::SurfaceError;
 
 const STRUCTURAL: &str = "MATCHES ast(...) must be a top-level condition of a single-node match";

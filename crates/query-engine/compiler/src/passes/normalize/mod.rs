@@ -10,8 +10,9 @@ use orbit_server_config::QueryLimits;
 use query_data_model::Catalog;
 use std::collections::HashMap;
 
+use query_data_model::EdgeField;
 use query_data_model::plan::logical::{
-    EdgeField, Expr, LogicalBuilder, LogicalOperation, LogicalPlan, PlanError, Projection, Rows,
+    Expr, LogicalBuilder, LogicalOperation, LogicalPlan, PlanError, Projection, Rows,
 };
 use query_data_model::plan::tracking::{Ref, Step};
 use query_data_model::{Direction, Model, RelationshipId};

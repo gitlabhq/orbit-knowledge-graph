@@ -1,8 +1,9 @@
 use super::limits::RESERVED_PREFIX;
 use super::{
-    Comparison, Conjunct, EdgeField, Expr, LogicalOperation, LogicalPlan, LogicalType, Operand,
-    PlanError, Predicate,
+    Comparison, Conjunct, Expr, LogicalOperation, LogicalPlan, LogicalType, Operand, PlanError,
+    Predicate,
 };
+use crate::EdgeField;
 use crate::plan::tracking::Ref;
 
 pub(super) fn plan(plan: &LogicalPlan, internal: &[String]) -> Result<(), PlanError> {

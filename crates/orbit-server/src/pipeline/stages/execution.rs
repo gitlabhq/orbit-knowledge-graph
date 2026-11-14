@@ -5,7 +5,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use clickhouse_client::{ArrowClickHouseClient, QuerySummary};
 
-use query_engine::compiler::dag::Request;
+use query_engine::compiler::dag::{Contract, Request};
 use query_engine::shared::dag::{Executed, Executor, ExecutorError};
 use query_engine::shared::{QueryExecution, QueryExecutionStats};
 
@@ -28,7 +28,11 @@ struct Statement<'a> {
 
 #[async_trait]
 impl Executor for ClickHouseExecutor {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
         let statement = match request {
             Request::Query(compiled) => Statement {
                 sql: &compiled.base.sql,
@@ -52,6 +56,10 @@ impl Executor for ClickHouseExecutor {
             }
         };
         let (batches, execution) = self.run(&statement).await?;
+        let batches = match contract {
+            Some(contract) => query_engine::shared::dag::decode(batches, contract)?,
+            None => batches,
+        };
         Ok(Executed {
             batches,
             log: vec![execution],

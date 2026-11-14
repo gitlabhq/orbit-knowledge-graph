@@ -1,7 +1,7 @@
 use super::{
-    EdgeField, Expr, Hops, Logical, LogicalCatalog, LogicalOperation, LogicalType, PlanError,
-    TimeUnit,
+    Expr, Hops, Logical, LogicalCatalog, LogicalOperation, LogicalType, PlanError, TimeUnit,
 };
+use crate::EdgeField;
 use crate::plan::tracking::{self, Construction, Ref};
 use crate::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
