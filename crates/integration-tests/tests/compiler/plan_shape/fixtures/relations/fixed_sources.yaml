@@ -63,9 +63,10 @@ cases:
   - name: Relationship filters remain on their edge relation
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]},{"id":"j","entity":"Job","columns":["id"]}],"relationships":[{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe","filters":{"target_id":1}},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","id_range":{"start":1,"end":10000},"columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]},{"id":"j","entity":"Job","columns":["id"]}],"relationships":[{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe","filters":{"target_id":1}},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
       gql: |
         MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE {target_id: 1}]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
+        WHERE mr.id >= 1 AND mr.id <= 10000
         RETURN mr.id, pipe.id, j.id
     logical:
       expect: ["(Filter e0.target_id = 1 (_))"]

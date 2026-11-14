@@ -2,10 +2,10 @@ cases:
   - name: Stored aggregation uses exact keys for an uncovered endpoint filter
     query:
       json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"title":{"starts_with":"Fix"}}}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"}],"aggregations":[{"count":"mr","as":"n"}]}
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"merged_at":{"gte":"2024-01-01T00:00:00Z"}}}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"}],"aggregations":[{"count":"mr","as":"n"}]}
       gql: |
         MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
-        WHERE mr.title STARTS WITH 'Fix'
+        WHERE mr.merged_at >= '2024-01-01T00:00:00Z'
         RETURN count(mr) AS n
     logical:
       expect: ["(Aggregate COUNT(mr) AS n (_))"]
@@ -13,7 +13,7 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $mrs (Project mr.id AS id (Filter starts_with(mr.title, 'Fix'), ... (Deduplicate Final (_)))))
+            - (CTE $mrs (Project mr.id AS id (Filter mr.merged_at >= '2024-01-01T00:00:00Z', ... (Deduplicate Final (_)))))
           expect:
             - (Filter _orbit_edge_0.target_id IN $mrs.id, ... (_))
 

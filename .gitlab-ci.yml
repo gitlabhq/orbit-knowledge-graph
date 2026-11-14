@@ -990,7 +990,7 @@ compiler-integration-test:
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo nextest run --profile ci -p integration-tests --test local --no-fail-fast
+    - cargo nextest run --profile ci -p integration-tests --test local --test plan_shape --no-fail-fast
     - sccache --show-stats || true
 
 billing-boundary-check:

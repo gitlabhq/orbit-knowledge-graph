@@ -15,6 +15,10 @@ const PRESETS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/server/data_correctness/presets"
 );
+const PLAN_SHAPE_FIXTURES: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/compiler/plan_shape/fixtures"
+);
 
 #[tokio::test]
 async fn data_correctness() {
@@ -38,6 +42,16 @@ async fn query_settings_scenarios() {
     super::status::fixtures::use_production_query_settings();
     let ctx = data_correctness_context().await;
     query_scenario::run_dir(&ctx, QUERY_SETTINGS, PRESETS).await;
+}
+
+#[tokio::test]
+async fn plan_shape_index_explains() {
+    let ctx = data_correctness_context().await;
+    integration_testkit::plan_shape::run_index_explains(
+        &ctx,
+        std::path::Path::new(PLAN_SHAPE_FIXTURES),
+    )
+    .await;
 }
 
 async fn data_correctness_context() -> TestContext {

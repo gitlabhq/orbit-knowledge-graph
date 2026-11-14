@@ -1,0 +1,47 @@
+cases:
+  - name: Equality on a text property passes validation on an ungrouped aggregation node
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.title = 'Implement login page' RETURN g, count(w) AS n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    logical:
+      expect: ["(Filter w.title = 'Implement login page' (_))"]
+    physical:
+      clickhouse: {}
+
+  - name: Code entities keep text filters on ungrouped aggregation nodes
+    query:
+      gql: |
+        MATCH (d:Definition) WHERE d.project_id = 1000 AND d.fqn STARTS WITH 'src' RETURN count(d) AS n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    logical:
+      expect: ["(Filter starts_with(d.fqn, 'src'), ... (_))"]
+    physical:
+      clickhouse: {}
+
+  - name: Group and project text filters pass validation on ungrouped aggregation nodes
+    query:
+      gql: |
+        MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest) WHERE g.full_path STARTS WITH 'public' AND p.name CONTAINS 'Project' RETURN count(mr) AS n
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    logical:
+      expect:
+        - "(Filter starts_with(g.full_path, 'public') (_))"
+        - "(Filter contains(p.name, 'Project') (_))"
+
+    physical:
+      clickhouse: {}
+
+  - name: A User neighbors query is not blocked by the User aggregation guard
+    query:
+      json: |
+        {"query_type": "neighbors", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}], "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]}, "limit": 10}
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(n) RETURN u, n LIMIT 10
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse: {}
