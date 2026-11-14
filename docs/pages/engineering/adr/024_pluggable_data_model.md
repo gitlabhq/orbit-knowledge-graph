@@ -321,7 +321,7 @@ Each fragment kind and each engine kind has one schema, generated from the spec 
 
 Every reference in a fragment must resolve to a declared fact of the right type. Every declared fact must also have a reader. Each backend states which fragment fields it reads, and a declaration that nothing reads fails the load. A missing declaration is always a load error, never a default.
 
-The loader seals its output into one `Model` per deployment shape. The model holds typed handles: `EntityId`, `PropertyId`, `RelationshipId`, `RelationshipVariantId`, `AttributeId`, `ConnectionId` and `StoreId`, with typed keys and columns. The raw spec types are private to the data model crate. The model's API returns only handles. It has no lookup by name and no access to the raw spec, so no phase can read an undeclared fact. Compiler phases, the stage split, the runner and the executors read entity facts only through the model. Every plan carries the `ModelId` it was built against.
+The loader seals its output into one `Model` per deployment shape. The model holds typed handles: `EntityId`, `PropertyId`, `RelationshipId`, `RelationshipVariantId`, `AttributeId`, `ConnectionId` and `StoreId`, with typed keys and columns. The raw spec types are private to the data model crate. The model's API returns only handles, and it has no access to the raw spec, so no phase can read an undeclared fact. Its one lookup by name is `Names<'m>`, which only the frontend and tests call. Compiler phases, the stage split, the runner and the executors read entity facts only through the model. Every plan carries the `ModelId` it was built against.
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear"}}}%%
@@ -463,7 +463,7 @@ RCAT .down.> TH
 CCAT .down.> TH
 VCAT .down.> TH
 note right of TH
-  Every catalog implements Catalog, Construct and Render.
+  Every catalog is a Catalog<B> that builds plans and implements Render.
   Tracking proves structure; each language proves its own rules.
 end note
 @enduml
@@ -520,7 +520,7 @@ CH --> Caller : rows
 @enduml
 ```
 
-The frontend records what the caller asked for and makes no planning decisions. It resolves the query's names, its entities and properties, to handles once, as it parses the GQL text. Everything else comes from those handles through the model. Outside the model, only placement chooses a read's stores, with one `get_store` call per node. Each stage hands its store's `StoreId` and `ConnectionId` to the backend. Nothing looks anything up by name, and tests resolve names with the explicit `Names` resolver.
+The frontend records what the caller asked for and makes no planning decisions. It resolves the query's names, its entities and properties, to handles once, as it parses the GQL text. Everything else comes from those handles through the model. Outside the model, only placement chooses a read's stores, with one `get_store` call per node. Each stage hands the backend `Runs::On { connection, stores }`: its `ConnectionId` and the `StoreId` placed for each entity it reads. Nothing looks anything up by name, and tests resolve names with `Names<'m>`.
 The planning phase decides and builds in one step, with no intermediate plan description. Later phases rewrite through the same builder under four rules:
 
 - Inputs come before consumers.
@@ -647,7 +647,7 @@ An integration's entity reads from its lake store unless a node needs what the l
 
 A store serves a need only through declared facts: its listed columns, its backend's capabilities, its search modes and its `accepts:`.
 Two different minimal combinations of stores that serve the same needs are a load error, so placement never depends on order. A combination that includes the complete store wins over one that does not. Search is one kind of need, not a special case.
-Outside the model, only placement calls `get_store`, once per node. Each stage carries one store's `StoreId` and its `ConnectionId` to the backend, and no backend calls placement.
+Outside the model, only placement calls `get_store`, once per node. Each stage carries `Runs::On { connection, stores }` to its backend, and the combine stage runs as `Runs::Combine`. No backend calls placement.
 If the deployment does not serve that connection, the query fails with an error that names the entity and the connection.
 
 The planner splits the logical plan into one stage per connection and connects them in a DAG:

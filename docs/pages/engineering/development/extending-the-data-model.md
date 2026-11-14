@@ -139,7 +139,7 @@ relationships:
     User -> MergeRequest: {edge_table: gl_edge}
 ```
 
-`access` says how queries use the columns, in terms that every backend understands. For example, ClickHouse derives its skip indexes and sort key from it, so no package writes index or sort-key details. Column storage types stay explicit. The `backend` block overrides the derived indexes only where a platform package needs it to.
+`access` says how queries use the columns, in terms that every backend that joins understands. A store whose backend does not join declares its push-downs and search modes in its `backend:` block instead. For example, ClickHouse derives its skip indexes and sort key from it, so no package writes index or sort-key details. Column storage types stay explicit. The `backend` block overrides the derived indexes only where a platform package needs it to.
 
 `accepts` names the columns that the store takes key sets on, when another stage hands it keys. Every store declares it, whatever its backend's capabilities. A store returns every column it lists, so listing `id` is what makes it return the identity.
 
@@ -152,19 +152,33 @@ A query's needs from a node are the properties it reads, its filter operators an
 
 An edge never outlives its endpoints. When the indexing engine tombstones a merge request, it also tombstones its `APPROVED` rows in `gl_edge` in the same flow, whichever pipeline wrote them. No fragment declares this, because the bindings already name every edge table that holds a merge request's edges.
 
-An edge table declares its endpoint ID columns and their types in the store's engine block:
+The fragment that declares a store sets its `engine:` block once. Its `backend:` block maps the edge fields in `edge_columns:` and declares each edge table with its typed columns:
 
 ```yaml
+# packages/gitlab/storage/clickhouse.yaml
 engine:
-  edge_tables:
-    gl_edge:
-      columns:
-        source_id: {backend: {type: Int64}}
-        target_id: {backend: {type: Int64}}
-        source_kind: {backend: {type: LowCardinality(String)}}
-        target_kind: {backend: {type: LowCardinality(String)}}
-        relationship_kind: {backend: {type: LowCardinality(String)}}
+  kind: clickhouse
+  connection: main
+  path_column: traversal_path
+  backend:
+    edge_columns:
+      source_id: source_id
+      source_kind: source_kind
+      target_id: target_id
+      target_kind: target_kind
+      relationship_kind: relationship_kind
+    edge_tables:
+      gl_edge:
+        columns:
+          source_id: {type: Int64}
+          target_id: {type: Int64}
+          source_kind: {type: LowCardinality(String)}
+          target_kind: {type: LowCardinality(String)}
+          relationship_kind: {type: LowCardinality(String)}
 ```
+
+`edge_columns:` maps each of the five edge fields to its column, once for every edge table in the store. Every field is required, so no column name is a convention. A table whose columns differ belongs in a separate store.
+An edge row stores each endpoint's kind as the entity's graph name, such as `MergeRequest`. The storage codec decodes it into a handle, and it fails on an unknown kind.
 
 A variant binds to an edge table only when both endpoint identities match its ID column types. An integration whose entities have string IDs declares its own edge table with `String` columns.
 
@@ -183,12 +197,17 @@ entities:
     columns: {state: state_id, project_id: target_project_id}
 relationships:
   APPROVED:
-    User -> MergeRequest:
-      tables: [siphon_approvals]
-      columns: {source: user_id, target: merge_request_id}
+    reindex: [siphon_approvals]
+    pipelines:
+      APPROVED_siphon_approvals_MergeRequest:
+        tables: [siphon_approvals]
+        order_by: [traversal_path, merge_request_id, id]
+        query: generated
+        from: {field: user_id, kind: User}
+        to: {field: merge_request_id, kind: MergeRequest}
 ```
 
-A foreign key relationship such as `AUTHORED` needs only its storage binding, because the indexer writes `author_id` with the merge request row. An edge-table variant such as `APPROVED` needs its own source entry, because its rows come from their own table.
+A foreign key relationship such as `AUTHORED` needs only its storage binding, because the indexer writes `author_id` with the merge request row. An edge-table variant such as `APPROVED` needs its own pipeline, because its rows come from their own table. `from:` and `to:` name the field and the entity kind of each endpoint.
 
 A relationship can declare a typed attribute in the graph for data that belongs to the edge, such as the access level of a membership. Queries filter and select attributes like properties, and storage binds each one to an edge column.
 
@@ -196,13 +215,6 @@ An edge table can also copy endpoint properties into its sort key, so a filter o
 
 ```yaml
 # packages/gitlab.source_code/storage/clickhouse.yaml
-engine:
-  edge_columns:
-    source_id: source_id
-    source_kind: source_kind
-    target_id: target_id
-    target_kind: target_kind
-    relationship_kind: relationship_kind
 relationships:
   CALLS:
     Definition -> Definition:
@@ -212,9 +224,6 @@ relationships:
 
 A filter on `a.branch` in `(a)-[:CALLS]->(b)` then also filters the edge read on its `branch` column.
 
-`edge_columns:` maps each of the five edge fields to its column, once for every edge table in the store. Every field is required, so no column name is a convention. A table whose columns differ belongs in a separate store.
-An edge row stores each endpoint's kind as the entity's graph name, such as `Definition`. The storage codec decodes it into a handle, and it fails on an unknown kind.
-
 In a store whose backend has the writer capability, each entity and edge-table variant has exactly one declared writer. The code indexer writes the code entities in the graph store, and its source fragment looks like any other:
 
 ```yaml
@@ -223,7 +232,11 @@ kind: source
 package: gitlab.source_code
 source: code_indexer
 entities: [Branch, Directory, File, Definition, ImportedSymbol]
-relationships: [CONTAINS, DEFINES, CALLS, IMPORTS]
+relationships:
+  CALLS: [Definition -> Definition, File -> Definition]
+  CONTAINS: [Branch -> Directory, Branch -> File, Directory -> File]
+  DEFINES: [File -> Definition]
+  IMPORTS: [File -> ImportedSymbol]
 ```
 
 Publish the new package version to the registry. The registry diffs its storage against the active version. The indexing engine then backfills the tables in scope, and the version goes live.
@@ -270,9 +283,9 @@ entities:
       id: {immutable: true, backend: {type: VARCHAR}}
       key: {backend: {type: VARCHAR}}
       summary: {backend: {type: VARCHAR}}
-      description: {backend: {type: VARCHAR}}
       merge_request_id: {backend: {type: BIGINT}}
       traversal_path: {backend: {type: VARCHAR}}
+    exclude: [description]
     accepts: [id, merge_request_id]
     access: {filter: [id, key, merge_request_id], text: [summary], order: [id]}
 ```
@@ -294,10 +307,10 @@ connections:
 
 ## Add an integration's live store
 
-A live store is the integration's partial store, on a backend that delegates and neither joins nor has writers. It holds no rows and declares no writer.
+A live store is the integration's partial store, on a backend that delegates and neither joins nor has writers. It holds no rows and declares no writer. Its `backend:` block names the API `operation`, the `filters` it pushes down and its full-text field, `text`.
 Because the backend delegates, a `Credentials` check governs its calls, and the service runs each call with the caller's own sign-in. Lake reads of the same entity rely on their scope filter.
 
-Jira gains a live store that adds full-text search on `description`, which the lake store does not index:
+The Jira ETL does not extract `description`, so the lake store excludes it. Jira's live store adds it, with full-text search through the API:
 
 ```yaml
 # packages/integration.jira/storage/live.yaml
@@ -309,15 +322,16 @@ engine:
   connection: data_extraction
 entities:
   JiraIssue:
+    accepts: [id, key]
     columns:
-      id: {immutable: true}
+      id: {}
       key: {}
       summary: {}
       description: {}
-    accepts: [id, key]
-    access: {filter: [id, key], text: [description]}
     backend:
       operation: search.issues
+      filters: [id, key]
+      text: description
 ```
 
 Its authorization adds a `live` policy and the check: `live: {scope_key: {via: IN_JIRA_PROJECT}}` next to the `duckdb` policy, and `checks: [{provider: jira, kind: delegated}]`.
@@ -407,7 +421,7 @@ relationships:
     enforce: {duckdb: {scope_key: traversal_path, of: source}}
 ```
 
-The lake store is complete for both entities and binds every relationship. It declares no `text` access, so it does not serve full-text search on `text`:
+The Slack ETL does not extract message text, so the lake store excludes `text`. The lake store is complete for both entities and binds every relationship:
 
 ```yaml
 # packages/integration.slack/storage/duckdb.yaml
@@ -426,11 +440,11 @@ entities:
       workspace: {backend: {type: VARCHAR}}
       channel: {backend: {type: VARCHAR}}
       author: {backend: {type: VARCHAR}}
-      text: {backend: {type: VARCHAR}}
       sent_at: {immutable: true, backend: {type: TIMESTAMP}}
       issue_id: {backend: {type: VARCHAR}}
       merge_request_id: {backend: {type: BIGINT}}
       traversal_path: {backend: {type: VARCHAR}}
+    exclude: [text]
     accepts: [id, workspace, issue_id]
     access: {filter: [workspace, channel, author, sent_at], order: [id]}
   SlackWorkspace:
@@ -454,7 +468,7 @@ relationships:
     SlackMessage -> MergeRequest: {fk: {on: source, column: merge_request_id}}
 ```
 
-The live store is partial. It lists the columns the API returns and declares the full-text search:
+The live store is partial. It lists the columns the API returns, `text` among them, and declares the full-text search:
 
 ```yaml
 # packages/integration.slack/storage/live.yaml
@@ -466,18 +480,19 @@ engine:
   connection: data_extraction
 entities:
   SlackMessage:
+    accepts: [workspace, issue_id]
     columns:
-      id: {immutable: true}
+      id: {}
       workspace: {}
       channel: {}
       author: {}
       text: {}
       sent_at: {}
       issue_id: {}
-    accepts: [workspace, issue_id]
-    access: {filter: [workspace, channel, author, sent_at, issue_id], text: [text]}
     backend:
       operation: search.messages
+      filters: [workspace, channel, author, sent_at, issue_id]
+      text: text
 ```
 
 The Data Extraction Service's `des` source writes the lake store. The live backend has no writer capability, so the live store declares no writer:
@@ -497,7 +512,7 @@ entities:
   SlackWorkspace: {tables: [slack_workspace], order_by: [traversal_path, id], query: generated}
 ```
 
-The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit. The `access` hints say which filters the operation pushes down, and any other filter is a construction error.
+The live catalog's plan language is API calls: an operation, the filters that operation can push down, a time window, paging and a limit. The store's `filters` say which filters the operation pushes down, and any other filter is a construction error.
 
 ```cypher
 MATCH (m:SlackMessage)
@@ -506,18 +521,20 @@ RETURN m.author, m.text LIMIT 20
 ```
 
 ```rust
-let live = model.physical::<Live>(stage.connection)?;
+let Runs::On { connection, stores } = &stage.runs else { unreachable!() };
+let store = stores.iter().find(|(entity, _)| *entity == message).map(|(_, store)| *store);
+let live = model.physical::<Live>(*connection)?;
 let plan = live.build(|q| {
-    let messages = q.call(live.operation(message)?)?;
-    let found = messages.field("channel")?.eq("orbit-dev");
-    let messages = q.filter(messages, found.and(messages.field("text")?.contains("deploy")))?;
-    let fields = [messages.field("author")?, messages.field("text")?];
+    let messages = q.call(live.operation(store.expect("placed"), message)?)?;
+    let found = messages.field(channel)?.eq("orbit-dev");
+    let messages = q.filter(messages, found.and(messages.field(text)?.contains("deploy")))?;
+    let fields = [messages.field(author)?, messages.field(text)?];
     q.select(q.limit(messages, 20)?, fields)
 })?;
 let request = live.render(&plan)?;
 ```
 
-Placement picked the live store for this stage, because only it serves `CONTAINS` on `text`. The stage's connection is that store's `store.connection()`.
+Placement put `message` on the live store, because the lake store does not hold `text`. `get_store(message, &needs)` returned that store, and the stage carries it in `Runs::On` with the store's `ConnectionId`.
 The frontend resolves only the query's names, once, at parse. Everything else comes from those handles through the model, and tests resolve names with the explicit `Names` resolver, `model.names()`.
 
 The `live` policy follows each message to the namespace that installed its workspace. A scope lookup on the Slack lake connection resolves that chain first, because the complete store of `SlackWorkspace` is there. The live backend sends the request only for workspaces in namespaces where the caller holds `read`. The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through that sign-in.
@@ -530,7 +547,7 @@ WHERE i.key = 'ORBIT-42' AND m.text CONTAINS 'rollback'
 RETURN i.summary, m.channel, m.text LIMIT 20
 ```
 
-`JiraIssue` reads from the Jira lake store, which serves the filter on `key` and the `summary` column. `SlackMessage` reads from the Slack live store, because only it serves `CONTAINS` on `text`.
+`JiraIssue` reads from the Jira lake store, which serves the filter on `key` and the `summary` column. `SlackMessage` reads from the Slack live store, because only it holds `text`.
 The lake stage hands the issue IDs to the live stage, which takes them on `issue_id` from its `accepts:`. The combine stage combines both stages' rows on `MENTIONS`.
 
 One node can also read from two stores:
@@ -541,7 +558,7 @@ WHERE m.text CONTAINS 'rollback'
 RETURN mr.iid, m.author
 ```
 
-No single store serves every need of `m`. Only the live store serves `CONTAINS` on `text`, and only the lake store holds `merge_request_id` for `DISCUSSES`. So placement splits `m` across both.
+No single store serves every need of `m`. Only the live store holds `text`, and only the lake store holds `merge_request_id` for `DISCUSSES`. So placement splits `m` across both.
 The live stage runs the full-text search and returns message IDs. The lake stage reads `merge_request_id` and `author` for those IDs, which it takes on `id` from its `accepts:`.
 The combine stage joins the two parts on the identity of `m` and follows `DISCUSSES` to the merge request.
 
@@ -550,40 +567,39 @@ The combine stage joins the two parts on the identity of `m` and follows `DISCUS
 A backend implements `StorageBackend`, which parses its `backend` blocks and resolves each store. It also declares its [capabilities](../adr/024_pluggable_data_model.md#4-catalogs-give-each-connection-a-typed-view): joins, writer, search and delegates.
 
 ```rust
-pub trait StorageBackend: Sized {
+pub trait StorageBackend: Sized + 'static {
     const KIND: &'static str;
-    type Options: DeserializeOwned;
-    type SourceOptions: DeserializeOwned;
-    type RouteOptions: DeserializeOwned;
-    type Store: Debug;
+    const CAPABILITIES: Capabilities;
+    const POLICIES: &'static [PolicyKind];
+    const FIELDS: &'static [Field];
+    type Options: Block + DeserializeOwned + Default + WrittenBlock;
+    type SourceOptions: Block + DeserializeOwned + Default + WrittenBlock;
+    type ColumnOptions: Block + DeserializeOwned + Default + WrittenBlock;
+    type Store: Debug + Send + Sync + 'static;
 
-    fn resolve(store: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
+    fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
+    fn serves(store: &Self::Store, entity: EntityId, property: PropertyId, operation: Operation) -> bool;
+}
+
+pub struct Capabilities {
+    pub joins: bool,
+    pub writer: bool,
+    pub search: bool,
+    pub delegates: bool,
 }
 ```
 
-Its catalog implements the three catalog traits. The associated types keep its vocabulary local, and `Render` returns its native request:
+`POLICIES` lists the policies the backend renders, and `FIELDS` lists the generic fragment fields it reads. `serves` tells placement which operations a store runs itself, beyond its capabilities and `accepts:`.
+
+Its catalog is `Catalog<B>`. Its `build` method takes a closure over the backend's plan builder, and `Render` turns the plan into the native request:
 
 ```rust
-pub trait Catalog: Sized {
-    type Operation;
-    type ValueType;
+pub trait Render {
+    type Language: Language;
+    type Request;
     type Error;
 
-    fn identity(&self) -> ModelId;
-}
-
-pub trait Construct: Catalog {
-    type Builder<'catalog>
-    where
-        Self: 'catalog;
-
-    fn builder(&self) -> Self::Builder<'_>;
-}
-
-pub trait Render: Catalog {
-    type Executable;
-
-    fn render(&self, plan: &Plan<Self>) -> Result<Self::Executable, Self::Error>;
+    fn render(&self, plan: &Plan<Self::Language>) -> Result<Self::Request, Self::Error>;
 }
 ```
 
@@ -601,19 +617,17 @@ engine:
   connection: code_indexing
 entities:
   File:
+    accepts: [project_id, branch]
     columns:
       project_id: {}
       branch: {}
       path: {}
-      content: {}
-    accepts: [project_id, branch]
-    access: {text: [path, content]}
     backend:
       repository: {project: project_id, branch: branch}
       search: {content: [trigram, structural], path: [trigram]}
 ```
 
-`access` marks `path` and `content` as searchable. `repository` names the columns that hold each row's project and branch. Orbit Next searches by repository, so its stores require `repository`.
+`search` names the search modes for each property: trigram and structural search on `content`, and trigram search on `path`. `repository` names the columns that hold each row's project and branch. Orbit Next searches by repository, so its stores require `repository`.
 
 An identity can be composite. A `Head` is the head of a branch, and its identity is its project and branch:
 
@@ -637,10 +651,10 @@ relationships:
 entities:
   Head:
     complete: true
-    columns:
-      project_id: {immutable: true}
-      branch: {immutable: true}
     accepts: [project_id, branch]
+    columns:
+      project_id: {}
+      branch: {}
     backend:
       repository: {project: project_id, branch: branch}
 relationships:
@@ -673,10 +687,12 @@ RETURN f.path, match.line, match.ARGS LIMIT 50
 ```
 
 ```rust
-let code = model.physical::<OrbitCode>(stage.connection)?;
+let Runs::On { connection, stores } = &stage.runs else { unreachable!() };
+let store = stores.iter().find(|(entity, _)| *entity == file).map(|(_, store)| *store);
+let code = model.physical::<OrbitCode>(*connection)?;
 let plan = code.build(|q| {
-    let index = code.index(file)?;
-    let files = q.repositories(index, [42])?;
+    let index = code.index(store.expect("placed"), file)?;
+    let files = q.repositories(index, [Literal::from(42)])?;
     let files = q.languages(files, [Language::Rust])?;
     let files = q.prefilter(files, Trigrams::of(["compile"]))?;
     let hits = q.structural(files, Pattern::ast_grep("compile($$$ARGS)")?)?;
@@ -688,7 +704,7 @@ let request = code.render(&plan)?;
 ```
 
 The planner adds the trigram prefilter: it takes the pattern's literal atoms and narrows the candidate files before the structural pass. The request goes over gRPC to the code indexing web servers. They narrow the files with the trigram index on S3 and run the pattern over the matching objects at the branch heads. They stream back paths, lines and captures.
-Placement picked this stage's store with `model.searching(file, content)` instead, because a structural match reads on the store whose backend searches the property. The connection is again `store.connection()`.
+Placement put `file` on the code store, because the query applies a structural search to `content`, which only that store's backend serves. `get_store(file, &needs)` returned that store for `Runs::On`.
 `File` declares `orbit_code: {scope_key: {via: IN_PROJECT}}` next to its ClickHouse policy, and the Orbit Next backend renders it as a repository restriction. `of: holder` on `IN_PROJECT` makes the project that holds the file the scope entity.
 
 ## Add a namespace overlay
@@ -743,17 +759,27 @@ relationships:
 # packages/overlay.agent_memory/storage/clickhouse.yaml
 kind: storage
 package: overlay.agent_memory
-store: graph
+store: memory
 engine:
-  edge_tables:
-    gl_memory_edge:
-      columns:
-        source_id: {backend: {type: String}}
-        target_id: {backend: {type: Int64}}
-        source_kind: {backend: {type: LowCardinality(String)}}
-        target_kind: {backend: {type: LowCardinality(String)}}
-        relationship_kind: {backend: {type: LowCardinality(String)}}
-        traversal_path: {backend: {type: String}}
+  kind: clickhouse
+  connection: main
+  path_column: traversal_path
+  backend:
+    edge_columns:
+      source_id: source_id
+      source_kind: source_kind
+      target_id: target_id
+      target_kind: target_kind
+      relationship_kind: relationship_kind
+    edge_tables:
+      gl_memory_edge:
+        columns:
+          source_id: {type: String}
+          target_id: {type: Int64}
+          source_kind: {type: LowCardinality(String)}
+          target_kind: {type: LowCardinality(String)}
+          relationship_kind: {type: LowCardinality(String)}
+          traversal_path: {type: String}
 entities:
   Memory:
     complete: true
@@ -770,7 +796,7 @@ relationships:
     Memory -> Project: {edge_table: gl_memory_edge}
 ```
 
-`Memory` has string IDs and points at entities with integer IDs, so its edges live in their own table. The agent memory API writes both:
+`Memory` has string IDs and points at entities with integer IDs, so its edges live in their own table. That table sits in the overlay's own store on the graph connection. The agent memory API writes both:
 
 ```yaml
 # packages/overlay.agent_memory/sources/agent_api.yaml
@@ -778,7 +804,8 @@ kind: source
 package: overlay.agent_memory
 source: agent_api
 entities: [Memory]
-relationships: [ABOUT]
+relationships:
+  ABOUT: [Memory -> MergeRequest, Memory -> Project]
 ```
 
 A user-scoped entity names its owner relationship instead of a scope key:
@@ -835,9 +862,9 @@ pub trait Module: Sized {
 The GitLab modules wrap the Rails session and redaction calls that already exist:
 
 ```rust
-impl Provider<Identify<'_>> for GitLabSession { /* verify the session token Rails issues */ }
-impl Provider<Scopes<'_>> for GitLabSession { /* paths at the role the permission maps to, as Subtrees */ }
-impl Provider<Check<'_>> for RailsAbilities { /* the redaction call to Rails, in batches */ }
+impl Provider<Identify> for GitLabSession { /* verify the session token Rails issues */ }
+impl Provider<Scopes> for GitLabSession { /* paths at the role the permission maps to, as Subtrees */ }
+impl Provider<Check> for RailsAbilities { /* the redaction call to Rails, in batches */ }
 ```
 
 The deployment config binds each provider name that packages use to a module, and names the one `Identify` provider:
@@ -877,7 +904,7 @@ Tests use seeded fakes for each query, like the existing redaction mock.
 A frontend parses text and builds a logical plan with the logical builder:
 
 ```rust
-let statement = frontend::gql::parse(text, model.logical())?;
+let statement = gql::parse(text, model.logical(&limits))?;
 ```
 
 Name, type and connectivity errors are construction errors, so a frontend has no validation pass. It records intent, such as hop bounds or a skip, as data and makes no planning decisions.
