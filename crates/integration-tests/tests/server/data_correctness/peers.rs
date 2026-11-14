@@ -5,15 +5,20 @@
 use std::sync::{Arc, Mutex};
 
 use arrow::record_batch::RecordBatch;
+use arrow::util::display::array_value_to_string;
 use compiler::dag::{Connections, Frontend, Rendered};
 use compiler::orbit_authorization::Key;
 use duckdb_client::dag::DuckDbExecutor;
 use duckdb_client::{DuckDbClient, OpenMode};
-use integration_testkit::dag_fakes::{AllowedKeys, peer_packages, run_served};
+use integration_testkit::dag_fakes::{
+    AllowedKeys, peer_packages, rank_packages, run_served, seeded_live,
+};
 use integration_testkit::{TABLE_PREFIX, TestContext, t};
 use orbit_server::pipeline::graph_executors;
 use query_data_model::implementations::clickhouse::versioned;
-use query_data_model::{ClickHouse, DuckDb, Model};
+use query_data_model::implementations::live::ExtractionRequest;
+use query_data_model::plan::live::Workspaces;
+use query_data_model::{ClickHouse, Deployments, DuckDb, Model, Packages};
 use query_engine::shared::dag::{Event, Executors, Outcome};
 
 use super::dag::{edges, grants, ints, strings};
@@ -30,12 +35,14 @@ struct Peers {
     executors: Executors,
 }
 
-fn model() -> Arc<Model> {
-    let fragments = peer_packages()
+fn guilds_deployments() -> Deployments {
+    Deployments::parse("guilds:\n  connections: [main, releases, lake, data_extraction]\n").unwrap()
+}
+
+fn model(packages: &Packages, deployments: &Deployments, shape: &str) -> Arc<Model> {
+    let fragments = packages
         .fragments()
-        .and_then(|fragments| {
-            fragments.deployment(&query_data_model::testkit::deployments(), "peers")
-        })
+        .and_then(|fragments| fragments.deployment(deployments, shape))
         .unwrap();
     let fragments = versioned(fragments, &TABLE_PREFIX).unwrap();
     Arc::new(Model::load(&fragments).unwrap())
@@ -85,7 +92,16 @@ fn lake(model: &Arc<Model>) -> DuckDbClient {
 }
 
 fn peers(ctx: &TestContext) -> Peers {
-    let model = model();
+    build(
+        ctx,
+        &peer_packages(),
+        &query_data_model::testkit::deployments(),
+        "peers",
+    )
+}
+
+fn build(ctx: &TestContext, packages: &Packages, deployments: &Deployments, shape: &str) -> Peers {
+    let model = model(packages, deployments, shape);
     let connections = Connections::of(&model).unwrap();
     let main = Arc::new(
         model
@@ -105,7 +121,7 @@ fn peers(ctx: &TestContext) -> Peers {
     );
     let second = graph_executors(client, &releases, "base", "gkg;peers".into(), Vec::new());
     let named = |name: &str| model.names().connection(name).unwrap();
-    let executors = Executors::default()
+    let mut executors = Executors::default()
         .with(named("main"), Arc::clone(graph.get(named("main")).unwrap()))
         .with(
             named("releases"),
@@ -117,6 +133,9 @@ fn peers(ctx: &TestContext) -> Peers {
                 client: Arc::new(Mutex::new(lake(&model))),
             }),
         );
+    if model.names().connection("data_extraction").is_some() {
+        executors = executors.with(named("data_extraction"), seeded_live("alice"));
+    }
     Peers {
         model,
         frontend: Frontend::Server(main),
@@ -317,4 +336,291 @@ pub(super) async fn peer_joins_carry_the_edges_they_cross(ctx: &TestContext) {
     assert_eq!(edges(&narrow, &[2010]), [reviews[0]]);
     let (_, none) = peers.joined(REVIEWED, &["1/101/"]).await;
     assert_eq!(edges(&none, all), Vec::<String>::new());
+}
+
+const SMITHS: &str = "smiths forge at dawn";
+const MASONS: &str = "masons meet at noon";
+const BADGE_GOLD: &str = "3f2b8c1e-7a4d-4e65-9b0a-1c2d3e4f5a6b";
+const BADGE_SILVER: &str = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
+
+/// Creates and fills the guild, clan and, when `packages` holds them, guild rank tables:
+/// guilds and clans under `1/100/` and `1/555/`.
+pub(super) async fn seed_guilds(ctx: &TestContext, packages: &Packages) {
+    let unprefixed = packages.deployed(&guilds_deployments(), "guilds").unwrap();
+    let ranked = packages
+        .sources()
+        .keys()
+        .any(|path| path.starts_with("peers.ranks/"));
+    let mut tables = vec![("main", "gl_guild"), ("releases", "gl_clan")];
+    if ranked {
+        tables.push(("main", "gl_guild_rank"));
+    }
+    for (connection, table) in tables {
+        let catalog = unprefixed
+            .physical::<ClickHouse>(unprefixed.names().connection(connection).unwrap())
+            .unwrap();
+        let schema = catalog.schema().unwrap();
+        let table = schema.table(table).unwrap();
+        ctx.execute(&table.to_create_sql(&TABLE_PREFIX)).await;
+    }
+    let mut statements = vec![
+        format!(
+            "INSERT INTO {} (id, name, traversal_path) VALUES (7, 'Smiths', '1/100/'), (8, 'Masons', '1/555/')",
+            t("gl_guild")
+        ),
+        format!(
+            "INSERT INTO {} (slug, name, traversal_path) VALUES ('forge', 'Forge', '1/100/'), ('quarry', 'Quarry', '1/555/')",
+            t("gl_clan")
+        ),
+    ];
+    if ranked {
+        statements.push(format!(
+            "INSERT INTO {} (guild, rank, title, granted_at, tier, badge, traversal_path) VALUES (7, 'gold', 'Grandmaster', '2026-03-01 12:00:00', 2, '{BADGE_GOLD}', '1/100/'), (8, 'silver', 'Journeyman', '2026-04-02 08:30:00', 1, '{BADGE_SILVER}', '1/555/')",
+            t("gl_guild_rank")
+        ));
+    }
+    for statement in statements {
+        ctx.execute(&statement).await;
+    }
+}
+
+fn live_calls(events: &[Event]) -> Vec<ExtractionRequest> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Rendered { requests, .. } => Some(requests),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|request| match request {
+            Rendered::Live(call) => Some(call.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn handed_keys(events: &[Event]) -> Vec<Key> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Keys { sample, .. } => Some(sample.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// A live-post query over scoped heads. For each caller the live call carries exactly the
+/// workspaces the caller reads, no key of a head the caller cannot read reaches a later stage,
+/// and a caller who reads no head sends no call and hands on no key.
+struct Posts<'a> {
+    query: &'a str,
+    column: &'a str,
+}
+
+impl Posts<'_> {
+    async fn caller(
+        &self,
+        peers: &Peers,
+        paths: &[&str],
+        rows: &[&str],
+        workspaces: &[&str],
+        denied: &[Key],
+    ) {
+        let (events, batches) = peers.run(self.query, paths).await;
+        let mut texts = strings(&batches, self.column);
+        texts.sort();
+        assert_eq!(texts, rows, "{paths:?}");
+        let sent: Vec<Workspaces> = live_calls(&events)
+            .into_iter()
+            .map(|call| call.workspaces)
+            .collect();
+        let handed = handed_keys(&events);
+        match workspaces.is_empty() {
+            true => {
+                assert!(sent.is_empty(), "{paths:?} sent {sent:?}");
+                assert!(handed.is_empty(), "{paths:?} handed on {handed:?}");
+            }
+            false => assert_eq!(
+                sent,
+                [Workspaces::Only(
+                    workspaces.iter().map(ToString::to_string).collect()
+                )],
+                "{paths:?}"
+            ),
+        }
+        for key in denied {
+            assert!(!handed.contains(key), "{paths:?} handed on {key}");
+        }
+    }
+}
+
+const GUILD_POSTS: &str = "MATCH (p:GuildPost {channel: 'guild-chat'}) RETURN p.text";
+
+/// Posts of guilds keyed by an integer on real ClickHouse: the lookup stage reads each caller's
+/// guilds, and only those keys reach the live call.
+pub(super) async fn guild_posts_reach_the_live_stage_only_for_the_guilds_the_caller_reads(
+    ctx: &TestContext,
+) {
+    let peers = build(ctx, &peer_packages(), &guilds_deployments(), "guilds");
+    let posts = Posts {
+        query: GUILD_POSTS,
+        column: "p_text",
+    };
+    posts
+        .caller(
+            &peers,
+            &["1/100/", "1/555/"],
+            &[MASONS, SMITHS],
+            &["7", "8"],
+            &[],
+        )
+        .await;
+    posts
+        .caller(&peers, &["1/100/"], &[SMITHS], &["7"], &[Key::Int(8)])
+        .await;
+    posts
+        .caller(&peers, &["1/101/"], &[], &[], &[Key::Int(7), Key::Int(8)])
+        .await;
+}
+
+const CLAN_POSTS: &str = "MATCH (p:ClanPost {channel: 'clan-chat'}) RETURN p.text";
+
+/// Posts of clans keyed by a text slug that is not named `id`, on the second ClickHouse
+/// connection.
+pub(super) async fn clan_posts_reach_the_live_stage_only_for_the_clans_the_caller_reads(
+    ctx: &TestContext,
+) {
+    let peers = build(ctx, &peer_packages(), &guilds_deployments(), "guilds");
+    let posts = Posts {
+        query: CLAN_POSTS,
+        column: "p_text",
+    };
+    let (forge, quarry) = ("forge clan lights the fires", "quarry clan hauls the stone");
+    let slug = |slug: &str| Key::Text(slug.into());
+    posts
+        .caller(
+            &peers,
+            &["1/100/", "1/555/"],
+            &[forge, quarry],
+            &["forge", "quarry"],
+            &[],
+        )
+        .await;
+    posts
+        .caller(&peers, &["1/100/"], &[forge], &["forge"], &[slug("quarry")])
+        .await;
+    posts
+        .caller(
+            &peers,
+            &["1/101/"],
+            &[],
+            &[],
+            &[slug("forge"), slug("quarry")],
+        )
+        .await;
+}
+
+const POSTED_IN: &str =
+    "MATCH (p:GuildPost {channel: 'guild-chat'})-[:GUILD_OF]->(g:Guild) RETURN p.text, g.name";
+
+/// A pattern that reads the head itself returns each post with its guild, for the guilds the
+/// caller reads.
+pub(super) async fn guild_posts_join_the_guilds_the_pattern_reads(ctx: &TestContext) {
+    let peers = build(ctx, &peer_packages(), &guilds_deployments(), "guilds");
+    let pairs = |batches: &[RecordBatch]| {
+        let mut pairs: Vec<(String, String)> = strings(batches, "p_text")
+            .into_iter()
+            .zip(strings(batches, "g_name"))
+            .collect();
+        pairs.sort();
+        pairs
+    };
+    let smiths = (SMITHS.to_string(), "Smiths".to_string());
+    let masons = (MASONS.to_string(), "Masons".to_string());
+    let (_, both) = peers.run(POSTED_IN, &["1/100/", "1/555/"]).await;
+    assert_eq!(pairs(&both), [masons, smiths.clone()]);
+    let (_, one) = peers.run(POSTED_IN, &["1/100/"]).await;
+    assert_eq!(pairs(&one), [smiths]);
+    let (_, none) = peers.run(POSTED_IN, &["1/101/"]).await;
+    assert_eq!(pairs(&none), Vec::<(String, String)>::new());
+}
+
+const RANK_POSTS: &str = "MATCH (p:RankPost) WHERE p.id IN ['rp1', 'rp2'] RETURN p.text";
+const RANKED: &str = "MATCH (p:RankPost)-[:RANK_POST_OF]->(r:GuildRank) WHERE p.id IN ['rp1', 'rp2'] RETURN p.text, r.rank, r.title, r.granted_at, r.tier, r.badge";
+
+/// Posts whose head has the composite key `(guild, rank)`: the lookup hands composite keys to
+/// the live call.
+pub(super) async fn rank_posts_reach_the_live_stage_only_for_the_ranks_the_caller_reads(
+    ctx: &TestContext,
+) {
+    let peers = build(ctx, &rank_packages(), &guilds_deployments(), "guilds");
+    let posts = Posts {
+        query: RANK_POSTS,
+        column: "p_text",
+    };
+    let (gold, silver) = ("gold rank hall opens", "silver rank oath renewed");
+    let rank = |guild, rank: &str| Key::Composite(vec![Key::Int(guild), Key::Text(rank.into())]);
+    posts
+        .caller(
+            &peers,
+            &["1/100/", "1/555/"],
+            &[gold, silver],
+            &["(7, gold)", "(8, silver)"],
+            &[],
+        )
+        .await;
+    posts
+        .caller(
+            &peers,
+            &["1/100/"],
+            &[gold],
+            &["(7, gold)"],
+            &[rank(8, "silver")],
+        )
+        .await;
+    posts
+        .caller(
+            &peers,
+            &["1/101/"],
+            &[],
+            &[],
+            &[rank(7, "gold"), rank(8, "silver")],
+        )
+        .await;
+}
+
+/// The composite head's columns survive the stage boundary: the timestamp as its instant, the
+/// enum as its label and the UUID as its canonical text.
+pub(super) async fn rank_columns_decode_through_a_stage_boundary(ctx: &TestContext) {
+    let peers = build(ctx, &rank_packages(), &guilds_deployments(), "guilds");
+    let rows = |batches: &[RecordBatch]| -> Vec<String> {
+        let mut rows = Vec::new();
+        for batch in batches.iter().filter(|batch| batch.num_rows() > 0) {
+            for index in 0..batch.num_rows() {
+                let cells: Vec<String> = batch
+                    .columns()
+                    .iter()
+                    .map(|column| array_value_to_string(column, index).unwrap())
+                    .collect();
+                rows.push(cells.join("|"));
+            }
+        }
+        rows.sort();
+        rows
+    };
+    let gold =
+        format!("gold rank hall opens|gold|Grandmaster|2026-03-01T12:00:00|gold|{BADGE_GOLD}");
+    let silver = format!(
+        "silver rank oath renewed|silver|Journeyman|2026-04-02T08:30:00|silver|{BADGE_SILVER}"
+    );
+    let (_, both) = peers.run(RANKED, &["1/100/", "1/555/"]).await;
+    assert_eq!(rows(&both), [gold.clone(), silver]);
+    let (events, one) = peers.run(RANKED, &["1/100/"]).await;
+    assert_eq!(rows(&one), [gold]);
+    let denied = Key::Composite(vec![Key::Int(8), Key::Text("silver".into())]);
+    assert!(!handed_keys(&events).contains(&denied));
+    let (events, none) = peers.run(RANKED, &["1/101/"]).await;
+    assert_eq!(rows(&none), Vec::<String>::new());
+    assert!(live_calls(&events).is_empty());
 }

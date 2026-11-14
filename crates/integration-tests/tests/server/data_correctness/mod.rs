@@ -44,7 +44,20 @@ async fn data_correctness_dag() {
     peers::releases_on_a_second_clickhouse_join_the_merge_requests_they_ship(&ctx).await;
     peers::merge_requests_on_clickhouse_join_their_reviews_on_duckdb(&ctx).await;
     peers::peer_joins_carry_the_edges_they_cross(&ctx).await;
+    peers::seed_guilds(&ctx, &integration_testkit::dag_fakes::peer_packages()).await;
+    peers::guild_posts_reach_the_live_stage_only_for_the_guilds_the_caller_reads(&ctx).await;
+    peers::clan_posts_reach_the_live_stage_only_for_the_clans_the_caller_reads(&ctx).await;
+    peers::guild_posts_join_the_guilds_the_pattern_reads(&ctx).await;
     dag::a_deep_page_fails_past_the_stage_cap_instead_of_losing_rows(&ctx).await;
+}
+
+#[tokio::test]
+#[ignore = "engine: the loader rejects a composite identity on a table store (catalog/layout.rs)"]
+async fn data_correctness_ranks() {
+    let ctx = data_correctness_context().await;
+    peers::seed_guilds(&ctx, &integration_testkit::dag_fakes::rank_packages()).await;
+    peers::rank_posts_reach_the_live_stage_only_for_the_ranks_the_caller_reads(&ctx).await;
+    peers::rank_columns_decode_through_a_stage_boundary(&ctx).await;
 }
 
 #[tokio::test]
