@@ -6,9 +6,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::catalog::{
-    Capabilities, Diagnostics, ExecuteError, NoOptions, PolicyKind, Row, StorageBackend,
-    StoreInput, check_unrelational,
+    Capabilities, Diagnostics, ExecuteError, Field, NoOptions, Operation, PolicyKind, Row,
+    StorageBackend, StoreInput,
 };
+use crate::plan::logical::Matching;
 use crate::{EntityId, PropertyId};
 
 #[derive(Debug, Clone)]
@@ -56,18 +57,42 @@ impl StorageBackend for Live {
         joins: false,
         writer: false,
         search: false,
+        delegates: true,
     };
-    const POLICIES: &'static [PolicyKind] = &[PolicyKind::Via, PolicyKind::None];
+    const POLICIES: &'static [PolicyKind] = &[PolicyKind::None];
+    const FIELDS: &'static [Field] = &[
+        Field::Trusted,
+        Field::Complete,
+        Field::Accepts,
+        Field::Exclude,
+        Field::Fk,
+    ];
     type Options = NoOptions;
     type SourceOptions = Option<LiveSource>;
     type ColumnOptions = NoOptions;
     type Store = LiveStore;
 
+    fn serves(
+        store: &LiveStore,
+        entity: EntityId,
+        property: PropertyId,
+        operation: Operation,
+    ) -> bool {
+        store
+            .endpoint(entity)
+            .is_some_and(|endpoint| match operation {
+                Operation::Equal | Operation::OneOf | Operation::Bound => {
+                    endpoint.filters.contains(&property)
+                }
+                Operation::Text(Matching::Contains) => endpoint.text == Some(property),
+                _ => false,
+            })
+    }
+
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> LiveStore {
         let graph = input.graph;
         let store = &input.store.name;
         let mut endpoints = Vec::new();
-        check_unrelational(&input, diagnostics);
         for source in &input.entities {
             let name = &graph.entity(source.entity).name;
             let Some(options) =
@@ -82,7 +107,7 @@ impl StorageBackend for Live {
                     .property_id(source.entity, property)
                     .filter(|id| input.store.column(*id).is_some());
                 diagnostics.require(id, source.package, || {
-                    format!("store {store} pushes down unknown property {name}.{property}")
+                    format!("store {store} pushes down {name}.{property}, which it does not store")
                 })
             };
             let filters: Vec<PropertyId> = options

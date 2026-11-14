@@ -1,0 +1,16 @@
+kind: graph
+package: peers.snippets
+entities:
+  Snippet:
+    identity: id
+    label: path
+    default_columns: [id, path]
+    properties:
+      id: {type: int64}
+      project_id: {type: int64}
+      branch: {type: string}
+      path: {type: string}
+      body: {type: string}
+      traversal_path: {type: string}
+relationships:
+  SNIPPET_IN: {variants: {Snippet -> Project: {cardinality: many_to_one}}}

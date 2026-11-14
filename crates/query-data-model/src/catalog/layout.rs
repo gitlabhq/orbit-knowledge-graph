@@ -25,6 +25,9 @@ pub(super) fn resolve<'a>(
         .into_iter()
         .filter_map(|(name, fragments)| {
             let (package, engine) = declare_engine(name, &fragments, diagnostics)?;
+            for fragment in &fragments {
+                super::fields::check(fragment, &engine.kind, diagnostics);
+            }
             let mut store = Store::new(name, package, engine, graph);
             let mut entities = Vec::new();
             for fragment in &fragments {

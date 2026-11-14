@@ -7,8 +7,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::catalog::{
-    Capabilities, Diagnostics, ExecuteError, NoOptions, PolicyKind, Row, StorageBackend,
-    StoreInput, check_unrelational,
+    Capabilities, Diagnostics, ExecuteError, Field, NoOptions, Operation, PolicyKind, Row,
+    SearchMode, StorageBackend, StoreInput,
 };
 use crate::{DataType, EntityId, PropertyId};
 
@@ -18,13 +18,6 @@ pub struct OrbitCode;
 /// The code indexing web servers, which run a structural search request.
 pub trait CodeSearch {
     fn search(&self, request: &StructuralSearchRequest) -> Result<Vec<Row>, ExecuteError>;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SearchMode {
-    Trigram,
-    Structural,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
@@ -69,9 +62,10 @@ pub struct CodeStore {
 }
 
 impl CodeStore {
-    pub fn supports(&self, property: PropertyId, mode: SearchMode) -> bool {
+    pub fn supports(&self, entity: EntityId, property: PropertyId, mode: SearchMode) -> bool {
         self.indexes
             .iter()
+            .filter(|indexed| indexed.entity == entity)
             .flat_map(|indexed| &indexed.searched)
             .any(|(id, modes)| *id == property && modes.contains(&mode))
     }
@@ -100,22 +94,35 @@ impl StorageBackend for OrbitCode {
         joins: false,
         writer: false,
         search: true,
+        delegates: false,
     };
-    const POLICIES: &'static [PolicyKind] = &[PolicyKind::Via, PolicyKind::None];
+    const POLICIES: &'static [PolicyKind] = &[PolicyKind::None];
+    const FIELDS: &'static [Field] = &[
+        Field::Trusted,
+        Field::Complete,
+        Field::Accepts,
+        Field::Exclude,
+        Field::Column,
+        Field::Fk,
+    ];
     type Options = NoOptions;
     type SourceOptions = CodeSource;
     type ColumnOptions = NoOptions;
     type Store = CodeStore;
 
-    fn structural(store: &CodeStore, entity: EntityId) -> Option<PropertyId> {
-        store.structural(entity)
+    fn serves(
+        store: &CodeStore,
+        entity: EntityId,
+        property: PropertyId,
+        operation: Operation,
+    ) -> bool {
+        matches!(operation, Operation::Search(mode) if store.supports(entity, property, mode))
     }
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> CodeStore {
         let graph = input.graph;
         let store_name = &input.store.name;
         let mut store = CodeStore::default();
-        check_unrelational(&input, diagnostics);
         for source in &input.entities {
             let name = &graph.entity(source.entity).name;
             let mut column = |written: &str, data_type: DataType| {

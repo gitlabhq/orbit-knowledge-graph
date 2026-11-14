@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use super::DuckDb;
 use crate::DataType;
-use crate::catalog::{Capabilities, Diagnostics, PolicyKind, StorageBackend, StoreInput};
+use crate::catalog::{Capabilities, Diagnostics, Field, PolicyKind, StorageBackend, StoreInput};
 use crate::implementations::relational::{
     Column, RelationalOptions, RelationalStore, Table, entity_layout,
 };
@@ -31,9 +31,11 @@ impl StorageBackend for DuckDb {
         joins: true,
         writer: true,
         search: false,
+        delegates: false,
     };
     const POLICIES: &'static [PolicyKind] =
         &[PolicyKind::ScopeKey, PolicyKind::Owner, PolicyKind::None];
+    const FIELDS: &'static [Field] = crate::implementations::relational::FIELDS;
     type Options = RelationalOptions;
     type SourceOptions = DuckDbSource;
     type ColumnOptions = Option<DuckDbColumn>;

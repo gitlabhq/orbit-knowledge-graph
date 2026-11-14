@@ -7,7 +7,7 @@ use orbit_authorization::Key;
 use orbit_utils::query_types::SqlType;
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::Hop;
-use query_data_model::catalog::{Guard, Rule};
+use query_data_model::catalog::{Guard, Needs, Operation, Rule};
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, JoinKind, ReadMode, Relation, RelationalError,
 };
@@ -90,10 +90,24 @@ pub fn lookup(
             .first()
             .ok_or_else(|| QueryError::Security("the scope lookup has an empty via chain".into()))?
             .to;
-        let built = connections
-            .placed(first)
+        let model = target.model();
+        let mut needs = Needs::default();
+        for property in &model.graph().entity(first).identity {
+            match keys {
+                Some(_) => needs.apply(*property, Operation::OneOf),
+                None => needs.read(*property),
+            }
+        }
+        if let Some(key) = hops.get(1).and_then(|hop| model.foreign_key(hop.variant)) {
+            needs.read(key.property);
+        }
+        let built = model
+            .get_store(first, &needs)
             .ok()
-            .and_then(|placement| connections.get(placement.connection))
+            .and_then(|placement| match placement.parts() {
+                [(store, _)] => connections.get(model.store(*store).connection()),
+                _ => None,
+            })
             .and_then(|peer| {
                 let built = match peer {
                     Peer::ClickHouse(catalog) => build(catalog, guard, hops, grants, keys.clone()),

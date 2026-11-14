@@ -7,6 +7,7 @@ use serde::de::DeserializeOwned;
 use super::access::EdgeScope;
 use super::guards::Guard;
 use super::guards::PolicyKind;
+use super::placement::Operation;
 use super::store::Facts;
 use super::{Access, Diagnostics, Model, Source, Sources, Store};
 use crate::implementations::{
@@ -24,8 +25,11 @@ use crate::{
 pub trait StorageBackend: Sized + 'static {
     const KIND: &'static str;
     const CAPABILITIES: Capabilities;
-    /// The access policies this backend renders into its plans.
+    /// The access policies this backend renders into its plans, besides `via`, which every
+    /// backend without joins renders.
     const POLICIES: &'static [PolicyKind];
+    /// The generic storage fragment fields this backend reads; a fragment sets no other.
+    const FIELDS: &'static [Field];
     type Options: Block + DeserializeOwned + Default + WrittenBlock;
     type SourceOptions: Block + DeserializeOwned + Default + WrittenBlock;
     type ColumnOptions: Block + DeserializeOwned + Default + WrittenBlock;
@@ -33,9 +37,15 @@ pub trait StorageBackend: Sized + 'static {
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
 
-    /// The property a structural pattern over `entity` runs on, in a store that searches.
-    fn structural(_store: &Self::Store, _entity: EntityId) -> Option<PropertyId> {
-        None
+    /// Whether the store runs `operation` on `property` of `entity` itself, beyond what its
+    /// capabilities and accepts already serve.
+    fn serves(
+        _store: &Self::Store,
+        _entity: EntityId,
+        _property: PropertyId,
+        _operation: Operation,
+    ) -> bool {
+        false
     }
 }
 
@@ -57,6 +67,54 @@ pub struct Capabilities {
     pub writer: bool,
     /// Evaluates the search modes its stores declare, and searches by repository.
     pub search: bool,
+    /// Calls an external service at query time with the caller's own sign-in, so it answers an
+    /// entity's delegated check.
+    pub delegates: bool,
+}
+
+/// A generic field of a storage fragment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub enum Field {
+    Trusted,
+    PathColumn,
+    Complete,
+    Accepts,
+    Table,
+    Exclude,
+    Access,
+    Immutable,
+    Column,
+    Selectivity,
+    StoredAsText,
+    Fk,
+    EdgeTable,
+    Index,
+    Copies,
+}
+
+impl Field {
+    pub const ALL: [Self; 15] = [
+        Self::Trusted,
+        Self::PathColumn,
+        Self::Complete,
+        Self::Accepts,
+        Self::Table,
+        Self::Exclude,
+        Self::Access,
+        Self::Immutable,
+        Self::Column,
+        Self::Selectivity,
+        Self::StoredAsText,
+        Self::Fk,
+        Self::EdgeTable,
+        Self::Index,
+        Self::Copies,
+    ];
+
+    pub fn name(self) -> &'static str {
+        self.into()
+    }
 }
 
 /// The options of a backend block that takes none.
@@ -65,27 +123,6 @@ pub struct Capabilities {
 pub struct NoOptions {}
 
 impl WrittenBlock for NoOptions {}
-
-/// A store that holds no rows names no tables.
-pub fn check_unrelational<B: StorageBackend>(
-    input: &StoreInput<'_, B>,
-    diagnostics: &mut Diagnostics,
-) {
-    let store = input.store;
-    for source in store.sources() {
-        if let Some(table) = &source.table {
-            diagnostics.error(
-                &source.package,
-                format!(
-                    "store {} is {} and holds no table, but binds {} to {table}",
-                    store.name,
-                    store.kind,
-                    input.graph.entity(source.entity).name
-                ),
-            );
-        }
-    }
-}
 
 /// One result row of a backend service, keyed by the request's field names.
 pub type Row = serde_json::Map<String, serde_json::Value>;
@@ -206,15 +243,10 @@ impl<B: StorageBackend> Catalog<B> {
         })
     }
 
-    pub fn store(&self, name: &str) -> Option<&Store> {
+    /// The backend facts of `store`, when it sits on this connection.
+    pub fn facts(&self, store: crate::StoreId) -> Option<&B::Store> {
         self.stores()
-            .find(|(store, _)| store.name == name)
-            .map(|(store, _)| store)
-    }
-
-    pub fn backend(&self, name: &str) -> Option<&B::Store> {
-        self.stores()
-            .find(|(store, _)| store.name == name)
+            .find(|(held, _)| held.id() == store)
             .map(|(_, facts)| facts)
     }
 
@@ -225,7 +257,7 @@ impl<B: StorageBackend> Catalog<B> {
 
     /// The store on this connection that plans read the entity from: its complete store when the
     /// connection holds it, else the one partial store here.
-    pub fn home(&self, entity: EntityId) -> Option<(&Store, &B::Store)> {
+    pub(crate) fn home(&self, entity: EntityId) -> Option<(&Store, &B::Store)> {
         let mut holders = self
             .stores()
             .filter(|(store, _)| store.source(entity).is_some());
@@ -343,9 +375,25 @@ pub(crate) trait Registered {
 
     fn capabilities(&self) -> Capabilities;
 
-    fn structural(&self, facts: &Facts, entity: EntityId) -> Option<PropertyId>;
+    fn serves(
+        &self,
+        facts: &Facts,
+        entity: EntityId,
+        property: PropertyId,
+        operation: Operation,
+    ) -> bool;
 
     fn policies(&self) -> &'static [PolicyKind];
+
+    fn fields(&self) -> &'static [Field];
+
+    fn renders(&self, policy: PolicyKind) -> bool {
+        self.policies().contains(&policy) || policy == PolicyKind::Via && !self.capabilities().joins
+    }
+
+    fn reads(&self, field: Field) -> bool {
+        self.fields().contains(&field)
+    }
 
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error>;
 
@@ -387,13 +435,24 @@ impl<B: StorageBackend> Registered for Entry<B> {
         B::CAPABILITIES
     }
 
-    fn structural(&self, facts: &Facts, entity: EntityId) -> Option<PropertyId> {
-        let store = (facts.as_ref() as &dyn std::any::Any).downcast_ref::<B::Store>()?;
-        B::structural(store, entity)
+    fn serves(
+        &self,
+        facts: &Facts,
+        entity: EntityId,
+        property: PropertyId,
+        operation: Operation,
+    ) -> bool {
+        (facts.as_ref() as &dyn std::any::Any)
+            .downcast_ref::<B::Store>()
+            .is_some_and(|store| B::serves(store, entity, property, operation))
     }
 
     fn policies(&self) -> &'static [PolicyKind] {
         B::POLICIES
+    }
+
+    fn fields(&self) -> &'static [Field] {
+        B::FIELDS
     }
 
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error> {

@@ -75,3 +75,8 @@ pub fn limits() -> &'static orbit_server_config::QueryLimits {
         });
     &LIMITS
 }
+
+/// Every store of the model, for tests that enumerate what the packages declare.
+pub fn stores(model: &crate::Model) -> impl Iterator<Item = &crate::catalog::Store> {
+    model.stores().iter()
+}

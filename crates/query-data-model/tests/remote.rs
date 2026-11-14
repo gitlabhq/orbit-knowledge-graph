@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use query_data_model::catalog::{Render, Rule};
+use query_data_model::catalog::{Needs, Operation, Render, Rule, SearchMode};
 use query_data_model::implementations::live::{ExtractionRequest, Live, RequestFilter};
 use query_data_model::implementations::orbit_code::{
     OrbitCode, RequestField, StructuralSearchRequest,
@@ -20,13 +20,15 @@ fn model() -> Arc<Model> {
 fn code_store(model: &Model) -> query_data_model::StoreId {
     let file = model.names().entity("File").unwrap();
     let content = model.names().property(file, "content").unwrap();
-    model.searching(file, content).unwrap().id()
+    let mut needs = Needs::default();
+    needs.apply(content, Operation::Search(SearchMode::Structural));
+    model.get_store(file, &needs).unwrap().parts()[0].0
 }
 
 /// The live store that holds messages.
 fn message_store(model: &Model) -> query_data_model::StoreId {
     let message = model.names().entity("SlackMessage").unwrap();
-    model.complete_store(message).unwrap().id()
+    model.get_store(message, &Needs::default()).unwrap().parts()[0].0
 }
 
 fn field(
@@ -71,7 +73,11 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
     let live = model
         .physical::<Live>(model.names().connection("data_extraction").unwrap())
         .unwrap();
-    let guard = live.store("slack").unwrap().guard(message).unwrap();
+    let guard = live
+        .model()
+        .store(live.names().store("slack").unwrap())
+        .guard(message)
+        .unwrap();
     let names = |rule: &Rule| match rule {
         Rule::Via(hops) => hops
             .iter()
@@ -84,7 +90,11 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
     let code = model
         .physical::<OrbitCode>(model.names().connection("code_indexing").unwrap())
         .unwrap();
-    let guard = code.store("code").unwrap().guard(file).unwrap();
+    let guard = code
+        .model()
+        .store(code.names().store("code").unwrap())
+        .guard(file)
+        .unwrap();
     assert_eq!(names(&guard.rule), ["IN_PROJECT"]);
     assert!(!model.access().entity(file).checks.is_empty());
 }

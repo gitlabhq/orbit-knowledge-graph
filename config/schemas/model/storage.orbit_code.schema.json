@@ -1,30 +1,5 @@
 {
   "$defs": {
-    "AccessHints": {
-      "additionalProperties": false,
-      "description": "How queries read an entity, in terms every backend turns into its own indexes and order.",
-      "properties": {
-        "filter": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "order": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "text": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
     "Binding": {
       "additionalProperties": false,
       "description": "Where one relationship variant's rows live: a foreign key, an edge table, or both.",
@@ -110,26 +85,6 @@
             "string",
             "null"
           ]
-        },
-        "immutable": {
-          "default": false,
-          "type": "boolean"
-        },
-        "selectivity": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FieldSelectivity"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "How well an equality filter on the column narrows; without it the planner judges by type."
-        },
-        "stored_as_text": {
-          "default": false,
-          "description": "The column holds an enum's labels rather than its integer codes.",
-          "type": "boolean"
         }
       },
       "type": "object"
@@ -166,12 +121,6 @@
         "kind": {
           "const": "orbit_code"
         },
-        "path_column": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "trusted": {
           "default": false,
           "type": "boolean"
@@ -193,9 +142,6 @@
           },
           "type": "array"
         },
-        "access": {
-          "$ref": "#/$defs/AccessHints"
-        },
         "backend": {
           "$ref": "#/$defs/CodeSource"
         },
@@ -216,19 +162,6 @@
             "type": "string"
           },
           "type": "array"
-        },
-        "path_column": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "table": {
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -236,21 +169,6 @@
         "backend"
       ],
       "type": "object"
-    },
-    "FieldSelectivity": {
-      "description": "Filter selectivity hint for the query planner.",
-      "oneOf": [
-        {
-          "const": "low",
-          "description": "Few distinct values (enums, booleans). Filtering narrows weakly.",
-          "type": "string"
-        },
-        {
-          "const": "high",
-          "description": "Many distinct values (IDs, strings, timestamps). Filtering narrows effectively.",
-          "type": "string"
-        }
-      ]
     },
     "KeySpec": {
       "additionalProperties": false,
@@ -305,6 +223,7 @@
       "description": "One written value or a list of them."
     },
     "SearchMode": {
+      "description": "A search a store's backend runs over a property.",
       "enum": [
         "trigram",
         "structural"

@@ -29,22 +29,11 @@ pub fn normalize(
     limits: &QueryLimits,
 ) -> Result<LogicalPlan> {
     let query = Query::new(&plan, model);
-    available(query, connections)?;
+    crate::dag::places(query, connections)?;
     let narrowed = kinds::narrowed(query)?;
     shared_keys(query, &narrowed, data)?;
     let catalog = model.logical(limits).as_admin();
     Ok(catalog.rebuild(plan, |q, step| rewrite(q, step, &narrowed, model))?)
-}
-
-fn available(query: Query<'_>, connections: &Connections) -> Result<()> {
-    let entities = query.plan.nodes().flat_map(|node| query.plan.outputs(node));
-    for entity in entities.filter_map(|output| query.entity(output)) {
-        if let Err(unplaced) = connections.placed(entity) {
-            let entity = &query.model.graph().entity(entity).name;
-            return Err(crate::dag::unplaced(entity, unplaced));
-        }
-    }
-    Ok(())
 }
 
 fn shared_keys(

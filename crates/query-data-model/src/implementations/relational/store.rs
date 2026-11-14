@@ -212,9 +212,7 @@ pub fn entity_layout<'a, B: StorageBackend>(
     let (graph, store) = (input.graph, input.store);
     let source = store.source(entity.entity)?;
     let name = &graph.entity(entity.entity).name;
-    let table = diagnostics.require(source.table.as_deref(), entity.package, || {
-        format!("store {} binds {name} without a table", store.name)
-    })?;
+    let table = source.table.as_deref()?;
     let sort_key = match sort_key {
         [] => {
             let order = source

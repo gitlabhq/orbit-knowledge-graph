@@ -1,5 +1,5 @@
 use super::{CodeBuilder, CodeError, CodeLanguage, CodeOperation, CodePlan, CodeValue, Matches};
-use crate::implementations::orbit_code::SearchMode;
+use crate::catalog::SearchMode;
 use crate::plan::tracking::{self, Construction, Declare, Output, Outputs, Rebuilder};
 
 impl CodeBuilder<'_> {

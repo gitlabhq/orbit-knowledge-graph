@@ -573,7 +573,8 @@
         }
       },
       "required": [
-        "accepts"
+        "accepts",
+        "table"
       ],
       "type": "object"
     },

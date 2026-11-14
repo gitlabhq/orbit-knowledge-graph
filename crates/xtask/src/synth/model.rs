@@ -61,7 +61,6 @@ impl Graph {
         let nodes = graph
             .entities()
             .filter_map(|entity| {
-                let (_, store) = catalog.home(entity.id)?;
                 Some(Node {
                     name: entity.name.clone(),
                     table: catalog.table_of(entity.id)?.to_string(),
@@ -78,11 +77,7 @@ impl Graph {
                             }
                         })
                         .collect(),
-                    sort_key: store
-                        .relational
-                        .sort_key(entity.id)
-                        .unwrap_or_default()
-                        .to_vec(),
+                    sort_key: catalog.sort_key(entity.id).unwrap_or_default().to_vec(),
                 })
             })
             .collect();

@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::catalog::{Catalog, StorageBackend};
+use crate::catalog::{Catalog, Field, StorageBackend};
 use crate::{ForeignKey, RelationshipVariantId};
 
 mod capabilities;
@@ -34,6 +34,9 @@ pub struct EdgeTableSpec {
     pub sort_key: Vec<String>,
     pub columns: IndexMap<String, String>,
 }
+
+/// The relational planner reads every generic fragment field.
+pub(crate) const FIELDS: &[Field] = &Field::ALL;
 
 pub trait RelationalFacts {
     fn relational(&self) -> &RelationalStore;

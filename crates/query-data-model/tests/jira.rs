@@ -43,26 +43,22 @@ fn every_jira_entity_has_one_complete_store_on_the_lake_connection() {
     let model = demo(|_, yaml| yaml).unwrap();
     for name in ENTITIES {
         let entity = model.names().entity(name).unwrap();
-        let holders: Vec<_> = model
-            .stores()
-            .iter()
+        let holders: Vec<_> = query_data_model::testkit::stores(&model)
             .filter(|store| store.source(entity).is_some())
             .map(|store| {
                 (
-                    store.name.as_str(),
+                    store.name(),
                     model.connection(store.connection()).kind(),
                     model.connection(store.connection()).name(),
                 )
             })
             .collect();
         assert_eq!(holders, [("jira", "duckdb", "jira_lake")], "{name}");
-        let store = model
-            .stores()
-            .iter()
-            .find(|store| store.name == "jira")
+        let store = query_data_model::testkit::stores(&model)
+            .find(|store| store.name() == "jira")
             .unwrap();
         assert!(store.complete(entity), "{name}");
-        assert!(!store.trusted);
+        assert!(!store.trusted());
     }
     let catalog = model
         .physical::<DuckDb>(model.names().connection("jira_lake").unwrap())
@@ -159,9 +155,7 @@ fn jira_foreign_keys_reference_gitlab_entities_on_another_connection() {
     assert_eq!(graph.property(key.property).name, "issue_id");
     let target = |entity: &str| {
         let entity = model.names().entity(entity).unwrap();
-        model
-            .stores()
-            .iter()
+        query_data_model::testkit::stores(&model)
             .find(|store| store.complete(entity))
             .map(|store| model.connection(store.connection()).name())
             .unwrap()
@@ -189,7 +183,9 @@ fn jira_reads_are_scoped_by_the_path_the_parquet_rows_carry() {
     let catalog = model
         .physical::<DuckDb>(model.names().connection("jira_lake").unwrap())
         .unwrap();
-    let store = catalog.store("jira").unwrap();
+    let store = catalog
+        .model()
+        .store(catalog.names().store("jira").unwrap());
     for name in ENTITIES {
         let guard = store.guard(model.names().entity(name).unwrap()).unwrap();
         assert_eq!(guard.rule, Rule::Column("traversal_path".into()), "{name}");
@@ -304,10 +300,8 @@ fn the_des_source_declares_the_lifecycle_columns_its_parquet_rows_carry() {
             "_siphon_deleted"
         )
     );
-    let store = model
-        .stores()
-        .iter()
-        .find(|store| store.name == "jira")
+    let store = query_data_model::testkit::stores(&model)
+        .find(|store| store.name() == "jira")
         .unwrap();
     for name in ENTITIES {
         let entity = model.names().entity(name).unwrap();

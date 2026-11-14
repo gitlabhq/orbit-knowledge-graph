@@ -9,6 +9,8 @@ mod dag_scenarios;
 mod deployment_shapes;
 pub mod lake;
 pub mod mock_redaction;
+#[cfg(test)]
+mod placement;
 pub mod plan_shape;
 pub mod query_scenario;
 pub mod s3;

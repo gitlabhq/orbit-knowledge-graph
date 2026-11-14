@@ -52,7 +52,7 @@ fn listing(policy: &str) -> Packages {
         ),
         (
             "test.listing/storage/live.yaml",
-            "kind: storage\npackage: test.listing\nstore: slack\nentities:\n  Listed:\n    complete: true\n    accepts: [id]\n    columns:\n      id: {immutable: true}\n      channel: {}\n      text: {}\n    backend:\n      operation: search.messages\n      filters: [id, channel]\n".to_string(),
+            "kind: storage\npackage: test.listing\nstore: slack\nentities:\n  Listed:\n    complete: true\n    accepts: [id]\n    columns:\n      id: {}\n      channel: {}\n      text: {}\n    backend:\n      operation: search.messages\n      filters: [id, channel]\n".to_string(),
         ),
     ];
     let sources = files

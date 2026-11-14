@@ -51,6 +51,11 @@ where
         }
     }
 
+    /// The sort key of the entity's table in its home store on this connection.
+    pub fn sort_key(&self, entity: EntityId) -> Option<&[String]> {
+        self.home(entity)?.1.relational().sort_key(entity)
+    }
+
     pub fn table_of(&self, entity: EntityId) -> Option<&str> {
         self.source(entity)?.1.table.as_deref()
     }
@@ -94,11 +99,11 @@ where
     }
 
     /// The checks the entity's returned rows go through; none on a trusted connection.
-    pub fn checks(&self, entity: EntityId) -> &[Check] {
-        match self.trusted() {
-            true => &[],
-            false => &self.model().access().entity(entity).checks,
-        }
+    pub fn checks(&self, entity: EntityId) -> impl Iterator<Item = &Check> {
+        let trusted = self.trusted();
+        self.model()
+            .checks(entity, self.connection())
+            .filter(move |_| !trusted)
     }
 
     /// Each foreign key of a variant whose target holds its source's scope, with that target.

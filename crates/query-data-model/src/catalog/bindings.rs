@@ -377,7 +377,9 @@ pub(super) fn check(
                 );
             }
             agree_on_text(entity, graph, &holders, *id, diagnostics);
-            let mut stored = holders.iter().filter(|store| store.column(*id).is_some());
+            let mut stored = holders.iter().filter(|store| {
+                store.column(*id).is_some() && store.reads(super::Field::Immutable)
+            });
             if let Some(first) = stored.next()
                 && let Some(other) =
                     stored.find(|store| store.immutable(*id) != first.immutable(*id))

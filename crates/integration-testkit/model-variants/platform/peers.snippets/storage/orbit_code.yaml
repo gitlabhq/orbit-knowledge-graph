@@ -1,0 +1,16 @@
+kind: storage
+package: peers.snippets
+store: snippets
+engine:
+  kind: orbit_code
+  connection: snippet_search
+entities:
+  Snippet:
+    accepts: [project_id, branch]
+    columns:
+      project_id: {}
+      branch: {}
+      path: {}
+    backend:
+      repository: {project: project_id, branch: branch}
+      search: {body: [structural]}

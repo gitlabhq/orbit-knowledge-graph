@@ -3,12 +3,10 @@
 
 use std::sync::Arc;
 
-use query_data_model::catalog::Guard;
 use query_data_model::implementations::live::Live;
 use query_data_model::implementations::orbit_code::OrbitCode;
 use query_data_model::{
-    Catalog, ClickHouse, ConnectionId, DataModelError, DuckDb, EntityId, Model, PropertyId,
-    StorageBackend, StoreId,
+    Catalog, ClickHouse, ConnectionId, DataModelError, DuckDb, Model, StorageBackend, StoreId,
 };
 
 use super::Backend;
@@ -85,18 +83,9 @@ impl Peer {
 
 /// The store a read runs on, and the connection that store sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Placement {
+pub struct Place {
     pub connection: ConnectionId,
     pub store: StoreId,
-}
-
-/// Why a binding has no connection to run on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Unplaced {
-    /// No store of the deployment marks the entity complete.
-    Unstored,
-    /// The entity's complete store sits on a connection the deployment does not serve.
-    Unserved(String),
 }
 
 /// Every connection a deployment serves.
@@ -151,41 +140,5 @@ impl Connections {
 
     pub fn target(&self, connection: ConnectionId) -> Option<&Target> {
         self.get(connection)?.remote()
-    }
-
-    fn served(&self, store: &query_data_model::catalog::Store) -> Option<Placement> {
-        self.get(store.connection()).map(|_| Placement {
-            connection: store.connection(),
-            store: store.id(),
-        })
-    }
-
-    /// The placement of a structural match over `property` of `entity`: the store that searches
-    /// it, on a served connection.
-    pub fn searching(&self, entity: EntityId, property: PropertyId) -> Option<Placement> {
-        let model = self.peers.first()?.model();
-        self.served(model.searching(entity, property)?)
-    }
-
-    /// The placement of a read of `entity`: its `complete: true` store, on a served connection.
-    pub fn placed(&self, entity: EntityId) -> Result<Placement, Unplaced> {
-        let model = self
-            .peers
-            .first()
-            .map(Peer::model)
-            .ok_or(Unplaced::Unstored)?;
-        let store = model.complete_store(entity).ok_or(Unplaced::Unstored)?;
-        self.served(store).ok_or_else(|| {
-            Unplaced::Unserved(model.connection(store.connection()).name().to_string())
-        })
-    }
-
-    /// The guard of a read of `entity` on its placed store.
-    pub fn guard(&self, entity: EntityId) -> Option<&Guard> {
-        let placement = self.placed(entity).ok()?;
-        self.get(placement.connection)?
-            .model()
-            .store(placement.store)
-            .guard(entity)
     }
 }

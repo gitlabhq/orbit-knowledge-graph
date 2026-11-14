@@ -3,10 +3,12 @@ mod backend;
 mod bindings;
 mod composition;
 mod diagnostics;
+mod fields;
 mod guards;
 mod layout;
 mod lookups;
 mod names;
+mod placement;
 pub mod sources;
 mod store;
 mod writers;
@@ -16,8 +18,8 @@ pub use access::{
     ProviderUse, RelationshipAccess, Scope, ScopeId, ScopeKind,
 };
 pub use backend::{
-    Capabilities, Catalog, ColumnInput, ExecuteError, NoOptions, Render, Row, SourceInput,
-    StorageBackend, StoreInput, check_unrelational,
+    Capabilities, Catalog, ColumnInput, ExecuteError, Field, NoOptions, Render, Row, SourceInput,
+    StorageBackend, StoreInput,
 };
 pub(crate) use backend::{backends, registered};
 pub use diagnostics::{Diagnostics, SpecError};
@@ -25,6 +27,7 @@ pub use guards::{Guard, PolicyKind, Rule};
 pub use lookups::{Lookup, Lookups};
 pub use names::Names;
 pub use names::{Reversed, Unresolved};
+pub use placement::{Need, Needs, Operation, Placement, SearchMode, Unplaced};
 pub use sources::Sources;
 pub use store::{Source, Store, StoredColumn};
 
@@ -150,6 +153,8 @@ impl Model {
         };
         let mut diagnostics = Diagnostics::default();
         model.resolve_backends(&blocks, &mut diagnostics);
+        model.check_placement(&mut diagnostics);
+        model.check_delegation(&mut diagnostics);
         diagnostics.finish()?;
         Ok(model)
     }
@@ -170,8 +175,15 @@ impl Model {
         self.lookups.get(property)
     }
 
-    pub fn stores(&self) -> &[Store] {
+    pub(crate) fn stores(&self) -> &[Store] {
         &self.stores
+    }
+
+    /// The stores on `connection`.
+    pub fn stores_on(&self, connection: crate::ConnectionId) -> impl Iterator<Item = &Store> {
+        self.stores
+            .iter()
+            .filter(move |store| store.connection_id == connection)
     }
 
     /// Every connection the deployment serves, in name order.
@@ -185,14 +197,6 @@ impl Model {
 
     pub fn connection(&self, id: crate::ConnectionId) -> &Connection {
         &self.connections[id.index()]
-    }
-
-    /// The store whose backend searches `property` of `entity` structurally: the placement of a
-    /// structural match, which need not be the entity's complete store.
-    pub fn searching(&self, entity: EntityId, property: PropertyId) -> Option<&Store> {
-        self.stores
-            .iter()
-            .find(|store| store.searches(entity, property))
     }
 
     pub fn sources(&self) -> &Sources {
@@ -228,16 +232,57 @@ impl Model {
         })
     }
 
-    /// The one store that holds or excludes every property of the entity.
-    pub fn complete_store(&self, entity: EntityId) -> Option<&Store> {
-        self.stores.iter().find(|store| store.complete(entity))
+    /// The checks a read of `entity` on `connection` evaluates: a delegated check only on a
+    /// connection that reads with the caller's sign-in, where every other read relies on its
+    /// scope filter.
+    pub fn checks(
+        &self,
+        entity: EntityId,
+        connection: crate::ConnectionId,
+    ) -> impl Iterator<Item = &Check> {
+        let delegates = self.connection(connection).capabilities().delegates;
+        self.access
+            .entity(entity)
+            .checks
+            .iter()
+            .filter(move |check| delegates || !matches!(check, Check::Delegated { .. }))
+    }
+
+    /// A delegated check is answered only by a read that signs in as the caller, so a stored
+    /// entity with one has a store on a delegating backend.
+    fn check_delegation(&self, diagnostics: &mut Diagnostics) {
+        for entity in self.graph.entities() {
+            let delegated = self
+                .access
+                .entity(entity.id)
+                .checks
+                .iter()
+                .any(|check| matches!(check, Check::Delegated { .. }));
+            let holders: Vec<&Store> = self
+                .stores
+                .iter()
+                .filter(|store| store.source(entity.id).is_some())
+                .collect();
+            let delegating = holders
+                .iter()
+                .any(|store| self.connection(store.connection()).capabilities().delegates);
+            if delegated && !holders.is_empty() && !delegating {
+                diagnostics.error(
+                    &entity.package,
+                    format!(
+                        "{} has a delegated check, but no store on a backend that reads with the caller's sign-in holds it",
+                        entity.name
+                    ),
+                );
+            }
+        }
     }
 
     /// How the entity's complete store keeps an enum property: as labels or as integer codes.
     pub fn enum_type(&self, property: PropertyId) -> crate::EnumType {
         let entity = self.graph.property(property).entity;
         match self
-            .complete_store(entity)
+            .complete(entity)
             .is_some_and(|store| store.stored_as_text(property))
         {
             true => crate::EnumType::String,
@@ -245,12 +290,12 @@ impl Model {
         }
     }
 
-    /// Whether every store that holds the property marks it immutable.
+    /// Whether every store that holds the property and reads immutability marks it immutable.
     pub fn immutable(&self, property: PropertyId) -> bool {
         let mut holders = self
             .stores
             .iter()
-            .filter(|store| store.column(property).is_some())
+            .filter(|store| store.column(property).is_some() && store.reads(Field::Immutable))
             .peekable();
         holders.peek().is_some() && holders.all(|store| store.immutable(property))
     }

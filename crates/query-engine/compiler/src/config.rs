@@ -304,7 +304,7 @@ fn admit_with(ctx: &mut impl CompilerCtx<Backend: SqlBackend>, selectivity: bool
     let statement = require(ctx.statement().as_ref(), "statement")?;
     let model = ctx.data_model();
     let query = crate::logical::Query::new(&statement.plan, model.model());
-    admit::admit(query, model, ctx.connections(), ctx.limits(), selectivity)
+    admit::admit(query, model, ctx.limits(), selectivity)
 }
 
 fn admit(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {

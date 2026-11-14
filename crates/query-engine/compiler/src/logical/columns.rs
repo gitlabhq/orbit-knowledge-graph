@@ -74,7 +74,7 @@ where
 /// The first property other than the id that a row check of the entity keys rows by; the
 /// row carries it in the redaction id column next to the id.
 pub fn redaction_column(model: &Catalog<impl SqlBackend>, entity: EntityId) -> Option<&str> {
-    model.checks(entity).iter().find_map(|check| match check {
+    model.checks(entity).find_map(|check| match check {
         query_data_model::catalog::Check::Rows { id, .. } => {
             let graph = model.graph();
             (graph.entity(entity).identity != [*id]).then(|| graph.property(*id).name.as_str())

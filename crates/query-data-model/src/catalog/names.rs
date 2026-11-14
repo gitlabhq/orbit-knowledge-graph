@@ -4,6 +4,7 @@ use super::Model;
 use crate::generic::AttributeId;
 use crate::{
     ConnectionId, Direction, EntityId, Hop, PropertyId, RelationshipId, RelationshipVariantId,
+    StoreId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -118,6 +119,14 @@ impl Names<'_> {
 
     pub fn attribute(&self, relationship: RelationshipId, name: &str) -> Option<AttributeId> {
         self.0.graph.attribute_id(relationship, name)
+    }
+
+    pub fn store(&self, name: &str) -> Option<StoreId> {
+        self.0
+            .stores
+            .iter()
+            .find(|store| store.name == name)
+            .map(|store| store.id())
     }
 
     pub fn connection(&self, name: &str) -> Option<ConnectionId> {

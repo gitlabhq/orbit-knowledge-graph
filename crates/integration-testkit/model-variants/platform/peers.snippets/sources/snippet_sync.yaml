@@ -1,0 +1,4 @@
+kind: source
+package: peers.snippets
+source: snippet_sync
+entities: [Snippet]

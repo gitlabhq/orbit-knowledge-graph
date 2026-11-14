@@ -1,7 +1,10 @@
 use std::collections::{BTreeSet, HashMap};
 
 use orbit_server_config::QueryLimits;
-use query_data_model::plan::logical::{Expr, LogicalOperation};
+use query_data_model::catalog::{Needs, Operation, SearchMode};
+use query_data_model::plan::logical::{
+    Columns, Comparison, Conjunct, Expr, LogicalOperation, Measure, Operand, Predicate, Projection,
+};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::surface::Statement;
 use query_data_model::{
@@ -9,13 +12,10 @@ use query_data_model::{
 };
 
 use super::cut::{Cut, Group};
-use super::{Connections, Dag, Stage, StageQuery};
+use super::{Connections, Dag, Place, Stage, StageQuery};
 use crate::error::{QueryError, Result};
 use crate::logical::{Kind, Query, Step};
 use crate::passes::codegen::SqlBackend;
-
-/// The store a binding reads, and the served connection it sits on.
-pub(super) type Place = super::Placement;
 
 /// A relationship step whose endpoints live on different connections, with the key pairs the
 /// Combine stage joins its two sides on.
@@ -101,39 +101,166 @@ pub fn split<B: SqlBackend>(
     cut.dag(response)
 }
 
-/// Each binding's connection: the code connection that searches the property a structural
-/// match runs over, else the connection that holds its entity.
-fn places(query: Query<'_>, connections: &Connections) -> Result<HashMap<Ref, Place>> {
-    let searched: HashMap<Ref, PropertyId> = query
-        .operations()
-        .filter_map(|(_, operation)| match operation {
-            LogicalOperation::Structural(structural) => match structural.target {
-                Expr::Property { binding, property } => Some((binding, property)),
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect();
+/// Each binding's store and the served connection it sits on: the store the model places a read
+/// with the binding's needs on.
+pub(crate) fn places(query: Query<'_>, connections: &Connections) -> Result<HashMap<Ref, Place>> {
+    let model = query.model;
+    let mut needs = needs(query);
     query
         .bindings()
         .into_iter()
         .map(|binding| {
-            let entity = binding.entity;
-            let name = &query.model.graph().entity(entity).name;
-            let place = match searched.get(&binding.output) {
-                Some(property) => connections.searching(entity, *property).ok_or_else(|| {
-                    QueryError::AllowlistRejected(format!(
-                        "no served connection searches {name}.{}",
-                        query.model.graph().property(*property).name
-                    ))
-                })?,
-                None => connections
-                    .placed(entity)
-                    .map_err(|unplaced| super::unplaced(name, unplaced))?,
+            let wanted = needs.remove(&binding.output).unwrap_or_default();
+            let placement = model
+                .get_store(binding.entity, &wanted)
+                .map_err(|unplaced| QueryError::AllowlistRejected(unplaced.to_string()))?;
+            let [(store, _)] = placement.parts() else {
+                return Err(QueryError::PipelineInvariant(
+                    "a read runs on one store".into(),
+                ));
             };
-            Ok((binding.output, place))
+            let store = model.store(*store);
+            if connections.get(store.connection()).is_none() {
+                return Err(QueryError::AllowlistRejected(format!(
+                    "{} reads from store {} on connection {}, which this deployment does not serve",
+                    model.graph().entity(binding.entity).name,
+                    store.name(),
+                    model.connection(store.connection()).name()
+                )));
+            }
+            Ok((
+                binding.output,
+                Place {
+                    connection: store.connection(),
+                    store: store.id(),
+                },
+            ))
         })
         .collect()
+}
+
+/// What each binding reads and applies: the properties its projections, groups and order read,
+/// the conditions on them, and its structural matches.
+fn needs(query: Query<'_>) -> HashMap<Ref, Needs> {
+    let mut needs: HashMap<Ref, Needs> = HashMap::new();
+    for (_, operation) in query.operations() {
+        match operation {
+            LogicalOperation::Filter(predicate) => {
+                for conjunct in predicate.conjuncts() {
+                    match conjunct {
+                        Conjunct::Leaf { predicate, negated } => {
+                            condition(predicate, negated, &mut needs)
+                        }
+                        Conjunct::Negated(group) => {
+                            for leaf in group.leaf_predicates() {
+                                condition(leaf, true, &mut needs);
+                            }
+                        }
+                    }
+                }
+            }
+            LogicalOperation::Structural(structural) => {
+                if let Expr::Property { binding, property } = structural.target {
+                    needs
+                        .entry(binding)
+                        .or_default()
+                        .apply(property, Operation::Search(SearchMode::Structural));
+                }
+            }
+            LogicalOperation::Select(items) => {
+                for item in items {
+                    match item {
+                        Projection::Graph {
+                            binding,
+                            columns: Columns::Listed(properties),
+                        } => {
+                            let binding = needs.entry(*binding).or_default();
+                            properties
+                                .iter()
+                                .for_each(|property| binding.read(*property));
+                        }
+                        Projection::Graph { .. } => {}
+                        Projection::Value(expr) => read(*expr, &mut needs),
+                    }
+                }
+            }
+            LogicalOperation::Order(keys) => {
+                keys.iter().for_each(|(expr, _)| read(*expr, &mut needs))
+            }
+            LogicalOperation::Aggregate { groups, measures } => {
+                groups.iter().for_each(|expr| read(*expr, &mut needs));
+                for measure in measures {
+                    match measure {
+                        Measure::Count(Some(expr))
+                        | Measure::CountDistinct(expr)
+                        | Measure::Sum(expr)
+                        | Measure::Avg(expr)
+                        | Measure::Min(expr)
+                        | Measure::Max(expr) => read(*expr, &mut needs),
+                        Measure::Count(None) => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    needs
+}
+
+fn read(expr: Expr, needs: &mut HashMap<Ref, Needs>) {
+    if let Expr::Property { binding, property }
+    | Expr::Truncate {
+        binding, property, ..
+    } = expr
+    {
+        needs.entry(binding).or_default().read(property);
+    }
+}
+
+/// One condition's need on the property it tests; a negated leaf is its complement when it has
+/// one. A comparison with another expression reads both sides, which the stage that holds them
+/// both evaluates.
+fn condition(predicate: &Predicate, negated: bool, needs: &mut HashMap<Ref, Needs>) {
+    if let Predicate::Compare {
+        left,
+        right: Operand::Expr(right),
+        ..
+    } = predicate
+    {
+        read(*left, needs);
+        read(*right, needs);
+        return;
+    }
+    let complement = negated.then(|| predicate.complement());
+    let operation = match (complement.as_ref(), predicate) {
+        (Some(Some(complement)), _) => operation(complement),
+        (Some(None), _) => Operation::Other,
+        (None, predicate) => operation(predicate),
+    };
+    for expr in predicate.exprs() {
+        match expr {
+            Expr::Property { binding, property } => {
+                needs.entry(binding).or_default().apply(property, operation)
+            }
+            other => read(other, needs),
+        }
+    }
+}
+
+fn operation(predicate: &Predicate) -> Operation {
+    match predicate {
+        Predicate::Compare {
+            comparison: Comparison::Eq,
+            ..
+        } => Operation::Equal,
+        Predicate::Compare {
+            comparison: Comparison::Lt | Comparison::Le | Comparison::Gt | Comparison::Ge,
+            ..
+        } => Operation::Bound,
+        Predicate::In { .. } | Predicate::InTuple { .. } => Operation::OneOf,
+        Predicate::Text { matching, .. } => Operation::Text(*matching),
+        _ => Operation::Other,
+    }
 }
 
 /// Bindings joined by steps that stay on one connection, in the order the plan binds them.

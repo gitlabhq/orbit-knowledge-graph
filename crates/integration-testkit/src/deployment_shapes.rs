@@ -2,6 +2,7 @@
 //! exactly one complete store and a connection to run on.
 
 use compiler::dag::Connections;
+use query_data_model::catalog::{Needs, Unplaced};
 use query_data_model::{Deployments, Packages};
 
 fn check(deployments: &Deployments, packages: &Packages) {
@@ -11,21 +12,18 @@ fn check(deployments: &Deployments, packages: &Packages) {
             .unwrap_or_else(|error| panic!("shape {shape} does not load: {error}"));
         let connections = Connections::of(&model).unwrap();
         for entity in model.graph().entities() {
-            let stores = model.stores().iter();
-            if !stores
-                .clone()
-                .any(|store| store.source(entity.id).is_some())
-            {
-                continue;
-            }
-            let complete = stores.filter(|store| store.complete(entity.id)).count();
-            assert_eq!(
-                complete, 1,
-                "shape {shape}: {} complete stores",
+            let store = match model.get_store(entity.id, &Needs::default()) {
+                Ok(placement) => model.store(placement.parts()[0].0),
+                Err(Unplaced::Unstored { .. }) => continue,
+                Err(error) => panic!("shape {shape}: {error}"),
+            };
+            assert!(
+                store.complete(entity.id),
+                "shape {shape}: {} reads from a partial store",
                 entity.name
             );
             assert!(
-                connections.placed(entity.id).is_ok(),
+                connections.get(store.connection()).is_some(),
                 "shape {shape}: {} has no connection to run on",
                 entity.name
             );

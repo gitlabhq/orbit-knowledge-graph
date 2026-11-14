@@ -14,7 +14,9 @@ fn graph_store_entities_filter_on_their_own_path_column() {
     let catalog = model
         .physical::<ClickHouse>(model.names().connection("main").unwrap())
         .unwrap();
-    let store = catalog.store("graph").unwrap();
+    let store = catalog
+        .model()
+        .store(catalog.names().store("graph").unwrap());
     for entity in model.graph().entities() {
         let guard = store.guard(entity.id).unwrap();
         let expected = match model.access().scope(guard.scope).kind {
@@ -61,7 +63,9 @@ fn code_edges_copy_endpoint_project_and_branch_in_the_graph_store_only() {
     let catalog = model
         .physical::<ClickHouse>(model.names().connection("main").unwrap())
         .unwrap();
-    let store = catalog.store("graph").unwrap();
+    let store = catalog
+        .model()
+        .store(catalog.names().store("graph").unwrap());
     let copy = |relationship: &str, source: &str, target: &str, endpoint: Endpoint| {
         let variant = graph.variant(names.variant(relationship, source, target).unwrap());
         let entity = match endpoint {
@@ -95,10 +99,8 @@ fn code_edges_copy_endpoint_project_and_branch_in_the_graph_store_only() {
             .all(|(_, _, binding)| binding.copies.is_empty())
     };
     assert!(
-        model
-            .stores()
-            .iter()
-            .filter(|store| store.name != "graph")
+        query_data_model::testkit::stores(&model)
+            .filter(|store| store.name() != "graph")
             .all(copies_nothing)
     );
 }
