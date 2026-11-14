@@ -364,7 +364,7 @@ async fn test_expand_all_wildcard() {
 
 fn custom_node_model() -> Arc<Catalog<ClickHouse>> {
     let graph = "kind: graph\npackage: test\nentities:\n  CustomNode:\n    identity: id\n    label: id\n    default_columns: [id]\n    properties: {id: int64}\n";
-    let authorization = "kind: authorization\npackage: test\npermissions: [read]\nscopes: {global: {kind: global, provider: gitlab_session}}\nentities:\n  CustomNode: {scope: global, permission: read, properties: {open: [id]}}\n";
+    let authorization = "kind: authorization\npackage: test\npermissions: [read]\nscopes: {global: {kind: global, provider: gitlab_session}}\nentities:\n  CustomNode: {scope: global, permission: read, checks: open, properties: {open: [id]}}\n";
     let storage = "kind: storage
 package: test
 store: graph

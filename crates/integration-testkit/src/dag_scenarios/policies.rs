@@ -1,5 +1,6 @@
 //! Remote reads under every policy a code or live store renders: `none` with a check, a `none`
-//! entity next to a `via` entity in one stage, and the `global` scope kind.
+//! entity next to a `via` entity in one stage, and the `global` scope kind, on a live store and
+//! on the graph store with `checks: open` or with a row check.
 
 use std::sync::Arc;
 
@@ -12,7 +13,9 @@ use serde_json::json;
 
 use super::single::CODE;
 use super::{Run, json_rows, row};
-use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_packages, edited, run_dag};
+use crate::authorization_variants::{deployment, registry};
+use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_model, dag_packages, edited, run_dag};
+use crate::mock_redaction::MockRedactionService;
 
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
@@ -193,4 +196,76 @@ async fn a_none_entity_before_a_via_entity_keeps_the_readable_repositories() {
     let rows = json_rows(&ran.outcome.unwrap().executed.batches);
     let paths: Vec<_> = rows.iter().map(|row| row["f_path"].clone()).collect();
     assert_eq!(paths, [json!("src/auth.rs")]);
+}
+
+/// A global entity on the graph store whose permission alone admits every row.
+fn flags() -> Packages {
+    let files = [
+        (
+            "test.flags/package.yaml",
+            "kind: package\nname: test.flags\nrequires: [gitlab, gitlab.core]\n",
+        ),
+        (
+            "test.flags/graph.yaml",
+            "kind: graph\npackage: test.flags\nentities:\n  Flag:\n    identity: id\n    label: name\n    default_columns: [id, name]\n    properties:\n      id: {type: int64}\n      name: {type: string}\n",
+        ),
+        (
+            "test.flags/authorization.yaml",
+            "kind: authorization\npackage: test.flags\nentities:\n  Flag:\n    scope: global\n    permission: read\n    checks: open\n    properties: {open: [id, name]}\n",
+        ),
+        (
+            "test.flags/storage/clickhouse.yaml",
+            "kind: storage\npackage: test.flags\nstore: graph\nentities:\n  Flag:\n    complete: true\n    accepts: [id]\n    table: gl_flag\n    path_column:\n    columns:\n      id: {immutable: true, backend: {type: Int64}}\n      name: {backend: {type: String}}\n    access: {filter: [id], order: [id]}\n    backend:\n      primary_key: [id]\n",
+        ),
+        (
+            "test.flags/sources/flag_sync.yaml",
+            "kind: source\npackage: test.flags\nsource: flag_sync\nentities: [Flag]\n",
+        ),
+    ];
+    let sources = files
+        .into_iter()
+        .map(|(path, text)| (path.to_string(), text.to_string()))
+        .collect();
+    dag_packages().with(Packages::new(Tier::Platform, sources))
+}
+
+/// The rows the server's redaction keeps and drops, with `redaction`'s answers to every check.
+fn redacted(run: Run, redaction: &MockRedactionService) -> (usize, usize) {
+    let outcome = run
+        .outcome
+        .unwrap_or_else(|error| panic!("the run failed: {error}"));
+    let context = &outcome.compiled.base.result_context;
+    let mut result =
+        orbit_server::redaction::QueryResult::from_batches(&outcome.executed.batches, context)
+            .unwrap();
+    let dropped = result.apply_authorizations(&redaction.check(&result.resource_checks()));
+    (result.authorized_count(), dropped)
+}
+
+/// A global ClickHouse entity under `checks: open` binds, and its rows come back through
+/// redaction with no row check.
+#[tokio::test]
+async fn a_global_open_entity_keeps_its_rows_through_redaction() {
+    let model = flags().deployment("demo").unwrap();
+    orbit_server::authorization::Deployment::bind(&deployment("dag"), &model, &registry())
+        .expect("the dag deployment binds an open global entity");
+    let flag = vec![json!({"f_name": "beta", "_orbit_f_id": 1, "_orbit_f_type": "Flag"})];
+    let query = "MATCH (f:Flag) WHERE f.id = 1 RETURN f.name LIMIT 5";
+    let ran = run_on(&model, query, flag, &Checks::default()).await;
+    assert_eq!(redacted(ran, &MockRedactionService::new()), (1, 0));
+}
+
+/// A global entity with a row check keeps it: `User` rows come back only where the check allows.
+#[tokio::test]
+async fn a_global_entity_with_a_check_redacts_the_rows_it_denies() {
+    let model = dag_model();
+    let users = || vec![json!({"u_username": "ann", "_orbit_u_id": 1, "_orbit_u_type": "User"})];
+    let query = "MATCH (u:User) WHERE u.id = 1 RETURN u.username LIMIT 5";
+    let ran = run_on(&model, query, users(), &Checks::default()).await;
+    assert_eq!(redacted(ran, &MockRedactionService::new()), (0, 1));
+
+    let mut allowed = MockRedactionService::new();
+    allowed.allow("user", &[1]);
+    let ran = run_on(&model, query, users(), &Checks::default()).await;
+    assert_eq!(redacted(ran, &allowed), (1, 0));
 }

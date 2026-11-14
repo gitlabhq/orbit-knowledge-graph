@@ -423,7 +423,7 @@ lookups:
 "#,
             dependencies.join(", ")
         );
-        let access = "{kind: authorization, package: test, permissions: [read], scopes: {global: {kind: global, provider: session}}, entities: {TestNode: {scope: global, permission: read, properties: {open: [id, name, project_id, branch, path]}}}}";
+        let access = "{kind: authorization, package: test, permissions: [read], scopes: {global: {kind: global, provider: session}}, entities: {TestNode: {scope: global, permission: read, checks: open, properties: {open: [id, name, project_id, branch, path]}}}}";
         catalog(entity, graph, &[&service, access])
     }
 
@@ -551,6 +551,7 @@ entities:
   User:
     scope: global
     permission: read
+    checks: open
     properties: {open: [id, username, state], admin: [is_admin, is_auditor]}
 "#;
         catalog(

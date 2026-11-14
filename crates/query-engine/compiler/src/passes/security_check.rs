@@ -2,7 +2,7 @@
 //!
 //! Runs after the security phase. Every scan of a guarded table needs a filter its caller's
 //! scope set allows, or a fail-closed false predicate, among the filters that directly consume
-//! its join tree.
+//! its join tree. A global read needs the false predicate when the caller lacks its permission.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -47,26 +47,33 @@ pub fn verify<B: RelationalBackend>(
             proved.insert(alias.clone());
         }
         for guard in guards {
-            let allowed = match scope_set(grants, catalog.model(), guard.scope, guard.permission)? {
-                ScopeSet::All => continue,
-                ScopeSet::Subtrees(roots) => {
+            let set = scope_set(grants, catalog.model(), guard.scope, guard.permission)?;
+            let allowed = match (&guard.column, set) {
+                (_, ScopeSet::All) => continue,
+                (None, set) if !set.is_empty() => continue,
+                (None, _) => Allowed::Nothing,
+                (Some(_), ScopeSet::Subtrees(roots)) => {
                     Allowed::Subtrees(roots.iter().map(|r| r.as_str().into()).collect())
                 }
-                ScopeSet::Keys(keys) => Allowed::Keys(keys),
+                (Some(_), ScopeSet::Keys(keys)) => Allowed::Keys(keys),
             };
-            let output = graph
-                .outputs(node)
-                .find(|output| graph.name(*output) == Some(guard.column.as_str()));
-            let guarded = output.is_some_and(|output| {
-                filters
-                    .iter()
-                    .any(|filter| has_valid_filter(filter, output, &allowed))
+            let output = guard.column.as_deref().and_then(|column| {
+                graph
+                    .outputs(node)
+                    .find(|output| graph.name(*output) == Some(column))
             });
+            let guarded = (guard.column.is_none() || output.is_some())
+                && filters
+                    .iter()
+                    .any(|filter| has_valid_filter(filter, output, &allowed));
             if !guarded {
                 let access = catalog.model().access();
+                let read = match &guard.column {
+                    Some(column) => format!("column '{alias}.{column}'"),
+                    None => format!("global read '{alias}'"),
+                };
                 return Err(QueryError::Security(format!(
-                    "post-check failed: column '{alias}.{}' missing a valid scope filter for permission {} in scope {}",
-                    guard.column,
+                    "post-check failed: {read} missing a valid scope filter for permission {} in scope {}",
                     access.permission(guard.permission).name,
                     access.scope(guard.scope).name,
                 )));
@@ -79,6 +86,7 @@ pub fn verify<B: RelationalBackend>(
 enum Allowed<'g> {
     Subtrees(Vec<TraversalPath>),
     Keys(&'g [Key]),
+    Nothing,
 }
 
 fn join_filters<'p, B: RelationalBackend>(
@@ -102,7 +110,7 @@ fn join_filters<'p, B: RelationalBackend>(
     filters
 }
 
-fn has_valid_filter(expr: &Expr, column: Ref, allowed: &Allowed<'_>) -> bool {
+fn has_valid_filter(expr: &Expr, column: Option<Ref>, allowed: &Allowed<'_>) -> bool {
     match expr {
         Expr::Bool(false)
         | Expr::Parameter {
@@ -132,7 +140,9 @@ fn has_valid_filter(expr: &Expr, column: Ref, allowed: &Allowed<'_>) -> bool {
                     },
                 ],
                 Allowed::Subtrees(roots),
-            ) if *actual == column => roots.iter().any(|root| path.starts_with(root.as_str())),
+            ) if Some(*actual) == column => {
+                roots.iter().any(|root| path.starts_with(root.as_str()))
+            }
             _ => false,
         },
         Expr::Binary {
@@ -147,7 +157,7 @@ fn has_valid_filter(expr: &Expr, column: Ref, allowed: &Allowed<'_>) -> bool {
                     ..
                 },
                 Allowed::Keys(keys),
-            ) if *actual == column => values.iter().all(|value| {
+            ) if Some(*actual) == column => values.iter().all(|value| {
                 keys.iter()
                     .any(|key| key_value(key).is_ok_and(|(_, key)| key == *value))
             }),
@@ -377,6 +387,27 @@ relationships:
                 .unwrap();
         let proved = verify(&plan, model(), &ctx).unwrap();
         assert_eq!(proved, std::collections::BTreeSet::from(["p".to_string()]));
+    }
+
+    #[test]
+    fn a_global_read_is_proved_by_its_permission_or_a_false_filter() {
+        let users = || {
+            build(model(), |q| {
+                let rows = scan(q, "gl_user", "u")?;
+                let rows = q.limit(rows, Some(10), None)?;
+                ids(q, rows, "u")
+            })
+        };
+        let proved = std::collections::BTreeSet::from(["u".to_string()]);
+        let held = grants(&["42/43/"]);
+        assert_eq!(verify(&users(), model(), &held).unwrap(), proved);
+
+        let denied = crate::test_grants::grants(model().model(), false, &["42/43/"], &["read"]);
+        let error = check(&users(), &denied, model()).unwrap_err().to_string();
+        assert!(error.contains("global read 'u' missing"), "{error}");
+        let plan =
+            crate::passes::security::apply_security_context(users(), model(), &denied).unwrap();
+        assert_eq!(verify(&plan, model(), &denied).unwrap(), proved);
     }
 
     #[test]
