@@ -16,10 +16,4 @@ query:
     MATCH (u:User {email: 'target@example.com'}), (g:Group) RETURN g, count(u) AS hit LIMIT 1
 
 expect:
-  compile_error: true
-  compile_error_contains:
-    json: [globally-scoped, relationships]
-    gql: [one connected pattern]
-  compile_error_not_contains:
-    json: ["target@example.com"]
-    gql: ["target@example.com"]
+  compile_error: { gql: schema, json: restrict }

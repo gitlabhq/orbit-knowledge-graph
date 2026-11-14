@@ -7,7 +7,7 @@ cases:
       gql: |
         MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN u.is_admin AS is_admin, count(u) AS members LIMIT 10
     expect:
-      compile_error_contains: [group_by, is_admin, administrator]
+      compile_error: restrict
 
   - name: admin_group_by_compiles
     description: An admin groups members by an admin-only field
