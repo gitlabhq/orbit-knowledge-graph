@@ -72,7 +72,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [raw, statement]
         }
         gql_parse_local {
-            reads_env: [data_model, limits, connections]
+            reads_env: [grants, data_model, limits, connections]
             mutates: [raw, statement]
         }
         admit {
@@ -221,9 +221,9 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         gql_local {
             backend: query_data_model::DuckDb
-            env: [limits, connections, trace]
+            env: [grants, limits, connections, trace]
             state: [raw, statement, dag]
-            phases: [gql_parse_local, normalize, admit_local, split_stages]
+            phases: [gql_parse_local, normalize, restrict, admit_local, split_stages]
         }
         gql_check {
             backend: query_data_model::ClickHouse
@@ -297,7 +297,8 @@ fn gql_parse_trusted(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<
 
 /// The local CLI returns every property of a node that lists no columns.
 fn gql_parse_local(ctx: &mut impl CompilerCtx<Backend: SqlBackend>) -> Result<()> {
-    parse(ctx, true, true)
+    let admin = ctx.grants().caller().admin();
+    parse(ctx, admin, true)
 }
 
 fn admit_with(ctx: &mut impl CompilerCtx<Backend: SqlBackend>, selectivity: bool) -> Result<()> {

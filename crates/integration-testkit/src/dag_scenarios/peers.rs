@@ -3,7 +3,10 @@
 
 use std::sync::{Arc, Mutex};
 
-use compiler::dag::{Connections, Frontend, Rendered};
+use compiler::HydrationPlan;
+use compiler::dag::{
+    Connections, Env, Frontend, Inputs, Rendered, Request, Runs, Source, compile, split_query,
+};
 use compiler::orbit_authorization::{Checks, Grants};
 use duckdb_client::dag::DuckDbExecutor;
 use duckdb_client::{DuckDbClient, OpenMode};
@@ -13,15 +16,17 @@ use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 use query_engine::shared::dag::Executors;
 use serde_json::{Value, json};
 
-use super::{Run, json_rows};
-use crate::dag_fakes::{peer_packages, run_served, seeded_live};
+use super::{Run, caller, json_rows, row, run};
+use crate::dag_fakes::{SeededGraph, peer_packages, run_served, seeded_live};
 
-fn grants(model: &Model, paths: &[&str]) -> Grants {
+fn grants(model: &Model, paths: &[&str], admin: bool) -> Grants {
     let paths = paths
         .iter()
         .map(|path| AuthorizedPath::new(*path, 20))
         .collect();
-    let session = SecurityContext::new_with_roles(1, paths).unwrap();
+    let session = SecurityContext::new_with_roles(1, paths)
+        .unwrap()
+        .with_role(admin, None);
     let config = orbit_server_config::AppConfig::embedded_defaults().authorization;
     orbit_server::authorization::gitlab::session_grants(&config, model, session).unwrap()
 }
@@ -74,17 +79,30 @@ fn lake() -> Lake {
 
 impl Lake {
     async fn run(&self, query: &str, paths: &[&str]) -> Run {
-        let grants = grants(&self.model, paths);
+        self.run_as(query, &grants(&self.model, paths, false)).await
+    }
+
+    async fn run_as(&self, query: &str, grants: &Grants) -> Run {
         let (events, outcome) = run_served(
             &self.frontend,
             &self.connections,
             &self.executors,
             query,
-            &grants,
+            grants,
             &Checks::default(),
         )
         .await;
         Run { events, outcome }
+    }
+
+    fn env<'a>(&'a self, grants: &'a Grants) -> Env<'a> {
+        Env {
+            frontend: &self.frontend,
+            connections: &self.connections,
+            grants,
+            limits: query_data_model::testkit::limits(),
+            trace: false,
+        }
     }
 }
 
@@ -196,4 +214,130 @@ async fn a_duckdb_stage_feeds_its_keys_to_a_live_stage() {
     assert!(calls(&none, 1).is_empty());
     assert!(none.edges().is_empty());
     assert!(column(none, "e_id").is_empty());
+}
+
+const FIRST_NAME: &str = "MATCH (u:User) WHERE u.id = 1 RETURN u.first_name LIMIT 5";
+
+/// A DuckDB frontend refuses an admin-only property to a caller who is no administrator, with
+/// the server frontend's error, and an administrator reads it from the graph connection.
+#[tokio::test]
+async fn a_duckdb_frontend_returns_admin_only_properties_to_administrators_alone() {
+    let mut lake = lake();
+    let alice = row(json!({"u_first_name": "Alice", "_orbit_u_id": 1, "_orbit_u_type": "User"}));
+    let main = lake.model.names().connection("main").unwrap();
+    lake.executors = lake
+        .executors
+        .with(main, Arc::new(SeededGraph(vec![alice])));
+
+    let refused = lake.run(FIRST_NAME, &["1/9970/"]).await.error();
+    assert!(
+        refused.contains("User.first_name is available to administrators only"),
+        "{refused}"
+    );
+    let server = run(FIRST_NAME, &caller("1/9970/"), Vec::new()).await;
+    assert_eq!(refused, server.error());
+
+    let admin = grants(&lake.model, &["1/9970/"], true);
+    let read = lake.run_as(FIRST_NAME, &admin).await;
+    assert!(lookups(&read, 0)[0].contains("u.first_name"));
+    assert_eq!(column(read, "u_first_name"), [json!("Alice")]);
+}
+
+/// A DuckDB frontend restricts a statement it did not parse, so a plan parsed for an
+/// administrator reads no admin-only property for a caller who is not one.
+#[test]
+fn a_duckdb_frontend_restricts_a_statement_parsed_for_an_administrator() {
+    let lake = lake();
+    let Frontend::Local(catalog) = &lake.frontend else {
+        unreachable!("the lake serves a DuckDB frontend");
+    };
+    let limits = query_data_model::testkit::limits();
+    let split = |admin: bool| {
+        let parsed = compiler::surface::parse(
+            FIRST_NAME,
+            compiler::surface::catalog(catalog, &lake.connections, limits, true),
+        )
+        .unwrap();
+        let grants = grants(&lake.model, &["1/9970/"], admin);
+        split_query(Source::Parsed(parsed), &lake.env(&grants))
+    };
+
+    let error = split(false).unwrap_err().to_string();
+    assert!(
+        error.contains("column \"first_name\" for User: field requires administrator access"),
+        "{error}"
+    );
+    split(true).unwrap();
+}
+
+/// A node a DuckDB frontend returns whole from another connection's stage hydrates no
+/// admin-only property, as a node a single stage returns whole does.
+#[test]
+fn a_whole_node_across_connections_hydrates_no_admin_only_property() {
+    let lake = lake();
+    let query = "MATCH (v:Review)-[:REVIEWS]->(m:MergeRequest)<-[:AUTHORED]-(u:User) RETURN v.id, u LIMIT 5";
+    let names = lake.model.names();
+    let main = names.connection("main").unwrap();
+    let user = names.entity("User").unwrap();
+    let username = names.property(user, "username").unwrap();
+    let first_name = names.property(user, "first_name").unwrap();
+    for admin in [false, true] {
+        let grants = grants(&lake.model, &["1/9970/"], admin);
+        let env = lake.env(&grants);
+        let graph = split_query(Source::Text(query), &env)
+            .unwrap()
+            .stages
+            .into_iter()
+            .find(|stage| matches!(stage.runs, Runs::On { connection, .. } if connection == main))
+            .unwrap();
+        let Request::Query(compiled) = compile(graph, Inputs::default(), &env).unwrap().request
+        else {
+            panic!("the graph stage compiles a relational query");
+        };
+        let HydrationPlan::Static(templates) = &compiled.hydration else {
+            panic!("the graph stage hydrates its nodes");
+        };
+        let columns = &templates
+            .iter()
+            .find(|template| template.entity == user)
+            .unwrap()
+            .columns;
+        assert!(columns.contains(&username), "{columns:?}");
+        assert!(!columns.contains(&first_name), "{columns:?}");
+    }
+}
+
+/// A caller who is no administrator aggregates on a DuckDB frontend over nodes another
+/// connection keys by scope.
+#[test]
+fn a_duckdb_frontend_aggregates_over_another_connections_scoped_nodes() {
+    let lake = lake();
+    let grants = grants(&lake.model, &["1/9970/"], false);
+    let query = "MATCH (p:Project) RETURN count(p) AS projects";
+    split_query(Source::Text(query), &lake.env(&grants)).unwrap();
+}
+
+/// A hidden property is unknown on a DuckDB frontend, as on the server frontend, on the DuckDB
+/// store and on a remote one, and to administrators too.
+#[tokio::test]
+async fn a_duckdb_frontend_knows_no_hidden_property() {
+    let lake = lake();
+    let project = "MATCH (p:Project) WHERE p.id = 1 RETURN p.traversal_path LIMIT 5";
+    let server = run(project, &caller("1/9970/"), Vec::new()).await;
+    assert_eq!(
+        lake.run(project, &["1/9970/"]).await.error(),
+        server.error()
+    );
+
+    let team = "MATCH (t:Team) RETURN t.name, t.traversal_path ORDER BY t.name LIMIT 5";
+    for (query, unknown) in [
+        (project, "unknown property Project.traversal_path"),
+        (team, "unknown property Team.traversal_path"),
+    ] {
+        for admin in [false, true] {
+            let grants = grants(&lake.model, &["1/9970/"], admin);
+            let error = lake.run_as(query, &grants).await.error();
+            assert!(error.contains(unknown), "{error}");
+        }
+    }
 }
