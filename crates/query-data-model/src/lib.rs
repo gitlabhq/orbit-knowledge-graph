@@ -5,6 +5,7 @@ mod error;
 pub mod generic;
 pub mod implementations;
 pub mod introspection;
+mod key;
 pub mod packages;
 pub mod plan;
 mod spec;
@@ -30,6 +31,7 @@ pub use implementations::clickhouse::facts::{
 };
 pub use implementations::duckdb::DuckDb;
 pub use implementations::relational::RelationshipRoute;
+pub use key::Key;
 pub use packages::{Packages, Tier};
 pub use spec::schemas;
 pub use types::{Cardinality, DataType, EnumType, FieldSelectivity, TraversalPathKind};

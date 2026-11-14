@@ -8,6 +8,7 @@ license = "MIT"
 path = "src/lib.rs"
 
 [dependencies]
+query-data-model = { path = "../query-data-model" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
