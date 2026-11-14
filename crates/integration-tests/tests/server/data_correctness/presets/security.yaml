@@ -11,5 +11,5 @@ group_100:
 user_42_scope:
   paths: ["1/9000000000042/"]
 
-no_jira_rows:
+no_integration_rows:
   paths: ["1/102/"]

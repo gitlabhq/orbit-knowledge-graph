@@ -45,7 +45,7 @@ cases:
   - name: empty
     description: A caller who reads none of the chain's first stage gets an empty chain
     config:
-      security: no_jira_rows
+      security: no_integration_rows
     query: |
       MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue)-[:IN_JIRA_PROJECT]->(jp:JiraProject)-[:MAPPED_TO]->(p:Project) WHERE mr.id <= 2002 RETURN mr.title, i.key, jp.key, p.name LIMIT 20
     expect:

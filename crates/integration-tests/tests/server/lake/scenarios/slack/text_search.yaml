@@ -13,6 +13,7 @@ cases:
           rows:
             - { id: m1, author: ann, text: deploy to staging at 5pm }
             - { id: m5, author: dee, text: deploy uses the production keys }
+      live_calls: [[T01, T02]]
 
   - name: partly_denied
     description: A group reader's lookup admits only its group's workspace, so the call never reaches the private group's messages
@@ -27,13 +28,15 @@ cases:
         SlackMessage:
           rows:
             - { id: m1, author: ann, text: deploy to staging at 5pm }
+      live_calls: [[T01]]
 
   - name: empty
     description: A caller whose group installed no workspace sends no call and reads nothing
     config:
-      security: no_jira_rows
+      security: no_integration_rows
     query: |
       MATCH (m:SlackMessage) WHERE m.channel = 'orbit-dev' AND m.text CONTAINS 'deploy' RETURN m.author, m.text LIMIT 20
     expect:
       node_count: 0
       skip_requirements: [node_ids, "filter:channel", "filter:text"]
+      live_calls: []

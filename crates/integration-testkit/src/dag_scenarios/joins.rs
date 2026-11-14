@@ -370,14 +370,7 @@ async fn the_observer_sees_each_stage_in_order() {
 #[tokio::test]
 async fn the_split_carries_each_stages_logical_sub_plan() {
     let ran = run(MENTIONED, &caller("1/9970/"), issues()).await;
-    let split = ran
-        .events
-        .iter()
-        .find_map(|event| match event {
-            Event::Split { stages } => Some(stages.clone()),
-            _ => None,
-        })
-        .unwrap();
+    let split = split(&ran);
     let logical: Vec<Vec<&str>> = split.iter().map(|stage| ops(&stage.logical)).collect();
     assert_eq!(
         logical,
@@ -420,7 +413,10 @@ async fn a_producers_row_checks_run_before_its_keys_cross_the_boundary() {
     let ran = run_with(DEVELOPED, &caller("1/9970/"), developed(), "alice", &one).await;
     assert_eq!(keys(&ran), [Key::Int(2000)]);
     let rows = ran.rows();
-    assert!(rows.iter().all(|row| row["mr_iid"] == 1), "{rows:?}");
+    assert!(
+        !rows.is_empty() && rows.iter().all(|row| row["mr_iid"] == 1),
+        "{rows:?}"
+    );
 
     let none = AllowedKeys::checks("merge_request", []);
     let ran = run_with(DEVELOPED, &caller("1/9970/"), developed(), "alice", &none).await;

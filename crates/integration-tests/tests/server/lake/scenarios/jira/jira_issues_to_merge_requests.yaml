@@ -38,7 +38,7 @@ cases:
   - name: empty
     description: A caller who reads no Jira rows hands no keys to the merge request stage
     config:
-      security: no_jira_rows
+      security: no_integration_rows
     query: |
       MATCH (i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest) WHERE i.status_category <> 'new' RETURN i.key, mr.title LIMIT 20
     expect:
