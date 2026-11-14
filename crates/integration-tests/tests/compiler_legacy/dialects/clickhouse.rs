@@ -1,5 +1,5 @@
-use crate::compiler::setup::{compile_pair, test_ctx, test_ontology};
-use crate::compiler::utils::has_param_value;
+use crate::compiler_legacy::setup::{compile_pair, test_ctx, test_ontology};
+use crate::compiler_legacy::utils::has_param_value;
 use compiler::gql::{PreparedStatement, prepare};
 use compiler::input::DynamicColumnMode;
 use compiler::{Frontend, QueryError, compile};
@@ -408,7 +408,7 @@ fn neighbors_query() {
 
 #[test]
 fn neighbors_project_the_edge_path_only_when_it_is_the_neighbors_own() {
-    let ontology = crate::compiler::setup::embedded_ontology();
+    let ontology = crate::compiler_legacy::setup::embedded_ontology();
     let render = |json: &str, orbit_query: &str| {
         compile_pair(json, orbit_query, &ontology, &test_ctx())
             .unwrap()
@@ -785,7 +785,7 @@ fn multi_table_neighbors_scans_all_tables() {
     );
 }
 
-use crate::compiler::setup::{admin_ctx, embedded_ontology};
+use crate::compiler_legacy::setup::{admin_ctx, embedded_ontology};
 
 const SCOPED_LOOKUP: &str = "FROM gl_project AS _orbit_scope WHERE";
 
@@ -1549,9 +1549,10 @@ fn orbit_query_caps_reject_during_lowering() {
 #[test]
 fn native_predicate_trees_are_bounded_before_planning() {
     use compiler::input::{BooleanExpression, Condition, FilterOp, InputFilter, PredicateTarget};
-    let model =
-        query_data_model::ClickHouseDataModel::derive(crate::compiler::setup::embedded_ontology())
-            .unwrap();
+    let model = query_data_model::ClickHouseDataModel::derive(
+        crate::compiler_legacy::setup::embedded_ontology(),
+    )
+    .unwrap();
     let validator = compiler::passes::validate::Validator::new(&model);
     let mut input =
         compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
@@ -1606,7 +1607,7 @@ fn native_conditions_need_a_column() {
         let error = compiler::compile_input(
             input,
             Default::default(),
-            &crate::compiler::setup::embedded_ontology(),
+            &crate::compiler_legacy::setup::embedded_ontology(),
             &test_ctx(),
         )
         .unwrap_err();

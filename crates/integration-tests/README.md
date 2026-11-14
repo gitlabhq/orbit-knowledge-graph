@@ -9,14 +9,15 @@ exists to break the dependency cycle: it depends on `orbit-server`, `compiler`, 
 ```plaintext
 tests/
   local.rs              # local binary (no Docker)
-  compiler_fixtures.rs  # compiler_fixtures binary (compiler fixtures, no Docker)
+  compiler.rs           # compiler binary (compiler fixtures, no Docker)
   server_containers.rs  # server container tests
   indexer_containers.rs # indexer container tests
   cli.rs                # cli binary (the orbit binary as a subprocess)
   billing_boundary.rs   # billing_boundary binary (orbit-billing dependents)
   common/               # shared helpers
   canary/               # TestContext canary
-  compiler/             # compiler, dialect, and named query tests; compiler fixtures in compiler/fixtures/
+  compiler/             # compiler fixtures in compiler/fixtures/
+  compiler_legacy/      # Rust compiler, dialect, and named query tests that move to compiler fixtures
   indexer/              # indexer tests; indexer scenarios in indexer/scenarios/
   server/               # server tests; query scenarios in server/data_correctness/scenarios/
   fixtures/             # CLI fixtures
@@ -25,7 +26,7 @@ tests/
 | Binary | Tests | CI job |
 |---|---|---|
 | `local` | compiler and querying pipeline, no Docker | `compiler-integration-test` |
-| `compiler_fixtures` | compiler fixtures, with the production query config, no Docker | `compiler-integration-test` |
+| `compiler` | compiler fixtures, with the production query config, no Docker | `compiler-integration-test` |
 | `server_containers` | Server tests with ClickHouse | `integration-test`, `integration-test-data-correctness`, `corpus-smoke-test` |
 | `indexer_containers` | Indexer tests with ClickHouse and NATS | `integration-test`, `integration-test-data-correctness` |
 | `cli` | the `orbit` CLI | `cli-integration-test` |
@@ -56,9 +57,9 @@ To run specific suites or tests directly:
 ```shell
 # Local tests (no Docker needed)
 cargo nextest run --test local                                           # all local tests
-cargo nextest run --test local -E 'test(compiler::)'                     # compiler only
+cargo nextest run --test local -E 'test(compiler_legacy::)'              # legacy compiler tests only
 cargo nextest run --test local -E 'test(querying_pipeline::)'            # querying pipeline only
-cargo nextest run --test compiler_fixtures                               # compiler fixtures
+cargo nextest run --test compiler                                        # compiler fixtures
 
 # Container tests
 export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
@@ -138,14 +139,14 @@ the module name (e.g. `querying_pipeline` lives under `server/`), use a
 `#[path]` attribute:
 
 ```rust
-// local.rs — compiler/ is at the tests/ root, so standard resolution works:
-mod compiler;
+// local.rs — compiler_legacy/ is at the tests/ root, so standard resolution works:
+mod compiler_legacy;
 
 // querying_pipeline/ lives under server/, so we need an explicit path:
 #[path = "server/querying_pipeline/mod.rs"]
 mod querying_pipeline;
 ```
 
-Avoid naming a `.rs` entrypoint the same as an existing subdirectory
-(e.g. don't create `tests/compiler.rs` when `tests/compiler/` exists) --
+Avoid naming a `.rs` entrypoint the same as a subdirectory that has a `mod.rs`
+(`tests/compiler/` holds only fixtures, so `tests/compiler.rs` is fine) --
 Rust forbids both `foo.rs` and `foo/mod.rs` for the same module.

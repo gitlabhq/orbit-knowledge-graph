@@ -139,7 +139,7 @@ run = "./scripts/dev/run-unit-tests.sh"
 description = "Run unit tests (--lib, the xtask and orbit binaries, and the code-graph-incremental integration targets; no Docker)"
 
 [tasks."test:local"]
-run = "cargo nextest run --test local --test compiler_fixtures"
+run = "cargo nextest run --test local --test compiler"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
 
 [tasks."test:scripts"]
@@ -147,7 +147,7 @@ run = "for t in scripts/dev/tests/*_test.sh scripts/fuzz/*_test.sh; do bash \"$t
 description = "Run the shell tests for the local development scripts (no cluster needed)"
 
 [tasks."test:compiler"]
-run = "cargo test -p integration-tests --test compiler_fixtures -- --nocapture"
+run = "cargo test -p integration-tests --test compiler -- --nocapture"
 description = "Check compiler phase state against YAML fixtures (no Docker)"
 
 [tasks."test:integration:codegraph"]

@@ -146,7 +146,7 @@ not ignored tests or missing fixture migrations.
 | `lower::hydration::tests::large_static_tp_sets_emit_or` | Pins 257 static predicates and rejects array mode; complements the dynamic YAML fixture |
 | `lower::hydration::tests::{dynamic,static}_tp_filter_precedes_id_filter` | Checks serialized predicate order; partial YAML item matching is unordered |
 | `compiler::hydration_planning_selects_paths_before_sql_rendering` | Exercises the 256/257 boundary and budget-driven mode selection together |
-| `compiler::ontology::hydration_widens_paths_to_segment_budget` | Checks bound path arrays, shared parameters, and ancestor coverage across generated paths |
+| `compiler_legacy::ontology::hydration_widens_paths_to_segment_budget` | Checks bound path arrays, shared parameters, and ancestor coverage across generated paths |
 | Compiler scope, role, settings, virtual-property, and telemetry tests | Exercise phases or observable outputs outside compiler fixture assertions |
 | Compiler dialect and parameter-rendering tests | Check final backend SQL or parameter bindings, rather than the shared SQL AST |
 | Input deserialization, normalization, schema-limit, validation-error, GQL hashing, hydration-metadata, and DDL tests | Check contracts that a valid query through the harness does not reach |
