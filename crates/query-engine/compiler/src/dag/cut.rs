@@ -36,12 +36,15 @@ impl Cut<'_> {
         let order = self.order()?;
         let lookups = order
             .iter()
-            .map(|group| self.lookups(*group))
+            .map(|group| self.lookups(*group, &order))
             .collect::<Result<Vec<_>>>()?;
         let mut ids = vec![0; self.groups.len()];
         let mut next = 0;
         for (group, lookups) in order.iter().zip(&lookups) {
-            next += lookups.len();
+            next += lookups
+                .iter()
+                .filter(|lookup| lookup.reader.is_none())
+                .count();
             ids[*group] = next;
             next += 1;
         }
@@ -144,9 +147,23 @@ impl Cut<'_> {
                 })
                 .collect::<Result<_>>()?;
             for lookup in lookups {
-                let (scope, admitted) = self.lookup_stage(lookup, stages.len(), &inputs, debug)?;
-                inputs.extend(admitted);
-                stages.push(scope);
+                let scopes = match &lookup.reader {
+                    Some((reader, heads)) => self.scopes(lookup, ids[*reader], |admit, key| {
+                        let output = self.node(*reader, heads[admit], key)?;
+                        contracts[*reader].position(&output).ok_or_else(|| {
+                            QueryError::PipelineInvariant(
+                                "a stage that reads a scope head returns no key column".into(),
+                            )
+                        })
+                    })?,
+                    None => {
+                        let (scope, scopes) =
+                            self.lookup_stage(lookup, stages.len(), &inputs, debug)?;
+                        stages.push(scope);
+                        scopes
+                    }
+                };
+                inputs.extend(scopes);
             }
             let plan = super::sub::plan(
                 self.query,

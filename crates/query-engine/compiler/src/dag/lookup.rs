@@ -1,6 +1,8 @@
 //! The scope lookups of a remote stage. Each `via` chain its reads follow is a relational stage
 //! that reads the chain from its head, on the store placement puts the head on, under every chain
 //! entity's guard and checks, and hands the head's keys to the remote stage as its scope keys.
+//! When an earlier relational stage already reads that chain through the variables the remote
+//! bindings' steps reach, its rows are the scope keys and no lookup stage runs.
 
 use query_data_model::catalog::{Check, Guard, Needs, Operation, Rule};
 use query_data_model::plan::logical::{
@@ -9,12 +11,12 @@ use query_data_model::plan::logical::{
 };
 use query_data_model::plan::tracking::Ref;
 use query_data_model::surface::Statement;
-use query_data_model::{Direction, Endpoint, EntityId, Hop, PropertyId};
+use query_data_model::{Direction, Endpoint, EntityId, Hop, PropertyId, StoreId};
 
 use super::cut::Cut;
 use super::split::place;
 use super::{
-    ColumnType, Contract, Handle, Input, KeyInput, Output, RowCheck, Runs, Stage, StageId,
+    ColumnType, Contract, Handle, Input, KeyInput, Output, Place, RowCheck, Runs, Stage, StageId,
     StageQuery,
 };
 use crate::error::{QueryError, Result};
@@ -25,8 +27,12 @@ pub(super) struct Lookup {
     head: EntityId,
     /// The hops past the head, which the lookup follows on the head's connection.
     chain: Vec<Hop>,
-    /// Each admitted binding, with each of its properties and the head key it holds.
-    admits: Vec<(Ref, Vec<(PropertyId, PropertyId)>)>,
+    /// Each admitted binding, the hop it reaches the head by, and each of its properties with the
+    /// head key it holds.
+    admits: Vec<(Ref, Hop, Vec<(PropertyId, PropertyId)>)>,
+    /// The earlier relational group whose stage already reads the chain, and the variable it
+    /// reads each admitted binding's head as.
+    pub reader: Option<(usize, Vec<Ref>)>,
 }
 
 fn name(index: usize) -> String {
@@ -37,8 +43,9 @@ fn name(index: usize) -> String {
 }
 
 impl Cut<'_> {
-    /// The lookups a group's reads need, one per distinct chain.
-    pub(super) fn lookups(&self, index: usize) -> Result<Vec<Lookup>> {
+    /// The lookups a group's reads need, one per distinct chain, each with the earlier stage in
+    /// `order` that already reads it.
+    pub(super) fn lookups(&self, index: usize, order: &[usize]) -> Result<Vec<Lookup>> {
         let group = &self.groups[index];
         let mut lookups: Vec<Lookup> = Vec::new();
         for binding in &group.bindings {
@@ -55,7 +62,7 @@ impl Cut<'_> {
             let [first, chain @ ..] = &hops[..] else {
                 return Err(QueryError::Security("a via chain is empty".into()));
             };
-            let admitted = (*binding, self.held_keys(first)?);
+            let admitted = (*binding, *first, self.held_keys(first)?);
             match lookups
                 .iter_mut()
                 .find(|lookup| lookup.head == first.to && lookup.chain == chain)
@@ -66,10 +73,130 @@ impl Cut<'_> {
                     head: first.to,
                     chain: chain.to_vec(),
                     admits: vec![admitted],
+                    reader: None,
                 }),
             }
         }
+        for lookup in &mut lookups {
+            lookup.reader = self.reader(lookup, order)?;
+        }
         Ok(lookups)
+    }
+
+    /// The earlier relational group that reads the lookup's chain exactly: each admitted
+    /// binding's own steps follow the chain into variables that group reads, on the stores the
+    /// lookup would read them from, so its checked rows are the keys the lookup would return; and
+    /// the lookup has no bound that group's read lacks.
+    fn reader(&self, lookup: &Lookup, order: &[usize]) -> Result<Option<(usize, Vec<Ref>)>> {
+        let steps = self.query.steps();
+        let reach = |binding: Ref, first: &Hop| {
+            let head = follow(&steps, binding, first)?;
+            let group = self.group(head);
+            let mut at = head;
+            for hop in &lookup.chain {
+                at = follow(&steps, at, hop).filter(|next| self.group(*next) == group)?;
+            }
+            Some((group, head))
+        };
+        let Some(reached) = lookup
+            .admits
+            .iter()
+            .map(|(binding, first, _)| reach(*binding, first))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(None);
+        };
+        let group = reached[0].0;
+        let position = |group: usize| order.iter().position(|at| *at == group);
+        if reached.iter().any(|(at, _)| *at != group)
+            || position(group) >= position(lookup.group)
+            || !self.peer(self.groups[group].place).joins()
+        {
+            return Ok(None);
+        }
+        let holders = self.holders(lookup);
+        let holds = |(binding, property): &(Ref, PropertyId)| {
+            holders
+                .iter()
+                .any(|(held, at, _)| held == binding && at == property)
+        };
+        let bounded_elsewhere = self.crossings.iter().any(|crossing| {
+            let (producer, consumer) = crossing.sides(order, |binding| self.group(binding));
+            crossing.consumer(order) == lookup.group
+                && self.group(producer[0].0) != group
+                && consumer.iter().any(holds)
+        });
+        if bounded_elsewhere || !self.named(&holders).is_empty() {
+            return Ok(None);
+        }
+        let mut needs = Needs::default();
+        for (_, key) in lookup.admits.iter().flat_map(|(_, _, pairs)| pairs) {
+            needs.apply(*key, Operation::OneOf);
+        }
+        let (_, stores) = self.placed(lookup, &needs)?;
+        let read = &self.groups[group].stores;
+        Ok(stores
+            .iter()
+            .all(|placed| read.contains(placed))
+            .then(|| (group, reached.into_iter().map(|(_, head)| head).collect())))
+    }
+
+    /// The scope keys of each admitted binding, read from stage `from` at the positions
+    /// `position` gives each binding's head keys.
+    pub(super) fn scopes(
+        &self,
+        lookup: &Lookup,
+        from: StageId,
+        mut position: impl FnMut(usize, PropertyId) -> Result<usize>,
+    ) -> Result<Vec<Input>> {
+        let graph = self.query.model.graph();
+        let mut scopes = Vec::new();
+        for (index, (binding, _, pairs)) in lookup.admits.iter().enumerate() {
+            scopes.push(Input::Scope(KeyInput {
+                from,
+                positions: pairs
+                    .iter()
+                    .map(|(_, key)| position(index, *key))
+                    .collect::<Result<_>>()?,
+                binding: self.query.name(*binding).to_string(),
+                properties: pairs.iter().map(|(held, _)| *held).collect(),
+                types: pairs
+                    .iter()
+                    .map(|(_, key)| graph.property(*key).data_type)
+                    .collect(),
+            }));
+        }
+        Ok(scopes)
+    }
+
+    /// The head's place for a read with `needs`, and the store of each chain entity, all on
+    /// the head's connection, which runs relational stages.
+    fn placed(&self, lookup: &Lookup, needs: &Needs) -> Result<(Place, Vec<(EntityId, StoreId)>)> {
+        let model = self.query.model;
+        let graph = model.graph();
+        let head = place(model, self.connections, lookup.head, needs)?;
+        let peer = self.peer(head.connection);
+        if !peer.joins() {
+            return Err(QueryError::Security(format!(
+                "{}, the head of a via chain, is read on {}, which runs no relational stage",
+                graph.entity(lookup.head).name,
+                peer.name()
+            )));
+        }
+        let mut stores = vec![(lookup.head, head.store)];
+        for hop in &lookup.chain {
+            let follower = place(model, self.connections, hop.to, &Needs::default())?;
+            if follower.connection != head.connection {
+                return Err(QueryError::Security(format!(
+                    "{}'s via chain crosses from connection {} to {}",
+                    graph.entity(lookup.head).name,
+                    peer.name(),
+                    self.peer(follower.connection).name()
+                )));
+            }
+            stores.push((hop.to, follower.store));
+        }
+        Ok((head, stores))
     }
 
     /// The properties the reading side of a chain's first hop holds the head's keys in.
@@ -112,7 +239,7 @@ impl Cut<'_> {
         let keyed = self.keyed(&holders, inputs);
         let named = self.named(&holders);
         let mut needs = Needs::default();
-        for (_, key) in lookup.admits.iter().flat_map(|(_, pairs)| pairs) {
+        for (_, key) in lookup.admits.iter().flat_map(|(_, _, pairs)| pairs) {
             let bound = keyed.iter().any(|input| input.properties.contains(key))
                 || named.iter().any(|(property, _)| property == key);
             match bound {
@@ -120,15 +247,8 @@ impl Cut<'_> {
                 false => needs.read(*key),
             }
         }
-        let head = place(model, self.connections, lookup.head, &needs)?;
+        let (head, stores) = self.placed(lookup, &needs)?;
         let peer = self.peer(head.connection);
-        if !peer.joins() {
-            return Err(QueryError::Security(format!(
-                "{}, the head of a via chain, is read on {}, which runs no relational stage",
-                graph.entity(lookup.head).name,
-                peer.name()
-            )));
-        }
         if let Some(key) = keyed
             .iter()
             .flat_map(|input| &input.properties)
@@ -141,22 +261,7 @@ impl Cut<'_> {
                 graph.property(*key).name
             )));
         }
-        let entities: Vec<EntityId> = std::iter::once(lookup.head)
-            .chain(lookup.chain.iter().map(|hop| hop.to))
-            .collect();
-        let mut stores = vec![(lookup.head, head.store)];
-        for entity in &entities[1..] {
-            let follower = place(model, self.connections, *entity, &Needs::default())?;
-            if follower.connection != head.connection {
-                return Err(QueryError::Security(format!(
-                    "{}'s via chain crosses from connection {} to {}",
-                    graph.entity(lookup.head).name,
-                    peer.name(),
-                    self.peer(follower.connection).name()
-                )));
-            }
-            stores.push((*entity, follower.store));
-        }
+        let entities: Vec<EntityId> = stores.iter().map(|(entity, _)| *entity).collect();
         let mut contract = Contract {
             columns: Vec::new(),
         };
@@ -179,19 +284,7 @@ impl Cut<'_> {
                 ColumnType::Scalar(graph.property(property).data_type),
             )
         };
-        let mut scopes = Vec::new();
-        for (binding, pairs) in &lookup.admits {
-            scopes.push(Input::Scope(KeyInput {
-                from: id,
-                positions: pairs.iter().map(|(_, key)| push(0, *key)).collect(),
-                binding: self.query.name(*binding).to_string(),
-                properties: pairs.iter().map(|(held, _)| *held).collect(),
-                types: pairs
-                    .iter()
-                    .map(|(_, key)| graph.property(*key).data_type)
-                    .collect(),
-            }));
-        }
+        let scopes = self.scopes(lookup, id, |_, key| Ok(push(0, key)))?;
         let access = model.access();
         let mut checks = Vec::new();
         for (index, entity) in entities.iter().enumerate() {
@@ -253,7 +346,7 @@ impl Cut<'_> {
             .flat_map(|crossing| crossing.pairs)
             .collect();
         let mut holders = Vec::new();
-        for (binding, held_keys) in &lookup.admits {
+        for (binding, _, held_keys) in &lookup.admits {
             for (held, key) in held_keys {
                 let mut equal = vec![(*binding, *held)];
                 while let Some(next) = pairs
@@ -406,4 +499,21 @@ impl Cut<'_> {
             q.limit(rows, self.limits.stage_keys as u64 + 1)
         })?)
     }
+}
+
+/// The variable a single-hop pattern step that walks `hop` from `from` reaches.
+fn follow(steps: &[crate::logical::Step<'_>], from: Ref, hop: &Hop) -> Option<Ref> {
+    steps.iter().find_map(|step| {
+        let [walked] = step.hops else {
+            return None;
+        };
+        if step.range.max != 1 || walked.variant != hop.variant {
+            return None;
+        }
+        match (step.from == from, step.to == from) {
+            (true, _) if walked.forward == hop.forward => Some(step.to),
+            (_, true) if walked.forward != hop.forward => Some(step.from),
+            _ => None,
+        }
+    })
 }
