@@ -591,6 +591,12 @@ fn return_columns(
             continue;
         };
         let id_column = crate::logical::columns::identity_column(model, entity_id)?;
+        let [identity] = identity.as_slice() else {
+            return Err(QueryError::PipelineInvariant(format!(
+                "node '{}' binds one term per identity column",
+                node.name
+            )));
+        };
         let redaction_column = redaction_column(model, entity_id).unwrap_or(id_column);
         let needs_separate_pk = redaction_column != id_column;
         let authorization_id = if needs_separate_pk {

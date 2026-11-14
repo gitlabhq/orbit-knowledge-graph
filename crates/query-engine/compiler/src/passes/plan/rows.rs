@@ -36,9 +36,10 @@ pub(super) fn point_lookup(predicates: &[Predicate], id_range_span: i64) -> Opti
 pub struct BindingSource {
     pub node: String,
     pub alias: String,
-    pub column: String,
-    /// The node's identity column, which the binding's column carries.
-    pub identity: String,
+    /// The columns of `alias` that carry each part of the node's identity.
+    pub key: Vec<String>,
+    /// The node's identity columns, which `key` carries.
+    pub identity: Vec<String>,
     pub property_source: Option<String>,
     pub traversal_path: Option<Column>,
 }
@@ -48,21 +49,32 @@ impl BindingSource {
         if property == TRAVERSAL_PATH_COLUMN {
             return self.traversal_path.clone();
         }
-        if property == self.identity {
-            Some(Column::new(&self.alias, &self.column))
-        } else {
-            self.property_source
+        match self.identity.iter().position(|part| part == property) {
+            Some(part) => Some(Column::new(&self.alias, &self.key[part])),
+            None => self
+                .property_source
                 .as_ref()
-                .map(|source| Column::new(source, property))
+                .map(|source| Column::new(source, property)),
         }
     }
 
-    pub(super) fn table(alias: &str, identity: &str) -> Self {
+    /// The one column carrying the node's identity, for a join that keys the node by one column.
+    pub(super) fn id(&self) -> Result<Column> {
+        match self.key.as_slice() {
+            [column] => Ok(Column::new(&self.alias, column)),
+            _ => Err(QueryError::Validation(format!(
+                "node '{}' has a composite identity, which no single column holds",
+                self.node
+            ))),
+        }
+    }
+
+    pub(super) fn table(alias: &str, identity: &[String]) -> Self {
         Self {
             node: alias.into(),
             alias: alias.into(),
-            column: identity.into(),
-            identity: identity.into(),
+            key: identity.to_vec(),
+            identity: identity.to_vec(),
             property_source: Some(alias.into()),
             traversal_path: Some(Column::new(alias, TRAVERSAL_PATH_COLUMN)),
         }

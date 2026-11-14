@@ -89,7 +89,21 @@ pub fn identity_column(
     model: &Catalog<impl SqlBackend>,
     entity: EntityId,
 ) -> crate::error::Result<&str> {
-    model.identity_column(entity).ok_or_else(|| {
+    match identity_columns(model, entity)? {
+        [column] => Ok(column),
+        _ => Err(crate::error::QueryError::Validation(format!(
+            "{} has a composite identity, which no single column holds",
+            model.graph().entity(entity).name
+        ))),
+    }
+}
+
+/// The columns holding each part of the entity's identity on the catalog's connection.
+pub fn identity_columns(
+    model: &Catalog<impl SqlBackend>,
+    entity: EntityId,
+) -> crate::error::Result<&[String]> {
+    model.identity_columns(entity).ok_or_else(|| {
         crate::error::QueryError::Lowering(format!(
             "{} has no identity column on connection {}",
             model.graph().entity(entity).name,

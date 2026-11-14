@@ -8,8 +8,11 @@ use std::collections::{HashMap, HashSet};
 use query_data_model::plan::logical::{Columns, Expr, Measure};
 
 use super::{NodePlan, Pattern};
+use crate::error::QueryError;
 use crate::logical::anchors::Anchor;
-use crate::logical::columns::{free_text, identity_column, redaction_column, returned, selections};
+use crate::logical::columns::{
+    free_text, identity_columns, redaction_column, returned, selections,
+};
 use crate::logical::{Query, binding};
 use crate::passes::plan::filters::{bind_facts, unindex_if_key_narrowed};
 use crate::passes::plan::predicates::{
@@ -28,7 +31,7 @@ impl NodePlan {
     {
         let binding = anchor.binding;
         let entity = binding.entity;
-        let id_column = identity_column(model, entity)?.to_string();
+        let identity = identity_columns(model, entity)?.to_vec();
         let graph = model.graph();
         let mut filters = bind_facts(anchor, model);
         filters.retain(|(_, filter)| {
@@ -54,9 +57,12 @@ impl NodePlan {
                 (true, true) => ReadScope::HighFanOut,
             },
             redaction_id_column: redaction_column(model, entity)
-                .unwrap_or(&id_column)
-                .to_string(),
-            id_column,
+                .or(match identity.as_slice() {
+                    [column] => Some(column.as_str()),
+                    _ => None,
+                })
+                .map(str::to_string),
+            identity,
             columns: returned(model, entity, selection)
                 .into_iter()
                 .filter(|property| model.lookup(*property).is_none())
@@ -81,7 +87,18 @@ impl NodePlan {
     }
 
     pub fn uses_default_pk(&self) -> bool {
-        self.redaction_id_column == self.id_column
+        self.identity.len() == 1 && self.redaction_id_column.as_ref() == self.identity.first()
+    }
+
+    /// The column holding the node's identity, for a read that keys the node by one column.
+    pub fn id_column(&self) -> crate::error::Result<&str> {
+        match self.identity.as_slice() {
+            [column] => Ok(column),
+            _ => Err(QueryError::Validation(format!(
+                "node '{}' has a composite identity, which no single column holds",
+                self.alias
+            ))),
+        }
     }
 
     pub(crate) fn is_pinned(&self) -> bool {
@@ -110,7 +127,9 @@ impl NodePlan {
             .filter_map(|(_, filter)| property_filter(&self.alias, filter, graph))
             .collect();
         predicates.extend(self.predicates.iter().cloned());
-        predicates.extend(self.id_predicates(Column::new(&self.alias, &self.id_column)));
+        if let [column] = self.identity.as_slice() {
+            predicates.extend(self.id_predicates(Column::new(&self.alias, column)));
+        }
         predicates.push(live(&self.alias));
         predicates
     }

@@ -98,7 +98,7 @@ pub(crate) fn stable_order<B: SqlBackend>(
         .bindings()
         .into_iter()
         .filter_map(|binding| nodes.get(binding.name))
-        .map(|binding| binding.identity().clone());
+        .flat_map(|binding| binding.identity().iter().cloned());
     if query.steps().is_empty() {
         return identities.collect();
     }

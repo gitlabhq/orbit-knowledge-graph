@@ -131,7 +131,7 @@ where
         let read = self.pattern.node_read(&mut self.reads, node)?;
         self.root = Some(self.reads.read(&read, None)?);
         self.outputs = node.outputs();
-        Ok(vec![BindingSource::table(&node.alias, &node.id_column)])
+        Ok(vec![BindingSource::table(&node.alias, &node.identity)])
     }
 
     fn binding(&self, node: &str) -> Option<&BindingSource> {
@@ -163,15 +163,15 @@ where
         &mut self,
         node: &str,
         alias: &str,
-        column: &str,
+        key: &[String],
         property_source: Option<&str>,
         traversal_path: Option<Column>,
     ) {
         self.nodes.entry(node.to_string()).or_default().binding = Some(BindingSource {
             node: node.to_string(),
             alias: alias.to_string(),
-            column: column.to_string(),
-            identity: self.pattern.nodes[node].id_column.clone(),
+            key: key.to_vec(),
+            identity: self.pattern.nodes[node].identity.clone(),
             property_source: property_source.map(str::to_string),
             traversal_path,
         });
@@ -184,7 +184,7 @@ where
         self.set_binding(
             &node.alias,
             &node.alias,
-            &node.id_column,
+            &node.identity,
             Some(&node.alias),
             traversal_path,
         );
@@ -211,21 +211,18 @@ where
             return Ok(());
         }
         let mut node = self.pattern.uncovered_node(alias);
+        let id_column = node.id_column()?.to_string();
         if let Some(ids) = self.reached_ids(alias) {
             node.predicates
-                .push(membership(Column::new(alias, &node.id_column), ids));
+                .push(membership(Column::new(alias, &id_column), ids));
         }
-        let id_column = node.id_column.clone();
         self.attach_table(&node, |builder| {
             let binding = builder.binding(alias).ok_or_else(|| {
                 QueryError::Lowering(format!(
                     "node '{alias}' is not connected to the planned relations"
                 ))
             })?;
-            Ok((
-                Column::new(alias, &id_column),
-                Column::new(&binding.alias, &binding.column),
-            ))
+            Ok((Column::new(alias, &id_column), binding.id()?))
         })
     }
 
@@ -290,14 +287,15 @@ where
         if let Some(ids) = self.ids(&node.alias) {
             return Ok(ids.clone());
         }
+        let id_column = node.id_column()?;
         let source = self.node_read(node)?;
         let id = Projection::new(
-            OutputValue::Column(Column::new(&node.alias, &node.id_column)),
-            &node.id_column,
+            OutputValue::Column(Column::new(&node.alias, id_column)),
+            id_column,
         );
         let ids = (
             self.reads.project(&source, None, &[id])?,
-            node.id_column.clone(),
+            id_column.to_string(),
         );
         self.set_ids(&node.alias, ids.clone());
         Ok(ids)
@@ -339,7 +337,7 @@ where
         if let Some(ids) = self.ids(node) {
             return Ok(Some(ids.clone()));
         }
-        let id_column = self.pattern.nodes[node].id_column.clone();
+        let id_column = self.pattern.nodes[node].id_column()?.to_string();
         let Some(ids) = self.ids_through_holder(node, &id_column)? else {
             return Ok(None);
         };

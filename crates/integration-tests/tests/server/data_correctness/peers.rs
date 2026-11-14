@@ -5,15 +5,13 @@
 use std::sync::{Arc, Mutex};
 
 use arrow::record_batch::RecordBatch;
-use arrow::util::display::array_value_to_string;
 use compiler::dag::{Connections, Frontend, Rendered};
 use compiler::orbit_authorization::Key;
 use duckdb_client::dag::DuckDbExecutor;
 use duckdb_client::{DuckDbClient, OpenMode};
-use integration_testkit::dag_fakes::{
-    AllowedKeys, peer_packages, rank_packages, run_served, seeded_live,
-};
+use integration_testkit::dag_fakes::{AllowedKeys, peer_packages, run_served, seeded_live};
 use integration_testkit::{TABLE_PREFIX, TestContext, t};
+use orbit_arrow::ArrowUtils;
 use orbit_server::pipeline::graph_executors;
 use query_data_model::implementations::clickhouse::versioned;
 use query_data_model::implementations::live::ExtractionRequest;
@@ -343,19 +341,17 @@ const MASONS: &str = "masons meet at noon";
 const BADGE_GOLD: &str = "3f2b8c1e-7a4d-4e65-9b0a-1c2d3e4f5a6b";
 const BADGE_SILVER: &str = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
 
-/// Creates and fills the guild, clan and, when `packages` holds them, guild rank tables:
-/// guilds and clans under `1/100/` and `1/555/`.
-pub(super) async fn seed_guilds(ctx: &TestContext, packages: &Packages) {
-    let unprefixed = packages.deployed(&guilds_deployments(), "guilds").unwrap();
-    let ranked = packages
-        .sources()
-        .keys()
-        .any(|path| path.starts_with("peers.ranks/"));
-    let mut tables = vec![("main", "gl_guild"), ("releases", "gl_clan")];
-    if ranked {
-        tables.push(("main", "gl_guild_rank"));
-    }
-    for (connection, table) in tables {
+/// Creates and fills the guild, clan and guild rank tables: guilds, clans and ranks under
+/// `1/100/` and `1/555/`.
+pub(super) async fn seed_guilds(ctx: &TestContext) {
+    let unprefixed = peer_packages()
+        .deployed(&guilds_deployments(), "guilds")
+        .unwrap();
+    for (connection, table) in [
+        ("main", "gl_guild"),
+        ("releases", "gl_clan"),
+        ("main", "gl_guild_rank"),
+    ] {
         let catalog = unprefixed
             .physical::<ClickHouse>(unprefixed.names().connection(connection).unwrap())
             .unwrap();
@@ -363,7 +359,7 @@ pub(super) async fn seed_guilds(ctx: &TestContext, packages: &Packages) {
         let table = schema.table(table).unwrap();
         ctx.execute(&table.to_create_sql(&TABLE_PREFIX)).await;
     }
-    let mut statements = vec![
+    let statements = [
         format!(
             "INSERT INTO {} (id, name, traversal_path) VALUES (7, 'Smiths', '1/100/'), (8, 'Masons', '1/555/')",
             t("gl_guild")
@@ -372,13 +368,11 @@ pub(super) async fn seed_guilds(ctx: &TestContext, packages: &Packages) {
             "INSERT INTO {} (slug, name, traversal_path) VALUES ('forge', 'Forge', '1/100/'), ('quarry', 'Quarry', '1/555/')",
             t("gl_clan")
         ),
-    ];
-    if ranked {
-        statements.push(format!(
-            "INSERT INTO {} (guild, rank, title, granted_at, tier, badge, traversal_path) VALUES (7, 'gold', 'Grandmaster', '2026-03-01 12:00:00', 2, '{BADGE_GOLD}', '1/100/'), (8, 'silver', 'Journeyman', '2026-04-02 08:30:00', 1, '{BADGE_SILVER}', '1/555/')",
+        format!(
+            "INSERT INTO {} (guild, rank, title, granted_at, tier, badge, traversal_path) VALUES (7, 'gold', 'Grandmaster', '2026-03-01 12:00:00', 'gold', '{BADGE_GOLD}', '1/100/'), (8, 'silver', 'Journeyman', '2026-04-02 08:30:00', 'silver', '{BADGE_SILVER}', '1/555/')",
             t("gl_guild_rank")
-        ));
-    }
+        ),
+    ];
     for statement in statements {
         ctx.execute(&statement).await;
     }
@@ -554,7 +548,7 @@ const RANKED: &str = "MATCH (p:RankPost)-[:RANK_POST_OF]->(r:GuildRank) WHERE p.
 pub(super) async fn rank_posts_reach_the_live_stage_only_for_the_ranks_the_caller_reads(
     ctx: &TestContext,
 ) {
-    let peers = build(ctx, &rank_packages(), &guilds_deployments(), "guilds");
+    let peers = build(ctx, &peer_packages(), &guilds_deployments(), "guilds");
     let posts = Posts {
         query: RANK_POSTS,
         column: "p_text",
@@ -591,17 +585,27 @@ pub(super) async fn rank_posts_reach_the_live_stage_only_for_the_ranks_the_calle
 }
 
 /// The composite head's columns survive the stage boundary: the timestamp as its instant, the
-/// enum as its label and the UUID as its canonical text.
+/// enum as its label and the UUID as its canonical text, each as the response formats it.
 pub(super) async fn rank_columns_decode_through_a_stage_boundary(ctx: &TestContext) {
-    let peers = build(ctx, &rank_packages(), &guilds_deployments(), "guilds");
+    let peers = build(ctx, &peer_packages(), &guilds_deployments(), "guilds");
+    let returned = [
+        "p_text",
+        "r_rank",
+        "r_title",
+        "r_granted_at",
+        "r_tier",
+        "r_badge",
+    ];
     let rows = |batches: &[RecordBatch]| -> Vec<String> {
         let mut rows = Vec::new();
         for batch in batches.iter().filter(|batch| batch.num_rows() > 0) {
             for index in 0..batch.num_rows() {
-                let cells: Vec<String> = batch
-                    .columns()
+                let cells: Vec<String> = returned
                     .iter()
-                    .map(|column| array_value_to_string(column, index).unwrap())
+                    .map(|name| {
+                        let column = batch.column_by_name(name).unwrap();
+                        ArrowUtils::array_value_to_string(column.as_ref(), index).unwrap()
+                    })
                     .collect();
                 rows.push(cells.join("|"));
             }
@@ -610,9 +614,9 @@ pub(super) async fn rank_columns_decode_through_a_stage_boundary(ctx: &TestConte
         rows
     };
     let gold =
-        format!("gold rank hall opens|gold|Grandmaster|2026-03-01T12:00:00|gold|{BADGE_GOLD}");
+        format!("gold rank hall opens|gold|Grandmaster|2026-03-01T12:00:00Z|gold|{BADGE_GOLD}");
     let silver = format!(
-        "silver rank oath renewed|silver|Journeyman|2026-04-02T08:30:00|silver|{BADGE_SILVER}"
+        "silver rank oath renewed|silver|Journeyman|2026-04-02T08:30:00Z|silver|{BADGE_SILVER}"
     );
     let (_, both) = peers.run(RANKED, &["1/100/", "1/555/"]).await;
     assert_eq!(rows(&both), [gold.clone(), silver]);

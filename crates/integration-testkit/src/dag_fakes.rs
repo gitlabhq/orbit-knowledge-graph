@@ -248,7 +248,8 @@ pub fn dag_packages() -> query_data_model::Packages {
 /// The DAG packages, plus releases on a second ClickHouse connection keyed by UUID, the
 /// deployments that name them on the graph connection, reviews on a DuckDB connection,
 /// snippets that a code store on their own connection searches, and live posts whose `via`
-/// heads are keyed by an integer and by an identity not named `id`.
+/// heads are keyed by an integer, by an identity not named `id` and by a composite identity on
+/// ClickHouse.
 pub fn peer_packages() -> query_data_model::Packages {
     let peers = crate::authorization_variants::platform(&[
         "peers.releases",
@@ -257,13 +258,9 @@ pub fn peer_packages() -> query_data_model::Packages {
         "peers.snippets",
         "peers.guilds",
         "peers.clans",
+        "peers.ranks",
     ]);
     dag_packages().with(peers)
-}
-
-/// The peer packages plus guild ranks, whose composite identity sits on ClickHouse.
-pub fn rank_packages() -> query_data_model::Packages {
-    peer_packages().with(crate::authorization_variants::platform(&["peers.ranks"]))
 }
 
 /// `packages` with text replaced in some fragments, keeping each package's tier.

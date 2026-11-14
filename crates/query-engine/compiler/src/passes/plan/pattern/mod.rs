@@ -41,9 +41,10 @@ pub struct NodePlan {
     pub id_range: Option<(i64, i64)>,
     pub has_traversal_path: bool,
     pub read_scope: ReadScope,
-    /// The column holding the node's identity.
-    pub id_column: String,
-    pub redaction_id_column: String,
+    /// The columns holding each part of the node's identity.
+    pub identity: Vec<String>,
+    /// The column redaction reads the node's rows by: its check key, or its one identity column.
+    pub redaction_id_column: Option<String>,
     pub columns: Vec<String>,
     pub emit_select: bool,
     pub null_as_epoch: NullAsEpochColumns,

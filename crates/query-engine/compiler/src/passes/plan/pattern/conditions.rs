@@ -155,7 +155,7 @@ where
                             pattern
                                 .nodes
                                 .get(&column.source)
-                                .is_none_or(|node| column.name != node.id_column)
+                                .is_none_or(|node| !node.identity.contains(&column.name))
                         })
                         .map(|column| column.source.clone()),
                 );

@@ -146,7 +146,7 @@ fn pattern<B: SqlBackend>(
         let nodes = metadata::bindings(&pattern.nodes, query, &matched.bindings)?;
         let (rows, stable_order) = match query.kind() {
             Kind::Aggregation => {
-                let result = aggregation::aggregation_plan(query, &pattern.nodes, &matched);
+                let result = aggregation::aggregation_plan(query, &pattern.nodes, &matched)?;
                 let stable_order = aggregation::emit::stable_order(&result);
                 let rows = aggregation::emit::emit(q, matched, &result, limit)?;
                 (rows, stable_order)

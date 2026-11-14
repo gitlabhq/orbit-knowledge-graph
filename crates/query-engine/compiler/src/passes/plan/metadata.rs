@@ -30,7 +30,8 @@ pub enum Term {
 pub enum NodeBinding {
     Filtered,
     Values {
-        identity: Term,
+        /// One term per part of the node's identity.
+        identity: Vec<Term>,
         table_alias: Option<String>,
         traversal_path: Option<Column>,
     },
@@ -40,18 +41,21 @@ pub enum NodeBinding {
 impl NodeBinding {
     pub(super) fn source(
         alias: &str,
-        column: &str,
+        key: &[String],
         table_alias: Option<String>,
         traversal_path: Option<Column>,
     ) -> Self {
         Self::Values {
-            identity: Term::Column(Column::new(alias, column)),
+            identity: key
+                .iter()
+                .map(|column| Term::Column(Column::new(alias, column)))
+                .collect(),
             table_alias,
             traversal_path,
         }
     }
 
-    pub(super) fn identity(&self) -> &Term {
+    pub(super) fn identity(&self) -> &[Term] {
         let Self::Values { identity, .. } = self else {
             unreachable!("projected bindings supply their own ordering")
         };
@@ -77,7 +81,7 @@ pub(super) fn bindings(
         .map(|binding| {
             let source = NodeBinding::source(
                 &binding.alias,
-                &binding.column,
+                &binding.key,
                 binding.property_source.clone(),
                 binding.traversal_path.clone(),
             );
@@ -104,9 +108,9 @@ pub(super) fn bindings(
                     ..
                 }),
                 _,
-            ) => NodeBinding::source(table, &source.column, None, None),
+            ) => NodeBinding::source(table, &source.key, None, None),
             (_, Some([id])) => NodeBinding::Values {
-                identity: Term::Id(id.clone()),
+                identity: vec![Term::Id(id.clone())],
                 table_alias: None,
                 traversal_path: None,
             },

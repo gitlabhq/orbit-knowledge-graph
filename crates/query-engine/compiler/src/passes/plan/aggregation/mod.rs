@@ -41,7 +41,7 @@ pub(crate) fn aggregation_plan(
     query: Query<'_>,
     nodes: &HashMap<String, NodePlan>,
     execution: &Matched,
-) -> AggregationPlan {
+) -> crate::error::Result<AggregationPlan> {
     let mut plan = AggregationPlan {
         groups: vec![],
         group_outputs: vec![],
@@ -59,7 +59,7 @@ pub(crate) fn aggregation_plan(
             }),
     };
     let Some((groups, measures, outputs)) = aggregate(query) else {
-        return plan;
+        return Ok(plan);
     };
     let graph = query.model.graph();
     let value = |node: &str, property: &str| {
@@ -93,29 +93,32 @@ pub(crate) fn aggregation_plan(
                         },
                     );
                 }
-                let primary_key = execution
+                let source = execution
                     .bindings
                     .iter()
                     .find(|binding| binding.node == node)
-                    .and_then(|binding| binding.property_source.as_ref())
-                    .map(|source| Column::new(source, &metadata.id_column))
-                    .unwrap_or_else(|| execution.property(node, &metadata.id_column));
-                add_group(
-                    &mut plan.groups,
-                    Group {
-                        value: OutputValue::Column(primary_key),
-                        truncate: None,
-                    },
-                );
-                add_group(
-                    &mut plan.groups,
-                    Group {
-                        value: OutputValue::Column(
-                            execution.property(node, &metadata.redaction_id_column),
-                        ),
-                        truncate: None,
-                    },
-                );
+                    .and_then(|binding| binding.property_source.as_ref());
+                for part in &metadata.identity {
+                    let primary_key = source
+                        .map(|source| Column::new(source, part))
+                        .unwrap_or_else(|| execution.property(node, part));
+                    add_group(
+                        &mut plan.groups,
+                        Group {
+                            value: OutputValue::Column(primary_key),
+                            truncate: None,
+                        },
+                    );
+                }
+                if let Some(redaction) = &metadata.redaction_id_column {
+                    add_group(
+                        &mut plan.groups,
+                        Group {
+                            value: OutputValue::Column(execution.property(node, redaction)),
+                            truncate: None,
+                        },
+                    );
+                }
             }
             _ => {}
         }
@@ -129,22 +132,30 @@ pub(crate) fn aggregation_plan(
             Logical::Min(input) => (AggregateFunction::Min, Some(input), false),
             Logical::Max(input) => (AggregateFunction::Max, Some(input), false),
         };
-        let argument = input.and_then(|input| {
-            let node = query.name(binding(*input));
-            let property = match input {
-                Expr::Property { property, .. } => Some(graph.property(*property).name.as_str()),
-                _ => None,
-            };
-            match (function, distinct) {
-                (AggregateFunction::Count, true) => property
-                    .or_else(|| nodes.get(node).map(|node| node.id_column.as_str()))
+        let argument = match input {
+            None => None,
+            Some(input) => {
+                let node = query.name(binding(*input));
+                let property = match input {
+                    Expr::Property { property, .. } => {
+                        Some(graph.property(*property).name.as_str())
+                    }
+                    _ => None,
+                };
+                match (function, distinct) {
+                    (AggregateFunction::Count, true) => match (property, nodes.get(node)) {
+                        (Some(property), _) => Some(property),
+                        (None, Some(node)) => Some(node.id_column()?),
+                        (None, None) => None,
+                    }
                     .map(|property| value(node, property)),
-                (AggregateFunction::Count, false) => property
-                    .filter(|_| nodes.get(node).is_some_and(|node| node.joined))
-                    .map(|property| value(node, property)),
-                _ => property.map(|property| value(node, property)),
+                    (AggregateFunction::Count, false) => property
+                        .filter(|_| nodes.get(node).is_some_and(|node| node.joined))
+                        .map(|property| value(node, property)),
+                    _ => property.map(|property| value(node, property)),
+                }
             }
-        });
+        };
         plan.measures.push(Measure {
             function,
             argument,
@@ -152,7 +163,7 @@ pub(crate) fn aggregation_plan(
             name: query.name(*output).to_string(),
         });
     }
-    plan
+    Ok(plan)
 }
 
 fn aggregate<'p>(query: Query<'p>) -> Option<(&'p [Expr], &'p [Logical], Vec<Ref>)> {

@@ -182,23 +182,21 @@ where
                 .filter(|(other, _)| *other != node)
                 .filter_map(|(other, other_column)| {
                     let other = self.binding(other)?;
-                    Some(column_eq(
-                        Column::new(&other.alias, &other.column),
-                        Column::new(alias, *other_column),
-                    ))
+                    Some(
+                        other
+                            .id()
+                            .map(|other| column_eq(other, Column::new(alias, *other_column))),
+                    )
                 })
-                .collect();
-            let on = (
-                Column::new(&binding.alias, &binding.column),
-                Column::new(alias, column),
-            );
+                .collect::<Result<_>>()?;
+            let on = (binding.id()?, Column::new(alias, column));
             self.root = Some(self.reads.join(previous, rows, on, &join_predicates)?);
         } else {
             self.root = Some(rows);
         }
         for (node, column) in endpoints {
             if self.binding(node).is_none() {
-                self.set_binding(node, alias, column, None, None);
+                self.set_binding(node, alias, &[column.to_string()], None, None);
             }
         }
         Ok(())

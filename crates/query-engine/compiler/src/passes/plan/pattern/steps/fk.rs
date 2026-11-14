@@ -52,7 +52,7 @@ where
                     node.columns = Vec::new();
                     if let Some(reached) = reached {
                         node.predicates.push(membership(
-                            Column::new(&node.alias, &node.id_column),
+                            Column::new(&node.alias, node.id_column()?),
                             reached,
                         ));
                     }
@@ -65,18 +65,22 @@ where
             predicates.push(membership(key_column.clone(), ids));
         }
         match self.binding(endpoint) {
-            Some(binding) if !joined_through_endpoint => predicates.push(column_eq(
-                Column::new(&binding.alias, &binding.column),
-                key_column,
-            )),
+            Some(binding) if !joined_through_endpoint => {
+                predicates.push(column_eq(binding.id()?, key_column))
+            }
             Some(_) => {}
-            None => self.set_binding(endpoint, alias, &key.column, None, None),
+            None => self.set_binding(
+                endpoint,
+                alias,
+                std::slice::from_ref(&key.column),
+                None,
+                None,
+            ),
         }
         if self.root.is_some() {
             self.filters.extend(predicates);
         }
-        self.push_fk_outputs(relation, key, alias);
-        Ok(())
+        self.push_fk_outputs(relation, key, alias)
     }
 
     /// Reads the holder table if it is not in the chain yet; returns whether it joined through the other endpoint.
@@ -103,38 +107,29 @@ where
         }
         if let Some(ids) = self.reached_ids(&key.node) {
             node.predicates
-                .push(membership(Column::new(&node.alias, &node.id_column), ids));
+                .push(membership(Column::new(&node.alias, node.id_column()?), ids));
         }
         let holder_binding = self.binding(&key.node).cloned();
         let joined_through_endpoint = self.root.is_some() && holder_binding.is_none();
         self.attach_table(&node, |builder| match &holder_binding {
-            Some(binding) => Ok((
-                Column::new(&node.alias, &node.id_column),
-                Column::new(&binding.alias, &binding.column),
-            )),
+            Some(binding) => Ok((Column::new(&node.alias, node.id_column()?), binding.id()?)),
             None => {
                 let endpoint = builder
                     .binding(endpoint)
                     .ok_or_else(|| QueryError::Lowering("node relation is disconnected".into()))?;
-                Ok((key_column, Column::new(&endpoint.alias, &endpoint.column)))
+                Ok((key_column, endpoint.id()?))
             }
         })?;
         Ok(joined_through_endpoint)
     }
 
-    fn push_fk_outputs(&mut self, relation: &EdgeRelation, key: &Fk, alias: &str) {
+    fn push_fk_outputs(&mut self, relation: &EdgeRelation, key: &Fk, alias: &str) -> Result<()> {
         let pattern = self.pattern;
         let (source, target) = relation.stored_endpoints();
         let (source_id, target_id) = if key.node == source {
-            (
-                pattern.nodes[source].id_column.as_str(),
-                key.column.as_str(),
-            )
+            (pattern.nodes[source].id_column()?, key.column.as_str())
         } else {
-            (
-                key.column.as_str(),
-                pattern.nodes[target].id_column.as_str(),
-            )
+            (key.column.as_str(), pattern.nodes[target].id_column()?)
         };
         let graph = pattern.model.graph();
         let entity = |node: &str| {
@@ -153,5 +148,6 @@ where
                 entity(target),
             ],
         );
+        Ok(())
     }
 }
