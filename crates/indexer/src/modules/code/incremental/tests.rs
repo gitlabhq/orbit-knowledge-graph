@@ -453,7 +453,7 @@ async fn archive_indexes_multiple_families_into_server_batches() {
         ("root/src/helper.py", b"def greet():\n    pass\n"),
         ("root/web/a.ts", b"export function hello() {}\n"),
         ("root/web/b.js", b"import { hello } from './a';\nhello();\n"),
-        ("root/README.md", b"readme"),
+        ("root/README.md", b"# Readme\n"),
         ("root/logo.png", b"image"),
     ];
     let fixture = IndexFixture::new();
@@ -466,7 +466,7 @@ async fn archive_indexes_multiple_families_into_server_batches() {
     });
     let result = fixture.run(files, options(), sink).await.unwrap();
     assert_eq!(result.stats.files_indexed, 6);
-    assert_eq!(result.stats.files_parsed, 4);
+    assert_eq!(result.stats.files_parsed, 5);
     assert_eq!(result.stats.files_skipped, 1);
     let batches = batches.lock().unwrap();
     let files = collected_rows(&batches, &tables.file);
@@ -476,7 +476,7 @@ async fn archive_indexes_multiple_families_into_server_batches() {
         .collect();
     assert_eq!(files.len(), paths.len());
     let definitions = collected_rows(&batches, &tables.definition);
-    for name in ["greet", "hello"] {
+    for name in ["greet", "hello", "Readme"] {
         assert!(
             definitions
                 .iter()
@@ -654,7 +654,7 @@ async fn repositories_without_source_files_still_emit_inventory() {
     let result = fixture
         .run(
             &[
-                ("root/docs/README.md", b"readme"),
+                ("root/docs/notes.txt", b"notes"),
                 ("root/image.png", b"image"),
             ],
             options(),

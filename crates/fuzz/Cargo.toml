@@ -6,13 +6,13 @@ publish = false
 
 [dependencies]
 compiler = { path = "../query-engine/compiler" }
-code-graph = { path = "../code-graph" }
-indexer = { path = "../indexer" }
 bolero = "0.13.4"
 serde_json.workspace = true
 pest_meta = "2.9.1"
 
 [dev-dependencies]
+code-graph = { path = "../code-graph" }
+indexer = { path = "../indexer" }
 
 [[test]]
 name = "fuzz_compile"
@@ -73,9 +73,6 @@ harness = false
 name = "fuzz_indexer_messages"
 path = "tests/fuzz_indexer_messages/fuzz_target.rs"
 harness = false
-
-[package.metadata.cargo-shear]
-ignored = ["code-graph", "indexer"] # used in [[test]] harnesses; bolero fuzz targets need them as deps
 
 # Override workspace lint: bolero's libfuzzer harness requires unsafe glue.
 [lints.rust]
