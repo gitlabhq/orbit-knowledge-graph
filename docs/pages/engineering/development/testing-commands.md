@@ -48,7 +48,7 @@ mise test:integration
 | Harness | Reference |
 | --- | --- |
 | Test binaries, CI jobs, lanes, and Rust-only data tests | [`integration-tests/README.md`](../../../../crates/integration-tests/README.md) |
-| Plan-shape fixtures | [`plan_shape/README.md`](../../../../crates/integration-tests/tests/compiler/plan_shape/README.md) |
+| Compiler fixtures | [`compiler/README.md`](../../../../crates/integration-tests/tests/compiler/README.md) |
 | Code-graph suites | [`integration-tests-codegraph/README.md`](../../../../crates/integration-tests-codegraph/README.md) |
 | Container harness and scenario format | [`integration-testkit/README.md`](../../../../crates/integration-testkit/README.md) |
 | Indexer scenario schema | [`indexer_scenario.schema.json`](../../../../config/schemas/indexer_scenario.schema.json) |
