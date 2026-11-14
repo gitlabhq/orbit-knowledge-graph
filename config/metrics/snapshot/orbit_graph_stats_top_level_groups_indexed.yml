@@ -1,6 +1,6 @@
 ---
-key_path: orbit.graph_stats.projects_eligible
-description: Projects under the Orbit-enabled top-level namespaces, from the latest daily gkg_graph_stats snapshot
+key_path: orbit.graph_stats.top_level_groups_indexed
+description: Top-level groups with Orbit enabled, from the latest daily orbit_graph_stats snapshot
 product_group: context_systems
 product_categories:
 - knowledge_graph
@@ -16,5 +16,5 @@ tiers:
 - premium
 - ultimate
 events:
-- name: gkg_graph_stats
-  operator: last(projects_eligible)
+- name: orbit_graph_stats
+  operator: last(top_level_groups_indexed)

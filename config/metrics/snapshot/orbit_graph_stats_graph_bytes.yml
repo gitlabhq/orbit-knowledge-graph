@@ -1,6 +1,6 @@
 ---
 key_path: orbit.graph_stats.graph_bytes
-description: Bytes on disk of the active graph node and edge tables, from the latest daily gkg_graph_stats snapshot
+description: Bytes on disk of the active graph node and edge tables, from the latest daily orbit_graph_stats snapshot
 product_group: context_systems
 product_categories:
 - knowledge_graph
@@ -16,5 +16,5 @@ tiers:
 - premium
 - ultimate
 events:
-- name: gkg_graph_stats
+- name: orbit_graph_stats
   operator: last(graph_bytes)
