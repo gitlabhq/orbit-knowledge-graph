@@ -70,7 +70,7 @@ The rules are front door configuration in `argocd/apps`, which the Orbit team ow
 No Rails change is needed to add, change, or remove a rule.
 
 The front door routes on claims but does not authorize on them.
-The web server behind it still checks the token, so a request routed to the wrong pool fails the same checks.
+The web server behind it still checks the token, so every pool enforces the same authorization and a routing mistake cannot widen access.
 
 ### Backend pools
 
