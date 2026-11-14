@@ -4,14 +4,15 @@
 
 use query_data_model::catalog::{Check, Guard, Needs, Operation, Rule};
 use query_data_model::plan::logical::{
-    Columns, Comparison, Conjunct, Expr, Hops, Literal, LogicalOperation, Operand, Predicate,
-    Projection, Step,
+    Columns, Comparison, Conjunct, Expr, Hops, Literal, LogicalOperation, LogicalPlan, Operand,
+    Predicate, Projection, Step,
 };
 use query_data_model::plan::tracking::Ref;
 use query_data_model::surface::Statement;
-use query_data_model::{ConnectionId, Direction, Endpoint, EntityId, Hop, PropertyId, StoreId};
+use query_data_model::{Direction, Endpoint, EntityId, Hop, PropertyId};
 
 use super::cut::Cut;
+use super::split::place;
 use super::{
     ColumnType, Contract, Handle, Input, KeyInput, Output, RowCheck, Runs, Stage, StageId,
     StageQuery,
@@ -26,21 +27,6 @@ pub(super) struct Lookup {
     chain: Vec<Hop>,
     /// Each admitted binding, with each of its properties and the head key it holds.
     admits: Vec<(Ref, Vec<(PropertyId, PropertyId)>)>,
-}
-
-impl Lookup {
-    /// The head keys the admitted bindings hold, once each.
-    fn keys(&self) -> Vec<PropertyId> {
-        let mut keys = Vec::new();
-        for (_, pairs) in &self.admits {
-            for (_, key) in pairs {
-                if !keys.contains(key) {
-                    keys.push(*key);
-                }
-            }
-        }
-        keys
-    }
 }
 
 fn name(index: usize) -> String {
@@ -67,22 +53,19 @@ impl Cut<'_> {
                 continue;
             };
             let [first, chain @ ..] = &hops[..] else {
-                return Err(QueryError::Security(format!(
-                    "{}'s via chain is empty",
-                    self.query.model.graph().entity(entity).name
-                )));
+                return Err(QueryError::Security("a via chain is empty".into()));
             };
-            let pairs = self.held_keys(first)?;
+            let admitted = (*binding, self.held_keys(first)?);
             match lookups
                 .iter_mut()
                 .find(|lookup| lookup.head == first.to && lookup.chain == chain)
             {
-                Some(lookup) => lookup.admits.push((*binding, pairs)),
+                Some(lookup) => lookup.admits.push(admitted),
                 None => lookups.push(Lookup {
                     group: index,
                     head: first.to,
                     chain: chain.to_vec(),
-                    admits: vec![(*binding, pairs)],
+                    admits: vec![admitted],
                 }),
             }
         }
@@ -115,81 +98,104 @@ impl Cut<'_> {
     }
 
     /// The lookup's stage `id`, bound by the key sets in `inputs` its consumer reads and by the
-    /// consumer's own conditions on the keys it holds.
+    /// consumer's own conditions on the keys it holds, and the scope keys it hands the consumer.
     pub(super) fn lookup_stage(
         &self,
         lookup: &Lookup,
         id: StageId,
         inputs: &[Input],
         debug: bool,
-    ) -> Result<Stage> {
+    ) -> Result<(Stage, Vec<Input>)> {
         let model = self.query.model;
         let graph = model.graph();
-        let keyed = self.keyed(lookup, inputs);
-        let named = self.named(lookup);
-        let keys = lookup.keys();
+        let holders = self.holders(lookup);
+        let keyed = self.keyed(&holders, inputs);
+        let named = self.named(&holders);
         let mut needs = Needs::default();
-        for key in keys.iter().copied() {
-            let bound = keyed.iter().any(|input| input.properties.contains(&key))
-                || named.iter().any(|(property, _)| *property == key);
+        for (_, key) in lookup.admits.iter().flat_map(|(_, pairs)| pairs) {
+            let bound = keyed.iter().any(|input| input.properties.contains(key))
+                || named.iter().any(|(property, _)| property == key);
             match bound {
-                true => needs.apply(key, Operation::OneOf),
-                false => needs.read(key),
+                true => needs.apply(*key, Operation::OneOf),
+                false => needs.read(*key),
             }
         }
-        let (connection, head) = self.place(lookup.head, &needs)?;
-        let peer = self
-            .connections
-            .get(connection)
-            .filter(|peer| peer.joins())
-            .ok_or_else(|| {
-                QueryError::Security(format!(
-                    "no served relational connection stores {}, the head of a via chain",
-                    graph.entity(lookup.head).name
-                ))
-            })?;
-        let store = model.store(head);
-        for input in &keyed {
-            if let Some(key) = input
-                .properties
-                .iter()
-                .find(|key| !store.accepts(lookup.head, **key))
-            {
-                return Err(QueryError::Validation(format!(
-                    "{} on connection {} takes no key set on {}.{}, so no scope lookup can read it",
-                    graph.entity(lookup.head).name,
-                    peer.name(),
-                    graph.entity(lookup.head).name,
-                    graph.property(*key).name
-                )));
-            }
+        let head = place(model, self.connections, lookup.head, &needs)?;
+        let peer = self.peer(head.connection);
+        if !peer.joins() {
+            return Err(QueryError::Security(format!(
+                "{}, the head of a via chain, is read on {}, which runs no relational stage",
+                graph.entity(lookup.head).name,
+                peer.name()
+            )));
+        }
+        if let Some(key) = keyed
+            .iter()
+            .flat_map(|input| &input.properties)
+            .find(|key| !model.store(head.store).accepts(lookup.head, **key))
+        {
+            return Err(QueryError::Validation(format!(
+                "{} on connection {} takes no key set on {}, so no scope lookup can read it",
+                graph.entity(lookup.head).name,
+                peer.name(),
+                graph.property(*key).name
+            )));
         }
         let entities: Vec<EntityId> = std::iter::once(lookup.head)
             .chain(lookup.chain.iter().map(|hop| hop.to))
             .collect();
-        let mut stores = vec![(lookup.head, head)];
+        let mut stores = vec![(lookup.head, head.store)];
         for entity in &entities[1..] {
-            let (at, store) = self.place(*entity, &Needs::default())?;
-            if at != connection {
+            let follower = place(model, self.connections, *entity, &Needs::default())?;
+            if follower.connection != head.connection {
                 return Err(QueryError::Security(format!(
                     "{}'s via chain crosses from connection {} to {}",
                     graph.entity(lookup.head).name,
                     peer.name(),
-                    model.connection(at).name()
+                    self.peer(follower.connection).name()
                 )));
             }
-            stores.push((*entity, store));
+            stores.push((*entity, follower.store));
         }
         let mut contract = Contract {
             columns: Vec::new(),
         };
-        for key in keys {
-            contract.push(self.scope_node(0, lookup.head, key), self.typed(key));
+        let mut returned: Vec<Vec<PropertyId>> = vec![Vec::new(); entities.len()];
+        let mut push = |index: usize, property: PropertyId| {
+            let identity = &graph.entity(entities[index]).identity;
+            let handle = match identity.iter().position(|part| *part == property) {
+                Some(part) => Handle::Identity(part),
+                None => Handle::Property(property),
+            };
+            if !returned[index].contains(&property) {
+                returned[index].push(property);
+            }
+            let output = Output::Node {
+                binding: name(index),
+                handle,
+            };
+            contract.push(
+                output,
+                ColumnType::Scalar(graph.property(property).data_type),
+            )
+        };
+        let mut scopes = Vec::new();
+        for (binding, pairs) in &lookup.admits {
+            scopes.push(Input::Scope(KeyInput {
+                from: id,
+                positions: pairs.iter().map(|(_, key)| push(0, *key)).collect(),
+                binding: self.query.name(*binding).to_string(),
+                properties: pairs.iter().map(|(held, _)| *held).collect(),
+                types: pairs
+                    .iter()
+                    .map(|(_, key)| graph.property(*key).data_type)
+                    .collect(),
+            }));
         }
         let access = model.access();
         let mut checks = Vec::new();
         for (index, entity) in entities.iter().enumerate() {
-            for check in model.checks(*entity, connection) {
+            for check in model.checks(*entity, head.connection) {
                 let Check::Rows {
                     provider,
                     permission,
@@ -200,13 +206,11 @@ impl Cut<'_> {
                 else {
                     continue;
                 };
-                let position =
-                    contract.push(self.scope_node(index, *entity, *key), self.typed(*key));
                 let check = RowCheck {
                     provider: provider.clone(),
                     permission: access.permission(*permission).name.clone(),
                     resource: resource.clone(),
-                    position,
+                    position: push(index, *key),
                     kind: crate::KeyKind::of(graph.property(*key).data_type),
                 };
                 if !checks.contains(&check) {
@@ -214,95 +218,37 @@ impl Cut<'_> {
                 }
             }
         }
-        let plan = self.lookup_plan(lookup, &entities, &named, &contract)?;
-        Ok(Stage {
+        let stage = Stage {
             id,
             backend: peer.backend(),
-            runs: Runs::On { connection, stores },
-            query: StageQuery::Gql(Statement { plan, debug }),
+            runs: Runs::On {
+                connection: head.connection,
+                stores,
+            },
+            query: StageQuery::Gql(Statement {
+                plan: self.lookup_plan(lookup, &named, &returned)?,
+                debug,
+            }),
             inputs: keyed.into_iter().map(Input::Keys).collect(),
             contract: Some(contract),
             checks,
-        })
-    }
-
-    /// The scope keys a lookup's stage hands each binding it admits.
-    pub(super) fn scopes(&self, lookup: &Lookup, stage: &Stage) -> Result<Vec<Input>> {
-        let contract = stage.contract.as_ref().ok_or_else(|| {
-            QueryError::PipelineInvariant("a scope lookup returns its keys".into())
-        })?;
-        lookup
-            .admits
-            .iter()
-            .map(|(binding, pairs)| {
-                let positions = pairs
-                    .iter()
-                    .map(|(_, key)| {
-                        contract
-                            .position(&self.scope_node(0, lookup.head, *key))
-                            .ok_or_else(|| {
-                                QueryError::PipelineInvariant(
-                                    "a scope lookup returns no key column".into(),
-                                )
-                            })
-                    })
-                    .collect::<Result<_>>()?;
-                Ok(Input::Scope(KeyInput {
-                    from: stage.id,
-                    positions,
-                    binding: self.query.name(*binding).to_string(),
-                    properties: pairs.iter().map(|(held, _)| *held).collect(),
-                    types: pairs
-                        .iter()
-                        .map(|(_, key)| self.query.model.graph().property(*key).data_type)
-                        .collect(),
-                }))
-            })
-            .collect()
-    }
-
-    /// The store and connection placement puts a read of `entity` with `needs` on.
-    fn place(&self, entity: EntityId, needs: &Needs) -> Result<(ConnectionId, StoreId)> {
-        let model = self.query.model;
-        let placement = model
-            .get_store(entity, needs)
-            .map_err(|unplaced| QueryError::AllowlistRejected(unplaced.to_string()))?;
-        let [(store, _)] = placement.parts() else {
-            return Err(QueryError::PipelineInvariant(
-                "a read runs on one store".into(),
-            ));
         };
-        Ok((model.store(*store).connection(), *store))
-    }
-
-    fn scope_node(&self, index: usize, entity: EntityId, property: PropertyId) -> Output {
-        let identity = &self.query.model.graph().entity(entity).identity;
-        let handle = match identity.iter().position(|part| *part == property) {
-            Some(part) => Handle::Identity(part),
-            None => Handle::Property(property),
-        };
-        Output::Node {
-            binding: name(index),
-            handle,
-        }
-    }
-
-    fn typed(&self, property: PropertyId) -> ColumnType {
-        ColumnType::Scalar(self.query.model.graph().property(property).data_type)
+        Ok((stage, scopes))
     }
 
     /// Each binding property that holds a head key, or that the group's own steps hold equal to
     /// one, with the head key it bounds.
     fn holders(&self, lookup: &Lookup) -> Vec<(Ref, PropertyId, PropertyId)> {
-        let steps = self.query.steps();
-        let pairs: Vec<_> = steps
-            .iter()
+        let pairs: Vec<_> = self
+            .query
+            .steps()
+            .into_iter()
             .enumerate()
             .filter(|(_, step)| {
                 self.group(step.from) == lookup.group && self.group(step.to) == lookup.group
             })
             .filter_map(|(index, step)| {
-                super::split::crossing(self.query, index, *step, (lookup.group, lookup.group)).ok()
+                super::split::crossing(self.query, index, step, (lookup.group, lookup.group)).ok()
             })
             .flat_map(|crossing| crossing.pairs)
             .collect();
@@ -310,17 +256,12 @@ impl Cut<'_> {
         for (binding, held_keys) in &lookup.admits {
             for (held, key) in held_keys {
                 let mut equal = vec![(*binding, *held)];
-                let mut grown = true;
-                while grown {
-                    grown = false;
-                    for (a, b) in &pairs {
-                        for (from, to) in [(a, b), (b, a)] {
-                            if equal.contains(from) && !equal.contains(to) {
-                                equal.push(*to);
-                                grown = true;
-                            }
-                        }
-                    }
+                while let Some(next) = pairs
+                    .iter()
+                    .flat_map(|(a, b)| [(a, b), (b, a)])
+                    .find(|(from, to)| equal.contains(from) && !equal.contains(to))
+                {
+                    equal.push(*next.1);
                 }
                 for (binding, property) in equal {
                     if !holders.contains(&(binding, property, *key)) {
@@ -334,8 +275,7 @@ impl Cut<'_> {
 
     /// The key sets the consumer reads on properties that hold head keys, as key sets on those
     /// head keys.
-    fn keyed(&self, lookup: &Lookup, inputs: &[Input]) -> Vec<KeyInput> {
-        let holders = self.holders(lookup);
+    fn keyed(&self, holders: &[(Ref, PropertyId, PropertyId)], inputs: &[Input]) -> Vec<KeyInput> {
         let graph = self.query.model.graph();
         let mut keyed = Vec::new();
         for input in inputs {
@@ -370,8 +310,7 @@ impl Cut<'_> {
 
     /// The values the consumer's own conditions name for properties that hold head keys, as the
     /// head key each set bounds.
-    fn named(&self, lookup: &Lookup) -> Vec<(PropertyId, Vec<Literal>)> {
-        let holders = self.holders(lookup);
+    fn named(&self, holders: &[(Ref, PropertyId, PropertyId)]) -> Vec<(PropertyId, Vec<Literal>)> {
         let held = |expr: &Expr| {
             holders.iter().find_map(|(binding, held, key)| {
                 matches!(expr, Expr::Property { binding: b, property } if b == binding && property == held)
@@ -415,21 +354,21 @@ impl Cut<'_> {
         named
     }
 
-    /// The chain from its head, each bound value set as a condition on the head, returning the
-    /// contract's columns.
+    /// The chain from its head, each bound value set as a condition on the head, returning
+    /// `returned` of each chain binding.
     fn lookup_plan(
         &self,
         lookup: &Lookup,
-        entities: &[EntityId],
         named: &[(PropertyId, Vec<Literal>)],
-        contract: &Contract,
-    ) -> Result<query_data_model::plan::logical::LogicalPlan> {
+        returned: &[Vec<PropertyId>],
+    ) -> Result<LogicalPlan> {
         let limits = orbit_server_config::QueryLimits {
             max_rows: self.limits.max_rows.max(self.limits.stage_keys as u64 + 1),
             ..*self.limits
         };
-        let model = self.query.model;
-        let catalog = model
+        let catalog = self
+            .query
+            .model
             .logical(&limits)
             .as_admin()
             .across(self.connections.ids());
@@ -452,34 +391,16 @@ impl Cut<'_> {
                     .via([catalog.relationship(hop.relationship)]);
                 rows = q.traverse(rows, from, step)?;
             }
-            let graph = model.graph();
             let mut items = Vec::new();
-            for (index, entity) in entities.iter().enumerate() {
-                let binding = name(index);
-                let identity = &graph.entity(*entity).identity;
-                let properties: Vec<PropertyId> = contract
-                    .columns
-                    .iter()
-                    .filter_map(|column| match &column.output {
-                        Output::Node {
-                            binding: at,
-                            handle,
-                        } if *at == binding => Some(match handle {
-                            Handle::Identity(part) => identity[*part],
-                            Handle::Property(property) => *property,
-                        }),
-                        _ => None,
-                    })
-                    .collect();
+            for (index, properties) in returned.iter().enumerate() {
                 if properties.is_empty() {
                     continue;
                 }
-                let bound = rows.binding(&binding)?.output();
                 let projection = Projection::Graph {
-                    binding: bound,
-                    columns: Columns::Listed(properties),
+                    binding: rows.binding(&name(index))?.output(),
+                    columns: Columns::Listed(properties.clone()),
                 };
-                items.push(projection.named(binding));
+                items.push(projection.named(name(index)));
             }
             let rows = q.select(rows, items)?;
             q.limit(rows, self.limits.stage_keys as u64 + 1)

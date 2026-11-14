@@ -104,39 +104,46 @@ pub fn split<B: SqlBackend>(
 /// Each binding's store and the served connection it sits on: the store the model places a read
 /// with the binding's needs on.
 pub(crate) fn places(query: Query<'_>, connections: &Connections) -> Result<HashMap<Ref, Place>> {
-    let model = query.model;
     let mut needs = needs(query);
     query
         .bindings()
         .into_iter()
         .map(|binding| {
             let wanted = needs.remove(&binding.output).unwrap_or_default();
-            let placement = model
-                .get_store(binding.entity, &wanted)
-                .map_err(|unplaced| QueryError::AllowlistRejected(unplaced.to_string()))?;
-            let [(store, _)] = placement.parts() else {
-                return Err(QueryError::PipelineInvariant(
-                    "a read runs on one store".into(),
-                ));
-            };
-            let store = model.store(*store);
-            if connections.get(store.connection()).is_none() {
-                return Err(QueryError::AllowlistRejected(format!(
-                    "{} reads from store {} on connection {}, which this deployment does not serve",
-                    model.graph().entity(binding.entity).name,
-                    store.name(),
-                    model.connection(store.connection()).name()
-                )));
-            }
-            Ok((
-                binding.output,
-                Place {
-                    connection: store.connection(),
-                    store: store.id(),
-                },
-            ))
+            let place = place(query.model, connections, binding.entity, &wanted)?;
+            Ok((binding.output, place))
         })
         .collect()
+}
+
+/// The store the model places a read of `entity` with `needs` on, on a served connection.
+pub(super) fn place(
+    model: &query_data_model::Model,
+    connections: &Connections,
+    entity: EntityId,
+    needs: &Needs,
+) -> Result<Place> {
+    let placement = model
+        .get_store(entity, needs)
+        .map_err(|unplaced| QueryError::AllowlistRejected(unplaced.to_string()))?;
+    let [(store, _)] = placement.parts() else {
+        return Err(QueryError::PipelineInvariant(
+            "a read runs on one store".into(),
+        ));
+    };
+    let store = model.store(*store);
+    if connections.get(store.connection()).is_none() {
+        return Err(QueryError::AllowlistRejected(format!(
+            "{} reads from store {} on connection {}, which this deployment does not serve",
+            model.graph().entity(entity).name,
+            store.name(),
+            model.connection(store.connection()).name()
+        )));
+    }
+    Ok(Place {
+        connection: store.connection(),
+        store: store.id(),
+    })
 }
 
 /// What each binding reads and applies: the properties its projections, groups and order read,

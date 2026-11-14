@@ -144,8 +144,8 @@ impl Cut<'_> {
                 })
                 .collect::<Result<_>>()?;
             for lookup in lookups {
-                let scope = self.lookup_stage(lookup, stages.len(), &inputs, debug)?;
-                inputs.extend(self.scopes(lookup, &scope)?);
+                let (scope, admitted) = self.lookup_stage(lookup, stages.len(), &inputs, debug)?;
+                inputs.extend(admitted);
                 stages.push(scope);
             }
             let plan = super::sub::plan(
@@ -237,7 +237,7 @@ impl Cut<'_> {
         })
     }
 
-    fn peer(&self, connection: query_data_model::ConnectionId) -> &Peer {
+    pub(super) fn peer(&self, connection: query_data_model::ConnectionId) -> &Peer {
         self.connections
             .get(connection)
             .expect("a group's connection is served")
