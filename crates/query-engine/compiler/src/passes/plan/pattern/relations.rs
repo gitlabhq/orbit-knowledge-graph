@@ -209,10 +209,7 @@ where
                     .map(|relationship| graph.relationship(*relationship).name.clone())
                     .collect(),
             };
-            let entity = |node: &str| {
-                let name = nodes.get(node)?.entity.as_deref()?;
-                model.names().entity(name).ok()
-            };
+            let entity = |node: &str| nodes.get(node)?.entity;
             let (source_node, target_node) = stored_order(direction, from, to);
             let (source, target) = (entity(source_node), entity(target_node));
             let relationships = step.relationships;

@@ -2,8 +2,8 @@ use query_data_model::Catalog;
 use std::collections::HashMap;
 
 use crate::passes::codegen::SqlBackend;
-use query_data_model::Direction;
 use query_data_model::plan::tracking::Ref;
+use query_data_model::{Direction, RelationshipId};
 
 use super::keys::{TpLookupKey, keys};
 use super::{TpBound, TpBounds, TpLookup};
@@ -15,7 +15,7 @@ const MAX_LOOKUPS_PER_ALIAS: usize = 8;
 pub(super) struct Edge {
     pub from: Ref,
     pub to: Ref,
-    pub types: Vec<String>,
+    pub relationships: Vec<RelationshipId>,
 }
 
 impl TpBounds {
@@ -44,9 +44,9 @@ impl TpBounds {
         let self_seeded = keys
             .iter()
             .filter(|(output, keys)| {
-                let entity = query.entity_name(**output);
+                let entity = query.entity(**output);
                 !keys.is_empty()
-                    && keys.iter().all(|key| Some(key.entity.as_str()) == entity)
+                    && keys.iter().all(|key| Some(key.entity) == entity)
                     && nodes
                         .get(output)
                         .is_some_and(|bound| !shared(**output, bound))
@@ -65,7 +65,6 @@ impl TpBounds {
 }
 
 fn edges(query: Query<'_>) -> Vec<Edge> {
-    let graph = query.model.graph();
     query
         .steps()
         .into_iter()
@@ -74,14 +73,11 @@ fn edges(query: Query<'_>) -> Vec<Edge> {
                 Direction::Incoming => (step.to, step.from),
                 _ => (step.from, step.to),
             };
-            let types = match step.relationships {
-                [] => vec!["*".to_string()],
-                ids => ids
-                    .iter()
-                    .map(|id| graph.relationship(*id).name.clone())
-                    .collect(),
-            };
-            Edge { from, to, types }
+            Edge {
+                from,
+                to,
+                relationships: step.relationships.to_vec(),
+            }
         })
         .collect()
 }
@@ -97,8 +93,8 @@ fn relationship(
         return from_bound.cloned();
     }
     let (from, to) = (query.entity(edge.from)?, query.entity(edge.to)?);
-    edge.types.iter().find_map(|kind| {
-        match super::variant_scope(model, kind, Some(from), Some(to)) {
+    edge.relationships.iter().find_map(|relationship| {
+        match super::variant_scope(model, *relationship, Some(from), Some(to)) {
             Some(query_data_model::catalog::EdgeScope::Source) => from_bound,
             Some(query_data_model::catalog::EdgeScope::Target) => to_bound,
             _ => None,
@@ -119,8 +115,7 @@ fn nodes(
             let lookups: Vec<TpLookup> = keys
                 .iter()
                 .filter_map(|key| {
-                    let entity = model.names().entity(&key.entity).ok()?;
-                    let lookup = model.path_lookup(entity, key.kind)?;
+                    let lookup = model.path_lookup(key.entity, key.kind)?;
                     Some(TpLookup {
                         source_table: lookup.table.clone(),
                         key_column: model.column(lookup.property)?.to_string(),

@@ -27,6 +27,7 @@ pub struct RelationalOptions {
     pub edge_columns: Option<EdgeColumns>,
 }
 
+/// The column every edge table of a store keeps each edge field in.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EdgeColumns {

@@ -291,11 +291,13 @@ mod tests {
         LazyLock::new(|| Catalog::<ClickHouse>::embedded("server").unwrap());
 
     fn arm(paths: Vec<TraversalPath>) -> HydrationArm {
-        let columns = ["title".to_string()];
+        let names = MODEL.names();
+        let merge_request = names.entity("MergeRequest").unwrap();
+        let columns = [names.property(merge_request, "title").unwrap()];
         HydrationArm::new(
             MODEL.model(),
             crate::testkit::limits(),
-            "MergeRequest",
+            merge_request,
             &[orbit_authorization::Key::Int(1)],
             &columns,
             paths,

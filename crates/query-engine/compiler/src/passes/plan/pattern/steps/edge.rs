@@ -83,8 +83,8 @@ where
             .collect();
         let source_kind = Column::new(alias, relation.column(EdgeField::SourceKind)?);
         let target_kind = Column::new(alias, relation.column(EdgeField::TargetKind)?);
-        predicates.extend(pattern.entity_kind(source_kind, source_node));
-        predicates.extend(pattern.entity_kind(target_kind, target_node));
+        predicates.extend(pattern.kind_predicate(source_kind, source_node));
+        predicates.extend(pattern.kind_predicate(target_kind, target_node));
         predicates.push(live(alias));
         predicates.extend(
             pattern

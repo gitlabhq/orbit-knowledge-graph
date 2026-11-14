@@ -32,7 +32,7 @@ use query_data_model::plan::logical::Expr;
 #[derive(Clone)]
 pub struct NodePlan {
     pub alias: String,
-    pub entity: Option<String>,
+    pub entity: Option<query_data_model::EntityId>,
     pub table: Option<String>,
     pub joined: bool,
     pub filters: Vec<(Target, BoundFilter)>,
@@ -112,10 +112,10 @@ impl<B: SqlBackend> Pattern<'_, B> {
         conditions
     }
 
-    fn entity_kind(&self, kind: Column, node: &str) -> Option<Predicate> {
+    fn kind_predicate(&self, kind: Column, node: &str) -> Option<Predicate> {
         Some(Predicate::EntityKind {
             column: kind,
-            entity: self.nodes[node].entity.clone()?,
+            entity: self.nodes[node].entity?,
         })
     }
 }

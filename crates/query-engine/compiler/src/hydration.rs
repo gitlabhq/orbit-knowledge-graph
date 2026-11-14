@@ -3,8 +3,8 @@
 
 use orbit_server_config::QueryLimits;
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::Model;
-use query_data_model::plan::logical::{Columns, LogicalPlan, PlanError, Projection};
+use query_data_model::plan::logical::{Columns, LogicalPlan, Projection};
+use query_data_model::{EntityId, Model, PropertyId};
 
 use crate::error::{QueryError, Result};
 use orbit_authorization::Key;
@@ -31,9 +31,9 @@ impl HydrationArm {
     pub fn new(
         model: &Model,
         limits: &QueryLimits,
-        entity: &str,
+        entity: EntityId,
         ids: &[Key],
-        columns: &[String],
+        columns: &[PropertyId],
         traversal_paths: Vec<TraversalPath>,
     ) -> Result<Self> {
         let limits = QueryLimits {
@@ -46,25 +46,17 @@ impl HydrationArm {
             .map(crate::logical::anchors::literal)
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| QueryError::Validation("a composite key cannot pin one row".into()))?;
-        let key = identity(
-            model,
-            model.names().entity(entity).map_err(PlanError::from)?,
-        )?;
+        let key = identity(model, entity)?;
         let plan = catalog.build(|q| {
-            let declared = catalog.entity_named(entity)?;
+            let declared = catalog.entity(entity);
             let name = q.internal_name("hydrate")?;
             let rows = q.entities_as(declared, &name)?;
             let binding = rows.endpoint()?;
-            let id = binding.property_named(key)?;
+            let id = binding.property(key)?;
             let rows = q.pin(rows, id, &ids)?;
-            let entity = binding.entity().ok_or(PlanError::NoEntity)?;
-            let listed = columns
-                .iter()
-                .map(|column| Ok(model.names().property(entity, column)?))
-                .collect::<std::result::Result<_, PlanError>>()?;
             let projection = Projection::Graph {
                 binding: binding.output(),
-                columns: Columns::Listed(listed),
+                columns: Columns::Listed(columns.to_vec()),
             };
             q.select(rows, [projection.named(&*name)])
         })?;
@@ -91,11 +83,11 @@ impl HydrationArm {
     }
 }
 
-/// The name of the one property that identifies the entity's rows.
-pub(crate) fn identity(model: &Model, entity: query_data_model::EntityId) -> Result<&str> {
+/// The one property that identifies the entity's rows.
+pub(crate) fn identity(model: &Model, entity: EntityId) -> Result<PropertyId> {
     let graph = model.graph();
     match graph.entity(entity).identity.as_slice() {
-        [identity] => Ok(&graph.property(*identity).name),
+        [identity] => Ok(*identity),
         _ => Err(QueryError::Validation(format!(
             "{} has a composite identity, which no row read keys by",
             graph.entity(entity).name

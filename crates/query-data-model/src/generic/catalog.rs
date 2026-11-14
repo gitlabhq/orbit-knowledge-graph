@@ -147,13 +147,12 @@ impl GraphCatalog {
             .map(|id| self.variant(id))
     }
 
-    pub(crate) fn relationship_names(
+    /// The relationships with a variant from `source` to `target`, in id order; either end open.
+    pub fn relationships_between(
         &self,
-        source: Option<&str>,
-        target: Option<&str>,
-    ) -> Vec<String> {
-        let source = source.and_then(|name| self.entity_id(name));
-        let target = target.and_then(|name| self.entity_id(name));
+        source: Option<EntityId>,
+        target: Option<EntityId>,
+    ) -> Vec<RelationshipId> {
         let connected: std::collections::BTreeSet<RelationshipId> = match (source, target) {
             (Some(source), target) => self
                 .hops(source, super::Direction::Outgoing)
@@ -170,9 +169,6 @@ impl GraphCatalog {
                 .map(|variant| variant.relationship)
                 .collect(),
         };
-        connected
-            .into_iter()
-            .map(|relationship| self.relationship(relationship).name.clone())
-            .collect()
+        connected.into_iter().collect()
     }
 }

@@ -7,13 +7,13 @@ use pipeline::PipelineError;
 
 use compiler::orbit_authorization::Key;
 use compiler::{QueryError, VirtualColumnRequest};
+use query_data_model::EntityId;
 
 pub type PropertyRow = HashMap<String, ColumnValue>;
 
-/// Hydrated properties by entity name and node identity key.
-pub type PropertyMap = HashMap<(String, Key), PropertyRow>;
+pub type PropertyMap = HashMap<(EntityId, Key), PropertyRow>;
 
-pub type EntityVirtualColumns<'a> = (&'a str, &'a [VirtualColumnRequest]);
+pub type EntityVirtualColumns<'a> = (EntityId, &'a [VirtualColumnRequest]);
 
 const DEFAULT_MAX_BATCH_SIZE: usize = 100;
 
@@ -87,9 +87,9 @@ pub async fn resolve_virtual_columns(
     let max_batch = registry.max_batch_size();
 
     for &(entity_type, virtual_columns) in entity_virtual_columns {
-        let valid_keys: Vec<(String, Key)> = property_map
+        let valid_keys: Vec<(EntityId, Key)> = property_map
             .keys()
-            .filter(|(etype, _)| etype == entity_type)
+            .filter(|(etype, _)| *etype == entity_type)
             .cloned()
             .collect();
 

@@ -85,7 +85,7 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
         let first_hop = hop_alias(1);
         let mut first_predicates = vec![live(&first_hop)];
         let first_kind = Column::new(&first_hop, kind(start_field)?);
-        first_predicates.extend(pattern.entity_kind(first_kind, &relation.from_node));
+        first_predicates.extend(pattern.kind_predicate(first_kind, &relation.from_node));
         if let Some(ids) = source_ids {
             first_predicates.push(membership(Column::new(&first_hop, start_id), ids));
         }
@@ -249,7 +249,7 @@ fn complete_depth<B: SqlBackend>(
     let end_id = relation.column(end_field)?;
     let end_kind = Column::new(alias, relation.column(kind_field(end_field))?);
     let mut predicates: Vec<Predicate> = pattern
-        .entity_kind(end_kind, &relation.to_node)
+        .kind_predicate(end_kind, &relation.to_node)
         .into_iter()
         .collect();
     if let Some(ids) = target_ids {

@@ -30,14 +30,6 @@ impl NodePlan {
         let entity = binding.entity;
         let id_column = identity_column(model, entity)?.to_string();
         let graph = model.graph();
-        let stored = |name: &str| {
-            model
-                .names()
-                .property(entity, name)
-                .ok()
-                .and_then(|property| model.lookup(property))
-                .is_none()
-        };
         let mut filters = bind_facts(anchor, model);
         filters.retain(|(_, filter)| {
             filter
@@ -48,7 +40,7 @@ impl NodePlan {
         let has_traversal_path = model.has_path_column(entity);
         Ok(Self {
             alias: binding.name.to_string(),
-            entity: Some(graph.entity(entity).name.clone()),
+            entity: Some(entity),
             table: model.table_of(entity).map(String::from),
             joined: false,
             filters,
@@ -67,7 +59,8 @@ impl NodePlan {
             id_column,
             columns: returned(model, entity, selection)
                 .into_iter()
-                .filter(|name| stored(name))
+                .filter(|property| model.lookup(*property).is_none())
+                .map(|property| graph.property(property).name.clone())
                 .collect(),
             emit_select: true,
             null_as_epoch: graph

@@ -1,6 +1,18 @@
 use crate::compiler::setup::embedded_model;
 use query_engine::compiler::{HydrationPlan, compile};
 
+fn entity_name(entity: query_data_model::EntityId) -> String {
+    embedded_model().graph().entity(entity).name.clone()
+}
+
+fn names(properties: &[query_data_model::PropertyId]) -> Vec<String> {
+    let model = embedded_model();
+    properties
+        .iter()
+        .map(|property| model.graph().property(*property).name.clone())
+        .collect()
+}
+
 fn compile_query(query: &str) -> query_engine::compiler::CompiledQueryContext {
     let data_model = embedded_model();
     let security_ctx = crate::compiler::setup::test_ctx();
@@ -45,7 +57,7 @@ fn search_with_content_produces_hydration_plan() {
         HydrationPlan::Static(templates) => {
             assert_eq!(templates.len(), 1);
             let t = &templates[0];
-            assert_eq!(t.entity_type, "File");
+            assert_eq!(entity_name(t.entity), "File");
             assert_eq!(t.node_alias, "f");
             assert!(
                 t.virtual_columns
@@ -55,11 +67,11 @@ fn search_with_content_produces_hydration_plan() {
             );
             for dep in &["project_id", "commit_sha", "branch", "path"] {
                 assert!(
-                    t.columns.contains(&dep.to_string()),
+                    names(&t.columns).contains(&dep.to_string()),
                     "depends_on column '{dep}' should be in search hydration plan"
                 );
                 assert!(
-                    t.injected_columns.contains(&dep.to_string()),
+                    names(&t.injected_columns).contains(&dep.to_string()),
                     "'{dep}' should be in injected_columns"
                 );
             }
@@ -124,7 +136,7 @@ fn traversal_with_content_includes_virtual_in_hydration_plan() {
 
     match &compiled.hydration {
         HydrationPlan::Static(templates) => {
-            let file_template = templates.iter().find(|t| t.entity_type == "File");
+            let file_template = templates.iter().find(|t| entity_name(t.entity) == "File");
             assert!(
                 file_template.is_some(),
                 "File should have a hydration template"
@@ -148,15 +160,18 @@ fn traversal_hydration_injects_depends_on_columns() {
 
     match &compiled.hydration {
         HydrationPlan::Static(templates) => {
-            let file_template = templates.iter().find(|t| t.entity_type == "File").unwrap();
-            let cols = &file_template.columns;
+            let file_template = templates
+                .iter()
+                .find(|t| entity_name(t.entity) == "File")
+                .unwrap();
+            let cols = &names(&file_template.columns);
             for dep in &["project_id", "commit_sha", "branch", "path"] {
                 assert!(
                     cols.iter().any(|c| c == dep),
                     "depends_on column '{dep}' should be auto-injected into hydration columns, got: {cols:?}"
                 );
                 assert!(
-                    file_template.injected_columns.contains(&dep.to_string()),
+                    names(&file_template.injected_columns).contains(&dep.to_string()),
                     "'{dep}' should be tracked in injected_columns for stripping"
                 );
             }
@@ -175,14 +190,14 @@ fn definition_content_also_handled() {
         HydrationPlan::Static(templates) => {
             let def_template = templates
                 .iter()
-                .find(|t| t.entity_type == "Definition")
+                .find(|t| entity_name(t.entity) == "Definition")
                 .unwrap();
             let vcs = &def_template.virtual_columns;
             assert!(
                 vcs.iter().any(|vc| vc.column_name == "content"),
                 "Definition should have content virtual column in hydration plan"
             );
-            let cols = &def_template.columns;
+            let cols = &names(&def_template.columns);
             for dep in &[
                 "project_id",
                 "commit_sha",
@@ -216,7 +231,7 @@ fn merge_request_diff_virtual_column_hydration() {
         HydrationPlan::Static(templates) => {
             let mr_template = templates
                 .iter()
-                .find(|t| t.entity_type == "MergeRequest")
+                .find(|t| entity_name(t.entity) == "MergeRequest")
                 .unwrap();
             let vcs = &mr_template.virtual_columns;
             assert!(
@@ -224,7 +239,7 @@ fn merge_request_diff_virtual_column_hydration() {
                     .any(|vc| vc.column_name == "diff" && vc.service == "gitaly"),
                 "hydration plan should include diff virtual column with gitaly service, got: {vcs:?}"
             );
-            let cols = &mr_template.columns;
+            let cols = &names(&mr_template.columns);
             for dep in &["project_id", "iid"] {
                 assert!(
                     cols.iter().any(|c| c == dep),
@@ -232,9 +247,7 @@ fn merge_request_diff_virtual_column_hydration() {
                 );
             }
             assert!(
-                mr_template
-                    .injected_columns
-                    .contains(&"project_id".to_string()),
+                names(&mr_template.injected_columns).contains(&"project_id".to_string()),
                 "'project_id' should be in injected_columns (user didn't request it)"
             );
         }
@@ -252,12 +265,12 @@ fn multiple_virtual_entities_in_same_query() {
         HydrationPlan::Static(templates) => {
             let def_vcs = &templates
                 .iter()
-                .find(|t| t.entity_type == "Definition")
+                .find(|t| entity_name(t.entity) == "Definition")
                 .unwrap()
                 .virtual_columns;
             let file_vcs = &templates
                 .iter()
-                .find(|t| t.entity_type == "File")
+                .find(|t| entity_name(t.entity) == "File")
                 .unwrap()
                 .virtual_columns;
             assert!(

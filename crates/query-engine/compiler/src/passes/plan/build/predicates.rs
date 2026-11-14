@@ -71,7 +71,10 @@ impl Lowering<'_> {
                 expr::id_range(self.column(column)?, *start, *end)
             }
             Predicate::Live { alias } => expr::live::<B>(self.scope, alias)?,
-            Predicate::EntityKind { column, entity } => eq(self.column(column)?, string(entity)),
+            Predicate::EntityKind { column, entity } => {
+                let kind = &q.catalog().graph().entity(*entity).name;
+                eq(self.column(column)?, string(kind))
+            }
             Predicate::ColumnEq { left, right } => eq(self.column(left)?, self.column(right)?),
             Predicate::RelationshipKinds { column, kinds } => {
                 expr::relationship_kinds::<B>(self.scope, column, kinds)?

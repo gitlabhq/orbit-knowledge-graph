@@ -176,10 +176,7 @@ impl<B: SqlBackend> Pattern<'_, B> {
     }
 
     pub fn shared_column_predicates(&self, node: &NodePlan) -> Vec<Predicate> {
-        let entity = node
-            .entity
-            .as_deref()
-            .and_then(|entity| self.model.names().entity(entity).ok());
+        let entity = node.entity;
         let table = entity.and_then(|entity| self.model.entity_table(entity));
         let (Some(entity), Some(table)) = (entity, table) else {
             return vec![];

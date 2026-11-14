@@ -43,12 +43,12 @@ pub fn get_domain_statuses(
 
             let feeding_plans = plan_phases
                 .iter()
-                .filter(|(plan, _)| plan_belongs_to_domain(graph, catalog.names(), plan, &nodes))
+                .filter(|(plan, _)| plan_belongs_to_domain(graph, plan, &nodes))
                 .map(|(_, phase)| *phase);
             let code = code_phase.filter(|_| has_code_nodes);
             let silenced = source_unavailable
                 .iter()
-                .any(|plan| plan_belongs_to_domain(graph, catalog.names(), plan, &nodes));
+                .any(|plan| plan_belongs_to_domain(graph, plan, &nodes));
             let phase = match combine_phases(feeding_plans.chain(code)) {
                 None if silenced => return None,
                 phase => phase.unwrap_or(Phase::Unknown),
@@ -86,7 +86,6 @@ fn get_entity_phase(name: &str, plan_phases: &[(&PipelineDescriptor, Phase)]) ->
 
 fn plan_belongs_to_domain(
     graph: &GraphCatalog,
-    names: query_data_model::catalog::Names<'_>,
     plan: &PipelineDescriptor,
     domain: &[&Entity],
 ) -> bool {
@@ -97,14 +96,14 @@ fn plan_belongs_to_domain(
 
     // A node plan's foreign-key edges belong to the node's domain. Only plans that write no node
     // feed the domains of their edge endpoints.
-    if names.entity(&plan.entity).is_ok() {
+    if graph.entities().any(|entity| entity.name == plan.entity) {
         return false;
     }
 
-    plan.reindex_targets
-        .iter()
-        .filter_map(|kind| names.relationship(kind).ok())
-        .flat_map(|relationship| &graph.relationship(relationship).variants)
+    graph
+        .relationships()
+        .filter(|relationship| plan.reindex_targets.contains(&relationship.name))
+        .flat_map(|relationship| &relationship.variants)
         .map(|variant| graph.variant(*variant))
         .any(|variant| {
             in_domain(&graph.entity(variant.source).name)

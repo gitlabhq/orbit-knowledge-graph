@@ -178,6 +178,8 @@ impl QueryStats {
                 .flat_map(|binding| {
                     let selection = selected.get(&binding.output).copied();
                     returned(model, binding.entity, selection)
+                        .into_iter()
+                        .map(|property| graph.property(property).name.clone())
                 })
                 .collect(),
             agg_functions: measures

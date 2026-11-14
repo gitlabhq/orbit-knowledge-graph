@@ -257,7 +257,10 @@ fn compile_one(
     .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
 }
 
-fn format_hydration(plan: &compiler::HydrationPlan) -> String {
+fn format_hydration(
+    plan: &compiler::HydrationPlan,
+    graph: &query_data_model::GraphCatalog,
+) -> String {
     match plan {
         compiler::HydrationPlan::None => "None".to_string(),
         compiler::HydrationPlan::Static(templates) => {
@@ -267,8 +270,12 @@ fn format_hydration(plan: &compiler::HydrationPlan) -> String {
                     format!(
                         "-- {} ({}): SELECT {} FROM {} FINAL WHERE id IN (...)",
                         t.node_alias,
-                        t.entity_type,
-                        t.columns.join(", "),
+                        graph.entity(t.entity).name,
+                        t.columns
+                            .iter()
+                            .map(|property| graph.property(*property).name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "),
                         t.destination_table,
                     )
                 })
@@ -299,8 +306,10 @@ fn run_compile_only(
                         value["base_sql"] = serde_json::Value::String(compiled.base.render());
                     }
                     if matches!(show, CompileShow::Hydration | CompileShow::Both) {
-                        value["hydration"] =
-                            serde_json::Value::String(format_hydration(&compiled.hydration));
+                        value["hydration"] = serde_json::Value::String(format_hydration(
+                            &compiled.hydration,
+                            data_model.graph(),
+                        ));
                     }
                     value
                 }
@@ -321,14 +330,20 @@ fn run_compile_only(
                 println!("{}", compiled.base.render());
             }
             CompileShow::Hydration => {
-                println!("{}", format_hydration(&compiled.hydration));
+                println!(
+                    "{}",
+                    format_hydration(&compiled.hydration, data_model.graph())
+                );
             }
             CompileShow::Both => {
                 println!("-- base");
                 println!("{}", compiled.base.render());
                 println!();
                 println!("-- hydration");
-                println!("{}", format_hydration(&compiled.hydration));
+                println!(
+                    "{}",
+                    format_hydration(&compiled.hydration, data_model.graph())
+                );
             }
         }
         if entries.len() > 1 {

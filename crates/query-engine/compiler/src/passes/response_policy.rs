@@ -51,7 +51,11 @@ pub fn apply_text_excerpts<B: SqlBackend>(
                     }
                 }
             }
-            excerpted.retain(|column| requested.contains(column));
+            excerpted.retain(|column| {
+                requested
+                    .iter()
+                    .any(|property| graph.property(*property).name == *column)
+            });
             (binding.name.to_string(), excerpted)
         })
         .collect();

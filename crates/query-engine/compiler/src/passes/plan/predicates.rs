@@ -48,7 +48,7 @@ pub enum Predicate {
     },
     EntityKind {
         column: Column,
-        entity: String,
+        entity: query_data_model::EntityId,
     },
     ColumnEq {
         left: Column,
