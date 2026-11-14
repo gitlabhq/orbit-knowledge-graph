@@ -1,0 +1,5 @@
+table: jira_project
+rows:
+  - {id: "10001", key: GW, name: Gateway, cloud_id: 6f1d2c3a-41b7-4e0b-9a52-3c6e1f0d7a10, project_id: 1000, traversal_path: 1/100/1000/}
+  - {id: "10002", key: CON, name: Console, cloud_id: 6f1d2c3a-41b7-4e0b-9a52-3c6e1f0d7a10, project_id: 1001, traversal_path: 1/100/1001/}
+  - {id: "10003", key: LED, name: Ledger, cloud_id: 6f1d2c3a-41b7-4e0b-9a52-3c6e1f0d7a10, project_id: 2000, traversal_path: 1/200/2000/}

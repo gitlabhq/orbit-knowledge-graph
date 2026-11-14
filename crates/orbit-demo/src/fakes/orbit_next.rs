@@ -30,7 +30,7 @@ pub struct Search {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Field {
-    Path,
+    Column(String),
     Line,
     Capture(String),
     Repository(String),
@@ -68,7 +68,7 @@ pub async fn search(
                         continue;
                     };
                     let row = request.fields.iter().map(|field| match field {
-                        Field::Path => ("path".to_string(), Value::from(file.path.as_str())),
+                        Field::Column(name) => (name.clone(), column(&file.path, name)),
                         Field::Line => ("line".to_string(), Value::from(index as u64 + 1)),
                         Field::Repository(name) => (name.clone(), Value::from(*project)),
                         Field::Branch(name) => (name.clone(), Value::from(branch.as_str())),
@@ -89,6 +89,20 @@ pub async fn search(
         }
     }
     Ok(Json(rows))
+}
+
+/// A file column the store lists, as the fake knows it from the file's path.
+fn column(path: &str, name: &str) -> Value {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    match name {
+        "path" => Value::from(path),
+        "name" => Value::from(file),
+        "extension" => file
+            .rsplit_once('.')
+            .map_or(Value::Null, |(_, ext)| Value::from(ext)),
+        "language" => Value::from(language(path)),
+        _ => Value::Null,
+    }
 }
 
 /// An ast-grep pattern as a one-line regex: `$$$NAME` takes any text, `$NAME` one identifier,

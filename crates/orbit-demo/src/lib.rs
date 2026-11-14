@@ -7,6 +7,7 @@ pub mod client;
 pub mod config;
 pub mod executors;
 pub mod fakes;
+pub mod lake;
 pub mod lockdown;
 pub mod plan_text;
 pub mod run;
@@ -17,12 +18,13 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use compiler::dag::{Primary, Remotes};
+use compiler::dag::{Connections, Frontend};
 use query_data_model::{Catalog, ClickHouse, Model};
 
 use crate::callers::Callers;
 use crate::config::Checked;
 use crate::fakes::{Fakes, Shared, shared};
+use crate::lake::Lakes;
 use crate::seed::Seed;
 use crate::store::Store;
 
@@ -37,9 +39,10 @@ pub struct Addresses {
 pub struct Demo {
     pub model: Arc<Model>,
     pub catalog: Arc<Catalog<ClickHouse>>,
-    pub primary: Primary,
-    pub remotes: Remotes,
+    pub frontend: Frontend,
+    pub connections: Connections,
     pub store: Store,
+    pub lakes: Lakes,
     pub fakes: Fakes,
     pub callers: Shared<Callers>,
     pub examples: Shared<Vec<seed::Example>>,
@@ -52,7 +55,8 @@ impl Demo {
     /// Re-reads the seed directory, then reloads ClickHouse, the fakes and the callers from it.
     pub async fn reload(&self) -> anyhow::Result<usize> {
         let seed = Seed::read(&self.seed_dir)?;
-        let rows = self.store.reload(&self.catalog, &seed.tables).await?;
+        let rows = self.store.reload(&self.catalog, &seed.tables).await?
+            + self.lakes.reload(&seed.lake)?;
         fakes::replace(&self.fakes.orbit_next, seed.orbit_next);
         fakes::replace(&self.fakes.slack, seed.slack);
         fakes::replace(&self.callers, seed.callers);
@@ -66,7 +70,9 @@ pub async fn start(checked: Checked) -> anyhow::Result<Arc<Demo>> {
     orbit_server_config::query::init_embedded_defaults();
     let seed = Seed::read(&checked.config.seed)?;
     let model = integration_testkit::dag_fakes::dag_model();
-    let catalog = Arc::new(Catalog::<ClickHouse>::from_model(&model)?);
+    let (catalog, connections) = integration_testkit::dag_fakes::dag_connections(&model);
+    let lakes = Lakes::open(&connections)?;
+    lakes.reload(&seed.lake)?;
     let store = Store::new(&checked);
     store
         .create(
@@ -88,11 +94,12 @@ pub async fn start(checked: Checked) -> anyhow::Result<Arc<Demo>> {
         slack,
     };
     let demo = Arc::new(Demo {
-        primary: Primary::ClickHouse(Arc::clone(&catalog)),
-        remotes: Remotes::all(&model),
+        frontend: Frontend::Server(Arc::clone(&catalog)),
+        connections,
         model,
         catalog,
         store,
+        lakes,
         fakes,
         callers: shared(seed.callers),
         examples: shared(seed.examples),

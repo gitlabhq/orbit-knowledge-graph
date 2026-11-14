@@ -8,7 +8,7 @@ use arrow::array::Array;
 use arrow::record_batch::RecordBatch;
 use arrow::util::display::array_value_to_string;
 use async_trait::async_trait;
-use compiler::dag::Request;
+use compiler::dag::{Contract, Request};
 use query_data_model::catalog::Row;
 use query_data_model::implementations::orbit_code::RequestField;
 use query_engine::shared::dag::{Executed, Executor, ExecutorError, from_rows};
@@ -32,10 +32,9 @@ pub fn kind(request: &Request) -> &'static str {
     match request {
         Request::Query(_) => "query",
         Request::Hydration(_) => "hydration",
-        Request::Lookup(_) => "scope lookup",
         Request::Code(_) => "structural search",
         Request::Live(_) => "extraction",
-        Request::Engine { .. } => "engine join",
+        Request::Combine { .. } => "combine",
     }
 }
 
@@ -44,7 +43,11 @@ pub struct CodeHttp(pub SocketAddr);
 
 #[async_trait]
 impl Executor for CodeHttp {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
         let Request::Code(search) = request else {
             return Err(unexpected(request));
         };
@@ -55,14 +58,14 @@ impl Executor for CodeHttp {
             .fields
             .iter()
             .map(|field| match field {
-                RequestField::Path => "path".to_string(),
                 RequestField::Line => "line".to_string(),
-                RequestField::Capture(name)
+                RequestField::Column(name)
+                | RequestField::Capture(name)
                 | RequestField::Repository(name)
                 | RequestField::Branch(name) => name.clone(),
             })
             .collect();
-        batch(&rows, &fields)
+        batch(&rows, &fields, contract)
     }
 }
 
@@ -74,7 +77,11 @@ pub struct LiveHttp {
 
 #[async_trait]
 impl Executor for LiveHttp {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
         let Request::Live(call) = request else {
             return Err(unexpected(request));
         };
@@ -87,13 +94,20 @@ impl Executor for LiveHttp {
         )
         .await
         .map_err(failed)?;
-        batch(&rows, &call.fields)
+        batch(&rows, &call.fields, contract)
     }
 }
 
-fn batch(rows: &[Row], fields: &[String]) -> Result<Executed, ExecutorError> {
+/// A remote stage's rows in the order and types of the stage's contract.
+fn batch(
+    rows: &[Row],
+    fields: &[String],
+    contract: Option<&Contract>,
+) -> Result<Executed, ExecutorError> {
+    let contract = contract
+        .ok_or_else(|| ExecutorError("a remote stage request carries a contract".into()))?;
     Ok(Executed {
-        batches: vec![from_rows(rows, fields)?],
+        batches: vec![from_rows(rows, fields, contract)?],
         log: Vec::new(),
     })
 }
@@ -116,8 +130,12 @@ pub struct Sampled {
 
 #[async_trait]
 impl Executor for Sampled {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
-        let executed = self.inner.execute(request).await?;
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
+        let executed = self.inner.execute(request, contract).await?;
         let sample = Sample {
             request: kind(request),
             count: executed.batches.iter().map(RecordBatch::num_rows).sum(),

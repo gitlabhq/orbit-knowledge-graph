@@ -17,8 +17,11 @@ function stage(id) {
 function describe(edge) {
   const count = edge.count === undefined ? "" : ` · ${Dag.plural(edge.count, edge.kind === "keys" ? "key" : "row")}`;
   if (edge.kind === "keys") {
-    edge.label = `(${edge.properties.join(", ")})`;
-    edge.title = `Keys on ${edge.properties.join(", ")} from stage ${edge.from} drive stage ${edge.to}${count}`;
+    const scope = edge.inputs.every((input) => input.scope);
+    const bindings = [...new Set(edge.inputs.map((input) => input.binding))].join(", ");
+    const types = [...new Set(edge.inputs.map((input) => `(${input.types.join(", ")})`))].join(" ");
+    edge.label = scope ? `scope for ${bindings}` : `${bindings} ${types}`;
+    edge.title = `${scope ? "Scope keys" : "Keys"} ${types} from stage ${edge.from} drive ${bindings} in stage ${edge.to}${count}`;
   } else {
     edge.label = "rows";
     edge.title = `Rows of stage ${edge.from} into Combine${count}${edge.columns ? `: ${edge.columns.join(", ")}` : ""}`;
@@ -37,7 +40,11 @@ function apply(event) {
       for (const info of event.stages) {
         run.stages.push({ ...info, status: "waiting", rendered: [], samples: [], keys: [], checks: [] });
         for (const input of info.inputs) {
-          run.edges.push({ id: `e${input.from}-${info.id}-${input.kind}`, from: input.from, to: info.id, kind: input.kind, properties: input.properties || [] });
+          const kind = input.kind === "rows" ? "rows" : "keys";
+          const id = `e${input.from}-${info.id}-${kind}`;
+          let edge = run.edges.find((e) => e.id === id);
+          if (!edge) run.edges.push(edge = { id, from: input.from, to: info.id, kind, inputs: [] });
+          if (kind === "keys") edge.inputs.push({ scope: input.kind === "scope", binding: input.binding, types: input.types });
         }
       }
       break;

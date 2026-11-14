@@ -6036,6 +6036,7 @@ dependencies = [
  "axum",
  "clickhouse-client",
  "compiler",
+ "duckdb-client",
  "futures",
  "integration-testkit",
  "orbit-authorization",

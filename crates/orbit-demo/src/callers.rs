@@ -6,16 +6,17 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use compiler::orbit_authorization::{Caller, CheckRequest, Grants, Key, Request};
-use compiler::remote::RowCheck;
+use compiler::orbit_authorization::{
+    AuthError, Caller, Check, Checks, Grants, Key, Provider, Request,
+};
 use integration_testkit::authorization_variants::fakes::OidcToken;
 use integration_testkit::authorization_variants::registry;
 use orbit_server::authorization::Deployment;
 use orbit_server::authorization::gitlab::session_grants;
 use orbit_server_config::AuthorizationConfig;
 use query_data_model::Model;
+use query_data_model::catalog::ProviderUse;
 use query_engine::pipeline::{AuthorizedPath, SecurityContext};
-use query_engine::shared::dag::{ExecutorError, RowChecks};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -120,52 +121,64 @@ impl Session {
         Ok(credential.handle)
     }
 
-    pub fn checks(&self, log: Arc<RunLog>) -> DeploymentChecks {
-        DeploymentChecks {
-            deployment: Arc::clone(&self.deployment),
-            caller: self.caller.clone(),
-            log,
-        }
+    /// The deployment's checks for every provider the model checks rows with, each logging what
+    /// it was asked and what it allowed.
+    pub fn checks(&self, model: &Model, log: Arc<RunLog>) -> Checks {
+        model
+            .access()
+            .providers()
+            .into_iter()
+            .filter(|(_, used)| *used == ProviderUse::Check)
+            .fold(Checks::default(), |checks, (name, _)| {
+                let logged = Logged {
+                    deployment: Arc::clone(&self.deployment),
+                    caller: self.caller.clone(),
+                    provider: name.to_string(),
+                    log: Arc::clone(&log),
+                };
+                checks.with(name, Arc::new(logged))
+            })
     }
 }
 
-/// Answers each remote row check with the provider the check names, as the caller, and logs
-/// what each check was asked and allowed.
-pub struct DeploymentChecks {
+/// Asks as the signed-in caller: a GitLab session's grants carry a placeholder caller, and its
+/// checks must reach the provider as the session's user.
+struct Logged {
     deployment: Arc<Deployment>,
     caller: Caller,
+    provider: String,
     log: Arc<RunLog>,
 }
 
 #[async_trait]
-impl RowChecks for DeploymentChecks {
-    async fn allowed(
-        &self,
-        check: &RowCheck,
-        keys: Vec<Key>,
-    ) -> Result<BTreeSet<Key>, ExecutorError> {
-        let asked = keys.clone();
-        let request = CheckRequest {
-            permission: check.permission.clone(),
-            resource: check.resource.clone(),
-            ids: keys,
-        };
+impl Provider<Check> for Logged {
+    async fn call(&self, query: Check) -> Result<Vec<BTreeSet<Key>>, AuthError> {
+        let asked: Vec<(String, String, Vec<Key>)> = query
+            .requests
+            .iter()
+            .map(|request| {
+                (
+                    request.permission.clone(),
+                    request.resource.clone(),
+                    request.ids.clone(),
+                )
+            })
+            .collect();
         let allowed = self
             .deployment
-            .check(&self.caller, &check.provider, vec![request])
-            .await
-            .map_err(|error| ExecutorError(error.to_string()))?
-            .pop()
-            .unwrap_or_default();
-        self.log.push(json!({
-            "event": "check",
-            "provider": check.provider,
-            "permission": check.permission,
-            "resource": check.resource,
-            "field": check.field,
-            "asked": asked,
-            "allowed": allowed,
-        }));
+            .checks()
+            .check(&self.caller, &self.provider, query.requests)
+            .await?;
+        for ((permission, resource, ids), kept) in asked.iter().zip(&allowed) {
+            self.log.push(json!({
+                "event": "check",
+                "provider": self.provider,
+                "permission": permission,
+                "resource": resource,
+                "asked": ids,
+                "allowed": kept,
+            }));
+        }
         Ok(allowed)
     }
 }

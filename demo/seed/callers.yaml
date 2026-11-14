@@ -11,7 +11,11 @@ gitlab:
         "user:1": [1000, 1001, 2000, 3000, 3001, 3002, 3003, 3004, 3005]
         "user:2": [1001, 3002]
     slack:
-      module: fake.slack
+      module: fake.sign_in
+      handles: {"user:1": priya, "user:2": tomas}
+      readable: {}
+    jira:
+      module: fake.sign_in
       handles: {"user:1": priya, "user:2": tomas}
       readable: {}
 
@@ -28,7 +32,11 @@ zanzibar:
       relations: {}
       allowed: {iokafor: [1000, 3000, 3001, 3005]}
     slack:
-      module: fake.slack
+      module: fake.sign_in
+      handles: {iokafor: ines}
+      readable: {}
+    jira:
+      module: fake.sign_in
       handles: {iokafor: ines}
       readable: {}
 

@@ -4,11 +4,17 @@
     MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
     WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust')
     RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20
-- title: Merge requests and the Slack messages that discuss them
+- title: Merge requests and the Slack messages in the lake that discuss them
   caller: maintainer
   query: >-
     MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage)
-    RETURN mr.iid, mr.title, m.author, m.text ORDER BY mr.iid LIMIT 10
+    RETURN mr.iid, mr.title, m.channel, m.author ORDER BY mr.iid LIMIT 10
+- title: Jira issues in the lake, the Slack messages that mention them with their text from live, and the merge requests behind them
+  caller: maintainer
+  query: >-
+    MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue)<-[:MENTIONS_ISSUE]-(m:SlackMessage)
+    WHERE i.status = 'In Review'
+    RETURN i.key, i.summary, mr.iid, m.author, m.text LIMIT 20
 - title: Code search bounded by the projects the caller can read
   caller: guest
   query: >-
@@ -21,9 +27,9 @@
 - title: Neighbors of a live merge request, for contrast
   caller: maintainer
   query: MATCH (mr:MergeRequest)--(n) WHERE mr.id = 3000 RETURN mr, n LIMIT 50
-- title: Open merge requests with their Slack threads and the TODOs on their branch heads
+- title: Open merge requests with their Slack threads in the lake and the TODOs on their branch heads
   caller: maintainer
   query: >-
     MATCH (m:SlackMessage)-[:DISCUSSES]->(mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
     WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust')
-    RETURN mr.iid, m.text, f.path, match.MSG ORDER BY mr.iid LIMIT 20
+    RETURN mr.iid, m.channel, m.author, f.path, match.MSG ORDER BY mr.iid LIMIT 20

@@ -1,6 +1,5 @@
 repositories:
   1000:
-    traversal_path: 1/100/1000/
     branches:
       main:
         - path: src/server.rs
@@ -58,7 +57,6 @@ repositories:
                 }
             }
   1001:
-    traversal_path: 1/100/1001/
     branches:
       main:
         - path: src/theme.rs
@@ -85,7 +83,6 @@ repositories:
                 todo!("pick contrast ratios that pass WCAG AA")
             }
   2000:
-    traversal_path: 1/200/2000/
     branches:
       main:
         - path: src/totals.rs

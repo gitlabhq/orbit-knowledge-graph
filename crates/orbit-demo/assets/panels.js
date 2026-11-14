@@ -3,7 +3,7 @@
 (function () {
   const TABS = ["Plans", "Request", "Security", "Keys and timing", "Rows"];
   const TONES = { waiting: "neutral", running: "info", done: "success", failed: "danger" };
-  const KIND_TONES = { relational: "info", remote: "review", engine: "warning" };
+  const KIND_TONES = { relational: "info", remote: "review", combine: "warning" };
 
   function node(tag, text, cls) {
     const el = document.createElement(tag);
@@ -53,9 +53,9 @@
     return wrap;
   }
 
-  function request(r) {
-    if (r.kind === "sql") return [heading("ClickHouse SQL"), sql(r.sql), heading("Parameters"), table(r.params.map(([name, value]) => ({ name, value })))];
-    if (r.kind === "engine") return [heading("Combine plan: combine the stages' rows, apply the response policy, page the result"), code(r.plan)];
+  function request(r, s) {
+    if (r.kind === "sql") return [heading(`${Dag.NAMES[s.backend] || s.backend} SQL`), sql(r.sql), heading("Parameters"), table(r.params.map(([name, value]) => ({ name, value })))];
+    if (r.kind === "combine") return [heading("Combine plan: combine the stages' rows, apply the response policy, page the result"), code(r.plan)];
     const { kind, ...body } = r;
     return [heading(kind === "code" ? "Orbit Next structural search request" : "Slack extraction request"), code(JSON.stringify(body, null, 2).split("\n"))];
   }
@@ -77,13 +77,11 @@
       case "Plans":
         return [heading("Logical sub-plan"), code(sub.plan), heading("Planned"), code(s.planned), heading("Emitted, with what the security and policy passes added"), code(s.emitted, added(s))];
       case "Request":
-        return s.rendered.length ? s.rendered.flatMap(request) : [empty("No request", "This stage rendered no request.")];
+        return s.rendered.length ? s.rendered.flatMap((r) => request(r, s)) : [empty("No request", "This stage rendered no request.")];
       case "Security": {
-        const lookups = s.rendered.filter((r) => r.kind === "sql" && s.backend !== "clickhouse");
-        const checks = s.checks.map((c) => ({ provider: c.provider, permission: c.permission, resource: c.resource, field: c.field, asked: c.asked, allowed: c.allowed }));
+        const checks = s.checks.map((c) => ({ provider: c.provider, permission: c.permission, resource: c.resource, asked: c.asked, allowed: c.allowed }));
         const parts = [heading("Operations the emitted plan adds"), code([...added(s)])];
         parts.push(heading("Row checks the stage's remote rows went through"), checks.length ? table(checks) : empty("No row checks", "No provider was asked about this stage's rows."));
-        if (lookups.length) parts.push(heading("Scope lookup on the relational connection"), ...lookups.flatMap(request));
         return parts;
       }
       case "Keys and timing": {
@@ -95,7 +93,7 @@
         parts.push(heading("Key sets this stage read"), keys.length ? table(keys) : empty("No key sets", "This stage reads no keys from earlier stages."));
         const flows = run.edges.filter((e) => e.kind === "rows" && (e.from === s.id || e.to === s.id))
           .map((e) => ({ from: `stage ${e.from}`, to: `stage ${e.to}`, rows: e.count ?? "", columns: (e.columns || []).join(", ") }));
-        if (flows.length) parts.push(heading(Dag.kind(s.backend) === "engine" ? "Rows Combine reads" : "Rows this stage hands to Combine"), table(flows));
+        if (flows.length) parts.push(heading(Dag.kind(s.backend) === "combine" ? "Rows Combine reads" : "Rows this stage hands to Combine"), table(flows));
         return parts;
       }
       default:

@@ -9,7 +9,9 @@ use orbit_demo::lockdown::CSP;
 use serde_json::{Value, json};
 use support::{checked, exchange, get, post};
 
-const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, mr.title, m.author, m.text ORDER BY mr.iid LIMIT 10";
+const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, mr.title, m.channel, m.author ORDER BY mr.iid LIMIT 10";
+
+const MENTIONED: &str = "MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue)<-[:MENTIONS_ISSUE]-(m:SlackMessage) WHERE i.status = 'In Review' RETURN i.key, i.summary, mr.iid, m.author, m.text LIMIT 20";
 
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
@@ -74,40 +76,34 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     let page = demo.addresses.page;
 
     let ran = events(page, "maintainer", QUERY_4).await;
-    assert_eq!(
-        kinds(&ran),
-        [
-            "caller",
-            "plans",
-            "logical",
-            "split",
-            "started 0",
-            "planned 0",
-            "emitted 0",
-            "rendered 0",
-            "rows 0",
-            "samples 0",
-            "finished 0",
-            "started 1",
-            "keys 0->1",
-            "rendered 1",
-            "planned 1",
-            "emitted 1",
-            "rendered 1",
-            "check",
-            "rows 1",
-            "samples 1",
-            "finished 1",
-            "started 2",
-            "planned 2",
-            "emitted 2",
-            "rendered 2",
-            "rows 2",
-            "samples 2",
-            "finished 2",
-            "done",
-        ]
-    );
+    let stage = |id: usize, inputs: &[&'static str], check: bool| {
+        let mut kinds = vec![format!("started {id}")];
+        kinds.extend(inputs.iter().map(|input| input.to_string()));
+        kinds.extend([
+            format!("planned {id}"),
+            format!("emitted {id}"),
+            format!("rendered {id}"),
+        ]);
+        if check {
+            kinds.push("check".into());
+        }
+        kinds.extend([
+            format!("rows {id}"),
+            format!("samples {id}"),
+            format!("finished {id}"),
+        ]);
+        kinds
+    };
+    let mut expected: Vec<String> = ["caller", "plans", "logical", "split"]
+        .map(String::from)
+        .to_vec();
+    expected.extend(stage(0, &[], true));
+    expected.extend(stage(1, &["keys 0->1"], true));
+    expected.extend(stage(2, &["keys 0->2", "keys 1->2", "keys 1->2"], true));
+    expected.extend(stage(3, &[], false));
+    expected.push("done".into());
+    assert_eq!(kinds(&ran), expected);
+
     let split = ran.iter().find(|event| event["event"] == "split").unwrap();
     let backends: Vec<&str> = split["stages"]
         .as_array()
@@ -115,10 +111,16 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
         .iter()
         .map(|stage| stage["backend"].as_str().unwrap())
         .collect();
-    assert_eq!(backends, ["clickhouse", "orbit_code", "engine"]);
-    let keys = ran.iter().find(|event| event["event"] == "keys").unwrap();
     assert_eq!(
-        keys["sample"],
+        backends,
+        ["clickhouse", "clickhouse", "orbit_code", "combine"]
+    );
+    let heads = ran
+        .iter()
+        .find(|event| event["event"] == "keys" && event["from"] == 0 && event["to"] == 2)
+        .unwrap();
+    assert_eq!(
+        heads["sample"],
         json!([
             [1000, "limiter-burst-config"],
             [1000, "scoped-admin-tokens"],
@@ -127,7 +129,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     );
     let code = ran
         .iter()
-        .filter(|event| event["event"] == "rendered" && event["stage"] == 1)
+        .filter(|event| event["event"] == "rendered" && event["stage"] == 2)
         .flat_map(|event| event["requests"].as_array().unwrap().clone())
         .find(|request| request["kind"] == "code")
         .unwrap();
@@ -135,7 +137,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     assert_eq!(code["pattern"], "todo!($$$MSG)");
     let samples = ran
         .iter()
-        .find(|event| event["event"] == "samples" && event["stage"] == 1)
+        .find(|event| event["event"] == "samples" && event["stage"] == 2)
         .unwrap();
     let requests: Vec<&str> = samples["samples"]
         .as_array()
@@ -143,7 +145,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
         .iter()
         .map(|sample| sample["request"].as_str().unwrap())
         .collect();
-    assert_eq!(requests, ["scope lookup", "structural search"]);
+    assert_eq!(requests, ["structural search"]);
     assert_eq!(
         paths(&ran),
         ["src/auth/scopes.rs", "src/limiter.rs", "src/theme.rs"]
@@ -154,16 +156,16 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     );
     let zanzibar = events(page, "zanzibar", QUERY_4).await;
     assert_eq!(paths(&zanzibar), ["src/auth/scopes.rs", "src/limiter.rs"]);
-    let check = zanzibar
+    let denied = zanzibar
         .iter()
-        .find(|event| event["event"] == "check")
+        .find(|event| event["event"] == "check" && event["resource"] == "project")
         .unwrap();
     assert_eq!(
-        (&check["provider"], &check["permission"], &check["field"]),
-        (&json!("rails"), &json!("read_code"), &json!("project_id"))
+        (&denied["provider"], &denied["permission"]),
+        (&json!("rails"), &json!("read_code"))
     );
     assert_eq!(
-        (&check["asked"], &check["allowed"]),
+        (&denied["asked"], &denied["allowed"]),
         (&json!([1000, 2000]), &json!([1000]))
     );
 
@@ -183,7 +185,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     ] {
         assert!(logical.contains(&line), "{line} in {logical:#?}");
     }
-    let code_stage = plans["stages"]["1"].as_array().unwrap();
+    let code_stage = plans["stages"]["2"].as_array().unwrap();
     assert!(
         code_stage
             .iter()
@@ -192,9 +194,17 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     );
 
     let discussed = events(page, "maintainer", DISCUSSED).await;
-    assert_eq!(column(&discussed, "m_text").len(), 3, "{discussed:?}");
+    assert_eq!(column(&discussed, "m_author").len(), 3, "{discussed:?}");
     let guest = events(page, "guest", DISCUSSED).await;
-    assert_eq!(column(&guest, "m_text"), Vec::<String>::new());
+    assert_eq!(column(&guest, "m_author"), Vec::<String>::new());
+    let mentioned = events(page, "maintainer", MENTIONED).await;
+    let mut texts = column(&mentioned, "m_text");
+    texts.sort();
+    assert_eq!(texts.len(), 2, "{mentioned:?}");
+    assert!(
+        texts[0].starts_with("!412 is ready for review"),
+        "{texts:?}"
+    );
 
     let host = format!("127.0.0.1:{}", page.port());
     let index = exchange(page, &get("/", &host, "")).await;

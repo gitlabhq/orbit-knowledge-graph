@@ -1,26 +1,25 @@
 workspaces:
   T01:
-    traversal_path: 1/100/
-    messages:
+    search.messages:
       - id: m1
+        issue_id: "20012"
         workspace: T01
-        merge_request_id: 3000
         channel: gateway
         author: daniel
         text: "!412 is ready for review. Admin routes now need admin:write, everything else is unchanged."
         sent_at: "2026-11-02T16:40:00Z"
         visible_to: [priya, ines]
       - id: m2
+        issue_id: "20012"
         workspace: T01
-        merge_request_id: 3000
         channel: gateway-incidents
         author: priya
         text: "Context for !412: last week's incident was a read-only token calling DELETE /admin/routes. Keep this thread private until the postmortem is out."
         sent_at: "2026-11-02T17:05:00Z"
         visible_to: [priya]
       - id: m3
+        issue_id: "20031"
         workspace: T01
-        merge_request_id: 3002
         channel: console
         author: tomas
         text: "Dark theme screenshots for !88 are in the thread. Sidebar contrast still needs a pass."
@@ -34,11 +33,10 @@ workspaces:
         sent_at: "2026-11-03T12:02:00Z"
         visible_to: [priya, tomas, ines]
   T02:
-    traversal_path: 1/200/
-    messages:
+    search.messages:
       - id: m5
+        issue_id: "20057"
         workspace: T02
-        merge_request_id: 3005
         channel: payments
         author: ines
         text: "Finance confirmed the CSV must round per line, not per invoice total. Updating !57."

@@ -30,7 +30,8 @@ the fakes and the callers.
 | --- | --- |
 | `clickhouse/*.yaml` | `table:` and `rows:` for one ClickHouse table. Columns you omit take their defaults. A row with `_deleted: true` and a later `_version` is a tombstone. |
 | `orbit_next.yaml` | Repositories, with the files at the head of each branch. The fake matches the search pattern against file contents line by line. |
-| `slack.yaml` | Workspaces and their messages. `visible_to` lists the Slack handles that can read each message. |
+| `lake/*.yaml` | `table:` and `rows:` for one table of a DuckDB lake: Slack's `slack_lake` and Jira's `jira_lake`, each an in-memory database the demo creates from the packages. |
+| `slack.yaml` | The live Slack messages, with the `text` the lake does not store, per workspace and operation. `visible_to` lists the Slack handles that can read each message. |
 | `callers.yaml` | The GitLab and Zanzibar-style deployments, and the callers the page offers. |
 | `examples.yaml` | The starter queries. |
 

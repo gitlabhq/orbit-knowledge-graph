@@ -14,6 +14,7 @@ use crate::callers::Callers;
 
 pub struct Seed {
     pub tables: Vec<TableRows>,
+    pub lake: Vec<TableRows>,
     pub orbit_next: OrbitNext,
     pub slack: SeededDataExtraction,
     pub callers: Callers,
@@ -46,7 +47,6 @@ pub struct OrbitNext {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Repository {
-    pub traversal_path: String,
     /// The files at the head of each branch.
     pub branches: BTreeMap<String, Vec<File>>,
 }
@@ -66,27 +66,28 @@ fn read<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
 
 impl Seed {
     pub fn read(dir: &Path) -> anyhow::Result<Self> {
-        let graph = dir.join("clickhouse");
-        let mut files: Vec<_> = std::fs::read_dir(&graph)
-            .with_context(|| format!("reading {}", graph.display()))?
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "yaml"))
-            .collect();
-        files.sort();
-        let tables = files
-            .iter()
-            .map(|path| read(path))
-            .collect::<anyhow::Result<_>>()?;
         Ok(Self {
-            tables,
+            tables: tables(&dir.join("clickhouse"))?,
+            lake: tables(&dir.join("lake"))?,
             orbit_next: read(&dir.join("orbit_next.yaml"))?,
             slack: read(&dir.join("slack.yaml"))?,
             callers: read(&dir.join("callers.yaml"))?,
             examples: read(&dir.join("examples.yaml"))?,
         })
     }
+}
+
+/// The rows of every table file in `dir`, in file name order.
+fn tables(dir: &Path) -> anyhow::Result<Vec<TableRows>> {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "yaml"))
+        .collect();
+    files.sort();
+    files.iter().map(|path| read(path)).collect()
 }
 
 /// The language Orbit Next indexes a file as, by its extension.

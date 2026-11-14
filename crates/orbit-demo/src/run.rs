@@ -118,7 +118,7 @@ async fn execute(
             samples: Arc::clone(&samples),
         })
     };
-    let connection = demo.primary.connection();
+    let connection = demo.catalog.connection();
     let graph = orbit_server::pipeline::graph_executors(
         Arc::clone(&demo.store.reader),
         &demo.catalog,
@@ -128,28 +128,32 @@ async fn execute(
     );
     let mut executors =
         Executors::default().with(connection, sampled(Arc::clone(graph.get(connection)?)));
+    for (connection, lake) in demo.lakes.executors() {
+        executors = executors.with(connection, sampled(Arc::new(lake)));
+    }
     let handle = session.slack_handle().await.unwrap_or_default();
-    for target in demo.remotes.targets() {
-        let executor: Arc<dyn Executor> = match target.backend() {
+    for peer in demo.connections.peers() {
+        let executor: Arc<dyn Executor> = match peer.backend() {
             Backend::OrbitCode => Arc::new(CodeHttp(demo.addresses.orbit_next)),
-            _ => Arc::new(LiveHttp {
+            Backend::Live => Arc::new(LiveHttp {
                 address: demo.addresses.slack,
                 handle: handle.clone(),
             }),
+            Backend::ClickHouse | Backend::DuckDb | Backend::Combine => continue,
         };
-        executors = executors.with(target.connection(), sampled(executor));
+        executors = executors.with(peer.connection(), sampled(executor));
     }
-    let checks = session.checks(Arc::clone(log));
+    let checks = session.checks(&demo.model, Arc::clone(log));
     let env = || Env {
-        primary: &demo.primary,
-        remotes: &demo.remotes,
+        frontend: &demo.frontend,
+        connections: &demo.connections,
         grants: &session.grants,
         limits: query_data_model::testkit::limits(),
         trace: true,
     };
     let parse = || {
         let admin = session.grants.caller().admin();
-        let catalog = surface::catalog(&demo.catalog, &demo.remotes, env().limits, admin);
+        let catalog = surface::catalog(&demo.catalog, &demo.connections, env().limits, admin);
         surface::parse(query, catalog)
     };
     log.push(plans(demo, parse()?, &env()));

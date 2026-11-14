@@ -3,14 +3,14 @@
 (function () {
   const NS = "http://www.w3.org/2000/svg";
   const W = 264, H = 92, GAP = 232, VGAP = 116, PAD = 18, ABOVE = 44, CHAR = 6.7;
-  const NAMES = { clickhouse: "ClickHouse", duckdb: "DuckDB", orbit_code: "Orbit Next", live: "Slack (live)", engine: "Combine" };
-  const KINDS = { relational: "Relational", remote: "Remote", engine: "In process" };
+  const NAMES = { clickhouse: "ClickHouse", duckdb: "DuckDB lake", orbit_code: "Orbit Next", live: "Live (Data Extraction)", combine: "Combine" };
+  const KINDS = { relational: "Relational", remote: "Remote", combine: "In process" };
   const STATES = { waiting: "Waiting", running: "Running", done: "Finished", failed: "Failed" };
   const ARROW = { keys: 2, rows: 1.5 };
   const HEAD = { keys: 5, rows: 6 };
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  const kind = (backend) => (backend === "engine" ? "engine" : backend === "clickhouse" || backend === "duckdb" ? "relational" : "remote");
+  const kind = (backend) => (backend === "combine" ? "combine" : backend === "clickhouse" || backend === "duckdb" ? "relational" : "remote");
   const fit = (text, width) => { const max = Math.floor(width / CHAR); return text.length > max ? text.slice(0, max - 1) + "…" : text; };
 
   function el(name, attrs, parent) {
@@ -35,8 +35,8 @@
   }
 
   function layout(stages, edges) {
-    const data = stages.filter((s) => kind(s.backend) !== "engine").sort((a, b) => a.id - b.id);
-    const combines = stages.filter((s) => kind(s.backend) === "engine");
+    const data = stages.filter((s) => kind(s.backend) !== "combine").sort((a, b) => a.id - b.id);
+    const combines = stages.filter((s) => kind(s.backend) === "combine");
     const column = Object.fromEntries(data.map((s, i) => [s.id, i]));
     const above = edges.some((e) => e.kind === "keys" && column[e.to] - column[e.from] > 1);
     const top = PAD + (above ? ABOVE : 0);
@@ -102,7 +102,7 @@
     el("rect", { class: "accent", x: 10, y: 12, width: 4, height: H - 24, rx: 2 }, group);
     text(group, 26, 25, `Stage ${stage.id} · ${KINDS[k]}`, "kind");
     text(group, 26, 44, NAMES[stage.backend] || stage.backend, "title");
-    text(group, 26, 60, k === "engine" ? "combines rows · policy · paging" : `connection ${stage.connection}`, "meta");
+    text(group, 26, 60, k === "combine" ? "combines rows · policy · paging" : `connection ${stage.connection}`, "meta");
     badge(group, 26, 77, STATES[stage.status] || stage.status, "pill");
     if (stage.status === "done") text(group, W - 14, 81, `${plural(stage.rows ?? 0, "row")} · ${stage.elapsed.toFixed(1)} ms`, "stats", "end");
     group.addEventListener("click", () => onSelect(stage.id));

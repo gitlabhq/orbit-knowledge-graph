@@ -1,0 +1,7 @@
+table: slack_message
+rows:
+  - {id: m1, issue_id: "20012", workspace: T01, channel: gateway, author: daniel, sent_at: "2026-11-02 16:40:00", merge_request_id: 3000, traversal_path: 1/100/}
+  - {id: m2, issue_id: "20012", workspace: T01, channel: gateway-incidents, author: priya, sent_at: "2026-11-02 17:05:00", merge_request_id: 3000, traversal_path: 1/100/}
+  - {id: m3, issue_id: "20031", workspace: T01, channel: console, author: tomas, sent_at: "2026-11-03 09:15:00", merge_request_id: 3002, traversal_path: 1/100/}
+  - {id: m4, workspace: T01, channel: random, author: daniel, sent_at: "2026-11-03 12:02:00", traversal_path: 1/100/}
+  - {id: m5, issue_id: "20057", workspace: T02, channel: payments, author: ines, sent_at: "2026-11-04 10:20:00", merge_request_id: 3005, traversal_path: 1/200/}

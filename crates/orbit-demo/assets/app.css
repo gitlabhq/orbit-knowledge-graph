@@ -44,7 +44,7 @@ svg#dag { display: block; width: 100%; height: auto; margin: 0 auto; font-family
 .stage-card .accent { stroke: none; }
 .stage-card.relational .accent { fill: var(--info); }
 .stage-card.remote .accent { fill: var(--review); }
-.stage-card.engine .accent { fill: var(--warning); }
+.stage-card.combine .accent { fill: var(--warning); }
 .stage-card .kind { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; fill: var(--text-subtle); }
 .stage-card .title { font-size: 14px; font-weight: 600; fill: var(--text-heading); }
 .stage-card .meta { font-family: var(--mono); font-size: 11px; fill: var(--text-subtle); }

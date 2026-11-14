@@ -4,11 +4,13 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
+use compiler::orbit_authorization::Key;
 use integration_testkit::seeded_remote::SeededDataExtraction;
 use query_data_model::catalog::Row;
 use query_data_model::implementations::live::{
     DataExtraction, ExtractionRequest, RequestFilter, Window,
 };
+use query_data_model::plan::live::Workspaces;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -21,7 +23,7 @@ pub const PATH: &str = "/v1/extract";
 #[serde(deny_unknown_fields)]
 pub struct Extract {
     pub operation: String,
-    pub workspaces: Vec<String>,
+    pub workspaces: WireWorkspaces,
     pub filters: Vec<Filter>,
     pub window: Option<WireWindow>,
     pub limit: Option<u64>,
@@ -42,6 +44,35 @@ pub struct WireWindow {
     pub field: String,
     pub from: Option<String>,
     pub to: Option<String>,
+}
+
+/// `Workspaces` as it arrives: `"any"`, or `{"only": [...]}` with each scope key as a text or
+/// a composite's parts.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum WireWorkspaces {
+    Any(String),
+    Only { only: Vec<Value> },
+}
+
+impl From<WireWorkspaces> for Workspaces {
+    fn from(wire: WireWorkspaces) -> Self {
+        match wire {
+            WireWorkspaces::Any(_) => Self::Any,
+            WireWorkspaces::Only { only } => Self::Only(only.iter().map(key).collect()),
+        }
+    }
+}
+
+fn key(value: &Value) -> Key {
+    match value {
+        Value::Array(parts) => Key::Composite(parts.iter().map(key).collect()),
+        Value::Number(number) => number
+            .as_i64()
+            .map_or_else(|| Key::Text(number.to_string()), Key::Int),
+        Value::String(text) => Key::Text(text.clone()),
+        other => Key::Text(other.to_string()),
+    }
 }
 
 fn op(name: &str) -> Result<&'static str, String> {
@@ -77,7 +108,7 @@ pub async fn extract(
         .map_err(|error| (StatusCode::BAD_REQUEST, error))?;
     let request = ExtractionRequest {
         operation: request.operation,
-        workspaces: request.workspaces,
+        workspaces: request.workspaces.into(),
         filters,
         window: request.window.map(|window| Window {
             field: window.field,
