@@ -7,7 +7,7 @@ use code_graph::v2::types::EdgeKind;
 use code_graph_incremental::export::ExportTables;
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::catalog::sources::CODE_INDEXER_SOURCE;
+use query_data_model::catalog::sources::CODE_INDEXER;
 use query_data_model::implementations::clickhouse::schema::{Table, data_type};
 
 use super::config::CodeKinds;
@@ -212,10 +212,11 @@ fn edge_specs(catalog: &Catalog<ClickHouse>) -> Result<Vec<ColumnSpec>, DataMode
     let writes = catalog
         .model()
         .sources()
-        .direct_source(CODE_INDEXER_SOURCE)
+        .direct_source(CODE_INDEXER)
         .ok_or_else(|| {
             DataModelError::Invalid(format!(
-                "the model declares no {CODE_INDEXER_SOURCE} source"
+                "the model declares no {} source",
+                CODE_INDEXER.name
             ))
         })?;
     let tables: BTreeSet<&str> = writes

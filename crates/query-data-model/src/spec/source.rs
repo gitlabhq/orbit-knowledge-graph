@@ -12,8 +12,18 @@ use crate::{EntityId, RelationshipVariantId};
 pub const GENERATED_QUERY: &str = "generated";
 pub const TEMPLATE_EXTENSION: &str = ".sql.j2";
 
+/// A source's identity: the package that declares or lists it, and its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceKey<'a> {
+    pub package: &'a str,
+    pub name: &'a str,
+}
+
 /// The source whose rows the code indexer writes itself, with no pipelines.
-pub const CODE_INDEXER_SOURCE: &str = "code_indexer";
+pub const CODE_INDEXER: SourceKey<'static> = SourceKey {
+    package: "gitlab.source_code",
+    name: "code_indexer",
+};
 
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(try_from = "WrittenFragment")]

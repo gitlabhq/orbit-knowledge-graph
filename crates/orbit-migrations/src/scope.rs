@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::Schema;
-use query_data_model::catalog::sources::CODE_INDEXER_SOURCE;
+use query_data_model::catalog::sources::CODE_INDEXER;
 use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor, RowWriter, Writer};
 use query_data_model::implementations::clickhouse::spec::TableRole;
 use query_data_model::{Catalog, ClickHouse, EntityId, RelationshipId};
@@ -222,7 +222,7 @@ pub(crate) fn relationship_tables(
 fn code_indexer_entities(catalog: &Catalog<ClickHouse>) -> impl Iterator<Item = EntityId> + '_ {
     let sources = catalog.model().sources();
     sources
-        .direct_source(CODE_INDEXER_SOURCE)
+        .direct_source(CODE_INDEXER)
         .into_iter()
         .flat_map(|writes| writes.entities.iter().copied())
 }
@@ -232,7 +232,7 @@ fn code_indexer_entities(catalog: &Catalog<ClickHouse>) -> impl Iterator<Item = 
 pub(crate) fn code_domain_tables(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
     let sources = catalog.model().sources();
     let code = |writer: Option<RowWriter>| {
-        writer.is_some_and(|writer| sources.row_writer_name(writer) == CODE_INDEXER_SOURCE)
+        writer.is_some_and(|writer| sources.row_writer_source(writer) == CODE_INDEXER)
     };
     let mut edge_tables = BTreeMap::<&str, bool>::new();
     for variant in catalog.graph().variants() {

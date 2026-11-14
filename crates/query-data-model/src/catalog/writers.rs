@@ -47,7 +47,7 @@ pub(super) fn assign(
                     &package,
                     format!(
                         "{} writes entity {}, whose stores {} take no writer",
-                        sources.row_writer_name(*writer),
+                        sources.row_writer_source(*writer).name,
                         entity.name,
                         unwritten().join(", ")
                     ),

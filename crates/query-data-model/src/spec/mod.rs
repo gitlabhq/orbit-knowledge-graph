@@ -15,8 +15,8 @@ pub use graph::{
 pub use schemas::schemas;
 pub use service::{Lookup, ServiceFragment};
 pub use source::{
-    CODE_INDEXER_SOURCE, EdgeMapping, Endpoint, EndpointKind, ExtractLookup, GENERATED_QUERY,
-    PathSpec, PipelineSpec, ReindexTrigger, SourceFragment, TEMPLATE_EXTENSION, Writes,
+    CODE_INDEXER, EdgeMapping, Endpoint, EndpointKind, ExtractLookup, GENERATED_QUERY, PathSpec,
+    PipelineSpec, ReindexTrigger, SourceFragment, SourceKey, TEMPLATE_EXTENSION, Writes,
 };
 pub use storage::{
     AccessHints, Binding, Block, Blocks, CopySources, Discriminator, EngineSpec, EntityStorage,

@@ -90,7 +90,7 @@ fn a_source_that_writes_an_entity_only_a_live_store_holds_fails_the_load() {
     )]);
     assert!(
         errors.contains(
-            &"integration.slack: SlackMessage writes entity SlackMessage, whose stores slack_live take no writer"
+            &"integration.slack: des writes entity SlackMessage, whose stores slack_live take no writer"
                 .to_string()
         ),
         "{errors:?}"

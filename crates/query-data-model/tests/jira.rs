@@ -289,7 +289,12 @@ fn a_jira_column_without_a_storage_type_fails_the_load() {
 fn the_des_source_declares_the_lifecycle_columns_its_parquet_rows_carry() {
     let model = demo(|_, yaml| yaml).unwrap();
     let sources = model.sources();
-    let des = sources.source_named("des").unwrap();
+    let des = sources
+        .source(query_data_model::catalog::sources::SourceKey {
+            package: "integration.jira",
+            name: "des",
+        })
+        .unwrap();
     assert_eq!(
         (
             des.connection.as_str(),
@@ -321,4 +326,62 @@ fn the_des_source_declares_the_lifecycle_columns_its_parquet_rows_carry() {
             .collect();
         assert_eq!(pipelines, [("des", vec![table])], "{name}");
     }
+}
+
+#[test]
+fn each_package_writes_through_its_own_des_source() {
+    let model = demo(|_, yaml| yaml).unwrap();
+    let sources = model.sources();
+    for (package, entity, connection) in [
+        ("integration.jira", "JiraIssue", "jira_lake"),
+        ("integration.slack", "SlackMessage", "slack_lake"),
+    ] {
+        let entity = model.names().entity(entity).unwrap();
+        let writers: Vec<_> = sources
+            .entity_pipelines(entity)
+            .map(|pipeline| sources.data_source(pipeline))
+            .map(|source| {
+                (
+                    source.package.as_str(),
+                    source.name.as_str(),
+                    source.connection.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(writers, [(package, "des", connection)]);
+    }
+}
+
+#[test]
+fn a_source_two_other_packages_declare_needs_its_own_declaration() {
+    let errors = spec_errors(
+        query_data_model::testkit::with_demo()
+            .with(query_data_model::Packages::new(
+                query_data_model::Tier::Integration,
+                [
+                    (
+                        "integration.extra/package.yaml".to_string(),
+                        "kind: package\nname: integration.extra\nrequires: [gitlab, integration.jira]\n".to_string(),
+                    ),
+                    (
+                        "integration.extra/authorization.yaml".to_string(),
+                        "kind: authorization\npackage: integration.extra\n".to_string(),
+                    ),
+                    (
+                        "integration.extra/sources/des.yaml".to_string(),
+                        "kind: source\npackage: integration.extra\nsource: des\nentities:\n  JiraUser: {tables: [jira_user], order_by: [traversal_path, account_id], query: generated}\n".to_string(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            ))
+            .deployment("demo"),
+    );
+    assert!(
+        errors.contains(
+            &"integration.extra: source des is declared by both integration.jira and integration.slack, so integration.extra must declare its own"
+                .to_string()
+        ),
+        "{errors:?}"
+    );
 }
