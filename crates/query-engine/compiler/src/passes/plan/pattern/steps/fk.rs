@@ -126,10 +126,18 @@ where
     fn push_fk_outputs(&mut self, relation: &EdgeRelation, key: &Fk, alias: &str) -> Result<()> {
         let pattern = self.pattern;
         let (source, target) = relation.stored_endpoints();
+        let held = |node: &str| -> Vec<OutputValue> {
+            pattern.nodes[node]
+                .identity
+                .iter()
+                .map(|column| OutputValue::Column(Column::new(alias, column)))
+                .collect()
+        };
+        let key_column = || vec![OutputValue::Column(Column::new(alias, &key.column))];
         let (source_id, target_id) = if key.node == source {
-            (pattern.nodes[source].id_column()?, key.column.as_str())
+            (held(source), key_column())
         } else {
-            (key.column.as_str(), pattern.nodes[target].id_column()?)
+            (key_column(), held(target))
         };
         let graph = pattern.model.graph();
         let entity = |node: &str| {
@@ -141,11 +149,13 @@ where
         self.push_relation_outputs(
             relation,
             [
-                OutputValue::Text(relation.rel_types.first().cloned().unwrap_or_default()),
-                OutputValue::Column(Column::new(alias, source_id)),
-                entity(source),
-                OutputValue::Column(Column::new(alias, target_id)),
-                entity(target),
+                vec![OutputValue::Text(
+                    relation.rel_types.first().cloned().unwrap_or_default(),
+                )],
+                source_id,
+                vec![entity(source)],
+                target_id,
+                vec![entity(target)],
             ],
         );
         Ok(())

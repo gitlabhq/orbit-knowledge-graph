@@ -381,7 +381,7 @@ async fn a_lookup_hands_on_integer_head_keys() {
         _ => None,
     });
     assert_eq!(scoped, Some(vec![Key::Int(7)]));
-    assert_eq!(calls(&ran, 1), [Workspaces::Only(vec!["7".into()])]);
+    assert_eq!(calls(&ran, 1), [Workspaces::Only(vec![Key::Int(7)])]);
     assert_eq!(column(ran, "p_text"), [json!("smiths forge at dawn")]);
 }
 

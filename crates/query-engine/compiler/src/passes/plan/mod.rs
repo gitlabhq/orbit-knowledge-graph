@@ -170,11 +170,21 @@ fn pattern<B: SqlBackend>(
     let edges = pattern
         .relations
         .iter()
-        .map(|hop| PlannedEdge {
-            variable_length: hop.max_hops > 1,
-            column_prefix: hop.column_prefix(),
-            rel_types: hop.rel_types.clone(),
-            relationship: hop.input_index,
+        .map(|hop| {
+            let (source, target) = hop.stored_endpoints();
+            let parts = |node: &str| {
+                pattern
+                    .nodes
+                    .get(node)
+                    .map_or(1, |node| node.identity.len())
+            };
+            PlannedEdge {
+                variable_length: hop.max_hops > 1,
+                column_prefix: hop.column_prefix(),
+                rel_types: hop.rel_types.clone(),
+                relationship: hop.input_index,
+                parts: (parts(source), parts(target)),
+            }
         })
         .collect();
     let point_lookup = !pattern.nodes.is_empty()

@@ -41,8 +41,6 @@ pub enum CombineOperation {
     },
     /// Constant text columns, each a name and the value every row holds.
     Tag(Vec<(String, String)>),
-    /// Text columns that each hold a composite key, built from its parts read as their types.
-    Composite(Vec<Vec<(Ref, DataType)>>),
     /// Text columns cut to `chars` characters, with `suffix` after any that were cut.
     Excerpt {
         columns: Vec<Ref>,
@@ -64,9 +62,6 @@ impl Language for CombineLanguage {
             CombineOperation::Select(columns) => columns.iter_mut().for_each(visit),
             CombineOperation::Order(keys) => keys.iter_mut().for_each(|(key, _)| visit(key)),
             CombineOperation::Excerpt { columns, .. } => columns.iter_mut().for_each(visit),
-            CombineOperation::Composite(keys) => {
-                keys.iter_mut().flatten().for_each(|(part, _)| visit(part))
-            }
             CombineOperation::Rows { .. }
             | CombineOperation::Limit { .. }
             | CombineOperation::Tag(_) => {}
@@ -202,24 +197,6 @@ impl CombineBuilder {
             .collect();
         self.connect(
             CombineOperation::Tag(columns),
-            vec![rel],
-            Outputs::extend(declared),
-        )
-    }
-
-    /// One text column per named composite key, from its parts.
-    pub fn composite(
-        &mut self,
-        rel: Rel,
-        keys: Vec<(String, Vec<(Ref, DataType)>)>,
-    ) -> Result<Rel, CombineError> {
-        let declared: Vec<_> = keys
-            .iter()
-            .map(|(name, _)| Declare::named(name, None))
-            .collect();
-        let parts = keys.into_iter().map(|(_, parts)| parts).collect();
-        self.connect(
-            CombineOperation::Composite(parts),
             vec![rel],
             Outputs::extend(declared),
         )

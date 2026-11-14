@@ -15,7 +15,8 @@ use query_data_model::plan::logical::{
 use query_data_model::plan::tracking::{Declare, Ref, Step};
 
 use crate::constants::{
-    primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
+    identity_part_column, primary_key_column, redaction_id_column, redaction_type_column,
+    traversal_path_column,
 };
 use crate::error::{QueryError, Result};
 use crate::logical::columns::{free_text, redaction_column};
@@ -117,6 +118,9 @@ pub struct RedactionNode {
     pub pk_column: String,
     pub id_column: String,
     pub type_column: String,
+    /// How many parts the node's identity has; a composite identity is carried one part per
+    /// column under `pk_column`.
+    pub parts: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +136,10 @@ pub struct EdgeMeta {
     pub dst_column: String,
     pub dst_type_column: String,
     pub relationship: usize,
+    /// How many identity parts each endpoint has; a composite endpoint is carried one part per
+    /// column under its id column.
+    pub src_parts: usize,
+    pub dst_parts: usize,
 }
 
 impl EdgeMeta {
@@ -159,6 +167,8 @@ impl EdgeMeta {
             relationship,
             from_alias: String::new(),
             to_alias: String::new(),
+            src_parts: 1,
+            dst_parts: 1,
         }
     }
 }
@@ -187,6 +197,11 @@ impl ResultContext {
     }
 
     pub fn add_node(&mut self, alias: &str, entity_type: &str) {
+        self.add_node_with_parts(alias, entity_type, 1);
+    }
+
+    /// A node whose identity has `parts` parts.
+    pub fn add_node_with_parts(&mut self, alias: &str, entity_type: &str, parts: usize) {
         self.nodes.insert(
             alias.to_string(),
             RedactionNode {
@@ -195,14 +210,15 @@ impl ResultContext {
                 pk_column: primary_key_column(alias),
                 id_column: redaction_id_column(alias),
                 type_column: redaction_type_column(alias),
+                parts,
             },
         );
     }
 
     /// A node of a remote stage, whose rows that stage put through every check of the entity
     /// before the Combine stage joined them.
-    pub fn add_stage_checked_node(&mut self, alias: &str, entity_type: &str) {
-        self.add_node(alias, entity_type);
+    pub fn add_stage_checked_node(&mut self, alias: &str, entity_type: &str, parts: usize) {
+        self.add_node_with_parts(alias, entity_type, parts);
         self.stage_checked.insert(alias.to_string());
     }
 
@@ -473,12 +489,16 @@ pub fn apply<B: SqlBackend>(
     let contract = return_columns(kind, &bindings, &selectable_nodes, &metadata.nodes, model)?;
     if matches!(kind, Kind::Traversal | Kind::Aggregation) {
         for edge in &metadata.edges {
-            ctx.edges.push(EdgeMeta::hop(
-                edge.column_prefix.clone(),
-                edge.variable_length,
-                edge.rel_types.clone(),
-                edge.relationship,
-            ));
+            ctx.edges.push(EdgeMeta {
+                src_parts: edge.parts.0,
+                dst_parts: edge.parts.1,
+                ..EdgeMeta::hop(
+                    edge.column_prefix.clone(),
+                    edge.variable_length,
+                    edge.rel_types.clone(),
+                    edge.relationship,
+                )
+            });
         }
     }
     let plan = match contract.outputs.is_empty() {
@@ -524,7 +544,8 @@ pub fn context<B: SqlBackend>(query: Query<'_>, model: &Catalog<B>) -> ResultCon
     let selectable_nodes = selectable(query, model);
     for binding in &query.bindings() {
         if selectable_nodes.contains(binding.name) {
-            ctx.add_node(binding.name, &model.graph().entity(binding.entity).name);
+            let entity = model.graph().entity(binding.entity);
+            ctx.add_node_with_parts(binding.name, &entity.name, entity.identity.len());
         }
     }
     ctx
@@ -590,32 +611,41 @@ fn return_columns(
         else {
             continue;
         };
-        let id_column = crate::logical::columns::identity_column(model, entity_id)?;
-        let [identity] = identity.as_slice() else {
-            return Err(QueryError::PipelineInvariant(format!(
-                "node '{}' binds one term per identity column",
-                node.name
-            )));
+        let authorization = match redaction_column(model, entity_id) {
+            Some(column) => {
+                let table_alias = table_alias.as_deref().ok_or_else(|| {
+                    QueryError::PipelineInvariant(format!(
+                        "node '{}' is authorized by {column} but has no table read",
+                        node.name
+                    ))
+                })?;
+                Some(Term::Column(Named::new(table_alias, column)))
+            }
+            None => None,
         };
-        let redaction_column = redaction_column(model, entity_id).unwrap_or(id_column);
-        let needs_separate_pk = redaction_column != id_column;
-        let authorization_id = if needs_separate_pk {
-            let table_alias = table_alias.as_deref().ok_or_else(|| {
-                QueryError::PipelineInvariant(format!(
-                    "node '{}' is authorized by {redaction_column} but has no table read",
-                    node.name
-                ))
-            })?;
-            Term::Column(Named::new(table_alias, redaction_column))
-        } else {
-            identity.clone()
-        };
-        if needs_separate_pk {
-            contract.set(primary_key_column(node.name), identity.clone());
-            contract.group(identity.clone());
+        match (identity.as_slice(), authorization) {
+            ([identity], None) => {
+                contract.set(redaction_id_column(node.name), identity.clone());
+                contract.group(identity.clone());
+            }
+            ([identity], Some(authorization)) => {
+                contract.set(primary_key_column(node.name), identity.clone());
+                contract.group(identity.clone());
+                contract.set(redaction_id_column(node.name), authorization.clone());
+                contract.group(authorization);
+            }
+            (parts, authorization) => {
+                for (part, term) in parts.iter().enumerate() {
+                    let column = identity_part_column(&primary_key_column(node.name), part);
+                    contract.set(column, term.clone());
+                    contract.group(term.clone());
+                }
+                if let Some(authorization) = authorization {
+                    contract.set(redaction_id_column(node.name), authorization.clone());
+                    contract.group(authorization);
+                }
+            }
         }
-        contract.set(redaction_id_column(node.name), authorization_id.clone());
-        contract.group(authorization_id);
         let label = Term::Value(Box::new(OutputValue::Text(entity.clone())));
         contract.set(redaction_type_column(node.name), label);
         if kind != Kind::Aggregation

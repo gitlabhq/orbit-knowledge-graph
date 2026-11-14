@@ -367,13 +367,15 @@ impl Cut<'_> {
             };
             let text = ColumnType::Scalar(DataType::String);
             for (field, data_type) in [
-                (EdgeField::Kind, text),
-                (EdgeField::SourceId, self.id_type(source)?),
-                (EdgeField::SourceKind, text),
-                (EdgeField::TargetId, self.id_type(target)?),
-                (EdgeField::TargetKind, text),
+                (EdgeField::Kind, Some(text)),
+                (EdgeField::SourceId, self.id_type(source)),
+                (EdgeField::SourceKind, Some(text)),
+                (EdgeField::TargetId, self.id_type(target)),
+                (EdgeField::TargetKind, Some(text)),
             ] {
-                contract.push(Output::Edge { step, field }, data_type);
+                if let Some(data_type) = data_type {
+                    contract.push(Output::Edge { step, field }, data_type);
+                }
             }
             if pattern.range.max > 1 {
                 contract.push(Output::Path { step }, ColumnType::Path);
@@ -414,19 +416,17 @@ impl Cut<'_> {
             .collect()
     }
 
-    /// The type of the identity an edge's endpoint carries.
-    fn id_type(&self, binding: Ref) -> Result<ColumnType> {
+    /// The type of the one identity column an edge's endpoint carries; a composite endpoint's id
+    /// is its node's identity parts, which the stage already returns.
+    fn id_type(&self, binding: Ref) -> Option<ColumnType> {
         let graph = self.query.model.graph();
-        let identity = self
-            .query
-            .entity(binding)
-            .map(|entity| graph.entity(entity).identity.as_slice());
-        match identity {
-            Some([part]) => Ok(ColumnType::Scalar(graph.property(*part).data_type)),
-            _ => Err(QueryError::Validation(format!(
-                "{} has no single identity for an edge to carry",
-                self.query.name(binding)
-            ))),
+        match graph
+            .entity(self.query.entity(binding)?)
+            .identity
+            .as_slice()
+        {
+            [part] => Some(ColumnType::Scalar(graph.property(*part).data_type)),
+            _ => None,
         }
     }
 
@@ -452,6 +452,27 @@ impl Cut<'_> {
             .enumerate()
             .map(|(local, global)| {
                 let field = |field| at(Output::Edge { step: local, field });
+                let pattern = &steps[global];
+                let (source, target) = match pattern.direction {
+                    Direction::Outgoing | Direction::Both => (pattern.from, pattern.to),
+                    Direction::Incoming => (pattern.to, pattern.from),
+                };
+                let id = |binding: Ref, field: EdgeField| -> Result<Vec<Position>> {
+                    if self.id_type(binding).is_some() {
+                        return Ok(vec![at(Output::Edge { step: local, field })?]);
+                    }
+                    let entity = self.query.entity(binding).ok_or_else(|| {
+                        QueryError::PipelineInvariant("an edge endpoint has no entity".into())
+                    })?;
+                    (0..graph.entity(entity).identity.len())
+                        .map(|part| {
+                            at(Output::Node {
+                                binding: self.query.name(binding).to_string(),
+                                handle: Handle::Identity(part),
+                            })
+                        })
+                        .collect()
+                };
                 let rel_types = match steps[global].relationships {
                     [] => vec!["*".to_string()],
                     named => named
@@ -463,9 +484,9 @@ impl Cut<'_> {
                     step: global,
                     rel_types,
                     kind: field(EdgeField::Kind)?,
-                    source: field(EdgeField::SourceId)?,
+                    source: id(source, EdgeField::SourceId)?,
                     source_kind: field(EdgeField::SourceKind)?,
-                    target: field(EdgeField::TargetId)?,
+                    target: id(target, EdgeField::TargetId)?,
                     target_kind: field(EdgeField::TargetKind)?,
                     path: match steps[global].range.max > 1 {
                         true => Some(at(Output::Path { step: local })?),

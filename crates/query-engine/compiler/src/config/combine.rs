@@ -4,12 +4,11 @@
 
 use std::collections::BTreeMap;
 
-use query_data_model::DataType;
 use query_data_model::plan::combine::{CombineBuilder, CombineError, CombineOperation, Position};
 use query_data_model::plan::tracking::Ref;
 
 use super::{CompilerCtx, require};
-use crate::constants::edge_column_prefix;
+use crate::constants::{edge_column_prefix, identity_part_column};
 use crate::dag::{Combine, CombineEdge};
 use crate::error::{QueryError, Result};
 use crate::passes::result_contract::{EdgeMeta, ResultContext};
@@ -93,51 +92,67 @@ pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Combine>) -> Result<()> 
     Ok(())
 }
 
-/// The suffix of each edge column a stage returns, with its position.
+/// Each edge column a stage returns, with its position; a composite endpoint id is one column
+/// per part.
 fn edge_columns(edge: &CombineEdge) -> impl Iterator<Item = (EdgeColumn, Position)> {
-    let columns = match edge {
-        CombineEdge::Crossing { .. } => Vec::new(),
-        CombineEdge::Stage {
-            kind,
-            source,
-            source_kind,
-            target,
-            target_kind,
-            path,
-            ..
-        } => [
-            (EdgeColumn::Kind, *kind),
-            (EdgeColumn::Source, *source),
-            (EdgeColumn::SourceKind, *source_kind),
-            (EdgeColumn::Target, *target),
-            (EdgeColumn::TargetKind, *target_kind),
-        ]
-        .into_iter()
-        .chain(path.map(|path| (EdgeColumn::Path, path)))
-        .collect(),
-    };
+    let mut columns = Vec::new();
+    if let CombineEdge::Stage {
+        kind,
+        source,
+        source_kind,
+        target,
+        target_kind,
+        path,
+        ..
+    } = edge
+    {
+        columns.push((EdgeColumn::Kind, *kind));
+        columns.extend(endpoint(EdgeColumn::Source, source));
+        columns.push((EdgeColumn::SourceKind, *source_kind));
+        columns.extend(endpoint(EdgeColumn::Target, target));
+        columns.push((EdgeColumn::TargetKind, *target_kind));
+        columns.extend(path.map(|path| (EdgeColumn::Path, path)));
+    }
     columns.into_iter()
+}
+
+fn endpoint(
+    column: fn(Option<usize>) -> EdgeColumn,
+    parts: &[Position],
+) -> Vec<(EdgeColumn, Position)> {
+    match parts {
+        [id] => vec![(column(None), *id)],
+        parts => parts
+            .iter()
+            .enumerate()
+            .map(|(part, position)| (column(Some(part)), *position))
+            .collect(),
+    }
 }
 
 #[derive(Clone, Copy)]
 enum EdgeColumn {
     Kind,
-    Source,
+    Source(Option<usize>),
     SourceKind,
-    Target,
+    Target(Option<usize>),
     TargetKind,
     Path,
 }
 
 impl EdgeColumn {
-    fn of(self, edge: &EdgeMeta) -> Option<&String> {
+    fn of(self, edge: &EdgeMeta) -> Option<String> {
+        let part = |column: &String, part: Option<usize>| match part {
+            Some(part) => identity_part_column(column, part),
+            None => column.clone(),
+        };
         match self {
-            Self::Kind => Some(&edge.type_column),
-            Self::Source => Some(&edge.src_column),
-            Self::SourceKind => Some(&edge.src_type_column),
-            Self::Target => Some(&edge.dst_column),
-            Self::TargetKind => Some(&edge.dst_type_column),
-            Self::Path => edge.path_column.as_ref(),
+            Self::Kind => Some(edge.type_column.clone()),
+            Self::Source(at) => Some(part(&edge.src_column, at)),
+            Self::SourceKind => Some(edge.src_type_column.clone()),
+            Self::Target(at) => Some(part(&edge.dst_column, at)),
+            Self::TargetKind => Some(edge.dst_type_column.clone()),
+            Self::Path => edge.path_column.clone(),
         }
     }
 }
@@ -163,21 +178,34 @@ pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Combine>) -> 
             .any(|(at, context)| *at == stage && context.stage_checked(alias))
     };
     let mut copied: Vec<(String, Position)> = Vec::new();
-    let mut composites: Vec<(String, Vec<(Position, DataType)>)> = Vec::new();
+    let mut identities: BTreeMap<String, String> = BTreeMap::new();
     let mut tags = Vec::new();
     for node in &query.nodes {
+        let parts = node.identity.len();
         match node.checked || proved(node.stage, &node.alias) {
-            true => result.add_stage_checked_node(&node.alias, &node.entity),
-            false => result.add_node(&node.alias, &node.entity),
+            true => result.add_stage_checked_node(&node.alias, &node.entity, parts),
+            false => result.add_node_with_parts(&node.alias, &node.entity, parts),
         }
         let added = result
             .get(&node.alias)
             .ok_or_else(|| QueryError::PipelineInvariant("a node was not added".into()))?;
-        match (node.key, &node.identity[..]) {
-            (Some(key), _) => copied.push((added.id_column.clone(), key)),
-            (None, [(part, _)]) => copied.push((added.id_column.clone(), *part)),
-            (None, parts) => composites.push((added.id_column.clone(), parts.to_vec())),
-        }
+        let identity = match (node.key, &node.identity[..]) {
+            (None, [(id, _)]) => {
+                copied.push((added.id_column.clone(), *id));
+                added.id_column.clone()
+            }
+            (key, parts) => {
+                copied.extend(key.map(|key| (added.id_column.clone(), key)));
+                match parts {
+                    [(id, _)] => copied.push((added.pk_column.clone(), *id)),
+                    parts => copied.extend(parts.iter().enumerate().map(|(part, (at, _))| {
+                        (identity_part_column(&added.pk_column, part), *at)
+                    })),
+                }
+                added.pk_column.clone()
+            }
+        };
+        identities.insert(node.alias.clone(), identity);
         tags.push((added.type_column.clone(), node.entity.clone()));
     }
     let mut edges = Vec::new();
@@ -192,13 +220,19 @@ pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Combine>) -> 
                 let (Some(from), Some(to)) = (result.get(source), result.get(target)) else {
                     continue;
                 };
+                let (Some(src), Some(dst)) = (identities.get(source), identities.get(target))
+                else {
+                    continue;
+                };
                 let meta = EdgeMeta {
-                    src_column: from.id_column.clone(),
+                    src_column: src.clone(),
                     src_type_column: from.type_column.clone(),
-                    dst_column: to.id_column.clone(),
+                    dst_column: dst.clone(),
                     dst_type_column: to.type_column.clone(),
                     from_alias: source.clone(),
                     to_alias: target.clone(),
+                    src_parts: from.parts,
+                    dst_parts: to.parts,
                     ..EdgeMeta::hop(
                         edge_column_prefix(*step, false),
                         false,
@@ -213,18 +247,24 @@ pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Combine>) -> 
                 step,
                 rel_types,
                 path,
+                source,
+                target,
                 ..
             } => {
                 let variable_length = path.is_some();
-                let meta = EdgeMeta::hop(
-                    edge_column_prefix(*step, variable_length),
-                    variable_length,
-                    rel_types.clone(),
-                    *step,
-                );
+                let meta = EdgeMeta {
+                    src_parts: source.len(),
+                    dst_parts: target.len(),
+                    ..EdgeMeta::hop(
+                        edge_column_prefix(*step, variable_length),
+                        variable_length,
+                        rel_types.clone(),
+                        *step,
+                    )
+                };
                 for (column, position) in edge_columns(edge) {
                     if let Some(name) = column.of(&meta) {
-                        copied.push((name.clone(), position));
+                        copied.push((name, position));
                     }
                 }
                 edges.push(meta);
@@ -249,26 +289,7 @@ pub(super) fn result_contract(ctx: &mut impl CompilerCtx<Backend = Combine>) -> 
         for (name, position) in &copied {
             columns.push((name.clone(), q.column(&input, *position)?));
         }
-        let keys = composites
-            .iter()
-            .map(|(name, parts)| {
-                let parts = parts
-                    .iter()
-                    .map(|(position, data_type)| Ok((q.column(&input, *position)?, *data_type)))
-                    .collect::<std::result::Result<Vec<_>, CombineError>>()?;
-                Ok((name.clone(), parts))
-            })
-            .collect::<std::result::Result<Vec<_>, CombineError>>()?;
-        let rows = match keys.is_empty() {
-            true => input,
-            false => q.composite(input, keys)?,
-        };
-        let composed: Vec<(String, Ref)> = composites
-            .iter()
-            .map(|(name, _)| Ok((name.clone(), q.output(&rows, name)?)))
-            .collect::<std::result::Result<_, CombineError>>()?;
-        columns.extend(composed);
-        let rows = q.select(rows, columns)?;
+        let rows = q.select(input, columns)?;
         match tags.is_empty() {
             true => Ok(rows),
             false => q.tag(rows, tags.clone()),

@@ -91,8 +91,8 @@ pub fn identity_column(
 ) -> crate::error::Result<&str> {
     match identity_columns(model, entity)? {
         [column] => Ok(column),
-        _ => Err(crate::error::QueryError::Validation(format!(
-            "{} has a composite identity, which no single column holds",
+        _ => Err(crate::error::QueryError::PipelineInvariant(format!(
+            "{} has a composite identity in a single-key slot, which the loader rejects",
             model.graph().entity(entity).name
         ))),
     }

@@ -254,7 +254,7 @@ fn a_live_plan_renders_an_extraction_request() {
                 messages,
                 channel.eq("orbit-dev").and(text.contains("deploy")),
             )?;
-            let messages = q.workspaces(messages, Workspaces::Only(vec!["T01".to_string()]))?;
+            let messages = q.workspaces(messages, Workspaces::Only(vec!["T01".into()]))?;
             let messages = q.limit(messages, 20)?;
             q.select(messages, [author, text])
         })

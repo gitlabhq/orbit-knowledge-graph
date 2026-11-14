@@ -376,6 +376,7 @@ fn hydration_request(
                 .collect();
             Ok(HydrationArm {
                 plan,
+                keys: anchor.pinned.clone(),
                 traversal_paths,
             })
         })

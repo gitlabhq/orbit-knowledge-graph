@@ -207,7 +207,7 @@ where
         let column = |name: &str| OutputValue::Column(Column::new(alias, name));
         self.push_relation_outputs(
             relation,
-            relation.edges()?.all().map(|(_, name)| column(name)),
+            relation.edges()?.all().map(|(_, name)| vec![column(name)]),
         );
         if relation.max_hops > 1 && !self.pattern.aggregate() {
             self.outputs.push(Projection::new(

@@ -62,8 +62,8 @@ impl BindingSource {
     pub(super) fn id(&self) -> Result<Column> {
         match self.key.as_slice() {
             [column] => Ok(Column::new(&self.alias, column)),
-            _ => Err(QueryError::Validation(format!(
-                "node '{}' has a composite identity, which no single column holds",
+            _ => Err(QueryError::PipelineInvariant(format!(
+                "node '{}' has a composite identity in a single-key slot, which the loader rejects",
                 self.node
             ))),
         }

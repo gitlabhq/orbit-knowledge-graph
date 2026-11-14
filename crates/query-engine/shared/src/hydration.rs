@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use arrow::record_batch::RecordBatch;
 use compiler::constants::{
-    hydration_id_column, hydration_node_alias, neighbor_traversal_path_column, primary_key_column,
-    redaction_id_column, traversal_path_column,
+    hydration_id_column, hydration_node_alias, identity_part_column,
+    neighbor_traversal_path_column, traversal_path_column,
 };
 use compiler::orbit_authorization::{Grants, Key, ScopeSet};
 use compiler::{
@@ -18,16 +18,19 @@ use pipeline::PipelineError;
 use query_data_model::catalog::Check;
 use query_data_model::{DataType, EntityId, Model, PropertyId};
 use types::identity;
-use types::{KeyLookup, QueryResult, QueryResultRow};
+use types::{KeyLookup, QueryResult};
 
 pub use crate::content::{PropertyMap, PropertyRow};
 
 /// Tries the PK column first (`_orbit_{alias}_pk`), falling back to the
 /// redaction ID column (`_orbit_{alias}_id`).
 pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<Key> {
+    let Some(node) = result.ctx().get(&template.node_alias).cloned() else {
+        return Vec::new();
+    };
     let mut ids: Vec<Key> = result
         .authorized_rows()
-        .filter_map(|row| static_id(row, &template.node_alias))
+        .filter_map(|row| row.get_public_id(&node))
         .collect();
     ids.sort_unstable();
     ids.dedup();
@@ -133,13 +136,6 @@ pub fn collect_dynamic_ref_paths(
         .collect())
 }
 
-/// A static node's identity: its primary key column, or its redaction id.
-fn static_id(row: &QueryResultRow, alias: &str) -> Option<Key> {
-    row.get(&primary_key_column(alias))
-        .and_then(identity)
-        .or_else(|| row.get(&redaction_id_column(alias)).and_then(identity))
-}
-
 /// The subtrees in which the caller holds the entity's permission, which bound its hydration
 /// read; a scope answered with keys or with `All` bounds no path, and security still scopes the read.
 pub fn granted_paths(
@@ -238,9 +234,6 @@ pub fn parse_hydration_batches(
     for batch in batches {
         for row_idx in 0..batch.num_rows() {
             let row_data = ArrowUtils::extract_row(batch, row_idx);
-            let Some(id) = row_data.get(&id_col).and_then(identity) else {
-                continue;
-            };
 
             let entity_type = row_data
                 .iter()
@@ -262,7 +255,7 @@ pub fn parse_hydration_batches(
                     .collect()
             });
 
-            let props: HashMap<String, ColumnValue> = row_data
+            let mut props: HashMap<String, ColumnValue> = row_data
                 .iter()
                 .find(|(name, _)| name.as_str() == props_col)
                 .and_then(|(_, v)| v.as_string())
@@ -283,6 +276,21 @@ pub fn parse_hydration_batches(
                         .collect()
                 })
                 .unwrap_or_default();
+            let id = match graph.entity(entity).identity.as_slice() {
+                [_] => row_data.get(&id_col).and_then(identity),
+                parts => parts
+                    .iter()
+                    .enumerate()
+                    .map(|(index, part)| {
+                        let value = props.remove(&identity_part_column(&id_col, index))?;
+                        identity(&typed_string(value, Some(&graph.property(*part).data_type)))
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map(Key::Composite),
+            };
+            let Some(id) = id else {
+                continue;
+            };
 
             result.insert((entity, id), props);
         }
@@ -309,9 +317,13 @@ pub fn merge_static_properties(
     property_map: &PropertyMap,
     templates: &[HydrationTemplate],
 ) {
+    let nodes: Vec<Option<compiler::RedactionNode>> = templates
+        .iter()
+        .map(|template| result.ctx().get(&template.node_alias).cloned())
+        .collect();
     for row in result.authorized_rows_mut() {
-        for template in templates {
-            if let Some(id) = static_id(row, &template.node_alias)
+        for (template, node) in templates.iter().zip(&nodes) {
+            if let Some(id) = node.as_ref().and_then(|node| row.get_public_id(node))
                 && let Some(props) = property_map.get(&(template.entity, id))
             {
                 for (key, value) in props {

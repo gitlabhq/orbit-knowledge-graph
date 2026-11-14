@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use arrow::array::{Array, Int64Array, ListArray, StringArray, StructArray};
 use arrow::record_batch::RecordBatch;
 use compiler::constants::{
-    edge_kinds_column, neighbor_id_column, neighbor_type_column, path_column,
+    edge_kinds_column, identity_part_column, neighbor_id_column, neighbor_type_column, path_column,
 };
 use compiler::internal_column_prefix;
 use compiler::orbit_authorization::Key;
@@ -95,12 +95,27 @@ impl QueryResultRow {
     }
 
     /// The node's identity key: its primary key column, or its redaction id when the base query
-    /// returned no separate primary key.
+    /// returned no separate primary key; a composite identity reads one column per part.
     pub fn get_public_id(&self, node: &RedactionNode) -> Option<Key> {
-        self.columns
-            .get(&node.pk_column)
-            .and_then(identity)
-            .or_else(|| self.get_id(node))
+        match node.parts {
+            1 => self
+                .columns
+                .get(&node.pk_column)
+                .and_then(identity)
+                .or_else(|| self.get_id(node)),
+            parts => self.key(&node.pk_column, parts),
+        }
+    }
+
+    /// The key held under `column`: that column's value, or a composite of `parts` part columns.
+    pub fn key(&self, column: &str, parts: usize) -> Option<Key> {
+        match parts {
+            1 => identity(self.columns.get(column)?),
+            parts => (0..parts)
+                .map(|part| identity(self.columns.get(&identity_part_column(column, part))?))
+                .collect::<Option<Vec<_>>>()
+                .map(Key::Composite),
+        }
     }
 
     pub fn get_type(&self, node: &RedactionNode) -> Option<&str> {
@@ -882,6 +897,7 @@ mod tests {
                 pk_column: "_orbit_ghost_id".to_string(),
                 id_column: "_orbit_ghost_id".to_string(),
                 type_column: "_orbit_ghost_type".to_string(),
+                parts: 1,
             };
             assert_eq!(row.get_id(&ghost), None);
             assert_eq!(row.get_type(&ghost), None);

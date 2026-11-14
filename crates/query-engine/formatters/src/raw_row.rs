@@ -24,7 +24,7 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
 
     for node in ctx.nodes() {
         if let Some(id) = row.get_public_id(node) {
-            obj.insert(format!("{}_id", node.alias), json!(id.to_string()));
+            obj.insert(format!("{}_id", node.alias), crate::graph::id_value(&id));
         }
         if let Some(entity_type) = row.get_type(node) {
             obj.insert(format!("{}_type", node.alias), json!(entity_type));
@@ -63,7 +63,7 @@ fn node_ref_to_json(node: &NodeRef) -> Value {
     for (key, value) in &node.properties {
         obj.insert(key.clone(), column_value_to_json(value));
     }
-    obj.insert("id".to_string(), json!(node.id.to_string()));
+    obj.insert("id".to_string(), crate::graph::id_value(&node.id));
     obj.insert("entity_type".to_string(), json!(node.entity_type));
     Value::Object(obj)
 }

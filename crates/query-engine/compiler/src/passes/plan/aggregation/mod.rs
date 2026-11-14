@@ -23,7 +23,8 @@ pub struct Group {
 
 pub struct Measure {
     pub function: AggregateFunction,
-    pub argument: Option<OutputValue>,
+    /// The measured values; a distinct count of a composite node counts every identity part.
+    pub arguments: Vec<OutputValue>,
     pub distinct: bool,
     pub name: String,
 }
@@ -132,8 +133,8 @@ pub(crate) fn aggregation_plan(
             Logical::Min(input) => (AggregateFunction::Min, Some(input), false),
             Logical::Max(input) => (AggregateFunction::Max, Some(input), false),
         };
-        let argument = match input {
-            None => None,
+        let arguments: Vec<OutputValue> = match input {
+            None => Vec::new(),
             Some(input) => {
                 let node = query.name(binding(*input));
                 let property = match input {
@@ -142,23 +143,27 @@ pub(crate) fn aggregation_plan(
                     }
                     _ => None,
                 };
-                match (function, distinct) {
+                let measured: Vec<&str> = match (function, distinct) {
                     (AggregateFunction::Count, true) => match (property, nodes.get(node)) {
-                        (Some(property), _) => Some(property),
-                        (None, Some(node)) => Some(node.id_column()?),
-                        (None, None) => None,
-                    }
-                    .map(|property| value(node, property)),
+                        (Some(property), _) => vec![property],
+                        (None, Some(node)) => node.identity.iter().map(String::as_str).collect(),
+                        (None, None) => Vec::new(),
+                    },
                     (AggregateFunction::Count, false) => property
                         .filter(|_| nodes.get(node).is_some_and(|node| node.joined))
-                        .map(|property| value(node, property)),
-                    _ => property.map(|property| value(node, property)),
-                }
+                        .into_iter()
+                        .collect(),
+                    _ => property.into_iter().collect(),
+                };
+                measured
+                    .into_iter()
+                    .map(|property| value(node, property))
+                    .collect()
             }
         };
         plan.measures.push(Measure {
             function,
-            argument,
+            arguments,
             distinct,
             name: query.name(*output).to_string(),
         });

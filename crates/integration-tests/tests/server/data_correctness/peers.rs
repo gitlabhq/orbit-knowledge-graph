@@ -9,7 +9,10 @@ use compiler::dag::{Connections, Frontend, Rendered};
 use compiler::orbit_authorization::Key;
 use duckdb_client::dag::DuckDbExecutor;
 use duckdb_client::{DuckDbClient, OpenMode};
-use integration_testkit::dag_fakes::{AllowedKeys, peer_packages, run_served, seeded_live};
+use integration_testkit::dag_fakes::{
+    AllowedKeys, peer_packages, response, response_edges, run_served, seeded_live,
+};
+use integration_testkit::mock_redaction::MockRedactionService;
 use integration_testkit::{TABLE_PREFIX, TestContext, t};
 use orbit_arrow::ArrowUtils;
 use orbit_server::pipeline::graph_executors;
@@ -418,7 +421,7 @@ impl Posts<'_> {
         peers: &Peers,
         paths: &[&str],
         rows: &[&str],
-        workspaces: &[&str],
+        workspaces: &[Key],
         denied: &[Key],
     ) {
         let (events, batches) = peers.run(self.query, paths).await;
@@ -435,13 +438,7 @@ impl Posts<'_> {
                 assert!(sent.is_empty(), "{paths:?} sent {sent:?}");
                 assert!(handed.is_empty(), "{paths:?} handed on {handed:?}");
             }
-            false => assert_eq!(
-                sent,
-                [Workspaces::Only(
-                    workspaces.iter().map(ToString::to_string).collect()
-                )],
-                "{paths:?}"
-            ),
+            false => assert_eq!(sent, [Workspaces::Only(workspaces.to_vec())], "{paths:?}"),
         }
         for key in denied {
             assert!(!handed.contains(key), "{paths:?} handed on {key}");
@@ -466,12 +463,18 @@ pub(super) async fn guild_posts_reach_the_live_stage_only_for_the_guilds_the_cal
             &peers,
             &["1/100/", "1/555/"],
             &[MASONS, SMITHS],
-            &["7", "8"],
+            &[Key::Int(7), Key::Int(8)],
             &[],
         )
         .await;
     posts
-        .caller(&peers, &["1/100/"], &[SMITHS], &["7"], &[Key::Int(8)])
+        .caller(
+            &peers,
+            &["1/100/"],
+            &[SMITHS],
+            &[Key::Int(7)],
+            &[Key::Int(8)],
+        )
         .await;
     posts
         .caller(&peers, &["1/101/"], &[], &[], &[Key::Int(7), Key::Int(8)])
@@ -497,12 +500,18 @@ pub(super) async fn clan_posts_reach_the_live_stage_only_for_the_clans_the_calle
             &peers,
             &["1/100/", "1/555/"],
             &[forge, quarry],
-            &["forge", "quarry"],
+            &[slug("forge"), slug("quarry")],
             &[],
         )
         .await;
     posts
-        .caller(&peers, &["1/100/"], &[forge], &["forge"], &[slug("quarry")])
+        .caller(
+            &peers,
+            &["1/100/"],
+            &[forge],
+            &[slug("forge")],
+            &[slug("quarry")],
+        )
         .await;
     posts
         .caller(
@@ -560,7 +569,7 @@ pub(super) async fn rank_posts_reach_the_live_stage_only_for_the_ranks_the_calle
             &peers,
             &["1/100/", "1/555/"],
             &[gold, silver],
-            &["(7, gold)", "(8, silver)"],
+            &[rank(7, "gold"), rank(8, "silver")],
             &[],
         )
         .await;
@@ -569,7 +578,7 @@ pub(super) async fn rank_posts_reach_the_live_stage_only_for_the_ranks_the_calle
             &peers,
             &["1/100/"],
             &[gold],
-            &["(7, gold)"],
+            &[rank(7, "gold")],
             &[rank(8, "silver")],
         )
         .await;
@@ -627,4 +636,131 @@ pub(super) async fn rank_columns_decode_through_a_stage_boundary(ctx: &TestConte
     let (events, none) = peers.run(RANKED, &["1/101/"]).await;
     assert_eq!(rows(&none), Vec::<String>::new());
     assert!(live_calls(&events).is_empty());
+}
+
+const RANKS_OF_GUILDS: &str =
+    "MATCH (r:GuildRank)-[:RANK_OF]->(g:Guild) WHERE r.rank IN ['gold', 'silver'] RETURN r, g";
+
+/// One ClickHouse stage returns guild ranks with their guilds: each rank's id is its typed
+/// parts, and each edge leaves the rank by the same id.
+pub(super) async fn guild_ranks_return_composite_ids_and_their_edges(ctx: &TestContext) {
+    let peers = build(ctx, &peer_packages(), &guilds_deployments(), "guilds");
+    let redaction = MockRedactionService::new();
+    let nodes = |outcome: &Outcome| -> Vec<String> {
+        let mut nodes: Vec<String> = response(outcome, &redaction)["nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|node| format!("{}:{}", node["type"].as_str().unwrap(), node["id"]))
+            .collect();
+        nodes.sort();
+        nodes
+    };
+    let gold = "GuildRank:[7,\"gold\"] -RANK_OF-> Guild:7";
+    let silver = "GuildRank:[8,\"silver\"] -RANK_OF-> Guild:8";
+    let (_, both) = peers.joined(RANKS_OF_GUILDS, &["1/100/", "1/555/"]).await;
+    assert_eq!(
+        nodes(&both),
+        [
+            "Guild:\"7\"",
+            "Guild:\"8\"",
+            "GuildRank:[7,\"gold\"]",
+            "GuildRank:[8,\"silver\"]"
+        ]
+    );
+    assert_eq!(response_edges(&both, &redaction), [gold, silver]);
+    let (_, one) = peers.joined(RANKS_OF_GUILDS, &["1/100/"]).await;
+    assert_eq!(nodes(&one), ["Guild:\"7\"", "GuildRank:[7,\"gold\"]"]);
+    assert_eq!(response_edges(&one, &redaction), [gold]);
+    let (_, none) = peers.joined(RANKS_OF_GUILDS, &["1/101/"]).await;
+    assert_eq!(nodes(&none), Vec::<String>::new());
+    assert_eq!(response_edges(&none, &redaction), Vec::<String>::new());
+}
+
+/// Ranks hydrate by their composite ids, read as a tuple IN under the caller's scope.
+pub(super) async fn guild_ranks_hydrate_by_composite_id(ctx: &TestContext) {
+    let peers = build(ctx, &peer_packages(), &guilds_deployments(), "guilds");
+    let (_, both) = peers.joined(RANKS_OF_GUILDS, &["1/100/", "1/555/"]).await;
+    let context = &both.compiled.base.result_context;
+    let result =
+        orbit_server::redaction::QueryResult::from_batches(&both.executed.batches, context)
+            .unwrap();
+    let node = context.get("r").unwrap();
+    let mut ids: Vec<Key> = result
+        .authorized_rows()
+        .filter_map(|row| row.get_public_id(node))
+        .collect();
+    ids.sort();
+    let rank = |guild, rank: &str| Key::Composite(vec![Key::Int(guild), Key::Text(rank.into())]);
+    assert_eq!(ids, [rank(7, "gold"), rank(8, "silver")]);
+    let names = peers.model.names();
+    let entity = names.entity("GuildRank").unwrap();
+    let columns = [
+        names.property(entity, "title").unwrap(),
+        names.property(entity, "tier").unwrap(),
+    ];
+    assert_eq!(
+        hydrated(&peers, entity, &ids, &columns, &["1/100/", "1/555/"]).await,
+        [
+            "(7, gold)|Grandmaster|gold",
+            "(8, silver)|Journeyman|silver"
+        ]
+    );
+    assert_eq!(
+        hydrated(&peers, entity, &ids, &columns, &["1/100/"]).await,
+        ["(7, gold)|Grandmaster|gold"]
+    );
+    assert_eq!(
+        hydrated(&peers, entity, &ids, &columns, &["1/101/"]).await,
+        Vec::<String>::new()
+    );
+}
+
+/// The title and tier of each rank the hydration stage reads for a caller under `paths`, by id.
+async fn hydrated(
+    peers: &Peers,
+    entity: query_data_model::EntityId,
+    ids: &[Key],
+    columns: &[query_data_model::PropertyId],
+    paths: &[&str],
+) -> Vec<String> {
+    let arm = query_engine::shared::hydration::hydration_arm(
+        &peers.model,
+        query_data_model::testkit::limits(),
+        entity,
+        ids,
+        columns,
+        Vec::new(),
+    )
+    .unwrap();
+    let grants = grants(&peers.model, paths);
+    let env = compiler::dag::Env {
+        frontend: &peers.frontend,
+        connections: &peers.connections,
+        grants: &grants,
+        limits: query_data_model::testkit::limits(),
+        trace: false,
+    };
+    let request = compiler::HydrationRequest {
+        arms: vec![arm],
+        options: Default::default(),
+    };
+    let compiled = compiler::dag::compile_hydration(request, &env).unwrap();
+    let Frontend::Server(graph) = &peers.frontend else {
+        panic!("the peers frontend is the server's");
+    };
+    let executor = peers.executors.get(graph.connection()).unwrap();
+    let executed = executor.execute(&compiled.request, None).await.unwrap();
+    let properties =
+        query_engine::shared::hydration::parse_hydration_batches(&executed.batches, &peers.model)
+            .unwrap();
+    let mut rows: Vec<String> = properties
+        .iter()
+        .map(|((_, id), row)| {
+            let text = |name: &str| row[name].as_string().cloned().unwrap_or_default();
+            format!("{id}|{}|{}", text("title"), text("tier"))
+        })
+        .collect();
+    rows.sort();
+    rows
 }

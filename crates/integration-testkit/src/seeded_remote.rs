@@ -8,7 +8,7 @@ use query_data_model::implementations::live::{DataExtraction, ExtractionRequest}
 use query_data_model::implementations::orbit_code::{
     CodeSearch, RequestField, StructuralSearchRequest,
 };
-use query_data_model::plan::live::Workspaces;
+use query_data_model::plan::live::{Workspaces, workspace};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -171,7 +171,13 @@ impl DataExtraction for SeededDataExtraction {
             Workspaces::Any => self.workspaces.values().collect(),
             Workspaces::Only(listed) => listed
                 .iter()
-                .filter_map(|workspace| self.workspaces.get(workspace))
+                .filter_map(|key| {
+                    let named = match workspace(key) {
+                        Value::String(name) => name,
+                        parts => parts.to_string(),
+                    };
+                    self.workspaces.get(&named)
+                })
                 .collect(),
         };
         Ok(workspaces

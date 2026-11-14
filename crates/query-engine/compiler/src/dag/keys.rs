@@ -75,7 +75,7 @@ pub fn bind(
     Ok(Statement { plan, ..statement })
 }
 
-fn single(keys: &[Key]) -> std::result::Result<Vec<Literal>, PlanError> {
+pub(crate) fn single(keys: &[Key]) -> std::result::Result<Vec<Literal>, PlanError> {
     keys.iter()
         .map(crate::logical::anchors::literal)
         .collect::<Option<Vec<_>>>()
@@ -83,7 +83,7 @@ fn single(keys: &[Key]) -> std::result::Result<Vec<Literal>, PlanError> {
 }
 
 /// A composite key as the literals of a tuple IN, one per key column.
-fn tuple(key: &Key, columns: usize) -> std::result::Result<Vec<Literal>, PlanError> {
+pub(crate) fn tuple(key: &Key, columns: usize) -> std::result::Result<Vec<Literal>, PlanError> {
     let Key::Composite(parts) = key else {
         return Err(PlanError::shape(
             "composite key columns read composite keys",

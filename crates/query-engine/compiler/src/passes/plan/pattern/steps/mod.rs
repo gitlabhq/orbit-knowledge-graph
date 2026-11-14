@@ -239,7 +239,9 @@ where
         Ok(())
     }
 
-    fn push_relation_outputs(&mut self, relation: &EdgeRelation, values: [OutputValue; 5]) {
+    /// The edge columns of a relation; an endpoint id is one value, or one per part of a
+    /// composite identity.
+    fn push_relation_outputs(&mut self, relation: &EdgeRelation, values: [Vec<OutputValue>; 5]) {
         if self.pattern.aggregate() {
             return;
         }
@@ -251,12 +253,17 @@ where
             EDGE_DST_SUFFIX,
             EDGE_DST_KIND_SUFFIX,
         ];
-        self.outputs.extend(
-            values
-                .into_iter()
-                .zip(suffixes)
-                .map(|(value, suffix)| Projection::new(value, format!("{prefix}{suffix}"))),
-        );
+        for (mut values, suffix) in values.into_iter().zip(suffixes) {
+            let name = format!("{prefix}{suffix}");
+            match values.len() {
+                1 => self.outputs.push(Projection::new(values.remove(0), name)),
+                _ => self
+                    .outputs
+                    .extend(values.into_iter().enumerate().map(|(part, value)| {
+                        Projection::new(value, identity_part_column(&name, part))
+                    })),
+            }
+        }
     }
 
     fn node_read(&mut self, node: &NodePlan) -> Result<Rel> {

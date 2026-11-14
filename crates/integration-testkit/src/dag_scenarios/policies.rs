@@ -142,7 +142,8 @@ async fn a_live_node_with_a_composite_identity_carries_both_parts() {
         rows,
         [row(json!({
             "m_text": "deploy memes",
-            "_orbit_m_id": "(random, m4)",
+            "_orbit_m_pk_0": "random",
+            "_orbit_m_pk_1": "m4",
             "_orbit_m_type": "Listed",
         }))]
     );

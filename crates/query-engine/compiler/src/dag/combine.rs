@@ -52,14 +52,15 @@ pub enum CombineEdge {
         source: String,
         target: String,
     },
-    /// A step within one stage, in the edge columns that stage returns.
+    /// A step within one stage, in the edge columns that stage returns; an endpoint id is one
+    /// column, or the endpoint node's identity parts when its identity is composite.
     Stage {
         step: usize,
         rel_types: Vec<String>,
         kind: Position,
-        source: Position,
+        source: Vec<Position>,
         source_kind: Position,
-        target: Position,
+        target: Vec<Position>,
         target_kind: Position,
         path: Option<Position>,
     },

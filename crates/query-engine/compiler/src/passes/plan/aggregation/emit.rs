@@ -31,7 +31,7 @@ pub(crate) fn emit<B: RelationalBackend>(
     let mut keys = Vec::new();
     let mut picks = Vec::new();
     for measure in &result.measures {
-        let key = (measure.function, &measure.argument, measure.distinct);
+        let key = (measure.function, &measure.arguments, measure.distinct);
         if let Some(position) = keys.iter().position(|existing| *existing == key) {
             picks.push((measure.name.clone(), position));
             continue;
@@ -41,10 +41,11 @@ pub(crate) fn emit<B: RelationalBackend>(
         for predicate in &result.condition {
             condition.push(lowering.predicate(q, predicate)?);
         }
-        let args = match &measure.argument {
-            Some(value) => vec![lowering.output::<B>(value)?],
-            None => Vec::new(),
-        };
+        let args = measure
+            .arguments
+            .iter()
+            .map(|value| lowering.output::<B>(value))
+            .collect::<Built<Vec<_>>>()?;
         let lowered = Measure {
             function: measure.function,
             args,

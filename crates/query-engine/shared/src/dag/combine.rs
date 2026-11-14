@@ -192,29 +192,6 @@ pub fn run(
                     rows: table.rows,
                 }
             }
-            CombineOperation::Composite(keys) => {
-                let table = input(0)?;
-                let outputs: Vec<Ref> = plan.outputs(node).collect();
-                let declared = &outputs[outputs.len() - keys.len()..];
-                let mut columns = table.columns.clone();
-                for (output, parts) in declared.iter().zip(keys) {
-                    let arrays = parts
-                        .iter()
-                        .map(|(part, data_type)| Ok((table.array(*part)?, *data_type)))
-                        .collect::<Result<Vec<_>, ExecutorError>>()?;
-                    let composed = (0..table.rows)
-                        .map(|row| {
-                            Ok(join_key(&arrays, row)?
-                                .map(|parts| Key::Composite(parts).to_string()))
-                        })
-                        .collect::<Result<arrow::array::StringArray, ExecutorError>>()?;
-                    columns.push((*output, Arc::new(composed) as ArrayRef));
-                }
-                Table {
-                    columns,
-                    rows: table.rows,
-                }
-            }
             CombineOperation::Excerpt {
                 columns,
                 chars,

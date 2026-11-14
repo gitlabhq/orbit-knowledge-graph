@@ -69,6 +69,8 @@ pub struct PlannedEdge {
     pub variable_length: bool,
     pub rel_types: Vec<String>,
     pub relationship: usize,
+    /// How many identity parts the stored source and target each have.
+    pub parts: (usize, usize),
 }
 
 pub(super) fn bindings(

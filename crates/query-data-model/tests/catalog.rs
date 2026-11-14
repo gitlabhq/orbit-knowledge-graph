@@ -1593,19 +1593,20 @@ fn variants_on_the_same_composite_key_columns_clash() {
 }
 
 /// A table store keys rows by every part of a composite identity, and a foreign key reaches it
-/// on one column per part; an edge table endpoint and a materialized join node, each keyed by one
-/// column, cannot hold it.
+/// on one column per part; an edge table endpoint, an edge index the writer derives and a
+/// materialized join node, each keyed by one column, cannot hold it.
 #[test]
 fn a_composite_identity_sits_on_a_table_but_not_in_a_single_key_slot() {
     let load = |slots: bool| {
-        let (graph, authorization, storage, written) = match slots {
+        let (graph, authorization, storage, written, index) = match slots {
             true => (
                 "  RANKED_BY: {variants: {User -> Rank: {cardinality: many_to_many}}}\n",
                 "  RANKED_BY: {scope: namespace, permission: read, enforce: {clickhouse: {scope_key: traversal_path, of: target}}}\n",
                 "  RANKED_BY:\n    User -> Rank: {edge_table: gl_edge}\n",
-                "relationships:\n  RANKED_BY: [User -> Rank]\n",
+                "relationships:\n  RANKED_BY: [User -> Rank]\n  RANK_OF: [Rank -> Group]\n",
+                ", index: {edge_table: gl_edge}",
             ),
-            false => ("", "", "", ""),
+            false => ("", "", "", "", ""),
         };
         let mut sources = Packages::embedded().sources().clone();
         let files = [
@@ -1634,7 +1635,7 @@ fn a_composite_identity_sits_on_a_table_but_not_in_a_single_key_slot() {
             (
                 "overlay/storage/clickhouse.yaml",
                 format!(
-                    "kind: storage\npackage: overlay\nstore: graph\nentities:\n  Rank:\n    complete: true\n    accepts: [group_id, rank]\n    table: gl_rank\n    columns:\n      group_id: {{immutable: true, backend: {{type: Int64}}}}\n      rank: {{immutable: true, backend: {{type: String}}}}\n      traversal_path: {{backend: {{type: String}}}}\n    backend:\n      primary_key: [traversal_path, group_id, rank]\nrelationships:\n  RANK_OF:\n    Rank -> Group: {{fk: {{on: source, column: group_id}}}}\n{storage}"
+                    "kind: storage\npackage: overlay\nstore: graph\nentities:\n  Rank:\n    complete: true\n    accepts: [group_id, rank]\n    table: gl_rank\n    columns:\n      group_id: {{immutable: true, backend: {{type: Int64}}}}\n      rank: {{immutable: true, backend: {{type: String}}}}\n      traversal_path: {{backend: {{type: String}}}}\n    backend:\n      primary_key: [traversal_path, group_id, rank]\nrelationships:\n  RANK_OF:\n    Rank -> Group: {{fk: {{on: source, column: group_id}}{index}}}\n{storage}"
                 ),
             ),
         ];
@@ -1655,6 +1656,7 @@ fn a_composite_identity_sits_on_a_table_but_not_in_a_single_key_slot() {
         spec_errors(load(true)),
         [
             "gitlab: store graph join gl_rank_group keys Rank by one column t0_group_id, but Rank has a composite identity",
+            "overlay: store graph RANK_OF(Rank -> Group) keeps its edges in gl_edge, whose source_id holds one key, but Rank has a composite identity",
             "overlay: store graph RANKED_BY(User -> Rank) keeps its edges in gl_edge, whose target_id holds one key, but Rank has a composite identity",
         ]
     );

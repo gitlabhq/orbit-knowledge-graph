@@ -7,7 +7,7 @@ use crate::catalog::{Catalog, Guard};
 use crate::implementations::live::{Endpoint, Live};
 use crate::plan::logical::Literal;
 use crate::plan::tracking::{self, Declared, Each, Plan, Ref, Rejected, Step};
-use crate::{DataType, EntityId, PropertyId, StoreId};
+use crate::{DataType, EntityId, Key, PropertyId, StoreId};
 
 #[derive(Debug)]
 pub struct LiveLanguage;
@@ -44,12 +44,25 @@ impl Condition {
 }
 
 /// The workspaces a call reads: every one the caller's own sign-in reaches, when only the
-/// entity's checks restrict its rows, or only these.
+/// entity's checks restrict its rows, or only these scope keys.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Workspaces {
     Any,
-    Only(Vec<String>),
+    Only(#[serde(serialize_with = "workspace_list")] Vec<Key>),
+}
+
+/// A workspace as a call names it: a single key as its text, a composite key as the list of its
+/// typed parts.
+pub fn workspace(key: &Key) -> serde_json::Value {
+    match key {
+        Key::Composite(_) => serde_json::to_value(key).unwrap_or(serde_json::Value::Null),
+        single => serde_json::Value::String(single.to_string()),
+    }
+}
+
+fn workspace_list<S: serde::Serializer>(keys: &[Key], serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(keys.iter().map(workspace))
 }
 
 #[derive(Debug, Clone, PartialEq)]

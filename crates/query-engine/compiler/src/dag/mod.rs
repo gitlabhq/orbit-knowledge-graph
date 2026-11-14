@@ -8,7 +8,7 @@ mod compile;
 mod connections;
 mod contract;
 mod cut;
-mod keys;
+pub(crate) mod keys;
 mod lookup;
 mod request;
 mod split;

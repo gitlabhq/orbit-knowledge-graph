@@ -90,12 +90,13 @@ impl NodePlan {
         self.identity.len() == 1 && self.redaction_id_column.as_ref() == self.identity.first()
     }
 
-    /// The column holding the node's identity, for a read that keys the node by one column.
+    /// The column holding the node's identity, for an edge, id set or pin, which only a single
+    /// identity reaches.
     pub fn id_column(&self) -> crate::error::Result<&str> {
         match self.identity.as_slice() {
             [column] => Ok(column),
-            _ => Err(QueryError::Validation(format!(
-                "node '{}' has a composite identity, which no single column holds",
+            _ => Err(QueryError::PipelineInvariant(format!(
+                "node '{}' has a composite identity in a single-key slot, which the loader rejects",
                 self.alias
             ))),
         }

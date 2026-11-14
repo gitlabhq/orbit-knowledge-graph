@@ -150,7 +150,7 @@ pub fn secure_code(
 pub fn secure_live(live: &Catalog<Live>, plan: LivePlan, admitted: &Admitted) -> Result<LivePlan> {
     let workspaces = match admitted {
         Admitted::Named => Workspaces::Any,
-        Admitted::Only(keys) => Workspaces::Only(keys.iter().map(ToString::to_string).collect()),
+        Admitted::Only(keys) => Workspaces::Only(keys.iter().cloned().collect()),
     };
     Ok(live.rebuild(plan, |q, step| {
         let call = matches!(step.operation, LiveOperation::Call(_));

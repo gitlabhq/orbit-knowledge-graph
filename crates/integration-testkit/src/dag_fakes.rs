@@ -442,12 +442,11 @@ pub async fn run_served(
     (observer.0, outcome)
 }
 
-/// The edges the graph response of `outcome` returns once `redaction` answers its result's
-/// checks, each as `From:id -TYPE-> To:id`, sorted.
-pub fn response_edges(
+/// The graph response of `outcome` once `redaction` answers its result's checks, as JSON.
+pub fn response(
     outcome: &Outcome,
     redaction: &crate::mock_redaction::MockRedactionService,
-) -> Vec<String> {
+) -> serde_json::Value {
     use query_engine::formatters::GraphFormatter;
     let compiled = &outcome.compiled;
     let context = &compiled.base.result_context;
@@ -466,15 +465,31 @@ pub fn response_edges(
         execution_log: Vec::new(),
         pagination: None,
     };
-    let mut edges: Vec<String> = GraphFormatter
-        .build_response(&output)
-        .edges
-        .iter()
+    serde_json::to_value(GraphFormatter.build_response(&output)).expect("a response is JSON")
+}
+
+/// The edges the graph response of `outcome` returns once `redaction` answers its result's
+/// checks, each as `From:id -TYPE-> To:id` with each id as the response writes it, sorted.
+pub fn response_edges(
+    outcome: &Outcome,
+    redaction: &crate::mock_redaction::MockRedactionService,
+) -> Vec<String> {
+    let id = |value: &serde_json::Value| match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    };
+    let mut edges: Vec<String> = response(outcome, redaction)["edges"]
+        .as_array()
+        .into_iter()
+        .flatten()
         .map(|edge| {
-            let (from, to) = (&edge.from, &edge.to);
             format!(
-                "{from}:{} -{}-> {to}:{}",
-                edge.from_id, edge.edge_type, edge.to_id
+                "{}:{} -{}-> {}:{}",
+                edge["from"].as_str().unwrap_or_default(),
+                id(&edge["from_id"]),
+                edge["type"].as_str().unwrap_or_default(),
+                edge["to"].as_str().unwrap_or_default(),
+                id(&edge["to_id"])
             )
         })
         .collect();

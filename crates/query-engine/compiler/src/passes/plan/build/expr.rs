@@ -241,6 +241,42 @@ pub(crate) fn id_list<B: RelationalBackend>(value: Expr, ids: &[Key]) -> Built<E
         .unwrap_or_else(|| param::<B>(SqlType::Bool, false.into())))
 }
 
+/// The rows whose identity columns hold one of `ids`: the one column's IN list, or a tuple IN
+/// over each part of a composite identity.
+pub(crate) fn key_list<B: RelationalBackend>(columns: Vec<Expr>, ids: &[Key]) -> Built<Expr> {
+    let [_, _, ..] = columns.as_slice() else {
+        let column = columns
+            .into_iter()
+            .next()
+            .ok_or(RelationalError::Incomplete("an identity column"))?;
+        return id_list::<B>(column, ids);
+    };
+    let tuple = |key: &Key| -> Built<Expr> {
+        let Key::Composite(parts) = key else {
+            return Err(RelationalError::Unsupported(
+                "a single key on a composite identity",
+            ));
+        };
+        if parts.len() != columns.len() {
+            return Err(RelationalError::Incomplete(
+                "one key part per identity column",
+            ));
+        }
+        let values = parts
+            .iter()
+            .map(|part| key_value(part).map(|(data_type, value)| param::<B>(data_type, value)))
+            .collect::<Built<Vec<_>>>()?;
+        Ok(Expr::List(values))
+    };
+    let mut tuples = ids.iter().map(tuple).collect::<Built<Vec<_>>>()?;
+    let left = Expr::List(columns);
+    Ok(match tuples.len() {
+        0 => param::<B>(SqlType::Bool, false.into()),
+        1 => eq(left, tuples.remove(0)),
+        _ => binary(BinaryOp::In, left, Expr::List(tuples)),
+    })
+}
+
 pub(crate) fn ids<B: RelationalBackend>(value: Expr, ids: &[Key]) -> Built<Expr> {
     match ids {
         [Key::Int(id)] => Ok(eq(value, super::int(*id))),

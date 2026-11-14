@@ -166,7 +166,7 @@ impl EdgeRelation {
     }
 
     /// The endpoints as the edge row stores them: the node in `source_id`, then the node in `target_id`.
-    pub(super) fn stored_endpoints(&self) -> (&str, &str) {
+    pub(crate) fn stored_endpoints(&self) -> (&str, &str) {
         stored_order(
             self.direction,
             self.from_node.as_str(),

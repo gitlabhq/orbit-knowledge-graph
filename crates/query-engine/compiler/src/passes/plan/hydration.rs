@@ -16,13 +16,13 @@ use query_data_model::implementations::relational::plan::{
 use query_data_model::plan::logical::{Columns, Projection};
 use serde_json::Value;
 
-use super::node::Node;
-use crate::constants::hydration_id_column;
+use crate::constants::{hydration_id_column, identity_part_column};
 use crate::error::{QueryError, Result};
 use crate::hydration::{HydrationArm, HydrationCompileOptions, HydrationRequest};
 use crate::logical::Query;
+use crate::logical::columns::identity_columns;
 use crate::passes::codegen::SqlBackend;
-use crate::passes::plan::build::expr::{id_list, live};
+use crate::passes::plan::build::expr::{key_list, live};
 use crate::passes::plan::build::predicates::Lowering;
 use crate::passes::plan::build::{
     Built, call, col, computed, disjoin, filtered, scan, stored, string, versioning,
@@ -36,8 +36,9 @@ pub(crate) struct Arm<'p> {
     alias: &'p str,
     entity: &'p str,
     table: &'p str,
-    id: &'p str,
-    ids: Option<Vec<orbit_authorization::Key>>,
+    /// The columns of each identity part.
+    identity: &'p [String],
+    ids: Option<&'p [orbit_authorization::Key]>,
     columns: Vec<(&'p str, Option<query_data_model::DataType>)>,
     path_filter: Option<PathFilter>,
     sort_key: &'p [String],
@@ -76,9 +77,9 @@ impl<'p> Arm<'p> {
             .into_iter()
             .next()
             .ok_or_else(|| QueryError::Lowering("hydration node has no entity".into()))?;
-        let node = Node::new(query, anchor, model)?;
-        let table = node
-            .table
+        let binding = anchor.binding;
+        let table = model
+            .table_of(binding.entity)
             .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
         let graph = query.model.graph();
         let columns = query
@@ -99,11 +100,11 @@ impl<'p> Arm<'p> {
             })
             .collect();
         Ok(Self {
-            alias: node.alias,
-            entity: node.entity,
+            alias: binding.name,
+            entity: &graph.entity(binding.entity).name,
             table,
-            id: node.id,
-            ids: node.pinned,
+            identity: identity_columns(model, binding.entity)?,
+            ids: arm.keys.as_deref(),
             columns,
             path_filter: path_filter(&arm.traversal_paths, options),
             sort_key: sort_key(model, table)?,
@@ -157,7 +158,6 @@ pub(crate) fn emit<B: RelationalBackend>(
 
 fn arm<B: RelationalBackend>(q: &mut RelationalBuilder<'_, B>, node: &Arm<'_>) -> Built<Relation> {
     let alias = node.alias;
-    let pk = node.id;
     let keys = q.subquery(alias, |q| {
         let rows = scan(q, node.table, alias, false)?;
         let scope = [&rows];
@@ -174,17 +174,22 @@ fn arm<B: RelationalBackend>(q: &mut RelationalBuilder<'_, B>, node: &Arm<'_>) -
             None => None,
         };
         predicates.extend(path_filter.map(Some));
-        if let Some(ids) = &node.ids {
-            predicates.push(Some(id_list::<B>(col(&scope, alias, pk)?, ids)?));
+        if let Some(ids) = node.ids {
+            let identity = node
+                .identity
+                .iter()
+                .map(|column| col(&scope, alias, column))
+                .collect::<Built<Vec<_>>>()?;
+            predicates.push(Some(key_list::<B>(identity, ids)?));
         }
         let rows = filtered(q, rows, predicates)?;
-        let mut names = vec![pk, DELETED_COLUMN];
-        names.extend(
-            node.columns
-                .iter()
-                .map(|(column, _)| *column)
-                .filter(|column| *column != pk && *column != DELETED_COLUMN),
-        );
+        let mut names: Vec<&str> = node.identity.iter().map(String::as_str).collect();
+        names.push(DELETED_COLUMN);
+        for (column, _) in &node.columns {
+            if !names.contains(column) {
+                names.push(column);
+            }
+        }
         let mut items = Vec::new();
         for name in names
             .into_iter()
@@ -220,10 +225,21 @@ fn arm<B: RelationalBackend>(q: &mut RelationalBuilder<'_, B>, node: &Arm<'_>) -
     };
     let rows = filtered(q, rows, vec![deleted])?;
     let lowering = Lowering { scope: &[&rows] };
-    let props = match node.columns.is_empty() {
+    let parts = match node.identity {
+        [_] => Vec::new(),
+        parts => parts.iter().enumerate().collect(),
+    };
+    let props = match node.columns.is_empty() && parts.is_empty() {
         true => string("{}"),
         false => {
             let mut args = Vec::new();
+            for (part, column) in &parts {
+                args.push(string(identity_part_column(&hydration_id_column(), *part)));
+                args.push(call(
+                    Function::ToString,
+                    vec![col(&[&rows], alias, column)?],
+                ));
+            }
             for (column, epoch) in &node.columns {
                 let column_ref = Column::new(alias, *column);
                 let value = match epoch {
@@ -239,8 +255,12 @@ fn arm<B: RelationalBackend>(q: &mut RelationalBuilder<'_, B>, node: &Arm<'_>) -
             call(Function::ToJson, vec![call(Function::Object, args)])
         }
     };
+    let id = match node.identity {
+        [column] => col(&[&rows], alias, column)?,
+        _ => Expr::Null,
+    };
     let items = vec![
-        (hydration_id_column(), col(&[&rows], alias, pk)?),
+        (hydration_id_column(), id),
         (format!("{alias}_entity_type"), string(node.entity)),
         (format!("{alias}_props"), props),
     ];

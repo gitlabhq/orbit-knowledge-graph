@@ -57,6 +57,8 @@ async fn data_correctness_ranks() {
     peers::seed_guilds(&ctx).await;
     peers::rank_posts_reach_the_live_stage_only_for_the_ranks_the_caller_reads(&ctx).await;
     peers::rank_columns_decode_through_a_stage_boundary(&ctx).await;
+    peers::guild_ranks_return_composite_ids_and_their_edges(&ctx).await;
+    peers::guild_ranks_hydrate_by_composite_id(&ctx).await;
 }
 
 #[tokio::test]

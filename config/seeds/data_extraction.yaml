@@ -65,14 +65,14 @@ workspaces:
         channel: realm-chat
         text: harvest in the south
         visible_to: [alice, bob]
-  "(7, gold)":
+  '[7,"gold"]':
     messages:
       - id: rp1
         guild: 7
         rank: gold
         text: gold rank hall opens
         visible_to: [alice, bob]
-  "(8, silver)":
+  '[8,"silver"]':
     messages:
       - id: rp2
         guild: 8
