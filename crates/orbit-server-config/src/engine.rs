@@ -424,6 +424,14 @@ pub struct MigrationCompletionConfig {
     pub schedule: ScheduleConfiguration,
 }
 
+/// Sends the daily `orbit_graph_stats` snapshot. Runs when analytics is on, or on self-managed when `local_collector_url` is set.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GraphStatsConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+}
+
 /// Records how far indexed SDLC data trails the datalake for every enabled namespace.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -461,6 +469,7 @@ pub struct ScheduledTasksConfiguration {
     pub migration_completion: MigrationCompletionConfig,
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
     pub namespace_freshness: NamespaceFreshnessConfig,
+    pub graph_stats: GraphStatsConfig,
 }
 
 // ── Top-level engine config ──────────────────────────────────────────
@@ -653,6 +662,7 @@ mod tests {
             tasks.stale_edge_reconciliation.schedule.cron.expression(),
             "0 */30 * * * *"
         );
+        assert_eq!(tasks.graph_stats.schedule.cron.expression(), "0 30 4 * * *");
     }
 
     #[test]

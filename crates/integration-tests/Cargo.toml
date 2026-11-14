@@ -11,7 +11,7 @@ publish = false
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
-orbit-analytics = { path = "../orbit-analytics" }
+orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
 orbit-server = { path = "../orbit-server", features = ["testkit"] }

@@ -858,5 +858,7 @@ fn dispatcher_config(context: &TestContext) -> DispatcherConfig {
         datalake: context.clickhouse.config.clone(),
         schedule: orbit_server_config::AppConfig::embedded_defaults().schedule,
         schema: orbit_server_config::AppConfig::embedded_defaults().schema,
+        gitlab: None,
+        analytics: orbit_server_config::AppConfig::embedded_defaults().analytics,
     }
 }
