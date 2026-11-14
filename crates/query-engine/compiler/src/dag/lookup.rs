@@ -21,6 +21,9 @@ use super::{
 };
 use crate::error::{QueryError, Result};
 
+/// Each property a binding holds a head key in, with that head key.
+type Held = Vec<(PropertyId, PropertyId)>;
+
 /// One chain a remote group's reads follow, and the bindings whose reads it admits.
 pub(super) struct Lookup {
     group: usize,
@@ -29,7 +32,7 @@ pub(super) struct Lookup {
     chain: Vec<Hop>,
     /// Each admitted binding, the hop it reaches the head by, and each of its properties with the
     /// head key it holds.
-    admits: Vec<(Ref, Hop, Vec<(PropertyId, PropertyId)>)>,
+    admits: Vec<(Ref, Hop, Held)>,
     /// The earlier relational group whose stage already reads the chain, and the variable it
     /// reads each admitted binding's head as.
     pub reader: Option<(usize, Vec<Ref>)>,
@@ -108,10 +111,7 @@ impl Cut<'_> {
         };
         let group = reached[0].0;
         let position = |group: usize| order.iter().position(|at| *at == group);
-        if reached.iter().any(|(at, _)| *at != group)
-            || position(group) >= position(lookup.group)
-            || !self.peer(self.groups[group].place).joins()
-        {
+        if reached.iter().any(|(at, _)| *at != group) || position(group) >= position(lookup.group) {
             return Ok(None);
         }
         let holders = self.holders(lookup);
@@ -200,7 +200,7 @@ impl Cut<'_> {
     }
 
     /// The properties the reading side of a chain's first hop holds the head's keys in.
-    fn held_keys(&self, hop: &Hop) -> Result<Vec<(PropertyId, PropertyId)>> {
+    fn held_keys(&self, hop: &Hop) -> Result<Held> {
         let model = self.query.model;
         let holder = match hop.forward {
             true => Endpoint::Source,
