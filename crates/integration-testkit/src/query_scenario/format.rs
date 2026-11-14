@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
-use query_engine::compiler::QueryType;
+use query_engine::compiler::{QueryType, RejectionReason};
+use regex::Regex;
 use serde::Deserialize;
+use strum::IntoEnumIterator;
 
 use crate::scenario::Seed;
 
@@ -115,9 +117,7 @@ pub struct QueryExpect {
     #[serde(default)]
     pub compile_error: Option<CompileErrorExpect>,
     #[serde(default)]
-    pub compile_error_contains: MessageExpect,
-    #[serde(default)]
-    pub compile_error_not_contains: MessageExpect,
+    pub compile_error_not_contains: Vec<ErrorPattern>,
     #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
@@ -290,8 +290,7 @@ impl QueryExpect {
             assert!(
                 page.repeat_count.is_none()
                     && page.compile_error.is_none()
-                    && !page.compile_error_contains.is_configured()
-                    && !page.compile_error_not_contains.is_configured()
+                    && page.compile_error_not_contains.is_empty()
                     && page.pages.is_empty()
                     && page.all_pages.is_none(),
                 "{scenario}: page {} supports only result assertions",
@@ -360,55 +359,77 @@ impl QueryExpect {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(untagged)]
+#[serde(try_from = "RawCompileError")]
 pub enum CompileErrorExpect {
-    Flag(bool),
-    Substring(String),
-    PerFrontend(BTreeMap<String, String>),
+    Everywhere(RejectionReason),
+    By(BTreeMap<String, RejectionReason>),
 }
 
-impl CompileErrorExpect {
-    pub fn substring_for(&self, frontend_key: &str) -> Option<&str> {
-        match self {
-            Self::Flag(_) => None,
-            Self::Substring(sub) => Some(sub),
-            Self::PerFrontend(by_frontend) => Some(
-                by_frontend
-                    .get(frontend_key)
-                    .unwrap_or_else(|| panic!("compile_error missing frontend '{frontend_key}'"))
-                    .as_str(),
-            ),
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawCompileError {
+    Everywhere(String),
+    By(BTreeMap<String, String>),
+}
+
+impl TryFrom<RawCompileError> for CompileErrorExpect {
+    type Error = String;
+
+    fn try_from(raw: RawCompileError) -> Result<Self, String> {
+        match raw {
+            RawCompileError::Everywhere(name) => rejection_reason(&name).map(Self::Everywhere),
+            RawCompileError::By(by) => by
+                .into_iter()
+                .map(|(key, name)| {
+                    if !["json", "gql", "clickhouse", "duckdb"].contains(&key.as_str()) {
+                        return Err(format!(
+                            "compile_error key '{key}' is not json, gql, clickhouse, or duckdb"
+                        ));
+                    }
+                    Ok((key, rejection_reason(&name)?))
+                })
+                .collect::<Result<_, _>>()
+                .map(Self::By),
         }
     }
 }
 
+fn rejection_reason(name: &str) -> Result<RejectionReason, String> {
+    RejectionReason::iter()
+        .find(|reason| <&str>::from(*reason) == name)
+        .ok_or_else(|| {
+            let known: Vec<&str> = RejectionReason::iter().map(<&str>::from).collect();
+            format!(
+                "unknown rejection reason '{name}'; expected one of {}",
+                known.join(", ")
+            )
+        })
+}
+
 #[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum MessageExpect {
-    All(Vec<String>),
-    PerFrontend(BTreeMap<String, Vec<String>>),
-}
+#[serde(try_from = "String")]
+pub struct ErrorPattern(pub Regex);
 
-impl Default for MessageExpect {
-    fn default() -> Self {
-        Self::All(Vec::new())
+impl TryFrom<String> for ErrorPattern {
+    type Error = regex::Error;
+
+    fn try_from(pattern: String) -> Result<Self, regex::Error> {
+        Regex::new(&pattern).map(Self)
     }
 }
 
-impl MessageExpect {
-    fn is_configured(&self) -> bool {
-        !matches!(self, Self::All(fragments) if fragments.is_empty())
-    }
-
-    pub fn for_frontend(&self, frontend_key: &str) -> &[String] {
+impl CompileErrorExpect {
+    pub fn reason_for(&self, backend: &str, frontend: &str) -> RejectionReason {
         match self {
-            Self::All(fragments) => fragments,
-            Self::PerFrontend(by_frontend) => by_frontend
-                .get(frontend_key)
+            Self::Everywhere(reason) => *reason,
+            Self::By(by) => *by
+                .get(backend)
+                .or_else(|| by.get(frontend))
                 .unwrap_or_else(|| {
-                    panic!("compile error message expectation missing frontend '{frontend_key}'")
-                })
-                .as_slice(),
+                    panic!(
+                        "compile_error names neither backend '{backend}' nor frontend '{frontend}'"
+                    )
+                }),
         }
     }
 }

@@ -19,7 +19,7 @@ cases:
       gql: |
         MATCH (w:WorkItem {id: 4001}) WHERE w.title STARTS WITH 'Fix a' RETURN count(w) AS n
     expect:
-      compile_error: text matching and ordering require grouping by "w"
+      compile_error: schema
 
   - name: text_contains_on_ungrouped_node_rejected
     description: A CONTAINS filter requires grouping by its node
@@ -27,7 +27,7 @@ cases:
       gql: |
         MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.title CONTAINS 'auth' RETURN g, count(w) AS n
     expect:
-      compile_error: text matching and ordering require grouping by "w"
+      compile_error: schema
 
   - name: negated_text_match_on_ungrouped_node_rejected
     description: A negated CONTAINS filter requires grouping by its node
@@ -35,7 +35,7 @@ cases:
       gql: |
         MATCH (w:WorkItem {id: 4001}) WHERE NOT w.description CONTAINS 'login' RETURN count(w) AS n
     expect:
-      compile_error: text matching and ordering require grouping by "w"
+      compile_error: schema
 
   - name: text_ordering_on_ungrouped_node_rejected
     description: An ordering comparison on text requires grouping by its node
@@ -43,7 +43,7 @@ cases:
       gql: |
         MATCH (w:WorkItem {id: 4001}) WHERE w.title < 'G' RETURN count(w) AS n
     expect:
-      compile_error: text matching and ordering require grouping by "w"
+      compile_error: schema
 
   - name: cross_node_text_ordering_rejected
     description: A text ordering comparison between nodes requires grouping by the left node
@@ -51,7 +51,7 @@ cases:
       gql: |
         MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.title > l.title RETURN count(w) AS n
     expect:
-      compile_error: text matching and ordering require grouping by "w"
+      compile_error: schema
 
   - name: cross_node_text_ordering_rhs_rejected
     description: A text ordering comparison between nodes requires grouping by the right node
@@ -59,7 +59,7 @@ cases:
       gql: |
         MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.title > l.title RETURN w, count(l) AS n
     expect:
-      compile_error: text matching and ordering require grouping by "l"
+      compile_error: schema
 
   - name: text_filter_on_grouped_node
     description: A text filter works on a grouped node and returns its readable rows

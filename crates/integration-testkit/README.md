@@ -346,9 +346,8 @@ only IDs and the relationship type.
 
 | Field | Type | Description |
 |---|---|---|
-| `compile_error` | bool / string / {frontend: string} | Expect compile failure |
-| `compile_error_contains` | [string] / {frontend: [string]} | Error must contain every listed fragment |
-| `compile_error_not_contains` | [string] / {frontend: [string]} | Error must NOT contain |
+| `compile_error` | reason / {key: reason} | Expect the compiler to reject the query for this reason. A key is a backend (`clickhouse`, `duckdb`) or a frontend (`json`, `gql`); a backend key wins. Reasons: `parse`, `schema`, `reference`, `ontology`, `authorization`, `restrict`, `ontology_internal`, `depth`, `limit`, `security`, `lowering`, `codegen`, `pipeline` |
+| `compile_error_not_contains` | [regex] | The error message must not match any listed regex, for a literal from this query. Requires `compile_error`. Every compile error is also checked for a traversal path, an email address, a physical table name, and the fixtures' private markers |
 
 **Pagination:**
 
