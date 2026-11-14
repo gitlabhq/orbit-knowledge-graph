@@ -57,7 +57,7 @@ it reviews what a person would.
 
 | Stage | What runs | Model call | Goes to |
 |---|---|---|---|
-| Setup | `needs_docs.py` scores the diff at threshold 6, `related_mrs.py` groups related MRs, and the docs branch is checked out | No | Write, or end. A mention on a same-project docs MR that the flow's identity opened goes to threads. |
+| Setup | `needs_docs.py` scores the diff at threshold 6, `related_mrs.py` groups related MRs, and the docs branch is checked out | No | Write, or end. A mention on a flow docs MR goes to threads: its branch must be in this project, not a fork, and the flow's identity must already have a note on it. |
 | Write | One agent follows `write.md` and runs `check.py`, the docs linters and the rules a script can check, until it is clean | Yes | Publish |
 | Publish | Checks the writer report and runs `check.py`. Pushes only user docs and only when `check.py` reports no errors, opens the draft docs MR, and posts thread replies. | No | CI, a fixer, or end |
 | CI loop | `ci_loop.py` waits for the docs MR pipeline | No | Review on the first green, threads later, a fixer on a docs failure |
@@ -80,7 +80,7 @@ nothing. The flow file ships with `MODE=shadow`, which stops after setup and log
 |---|---|
 | Feature MR author | Review the docs MR when the flow requests your review. Settle the **Needs reviewer decision** threads. To skip the flow, add `docs-factory::skip`. |
 | Docs MR reviewer | Read the "For agent: docs review" comment and the flow's reply to it. Check the "What to check" lines in the description, and each claim against the feature code. Add the feature MR as a dependency, then merge after it. |
-| Anyone | Mention the flow's service account on a feature MR to run the gate again. Mention it on a docs MR it opened to fix the open threads. It fixes only threads from the people and bots listed in [Guardrails](#guardrails). |
+| Anyone | Mention the flow's service account on a feature MR to run the gate again. Mention it on a docs MR from the flow to fix the open threads. It fixes only threads from the people and bots listed in [Guardrails](#guardrails). |
 
 ## Guardrails
 
@@ -89,12 +89,13 @@ Script steps enforce these rules:
 - The scripts open docs MRs as drafts and never merge or approve.
 - A push happens only when `check.py` reports no errors and the branch changes nothing but
   user docs. Warnings left after the fix cycles are listed on the MR.
-- Agents see only threads from the feature MR author, its reviewers, Developer+ members of
-  this project, and Duo Code Review. Other threads stay open for the person who merges, and
-  the handoff note lists them.
+- Agents see only threads and notes from the flow's identity, Duo Code Review, the feature MR
+  authors and reviewers, the docs MR reviewers, and Developer+ members of this project. Other
+  threads stay open for the person who merges, and the handoff note links them without their text.
 - The flow resolves only the threads it gave the fixer, and only after the fix is pushed and
   `check.py` is clean. It never resolves a **Needs reviewer decision** thread.
-- The threads path runs only on a docs MR that the flow's identity opened in this project.
+- The threads path runs only on a docs MR whose branch is in this project, not a fork, and
+  where the flow's identity already has a note.
   Flow markers count only on notes from the flow's identity or GitLab Duo.
 - The flow discards any commit the review agent makes, and any edit outside `.docs-write/`.
 
