@@ -15,11 +15,12 @@ use compiler::{
 use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
-use query_data_model::{DataType, Model};
+use query_data_model::catalog::Check;
+use query_data_model::{DataType, EntityId, Model, PropertyId};
 use types::identity;
-use types::{QueryResult, QueryResultRow};
+use types::{KeyLookup, QueryResult, QueryResultRow};
 
-pub use crate::content::PropertyMap;
+pub use crate::content::{PropertyMap, PropertyRow};
 
 /// Tries the PK column first (`_orbit_{alias}_pk`), falling back to the
 /// redaction ID column (`_orbit_{alias}_id`).
@@ -47,24 +48,39 @@ pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<Travers
     paths
 }
 
+/// The entity a stored kind value names. Every kind a row carries decodes here, and an unknown
+/// value fails the request rather than dropping the row.
+pub fn decode_kind(model: &Model, value: &str, column: &str) -> Result<EntityId, PipelineError> {
+    model
+        .graph()
+        .entity_kind(value)
+        .map(|entity| entity.id)
+        .ok_or_else(|| {
+            PipelineError::custom(format!(
+                "column {column} holds unknown entity kind {value:?}"
+            ))
+        })
+}
+
 /// When `static_nodes` is provided (e.g. the center node in a neighbors query),
 /// their IDs are also collected so properties can be hydrated for them.
 pub fn extract_dynamic_refs(
+    model: &Model,
     result: &QueryResult,
     static_nodes: &[compiler::RedactionNode],
-) -> HashMap<String, Vec<Key>> {
-    let mut refs: HashMap<String, Vec<Key>> = HashMap::new();
+) -> Result<HashMap<EntityId, Vec<Key>>, PipelineError> {
+    let mut refs: HashMap<EntityId, Vec<Key>> = HashMap::new();
     for row in result.authorized_rows() {
         for node_ref in row.dynamic_nodes() {
-            refs.entry(node_ref.entity_type.clone())
-                .or_default()
-                .push(node_ref.id.clone());
+            let entity = decode_kind(model, &node_ref.entity_type, "type")?;
+            refs.entry(entity).or_default().push(node_ref.id.clone());
         }
         for node in static_nodes {
             if let Some(id) = row.get_public_id(node)
                 && let Some(entity_type) = row.get_type(node)
             {
-                refs.entry(entity_type.to_string()).or_default().push(id);
+                let entity = decode_kind(model, entity_type, &node.type_column)?;
+                refs.entry(entity).or_default().push(id);
             }
         }
     }
@@ -72,18 +88,17 @@ pub fn extract_dynamic_refs(
         ids.sort_unstable();
         ids.dedup();
     }
-    refs
+    Ok(refs)
 }
 
 pub fn collect_dynamic_ref_paths(
+    model: &Model,
     result: &QueryResult,
     static_nodes: &[compiler::RedactionNode],
-) -> HashMap<String, Vec<TraversalPath>> {
-    let mut paths: HashMap<String, Option<Vec<TraversalPath>>> = HashMap::new();
-    let mut record = |entity_type: &str, path: Option<String>| {
-        let entry = paths
-            .entry(entity_type.to_string())
-            .or_insert_with(|| Some(Vec::new()));
+) -> Result<HashMap<EntityId, Vec<TraversalPath>>, PipelineError> {
+    let mut paths: HashMap<EntityId, Option<Vec<TraversalPath>>> = HashMap::new();
+    let mut record = |entity: EntityId, path: Option<String>| {
+        let entry = paths.entry(entity).or_insert_with(|| Some(Vec::new()));
         match (entry.as_mut(), path.filter(|p| !p.is_empty())) {
             (Some(list), Some(path)) => list.push(TraversalPath::new_unchecked(path)),
             _ => *entry = None,
@@ -92,28 +107,30 @@ pub fn collect_dynamic_ref_paths(
     for row in result.authorized_rows() {
         let neighbor_path = row.get_column_string(neighbor_traversal_path_column());
         for node_ref in row.dynamic_nodes() {
-            record(&node_ref.entity_type, neighbor_path.clone());
+            let entity = decode_kind(model, &node_ref.entity_type, "type")?;
+            record(entity, neighbor_path.clone());
         }
         for node in static_nodes {
             if row.get_public_id(node).is_some()
                 && let Some(entity_type) = row.get_type(node)
             {
+                let entity = decode_kind(model, entity_type, &node.type_column)?;
                 record(
-                    entity_type,
+                    entity,
                     row.get_column_string(&traversal_path_column(&node.alias)),
                 );
             }
         }
     }
-    paths
+    Ok(paths
         .into_iter()
-        .filter_map(|(entity_type, list)| {
+        .filter_map(|(entity, list)| {
             let mut list = list?;
             list.sort_unstable();
             list.dedup();
-            Some((entity_type, list))
+            Some((entity, list))
         })
-        .collect()
+        .collect())
 }
 
 /// A static node's identity: its primary key column, or its redaction id.
@@ -128,12 +145,8 @@ fn static_id(row: &QueryResultRow, alias: &str) -> Option<Key> {
 pub fn granted_paths(
     grants: &Grants,
     model: &Model,
-    entity: &str,
+    entity: EntityId,
 ) -> Result<Vec<TraversalPath>, PipelineError> {
-    let entity = model
-        .names()
-        .entity(entity)
-        .map_err(|error| PipelineError::custom(error.to_string()))?;
     let access = model.access();
     let declared = access.entity(entity);
     let set = grants
@@ -151,12 +164,52 @@ pub fn granted_paths(
     })
 }
 
+pub fn key_lookup_arm(
+    model: &Model,
+    limits: &QueryLimits,
+    grants: &Grants,
+    lookup: &KeyLookup,
+) -> Result<HydrationArm, PipelineError> {
+    let entity = decode_kind(model, &lookup.entity, "type")?;
+    let graph = model.graph();
+    let keys: Vec<PropertyId> = model
+        .access()
+        .entity(entity)
+        .checks
+        .iter()
+        .filter_map(|check| match check {
+            Check::Rows { id, .. } => Some(*id),
+            Check::Delegated { .. } => None,
+        })
+        .filter(|key| lookup.properties.contains(&graph.property(*key).name))
+        .collect();
+    let scope = granted_paths(grants, model, entity)?;
+    hydration_arm(model, limits, entity, &lookup.ids, &keys, scope)
+}
+
+/// Hydrated properties keyed by entity name, as the result's row checks read them.
+pub fn by_kind_name(
+    model: &Model,
+    property_map: &PropertyMap,
+) -> HashMap<(String, Key), PropertyRow> {
+    let graph = model.graph();
+    property_map
+        .iter()
+        .map(|((entity, key), row)| {
+            (
+                (graph.entity(*entity).name.clone(), key.clone()),
+                row.clone(),
+            )
+        })
+        .collect()
+}
+
 pub fn hydration_arm(
     model: &Model,
     limits: &QueryLimits,
-    entity: &str,
+    entity: EntityId,
     ids: &[Key],
-    columns: &[String],
+    columns: &[PropertyId],
     traversal_paths: Vec<TraversalPath>,
 ) -> Result<HydrationArm, PipelineError> {
     HydrationArm::new(model, limits, entity, ids, columns, traversal_paths).map_err(|error| {
@@ -179,7 +232,8 @@ pub fn parse_hydration_batches(
     let id_col = hydration_id_column();
 
     let mut result = HashMap::new();
-    let mut field_types_cache: HashMap<String, HashMap<String, DataType>> = HashMap::new();
+    let mut field_types_cache: HashMap<EntityId, HashMap<String, DataType>> = HashMap::new();
+    let graph = model.graph();
 
     for batch in batches {
         for row_idx in 0..batch.num_rows() {
@@ -196,23 +250,17 @@ pub fn parse_hydration_batches(
             let Some(entity_type) = entity_type else {
                 continue;
             };
+            let entity = decode_kind(model, &entity_type, &entity_type_col)?;
 
-            let field_types = field_types_cache
-                .entry(entity_type.clone())
-                .or_insert_with(|| {
-                    let graph = model.graph();
-                    graph
-                        .entity_kind(&entity_type)
-                        .map(|entity| {
-                            entity
-                                .properties
-                                .iter()
-                                .map(|property| graph.property(*property))
-                                .map(|property| (property.name.clone(), property.data_type))
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                });
+            let field_types = field_types_cache.entry(entity).or_insert_with(|| {
+                graph
+                    .entity(entity)
+                    .properties
+                    .iter()
+                    .map(|property| graph.property(*property))
+                    .map(|property| (property.name.clone(), property.data_type))
+                    .collect()
+            });
 
             let props: HashMap<String, ColumnValue> = row_data
                 .iter()
@@ -236,7 +284,7 @@ pub fn parse_hydration_batches(
                 })
                 .unwrap_or_default();
 
-            result.insert((entity_type, id), props);
+            result.insert((entity, id), props);
         }
     }
 
@@ -264,7 +312,7 @@ pub fn merge_static_properties(
     for row in result.authorized_rows_mut() {
         for template in templates {
             if let Some(id) = static_id(row, &template.node_alias)
-                && let Some(props) = property_map.get(&(template.entity_type.clone(), id))
+                && let Some(props) = property_map.get(&(template.entity, id))
             {
                 for (key, value) in props {
                     let col_name = format!("{}_{key}", template.node_alias);
@@ -275,24 +323,29 @@ pub fn merge_static_properties(
     }
 }
 
-pub fn merge_dynamic_properties(result: &mut QueryResult, property_map: &PropertyMap) {
+pub fn merge_dynamic_properties(
+    model: &Model,
+    result: &mut QueryResult,
+    property_map: &PropertyMap,
+) -> Result<(), PipelineError> {
     for row in result.authorized_rows_mut() {
         for node_ref in row.dynamic_nodes_mut() {
-            if let Some(props) =
-                property_map.get(&(node_ref.entity_type.clone(), node_ref.id.clone()))
-            {
+            let entity = decode_kind(model, &node_ref.entity_type, "type")?;
+            if let Some(props) = property_map.get(&(entity, node_ref.id.clone())) {
                 node_ref.properties = props.clone();
             }
         }
     }
+    Ok(())
 }
 
 /// Writes row columns named `{alias}_{column}` so formatters can extract them.
 pub fn merge_static_node_properties(
+    model: &Model,
     result: &mut QueryResult,
     property_map: &PropertyMap,
     static_nodes: &[compiler::RedactionNode],
-) {
+) -> Result<(), PipelineError> {
     for row in result.authorized_rows_mut() {
         for node in static_nodes {
             let Some(id) = row.get_public_id(node) else {
@@ -301,7 +354,8 @@ pub fn merge_static_node_properties(
             let Some(entity_type) = row.get_type(node) else {
                 continue;
             };
-            if let Some(props) = property_map.get(&(entity_type.to_string(), id)) {
+            let entity = decode_kind(model, entity_type, &node.type_column)?;
+            if let Some(props) = property_map.get(&(entity, id)) {
                 for (key, value) in props {
                     let col_name = format!("{}_{key}", node.alias);
                     row.set_column(col_name, value.clone());
@@ -309,22 +363,25 @@ pub fn merge_static_node_properties(
             }
         }
     }
+    Ok(())
 }
 
 /// Remove columns that were injected as dependencies for virtual column
 /// resolvers but not explicitly requested by the user.
 pub fn strip_injected_columns<'a>(
+    model: &Model,
     property_map: &mut PropertyMap,
-    specs: impl Iterator<Item = (&'a str, &'a Vec<String>)>,
+    specs: impl Iterator<Item = (EntityId, &'a Vec<PropertyId>)>,
 ) {
-    for (entity_type, injected) in specs {
+    let graph = model.graph();
+    for (entity, injected) in specs {
         if injected.is_empty() {
             continue;
         }
         for ((et, _), props) in property_map.iter_mut() {
-            if et == entity_type {
-                for col in injected {
-                    props.remove(col);
+            if *et == entity {
+                for property in injected {
+                    props.remove(&graph.property(*property).name);
                 }
             }
         }
@@ -358,7 +415,7 @@ pub fn hydrate_static(
         arms.push(hydration_arm(
             model,
             limits,
-            &template.entity_type,
+            template.entity,
             &ids,
             &template.columns,
             traversal_paths,
@@ -377,18 +434,18 @@ pub fn hydrate_dynamic(
     model: &Model,
     limits: &QueryLimits,
     entity_specs: &[DynamicEntityColumns],
-    refs: &HashMap<String, Vec<Key>>,
+    refs: &HashMap<EntityId, Vec<Key>>,
     grants: &Grants,
-    ref_paths: &HashMap<String, Vec<TraversalPath>>,
+    ref_paths: &HashMap<EntityId, Vec<TraversalPath>>,
 ) -> Result<Vec<HydrationArm>, PipelineError> {
     let mut arms = Vec::new();
 
-    for (entity_type, ids) in refs {
+    for (entity, ids) in refs {
         if ids.is_empty() {
             continue;
         }
 
-        let spec = match entity_specs.iter().find(|s| s.entity_type == *entity_type) {
+        let spec = match entity_specs.iter().find(|s| s.entity == *entity) {
             Some(s) => s,
             None => continue,
         };
@@ -399,16 +456,16 @@ pub fn hydrate_dynamic(
 
         let capped_ids: Vec<Key> = ids.iter().take(limits.hydration_rows).cloned().collect();
 
-        let tps = match (spec.has_traversal_path, ref_paths.get(entity_type)) {
+        let tps = match (spec.has_traversal_path, ref_paths.get(entity)) {
             (false, _) => Vec::new(),
             (true, Some(paths)) => paths.clone(),
-            (true, None) => granted_paths(grants, model, entity_type)?,
+            (true, None) => granted_paths(grants, model, *entity)?,
         };
 
         arms.push(hydration_arm(
             model,
             limits,
-            entity_type,
+            *entity,
             &capped_ids,
             &spec.columns,
             tps,
@@ -501,9 +558,19 @@ mod tests {
             "read",
             ScopeSet::Subtrees(vec!["1/9970/".into()]),
         );
-        let paths = granted_paths(&grants, &model, "MergeRequest").unwrap();
+        let paths = granted_paths(
+            &grants,
+            &model,
+            model.names().entity("MergeRequest").unwrap(),
+        )
+        .unwrap();
         assert_eq!(paths, [TraversalPath::new_unchecked("1/9970/".to_string())]);
-        let unanswered = granted_paths(&grants, &model, "Vulnerability").unwrap_err();
+        let unanswered = granted_paths(
+            &grants,
+            &model,
+            model.names().entity("Vulnerability").unwrap(),
+        )
+        .unwrap_err();
         assert!(
             unanswered.to_string().contains("no scope answer"),
             "{unanswered}"

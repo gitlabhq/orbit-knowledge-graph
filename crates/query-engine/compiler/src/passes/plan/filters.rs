@@ -5,11 +5,11 @@ use crate::passes::codegen::SqlBackend;
 use std::collections::HashMap;
 
 use crate::tp_bounds::anchor_keys;
-use query_data_model::Catalog;
-use query_data_model::implementations::relational::RelationalBackend;
+use query_data_model::implementations::relational::{ColumnId, TableId, Target};
 use query_data_model::plan::logical::{
     Comparison, Expr as Logical, Literal, Operand, Predicate as Leaf,
 };
+use query_data_model::{Catalog, EntityId, PropertyId};
 use serde_json::Value as Json;
 
 use super::predicates::{Column, Predicate};
@@ -31,9 +31,9 @@ pub struct NullAsEpoch {
 #[derive(Clone, PartialEq)]
 pub struct BoundFilter {
     pub leaf: Leaf,
-    /// The column a comparison across columns reads on its right.
-    pub rhs: Option<Column>,
-    pub property: Option<query_data_model::PropertyId>,
+    pub target: Target,
+    /// What a comparison across columns reads on its right.
+    pub rhs: Option<Target>,
     pub data_type: Option<query_data_model::DataType>,
     pub selectivity: query_data_model::FieldSelectivity,
     pub namespace_anchor: bool,
@@ -44,10 +44,17 @@ pub struct BoundFilter {
     pub immutable: bool,
     pub null_as_epoch: NullAsEpoch,
     /// Every stored column and type a tuple IN reads, in tuple order; empty for any other leaf.
-    pub tuple: Vec<(String, Option<query_data_model::DataType>)>,
+    pub tuple: Vec<(ColumnId, query_data_model::DataType)>,
 }
 
 impl BoundFilter {
+    pub fn property(&self) -> Option<PropertyId> {
+        match self.target {
+            Target::Property(property) => Some(property),
+            Target::Attribute(_) | Target::Edge(_) => None,
+        }
+    }
+
     pub fn is_selective(&self) -> bool {
         if self.namespace_anchor {
             return false;
@@ -95,21 +102,22 @@ impl BoundFilter {
         (self.matches_values() && !values.is_empty()).then(|| values.iter().map(tag).collect())
     }
 
-    pub fn at(&self, column: Column) -> Predicate {
+    pub fn at(&self, column: Column, rhs: Option<Column>) -> Predicate {
         Predicate::Filter {
             column,
+            rhs,
             filter: self.clone(),
         }
     }
 }
 
 pub enum FilterOwner<'a> {
-    Entity(query_data_model::EntityId),
-    Tables(&'a [String]),
+    Entity(EntityId),
+    Tables(&'a [TableId]),
 }
 
 /// A sort-key match already narrows the read, so no filter in the set also asks for the text index.
-pub fn unindex_if_key_narrowed(filters: &mut [(String, BoundFilter)]) {
+pub fn unindex_if_key_narrowed(filters: &mut [(Target, BoundFilter)]) {
     if filters
         .iter()
         .any(|(_, filter)| filter.in_sort_key && filter.matches_values())
@@ -121,62 +129,79 @@ pub fn unindex_if_key_narrowed(filters: &mut [(String, BoundFilter)]) {
 }
 
 pub fn bind_filter(
-    property: &str,
+    target: Target,
     leaf: Leaf,
-    rhs: Option<Column>,
+    rhs: Option<Target>,
     owner: &FilterOwner<'_>,
     model: &Catalog<impl SqlBackend>,
 ) -> BoundFilter {
     let graph = model.graph();
-    let (metadata, in_sort_key) = match owner {
+    let columns = |tables: &[TableId]| -> Vec<Option<ColumnId>> {
+        tables
+            .iter()
+            .map(|table| model.column_of(target, *table))
+            .collect()
+    };
+    let (property, data_type, columns) = match owner {
         FilterOwner::Entity(entity) => {
-            let table = model.table_of(*entity);
+            let property = match target {
+                Target::Property(property) if graph.property(property).entity == *entity => {
+                    Some(property)
+                }
+                _ => None,
+            };
+            let table = model.entity_table(*entity);
             (
-                model
-                    .names()
-                    .property(*entity, property)
-                    .ok()
-                    .map(|property| graph.property(property))
-                    .map(|property| (Some(property.id), Some(property.data_type))),
-                table.is_some_and(|table| in_sort_key(model, table, property)),
+                property,
+                property.map(|property| graph.property(property).data_type),
+                columns(table.as_slice()),
             )
         }
         FilterOwner::Tables(tables) => {
-            let data_type = tables.first().and_then(|first| {
-                let data_type = column_type(model, first, property)?;
-                tables[1..]
-                    .iter()
-                    .all(|table| column_type(model, table, property) == Some(data_type))
-                    .then_some(data_type)
-            });
-            (
-                Some((None, data_type)),
-                tables
-                    .iter()
-                    .all(|table| in_sort_key(model, table, property)),
-            )
+            let columns = columns(tables);
+            let mut types = columns
+                .iter()
+                .map(|column| column.and_then(|column| model.column_type(column)));
+            let first = types.next().flatten();
+            let data_type = first.filter(|_| types.all(|other| other == first));
+            (None, data_type, columns)
         }
     };
-    let (property_id, data_type) = metadata.unwrap_or_default();
+    let stored = |fact: fn(&Catalog<_>, ColumnId) -> bool| {
+        columns
+            .iter()
+            .all(|column| column.is_some_and(|column| fact(model, column)))
+    };
+    let in_sort_key = match owner {
+        FilterOwner::Entity(_) => !columns.is_empty(),
+        FilterOwner::Tables(_) => true,
+    } && stored(Catalog::in_sort_key);
     let tuple = match &leaf {
         Leaf::InTuple { left, .. } => left
             .iter()
             .filter_map(|expr| match expr {
-                query_data_model::plan::logical::Expr::Property { property, .. } => Some((
-                    model.column(*property)?.to_string(),
-                    Some(graph.property(*property).data_type),
-                )),
+                Logical::Property { property, .. } => {
+                    let table = model.entity_table(graph.property(*property).entity)?;
+                    let column = model.column_of(Target::Property(*property), table)?;
+                    Some((column, graph.property(*property).data_type))
+                }
                 _ => None,
             })
             .collect(),
         _ => Vec::new(),
     };
+    let epoch = |target: Option<Target>| match target {
+        Some(Target::Property(property)) if model.null_as_epoch(property) => {
+            Some(graph.property(property).data_type)
+        }
+        _ => None,
+    };
     BoundFilter {
         leaf,
+        target,
         rhs,
-        property: property_id,
         data_type,
-        selectivity: property_id
+        selectivity: property
             .map(|property| {
                 model.selectivity(property).unwrap_or_else(|| {
                     query_data_model::FieldSelectivity::from_data_type(
@@ -186,34 +211,19 @@ pub fn bind_filter(
             })
             .or_else(|| data_type.map(query_data_model::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
-        namespace_anchor: property_id
+        namespace_anchor: property
             .is_some_and(|property| anchor_keys(model).iter().any(|(key, _)| *key == property)),
-        foreign_key: property_id.is_some_and(|property| model.model().holds_foreign_key(property)),
+        foreign_key: property.is_some_and(|property| model.model().holds_foreign_key(property)),
         in_sort_key,
-        text_indexed: property_id.is_some_and(|property| model.text_index(property)),
-        unique: property_id.is_some_and(|property| graph.property(property).unique),
-        immutable: property_id.is_some_and(|property| model.model().immutable(property)),
+        text_indexed: property.is_some() && stored(Catalog::text_indexed),
+        unique: property.is_some_and(|property| graph.property(property).unique),
+        immutable: property.is_some_and(|property| model.model().immutable(property)),
         null_as_epoch: NullAsEpoch {
-            column: data_type
-                .filter(|_| property_id.is_some_and(|property| model.null_as_epoch(property))),
-            rhs: None,
+            column: epoch(property.map(Target::Property)),
+            rhs: epoch(rhs),
         },
         tuple,
     }
-}
-
-fn in_sort_key<B: RelationalBackend>(catalog: &Catalog<B>, table: &str, column: &str) -> bool {
-    catalog
-        .physical_table(table)
-        .is_some_and(|table| table.sort_key.iter().any(|key| key == column))
-}
-
-fn column_type<B: RelationalBackend>(
-    catalog: &Catalog<B>,
-    table: &str,
-    column: &str,
-) -> Option<query_data_model::DataType> {
-    catalog.physical_table(table)?.column(column)?.data_type
 }
 
 pub fn lowerable_denorm<'a>(
@@ -223,7 +233,7 @@ pub fn lowerable_denorm<'a>(
 ) -> Option<&'a DenormalizedProperty> {
     denormalized
         .get(&DenormalizedKey {
-            property: filter.property?,
+            property: filter.property()?,
             direction,
         })
         .filter(|facts| filter.tags(&facts.tag_key).is_some())
@@ -257,12 +267,9 @@ pub fn denormalized_facts(
 
 /// The anchor's attached filters, each bound to its property on the binding's entity.
 pub fn bind_facts<B: SqlBackend>(
-    query: Query<'_>,
     anchor: &Anchor<'_>,
-    alias: &str,
     model: &Catalog<B>,
-) -> Vec<(String, BoundFilter)> {
-    let graph = query.model.graph();
+) -> Vec<(Target, BoundFilter)> {
     let owner = FilterOwner::Entity(anchor.binding.entity);
     anchor
         .filters
@@ -271,18 +278,14 @@ pub fn bind_facts<B: SqlBackend>(
             let Logical::Property { property, .. } = fact.left() else {
                 return None;
             };
-            let name = &graph.property(property).name;
             let rhs = match fact.right() {
-                Some(Logical::Property { property, .. }) => Some(property),
+                Some(Logical::Property { property, .. }) => Some(Target::Property(property)),
                 Some(_) => return None,
                 None => None,
             };
-            let column = rhs.map(|rhs| Column::new(alias, &graph.property(rhs).name));
-            let mut bound = bind_filter(name, (*fact.predicate).clone(), column, &owner, model);
-            bound.null_as_epoch.rhs = rhs
-                .filter(|rhs| model.null_as_epoch(*rhs))
-                .map(|rhs| graph.property(rhs).data_type);
-            Some((name.clone(), bound))
+            let target = Target::Property(property);
+            let bound = bind_filter(target, (*fact.predicate).clone(), rhs, &owner, model);
+            Some((target, bound))
         })
         .collect()
 }

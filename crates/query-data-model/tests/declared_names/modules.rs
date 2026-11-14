@@ -9,8 +9,34 @@ pub struct Literal {
     pub text: String,
 }
 
+/// The non-test tokens of one source file.
+pub struct Unit {
+    pub file: PathBuf,
+    pub tokens: Vec<Token>,
+}
+
 /// The string literals of every non-test module reachable from the crate roots under `dir`.
 pub fn literals(dir: &Path) -> Vec<Literal> {
+    units(dir)
+        .into_iter()
+        .flat_map(|unit| {
+            let file = unit.file;
+            unit.tokens
+                .into_iter()
+                .filter_map(move |token| match token {
+                    Token::Str(text, line) => Some(Literal {
+                        file: file.clone(),
+                        line,
+                        text,
+                    }),
+                    _ => None,
+                })
+        })
+        .collect()
+}
+
+/// The non-test tokens of every module reachable from the crate roots under `dir`.
+pub fn units(dir: &Path) -> Vec<Unit> {
     let mut out = Vec::new();
     for manifest in manifests(dir) {
         let root = manifest.parent().unwrap();
@@ -47,8 +73,9 @@ fn manifests(dir: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// Records `file`'s literals and walks the module files it declares, `modules` being their directory.
-fn walk(file: &Path, modules: &Path, out: &mut Vec<Literal>) {
+/// Records `file`'s non-test tokens and walks the module files it declares, `modules` being their
+/// directory.
+fn walk(file: &Path, modules: &Path, out: &mut Vec<Unit>) {
     let source = std::fs::read_to_string(file).unwrap();
     if source
         .lines()
@@ -58,12 +85,18 @@ fn walk(file: &Path, modules: &Path, out: &mut Vec<Literal>) {
         return;
     }
     let tokens = lex(&source);
+    let index = out.len();
+    out.push(Unit {
+        file: file.to_path_buf(),
+        tokens: Vec::new(),
+    });
     let (mut at, mut depth, mut inline) = (0, 0usize, vec![(0, modules.to_path_buf())]);
     while at < tokens.len() {
         match &tokens[at] {
             Token::Punct('#') => {
                 let (gate, end) = attributes(&tokens, at);
                 if gate.file {
+                    out[index].tokens.clear();
                     return;
                 }
                 if gate.item {
@@ -71,11 +104,6 @@ fn walk(file: &Path, modules: &Path, out: &mut Vec<Literal>) {
                     continue;
                 }
             }
-            Token::Str(text, line) => out.push(Literal {
-                file: file.to_path_buf(),
-                line: *line,
-                text: text.clone(),
-            }),
             Token::Punct('{') => depth += 1,
             Token::Punct('}') => {
                 if inline.last().is_some_and(|(open, _)| *open == depth) {
@@ -95,11 +123,12 @@ fn walk(file: &Path, modules: &Path, out: &mut Vec<Literal>) {
             }
             _ => {}
         }
+        out[index].tokens.push(tokens[at].clone());
         at += 1;
     }
 }
 
-fn walk_child(dir: &Path, name: &str, out: &mut Vec<Literal>) {
+fn walk_child(dir: &Path, name: &str, out: &mut Vec<Unit>) {
     let flat = dir.join(format!("{name}.rs"));
     let file = if flat.exists() {
         flat

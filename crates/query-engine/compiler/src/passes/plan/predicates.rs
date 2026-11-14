@@ -1,7 +1,9 @@
 //! Predicates and projections the planner attaches to relations, and the facts about a predicate the
 //! planner asks for: selective, a point lookup, or filtering the sort key.
 
-use query_data_model::constants::*;
+use query_data_model::implementations::relational::Target;
+use query_data_model::plan::logical::EdgeField;
+use query_data_model::{GraphCatalog, PropertyId};
 
 use query_data_model::plan::logical::{Comparison, Predicate as Leaf};
 
@@ -29,6 +31,7 @@ pub enum Predicate {
     Boolean(Boolean<Box<Predicate>>),
     Filter {
         column: Column,
+        rhs: Option<Column>,
         filter: BoundFilter,
     },
     Ids {
@@ -45,14 +48,14 @@ pub enum Predicate {
     },
     EntityKind {
         column: Column,
-        entity: String,
+        entity: query_data_model::EntityId,
     },
     ColumnEq {
         left: Column,
         right: Column,
     },
     RelationshipKinds {
-        alias: String,
+        column: Column,
         kinds: Vec<String>,
     },
     Tags {
@@ -140,14 +143,14 @@ impl Predicate {
                 &|children| children.into_iter().all(|filters| filters),
                 &|filters| filters,
             ),
-            Self::Filter { column, filter } => {
+            Self::Filter { column, filter, .. } => {
                 filter.rhs.is_none() && (filter.immutable && immutable_ok || in_key(&column.name))
             }
             Self::Ids { column, .. }
             | Self::IdRange { column, .. }
             | Self::EntityKind { column, .. } => in_key(&column.name),
             Self::Membership { columns, .. } => columns.iter().all(|column| in_key(&column.name)),
-            Self::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
+            Self::RelationshipKinds { column, .. } => in_key(&column.name),
             _ => false,
         }
     }
@@ -207,16 +210,37 @@ impl Projection {
     }
 }
 
-pub fn kind_column(id_column: &str) -> &'static str {
-    if id_column == SOURCE_ID_COLUMN {
-        SOURCE_KIND_COLUMN
-    } else {
-        TARGET_KIND_COLUMN
+pub fn kind_field(id: EdgeField) -> EdgeField {
+    match id {
+        EdgeField::SourceId => EdgeField::SourceKind,
+        _ => EdgeField::TargetKind,
     }
 }
 
-pub fn property_filter(alias: &str, property: &str, bound: &BoundFilter) -> Predicate {
-    bound.at(Column::new(alias, property))
+pub fn property_column(alias: &str, property: PropertyId, graph: &GraphCatalog) -> Column {
+    Column::new(alias, &graph.property(property).name)
+}
+
+pub fn property_columns(
+    alias: &str,
+    bound: &BoundFilter,
+    graph: &GraphCatalog,
+) -> Option<(Column, Option<Column>)> {
+    let property = bound.property()?;
+    let rhs = match bound.rhs {
+        Some(Target::Property(rhs)) => Some(property_column(alias, rhs, graph)),
+        _ => None,
+    };
+    Some((property_column(alias, property, graph), rhs))
+}
+
+pub fn property_filter(
+    alias: &str,
+    bound: &BoundFilter,
+    graph: &GraphCatalog,
+) -> Option<Predicate> {
+    let (column, rhs) = property_columns(alias, bound, graph)?;
+    Some(bound.at(column, rhs))
 }
 
 pub fn membership(column: Column, (relation, key): (Rel, String)) -> Predicate {
@@ -237,9 +261,9 @@ pub fn live(alias: &str) -> Predicate {
     }
 }
 
-pub fn relationship_kinds(alias: &str, kinds: &[String]) -> Option<Predicate> {
+pub fn relationship_kinds(column: Column, kinds: &[String]) -> Option<Predicate> {
     (!kinds.is_empty()).then(|| Predicate::RelationshipKinds {
-        alias: alias.into(),
+        column,
         kinds: kinds.to_vec(),
     })
 }

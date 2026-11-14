@@ -1,6 +1,7 @@
 use orbit_authorization::Key;
 use orbit_utils::query_types::{SqlType, TimeZone};
-use query_data_model::constants::{DELETED_COLUMN, RELATIONSHIP_KIND_COLUMN};
+use query_data_model::Catalog;
+use query_data_model::constants::DELETED_COLUMN;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Expr, Function, Relation, RelationalError, TextMatch, UnaryOp,
@@ -68,8 +69,9 @@ fn unary(op: UnaryOp, value: Expr) -> Expr {
 /// The one lowering of a filter leaf, under `negated` NOTs that stay above it. Null-as-epoch
 /// columns and the lower() text-index twin are applied here only.
 pub(crate) fn filter<B: RelationalBackend>(
+    catalog: &Catalog<B>,
     scope: &[&Relation],
-    column: &Column,
+    (column, rhs): (&Column, Option<&Column>),
     f: &BoundFilter,
     negated: bool,
 ) -> Built<Expr> {
@@ -83,10 +85,7 @@ pub(crate) fn filter<B: RelationalBackend>(
             right: Operand::Expr(_),
             ..
         } => {
-            let rhs = f
-                .rhs
-                .as_ref()
-                .ok_or(RelationalError::Incomplete("a compared column"))?;
+            let rhs = rhs.ok_or(RelationalError::Incomplete("a compared column"))?;
             let rhs = read::<B>(col(scope, &rhs.source, &rhs.name)?, epochs.rhs);
             let left = read::<B>(raw, epochs.column);
             return Ok(binary(binary_op(*comparison), left, rhs));
@@ -121,7 +120,7 @@ pub(crate) fn filter<B: RelationalBackend>(
             let columns = f
                 .tuple
                 .iter()
-                .map(|(name, _)| col(scope, &column.source, name))
+                .map(|(stored, _)| col(scope, &column.source, catalog.column_name(*stored)))
                 .collect::<Built<Vec<_>>>()?;
             let tuple = |literals: &Vec<query_data_model::plan::logical::Literal>| {
                 Expr::List(
@@ -129,7 +128,7 @@ pub(crate) fn filter<B: RelationalBackend>(
                         .iter()
                         .zip(&f.tuple)
                         .map(|(literal, (_, data_type))| {
-                            param::<B>(parameter_type(data_type.as_ref()), literal.into())
+                            param::<B>(parameter_type(Some(data_type)), literal.into())
                         })
                         .collect(),
                 )
@@ -266,13 +265,13 @@ pub(crate) fn live<B: RelationalBackend>(scope: &[&Relation], alias: &str) -> Bu
 
 pub(crate) fn relationship_kinds<B: RelationalBackend>(
     scope: &[&Relation],
-    alias: &str,
+    column: &Column,
     kinds: &[String],
 ) -> Built<Option<Expr>> {
     if kinds.is_empty() {
         return Ok(None);
     }
-    let kind = col(scope, alias, RELATIONSHIP_KIND_COLUMN)?;
+    let kind = col(scope, &column.source, &column.name)?;
     Ok(match kinds {
         [only] => Some(eq(kind, super::string(only))),
         _ => {

@@ -43,12 +43,16 @@ pub fn defaults(entity: &Entity) -> impl Iterator<Item = PropertyId> + '_ {
 }
 
 /// The properties a binding returns: the listed ones, else the defaults or every readable property.
-pub fn returned<B>(model: &Catalog<B>, entity: EntityId, selection: Option<&Columns>) -> Vec<String>
+pub fn returned<B>(
+    model: &Catalog<B>,
+    entity: EntityId,
+    selection: Option<&Columns>,
+) -> Vec<PropertyId>
 where
     B: SqlBackend,
 {
     let graph = model.graph();
-    let properties: Vec<PropertyId> = match selection {
+    match selection {
         Some(Columns::Listed(listed)) => listed.clone(),
         selection => {
             let entity = graph.entity(entity);
@@ -64,11 +68,7 @@ where
                 .filter(|property| !model.admin_only(*property))
                 .collect()
         }
-    };
-    properties
-        .into_iter()
-        .map(|property| graph.property(property).name.clone())
-        .collect()
+    }
 }
 
 /// The first property other than the id that a row check of the entity keys rows by; the

@@ -2,9 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::TraversalPathKind;
 
-use super::{Column, RelationalFacts, Table};
+use super::{Column, ColumnId, EdgeColumns, RelationalFacts, Table, TableId, Target};
 use crate::catalog::{Catalog, Check, EdgeScope, Lookup, StorageBackend};
 use crate::implementations::clickhouse::backend::IndexKind;
+use crate::plan::logical::EdgeField;
 use crate::{
     DenormalizedKey, DenormalizedProperty, Endpoint, EntityId, ForeignKey, MaterializedJoin,
     PropertyId, RelationshipId, RelationshipVariant, RelationshipVariantId, TraversalPathLookup,
@@ -14,6 +15,7 @@ use crate::{
 #[derive(Debug)]
 pub struct RelationshipRoute<'a> {
     pub table: &'a str,
+    pub id: TableId,
     variants: Vec<&'a RelationshipVariant>,
 }
 
@@ -158,7 +160,14 @@ where
         }
         routes
             .into_iter()
-            .map(|(table, variants)| RelationshipRoute { table, variants })
+            .filter_map(|(table, variants)| {
+                let id = self.table_named(table)?;
+                Some(RelationshipRoute {
+                    table,
+                    id,
+                    variants,
+                })
+            })
             .collect()
     }
 
@@ -204,10 +213,140 @@ where
             .find_map(|(store, _)| store.copy(variant, endpoint, property))
     }
 
+    pub fn copied_property(
+        &self,
+        variant: RelationshipVariantId,
+        endpoint: Endpoint,
+        column: &str,
+    ) -> Option<PropertyId> {
+        self.stores().find_map(|(store, _)| {
+            let sources = store.binding(variant)?.copies.get(column)?;
+            sources
+                .iter()
+                .find(|(side, _)| *side == endpoint)
+                .map(|(_, property)| *property)
+        })
+    }
+
     /// A table any store of the connection holds.
     pub fn physical_table(&self, name: &str) -> Option<&Table> {
         self.stores()
             .find_map(|(_, facts)| facts.relational().table(name))
+    }
+
+    fn table_handles(&self) -> impl Iterator<Item = (TableId, &Table)> {
+        self.stores().flat_map(|(store, facts)| {
+            facts
+                .relational()
+                .tables
+                .iter()
+                .enumerate()
+                .map(move |(index, table)| {
+                    let id = TableId {
+                        store: store.id(),
+                        index,
+                    };
+                    (id, table)
+                })
+        })
+    }
+
+    fn table_named(&self, name: &str) -> Option<TableId> {
+        self.table_handles()
+            .find(|(_, table)| table.name == name)
+            .map(|(id, _)| id)
+    }
+
+    pub fn table_at(&self, id: TableId) -> &Table {
+        let (_, facts) = self
+            .stores()
+            .find(|(store, _)| store.id() == id.store)
+            .expect("a table handle names a store of its connection");
+        &facts.relational().tables[id.index]
+    }
+
+    pub fn entity_table(&self, entity: EntityId) -> Option<TableId> {
+        self.table_named(self.table_of(entity)?)
+    }
+
+    pub fn edge_table_ids(&self, relationships: &[RelationshipId]) -> Vec<TableId> {
+        self.edge_tables(relationships)
+            .iter()
+            .filter_map(|name| self.table_named(name))
+            .collect()
+    }
+
+    pub fn shared_edge_table_id(&self) -> Option<TableId> {
+        self.table_named(self.shared_edge_table()?)
+    }
+
+    pub fn copies(&self, table: TableId) -> Vec<TableId> {
+        self.copies_of(&self.table_at(table).name)
+            .into_iter()
+            .filter_map(|copy| self.table_named(copy))
+            .collect()
+    }
+
+    pub fn column_of(&self, target: Target, table: TableId) -> Option<ColumnId> {
+        let stored = self.table_at(table);
+        let index = match target {
+            Target::Property(property) => stored
+                .columns
+                .iter()
+                .position(|column| column.property == Some(property)),
+            Target::Attribute(attribute) => {
+                let name = &self.graph().attribute(attribute).name;
+                let edge = stored.edge.then_some(stored);
+                edge.and_then(|table| table.columns.iter().position(|c| &c.name == name))
+            }
+            Target::Edge(field) => {
+                let name = self.edge_column_of(table, field)?;
+                stored.columns.iter().position(|column| column.name == name)
+            }
+        }?;
+        Some(ColumnId { table, index })
+    }
+
+    fn edge_column_of(&self, table: TableId, field: EdgeField) -> Option<&str> {
+        let (_, facts) = self.stores().find(|(store, _)| store.id() == table.store)?;
+        let columns = facts.relational().edge_columns.as_ref()?;
+        self.table_at(table).edge.then(|| columns.column(field))
+    }
+
+    fn stored(&self, column: ColumnId) -> (&Table, &Column) {
+        let table = self.table_at(column.table);
+        (table, &table.columns[column.index])
+    }
+
+    /// The name the backend stores a column under, for the SQL renderer.
+    pub fn column_name(&self, column: ColumnId) -> &str {
+        &self.stored(column).1.name
+    }
+
+    pub fn column_type(&self, column: ColumnId) -> Option<crate::DataType> {
+        self.stored(column).1.data_type
+    }
+
+    pub fn in_sort_key(&self, column: ColumnId) -> bool {
+        let (table, column) = self.stored(column);
+        table.sort_key.contains(&column.name)
+    }
+
+    pub fn text_indexed(&self, column: ColumnId) -> bool {
+        let (table, column) = self.stored(column);
+        table.indexes.iter().any(|index| {
+            index.column == column.name && IndexKind::parse(&index.kind) == Some(IndexKind::Text)
+        })
+    }
+
+    /// The edge columns every edge-table store on the connection declares; none when the
+    /// connection stores no edges or its stores disagree.
+    pub fn edge_columns(&self) -> Option<&EdgeColumns> {
+        let mut declared = self
+            .stores()
+            .filter_map(|(_, facts)| facts.relational().edge_columns.as_ref());
+        let first = declared.next()?;
+        declared.all(|other| other == first).then_some(first)
     }
 
     /// The copies of a table that store the same rows in another sort order.

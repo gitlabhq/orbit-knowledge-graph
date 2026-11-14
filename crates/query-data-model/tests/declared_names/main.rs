@@ -2,6 +2,7 @@
 //! non-test source of the query engine, indexer, migrations or server.
 
 mod collisions;
+mod handles;
 mod lexer;
 mod modules;
 
@@ -276,11 +277,74 @@ fn scanner_reads_only_non_test_literals() {
         .map(|literal| (literal.text.as_str(), literal.line))
         .collect();
     let expected = [
-        ("kept", 1),
         ("attribute", 7),
         ("raw \"quoted\"", 9),
         ("not test", 13),
         ("line \\\ncontinued", 18),
+        ("kept", 1),
     ];
     assert_eq!(found, expected);
+}
+
+fn connection_names() -> Vec<String> {
+    let testkit = std::fs::read_to_string(
+        repository().join("crates/query-data-model/src/testkit_deployments.yaml"),
+    )
+    .unwrap();
+    let mut names = std::collections::BTreeSet::new();
+    for deployments in [
+        query_data_model::Deployments::embedded(),
+        query_data_model::Deployments::parse(&testkit).unwrap(),
+    ] {
+        for shape in deployments.shapes() {
+            names.extend(deployments.connections(shape).unwrap().iter().cloned());
+        }
+    }
+    names.into_iter().collect()
+}
+
+#[test]
+fn engine_reads_model_facts_by_handle() {
+    let found = handles::violations(&repository(), &handles::ENGINE, &connection_names());
+    assert!(
+        found.is_empty(),
+        "{} engine files break a handle rule:\n{}",
+        found.len(),
+        found.join("\n")
+    );
+}
+
+const PLANTED: &str = r#"
+fn names(model: &Model) { let _ = model.names(); }
+fn fixture() { let _ = query_data_model::testkit::limits(); }
+fn decode(graph: &GraphCatalog) { let _ = graph.entity_kind("User"); }
+const KEY: &str = "id";
+const PEER: &str = "main";
+fn branch(kind: &str) -> bool { kind == ClickHouse::KIND || kind == "duckdb" }
+#[cfg(test)]
+mod tests {
+    fn allowed(model: &Model) { let _ = model.names(); let _ = "id"; }
+}
+"#;
+
+#[test]
+fn handle_rules_fail_on_planted_violations() {
+    let root = std::env::temp_dir().join(format!("handle-rules-{}", std::process::id()));
+    let src = root.join("crate/src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(root.join("crate/Cargo.toml"), "").unwrap();
+    std::fs::write(src.join("lib.rs"), PLANTED).unwrap();
+    let found = handles::violations(&root, &["crate"], &["main".to_string()]);
+    std::fs::remove_dir_all(&root).unwrap();
+    assert_eq!(
+        found,
+        [
+            "crate/src/lib.rs: Names",
+            "crate/src/lib.rs: Testkit",
+            "crate/src/lib.rs: KindCodec",
+            "crate/src/lib.rs: IdentityColumn",
+            "crate/src/lib.rs: ConnectionName",
+            "crate/src/lib.rs: BackendKind",
+        ]
+    );
 }

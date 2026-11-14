@@ -1,9 +1,7 @@
 use std::borrow::Cow;
 
 use query_data_model::PropertyId;
-use query_data_model::constants::{
-    SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
-};
+use query_data_model::implementations::relational::Target;
 use query_data_model::plan::logical::{
     Comparison, Conjunct, EdgeField, Expr, Literal, LogicalOperation, Operand, Predicate,
 };
@@ -120,6 +118,15 @@ impl Leaf<'_> {
     }
 }
 
+pub fn target(expr: Expr) -> Option<Target> {
+    match expr {
+        Expr::Property { property, .. } => Some(Target::Property(property)),
+        Expr::Attribute { attribute, .. } => Some(Target::Attribute(attribute)),
+        Expr::Edge { field, .. } => Some(Target::Edge(field)),
+        Expr::Truncate { .. } | Expr::Node(_) | Expr::Output(_) => None,
+    }
+}
+
 pub fn binding(expr: Expr) -> Ref {
     match expr {
         Expr::Property { binding, .. }
@@ -136,18 +143,16 @@ impl<'p> Query<'p> {
         &self.model.graph().property(property).name
     }
 
-    /// The stored column an expression reads; an edge's kind is not one.
-    pub fn column_name(self, expr: Expr) -> Option<&'p str> {
+    /// The name of the field an expression reads; an edge's kind is not one.
+    pub fn field_name(self, expr: Expr) -> Option<&'p str> {
         Some(match expr {
             Expr::Property { property, .. } => self.property_name(property),
             Expr::Attribute { attribute, .. } => &self.model.graph().attribute(attribute).name,
-            Expr::Edge { field, .. } => match field {
-                EdgeField::Kind => return None,
-                EdgeField::Source => SOURCE_ID_COLUMN,
-                EdgeField::SourceKind => SOURCE_KIND_COLUMN,
-                EdgeField::Target => TARGET_ID_COLUMN,
-                EdgeField::TargetKind => TARGET_KIND_COLUMN,
-            },
+            Expr::Edge {
+                field: EdgeField::Kind,
+                ..
+            } => return None,
+            Expr::Edge { field, .. } => field.into(),
             Expr::Truncate { .. } | Expr::Node(_) | Expr::Output(_) => return None,
         })
     }

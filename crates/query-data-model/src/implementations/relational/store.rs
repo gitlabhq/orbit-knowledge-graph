@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{RelationalFacts, Table};
+use super::{EdgeColumns, RelationalFacts, Table};
 use crate::catalog::{Diagnostics, Source, SourceInput, StorageBackend, StoreInput};
-use crate::constants::{SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
+use crate::plan::logical::EdgeField;
 use crate::{
     DenormalizedCatalog, EntityId, MaterializedJoin, RelationshipVariantId, TraversalPathKind,
     TraversalPathLookup,
@@ -19,6 +19,7 @@ pub struct Versioning {
 pub struct RelationalStore {
     pub versioning: Option<Versioning>,
     pub shared_edge_table: Option<String>,
+    pub edge_columns: Option<EdgeColumns>,
     pub tables: Vec<Table>,
     edge_routes: Vec<Option<String>>,
 }
@@ -65,9 +66,27 @@ impl RelationalStore {
         version: Option<&String>,
         deleted: Option<&String>,
         edge_tables: &[(&str, bool)],
+        edge_columns: Option<&EdgeColumns>,
         diagnostics: &mut Diagnostics,
     ) -> Self {
         let store = input.store;
+        match (edge_tables.is_empty(), edge_columns) {
+            (false, None) => diagnostics.error(
+                &store.package,
+                format!(
+                    "store {} declares edge tables but no edge_columns",
+                    store.name
+                ),
+            ),
+            (true, Some(_)) => diagnostics.error(
+                &store.package,
+                format!(
+                    "store {} declares edge_columns but no edge tables",
+                    store.name
+                ),
+            ),
+            _ => {}
+        }
         let mut shared = edge_tables.iter().filter(|(_, shared)| *shared);
         let shared_edge_table = shared.next().map(|(name, _)| name.to_string());
         if shared.next().is_some() {
@@ -117,19 +136,42 @@ impl RelationalStore {
         Self {
             versioning,
             shared_edge_table,
+            edge_columns: edge_columns.cloned(),
             tables: Vec::new(),
             edge_routes,
         }
     }
 
-    /// Every attribute of a variant's relationship is a column of the variant's edge table, and
-    /// the table's ID columns have the types of both endpoint identities.
+    fn edge_field(&self, column: &str) -> bool {
+        self.edge_columns
+            .as_ref()
+            .is_some_and(|columns| columns.all().iter().any(|(_, name)| *name == column))
+    }
+
+    /// Every edge table stores every edge field, every attribute of a variant's relationship is a
+    /// column of the variant's edge table, and the table's ID columns have the types of both
+    /// endpoint identities.
     pub fn check_edge_columns<B: StorageBackend>(
         &self,
         input: &StoreInput<'_, B>,
         diagnostics: &mut Diagnostics,
     ) {
         let (graph, store) = (input.graph, input.store);
+        if let Some(columns) = &self.edge_columns {
+            for table in self.tables.iter().filter(|table| table.edge) {
+                for (_, column) in columns.all() {
+                    if !table.has_column(column) {
+                        diagnostics.error(
+                            &store.package,
+                            format!(
+                                "store {} edge table {} has no edge column {column}",
+                                store.name, table.name
+                            ),
+                        );
+                    }
+                }
+            }
+        }
         for (variant, package, _) in store.bindings() {
             let variant = graph.variant(variant);
             let relationship = graph.relationship(variant.relationship);
@@ -146,11 +188,12 @@ impl RelationalStore {
             let table = self
                 .edge_table(variant.id)
                 .and_then(|name| self.table(name));
-            if let Some(table) = table {
-                for (column, endpoint) in [
-                    (SOURCE_ID_COLUMN, variant.source),
-                    (TARGET_ID_COLUMN, variant.target),
+            if let (Some(table), Some(columns)) = (table, &self.edge_columns) {
+                for (field, endpoint) in [
+                    (EdgeField::SourceId, variant.source),
+                    (EdgeField::TargetId, variant.target),
                 ] {
+                    let column = columns.column(field);
                     let entity = graph.entity(endpoint);
                     let identity = match entity.identity.as_slice() {
                         [identity] => Some(graph.property(*identity).data_type),
@@ -175,6 +218,19 @@ impl RelationalStore {
             }
             for attribute in &relationship.attributes {
                 let attribute = graph.attribute(*attribute);
+                if self.edge_field(&attribute.name)
+                    || store.path_column.as_ref() == Some(&attribute.name)
+                {
+                    diagnostics.error(
+                        package,
+                        format!(
+                            "{} declares attribute {} on an edge column the store reserves",
+                            label(),
+                            attribute.name
+                        ),
+                    );
+                    continue;
+                }
                 let found = table.and_then(|table| table.column(&attribute.name));
                 match found.and_then(|column| column.data_type) {
                     Some(found) if found == attribute.data_type => {}

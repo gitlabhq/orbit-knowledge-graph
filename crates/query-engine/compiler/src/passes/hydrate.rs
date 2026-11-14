@@ -4,8 +4,7 @@
 use query_data_model::Catalog;
 use std::collections::HashSet;
 
-use query_data_model::EntityId;
-use query_data_model::catalog::Lookup;
+use query_data_model::{EntityId, PropertyId};
 
 use crate::logical::columns::{defaults, returned, selections};
 use crate::logical::{DynamicColumnMode, Kind, Query};
@@ -45,19 +44,19 @@ impl HydrationPlan {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HydrationTemplate {
-    pub entity_type: String,
+    pub entity: EntityId,
     /// Used to correlate hydration results back to the base query's
     /// `_orbit_{alias}_pk` column.
     pub node_alias: String,
     pub destination_table: String,
     /// User-requested columns with virtual columns filtered out, plus
     /// injected dependencies.
-    pub columns: Vec<String>,
+    pub columns: Vec<PropertyId>,
     pub virtual_columns: Vec<VirtualColumnRequest>,
     /// Dependency columns injected for virtual column resolvers that the
     /// user didn't explicitly request. These should be stripped from the
     /// final output after content resolution.
-    pub injected_columns: Vec<String>,
+    pub injected_columns: Vec<PropertyId>,
     /// When true, the hydration pipeline can narrow scans via
     /// `startsWith(traversal_path, tp)` using TP values from the base query.
     pub has_traversal_path: bool,
@@ -85,12 +84,12 @@ impl VirtualFilter {
 /// Pre-resolved column spec for an entity type in dynamic hydration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicEntityColumns {
-    pub entity_type: String,
+    pub entity: EntityId,
     pub destination_table: String,
-    pub columns: Vec<String>,
+    pub columns: Vec<PropertyId>,
     pub virtual_columns: Vec<VirtualColumnRequest>,
     /// Columns injected as dependencies, not user-requested.
-    pub injected_columns: Vec<String>,
+    pub injected_columns: Vec<PropertyId>,
     pub has_traversal_path: bool,
 }
 
@@ -153,60 +152,63 @@ fn build_static_templates(
         .iter()
         .filter_map(|anchor| {
             let (alias, entity_id) = (anchor.binding.name, anchor.binding.entity);
-            let entity = &model.graph().entity(entity_id).name;
+            let graph = model.graph();
             let selection = selected.get(&anchor.binding.output).copied();
             let requested = returned(model, entity_id, selection);
 
-            let selected: Vec<String> = requested
+            let selected: Vec<PropertyId> = requested
                 .iter()
-                .filter(|column| !projected(&format!("{alias}_{column}")))
-                .cloned()
+                .filter(|property| {
+                    !projected(&format!("{alias}_{}", graph.property(**property).name))
+                })
+                .copied()
                 .collect();
-            let requested_virtuals: HashSet<String> = requested
+            let requested_virtuals: HashSet<PropertyId> = requested
                 .iter()
-                .filter(|property| served(model, entity_id, property).is_some())
-                .cloned()
+                .filter(|property| model.lookup(**property).is_some())
+                .copied()
                 .collect();
-            let (mut columns, mut virtual_columns) =
-                split_model_columns(&selected, model, entity_id);
+            let (mut columns, mut virtuals) = split_model_columns(&selected, model);
             let mut virtual_filters = Vec::new();
+            let mut filtered = Vec::new();
             for fact in &anchor.filters {
                 let Expr::Property { property, .. } = fact.left() else {
                     continue;
                 };
-                let property = query.property_name(property);
-                if served(model, entity_id, property).is_none() {
+                if model.lookup(property).is_none() {
                     continue;
                 }
+                let name = query.property_name(property);
                 let filter = VirtualFilter {
                     op: fact.predicate.operator().unwrap_or(Operator::Eq),
                     value: fact.value(),
                 };
-                virtual_filters.push((property.to_string(), filter));
-                if !virtual_columns
-                    .iter()
-                    .any(|column| column.column_name == property)
-                    && let Some(request) = virtual_request(model, entity_id, property)
+                virtual_filters.push((name.to_string(), filter));
+                filtered.push(property);
+                if !virtuals.contains(&property)
+                    && model
+                        .lookup(property)
+                        .is_some_and(|lookup| !lookup.disabled)
                 {
-                    virtual_columns.push(request);
+                    virtuals.push(property);
                 }
             }
-            let filter_injected_columns = virtual_filters
-                .iter()
-                .map(|(property, _)| property)
-                .filter(|property| !requested_virtuals.contains(*property))
-                .cloned()
+            let filter_injected_columns = filtered
+                .into_iter()
+                .filter(|property| !requested_virtuals.contains(property))
+                .map(|property| graph.property(property).name.clone())
                 .collect();
 
-            if columns.is_empty() && virtual_columns.is_empty() {
+            if columns.is_empty() && virtuals.is_empty() {
                 return None;
             }
 
             let injected_columns =
-                inject_model_virtual_dependencies(&mut columns, &virtual_columns, model, entity_id);
+                inject_model_virtual_dependencies(&mut columns, &virtuals, model);
+            let virtual_columns = requests(&virtuals, model);
 
             Some(HydrationTemplate {
-                entity_type: entity.clone(),
+                entity: entity_id,
                 node_alias: alias.to_string(),
                 destination_table: model.table_of(entity_id)?.to_string(),
                 columns,
@@ -238,21 +240,11 @@ fn build_dynamic_specs(
     graph
         .entities()
         .filter_map(|entity| {
-            let name = entity.name.as_str();
             let table = model.table_of(entity.id)?;
+            let admin_only =
+                |property: PropertyId| !grants.caller().admin() && model.admin_only(property);
 
-            let admin_only: HashSet<&str> = if grants.caller().admin() {
-                HashSet::new()
-            } else {
-                entity
-                    .properties
-                    .iter()
-                    .filter(|property| model.admin_only(**property))
-                    .map(|property| graph.property(*property).name.as_str())
-                    .collect()
-            };
-
-            let requested: Vec<String> = match mode {
+            let requested: Vec<PropertyId> = match mode {
                 // Virtual columns are excluded from dynamic modes: they
                 // require an explicit user request because they incur
                 // external service calls (e.g. Gitaly round-trips).
@@ -266,13 +258,11 @@ fn build_dynamic_specs(
                             && property.name != "_version"
                             && property.name != "_deleted"
                     })
-                    .filter(|property| !admin_only.contains(property.name.as_str()))
-                    .map(|property| property.name.clone())
+                    .filter(|property| !admin_only(property.id))
+                    .map(|property| property.id)
                     .collect(),
                 DynamicColumnMode::Default => defaults(entity)
-                    .map(|property| graph.property(property).name.as_str())
-                    .filter(|property| !admin_only.contains(property))
-                    .map(String::from)
+                    .filter(|property| !admin_only(*property))
                     .collect(),
             };
 
@@ -280,17 +270,18 @@ fn build_dynamic_specs(
                 return None;
             }
 
-            let (mut columns, virtual_columns) = split_model_columns(&requested, model, entity.id);
+            let (mut columns, virtuals) = split_model_columns(&requested, model);
 
-            if columns.is_empty() && virtual_columns.is_empty() {
+            if columns.is_empty() && virtuals.is_empty() {
                 return None;
             }
 
             let injected_columns =
-                inject_model_virtual_dependencies(&mut columns, &virtual_columns, model, entity.id);
+                inject_model_virtual_dependencies(&mut columns, &virtuals, model);
+            let virtual_columns = requests(&virtuals, model);
 
             Some(DynamicEntityColumns {
-                entity_type: name.to_string(),
+                entity: entity.id,
                 destination_table: table.to_string(),
                 columns,
                 virtual_columns,
@@ -301,32 +292,21 @@ fn build_dynamic_specs(
         .collect()
 }
 
-/// The lookup serving an entity's property, by property name.
-fn served<'m>(
-    model: &'m Catalog<impl SqlBackend>,
-    entity: EntityId,
-    property: &str,
-) -> Option<&'m Lookup> {
-    model.lookup(model.names().property(entity, property).ok()?)
-}
-
 /// Returns the columns that were injected (not originally requested).
 fn inject_model_virtual_dependencies(
-    columns: &mut Vec<String>,
-    virtual_columns: &[VirtualColumnRequest],
+    columns: &mut Vec<PropertyId>,
+    virtuals: &[PropertyId],
     model: &Catalog<impl SqlBackend>,
-    entity: EntityId,
-) -> Vec<String> {
+) -> Vec<PropertyId> {
     let mut injected = Vec::new();
-    for vc in virtual_columns {
-        let Some(lookup) = served(model, entity, &vc.column_name) else {
-            continue;
-        };
+    for lookup in virtuals
+        .iter()
+        .filter_map(|property| model.lookup(*property))
+    {
         for key in &lookup.keys {
-            let dependency = &model.graph().property(*key).name;
-            if !columns.contains(dependency) && model.column(*key).is_some() {
-                columns.push(dependency.clone());
-                injected.push(dependency.clone());
+            if !columns.contains(key) && model.column(*key).is_some() {
+                columns.push(*key);
+                injected.push(*key);
             }
         }
     }
@@ -334,42 +314,36 @@ fn inject_model_virtual_dependencies(
 }
 
 fn split_model_columns(
-    requested: &[String],
+    requested: &[PropertyId],
     model: &Catalog<impl SqlBackend>,
-    entity: EntityId,
-) -> (Vec<String>, Vec<VirtualColumnRequest>) {
+) -> (Vec<PropertyId>, Vec<PropertyId>) {
     let mut columns = Vec::new();
-    let mut virtual_columns = Vec::new();
-
-    for col_name in requested {
-        match served(model, entity, col_name) {
-            Some(lookup) => {
-                if !lookup.disabled {
-                    virtual_columns.push(request(col_name, lookup));
-                }
-            }
-            None => columns.push(col_name.clone()),
+    let mut virtuals = Vec::new();
+    for property in requested {
+        match model.lookup(*property) {
+            Some(lookup) if !lookup.disabled => virtuals.push(*property),
+            Some(_) => {}
+            None => columns.push(*property),
         }
     }
-
-    (columns, virtual_columns)
+    (columns, virtuals)
 }
 
-fn virtual_request(
+fn requests(
+    virtuals: &[PropertyId],
     model: &Catalog<impl SqlBackend>,
-    entity: EntityId,
-    property: &str,
-) -> Option<VirtualColumnRequest> {
-    let lookup = served(model, entity, property)?;
-    (!lookup.disabled).then(|| request(property, lookup))
-}
-
-fn request(column: &str, lookup: &Lookup) -> VirtualColumnRequest {
-    VirtualColumnRequest {
-        column_name: column.to_string(),
-        service: lookup.service.clone(),
-        lookup: lookup.operation.clone(),
-    }
+) -> Vec<VirtualColumnRequest> {
+    virtuals
+        .iter()
+        .filter_map(|property| {
+            let lookup = model.lookup(*property)?;
+            Some(VirtualColumnRequest {
+                column_name: model.graph().property(*property).name.clone(),
+                service: lookup.service.clone(),
+                lookup: lookup.operation.clone(),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -457,58 +431,53 @@ lookups:
         model.names().entity("TestNode").unwrap()
     }
 
+    fn property(model: &Catalog<ClickHouse>, name: &str) -> PropertyId {
+        model.names().property(entity(model), name).unwrap()
+    }
+
+    fn named(model: &Catalog<ClickHouse>, properties: &[PropertyId]) -> Vec<String> {
+        let graph = model.graph();
+        properties
+            .iter()
+            .map(|property| graph.property(*property).name.clone())
+            .collect()
+    }
+
     #[test]
     fn inject_adds_missing_dependencies() {
         let model = model(&["project_id", "branch", "path"], false);
-        let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
-        let mut columns = vec!["name".to_string()];
+        let mut columns = vec![property(&model, "name")];
 
-        let injected = inject_model_virtual_dependencies(
-            &mut columns,
-            &virtual_columns,
-            &model,
-            entity(&model),
+        let injected =
+            inject_model_virtual_dependencies(&mut columns, &[property(&model, "name")], &model);
+
+        assert_eq!(
+            named(&model, &columns),
+            ["name", "project_id", "branch", "path"]
         );
-
-        assert!(columns.contains(&"project_id".to_string()));
-        assert!(columns.contains(&"branch".to_string()));
-        assert!(columns.contains(&"path".to_string()));
-        assert_eq!(injected, vec!["project_id", "branch", "path"]);
+        assert_eq!(named(&model, &injected), ["project_id", "branch", "path"]);
     }
 
     #[test]
     fn inject_does_not_duplicate_existing_columns() {
         let model = model(&["project_id", "branch"], false);
-        let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
-        let mut columns = vec!["project_id".to_string()];
+        let mut columns = vec![property(&model, "project_id")];
 
-        let injected = inject_model_virtual_dependencies(
-            &mut columns,
-            &virtual_columns,
-            &model,
-            entity(&model),
-        );
+        let injected =
+            inject_model_virtual_dependencies(&mut columns, &[property(&model, "name")], &model);
 
-        let count = columns.iter().filter(|c| *c == "project_id").count();
-        assert_eq!(count, 1, "project_id should not be duplicated");
-        assert!(columns.contains(&"branch".to_string()));
-        assert_eq!(injected, vec!["branch"]);
+        assert_eq!(named(&model, &columns), ["project_id", "branch"]);
+        assert_eq!(named(&model, &injected), ["branch"]);
     }
 
     #[test]
     fn inject_noop_when_no_virtual_columns() {
         let model = model(&[], false);
-        let virtual_columns = Vec::new();
-        let mut columns = vec!["name".to_string()];
+        let mut columns = vec![property(&model, "name")];
 
-        let injected = inject_model_virtual_dependencies(
-            &mut columns,
-            &virtual_columns,
-            &model,
-            entity(&model),
-        );
+        let injected = inject_model_virtual_dependencies(&mut columns, &[], &model);
 
-        assert_eq!(columns, vec!["name".to_string()]);
+        assert_eq!(named(&model, &columns), ["name"]);
         assert!(injected.is_empty());
     }
 
@@ -519,23 +488,22 @@ lookups:
             &["branch", "path"],
             false,
         );
-        let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
         let mut columns = vec![];
 
-        inject_model_virtual_dependencies(&mut columns, &virtual_columns, &model, entity(&model));
+        inject_model_virtual_dependencies(&mut columns, &[property(&model, "name")], &model);
 
-        assert!(columns.contains(&"branch".to_string()));
-        assert!(!columns.contains(&"path".to_string()));
+        assert_eq!(named(&model, &columns), ["branch"]);
     }
 
     #[test]
     fn split_columns_separates_db_and_virtual() {
         let model = model(&[], false);
-        let requested = vec!["id".to_string(), "name".to_string()];
+        let requested = [property(&model, "id"), property(&model, "name")];
 
-        let (columns, virtual_columns) = split_model_columns(&requested, &model, entity(&model));
+        let (columns, virtuals) = split_model_columns(&requested, &model);
+        let virtual_columns = requests(&virtuals, &model);
 
-        assert_eq!(columns, vec!["id"]);
+        assert_eq!(named(&model, &columns), ["id"]);
         assert_eq!(virtual_columns.len(), 1);
         assert_eq!(virtual_columns[0].column_name, "name");
         assert_eq!(virtual_columns[0].service, "gitaly");
@@ -544,12 +512,12 @@ lookups:
     #[test]
     fn split_columns_excludes_disabled_virtual() {
         let model = model(&[], true);
-        let requested = vec!["name".to_string()];
+        let requested = [property(&model, "name")];
 
-        let (columns, virtual_columns) = split_model_columns(&requested, &model, entity(&model));
+        let (columns, virtuals) = split_model_columns(&requested, &model);
 
         assert!(columns.is_empty());
-        assert!(virtual_columns.is_empty());
+        assert!(virtuals.is_empty());
     }
 
     // Regression guard: before the fix, `dynamic_columns: "*"` on
@@ -603,21 +571,29 @@ entities:
         let specs = build_dynamic_specs(mode, &model, &ctx);
         let user = specs
             .iter()
-            .find(|s| s.entity_type == "User")
+            .find(|s| model.graph().entity(s.entity).name == "User")
             .expect("User spec present");
+        let columns = model
+            .graph()
+            .entity(user.entity)
+            .properties
+            .iter()
+            .filter(|property| user.columns.contains(property))
+            .map(|property| model.graph().property(*property).name.as_str())
+            .collect::<Vec<_>>();
 
         assert!(
-            !user.columns.iter().any(|c| c == "is_admin"),
+            !columns.contains(&"is_admin"),
             "non-admin wildcard must not include is_admin, got {:?}",
-            user.columns
+            columns
         );
         assert!(
-            !user.columns.iter().any(|c| c == "is_auditor"),
+            !columns.contains(&"is_auditor"),
             "non-admin wildcard must not include is_auditor, got {:?}",
-            user.columns
+            columns
         );
-        assert!(user.columns.iter().any(|c| c == "username"));
-        assert!(user.columns.iter().any(|c| c == "state"));
+        assert!(columns.contains(&"username"));
+        assert!(columns.contains(&"state"));
     }
 
     #[test]
@@ -629,18 +605,26 @@ entities:
         let specs = build_dynamic_specs(mode, &model, &ctx);
         let user = specs
             .iter()
-            .find(|s| s.entity_type == "User")
+            .find(|s| model.graph().entity(s.entity).name == "User")
             .expect("User spec present");
+        let columns = model
+            .graph()
+            .entity(user.entity)
+            .properties
+            .iter()
+            .filter(|property| user.columns.contains(property))
+            .map(|property| model.graph().property(*property).name.as_str())
+            .collect::<Vec<_>>();
 
         assert!(
-            user.columns.iter().any(|c| c == "is_admin"),
+            columns.contains(&"is_admin"),
             "admin wildcard must include is_admin, got {:?}",
-            user.columns
+            columns
         );
         assert!(
-            user.columns.iter().any(|c| c == "is_auditor"),
+            columns.contains(&"is_auditor"),
             "admin wildcard must include is_auditor, got {:?}",
-            user.columns
+            columns
         );
     }
 
@@ -656,9 +640,17 @@ entities:
         let specs = build_dynamic_specs(mode, &model, &ctx);
         let user = specs
             .iter()
-            .find(|s| s.entity_type == "User")
+            .find(|s| model.graph().entity(s.entity).name == "User")
             .expect("User spec present");
+        let columns = model
+            .graph()
+            .entity(user.entity)
+            .properties
+            .iter()
+            .filter(|property| user.columns.contains(property))
+            .map(|property| model.graph().property(*property).name.as_str())
+            .collect::<Vec<_>>();
 
-        assert_eq!(user.columns, vec!["username".to_string()]);
+        assert_eq!(columns, ["username"]);
     }
 }

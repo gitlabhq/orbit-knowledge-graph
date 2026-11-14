@@ -374,8 +374,12 @@ engine:
   backend:
     version_column: _version
     deleted_column: _deleted
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
-      gl_edge: {shared: true, sort_key: [source_id, relationship_kind, target_id]}
+      gl_edge:
+        shared: true
+        sort_key: [source_id, relationship_kind, target_id]
+        columns: {source_id: {type: Int64}, source_kind: {type: String}, relationship_kind: {type: String}, target_id: {type: Int64}, target_kind: {type: String}}
 entities:
   CustomNode:
     complete: true

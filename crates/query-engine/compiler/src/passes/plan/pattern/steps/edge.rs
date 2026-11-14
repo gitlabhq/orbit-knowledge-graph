@@ -4,9 +4,10 @@
 use crate::passes::codegen::SqlBackend;
 use crate::passes::plan::build::stored;
 use query_data_model::constants::*;
-use query_data_model::implementations::relational::RelationalBackend;
+use query_data_model::implementations::relational::{RelationalBackend, TableId};
+use query_data_model::plan::logical::EdgeField;
 
-use super::super::relations::{edge_columns, select_edge_layouts};
+use super::super::relations::select_edge_layouts;
 use super::super::{EdgeRelation, Pattern};
 use super::{IdSet, RelationBuilder};
 use crate::constants::*;
@@ -37,13 +38,13 @@ where
         if relation.max_hops == 1 {
             let narrowed: Vec<&str> = endpoint_ids
                 .iter()
-                .filter_map(|(node, _)| relation.endpoint_column(node))
-                .collect();
+                .filter_map(|(node, _)| relation.endpoint_column(node).transpose())
+                .collect::<Result<_>>()?;
             select_edge_layouts(pattern.model, &mut physical.edge_tables, &narrowed);
         }
-        let mut predicates = self.edge_predicates(&physical);
+        let mut predicates = self.edge_predicates(&physical)?;
         for (node, ids) in &endpoint_ids {
-            if let Some(column) = relation.endpoint_column(node) {
+            if let Some(column) = relation.endpoint_column(node)? {
                 predicates.push(membership(Column::new(alias, column), ids.clone()));
             }
         }
@@ -55,7 +56,7 @@ where
                 continue;
             }
             let ids = self.node_ids(node)?;
-            let column = relation.endpoint_column(node).expect("relation endpoint");
+            let column = relation.endpoint_column(node)?.expect("relation endpoint");
             predicates.push(membership(Column::new(alias, column), ids));
         }
         let source = if relation.max_hops > 1 {
@@ -66,37 +67,37 @@ where
         self.bind_relation_ids(index, relation, &source)?;
         let wrapped = relation.max_hops == 1 && pattern.relations.len() > 1;
         self.join_edge(relation, &source, wrapped)?;
-        self.push_edge_outputs(relation);
+        self.push_edge_outputs(relation)?;
         Ok(())
     }
 
-    fn edge_predicates(&mut self, relation: &EdgeRelation) -> Vec<Predicate> {
+    fn edge_predicates(&mut self, relation: &EdgeRelation) -> Result<Vec<Predicate>> {
         let pattern = self.pattern;
         let alias = &relation.alias;
         let endpoints = [&relation.from_node, &relation.to_node];
         let (source_node, target_node) = relation.stored_endpoints();
-        let mut predicates: Vec<Predicate> = relationship_kinds(alias, relation.kinds())
+        let graph = pattern.model.graph();
+        let kind = Column::new(alias, relation.column(EdgeField::Kind)?);
+        let mut predicates: Vec<Predicate> = relationship_kinds(kind, relation.kinds())
             .into_iter()
             .collect();
-        predicates.extend(pattern.entity_kind(alias, source_node, SOURCE_ID_COLUMN));
-        predicates.extend(pattern.entity_kind(alias, target_node, TARGET_ID_COLUMN));
+        let source_kind = Column::new(alias, relation.column(EdgeField::SourceKind)?);
+        let target_kind = Column::new(alias, relation.column(EdgeField::TargetKind)?);
+        predicates.extend(pattern.kind_predicate(source_kind, source_node));
+        predicates.extend(pattern.kind_predicate(target_kind, target_node));
         predicates.push(live(alias));
         predicates.extend(
             pattern
                 .edge_column_filters(relation)
                 .into_iter()
-                .map(|(column, _, filter)| property_filter(alias, column, filter)),
+                .map(|(column, _, filter)| filter.at(Column::new(alias, column), None)),
         );
-        predicates.extend(
-            relation
-                .filters
-                .iter()
-                .map(|(property, filter)| property_filter(alias, property, filter)),
-        );
+        for (_, filter) in &relation.filters {
+            predicates.push(relation.filter_at(alias, filter, graph)?);
+        }
         for node in endpoints {
-            for (filter_index, (property, filter)) in pattern.nodes[node].filters.iter().enumerate()
-            {
-                let tag = (node.clone(), property.clone(), filter_index);
+            for (filter_index, (target, filter)) in pattern.nodes[node].filters.iter().enumerate() {
+                let tag = (node.clone(), *target, filter_index);
                 if self.tagged.contains(&tag) {
                     continue;
                 }
@@ -107,10 +108,10 @@ where
             }
         }
         for node in endpoints {
-            let column = relation.endpoint_column(node).expect("relation endpoint");
+            let column = relation.endpoint_column(node)?.expect("relation endpoint");
             predicates.extend(pattern.nodes[node].id_predicates(Column::new(alias, column)));
         }
-        predicates
+        Ok(predicates)
     }
 
     fn edge_source(&mut self, relation: &EdgeRelation, predicates: Vec<Predicate>) -> Result<Rel> {
@@ -121,6 +122,7 @@ where
                 let rows = plain_edge_rows(&mut self.reads, relation, true)?;
                 return self.reads.filtered(&rows, &predicates);
             };
+            let table = &pattern.model.table_at(table).name;
             let rows = plain_edge_rows(&mut self.reads, relation, false)?;
             let key = sort_key(pattern.model, table)?;
             let identity: Vec<_> = predicates
@@ -154,7 +156,7 @@ where
     /// Joins the edge rows to the chain; `wrapped` keeps them in their own block when other relations join too.
     fn join_edge(&mut self, relation: &EdgeRelation, source: &Rel, wrapped: bool) -> Result<()> {
         let alias = &relation.alias;
-        let (start, end) = edge_columns(relation.direction);
+        let (start, end) = relation.id_columns()?;
         let endpoints = [(&relation.from_node, start), (&relation.to_node, end)];
         let rows = match wrapped {
             true => {
@@ -202,18 +204,12 @@ where
         Ok(())
     }
 
-    fn push_edge_outputs(&mut self, relation: &EdgeRelation) {
+    fn push_edge_outputs(&mut self, relation: &EdgeRelation) -> Result<()> {
         let alias = relation.alias.as_str();
         let column = |name: &str| OutputValue::Column(Column::new(alias, name));
         self.push_relation_outputs(
             relation,
-            [
-                column(RELATIONSHIP_KIND_COLUMN),
-                column(SOURCE_ID_COLUMN),
-                column(SOURCE_KIND_COLUMN),
-                column(TARGET_ID_COLUMN),
-                column(TARGET_KIND_COLUMN),
-            ],
+            relation.edges()?.all().map(|(_, name)| column(name)),
         );
         if relation.max_hops > 1 && !self.pattern.aggregate() {
             self.outputs.push(Projection::new(
@@ -221,6 +217,7 @@ where
                 relation.path_nodes_column(),
             ));
         }
+        Ok(())
     }
 }
 
@@ -237,26 +234,21 @@ where
     let model = pattern.model;
     let bound = reads.relationship_bound(relation.input_index);
     if let Some(table) = relation.single_edge_table() {
+        let table = &model.table_at(table).name;
         let key = sort_key(model, table)?;
         return reads.current_rows(table, alias, bound, key, predicates, ReadScope::Edge);
     }
-    edge_union(
-        reads,
-        &relation.edge_tables,
-        alias,
-        alias,
-        |reads, table| {
-            let key = sort_key(model, table)?;
-            reads.current_rows(
-                table,
-                alias,
-                bound,
-                key,
-                predicates.clone(),
-                ReadScope::Edge,
-            )
-        },
-    )
+    edge_union(reads, relation, alias, alias, |reads, table| {
+        let key = sort_key(model, table)?;
+        reads.current_rows(
+            table,
+            alias,
+            bound,
+            key,
+            predicates.clone(),
+            ReadScope::Edge,
+        )
+    })
 }
 
 fn plain_edge_rows<B: RelationalBackend>(
@@ -267,33 +259,34 @@ fn plain_edge_rows<B: RelationalBackend>(
     let alias = &relation.alias;
     let bound = reads.relationship_bound(relation.input_index);
     if let Some(table) = relation.single_edge_table() {
+        let table = &reads.q.catalog().table_at(table).name;
         return reads.table(table, alias, final_, bound, &[]);
     }
     let route_alias = union_arm_alias(alias);
-    edge_union(
-        reads,
-        &relation.edge_tables,
-        alias,
-        &route_alias,
-        |reads, table| reads.table(table, &route_alias, final_, bound, &[]),
-    )
+    edge_union(reads, relation, alias, &route_alias, |reads, table| {
+        reads.table(table, &route_alias, final_, bound, &[])
+    })
 }
 
 fn edge_union<B: RelationalBackend>(
     reads: &mut Reads<'_, '_, B>,
-    tables: &[String],
+    relation: &EdgeRelation,
     alias: &str,
     route_alias: &str,
     mut route: impl FnMut(&mut Reads<'_, '_, B>, &str) -> Result<Rel>,
 ) -> Result<Rel> {
-    let outputs: Vec<Projection> = EDGE_RESERVED_COLUMNS
-        .iter()
-        .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN, &DELETED_COLUMN])
+    let fields = relation.edges()?.all().map(|(_, column)| column);
+    let outputs: Vec<Projection> = [TRAVERSAL_PATH_COLUMN]
+        .into_iter()
+        .chain(fields)
+        .chain([SOURCE_TAGS_COLUMN, TARGET_TAGS_COLUMN, DELETED_COLUMN])
         .map(|column| Projection::col(route_alias, column))
         .collect();
-    let routes = tables
+    let catalog = reads.q.catalog();
+    let routes = relation
+        .edge_tables
         .iter()
-        .map(|table| route(reads, table))
+        .map(|table: &TableId| route(reads, &catalog.table_at(*table).name))
         .collect::<Result<Vec<_>>>()?;
     reads.union(alias, |reads| {
         let mut arms = Vec::new();

@@ -64,12 +64,13 @@ async fn graph_formatter_string_identity_e2e() {
         .collect();
     assert_eq!(ids, [Key::Text("T1".into())]);
 
+    let workspace = catalog.names().entity("SlackWorkspace").unwrap();
     let arm = HydrationArm::new(
         catalog.model(),
         limits,
-        "SlackWorkspace",
+        workspace,
         &[Key::Text("T1".into()), Key::Text("T2".into())],
-        &["name".to_string()],
+        &[catalog.names().property(workspace, "name").unwrap()],
         vec![TraversalPath::new_unchecked("1/100/".to_string())],
     )
     .unwrap();
@@ -80,7 +81,7 @@ async fn graph_formatter_string_identity_e2e() {
     let hydration = compile_hydration(request, &catalog, &grants, limits).unwrap();
     let rows = ctx.query_parameterized(&hydration).await;
     let properties = parse_hydration_batches(&rows, catalog.model()).unwrap();
-    let key = ("SlackWorkspace".to_string(), Key::Text("T1".into()));
+    let key = (workspace, Key::Text("T1".into()));
     assert_eq!(
         properties.get(&key).and_then(|row| row.get("name")),
         Some(&ColumnValue::String("Orbit".into()))
@@ -169,8 +170,9 @@ async fn graph_formatter_named_identity_e2e() {
         panic!("neighbors hydrate dynamically: {:?}", compiled.hydration);
     };
     let static_nodes: Vec<_> = compiled.base.result_context.nodes().cloned().collect();
-    let refs = helpers::extract_dynamic_refs(&result, &static_nodes);
-    let ref_paths = helpers::collect_dynamic_ref_paths(&result, &static_nodes);
+    let refs = helpers::extract_dynamic_refs(catalog.model(), &result, &static_nodes).unwrap();
+    let ref_paths =
+        helpers::collect_dynamic_ref_paths(catalog.model(), &result, &static_nodes).unwrap();
     let arms = helpers::hydrate_dynamic(catalog.model(), limits, specs, &refs, &grants, &ref_paths)
         .unwrap();
     let request = HydrationRequest {
@@ -184,7 +186,7 @@ async fn graph_formatter_named_identity_e2e() {
     assert!(hydration.sql.contains(".key"), "{}", hydration.sql);
     let rows = ctx.query_parameterized(&hydration).await;
     let properties = parse_hydration_batches(&rows, catalog.model()).unwrap();
-    helpers::merge_dynamic_properties(&mut result, &properties);
+    helpers::merge_dynamic_properties(catalog.model(), &mut result, &properties).unwrap();
 
     let output = PipelineOutput {
         row_count: result.authorized_count(),

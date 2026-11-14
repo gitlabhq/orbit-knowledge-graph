@@ -189,8 +189,8 @@ pub(super) fn scalar<'m>(
         Expr::Edge { binding, field } => match construction.value(binding)? {
             (_, LogicalType::Edge) => Ok(Typed {
                 data_type: match field {
-                    EdgeField::Source => endpoint_identity(model, construction, binding, true)?,
-                    EdgeField::Target => endpoint_identity(model, construction, binding, false)?,
+                    EdgeField::SourceId => endpoint_identity(model, construction, binding, true)?,
+                    EdgeField::TargetId => endpoint_identity(model, construction, binding, false)?,
                     EdgeField::Kind | EdgeField::SourceKind | EdgeField::TargetKind => {
                         DataType::String
                     }

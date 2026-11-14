@@ -127,6 +127,35 @@
       },
       "type": "object"
     },
+    "EdgeColumns": {
+      "additionalProperties": false,
+      "description": "The column every edge table of a store keeps each edge field in.",
+      "properties": {
+        "relationship_kind": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_kind": {
+          "type": "string"
+        },
+        "target_id": {
+          "type": "string"
+        },
+        "target_kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "relationship_kind",
+        "source_id",
+        "source_kind",
+        "target_id",
+        "target_kind"
+      ],
+      "type": "object"
+    },
     "EdgeIndex": {
       "additionalProperties": false,
       "description": "An edge table that the variant's writer derives from its foreign key, read in its place.",
@@ -324,6 +353,16 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "edge_columns": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EdgeColumns"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "edge_tables": {

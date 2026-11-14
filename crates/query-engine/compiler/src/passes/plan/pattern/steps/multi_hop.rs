@@ -5,7 +5,7 @@ use crate::passes::codegen::SqlBackend;
 use query_data_model::constants::*;
 use query_data_model::implementations::relational::plan::Relation;
 
-use super::super::relations::{edge_columns, select_edge_layouts, stored_order};
+use super::super::relations::{id_fields, select_edge_layouts, stored_order};
 use super::super::{EdgeRelation, Pattern};
 use super::edge::current_edge_rows;
 use super::{IdSet, RelationBuilder};
@@ -14,6 +14,7 @@ use crate::error::Result;
 use crate::passes::plan::predicates::*;
 use crate::passes::plan::rows::{Reads, Rel};
 use query_data_model::Direction;
+use query_data_model::plan::logical::EdgeField;
 
 impl<B> RelationBuilder<'_, '_, '_, B>
 where
@@ -32,11 +33,8 @@ where
             expansion = expansion.reversed();
             std::mem::swap(&mut source_ids, &mut target_ids);
         }
-        select_edge_layouts(
-            pattern.model,
-            &mut expansion.edge_tables,
-            &[edge_columns(expansion.direction).0],
-        );
+        let start = expansion.id_columns()?.0.to_string();
+        select_edge_layouts(pattern.model, &mut expansion.edge_tables, &[&start]);
         let mut walk = Walk {
             reads: &mut self.reads,
             pattern,
@@ -62,15 +60,22 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
             .iter()
             .map(|(column, _, _)| (*column).to_string())
             .collect();
-        let (start_id, end_id) = edge_columns(relation.direction);
+        let (start_field, end_field) = id_fields(relation.direction);
+        let (start_id, end_id) = relation.id_columns()?;
         let toward_sources = relation.direction == Direction::Incoming;
-        let path_id = if toward_sources { start_id } else { end_id };
+        let path_field = if toward_sources {
+            start_field
+        } else {
+            end_field
+        };
+        let path_id = relation.column(path_field)?;
+        let kind = |field| relation.column(kind_field(field));
         let from = &pattern.nodes[&relation.from_node];
         let tagged = relation.edge_tables.iter().all(|table| {
             pattern
                 .model
-                .physical_table(table)
-                .is_none_or(|table| table.has_column(SOURCE_TAGS_COLUMN))
+                .table_at(*table)
+                .has_column(SOURCE_TAGS_COLUMN)
         });
         let shape = Depth {
             required: &required,
@@ -79,7 +84,8 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
 
         let first_hop = hop_alias(1);
         let mut first_predicates = vec![live(&first_hop)];
-        first_predicates.extend(pattern.entity_kind(&first_hop, &relation.from_node, start_id));
+        let first_kind = Column::new(&first_hop, kind(start_field)?);
+        first_predicates.extend(pattern.kind_predicate(first_kind, &relation.from_node));
         if let Some(ids) = source_ids {
             first_predicates.push(membership(Column::new(&first_hop, start_id), ids));
         }
@@ -90,12 +96,12 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
         first_predicates.extend(
             covered
                 .iter()
-                .map(|(column, _, filter)| property_filter(&first_hop, column, filter)),
+                .map(|(column, _, filter)| filter.at(Column::new(&first_hop, *column), None)),
         );
         let first = self.hop_rows(&first_hop, first_predicates)?;
         let first_path = OutputValue::Path(vec![(
             Column::new(&first_hop, path_id),
-            Column::new(&first_hop, kind_column(path_id)),
+            Column::new(&first_hop, kind(path_field)?),
         )]);
         let rows = self.reads.read(&first, None)?;
         let mut previous = self.project_depth(
@@ -132,8 +138,8 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
                     Column::new(&current_alias, start_id),
                 ),
                 &[column_eq(
-                    Column::new(&previous_alias, kind_column(end_id)),
-                    Column::new(&current_alias, kind_column(start_id)),
+                    Column::new(&previous_alias, kind(end_field)?),
+                    Column::new(&current_alias, kind(start_field)?),
                 )],
             )?;
             let (source, target) =
@@ -141,7 +147,7 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
             let step = (
                 Column::new(&previous_alias, path_nodes_column()),
                 Column::new(&current_alias, path_id),
-                Column::new(&current_alias, kind_column(path_id)),
+                Column::new(&current_alias, kind(path_field)?),
             );
             let path = if toward_sources {
                 OutputValue::PathPrepend {
@@ -180,13 +186,12 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
 
     fn hop_rows(&mut self, alias: &str, mut predicates: Vec<Predicate>) -> Result<Rel> {
         let relation = self.relation;
-        predicates.extend(relationship_kinds(alias, relation.kinds()));
-        predicates.extend(
-            relation
-                .filters
-                .iter()
-                .map(|(property, filter)| property_filter(alias, property, filter)),
-        );
+        let graph = self.pattern.model.graph();
+        let kind = Column::new(alias, relation.column(EdgeField::Kind)?);
+        predicates.extend(relationship_kinds(kind, relation.kinds()));
+        for (_, filter) in &relation.filters {
+            predicates.push(relation.filter_at(alias, filter, graph)?);
+        }
         current_edge_rows(self.reads, self.pattern, relation, alias, predicates)
     }
 
@@ -199,13 +204,14 @@ impl<B: SqlBackend> Walk<'_, '_, '_, '_, B> {
         shape: &Depth<'_>,
     ) -> Result<Rel> {
         let tags = |alias, column| shape.tagged.then(|| Projection::col(alias, column));
+        let edges = self.relation.edges()?;
         let mut outputs: Vec<_> = [
-            Some(Projection::col(meta, RELATIONSHIP_KIND_COLUMN)),
-            Some(Projection::col(source, SOURCE_ID_COLUMN)),
-            Some(Projection::col(source, SOURCE_KIND_COLUMN)),
+            Some(Projection::col(meta, &edges.relationship_kind)),
+            Some(Projection::col(source, &edges.source_id)),
+            Some(Projection::col(source, &edges.source_kind)),
             tags(source, SOURCE_TAGS_COLUMN),
-            Some(Projection::col(target, TARGET_ID_COLUMN)),
-            Some(Projection::col(target, TARGET_KIND_COLUMN)),
+            Some(Projection::col(target, &edges.target_id)),
+            Some(Projection::col(target, &edges.target_kind)),
             tags(target, TARGET_TAGS_COLUMN),
             Some(Projection::new(path, path_nodes_column())),
             Some(Projection::new(OutputValue::Depth(depth), depth_column())),
@@ -239,9 +245,11 @@ fn complete_depth<B: SqlBackend>(
     depth: &Rel,
     target_ids: Option<&IdSet>,
 ) -> Result<Relation> {
-    let end_id = edge_columns(relation.direction).1;
+    let end_field = id_fields(relation.direction).1;
+    let end_id = relation.column(end_field)?;
+    let end_kind = Column::new(alias, relation.column(kind_field(end_field))?);
     let mut predicates: Vec<Predicate> = pattern
-        .entity_kind(alias, &relation.to_node, end_id)
+        .kind_predicate(end_kind, &relation.to_node)
         .into_iter()
         .collect();
     if let Some(ids) = target_ids {

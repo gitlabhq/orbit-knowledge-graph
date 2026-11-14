@@ -135,11 +135,6 @@ impl Names<'_> {
             .find(|connection| connection.name() == name)
             .map(|connection| connection.id())
     }
-
-    /// The relationships with a variant from `source` to `target`, either left open.
-    pub fn relationships_between(&self, source: Option<&str>, target: Option<&str>) -> Vec<String> {
-        self.0.graph.relationship_names(source, target)
-    }
 }
 
 impl Model {

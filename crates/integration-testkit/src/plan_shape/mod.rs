@@ -775,8 +775,15 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         let paths = (0..count)
             .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
             .collect();
-        let arm =
-            HydrationArm::new(model.model(), limits(), "File", &[1.into()], &[], paths).unwrap();
+        let arm = HydrationArm::new(
+            model.model(),
+            limits(),
+            model.names().entity("File").unwrap(),
+            &[1.into()],
+            &[],
+            paths,
+        )
+        .unwrap();
         let request = HydrationRequest {
             arms: vec![arm],
             options: HydrationCompileOptions {

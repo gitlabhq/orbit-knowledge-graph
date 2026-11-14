@@ -7,31 +7,32 @@ use std::collections::{HashMap, HashSet};
 use query_data_model::plan::logical::Expr;
 use query_data_model::plan::tracking::Ref;
 
-use super::{EdgeRelation, NodePlan, Pattern};
+use super::{EdgeRelation, Pattern};
 use crate::error::{QueryError, Result};
 use crate::logical::Boolean;
-use crate::logical::{Leaf, Query};
+use crate::logical::{Leaf, Query, binding, target};
 use crate::passes::plan::filters::{BoundFilter, FilterOwner, bind_filter};
-use crate::passes::plan::predicates::{Column, Predicate, tag_filter};
+use crate::passes::plan::predicates::{Column, Predicate, property_column, tag_filter};
 use crate::passes::plan::rows::BindingSource;
+use query_data_model::implementations::relational::Target;
+use query_data_model::plan::logical::EdgeField;
 
 /// One leaf of a condition tree, bound to the node or edge column it reads.
 #[derive(Clone)]
 pub(super) struct Condition {
     column: Column,
+    rhs: Option<Column>,
     filter: BoundFilter,
     edge: bool,
 }
 
 impl Condition {
-    const KIND: &str = "type()";
-
     fn is_kind(&self) -> bool {
-        self.edge && self.column.name == Self::KIND
+        self.edge && self.filter.target == Target::Edge(EdgeField::Kind)
     }
 
     fn compares_aliases(&self) -> bool {
-        match (self.edge, &self.filter.rhs) {
+        match (self.edge, &self.rhs) {
             (false, Some(rhs)) => self.column.source != rhs.source,
             (true, rhs) => rhs.is_some(),
             (false, None) => false,
@@ -40,7 +41,7 @@ impl Condition {
 
     fn node_properties(&self) -> impl Iterator<Item = &Column> {
         let lhs = (!self.edge).then_some(&self.column);
-        lhs.into_iter().chain(&self.filter.rhs)
+        lhs.into_iter().chain(&self.rhs)
     }
 }
 
@@ -58,7 +59,6 @@ fn local_node(root: &Boolean<Condition>) -> Option<&str> {
 pub(super) fn conditions<B: SqlBackend>(
     query: Query<'_>,
     relations: &[EdgeRelation],
-    nodes: &HashMap<String, NodePlan>,
     model: &Catalog<B>,
 ) -> Result<Vec<Boolean<Condition>>> {
     let edges: HashMap<Ref, &EdgeRelation> = query
@@ -74,7 +74,7 @@ pub(super) fn conditions<B: SqlBackend>(
         .collect();
     let mut roots = Vec::new();
     for tree in query.filters() {
-        match tree.try_map(&mut |leaf| condition(query, &edges, nodes, model, leaf))? {
+        match tree.try_map(&mut |leaf| condition(query, &edges, model, leaf))? {
             Boolean::Leaf(condition) if !condition.compares_aliases() && !condition.is_kind() => {}
             root => roots.push(root),
         }
@@ -85,57 +85,47 @@ pub(super) fn conditions<B: SqlBackend>(
 fn condition<B: SqlBackend>(
     query: Query<'_>,
     edges: &HashMap<Ref, &EdgeRelation>,
-    nodes: &HashMap<String, NodePlan>,
     model: &Catalog<B>,
     leaf: Leaf<'_>,
 ) -> Result<Condition> {
     let graph = query.model.graph();
-    let on_edge = |binding: Ref, name: &str| {
-        let relation = edges.get(&binding).ok_or_else(|| {
-            QueryError::PipelineInvariant("condition relationship has no edge scan".into())
-        })?;
-        let owner = FilterOwner::Tables(&relation.edge_tables);
-        Ok::<_, QueryError>((Column::new(&relation.alias, name), owner, true))
-    };
+    let target = target(leaf.left()).ok_or_else(|| {
+        QueryError::PipelineInvariant(format!("{:?} is not a filterable column", leaf.left()))
+    })?;
     let (column, owner, edge) = match leaf.left() {
         Expr::Property { binding, property } => {
             let alias = query.name(binding);
             let entity = query.entity(binding).ok_or_else(|| {
                 QueryError::PipelineInvariant(format!("condition node '{alias}' has no entity"))
             })?;
-            let column = Column::new(alias, &graph.property(property).name);
+            let column = property_column(alias, property, graph);
             (column, FilterOwner::Entity(entity), false)
         }
-        left @ (Expr::Edge { binding, .. } | Expr::Attribute { binding, .. }) => {
-            on_edge(binding, query.column_name(left).unwrap_or(Condition::KIND))?
-        }
-        other => {
-            return Err(QueryError::PipelineInvariant(format!(
-                "{other:?} is not a filterable column"
-            )));
+        left => {
+            let relation = edges.get(&binding(left)).ok_or_else(|| {
+                QueryError::PipelineInvariant("condition relationship has no edge scan".into())
+            })?;
+            let column = relation.target_column(&relation.alias, target, graph)?;
+            (column, FilterOwner::Tables(&relation.edge_tables), true)
         }
     };
-    let rhs = match leaf.right() {
-        Some(Expr::Property { binding, property }) => Some(Column::new(
-            query.name(binding),
-            &graph.property(property).name,
-        )),
+    let (rhs, rhs_target) = match leaf.right() {
+        Some(Expr::Property { binding, property }) => (
+            Some(property_column(query.name(binding), property, graph)),
+            Some(Target::Property(property)),
+        ),
         Some(_) => {
             return Err(QueryError::PipelineInvariant(
                 "relationship columns are never compared with properties".into(),
             ));
         }
-        None => None,
+        None => (None, None),
     };
     let leaf = leaf.predicate.into_owned();
-    let mut filter = bind_filter(&column.name, leaf, rhs, &owner, model);
-    if let Some(rhs) = &filter.rhs {
-        filter.null_as_epoch.rhs = nodes
-            .get(&rhs.source)
-            .and_then(|node| node.null_as_epoch.get(&rhs.name).copied());
-    }
+    let filter = bind_filter(target, leaf, rhs_target, &owner, model);
     Ok(Condition {
         column,
+        rhs,
         filter,
         edge,
     })
@@ -236,7 +226,8 @@ where
 {
     let Condition {
         column,
-        mut filter,
+        rhs,
+        filter,
         edge,
     } = condition;
     if !edge
@@ -245,7 +236,7 @@ where
     {
         return Ok(match resolve_column(bindings, column) {
             Ok(column) => Predicate::Boolean(Boolean::And(vec![
-                Boolean::Leaf(Box::new(filter.at(column))),
+                Boolean::Leaf(Box::new(filter.at(column, None))),
                 Boolean::Leaf(Box::new(tag)),
             ])),
             Err(_) => tag,
@@ -255,10 +246,8 @@ where
         true => column,
         false => resolve_column(bindings, column)?,
     };
-    if let Some(rhs) = filter.rhs.as_mut() {
-        *rhs = resolve_column(bindings, rhs.clone())?;
-    }
-    Ok(filter.at(column))
+    let rhs = rhs.map(|rhs| resolve_column(bindings, rhs)).transpose()?;
+    Ok(filter.at(column, rhs))
 }
 
 fn edge_tag<B>(pattern: &Pattern<'_, B>, node: &str, bound: &BoundFilter) -> Option<Predicate>

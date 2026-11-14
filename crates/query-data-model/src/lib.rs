@@ -19,9 +19,9 @@ pub use constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, 
 pub use deployments::Deployments;
 pub use error::DataModelError;
 pub use generic::{
-    Attribute, ConnectionId, Direction, Domain, Endpoint, Entity, EntityId, ForeignKey,
-    GraphCatalog, Hop, Property, PropertyId, Relationship, RelationshipId, RelationshipVariant,
-    RelationshipVariantId, StoreId,
+    Attribute, AttributeId, ConnectionId, Direction, Domain, Endpoint, Entity, EntityId,
+    ForeignKey, GraphCatalog, Hop, Property, PropertyId, Relationship, RelationshipId,
+    RelationshipVariant, RelationshipVariantId, StoreId,
 };
 pub use implementations::clickhouse::ClickHouse;
 pub use implementations::clickhouse::facts::{

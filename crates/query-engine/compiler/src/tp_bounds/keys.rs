@@ -14,7 +14,7 @@ pub(super) enum TpLookupValue {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct TpLookupKey {
-    pub entity: String,
+    pub entity: EntityId,
     pub kind: TraversalPathKind,
     pub value: TpLookupValue,
 }
@@ -24,9 +24,9 @@ pub(super) fn keys(
     anchor: &Anchor<'_>,
     anchors: &[(PropertyId, EntityId)],
 ) -> Vec<TpLookupKey> {
-    let entity = &query.model.graph().entity(anchor.binding.entity).name;
-    let key = |entity: &str, kind, value| TpLookupKey {
-        entity: entity.to_string(),
+    let entity = anchor.binding.entity;
+    let key = |entity: EntityId, kind, value| TpLookupKey {
+        entity,
         kind,
         value,
     };
@@ -62,9 +62,8 @@ pub(super) fn keys(
     }
     for (foreign_key, anchor) in anchors {
         if let Some(Literal::Int(id)) = single_eq(&|property| property == *foreign_key) {
-            let anchor = &query.model.graph().entity(*anchor).name;
             keys.push(key(
-                anchor,
+                *anchor,
                 TraversalPathKind::Id,
                 TpLookupValue::Numeric(*id),
             ));

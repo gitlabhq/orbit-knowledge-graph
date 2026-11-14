@@ -8,7 +8,7 @@ use query_data_model::Catalog;
 use std::collections::{HashMap, HashSet};
 
 use keys::TpLookupValue;
-use query_data_model::{EntityId, PropertyId, RelationshipVariantId};
+use query_data_model::{EntityId, PropertyId, RelationshipId};
 
 use crate::passes::codegen::SqlBackend;
 
@@ -23,16 +23,14 @@ pub(crate) fn anchor_keys(model: &Catalog<impl SqlBackend>) -> Vec<(PropertyId, 
     anchors
 }
 
-/// The scope of the `kind` variant between two entities; none for a wildcard or an unknown triple.
+/// The scope of the relationship's variant between two entities; none for an unknown triple.
 fn variant_scope(
     model: &Catalog<impl SqlBackend>,
-    kind: &str,
+    relationship: RelationshipId,
     source: Option<EntityId>,
     target: Option<EntityId>,
 ) -> Option<query_data_model::catalog::EdgeScope> {
-    let graph = model.graph();
-    let variant: RelationshipVariantId =
-        graph.variant_id(model.names().relationship(kind).ok()?, source?, target?)?;
+    let variant = model.graph().variant_id(relationship, source?, target?)?;
     model.edge_scope(variant)
 }
 

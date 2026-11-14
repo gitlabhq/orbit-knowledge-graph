@@ -136,8 +136,13 @@ where
                 pattern.nodes[target].id_column.as_str(),
             )
         };
-        let entity =
-            |node: &str| OutputValue::Text(pattern.nodes[node].entity.clone().unwrap_or_default());
+        let graph = pattern.model.graph();
+        let entity = |node: &str| {
+            let entity = pattern.nodes[node]
+                .entity
+                .map(|entity| graph.entity(entity));
+            OutputValue::Text(entity.map(|entity| entity.name.clone()).unwrap_or_default())
+        };
         self.push_relation_outputs(
             relation,
             [

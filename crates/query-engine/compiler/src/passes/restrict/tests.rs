@@ -91,9 +91,12 @@ fn plans_built_in_code_cannot_read_hidden_or_admin_only_fields() {
             crate::hydration::HydrationArm::new(
                 model,
                 crate::testkit::limits(),
-                entity,
+                model.names().entity(entity).unwrap(),
                 &[orbit_authorization::Key::Int(1)],
-                &[column.into()],
+                &[model
+                    .names()
+                    .property(model.names().entity(entity).unwrap(), column)
+                    .unwrap()],
                 Vec::new(),
             )
             .unwrap(),
