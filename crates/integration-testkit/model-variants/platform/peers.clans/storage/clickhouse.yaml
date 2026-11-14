@@ -1,0 +1,15 @@
+kind: storage
+package: peers.clans
+store: releases
+entities:
+  Clan:
+    complete: true
+    accepts: [slug]
+    table: gl_clan
+    columns:
+      slug: {immutable: true, backend: {type: String}}
+      name: {backend: {type: String}}
+      traversal_path: {backend: {type: String}}
+    access: {filter: [slug], order: [slug]}
+    backend:
+      primary_key: [traversal_path, slug]

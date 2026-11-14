@@ -65,3 +65,31 @@ workspaces:
         channel: realm-chat
         text: harvest in the south
         visible_to: [alice, bob]
+  "(7, gold)":
+    messages:
+      - id: rp1
+        guild: 7
+        rank: gold
+        text: gold rank hall opens
+        visible_to: [alice, bob]
+  "(8, silver)":
+    messages:
+      - id: rp2
+        guild: 8
+        rank: silver
+        text: silver rank oath renewed
+        visible_to: [alice, bob]
+  forge:
+    messages:
+      - id: cp1
+        clan: forge
+        channel: clan-chat
+        text: forge clan lights the fires
+        visible_to: [alice, bob]
+  quarry:
+    messages:
+      - id: cp2
+        clan: quarry
+        channel: clan-chat
+        text: quarry clan hauls the stone
+        visible_to: [alice, bob]

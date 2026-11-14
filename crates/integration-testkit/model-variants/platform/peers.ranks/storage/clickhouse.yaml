@@ -1,0 +1,22 @@
+kind: storage
+package: peers.ranks
+store: graph
+entities:
+  GuildRank:
+    complete: true
+    accepts: [guild, rank]
+    table: gl_guild_rank
+    columns:
+      guild: {immutable: true, backend: {type: Int64}}
+      rank: {immutable: true, backend: {type: String}}
+      title: {backend: {type: String}}
+      granted_at: {backend: {type: "DateTime64(0, 'UTC')"}}
+      tier: {backend: {type: Int8}}
+      badge: {backend: {type: UUID}}
+      traversal_path: {backend: {type: String}}
+    access: {filter: [guild, rank], order: [guild, rank]}
+    backend:
+      primary_key: [traversal_path, guild, rank]
+relationships:
+  RANK_OF:
+    GuildRank -> Guild: {fk: {on: source, column: guild}}

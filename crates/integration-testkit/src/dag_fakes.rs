@@ -255,8 +255,14 @@ pub fn peer_packages() -> query_data_model::Packages {
         "peers.lake",
         "peers.snippets",
         "peers.guilds",
+        "peers.clans",
     ]);
     dag_packages().with(peers)
+}
+
+/// The peer packages plus guild ranks, whose composite identity sits on ClickHouse.
+pub fn rank_packages() -> query_data_model::Packages {
+    peer_packages().with(crate::authorization_variants::platform(&["peers.ranks"]))
 }
 
 /// `packages` with text replaced in some fragments, keeping each package's tier.

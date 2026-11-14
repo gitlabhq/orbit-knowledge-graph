@@ -1,0 +1,18 @@
+kind: storage
+package: peers.clans
+store: slack
+entities:
+  ClanPost:
+    complete: true
+    accepts: [id]
+    columns:
+      id: {}
+      clan: {}
+      channel: {}
+      text: {}
+    backend:
+      operation: search.messages
+      filters: [id, channel]
+relationships:
+  CLAN_OF:
+    ClanPost -> Clan: {fk: {on: source, column: clan}}
