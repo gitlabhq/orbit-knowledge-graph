@@ -24,6 +24,7 @@ entities:
       id: {type: string, description: Jira's numeric issue ID.}
       key: {type: string, description: The issue key.}
       summary: {type: string}
+      description: {type: string, description: The issue body.}
       status: {type: string, description: The workflow status name.}
       status_category:
         type: enum

@@ -1,6 +1,6 @@
 //! ADR 024's DAG queries with ClickHouse on the test container: relational stages, scope
-//! lookup stages included, run real SQL through the server's executor, Orbit Next and the Data
-//! Extraction Service run behind their seeded fakes, and the Combine stage joins every side.
+//! lookup stages included, run real SQL through the server's executor, Orbit Next runs behind
+//! its seeded fake, and the Combine stage joins every side.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -18,33 +18,13 @@ use query_engine::shared::dag::{DagError, Event, Executor, Outcome};
 
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
-const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, m.text ORDER BY mr.iid LIMIT 10";
-
 const BOUNDED: &str = "MATCH (f:File) WHERE f.project_id IN [42, 77] AND f.content MATCHES ast('compile($$$ARGS)', 'rust') RETURN f.project_id, f.path, match.ARGS LIMIT 20";
 
-/// The rows the DAG scenarios add to the data-correctness seed: the Slack workspace table the
-/// DAG model adds, with T01 in group 100 and T02 in group 101; projects 42 and 77, which the code
-/// fake indexes; an open merge request on project 42's indexed head, and one on project 43,
+/// The rows the DAG scenarios add to the data-correctness seed: projects 42 and 77, which the
+/// code fake indexes; an open merge request on project 42's indexed head, and one on project 43,
 /// which the graph does not hold.
 pub(super) async fn seed(ctx: &TestContext) {
-    let schema = integration_testkit::graph_schema(
-        &dag_packages()
-            .fragments()
-            .and_then(|fragments| fragments.deploy("demo"))
-            .unwrap(),
-    );
-    let table = schema
-        .tables
-        .iter()
-        .find(|table| table.name == "gl_slack_workspace")
-        .expect("the DAG model stores Slack workspaces");
-    ctx.execute(&table.to_create_sql(&integration_testkit::TABLE_PREFIX))
-        .await;
     for statement in [
-        format!(
-            "INSERT INTO {} (id, name, group_id, traversal_path) VALUES ('T01', 'Orbit', 100, '1/100/'), ('T02', 'Vault', 101, '1/101/')",
-            t("gl_slack_workspace")
-        ),
         format!(
             "INSERT INTO {} (id, name, full_path, visibility_level, traversal_path) VALUES (42, 'Orbit', 'public-group/orbit', 'public', '1/100/42/'), (77, 'Vault', 'secret/vault', 'private', '1/555/77/')",
             t("gl_project")
@@ -198,66 +178,6 @@ pub(super) async fn query_4_drops_the_files_their_read_code_check_denies(ctx: &T
     assert_eq!(strings(&unindexed, "f_path"), Vec::<String>::new());
 }
 
-/// The workspace lookup stage reads each SlackWorkspace with its Group under both guards, so
-/// each caller reads the workspaces of its groups, and a caller who reads no workspace gets no
-/// messages and sends no call.
-pub(super) async fn merge_requests_join_the_slack_messages_that_discuss_them(ctx: &TestContext) {
-    let pairs = |batches: &[RecordBatch]| {
-        let mut pairs: Vec<(i64, String)> = ints(batches, "mr_iid")
-            .into_iter()
-            .zip(strings(batches, "m_text"))
-            .collect();
-        pairs.sort();
-        pairs
-    };
-    let (events, both) = run(ctx, DISCUSSED, &["1/100/", "1/101/"], &[]).await;
-    let Some(Rendered::Live(call)) = remote_requests(&events, 2).pop() else {
-        panic!("the Slack stage renders a call");
-    };
-    assert_eq!(
-        call.workspaces,
-        query_data_model::plan::live::Workspaces::Only(vec!["T01".into(), "T02".into()])
-    );
-    assert_eq!(
-        pairs(&both),
-        [
-            (1, "deploy to staging at 5pm".to_string()),
-            (1, "deploy uses the production keys".to_string()),
-            (2, "deploy memes".to_string()),
-        ]
-    );
-
-    let (_, one) = run(ctx, DISCUSSED, &["1/100/"], &[]).await;
-    assert_eq!(
-        pairs(&one),
-        [
-            (1, "deploy to staging at 5pm".to_string()),
-            (2, "deploy memes".to_string()),
-        ]
-    );
-
-    let (events, none) = run(ctx, DISCUSSED, &["1/100/1000/"], &[]).await;
-    assert!(remote_requests(&events, 2).is_empty());
-    assert_eq!(pairs(&none), []);
-}
-
-/// The joined rows carry the DISCUSSES edge between the endpoints the Combine stage joins: a message
-/// outside the caller's workspaces never comes back, a merge request the redaction service
-/// denies takes its edges with it, and a caller who reads nothing gets no edge.
-pub(super) async fn the_joined_rows_carry_the_edges_they_cross(ctx: &TestContext) {
-    let discusses = [
-        "SlackMessage:m1 -DISCUSSES-> MergeRequest:2000",
-        "SlackMessage:m4 -DISCUSSES-> MergeRequest:2001",
-        "SlackMessage:m5 -DISCUSSES-> MergeRequest:2000",
-    ];
-    let (_, all) = joined(ctx, DISCUSSED, &["1/100/", "1/101/"], &[]).await;
-    assert_eq!(edges(&all, &[2000, 2001]), discusses);
-    let (_, part) = joined(ctx, DISCUSSED, &["1/100/"], &[]).await;
-    assert_eq!(edges(&part, &[2000]), [discusses[0]]);
-    let (_, none) = joined(ctx, DISCUSSED, &["1/100/1000/"], &[]).await;
-    assert_eq!(edges(&none, &[2000, 2001]), Vec::<String>::new());
-}
-
 /// A code search names projects 42 and 77; each caller searches only the repositories its scope
 /// holds, and a guest whose scope holds neither gets no matches and sends no search.
 pub(super) async fn a_code_search_reads_only_the_repositories_the_caller_can_read(
@@ -279,46 +199,6 @@ pub(super) async fn a_code_search_reads_only_the_repositories_the_caller_can_rea
     let (events, guest) = run(ctx, BOUNDED, &["1/101/"], &[42, 77]).await;
     assert!(remote_requests(&events, 1).is_empty());
     assert_eq!(strings(&guest, "f_path"), Vec::<String>::new());
-}
-
-/// The merge request stage's `read_merge_request` check runs before its keys reach the Slack
-/// stage: the live call sees only the keys of merge requests the check allows, and none when it
-/// allows none.
-pub(super) async fn merge_requests_hand_slack_only_the_keys_their_check_allows(ctx: &TestContext) {
-    let run = |allowed: &'static [i64]| {
-        let checks = AllowedKeys::checks("merge_request", allowed.iter().copied().map(Key::Int));
-        async move {
-            match run_with(
-                ctx,
-                dag_packages(),
-                DISCUSSED,
-                &["1/100/", "1/101/"],
-                &checks,
-            )
-            .await
-            {
-                (events, Ok(Outcome { executed, .. })) => (events, executed.batches),
-                (_, Err(error)) => panic!("{error}"),
-            }
-        }
-    };
-    let keys = |events: &[Event]| {
-        events.iter().find_map(|event| match event {
-            Event::Keys { sample, .. } => Some(sample.clone()),
-            _ => None,
-        })
-    };
-    let (events, both) = run(&[2000, 2001]).await;
-    assert_eq!(keys(&events), Some(vec![Key::Int(2000), Key::Int(2001)]));
-    assert_eq!(ints(&both, "mr_iid").len(), 3);
-
-    let (events, one) = run(&[2000]).await;
-    assert_eq!(keys(&events), Some(vec![Key::Int(2000)]));
-    assert_eq!(ints(&one, "mr_iid"), [1, 1]);
-
-    let (events, none) = run(&[]).await;
-    assert!(remote_requests(&events, 2).is_empty());
-    assert_eq!(ints(&none, "mr_iid"), Vec::<i64>::new());
 }
 
 /// `Head` enforces only its check and the `File`s at each head enforce `via`: `File`'s lookup

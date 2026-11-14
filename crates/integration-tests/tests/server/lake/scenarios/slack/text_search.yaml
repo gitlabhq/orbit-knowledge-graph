@@ -1,0 +1,39 @@
+cases:
+  - name: allowed
+    description: A search on message text reads the Slack live store, the only store that holds text, for the workspaces the lookup on the Slack lake admits
+    config:
+      security: default
+    query: |
+      MATCH (m:SlackMessage) WHERE m.channel = 'orbit-dev' AND m.text CONTAINS 'deploy' RETURN m.author, m.text ORDER BY m.text LIMIT 20
+    expect:
+      node_count: 2
+      skip_requirements: [node_ids, order_by, "filter:channel", "filter:text"]
+      nodes:
+        SlackMessage:
+          rows:
+            - { id: m1, author: ann, text: deploy to staging at 5pm }
+            - { id: m5, author: dee, text: deploy uses the production keys }
+
+  - name: partly_denied
+    description: A group reader's lookup admits only its group's workspace, so the call never reaches the private group's messages
+    config:
+      security: group_100
+    query: |
+      MATCH (m:SlackMessage) WHERE m.channel = 'orbit-dev' AND m.text CONTAINS 'deploy' RETURN m.author, m.text ORDER BY m.text LIMIT 20
+    expect:
+      node_count: 1
+      skip_requirements: [node_ids, order_by, "filter:channel", "filter:text"]
+      nodes:
+        SlackMessage:
+          rows:
+            - { id: m1, author: ann, text: deploy to staging at 5pm }
+
+  - name: empty
+    description: A caller whose group installed no workspace sends no call and reads nothing
+    config:
+      security: no_jira_rows
+    query: |
+      MATCH (m:SlackMessage) WHERE m.channel = 'orbit-dev' AND m.text CONTAINS 'deploy' RETURN m.author, m.text LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: [node_ids, "filter:channel", "filter:text"]

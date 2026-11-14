@@ -136,7 +136,7 @@ impl Executor for LiveExecutor {
     }
 }
 
-/// The graph connection in tests that assert plans without a container: each query returns the
+/// The relational connections in tests that assert plans without a container: each query returns the
 /// seeded rows that hold any of the names its SQL gives its columns, so each stage reads the rows
 /// seeded for its own bindings.
 pub struct SeededGraph(pub Vec<Row>);
@@ -335,18 +335,18 @@ impl Executor for Counted {
     }
 }
 
-/// The fake each served backend runs on: `graph` for ClickHouse, the seeded code and live fakes
-/// for the remotes, signed in to the live service as `user`.
+/// The fake each served backend runs on: `graph` for the relational backends, the seeded code
+/// and live fakes for the remotes, signed in to the live service as `user`.
 fn fake(backend: Backend, graph: &Arc<dyn Executor>, user: &str) -> Option<Arc<dyn Executor>> {
     match backend {
-        Backend::ClickHouse => Some(Arc::clone(graph)),
+        Backend::ClickHouse | Backend::DuckDb => Some(Arc::clone(graph)),
         Backend::OrbitCode => Some(seeded_code()),
         Backend::Live => Some(seeded_live(user)),
         _ => None,
     }
 }
 
-/// `graph` on the ClickHouse connection and the seeded code and live fakes on every served
+/// `graph` on every relational connection and the seeded code and live fakes on every served
 /// remote, signed in to the live service as `user`.
 pub fn dag_executors(connections: &Connections, graph: Arc<dyn Executor>, user: &str) -> Executors {
     let mut executors = Executors::default();
@@ -395,8 +395,8 @@ pub async fn run_counted(
     (events, outcome, requests)
 }
 
-/// Runs a query through the DAG runner with `graph` on the graph connection and the seeded code
-/// and live fakes on theirs, signed in to the live service as `user`.
+/// Runs a query through the DAG runner with `graph` on the relational connections and the seeded
+/// code and live fakes on theirs, signed in to the live service as `user`.
 pub async fn run_dag(
     model: &Arc<Model>,
     graph: Arc<dyn Executor>,

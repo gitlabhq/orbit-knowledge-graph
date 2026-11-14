@@ -53,7 +53,11 @@ fn every_jira_entity_has_one_complete_store_on_the_lake_connection() {
                 )
             })
             .collect();
-        assert_eq!(holders, [("jira", "duckdb", "jira_lake")], "{name}");
+        let live = ("jira_live", "live", "data_extraction");
+        match name {
+            "JiraIssue" => assert_eq!(holders, [("jira", "duckdb", "jira_lake"), live]),
+            _ => assert_eq!(holders, [("jira", "duckdb", "jira_lake")], "{name}"),
+        }
         let store = query_data_model::testkit::stores(&model)
             .find(|store| store.name() == "jira")
             .unwrap();

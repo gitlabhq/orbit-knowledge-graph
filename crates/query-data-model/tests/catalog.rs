@@ -515,14 +515,14 @@ fn only_a_global_entity_declares_checks_open() {
 fn only_a_platform_package_declares_checks_open() {
     let errors = spec_errors(demo(|name, yaml| match name {
         "integration.jira/authorization.yaml" => yaml.replace(
-            "  JiraIssue:\n    scope: namespace\n",
-            "  JiraIssue:\n    scope: namespace\n    checks: open\n",
+            "  JiraProject:\n    scope: namespace\n",
+            "  JiraProject:\n    scope: namespace\n    checks: open\n",
         ),
         _ => yaml,
     }));
     assert!(
         errors.contains(
-            &"integration.jira: JiraIssue declares checks: open, which only a platform package may"
+            &"integration.jira: JiraProject declares checks: open, which only a platform package may"
                 .to_string()
         ),
         "{errors:?}"
@@ -1702,14 +1702,11 @@ fn every_store_names_the_stored_columns_it_takes_key_sets_on() {
     let live = sources
         .get_mut("integration.slack/storage/live.yaml")
         .unwrap();
-    *live = live.replace(
-        "accepts: [id, merge_request_id]",
-        "accepts: [id, workspace]",
-    );
+    *live = live.replace("accepts: [workspace, issue_id]", "accepts: [id, workspace]");
     assert_eq!(
         spec_errors(Packages::new(query_data_model::Tier::Platform, sources).deployment("demo")),
         [
-            "integration.slack: store slack accepts keys on SlackMessage.workspace, which its operation does not filter on"
+            "integration.slack: store slack_live accepts keys on SlackMessage.id, which its operation does not filter on"
         ]
     );
 }

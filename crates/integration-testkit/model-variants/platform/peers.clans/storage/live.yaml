@@ -1,6 +1,6 @@
 kind: storage
 package: peers.clans
-store: slack
+store: slack_live
 entities:
   ClanPost:
     complete: true

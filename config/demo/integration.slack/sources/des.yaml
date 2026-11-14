@@ -1,0 +1,11 @@
+kind: source
+package: integration.slack
+source: des
+declare:
+  connection: slack_lake
+  version: _siphon_replicated_at
+  watermark: _siphon_watermark
+  deleted: _siphon_deleted
+entities:
+  SlackMessage: {tables: [slack_message], order_by: [traversal_path, id], query: generated}
+  SlackWorkspace: {tables: [slack_workspace], order_by: [traversal_path, id], query: generated}

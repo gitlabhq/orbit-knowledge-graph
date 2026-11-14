@@ -1,0 +1,39 @@
+cases:
+  - name: allowed
+    description: A search on issue descriptions reads the Jira live store, the only store that holds description, for the Jira projects the lookup on the Jira lake admits
+    config:
+      security: default
+    query: |
+      MATCH (i:JiraIssue) WHERE i.description CONTAINS 'login' RETURN i.key, i.description ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 2
+      skip_requirements: [node_ids, order_by, "filter:description"]
+      nodes:
+        JiraIssue:
+          rows:
+            - { id: "10100", key: ORB-1, description: Users land on a blank page after login }
+            - { id: "10200", key: SEC-1, description: Rotate the keys before the login certificate expires }
+
+  - name: partly_denied
+    description: A group reader's lookup admits only its group's Jira project
+    config:
+      security: group_100
+    query: |
+      MATCH (i:JiraIssue) WHERE i.description CONTAINS 'login' RETURN i.key, i.description ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 1
+      skip_requirements: [node_ids, order_by, "filter:description"]
+      nodes:
+        JiraIssue:
+          rows:
+            - { id: "10100", key: ORB-1, description: Users land on a blank page after login }
+
+  - name: empty
+    description: A caller whose group holds no Jira project sends no call and reads nothing
+    config:
+      security: no_jira_rows
+    query: |
+      MATCH (i:JiraIssue) WHERE i.description CONTAINS 'login' RETURN i.key, i.description LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: [node_ids, "filter:description"]

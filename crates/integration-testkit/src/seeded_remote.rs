@@ -110,12 +110,11 @@ impl CodeSearch for SeededCodeSearch {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Workspace {
-    messages: Vec<BTreeMap<String, Value>>,
-}
+/// The rows each operation returns in one workspace, by operation name.
+type Workspace = BTreeMap<String, Vec<BTreeMap<String, Value>>>;
 
+/// The rows of every workspace, keyed by the scope key a call names it by: a Slack workspace,
+/// or a Jira project.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SeededDataExtraction {
@@ -134,7 +133,11 @@ fn text(value: Option<&Value>) -> &str {
 
 impl DataExtraction for SeededDataExtraction {
     fn extract(&self, user: &str, request: &ExtractionRequest) -> Result<Vec<Row>, ExecuteError> {
-        if request.operation != "search.messages" {
+        if !self
+            .workspaces
+            .values()
+            .any(|workspace| workspace.contains_key(&request.operation))
+        {
             return Err(ExecuteError(format!(
                 "unknown operation {}",
                 request.operation
@@ -182,7 +185,7 @@ impl DataExtraction for SeededDataExtraction {
         };
         Ok(workspaces
             .into_iter()
-            .flat_map(|workspace| &workspace.messages)
+            .flat_map(|workspace| workspace.get(&request.operation).into_iter().flatten())
             .filter(visible)
             .filter(filtered)
             .filter(windowed)

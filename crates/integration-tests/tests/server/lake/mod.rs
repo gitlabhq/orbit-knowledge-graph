@@ -1,7 +1,8 @@
-//! The `integration.jira` package on a DuckDB connection over a local S3 server, in both
-//! location modes: Parquet files under a prefix, and a DuckLake catalog with its data on S3.
-//! These run without `--all-features`: the bundled DuckDB build carries a dev version id, so it
-//! refuses the official httpfs and ducklake extension files.
+//! The `integration.jira` and `integration.slack` packages: their lake stores on DuckDB
+//! connections over a local S3 server, in both location modes (Parquet files under a prefix, and
+//! a DuckLake catalog with its data on S3), and their live stores on the seeded Data Extraction
+//! Service. These run without `--all-features`: the bundled DuckDB build carries a dev version
+//! id, so it refuses the official httpfs and ducklake extension files.
 
 use std::path::Path;
 
@@ -12,61 +13,36 @@ use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext};
 use orbit_server_config::DuckDbLocation;
 use query_data_model::{Catalog, DuckDb};
 
-const SHAPE: &str = "jira";
+const SHAPE: &str = "integrations";
 const CONNECTION: &str = "jira_lake";
-const SEED: &str = "jira";
+const SEED: &str = "integrations";
 const SCENARIOS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/server/lake/scenarios");
 const PRESETS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/server/data_correctness/presets"
 );
 
-/// The data-correctness graph, plus the ClickHouse tables of the demo packages' check-less
-/// Slack entities and their rows.
-async fn graph() -> TestContext {
-    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-    let schema = integration_testkit::graph_schema(
-        &query_data_model::testkit::with_demo()
-            .fragments()
-            .and_then(|fragments| {
-                fragments.deployment(&query_data_model::testkit::deployments(), SHAPE)
-            })
-            .unwrap(),
-    );
-    for name in ["gl_incident", "gl_slack_workspace"] {
-        let table = schema
-            .tables
-            .iter()
-            .find(|table| table.name == name)
-            .unwrap_or_else(|| panic!("the {SHAPE} shape stores {name}"));
-        ctx.execute(&table.to_create_sql(&integration_testkit::TABLE_PREFIX))
-            .await;
-    }
-    load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
-    load_yaml_seed(&ctx, PRESETS, "slack").await;
-    ctx.optimize_if_needed().await;
-    ctx
-}
-
 async fn scenarios(mode: Mode) {
-    let ctx = graph().await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
+    ctx.optimize_if_needed().await;
     run_lake_dir(
         &ctx,
         (SCENARIOS, PRESETS),
         query_data_model::testkit::with_demo(),
-        (SHAPE, CONNECTION, SEED),
+        (SHAPE, SEED),
         mode,
     )
     .await;
 }
 
 #[tokio::test]
-async fn jira_parquet_scenarios() {
+async fn integrations_parquet_scenarios() {
     scenarios(Mode::Parquet).await;
 }
 
 #[tokio::test]
-async fn jira_ducklake_scenarios() {
+async fn integrations_ducklake_scenarios() {
     scenarios(Mode::Ducklake).await;
 }
 
@@ -81,7 +57,7 @@ fn catalog() -> Catalog<DuckDb> {
 
 async fn seeded(mode: Mode, storage_type: impl Fn(&str, &str, &str) -> String) -> Lake {
     let seed = seed_preset(Path::new(PRESETS), SEED);
-    Lake::seed(mode, &catalog(), &seed, storage_type).await
+    Lake::seed(mode, &[&catalog()], &seed, storage_type).await
 }
 
 async fn declared(mode: Mode) -> Lake {
@@ -89,7 +65,7 @@ async fn declared(mode: Mode) -> Lake {
 }
 
 fn open(lake: &Lake) -> Result<DuckDbClient, String> {
-    DuckDbClient::open_s3(CONNECTION, &lake.connection, &catalog())
+    DuckDbClient::open_s3(CONNECTION, &lake.connections[CONNECTION], &catalog())
         .map_err(|error| error.to_string())
 }
 
@@ -122,7 +98,7 @@ async fn jira_ducklake_rejects_a_column_of_another_type() {
 #[tokio::test]
 async fn jira_parquet_rejects_a_prefix_without_the_tables() {
     let mut lake = declared(Mode::Parquet).await;
-    lake.connection.location = DuckDbLocation::Parquet {
+    lake.connection(CONNECTION).location = DuckDbLocation::Parquet {
         bucket: integration_testkit::s3::BUCKET.into(),
         prefix: "elsewhere/".into(),
     };
@@ -137,7 +113,7 @@ async fn jira_parquet_rejects_a_prefix_without_the_tables() {
 #[tokio::test]
 async fn jira_ducklake_rejects_another_data_path() {
     let mut lake = declared(Mode::Ducklake).await;
-    let DuckDbLocation::Ducklake { prefix, .. } = &mut lake.connection.location else {
+    let DuckDbLocation::Ducklake { prefix, .. } = &mut lake.connection(CONNECTION).location else {
         unreachable!()
     };
     *prefix = "elsewhere/".into();
@@ -152,8 +128,9 @@ async fn jira_ducklake_rejects_another_data_path() {
 #[tokio::test]
 async fn jira_a_refused_secret_never_shows_in_the_error() {
     let mut lake = declared(Mode::Parquet).await;
-    let refused = format!("refused-{}", lake.connection.credentials.secret_access_key);
-    lake.connection.credentials.secret_access_key = refused.clone();
+    let credentials = &mut lake.connection(CONNECTION).credentials;
+    let refused = format!("refused-{}", credentials.secret_access_key);
+    credentials.secret_access_key = refused.clone();
     let error = open(&lake).err().unwrap();
     assert!(
         error.starts_with("connection jira_lake cannot resolve table jira_gitlab_ref: ")

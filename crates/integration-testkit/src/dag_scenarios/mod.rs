@@ -158,12 +158,9 @@ fn projects(ids: &[i64]) -> Vec<Row> {
     ids.iter().map(|id| row(json!({"scope_id": id}))).collect()
 }
 
-/// The rows a workspace lookup returns: each workspace, and the group it is installed in.
-fn workspaces(installed: &[(&str, i64)]) -> Vec<Row> {
-    installed
-        .iter()
-        .map(|(workspace, group)| row(json!({"scope_id": workspace, "scope1_id": group})))
-        .collect()
+/// The rows a workspace lookup on the Slack lake returns.
+fn workspaces(ids: &[&str]) -> Vec<Row> {
+    ids.iter().map(|id| row(json!({"scope_id": id}))).collect()
 }
 
 /// Rows of Arrow batches as JSON, integers as numbers and text as strings.

@@ -1,6 +1,6 @@
 kind: storage
 package: peers.guilds
-store: slack
+store: slack_live
 entities:
   GuildPost:
     complete: true

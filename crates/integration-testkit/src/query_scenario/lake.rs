@@ -4,26 +4,29 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 
+use compiler::dag::{Backend, Connections, Peer};
 use orbit_server::pipeline::PeerExecutors;
 use orbit_server_config::ConnectionsConfig;
-use query_data_model::{DuckDb, Packages};
+use query_data_model::{Catalog, DuckDb, Packages};
 
 use super::{
     PresetOr, QueryStep, assert_compilation, assert_output, build_redaction, build_security,
-    execute_output, read_scenarios, resolve_preset, seed_preset, settle, step_label,
+    read_scenarios, resolve_preset, seed_preset, settle, step_label, try_execute_output,
 };
 use crate::context::TestContext;
+use crate::dag_fakes::seeded_live;
 use crate::lake::{Lake, Mode};
 use crate::scenario::discover;
 
 /// Runs every scenario under `root` the way the server does, on a deployment of the testkit
-/// shape `shape`: the ClickHouse graph of `ctx`, and `connection`'s DuckDB peer with its tables
-/// landed on a local S3 server in `mode`, seeded once from the `seed` preset.
+/// shape `shape`: the ClickHouse graph of `ctx`, each DuckDB peer with its tables landed on one
+/// local S3 server in `mode`, seeded once from the `seed` preset, and the live peer on the
+/// seeded Data Extraction Service, signed in as `alice`.
 pub async fn run_lake_dir(
     ctx: &TestContext,
     (root, presets): (&str, &str),
     packages: Packages,
-    (shape, connection, seed): (&str, &str, &str),
+    (shape, seed): (&str, &str),
     mode: Mode,
 ) {
     let (root, presets) = (Path::new(root), Path::new(presets));
@@ -34,24 +37,31 @@ pub async fn run_lake_dir(
         })
         .unwrap();
     let graph = crate::versioned_data_model(fragments);
-    let lake_catalog = Arc::new(
-        graph
-            .shared_model()
-            .physical::<DuckDb>(graph.names().connection(connection).unwrap())
-            .unwrap(),
-    );
+    let catalogs: Vec<Catalog<DuckDb>> = Connections::of(graph.shared_model())
+        .unwrap()
+        .peers()
+        .iter()
+        .filter(|peer| peer.backend() == Backend::DuckDb)
+        .map(|peer| {
+            graph
+                .shared_model()
+                .physical::<DuckDb>(peer.connection())
+                .unwrap()
+        })
+        .collect();
     let lake = Lake::seed(
         mode,
-        &lake_catalog,
+        &catalogs.iter().collect::<Vec<_>>(),
         &seed_preset(presets, seed),
         |_, _, declared| declared.to_string(),
     )
     .await;
     let config = ConnectionsConfig {
-        duckdb: [(connection.to_string(), lake.connection.clone())].into(),
+        duckdb: lake.connections.clone(),
     };
-    let peers = PeerExecutors::open(graph.shared_model(), &config)
-        .unwrap_or_else(|error| panic!("open {connection}: {error}"));
+    let live = |peer: &Peer| (peer.backend() == Backend::Live).then(|| seeded_live("alice"));
+    let peers = PeerExecutors::open_with(graph.shared_model(), &config, live)
+        .unwrap_or_else(|error| panic!("open the {shape} peers: {error}"));
     let mut files = Vec::new();
     discover(root, &mut files);
     files.sort();
@@ -110,7 +120,9 @@ async fn run_step(
         expect.pages.is_empty() && !expect.compile_only,
         "{label}: lake scenarios run one page"
     );
-    let output = execute_output(ctx, &step.query, graph, security, redaction, peers).await;
-    assert_compilation(Ok::<_, String>(Arc::clone(&output.compiled)), expect, label);
-    assert_output(&output, expect, label);
+    let output = try_execute_output(ctx, &step.query, graph, security, redaction, peers).await;
+    let compiled = output.as_ref().map(|output| Arc::clone(&output.compiled));
+    if assert_compilation(compiled, expect, label).is_some() {
+        assert_output(&output.expect("the query ran"), expect, label);
+    }
 }

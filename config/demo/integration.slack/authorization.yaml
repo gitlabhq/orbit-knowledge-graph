@@ -4,34 +4,37 @@ entities:
   SlackMessage:
     scope: namespace
     permission: read
-    enforce: {live: {scope_key: {via: [IN_WORKSPACE, INSTALLED_IN]}}}
-    checks: [{provider: slack, kind: delegated}]
+    enforce:
+      duckdb: {scope_key: traversal_path}
+      live: {scope_key: {via: IN_WORKSPACE}}
+    checks:
+      - {provider: slack, kind: delegated}
     properties:
-      open: [id, workspace, merge_request_id, channel, author, text, sent_at]
-
-  Incident:
-    scope: namespace
-    permission: read
-    enforce: {clickhouse: {scope_key: traversal_path}}
-    properties:
-      open: [id, title, message_id]
+      open: [id, channel, author, text, sent_at, issue_id, merge_request_id]
+      exact: [workspace]
       hidden: [traversal_path]
-
   SlackWorkspace:
     scope: namespace
     permission: read
-    enforce: {clickhouse: {scope_key: traversal_path}, live: {scope_key: {via: INSTALLED_IN}}}
+    enforce:
+      duckdb: {scope_key: traversal_path}
     properties:
-      open: [id, name, group_id]
-      hidden: [traversal_path]
+      open: [id, name]
+      hidden: [namespace_id, traversal_path]
 relationships:
-  IN_WORKSPACE: {scope: namespace, permission: read, enforce: {}}
-  DISCUSSES: {scope: namespace, permission: read, enforce: {}}
-  RAISED_IN:
+  IN_WORKSPACE:
     scope: namespace
     permission: read
-    enforce: {clickhouse: {scope_key: traversal_path, of: source}}
+    enforce: {duckdb: {scope_key: traversal_path, of: both}}
   INSTALLED_IN:
     scope: namespace
     permission: read
-    enforce: {clickhouse: {scope_key: traversal_path, of: holder}}
+    enforce: {duckdb: {scope_key: traversal_path, of: holder}}
+  MENTIONS_ISSUE:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}
+  DISCUSSES:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}

@@ -100,7 +100,7 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
 
 #[tokio::test]
 async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
-    let orbit = workspaces(&[("T01", 100)]);
+    let orbit = workspaces(&["T01"]);
     let ran = run(SLACK, &caller("1/9970/"), orbit.clone()).await;
     assert_eq!(
         ops(&ran.plan(1, false)),
@@ -114,10 +114,8 @@ async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
         panic!("the workspace lookup stage renders SQL");
     };
     assert!(
-        sql.contains("FROM gl_slack_workspace AS scope FINAL WHERE startsWith(scope.traversal_path, {p0:String})")
-            && sql.contains("FROM gl_group AS scope1 WHERE (startsWith(scope1.traversal_path, {p0:String})")
-            && sql.contains("ON (scope1.id = scope.group_id)"),
-        "the lookup reads the chain from the workspace to its group under both guards: {sql}"
+        sql.contains("FROM slack_workspace AS scope WHERE starts_with(scope.traversal_path, $1)"),
+        "the lookup reads the workspaces on the Slack lake under their guard: {sql}"
     );
     assert_eq!(
         *live_request(&ran.rendered(1)),
@@ -183,7 +181,7 @@ async fn the_repository_restriction_keeps_the_projects_the_lookup_returns() {
 
 #[tokio::test]
 async fn the_workspace_precondition_keeps_unreadable_namespaces_out_of_the_call() {
-    let both = workspaces(&[("T01", 100), ("T02", 101)]);
+    let both = workspaces(&["T01", "T02"]);
     let everywhere = run(SLACK, &caller("1/"), both).await;
     assert_eq!(
         live_request(&everywhere.rendered(1)).workspaces,
@@ -191,7 +189,7 @@ async fn the_workspace_precondition_keeps_unreadable_namespaces_out_of_the_call(
     );
     assert_eq!(everywhere.rows().len(), 2);
 
-    let narrow = run(SLACK, &caller("1/9970/"), workspaces(&[("T01", 100)])).await;
+    let narrow = run(SLACK, &caller("1/9970/"), workspaces(&["T01"])).await;
     let texts: Vec<_> = narrow
         .rows()
         .into_iter()
@@ -216,14 +214,14 @@ async fn a_caller_who_can_read_nothing_gets_no_request() {
 async fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture() {
     let ctx = caller("1/9970/");
     let pushed = run(
-        "MATCH (m:SlackMessage) WHERE m.workspace = 'T01' RETURN m.text LIMIT 5",
+        "MATCH (m:SlackMessage) WHERE m.id = 'm1' RETURN m.text LIMIT 5",
         &ctx,
         Vec::new(),
     )
     .await;
     assert_eq!(
         pushed.error(),
-        "allowlist rejected: no store serves equality on SlackMessage.workspace"
+        "allowlist rejected: no one store of SlackMessage serves both a read of SlackMessage.text and equality on SlackMessage.id"
     );
     let capture = run(&CODE.replace("match.ARGS", "match.BODY"), &ctx, Vec::new()).await;
     assert_eq!(

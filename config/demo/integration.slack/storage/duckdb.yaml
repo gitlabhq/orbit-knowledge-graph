@@ -1,0 +1,41 @@
+kind: storage
+package: integration.slack
+store: slack
+engine:
+  kind: duckdb
+  connection: slack_lake
+entities:
+  SlackMessage:
+    complete: true
+    table: slack_message
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      workspace: {backend: {type: VARCHAR}}
+      channel: {backend: {type: VARCHAR}}
+      author: {backend: {type: VARCHAR}}
+      sent_at: {immutable: true, backend: {type: TIMESTAMP}}
+      issue_id: {backend: {type: VARCHAR}}
+      merge_request_id: {backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+    exclude: [text]
+    accepts: [id, workspace, issue_id, merge_request_id]
+    access: {filter: [workspace, channel, author, sent_at], order: [id]}
+  SlackWorkspace:
+    complete: true
+    table: slack_workspace
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      name: {backend: {type: VARCHAR}}
+      namespace_id: {backend: {type: BIGINT}}
+      traversal_path: {backend: {type: VARCHAR}}
+    accepts: [id]
+    access: {order: [id]}
+relationships:
+  IN_WORKSPACE:
+    SlackMessage -> SlackWorkspace: {fk: {on: source, column: workspace}}
+  INSTALLED_IN:
+    SlackWorkspace -> Group: {fk: {on: source, column: namespace_id}}
+  MENTIONS_ISSUE:
+    SlackMessage -> JiraIssue: {fk: {on: source, column: issue_id}}
+  DISCUSSES:
+    SlackMessage -> MergeRequest: {fk: {on: source, column: merge_request_id}}

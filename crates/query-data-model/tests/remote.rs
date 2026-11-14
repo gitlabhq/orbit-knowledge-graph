@@ -25,10 +25,12 @@ fn code_store(model: &Model) -> query_data_model::StoreId {
     model.get_store(file, &needs).unwrap().parts()[0].0
 }
 
-/// The live store that holds messages.
+/// The live store, which placement puts a read of message text on.
 fn message_store(model: &Model) -> query_data_model::StoreId {
     let message = model.names().entity("SlackMessage").unwrap();
-    model.get_store(message, &Needs::default()).unwrap().parts()[0].0
+    let mut needs = Needs::default();
+    needs.read(model.names().property(message, "text").unwrap());
+    model.get_store(message, &needs).unwrap().parts()[0].0
 }
 
 fn field(
@@ -75,7 +77,7 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
         .unwrap();
     let guard = live
         .model()
-        .store(live.names().store("slack").unwrap())
+        .store(live.names().store("slack_live").unwrap())
         .guard(message)
         .unwrap();
     let names = |rule: &Rule| match rule {
@@ -85,7 +87,7 @@ fn the_new_fragments_load_from_their_per_kind_directories() {
             .collect::<Vec<_>>(),
         other => panic!("expected a via chain, got {other:?}"),
     };
-    assert_eq!(names(&guard.rule), ["IN_WORKSPACE", "INSTALLED_IN"]);
+    assert_eq!(names(&guard.rule), ["IN_WORKSPACE"]);
     let file = model.names().entity("File").unwrap();
     let code = model
         .physical::<OrbitCode>(model.names().connection("code_indexing").unwrap())
@@ -309,13 +311,13 @@ fn a_filter_the_operation_cannot_push_down_is_a_construction_error() {
     let error = live
         .build(|q| {
             let messages = q.call(operation)?;
-            let workspace = field(&model, &messages, "workspace")?;
-            q.filter(messages, workspace.eq("T01"))
+            let id = field(&model, &messages, "id")?;
+            q.filter(messages, id.eq("m1"))
         })
         .unwrap_err();
     assert_eq!(
         error.to_string(),
-        "search.messages cannot push down equality on SlackMessage.workspace; it filters on id, channel, author, sent_at, merge_request_id, text (contains)"
+        "search.messages cannot push down equality on SlackMessage.id; it filters on workspace, channel, author, sent_at, issue_id, text (contains)"
     );
     let substring = live.build(|q| {
         let messages = q.call(operation)?;
@@ -374,28 +376,28 @@ fn the_gql_surface_lowers_structural_matches_into_columns() {
 fn a_via_step_whose_key_type_differs_from_the_target_id_fails_the_load() {
     let mut sources = testkit::with_demo().sources().clone();
     let graph = sources.get_mut("integration.slack/graph.yaml").unwrap();
-    *graph = graph.replace("group_id: {type: int64}", "group_id: {type: string}");
+    *graph = graph.replace("workspace: {type: string}", "workspace: {type: int64}");
     let storage = sources
-        .get_mut("integration.slack/storage/clickhouse.yaml")
+        .get_mut("integration.slack/storage/duckdb.yaml")
         .unwrap();
     *storage = storage.replace(
-        "group_id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}",
-        "group_id: {backend: {type: String, codec: [ZSTD(1)]}}",
+        "workspace: {backend: {type: VARCHAR}}",
+        "workspace: {backend: {type: BIGINT}}",
     );
     let (platform, demo): (Vec<_>, Vec<_>) = sources
         .into_iter()
-        .partition(|(path, _)| !path.starts_with("integration.slack/"));
+        .partition(|(path, _)| !path.starts_with("integration."));
     let error = Packages::new(Tier::Platform, platform.into_iter().collect())
         .with(Packages::new(Tier::Integration, demo.into_iter().collect()))
         .deployment("demo")
         .unwrap_err()
         .to_string();
-    for expected in [
-        "INSTALLED_IN(SlackWorkspace -> Group) foreign key group_id is String but Group.id is Int; keys are never cast",
-        "SlackWorkspace's via step INSTALLED_IN has no foreign key on SlackWorkspace in any store",
-    ] {
-        assert!(error.contains(expected), "{error}");
-    }
+    assert!(
+        error.contains(
+            "IN_WORKSPACE(SlackMessage -> SlackWorkspace) foreign key workspace is Int but SlackWorkspace.id is String; keys are never cast"
+        ),
+        "{error}"
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 kind: storage
 package: peers.ranks
-store: slack
+store: slack_live
 entities:
   RankPost:
     complete: true

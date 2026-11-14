@@ -171,7 +171,7 @@ data_correctness:
     - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12002, target_kind: Definition }
     - { traversal_path: "1/101/1001/", project_id: 1001, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12102, target_kind: Definition }
 
-jira:
+integrations:
   jira_project:
     - { id: "10000", key: ORB, name: Orbit, cloud_id: a8f1c2d4-5e6f-4a1b-9c2d-3e4f5a6b7c8d, project_id: 1000, traversal_path: "1/100/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }
     - { id: "10001", key: SEC, name: Security, cloud_id: a8f1c2d4-5e6f-4a1b-9c2d-3e4f5a6b7c8d, project_id: 1001, traversal_path: "1/101/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }
@@ -200,10 +200,15 @@ jira:
     - { id: ref-1, kind: merge_request, project_path: public-group/public-project, iid: 1, url: "https://gitlab.example.com/public-group/public-project/-/merge_requests/1", issue_id: "10100", traversal_path: "1/100/", _siphon_replicated_at: "2026-11-04 09:00:00", _siphon_watermark: "2026-11-04 09:00:00", _siphon_deleted: false }
     - { id: ref-2, kind: merge_request, project_path: private-group/private-project, iid: 3, url: "https://gitlab.example.com/private-group/private-project/-/merge_requests/3", issue_id: "10200", traversal_path: "1/101/", _siphon_replicated_at: "2026-11-04 10:00:00", _siphon_watermark: "2026-11-04 10:00:00", _siphon_deleted: false }
 
-slack:
-  gl_slack_workspace:
-    - { id: T01, name: Orbit, group_id: 100, traversal_path: "1/100/" }
-    - { id: T02, name: Vault, group_id: 101, traversal_path: "1/101/" }
-  gl_incident:
-    - { id: 500, title: Deploy outage, message_id: M01, traversal_path: "1/100/" }
-    - { id: 501, title: Leaked signing key, message_id: M02, traversal_path: "1/101/" }
+  slack_workspace:
+    - { id: T01, name: Orbit, namespace_id: 100, traversal_path: "1/100/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }
+    - { id: T02, name: Vault, namespace_id: 101, traversal_path: "1/101/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }
+
+  slack_message:
+    - { id: m1, workspace: T01, channel: orbit-dev, author: ann, sent_at: "2026-11-02 17:00:00", issue_id: "10100", merge_request_id: 2000, traversal_path: "1/100/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }
+    - { id: m2, workspace: T01, channel: orbit-dev, author: ben, sent_at: "2026-11-02 18:00:00", issue_id: "10100", merge_request_id: 2000, traversal_path: "1/100/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }
+    - { id: m3, workspace: T01, channel: orbit-dev, author: cam, sent_at: "2026-11-03 12:00:00", issue_id: null, merge_request_id: null, traversal_path: "1/100/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }
+    - { id: m4, workspace: T01, channel: random, author: ann, sent_at: "2026-11-03 13:00:00", issue_id: "10101", merge_request_id: 2001, traversal_path: "1/100/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }
+    - { id: m5, workspace: T02, channel: orbit-dev, author: dee, sent_at: "2026-11-04 09:00:00", issue_id: "10200", merge_request_id: 2002, traversal_path: "1/101/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }
+    - { id: m6, workspace: T01, channel: orbit-dev, author: ann, sent_at: "2026-11-05 09:00:00", issue_id: "10100", merge_request_id: null, traversal_path: "1/100/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }
+    - { id: m7, workspace: T02, channel: orbit-dev, author: dee, sent_at: "2026-11-05 10:00:00", issue_id: "10200", merge_request_id: null, traversal_path: "1/101/", _siphon_replicated_at: "2026-11-01 10:00:00", _siphon_watermark: "2026-11-01 10:00:00", _siphon_deleted: false }

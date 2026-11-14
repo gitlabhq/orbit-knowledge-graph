@@ -1,6 +1,6 @@
 kind: storage
 package: peers.lake
-store: slack
+store: slack_live
 entities:
   TeamMessage:
     complete: true

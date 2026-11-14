@@ -171,6 +171,8 @@ async fn a_duckdb_frontend_looks_up_a_live_stages_workspaces_on_duckdb() {
             json!("deploy to staging at 5pm"),
             json!("deploy uses the production keys"),
             json!("lunch at noon?"),
+            json!("rollback of the TLS keys starts at noon"),
+            json!("the rollback plan for the login fix is ready"),
         ]
     );
 
@@ -178,7 +180,11 @@ async fn a_duckdb_frontend_looks_up_a_live_stages_workspaces_on_duckdb() {
     assert_eq!(calls(&one, 1), [Workspaces::Only(vec!["T01".into()])]);
     assert_eq!(
         column(one, "m_text"),
-        [json!("deploy to staging at 5pm"), json!("lunch at noon?")]
+        [
+            json!("deploy to staging at 5pm"),
+            json!("lunch at noon?"),
+            json!("the rollback plan for the login fix is ready"),
+        ]
     );
 
     let none = lake.run(MESSAGES, &["1/101/"]).await;
@@ -476,7 +482,11 @@ async fn a_lookup_past_the_stage_cap_fails_and_one_at_it_runs() {
     assert_eq!(workspaces.len(), 1000);
     assert_eq!(
         column(ran, "m_text"),
-        [json!("deploy to staging at 5pm"), json!("lunch at noon?")]
+        [
+            json!("deploy to staging at 5pm"),
+            json!("lunch at noon?"),
+            json!("the rollback plan for the login fix is ready"),
+        ]
     );
 
     let past = teams(1000);

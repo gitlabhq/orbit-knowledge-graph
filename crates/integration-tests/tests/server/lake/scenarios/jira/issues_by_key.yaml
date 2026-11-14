@@ -1,0 +1,42 @@
+cases:
+  - name: allowed
+    description: A lake-only read finds Jira issues by key on the Jira lake under the traversal_path filter the ETL rows carry
+    config:
+      security: default
+    query: |
+      MATCH (i:JiraIssue) WHERE i.key IN ['ORB-1', 'ORB-2', 'SEC-1'] RETURN i.key, i.summary ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 3
+      skip_requirements: ["filter:key"]
+      nodes:
+        JiraIssue:
+          ids: [10100, 10101, 10200]
+          order: [10100, 10101, 10200]
+          rows:
+            - { id: "10100", key: ORB-1, summary: Fix the login redirect }
+            - { id: "10101", key: ORB-2, summary: Flaky deploy job }
+            - { id: "10200", key: SEC-1, summary: Rotate the TLS keys }
+
+  - name: partly_denied
+    description: A group reader keeps its group's issues and loses the private group's
+    config:
+      security: group_100
+    query: |
+      MATCH (i:JiraIssue) WHERE i.key IN ['ORB-1', 'ORB-2', 'SEC-1'] RETURN i.key, i.summary ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 2
+      skip_requirements: ["filter:key"]
+      nodes:
+        JiraIssue:
+          ids: [10100, 10101]
+          order: [10100, 10101]
+
+  - name: empty
+    description: A caller whose group holds no Jira rows reads none
+    config:
+      security: no_jira_rows
+    query: |
+      MATCH (i:JiraIssue) WHERE i.key IN ['ORB-1', 'ORB-2', 'SEC-1'] RETURN i.key, i.summary LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: ["filter:key"]

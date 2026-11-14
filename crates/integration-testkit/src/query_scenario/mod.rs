@@ -635,6 +635,19 @@ async fn execute_output(
     redaction: &MockRedactionService,
     peers: &PeerExecutors,
 ) -> PipelineOutput {
+    try_execute_output(ctx, query, data_model, security, redaction, peers)
+        .await
+        .unwrap_or_else(|error| panic!("the DAG should run: {error}"))
+}
+
+async fn try_execute_output(
+    ctx: &TestContext,
+    query: &str,
+    data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
+    security: &SecurityContext,
+    redaction: &MockRedactionService,
+    peers: &PeerExecutors,
+) -> Result<PipelineOutput, PipelineError> {
     let resolver = Arc::new(SeededColumnResolver::from_seed_file());
     let mut resolver_registry = ColumnResolverRegistry::new();
     resolver_registry.register("gitaly", resolver as _);
@@ -672,12 +685,8 @@ async fn execute_output(
     let mut obs = NoOpObserver;
     RoutingStage { connections }
         .execute(&mut pipeline_ctx, &mut obs)
-        .await
-        .expect("the query should route");
-    let executed = dag
-        .execute(&mut pipeline_ctx, &mut obs)
-        .await
-        .expect("the DAG should run");
+        .await?;
+    let executed = dag.execute(&mut pipeline_ctx, &mut obs).await?;
     let compiled = pipeline_ctx
         .compiled
         .clone()
@@ -702,13 +711,13 @@ async fn execute_output(
         .await
         .expect("hydration should succeed");
 
-    pipeline_output(
+    Ok(pipeline_output(
         &compiled,
         hydration_output.query_result,
         hydration_output.redacted_count,
         hydration_output.result_context,
         compiled.base.sql.clone(),
-    )
+    ))
 }
 
 fn pipeline_output(

@@ -291,11 +291,11 @@ fn a_check_less_entity_fails_the_bind_when_its_scope_answer_is_not_exact() {
     };
     let entities = [
         "GitLabRef",
-        "Incident",
         "JiraComment",
         "JiraIssue",
         "JiraProject",
         "JiraUser",
+        "SlackMessage",
         "SlackWorkspace",
     ];
     let expected: Vec<String> = entities

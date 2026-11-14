@@ -33,6 +33,7 @@ entities:
       merge_request_id: {backend: {type: BIGINT}}
       created_at: {immutable: true, backend: {type: TIMESTAMP}}
       traversal_path: {backend: {type: VARCHAR}}
+    exclude: [description]
     access: {filter: [id, key, merge_request_id], text: [summary], order: [id]}
   JiraUser:
     complete: true

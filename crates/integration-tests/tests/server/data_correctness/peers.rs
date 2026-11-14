@@ -37,7 +37,10 @@ struct Peers {
 }
 
 fn guilds_deployments() -> Deployments {
-    Deployments::parse("guilds:\n  connections: [main, releases, lake, data_extraction]\n").unwrap()
+    Deployments::parse(
+        "guilds:\n  connections: [main, releases, lake, data_extraction, jira_lake, slack_lake]\n",
+    )
+    .unwrap()
 }
 
 fn model(packages: &Packages, deployments: &Deployments, shape: &str) -> Arc<Model> {

@@ -34,10 +34,7 @@ async fn data_correctness_dag() {
     let ctx = data_correctness_context().await;
     dag::seed(&ctx).await;
     dag::query_4_drops_the_files_their_read_code_check_denies(&ctx).await;
-    dag::merge_requests_join_the_slack_messages_that_discuss_them(&ctx).await;
-    dag::the_joined_rows_carry_the_edges_they_cross(&ctx).await;
     dag::a_code_search_reads_only_the_repositories_the_caller_can_read(&ctx).await;
-    dag::merge_requests_hand_slack_only_the_keys_their_check_allows(&ctx).await;
     dag::a_head_under_none_keeps_the_files_its_via_chain_admits(&ctx).await;
     peers::seed(&ctx).await;
     peers::rollouts_on_one_clickhouse_join_releases_on_another_by_uuid(&ctx).await;

@@ -5,4 +5,4 @@ server:
 local:
   connections: [local]
 demo:
-  connections: [main, code_indexing, data_extraction, jira_lake]
+  connections: [main, code_indexing, data_extraction, jira_lake, slack_lake]

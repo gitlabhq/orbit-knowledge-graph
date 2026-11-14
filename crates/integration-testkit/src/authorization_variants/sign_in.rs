@@ -1,5 +1,5 @@
-//! A seeded fake of Slack: the sign-in a delegated check asks for, and a check of messages keyed
-//! by Slack's string ids.
+//! A seeded fake of a delegated service such as Slack or Jira: the sign-in a delegated check asks
+//! for, and a check of rows keyed by the service's string ids.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -12,22 +12,22 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SlackOptions {
+pub struct SignInOptions {
     /// The sign-in handle the Data Extraction Service holds for each caller subject.
     pub handles: BTreeMap<String, String>,
-    /// The message ids each caller subject may read.
+    /// The row ids each caller subject may read.
     pub readable: BTreeMap<String, Vec<String>>,
 }
 
-/// Answers `Credentials` with the caller's Slack sign-in handle and `Check` with the messages
+/// Answers `Credentials` with the caller's sign-in handle and `Check` with the rows
 /// the caller may read; a caller without either fails closed.
-pub struct SlackSignIn(SlackOptions);
+pub struct SignIn(SignInOptions);
 
-impl Module for SlackSignIn {
-    const KIND: &'static str = "fake.slack";
-    type Options = SlackOptions;
+impl Module for SignIn {
+    const KIND: &'static str = "fake.sign_in";
+    type Options = SignInOptions;
 
-    fn build(options: SlackOptions) -> Result<Self, AuthError> {
+    fn build(options: SignInOptions) -> Result<Self, AuthError> {
         Ok(Self(options))
     }
 
@@ -41,7 +41,7 @@ impl Module for SlackSignIn {
 }
 
 #[async_trait]
-impl Provider<Credentials> for SlackSignIn {
+impl Provider<Credentials> for SignIn {
     async fn call(&self, query: Credentials) -> Result<Credential, AuthError> {
         let handle = self.0.handles.get(query.caller.subject()).ok_or_else(|| {
             AuthError::Denied(format!(
@@ -58,7 +58,7 @@ impl Provider<Credentials> for SlackSignIn {
 }
 
 #[async_trait]
-impl Provider<Check> for SlackSignIn {
+impl Provider<Check> for SignIn {
     async fn call(&self, query: Check) -> Result<Vec<BTreeSet<Key>>, AuthError> {
         let readable: BTreeSet<Key> = self
             .0

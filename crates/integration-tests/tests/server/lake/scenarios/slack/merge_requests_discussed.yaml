@@ -1,0 +1,51 @@
+cases:
+  - name: allowed
+    description: The bounded merge request stage on ClickHouse and the Slack lake stage on DuckDB, which holds merge_request_id, join on DISCUSSES
+    config:
+      security: default
+    query: |
+      MATCH (mr:MergeRequest)<-[:DISCUSSES]-(m:SlackMessage) WHERE mr.id <= 2002 RETURN mr.title, m.author, m.channel ORDER BY m.author LIMIT 20
+    expect:
+      node_count: 7
+      skip_requirements: [node_ids, order_by, "filter:id", "relationship:DISCUSSES"]
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001, 2002]
+        SlackMessage:
+          rows:
+            - { id: m1, author: ann, channel: orbit-dev }
+            - { id: m4, author: ann, channel: random }
+            - { id: m2, author: ben, channel: orbit-dev }
+            - { id: m5, author: dee, channel: orbit-dev }
+      edge_count:
+        DISCUSSES: 4
+
+  - name: partly_denied
+    description: A group reader keeps its group's merge requests and messages; the private group's pair drops on both connections
+    config:
+      security: group_100
+    query: |
+      MATCH (mr:MergeRequest)<-[:DISCUSSES]-(m:SlackMessage) WHERE mr.id <= 2002 RETURN mr.title, m.author, m.channel ORDER BY m.author LIMIT 20
+    expect:
+      node_count: 5
+      skip_requirements: [node_ids, order_by, "filter:id", "relationship:DISCUSSES"]
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001]
+        SlackMessage:
+          rows:
+            - { id: m1, author: ann, channel: orbit-dev }
+            - { id: m4, author: ann, channel: random }
+            - { id: m2, author: ben, channel: orbit-dev }
+      edge_count:
+        DISCUSSES: 3
+
+  - name: empty
+    description: A caller whose group holds neither the merge requests nor Slack rows reads nothing on either side
+    config:
+      security: no_jira_rows
+    query: |
+      MATCH (mr:MergeRequest)<-[:DISCUSSES]-(m:SlackMessage) WHERE mr.id <= 2002 RETURN mr.title, m.author, m.channel LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: [node_ids, "filter:id", "relationship:DISCUSSES"]

@@ -17,7 +17,7 @@ use crate::authorization_variants::{deployment, registry};
 use crate::dag_fakes::{SeededGraph, dag_executors, dag_model};
 use crate::mock_redaction::MockRedactionService;
 
-const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, mr.title, m.author, m.text ORDER BY mr.iid LIMIT 10";
+const DEVELOPED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DEVELOPED_IN]-(i:JiraIssue) RETURN mr.iid, mr.title, i.key, i.summary ORDER BY mr.iid LIMIT 10";
 
 /// The server's DAG stage over the seeded fakes, checking rows through the providers the `dag`
 /// deployment binds: its `rails` checks allow project 42 only.
@@ -95,10 +95,15 @@ async fn served_output() -> PipelineOutput {
     let graph = Arc::new(SeededGraph(vec![
         row(json!({"mr_iid": 1, "mr_title": "Add feature A", "mr_id": 2000})),
         row(json!({"mr_iid": 2, "mr_title": "Fix bug B", "mr_id": 2001})),
-        row(json!({"scope_id": "T01", "scope1_id": 100})),
+        row(
+            json!({"i_key": "ORB-1", "i_summary": "Fix the login redirect", "i_merge_request_id": 2000, "i_id": "10100"}),
+        ),
+        row(
+            json!({"i_key": "ORB-2", "i_summary": "Flaky deploy job", "i_merge_request_id": 2001, "i_id": "10101"}),
+        ),
     ]));
     let dag = served_stage(&model, graph);
-    let mut ctx = context(&model, DISCUSSED);
+    let mut ctx = context(&model, DEVELOPED);
     let mut obs = NoOpObserver;
     RoutingStage {
         connections: dag.connections.clone(),
@@ -150,12 +155,12 @@ async fn the_server_formats_a_joined_response_like_a_single_stage_one() {
     assert_eq!(output.redacted_count, 1);
 
     let (header, rows) = GqlFormatter.table(&output);
-    assert_eq!(header, ["mr", "m"]);
+    assert_eq!(header, ["mr", "i"]);
     assert_eq!(
         rows,
         [[
             "(:MergeRequest {id: 2000, iid: 1, title: \"Add feature A\"})",
-            "(:SlackMessage {id: \"m1\", author: \"ann\", text: \"deploy to staging at 5pm\"})",
+            "(:JiraIssue {id: \"10100\", key: \"ORB-1\", summary: \"Fix the login redirect\"})",
         ]]
     );
 
@@ -169,16 +174,16 @@ async fn the_server_formats_a_joined_response_like_a_single_stage_one() {
     assert_eq!(
         found,
         [
+            ("\"JiraIssue\"".to_string(), "\"10100\"".to_string()),
             ("\"MergeRequest\"".to_string(), "\"2000\"".to_string()),
-            ("\"SlackMessage\"".to_string(), "\"m1\"".to_string()),
         ]
     );
     assert_eq!(
         graph["edges"],
-        json!([{"from": "SlackMessage", "from_id": "m1", "to": "MergeRequest", "to_id": "2000", "type": "DISCUSSES"}])
+        json!([{"from": "JiraIssue", "from_id": "10100", "to": "MergeRequest", "to_id": "2000", "type": "DEVELOPED_IN"}])
     );
 
     let toon = ToonFormatter.format(&output).to_string();
-    assert!(toon.contains("deploy to staging at 5pm"), "{toon}");
+    assert!(toon.contains("Fix the login redirect"), "{toon}");
     assert!(!toon.contains("Fix bug B"), "{toon}");
 }

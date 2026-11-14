@@ -12,9 +12,12 @@ entities:
   JiraIssue:
     scope: namespace
     permission: read
-    enforce: {duckdb: {scope_key: traversal_path}}
+    enforce:
+      duckdb: {scope_key: traversal_path}
+      live: {scope_key: {via: IN_JIRA_PROJECT}}
+    checks: [{provider: jira, kind: delegated}]
     properties:
-      open: [id, key, summary, status, status_category, jira_project_id, assignee_id, merge_request_id, created_at]
+      open: [id, key, summary, description, status, status_category, jira_project_id, assignee_id, merge_request_id, created_at]
       hidden: [traversal_path]
 
   JiraUser:
