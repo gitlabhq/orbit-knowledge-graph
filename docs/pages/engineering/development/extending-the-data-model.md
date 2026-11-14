@@ -955,7 +955,7 @@ The loader collects every error with its package and fails once. A missing decla
 - A `via` chain that does not reach an entity that holds the scope key, or a step with more than one target.
 - A `via` chain whose entities' complete stores sit on different connections in the deployment shape.
 - An `enforce` entry of `none` with no `checks`.
-- A `Credentials` check on an entity that no delegating backend stores.
+- An entity with a `Credentials` check that no delegating backend stores in any loaded package. This check runs on all the packages, before the deployment-shape filter.
 - A provider name the deployment does not bind, or one bound to a module that does not answer the query the check needs.
 - A user-scoped entity whose owner relationship does not reach `User` or allows more than one owner per row. The owner relationship must be a foreign key on the entity's row.
 - An unknown deployment shape.

@@ -366,6 +366,8 @@ With `checks: open`, the rows that a global read admits come back without a row 
 Rows that the Data Extraction Service writes carry `traversal_path` from its ETL, and that path is their scope key. A `Credentials` check is answered only on a backend that delegates, for example the live backend for a Slack message read.
 Reads of the same entity on other backends rely on their scope filter, so a lake read uses `scope_key: traversal_path`.
 A deployment shape can serve an integration's lake store but no delegating backend for the entity. In that shape, the entity's `Credentials` check does not apply. Its reads rely on the lake's scope filter, `scope_key: traversal_path` from the ETL.
+A lake read can return a row that the live service would hide from the caller, such as a private channel's message. Lake reads rely on the namespace scope that the ETL assigns, so the extraction service must scope private source data narrowly.
+The loader checks that some delegating backend stores each entity with a `Credentials` check. It runs this check on all loaded packages, before the deployment-shape filter, so it catches an authoring mistake. A shape that serves no delegating store for the entity stays valid.
 
 Every property and edge attribute has exactly one access class. If it has none or two, the load fails. The security phase enforces the classes on every plan, including plans that a phase builds directly.
 
