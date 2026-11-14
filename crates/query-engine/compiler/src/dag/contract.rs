@@ -54,9 +54,11 @@ impl Contract {
             .position(|column| column.output == *output)
     }
 
-    pub(super) fn push(&mut self, output: Output, data_type: ColumnType) {
-        if self.position(&output).is_none() {
+    /// The position of `output`, added at the end when the contract lacks it.
+    pub(super) fn push(&mut self, output: Output, data_type: ColumnType) -> usize {
+        self.position(&output).unwrap_or_else(|| {
             self.columns.push(Column { output, data_type });
-        }
+            self.columns.len() - 1
+        })
     }
 }

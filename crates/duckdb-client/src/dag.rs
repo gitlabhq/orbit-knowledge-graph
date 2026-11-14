@@ -15,8 +15,7 @@ use shared::{QueryExecution, QueryExecutionStats};
 
 use crate::DuckDbClient;
 
-/// Runs each relational stage's SQL, and each scope lookup a remote stage needs, on one local
-/// database.
+/// Runs each relational stage's SQL on one local database.
 pub struct DuckDbExecutor {
     pub client: Arc<Mutex<DuckDbClient>>,
 }
@@ -30,19 +29,8 @@ impl Executor for DuckDbExecutor {
     ) -> Result<Executed, ExecutorError> {
         let sql = match request {
             Request::Query(compiled) => compiled.base.render(),
-            Request::Lookup(lookup) => compiler::ParameterizedQuery {
-                sql: lookup.query.sql.clone(),
-                params: lookup.query.parameters.clone(),
-                columns: Vec::new(),
-                result_context: Default::default(),
-                query_config: Default::default(),
-                dialect: compiler::SqlDialect::DuckDb,
-            }
-            .render(),
             other => {
-                return Err(ExecutorError(format!(
-                    "DuckDB runs queries and lookups, not {other:?}"
-                )));
+                return Err(ExecutorError(format!("DuckDB runs queries, not {other:?}")));
             }
         };
         let start = std::time::Instant::now();

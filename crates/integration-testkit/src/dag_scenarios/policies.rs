@@ -172,8 +172,9 @@ async fn a_code_read_under_none_searches_the_named_repositories_through_its_chec
     assert!(json_rows(&ran.outcome.unwrap().executed.batches).is_empty());
 }
 
-/// `Head` enforces `none` and the `File`s at each head enforce `via`: the stage looks up the
-/// repositories of `File`'s chain, so it keeps the readable one instead of dropping them all.
+/// `Head` enforces `none` and the `File`s at each head enforce `via`: `File`'s lookup reads the
+/// projects of the heads' key set, which the step between them holds equal to the files'
+/// projects, so the stage keeps the readable one instead of dropping them all.
 #[tokio::test]
 async fn a_none_entity_before_a_via_entity_keeps_the_readable_repositories() {
     let model = crate::dag_fakes::heads_under_none(dag_packages())
@@ -182,11 +183,22 @@ async fn a_none_entity_before_a_via_entity_keeps_the_readable_repositories() {
     let merge_requests = vec![
         json!({"mr_iid": 1, "mr_id": 2000, "mr_project_id": 42, "mr_source_branch": "feature-a"}),
         json!({"mr_iid": 2, "mr_id": 2001, "mr_project_id": 77, "mr_source_branch": "fix-b"}),
+        json!({"scope_id": 42}),
     ];
     let checks = AllowedKeys::checks("project", [Key::Int(42), Key::Int(77)]);
     let ran = run_on(&model, QUERY_4, merge_requests, &checks).await;
+    let bound = ran.events.iter().find_map(|event| match event {
+        query_engine::shared::dag::Event::Keys {
+            from: 0,
+            to: 1,
+            sample,
+            ..
+        } => Some(sample.clone()),
+        _ => None,
+    });
+    assert_eq!(bound, Some(vec![Key::Int(42), Key::Int(77)]));
     let code = ran
-        .rendered(1)
+        .rendered(2)
         .into_iter()
         .find_map(|request| match request {
             Rendered::Code(code) => Some(code),

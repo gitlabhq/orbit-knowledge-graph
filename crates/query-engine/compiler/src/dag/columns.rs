@@ -128,14 +128,15 @@ impl Cut<'_> {
         Ok(needed)
     }
 
-    /// The key set a crossing hands its consumer, on properties the consumer's store accepts.
+    /// The key set a crossing hands its consumer, on properties the consumer's store accepts;
+    /// `stages` holds each group's stage.
     pub(super) fn keys(
         &self,
         crossing: &Crossing,
         order: &[usize],
+        stages: &[usize],
         contracts: &[Contract],
     ) -> Result<KeyInput> {
-        let stage = |group: usize| order.iter().position(|g| *g == group).unwrap_or_default();
         let (producer, consumer) = crossing.sides(order, |binding| self.group(binding));
         let producer_group = self.group(producer[0].0);
         let binding = self.query.name(consumer[0].0).to_string();
@@ -166,7 +167,7 @@ impl Cut<'_> {
             })
             .collect::<Result<_>>()?;
         Ok(KeyInput {
-            from: stage(producer_group),
+            from: stages[producer_group],
             positions,
             binding,
             properties: consumer.iter().map(|(_, property)| *property).collect(),

@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use compiler::dag::{Backend, Connections, Contract, Env, Frontend, Peer, Request, Source};
 use compiler::orbit_authorization::Key;
 use compiler::orbit_authorization::{Answers, AuthError, Check, Checks, Module, Need, Provider};
-use compiler::remote::Resolves;
 use query_data_model::catalog::Row;
 use query_data_model::implementations::live::DataExtraction;
 use query_data_model::implementations::orbit_code::{CodeSearch, RequestField};
@@ -17,9 +16,9 @@ use query_engine::shared::dag::{
     DagError, Event, Executed, Executor, ExecutorError, Executors, Outcome, Recording, Runner,
     from_rows,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::seeded_remote::{SeededCodeSearch, SeededDataExtraction, seeded_scopes};
+use crate::seeded_remote::{SeededCodeSearch, SeededDataExtraction};
 
 fn unexpected(request: &Request) -> ExecutorError {
     ExecutorError(format!("this fake runs no {request:?}"))
@@ -137,8 +136,8 @@ impl Executor for LiveExecutor {
 }
 
 /// The graph connection in tests that assert plans without a container: each query returns the
-/// seeded rows under the names its SQL gives its columns, and each scope lookup the seeded
-/// namespaces.
+/// seeded rows that hold any of the names its SQL gives its columns, so each stage reads the rows
+/// seeded for its own bindings.
 pub struct SeededGraph(pub Vec<Row>);
 
 #[async_trait]
@@ -148,36 +147,20 @@ impl Executor for SeededGraph {
         request: &Request,
         contract: Option<&Contract>,
     ) -> Result<Executed, ExecutorError> {
-        match request {
-            Request::Query(_) if self.0.is_empty() => Ok(Executed::default()),
-            Request::Query(compiled) => match contract {
-                Some(_) => batch(&self.0, &compiled.base.columns, contract),
-                None => named(&self.0, &compiled.base.columns),
-            },
-            Request::Lookup(lookup) => {
-                let seeded = seeded_scopes();
-                let row = |id: Value, path: &str| {
-                    json!({compiler::remote::KEY: id, lookup.scope.as_str(): path})
-                        .as_object()
-                        .cloned()
-                        .unwrap_or_default()
-                };
-                let rows: Vec<Row> = match lookup.resolves {
-                    Resolves::Repositories => seeded
-                        .repositories
-                        .iter()
-                        .map(|(id, path)| row(Value::from(*id), path.as_str()))
-                        .collect(),
-                    Resolves::Workspaces => seeded
-                        .workspaces
-                        .iter()
-                        .map(|(id, path)| row(Value::from(id.as_str()), path.as_str()))
-                        .collect(),
-                };
-                let fields = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
-                named(&rows, &fields)
-            }
-            other => Err(unexpected(other)),
+        let Request::Query(compiled) = request else {
+            return Err(unexpected(request));
+        };
+        let columns = &compiled.base.columns;
+        let rows: Vec<Row> = self
+            .0
+            .iter()
+            .filter(|row| columns.iter().any(|column| row.contains_key(column)))
+            .cloned()
+            .collect();
+        match (rows.is_empty(), contract) {
+            (true, _) => Ok(Executed::default()),
+            (false, Some(_)) => batch(&rows, columns, contract),
+            (false, None) => named(&rows, columns),
         }
     }
 }

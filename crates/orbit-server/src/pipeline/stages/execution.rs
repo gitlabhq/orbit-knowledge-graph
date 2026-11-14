@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
 use clickhouse_client::{ArrowClickHouseClient, QuerySummary};
 
+use query_engine::compiler::ParameterizedQuery;
 use query_engine::compiler::dag::{Contract, Request};
 use query_engine::shared::dag::{Executed, Executor, ExecutorError};
 use query_engine::shared::{QueryExecution, QueryExecutionStats};
@@ -20,12 +20,6 @@ pub struct ClickHouseExecutor {
     pub settings: Vec<(String, String)>,
 }
 
-struct Statement<'a> {
-    sql: &'a str,
-    params: &'a HashMap<String, orbit_utils::query_types::ParamValue>,
-    rendered: String,
-}
-
 #[async_trait]
 impl Executor for ClickHouseExecutor {
     async fn execute(
@@ -34,28 +28,15 @@ impl Executor for ClickHouseExecutor {
         contract: Option<&Contract>,
     ) -> Result<Executed, ExecutorError> {
         let statement = match request {
-            Request::Query(compiled) => Statement {
-                sql: &compiled.base.sql,
-                params: &compiled.base.params,
-                rendered: compiled.base.render(),
-            },
-            Request::Hydration(query) => Statement {
-                sql: &query.sql,
-                params: &query.params,
-                rendered: query.render(),
-            },
-            Request::Lookup(lookup) => Statement {
-                sql: &lookup.query.sql,
-                params: &lookup.query.parameters,
-                rendered: lookup.query.sql.clone(),
-            },
+            Request::Query(compiled) => &compiled.base,
+            Request::Hydration(query) => query.as_ref(),
             other => {
                 return Err(ExecutorError(format!(
                     "the ClickHouse connection runs SQL, not {other:?}"
                 )));
             }
         };
-        let (batches, execution) = self.run(&statement).await?;
+        let (batches, execution) = self.run(statement).await?;
         let batches = match contract {
             Some(contract) => query_engine::shared::dag::decode(batches, contract)?,
             None => batches,
@@ -70,17 +51,17 @@ impl Executor for ClickHouseExecutor {
 impl ClickHouseExecutor {
     async fn run(
         &self,
-        statement: &Statement<'_>,
+        statement: &ParameterizedQuery,
     ) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), ExecutorError> {
         let start = Instant::now();
         let query_id = correlation::query_id(&self.label.replace(':', "-"));
         let mut query = self
             .client
-            .query(statement.sql)
+            .query(&statement.sql)
             .with_setting("query_id", &query_id)
             .with_setting("log_comment", &self.log_comment)
             .with_settings(self.settings.clone());
-        for (key, param) in statement.params {
+        for (key, param) in &statement.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.data_type);
         }
         let (batches, summary) = query
@@ -99,7 +80,7 @@ impl ClickHouseExecutor {
         );
         let execution = QueryExecution {
             label: self.label.clone(),
-            rendered_sql: statement.rendered.clone(),
+            rendered_sql: statement.render(),
             query_id,
             elapsed_ms: elapsed.as_secs_f64() * 1000.0,
             stats,

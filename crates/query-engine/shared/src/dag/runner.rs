@@ -8,8 +8,8 @@ use std::time::Instant;
 
 use arrow::record_batch::RecordBatch;
 use compiler::dag::{
-    Compiled, Dag, Env, Inputs, KeySet, Request, Source, Stage, StageId, StageQuery, bind, compile,
-    split_query,
+    Compiled, Dag, Env, Input, Inputs, KeySet, Request, Source, Stage, StageId, StageQuery, bind,
+    compile, split_query,
 };
 use compiler::passes::result_contract::ResultContext;
 use compiler::{CompiledQueryContext, HydrationRequest, ParameterizedQuery, QueryError};
@@ -172,7 +172,13 @@ impl<'r> Runner<'r> {
     ) -> Result<(Option<Request>, Executed), DagError> {
         let id = stage.id;
         let mut sets = Vec::new();
-        for input in stage.keys() {
+        let mut scopes = Vec::new();
+        for input in &stage.inputs {
+            let (input, into) = match input {
+                Input::Keys(input) => (input, &mut sets),
+                Input::Scope(input) => (input, &mut scopes),
+                Input::Rows { .. } => continue,
+            };
             let produced = results.get(&input.from).map_or(&[][..], Vec::as_slice);
             let keys = rows::keys(produced, &input.positions, &input.types)?;
             self.emit(|| Event::Keys {
@@ -182,12 +188,12 @@ impl<'r> Runner<'r> {
                 count: keys.len(),
                 sample: keys.iter().take(KEY_SAMPLE).cloned().collect(),
             });
-            sets.push(KeySet {
+            into.push(KeySet {
                 input: input.clone(),
                 keys,
             });
         }
-        if sets.iter().any(|set| set.keys.is_empty()) {
+        if sets.iter().chain(&scopes).any(|set| set.keys.is_empty()) {
             return Ok((None, Executed::default()));
         }
         let mut inputs = Inputs {
@@ -203,13 +209,17 @@ impl<'r> Runner<'r> {
                 self.env.limits,
                 connections,
             )?;
-            if let compiler::dag::Runs::On { connection, stores } = &stage.runs
-                && let Some(target) = self.env.connections.target(*connection)
+            if let Some(target) = stage
+                .runs
+                .connection()
+                .and_then(|connection| self.env.connections.target(connection))
             {
-                match remote::admitted(self, id, target, stores, &bound).await? {
-                    Some(admitted) => inputs.admitted = Some(admitted),
-                    None => return Ok((None, Executed::default())),
+                let admitted =
+                    compiler::remote::admitted(target, &bound.plan, self.env.grants, &scopes)?;
+                if admitted.is_empty() {
+                    return Ok((None, Executed::default()));
                 }
+                inputs.admitted = Some(admitted);
             }
             stage.query = StageQuery::Gql(bound);
         }

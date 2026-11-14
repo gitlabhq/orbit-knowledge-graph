@@ -4,7 +4,7 @@
 mod code;
 mod live;
 
-pub use code::{named_repositories, plan as plan_code};
+pub use code::plan as plan_code;
 pub use live::plan as plan_live;
 
 use std::sync::Arc;

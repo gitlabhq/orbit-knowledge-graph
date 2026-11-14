@@ -321,7 +321,7 @@ fn group_of(groups: &[Group], binding: Ref) -> Option<usize> {
 }
 
 /// The foreign key of the step's one relationship variant, as the key pair the Combine stage joins on.
-fn crossing(
+pub(super) fn crossing(
     query: Query<'_>,
     index: usize,
     step: Step<'_>,

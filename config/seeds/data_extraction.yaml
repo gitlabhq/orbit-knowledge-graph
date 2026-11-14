@@ -1,6 +1,5 @@
 workspaces:
   T01:
-    traversal_path: 1/9970/
     messages:
       - id: m1
         merge_request_id: 2000
@@ -30,7 +29,6 @@ workspaces:
         sent_at: "2026-11-03T13:00:00Z"
         visible_to: [alice, bob]
   T02:
-    traversal_path: 1/555/
     messages:
       - id: m5
         merge_request_id: 2000

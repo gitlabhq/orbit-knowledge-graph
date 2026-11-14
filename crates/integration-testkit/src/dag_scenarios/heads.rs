@@ -8,18 +8,35 @@ use query_engine::shared::dag::Event;
 use serde_json::json;
 
 use super::single::ops;
-use super::{caller, row, run, run_with};
+use super::{caller, projects, row, run, run_with};
 use crate::dag_fakes::AllowedKeys;
 
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
+/// Two open merge requests, and the one project of theirs the caller's lookup returns.
 fn open_merge_requests() -> Vec<query_data_model::catalog::Row> {
-    vec![
+    let mut rows = vec![
         row(
             json!({"mr_iid": 1, "mr_id": 2000, "mr_project_id": 42, "mr_source_branch": "feature-a"}),
         ),
         row(json!({"mr_iid": 2, "mr_id": 2001, "mr_project_id": 77, "mr_source_branch": "fix-b"})),
-    ]
+    ];
+    rows.extend(projects(&[42]));
+    rows
+}
+
+/// The scope keys the project lookup at `from` hands the heads and the files of a code stage.
+fn scopes(from: usize) -> [Input; 2] {
+    let scope = |binding: &str, entity: &str| {
+        Input::Scope(KeyInput {
+            from,
+            positions: vec![0],
+            binding: binding.into(),
+            properties: super::properties(entity, &["project_id"]),
+            types: vec![query_data_model::DataType::Int],
+        })
+    };
+    [scope("h", "Head"), scope("f", "File")]
 }
 
 #[tokio::test]
@@ -60,23 +77,43 @@ async fn open_merge_requests_search_their_branch_heads_in_orbit_next() {
     let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
     assert_eq!(
         backends,
-        [Backend::ClickHouse, Backend::OrbitCode, Backend::Combine]
+        [
+            Backend::ClickHouse,
+            Backend::ClickHouse,
+            Backend::OrbitCode,
+            Backend::Combine
+        ]
     );
     assert_eq!(
         split[1].inputs,
         [Input::Keys(KeyInput {
             from: 0,
-            positions: vec![1, 2],
-            binding: "h".into(),
-            properties: super::properties("Head", &["project_id", "branch"]),
-            types: vec![
-                query_data_model::DataType::Int,
-                query_data_model::DataType::String
-            ],
+            positions: vec![1],
+            binding: "scope".into(),
+            properties: super::properties("Project", &["id"]),
+            types: vec![query_data_model::DataType::Int],
         })]
     );
+    let [head_scope, file_scope] = scopes(1);
+    assert_eq!(
+        split[2].inputs,
+        [
+            Input::Keys(KeyInput {
+                from: 0,
+                positions: vec![1, 2],
+                binding: "h".into(),
+                properties: super::properties("Head", &["project_id", "branch"]),
+                types: vec![
+                    query_data_model::DataType::Int,
+                    query_data_model::DataType::String
+                ],
+            }),
+            head_scope,
+            file_scope,
+        ]
+    );
     let keys = ran.events.iter().find_map(|event| match event {
-        Event::Keys { sample, .. } => Some(sample.clone()),
+        Event::Keys { to: 2, sample, .. } => Some(sample.clone()),
         _ => None,
     });
     assert_eq!(
@@ -94,7 +131,7 @@ async fn open_merge_requests_search_their_branch_heads_in_orbit_next() {
         "join keys are never excerpted: {sql}"
     );
     assert_eq!(
-        ops(&ran.plan(1, false)),
+        ops(&ran.plan(2, false)),
         [
             "Repositories",
             "Branches",
@@ -106,11 +143,11 @@ async fn open_merge_requests_search_their_branch_heads_in_orbit_next() {
         ]
     );
     assert_eq!(
-        ops(&ran.plan(1, true))[..3],
+        ops(&ran.plan(2, true))[..3],
         ["Repositories", "Restrict", "Branches"]
     );
     let request = ran
-        .rendered(1)
+        .rendered(2)
         .into_iter()
         .find_map(|request| match request {
             Rendered::Code(request) => Some(request),
@@ -160,12 +197,20 @@ async fn a_code_stage_feeds_composite_keys_into_a_clickhouse_stage() {
     let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
     assert_eq!(
         backends,
-        [Backend::OrbitCode, Backend::ClickHouse, Backend::Combine]
+        [
+            Backend::ClickHouse,
+            Backend::OrbitCode,
+            Backend::ClickHouse,
+            Backend::Combine
+        ]
     );
+    assert!(split[0].inputs.is_empty());
+    let [head_scope, file_scope] = scopes(0);
+    assert_eq!(split[1].inputs, [file_scope, head_scope]);
     assert_eq!(
-        split[1].inputs,
+        split[2].inputs,
         [Input::Keys(KeyInput {
-            from: 0,
+            from: 1,
             positions: vec![3, 2],
             binding: "mr".into(),
             properties: super::properties("MergeRequest", &["project_id", "source_branch"]),
@@ -175,7 +220,7 @@ async fn a_code_stage_feeds_composite_keys_into_a_clickhouse_stage() {
             ],
         })]
     );
-    let Rendered::Sql { sql, params } = &ran.rendered(1)[0] else {
+    let Rendered::Sql { sql, params } = &ran.rendered(2)[0] else {
         panic!("the merge request stage renders SQL");
     };
     assert!(

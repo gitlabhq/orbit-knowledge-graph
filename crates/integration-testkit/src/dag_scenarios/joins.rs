@@ -7,17 +7,45 @@ use query_engine::shared::dag::Event;
 use serde_json::json;
 
 use super::single::ops;
-use super::{caller, row, run, run_with};
+use super::{caller, projects, row, run, run_with, workspaces};
 use crate::dag_fakes::AllowedKeys;
 
 const MENTIONS: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, mr.title, m.author, m.text ORDER BY mr.iid LIMIT 10";
 
 const BOUNDED: &str = "MATCH (p:Project)<-[:IN_PROJECT]-(f:File) WHERE p.id IN [42, 77] AND f.content MATCHES ast('compile($$$ARGS)', 'rust') RETURN p.full_path, f.path, match.line ORDER BY f.path LIMIT 20";
 
+/// Two open merge requests, and the workspace the caller's lookup returns.
 fn open_merge_requests() -> Vec<query_data_model::catalog::Row> {
-    vec![
+    let mut rows = vec![
         row(json!({"mr_iid": 1, "mr_title": "Add feature A", "mr_id": 2000})),
         row(json!({"mr_iid": 2, "mr_title": "Fix bug B", "mr_id": 2001})),
+    ];
+    rows.extend(workspaces(&[("T01", 100)]));
+    rows
+}
+
+/// The Slack stage of a query that crosses from a ClickHouse stage into Slack messages: its
+/// key set from the first stage and its scope keys from the workspace lookup.
+fn slack_inputs(
+    positions: Vec<usize>,
+    on: &str,
+    data_type: query_data_model::DataType,
+) -> [Input; 2] {
+    [
+        Input::Keys(KeyInput {
+            from: 0,
+            positions,
+            binding: "m".into(),
+            properties: super::properties("SlackMessage", &[on]),
+            types: vec![data_type],
+        }),
+        Input::Scope(KeyInput {
+            from: 1,
+            positions: vec![0],
+            binding: "m".into(),
+            properties: super::properties("SlackMessage", &["workspace"]),
+            types: vec![query_data_model::DataType::String],
+        }),
     ]
 }
 
@@ -35,21 +63,21 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
     let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
     assert_eq!(
         backends,
-        [Backend::ClickHouse, Backend::Live, Backend::Combine]
+        [
+            Backend::ClickHouse,
+            Backend::ClickHouse,
+            Backend::Live,
+            Backend::Combine
+        ]
     );
-    assert_eq!(
-        split[1].inputs,
-        [Input::Keys(KeyInput {
-            from: 0,
-            positions: vec![2],
-            binding: "m".into(),
-            properties: super::properties("SlackMessage", &["merge_request_id"]),
-            types: vec![query_data_model::DataType::Int],
-        })]
-    );
+    assert!(split[1].inputs.is_empty());
     assert_eq!(
         split[2].inputs,
-        [Input::Rows { from: 0 }, Input::Rows { from: 1 }]
+        slack_inputs(vec![2], "merge_request_id", query_data_model::DataType::Int)
+    );
+    assert_eq!(
+        split[3].inputs,
+        [Input::Rows { from: 0 }, Input::Rows { from: 2 }]
     );
     let Rendered::Sql { sql, .. } = &ran.rendered(0)[0] else {
         panic!("the merge request stage renders SQL");
@@ -60,7 +88,7 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
     );
     assert!(sql.contains("startsWith(mr.traversal_path"), "{sql}");
     let call = ran
-        .rendered(1)
+        .rendered(2)
         .into_iter()
         .find_map(|request| match request {
             Rendered::Live(call) => Some(call),
@@ -74,7 +102,7 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
     assert_eq!(call.filters[0].op, "in");
     assert_eq!(call.filters[0].value, json!([2000, 2001]));
     assert_eq!(
-        ops(&ran.plan(2, true)),
+        ops(&ran.plan(3, true)),
         [
             "Rows", "Rows", "Join", "Order", "Select", "Tag", "Excerpt", "Limit"
         ]
@@ -99,13 +127,32 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
 
 #[tokio::test]
 async fn a_code_search_is_bounded_by_the_callers_readable_projects() {
-    let projects = vec![
+    let mut graph = vec![
         row(json!({"p_full_path": "gitlab-org/orbit", "p_id": 42})),
         row(json!({"p_full_path": "secret/vault", "p_id": 77})),
     ];
-    let ran = run(BOUNDED, &caller("1/9970/"), projects).await;
+    graph.extend(projects(&[42]));
+    let ran = run(BOUNDED, &caller("1/9970/"), graph).await;
+    let split = ran
+        .events
+        .iter()
+        .find_map(|event| match event {
+            Event::Split { stages } => Some(stages.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        split[1].inputs,
+        [Input::Keys(KeyInput {
+            from: 0,
+            positions: vec![1],
+            binding: "scope".into(),
+            properties: super::properties("Project", &["id"]),
+            types: vec![query_data_model::DataType::Int],
+        })]
+    );
     let request = ran
-        .rendered(1)
+        .rendered(2)
         .into_iter()
         .find_map(|request| match request {
             Rendered::Code(request) => Some(request),
@@ -113,7 +160,7 @@ async fn a_code_search_is_bounded_by_the_callers_readable_projects() {
         })
         .unwrap();
     assert_eq!(request.repositories, [42]);
-    assert!(ran.plan(1, false)[0].contains("projects: [42, 77]"));
+    assert!(ran.plan(2, false)[0].contains("projects: [42, 77]"));
     assert_eq!(
         ran.rows(),
         [
@@ -142,24 +189,31 @@ async fn the_observer_sees_each_stage_in_order() {
             "rows 0",
             "finished 0",
             "started 1",
-            "keys 0->1",
-            "rendered 1",
             "planned 1",
             "emitted 1",
             "rendered 1",
             "rows 1",
             "finished 1",
             "started 2",
+            "keys 0->2",
+            "keys 1->2",
             "planned 2",
             "emitted 2",
             "rendered 2",
             "rows 2",
             "finished 2",
+            "started 3",
+            "planned 3",
+            "emitted 3",
+            "rendered 3",
+            "rows 3",
+            "finished 3",
         ]
     );
     let serialized = serde_json::to_value(&ran.events).unwrap();
     assert_eq!(serialized[0]["event"], "logical");
-    assert_eq!(serialized[1]["stages"][1]["backend"], "live");
+    assert_eq!(serialized[1]["stages"][2]["backend"], "live");
+    assert_eq!(serialized[1]["stages"][2]["inputs"][1]["kind"], "scope");
 }
 
 #[tokio::test]
@@ -178,12 +232,14 @@ async fn the_split_carries_each_stages_logical_sub_plan() {
         logical,
         [
             vec!["Entities", "Filter", "Select", "Limit"],
+            vec!["Entities", "Follow", "Select", "Limit"],
             vec!["Entities", "Select", "Limit"],
             vec![],
         ]
     );
     assert!(split[0].logical[0].ends_with("-> [mr]"));
-    assert!(split[1].logical[0].ends_with("-> [m]"));
+    assert!(split[1].logical[0].ends_with("-> [scope]"));
+    assert!(split[2].logical[0].ends_with("-> [m]"));
 }
 
 /// The merge request stage's `read_merge_request` check runs before its keys reach the Slack
@@ -222,14 +278,14 @@ async fn a_producers_row_checks_run_before_its_keys_cross_the_boundary() {
         &none,
     )
     .await;
-    assert!(ran.rendered(1).is_empty());
+    assert!(ran.rendered(2).is_empty());
     assert!(ran.rows().is_empty());
 }
 
 #[tokio::test]
 async fn an_empty_key_set_skips_the_stage_that_reads_it() {
-    let ran = run(MENTIONS, &caller("1/9970/"), Vec::new()).await;
-    assert!(ran.rendered(1).is_empty());
+    let ran = run(MENTIONS, &caller("1/9970/"), workspaces(&[("T01", 100)])).await;
+    assert!(ran.rendered(2).is_empty());
     assert!(ran.rows().is_empty());
 }
 
@@ -259,7 +315,8 @@ async fn a_stage_over_the_row_cap_fails_however_few_keys_it_holds() {
 #[tokio::test]
 async fn joined_text_is_excerpted_like_a_single_stage_response() {
     let title = "a".repeat(200_000);
-    let merge_requests = vec![row(json!({"mr_iid": 1, "mr_title": title, "mr_id": 2000}))];
+    let mut merge_requests = vec![row(json!({"mr_iid": 1, "mr_title": title, "mr_id": 2000}))];
+    merge_requests.extend(workspaces(&[("T01", 100)]));
     let ran = run(MENTIONS, &caller("1/9970/"), merge_requests).await;
     let rows = ran.rows();
     let excerpt = rows[0]["mr_title"].as_str().unwrap();
@@ -274,9 +331,10 @@ const RAISED: &str = "MATCH (i:Incident)-[:RAISED_IN]->(m:SlackMessage) WHERE i.
 /// the edge crosses connections, so the planner splits it into a stage boundary with a key set.
 #[tokio::test]
 async fn a_single_column_key_crosses_from_a_relational_store() {
-    let incidents = vec![row(
+    let mut incidents = vec![row(
         json!({"i_title": "staging outage", "i_message_id": "m1", "i_id": 7}),
     )];
+    incidents.extend(workspaces(&[("T01", 100)]));
     let ran = run(RAISED, &caller("1/9970/"), incidents).await;
     if let Err(error) = &ran.outcome {
         panic!("the incident query failed: {error}");
@@ -292,20 +350,19 @@ async fn a_single_column_key_crosses_from_a_relational_store() {
     let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
     assert_eq!(
         backends,
-        [Backend::ClickHouse, Backend::Live, Backend::Combine]
+        [
+            Backend::ClickHouse,
+            Backend::ClickHouse,
+            Backend::Live,
+            Backend::Combine
+        ]
     );
     assert_eq!(
-        split[1].inputs,
-        [Input::Keys(KeyInput {
-            from: 0,
-            positions: vec![1],
-            binding: "m".into(),
-            properties: super::properties("SlackMessage", &["id"]),
-            types: vec![query_data_model::DataType::String],
-        })]
+        split[2].inputs,
+        slack_inputs(vec![1], "id", query_data_model::DataType::String)
     );
     let call = ran
-        .rendered(1)
+        .rendered(2)
         .into_iter()
         .find_map(|request| match request {
             Rendered::Live(call) => Some(call),
@@ -333,7 +390,8 @@ async fn a_relational_stage_returns_every_node_it_reads_inline() {
             "_orbit_e0_dst": id, "_orbit_e0_dst_kind": "MergeRequest",
         }))
     };
-    let rows = vec![authored("ann", 1, 1, 2000), authored("bob", 2, 2, 2001)];
+    let mut rows = vec![authored("ann", 1, 1, 2000), authored("bob", 2, 2, 2001)];
+    rows.extend(workspaces(&[("T01", 100)]));
     let ran = run(AUTHORED, &caller("1/9970/"), rows).await;
     let Rendered::Sql { sql, .. } = &ran.rendered(0)[0] else {
         panic!("the merge request stage renders SQL");

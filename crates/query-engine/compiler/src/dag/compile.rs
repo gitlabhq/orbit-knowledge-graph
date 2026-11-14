@@ -69,12 +69,21 @@ fn produced<T>(value: Option<T>) -> Result<T> {
     value.ok_or_else(|| QueryError::PipelineInvariant("pipeline did not produce output".into()))
 }
 
-pub fn compile(stage: Stage, inputs: Inputs, env: &Env<'_>) -> Result<Compiled> {
+pub fn compile(stage: Stage, mut inputs: Inputs, env: &Env<'_>) -> Result<Compiled> {
     let contract = stage.contract;
     let (grants, limits, trace) = (env.grants.clone(), *env.limits, env.trace);
     let statement = match stage.query {
         StageQuery::Gql(statement) => statement,
-        StageQuery::Combine(query, shape) => return combine(query, *shape, inputs, env),
+        StageQuery::Combine(query, shape) => {
+            let joined = |at: &StageId| {
+                stage
+                    .inputs
+                    .iter()
+                    .any(|input| matches!(input, super::Input::Rows { from } if from == at))
+            };
+            inputs.contexts.retain(|(at, _)| joined(at));
+            return combine(query, *shape, inputs, env);
+        }
         StageQuery::Hydration(_) => {
             return Err(QueryError::PipelineInvariant(
                 "a hydration stage compiles through compile_hydration".into(),

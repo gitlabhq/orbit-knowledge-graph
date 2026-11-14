@@ -51,7 +51,6 @@ fn main() -> String {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Repository {
-    traversal_path: String,
     matches: Vec<SeededMatch>,
 }
 
@@ -114,7 +113,6 @@ impl CodeSearch for SeededCodeSearch {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Workspace {
-    traversal_path: String,
     messages: Vec<BTreeMap<String, Value>>,
 }
 
@@ -196,29 +194,5 @@ impl DataExtraction for SeededDataExtraction {
                     .collect()
             })
             .collect())
-    }
-}
-
-/// The traversal path of every seeded repository and workspace, as a lookup on the graph
-/// connection would resolve them.
-pub struct SeededScopes {
-    pub repositories: BTreeMap<i64, String>,
-    pub workspaces: BTreeMap<String, String>,
-}
-
-pub fn seeded_scopes() -> SeededScopes {
-    let code = SeededCodeSearch::from_seed_file();
-    let live = SeededDataExtraction::from_seed_file();
-    SeededScopes {
-        repositories: code
-            .repositories
-            .iter()
-            .map(|(project, repository)| (*project, repository.traversal_path.clone()))
-            .collect(),
-        workspaces: live
-            .workspaces
-            .iter()
-            .map(|(workspace, seeded)| (workspace.clone(), seeded.traversal_path.clone()))
-            .collect(),
     }
 }

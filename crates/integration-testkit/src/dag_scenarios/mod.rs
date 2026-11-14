@@ -18,7 +18,7 @@ use compiler::orbit_authorization::{Grants, Key};
 use query_data_model::catalog::Row;
 use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 use query_engine::shared::dag::{DagError, Event, Outcome};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_model, run_dag};
 
@@ -137,6 +137,20 @@ async fn run(query: &str, grants: &Grants, graph: Vec<Row>) -> Run {
 
 fn row(value: Value) -> Row {
     value.as_object().cloned().unwrap()
+}
+
+/// The rows a project lookup returns. The seeded graph runs no SQL, so each scenario seeds what
+/// the lookup's scope filter keeps for its caller.
+fn projects(ids: &[i64]) -> Vec<Row> {
+    ids.iter().map(|id| row(json!({"scope_id": id}))).collect()
+}
+
+/// The rows a workspace lookup returns: each workspace, and the group it is installed in.
+fn workspaces(installed: &[(&str, i64)]) -> Vec<Row> {
+    installed
+        .iter()
+        .map(|(workspace, group)| row(json!({"scope_id": workspace, "scope1_id": group})))
+        .collect()
 }
 
 /// Rows of Arrow batches as JSON, integers as numbers and text as strings.

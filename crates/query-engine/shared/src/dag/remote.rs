@@ -1,78 +1,11 @@
-//! The security a remote stage needs around its request: the scope keys its reads' `via`
-//! chains resolve on the relational connection, and the row checks its rows go through.
+//! The row checks a stage's rows go through before a later stage reads them.
 
-use arrow::record_batch::RecordBatch;
-use compiler::dag::Request;
 use compiler::dag::RowCheck;
-use compiler::remote::{Admitted, Namespaces, Target, lookup};
-use query_data_model::catalog::Row;
-use query_data_model::surface::Statement;
-use serde_json::Value;
-
 use compiler::orbit_authorization::{AuthError, Caller, CheckRequest, Checks};
 
 use super::executor::{Executed, ExecutorError};
 use super::rows;
-use super::runner::{DagError, Runner};
-
-/// Runs the scope lookups of a remote stage on the relational connections that store their
-/// chains, and what its reads' policies then admit; none when they admit nothing, so the stage
-/// reads nothing.
-pub(super) async fn admitted(
-    runner: &mut Runner<'_>,
-    stage: compiler::dag::StageId,
-    target: &Target,
-    placed: &[(query_data_model::EntityId, query_data_model::StoreId)],
-    statement: &Statement,
-) -> Result<Option<Admitted>, DagError> {
-    let grants = runner.env.grants;
-    let mut namespaces = Namespaces::default();
-    let lookups = lookup(
-        target,
-        &statement.plan,
-        placed,
-        runner.env.connections,
-        grants,
-    )?;
-    for lookup in lookups {
-        let columns = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
-        let request = Request::Lookup(lookup.clone());
-        runner.emit(|| super::observer::Event::Rendered {
-            stage,
-            requests: request.rendered(),
-        });
-        let executor = runner.executors.get(lookup.connection)?;
-        let executed = executor.execute(&request, None).await?;
-        let rows = json(&executed.batches, &columns)?;
-        compiler::remote::namespaces(&lookup, &rows, &mut namespaces)?;
-    }
-    let admitted = compiler::remote::admitted(target, &statement.plan, grants, &namespaces)?;
-    Ok((!admitted.is_empty()).then_some(admitted))
-}
-
-/// Lookup rows as JSON rows of their key and scope, which a lookup returns in that order.
-fn json(batches: &[RecordBatch], columns: &[String]) -> Result<Vec<Row>, ExecutorError> {
-    let mut out = Vec::new();
-    for batch in batches {
-        let mut values = Vec::new();
-        for position in 0..columns.len() {
-            values.push(rows::column_keys(batch, position)?);
-        }
-        for row in 0..batch.num_rows() {
-            let mut json = Row::new();
-            for (column, keys) in columns.iter().zip(&values) {
-                let value = match &keys[row] {
-                    Some(compiler::orbit_authorization::Key::Int(key)) => Value::from(*key),
-                    Some(key) => Value::from(key.to_string()),
-                    None => Value::Null,
-                };
-                json.insert(column.clone(), value);
-            }
-            out.push(json);
-        }
-    }
-    Ok(out)
-}
+use super::runner::DagError;
 
 /// Keeps the rows of a stage that every row check of its entities allows, asked of the providers
 /// the deployment binds.

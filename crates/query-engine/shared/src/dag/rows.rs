@@ -162,17 +162,6 @@ pub fn concat(batches: &[RecordBatch]) -> Result<Option<RecordBatch>, ExecutorEr
         .map_err(failed)
 }
 
-/// Each row's key at `position`, read as text or integer; a null holds none.
-pub fn column_keys(
-    batch: &RecordBatch,
-    position: usize,
-) -> Result<Vec<Option<Key>>, ExecutorError> {
-    let array = column(batch, position)?;
-    (0..batch.num_rows())
-        .map(|row| scalar(array, row, KeyKind::Text))
-        .collect()
-}
-
 /// The Arrow type a contract column decodes into; a path keeps the type its backend returns.
 fn arrow_type(data_type: ColumnType) -> Option<ArrowType> {
     let ColumnType::Scalar(data_type) = data_type else {

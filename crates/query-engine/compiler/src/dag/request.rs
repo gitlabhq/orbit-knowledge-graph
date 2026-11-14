@@ -6,14 +6,12 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::passes::codegen::{CompiledQueryContext, ParameterizedQuery};
-use crate::passes::scope_lookup::ScopeLookup;
 
 /// What one compiled stage asks its executor for.
 #[derive(Debug)]
 pub enum Request {
     Query(Box<CompiledQueryContext>),
     Hydration(Box<ParameterizedQuery>),
-    Lookup(ScopeLookup),
     Code(StructuralSearchRequest),
     Live(ExtractionRequest),
     /// The Combine plan, and the compiled context of the response it produces.
@@ -56,19 +54,6 @@ impl Request {
         match self {
             Self::Query(compiled) => vec![sql(&compiled.base)],
             Self::Hydration(query) => vec![sql(query)],
-            Self::Lookup(lookup) => {
-                let mut params: Vec<(String, Value)> = lookup
-                    .query
-                    .parameters
-                    .iter()
-                    .map(|(name, param)| (name.clone(), param.value.clone()))
-                    .collect();
-                params.sort_by(|a, b| a.0.cmp(&b.0));
-                vec![Rendered::Sql {
-                    sql: lookup.query.sql.clone(),
-                    params,
-                }]
-            }
             Self::Code(request) => vec![Rendered::Code(request.clone())],
             Self::Live(request) => vec![Rendered::Live(request.clone())],
             Self::Combine { plan, .. } => vec![Rendered::Combine {

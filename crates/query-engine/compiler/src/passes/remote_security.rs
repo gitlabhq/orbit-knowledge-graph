@@ -2,10 +2,9 @@
 //! becomes the request's own form of its scope restriction, then a check proves every read
 //! carries it.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use orbit_authorization::{Grants, Key, ScopeSet};
-use orbit_utils::traversal_path::TraversalPath;
+use orbit_authorization::{Grants, Key};
 use query_data_model::catalog::{Catalog, Rule};
 use query_data_model::implementations::live::Live;
 use query_data_model::implementations::orbit_code::OrbitCode;
@@ -16,13 +15,9 @@ use query_data_model::plan::tracking::{Language, NodeId, Plan};
 use query_data_model::{EntityId, Model};
 
 use super::guards::scope_set;
+use crate::dag::KeySet;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::remote::Target;
-
-/// The scope key of each repository or workspace a stage reads, by the entity whose `via` chain
-/// resolved it on a relational connection before the request went out.
-#[derive(Debug, Clone, Default)]
-pub struct Namespaces(pub BTreeMap<EntityId, BTreeMap<Key, TraversalPath>>);
 
 /// What the policies of a stage's reads admit: every repository or workspace the request names,
 /// when only checks restrict its rows, or only these.
@@ -46,7 +41,7 @@ impl Admitted {
 }
 
 /// Every entity a stage's logical plan reads; one it cannot name fails closed.
-pub fn read_entities(logical: &LogicalPlan) -> Result<Vec<EntityId>> {
+fn read_entities(logical: &LogicalPlan) -> Result<Vec<EntityId>> {
     let unnamed = || QueryError::Security("a remote stage reads nodes it cannot name".into());
     let mut entities = Vec::new();
     for node in logical.nodes() {
@@ -71,39 +66,46 @@ pub fn read_entities(logical: &LogicalPlan) -> Result<Vec<EntityId>> {
     Ok(entities)
 }
 
-/// What every read of the stage admits: each `via` read keeps the keys whose scope the caller
-/// holds, a global read needs the permission somewhere, and a checked or trusted read leaves the
-/// rows to its checks.
+/// What every read of the stage admits: each `via` read keeps the keys its scope lookups
+/// returned, a global read needs the permission somewhere, and a checked or trusted read leaves
+/// the rows to its checks.
 pub fn admitted(
     target: &Target,
     logical: &LogicalPlan,
     grants: &Grants,
-    namespaces: &Namespaces,
+    scopes: &[KeySet],
 ) -> Result<Admitted> {
     let model = target.model();
+    let graph = model.graph();
     let mut admitted = Admitted::Named;
     for entity in read_entities(logical)? {
         let guard = target
             .guard(entity)
             .ok_or_else(|| QueryError::Security("the read has no guard".into()))?;
-        let set = || scope_set(grants, model, guard.scope, guard.permission);
         match &guard.rule {
             Rule::Via(_) => {
-                let set = set()?;
-                let resolved = namespaces.0.get(&entity).ok_or_else(|| {
-                    QueryError::Security(format!(
-                        "no scope lookup resolved {}'s via chain",
-                        model.graph().entity(entity).name
-                    ))
-                })?;
-                let held = resolved
+                let mut looked_up = scopes
                     .iter()
-                    .filter(|(_, path)| holds(set, path))
-                    .map(|(key, _)| key.clone())
-                    .collect();
-                admitted = admitted.intersect(held);
+                    .filter(|set| {
+                        set.input
+                            .properties
+                            .first()
+                            .is_some_and(|held| graph.property(*held).entity == entity)
+                    })
+                    .peekable();
+                if looked_up.peek().is_none() {
+                    return Err(QueryError::Security(format!(
+                        "no scope lookup admits {}'s reads",
+                        graph.entity(entity).name
+                    )));
+                }
+                for set in looked_up {
+                    admitted = admitted.intersect(set.keys.iter().cloned().collect());
+                }
             }
-            Rule::Global if set()?.is_empty() => admitted = Admitted::Only(BTreeSet::new()),
+            Rule::Global if scope_set(grants, model, guard.scope, guard.permission)?.is_empty() => {
+                admitted = Admitted::Only(BTreeSet::new())
+            }
             Rule::Global | Rule::Checked | Rule::Trusted => {}
             Rule::Column(_) | Rule::Owner(_) => {
                 return Err(QueryError::Security(
@@ -158,17 +160,6 @@ pub fn secure_live(live: &Catalog<Live>, plan: LivePlan, admitted: &Admitted) ->
             false => Ok(calls),
         }
     })?)
-}
-
-fn holds(set: &ScopeSet, path: &TraversalPath) -> bool {
-    match set {
-        ScopeSet::All => true,
-        ScopeSet::Subtrees(roots) => {
-            let roots: Vec<TraversalPath> = roots.iter().map(|root| root.as_str().into()).collect();
-            path.is_within_scope(&roots.iter().collect::<Vec<_>>())
-        }
-        ScopeSet::Keys(keys) => keys.contains(&Key::Text(path.as_str().to_string())),
-    }
 }
 
 /// Every repository read feeds a restriction.

@@ -1,4 +1,4 @@
-//! A DuckDB frontend with remote stages: a live stage's workspace lookup runs on the DuckDB
+//! A DuckDB frontend with remote stages: a live stage's workspace lookup is a stage on the DuckDB
 //! connection that stores its `via` chain, and a DuckDB stage feeds a live stage its keys.
 
 use std::sync::{Arc, Mutex};
@@ -138,17 +138,23 @@ fn lookups(run: &Run, stage: usize) -> Vec<String> {
 const MESSAGES: &str =
     "MATCH (m:TeamMessage) WHERE m.channel = 'orbit-dev' RETURN m.text ORDER BY m.text LIMIT 10";
 
-/// The live stage's workspace lookup runs as DuckDB SQL on the lake, so each caller reads the
+/// The live stage's workspace lookup is a DuckDB stage on the lake, so each caller reads the
 /// workspaces of its teams, and a caller who can read no team sends no call.
 #[tokio::test]
 async fn a_duckdb_frontend_looks_up_a_live_stages_workspaces_on_duckdb() {
     let lake = lake();
     let both = lake.run(MESSAGES, &["1/9970/", "1/555/"]).await;
     assert_eq!(
-        calls(&both, 0),
+        calls(&both, 1),
         [Workspaces::Only(vec!["T01".into(), "T02".into()])]
     );
-    assert!(lookups(&both, 0)[0].contains("FROM gl_team AS k0"));
+    assert!(
+        lookups(&both, 0)[0].starts_with(
+            "SELECT scope.id AS scope_id FROM (SELECT * FROM gl_team AS scope WHERE (starts_with(scope.traversal_path, $1)"
+        ),
+        "{:?}",
+        lookups(&both, 0)
+    );
     assert_eq!(
         column(both, "m_text"),
         [
@@ -159,14 +165,14 @@ async fn a_duckdb_frontend_looks_up_a_live_stages_workspaces_on_duckdb() {
     );
 
     let one = lake.run(MESSAGES, &["1/9970/"]).await;
-    assert_eq!(calls(&one, 0), [Workspaces::Only(vec!["T01".into()])]);
+    assert_eq!(calls(&one, 1), [Workspaces::Only(vec!["T01".into()])]);
     assert_eq!(
         column(one, "m_text"),
         [json!("deploy to staging at 5pm"), json!("lunch at noon?")]
     );
 
     let none = lake.run(MESSAGES, &["1/101/"]).await;
-    assert!(calls(&none, 0).is_empty());
+    assert!(calls(&none, 1).is_empty());
     assert!(column(none, "m_text").is_empty());
 }
 
@@ -210,7 +216,7 @@ async fn a_duckdb_stage_feeds_its_keys_to_a_live_stage() {
     assert_eq!(column(one, "e_id"), [json!(1)]);
 
     let none = lake.run(ESCALATED, &["1/101/"]).await;
-    assert!(calls(&none, 1).is_empty());
+    assert!(calls(&none, 2).is_empty());
     assert!(none.edges().is_empty());
     assert!(column(none, "e_id").is_empty());
 }

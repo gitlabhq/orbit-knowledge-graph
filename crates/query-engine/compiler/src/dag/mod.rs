@@ -9,6 +9,7 @@ mod connections;
 mod contract;
 mod cut;
 mod keys;
+mod lookup;
 mod request;
 mod split;
 mod sub;
@@ -122,7 +123,12 @@ pub struct KeyInput {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Input {
     Keys(KeyInput),
-    Rows { from: StageId },
+    /// The keys a scope lookup admits a remote binding's reads to; the stage's security phase
+    /// reads them, so they bind no condition.
+    Scope(KeyInput),
+    Rows {
+        from: StageId,
+    },
 }
 
 /// Where a stage runs: on one connection, reading each entity from the store placement chose, or
@@ -168,15 +174,6 @@ pub struct RowCheck {
     pub position: usize,
     /// The type of the key the check reads at `position`.
     pub kind: crate::KeyKind,
-}
-
-impl Stage {
-    pub fn keys(&self) -> impl Iterator<Item = &KeyInput> {
-        self.inputs.iter().filter_map(|input| match input {
-            Input::Keys(keys) => Some(keys),
-            Input::Rows { .. } => None,
-        })
-    }
 }
 
 #[derive(Debug)]

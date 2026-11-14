@@ -1,6 +1,6 @@
-//! ADR 024's DAG queries with ClickHouse on the test container: relational stages and scope
-//! lookups run real SQL through the server's executor, Orbit Next and the Data Extraction
-//! Service run behind their seeded fakes, and the Combine stage joins every side.
+//! ADR 024's DAG queries with ClickHouse on the test container: relational stages, scope
+//! lookup stages included, run real SQL through the server's executor, Orbit Next and the Data
+//! Extraction Service run behind their seeded fakes, and the Combine stage joins every side.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -170,7 +170,7 @@ fn remote_requests(events: &[Event], stage: usize) -> Vec<Rendered> {
 pub(super) async fn query_4_drops_the_files_their_read_code_check_denies(ctx: &TestContext) {
     let (events, both) = run(ctx, QUERY_4, &["1/100/"], &[1000, 42]).await;
     let keys = events.iter().find_map(|event| match event {
-        Event::Keys { sample, .. } => Some(sample.clone()),
+        Event::Keys { to: 2, sample, .. } => Some(sample.clone()),
         _ => None,
     });
     let head =
@@ -184,7 +184,7 @@ pub(super) async fn query_4_drops_the_files_their_read_code_check_denies(ctx: &T
             head(1000, "fix-b"),
         ])
     );
-    let Some(Rendered::Code(code)) = remote_requests(&events, 1).pop() else {
+    let Some(Rendered::Code(code)) = remote_requests(&events, 2).pop() else {
         panic!("the code stage renders a request");
     };
     assert_eq!(code.repositories, [42, 1000]);
@@ -194,13 +194,13 @@ pub(super) async fn query_4_drops_the_files_their_read_code_check_denies(ctx: &T
     assert_eq!(strings(&denied, "f_path"), ["src/feature.rs"]);
 
     let (events, unindexed) = run(ctx, QUERY_4, &["1/100/43/"], &[1000, 42]).await;
-    assert!(remote_requests(&events, 1).is_empty());
+    assert!(remote_requests(&events, 2).is_empty());
     assert_eq!(strings(&unindexed, "f_path"), Vec::<String>::new());
 }
 
-/// The workspace lookup joins SlackWorkspace to Group: its columns come back under the names
-/// the stage reads, each caller reads the workspaces of its groups, and a caller who reads no
-/// workspace gets no messages and sends no call.
+/// The workspace lookup stage reads each SlackWorkspace with its Group under both guards, so
+/// each caller reads the workspaces of its groups, and a caller who reads no workspace gets no
+/// messages and sends no call.
 pub(super) async fn merge_requests_join_the_slack_messages_that_discuss_them(ctx: &TestContext) {
     let pairs = |batches: &[RecordBatch]| {
         let mut pairs: Vec<(i64, String)> = ints(batches, "mr_iid")
@@ -211,7 +211,7 @@ pub(super) async fn merge_requests_join_the_slack_messages_that_discuss_them(ctx
         pairs
     };
     let (events, both) = run(ctx, DISCUSSED, &["1/100/", "1/101/"], &[]).await;
-    let Some(Rendered::Live(call)) = remote_requests(&events, 1).pop() else {
+    let Some(Rendered::Live(call)) = remote_requests(&events, 2).pop() else {
         panic!("the Slack stage renders a call");
     };
     assert_eq!(
@@ -237,7 +237,7 @@ pub(super) async fn merge_requests_join_the_slack_messages_that_discuss_them(ctx
     );
 
     let (events, none) = run(ctx, DISCUSSED, &["1/100/1000/"], &[]).await;
-    assert!(remote_requests(&events, 1).is_empty());
+    assert!(remote_requests(&events, 2).is_empty());
     assert_eq!(pairs(&none), []);
 }
 
@@ -264,7 +264,7 @@ pub(super) async fn a_code_search_reads_only_the_repositories_the_caller_can_rea
     ctx: &TestContext,
 ) {
     let (events, both) = run(ctx, BOUNDED, &["1/100/", "1/555/"], &[42, 77]).await;
-    let Some(Rendered::Code(code)) = remote_requests(&events, 0).pop() else {
+    let Some(Rendered::Code(code)) = remote_requests(&events, 1).pop() else {
         panic!("the code stage renders a search");
     };
     assert_eq!(code.repositories, [42, 77]);
@@ -277,7 +277,7 @@ pub(super) async fn a_code_search_reads_only_the_repositories_the_caller_can_rea
     assert_eq!(projects, BTreeSet::from([42]));
 
     let (events, guest) = run(ctx, BOUNDED, &["1/101/"], &[42, 77]).await;
-    assert!(remote_requests(&events, 0).is_empty());
+    assert!(remote_requests(&events, 1).is_empty());
     assert_eq!(strings(&guest, "f_path"), Vec::<String>::new());
 }
 
@@ -317,12 +317,12 @@ pub(super) async fn merge_requests_hand_slack_only_the_keys_their_check_allows(c
     assert_eq!(ints(&one, "mr_iid"), [1, 1]);
 
     let (events, none) = run(&[]).await;
-    assert!(remote_requests(&events, 1).is_empty());
+    assert!(remote_requests(&events, 2).is_empty());
     assert_eq!(ints(&none, "mr_iid"), Vec::<i64>::new());
 }
 
-/// `Head` enforces only its check and the `File`s at each head enforce `via`: the code stage
-/// looks up `File`'s repositories on ClickHouse, so it searches the readable ones instead of
+/// `Head` enforces only its check and the `File`s at each head enforce `via`: `File`'s lookup
+/// stage reads the heads' projects on ClickHouse, so it searches the readable ones instead of
 /// dropping them all, and a caller who reads no merge request sends no search.
 pub(super) async fn a_head_under_none_keeps_the_files_its_via_chain_admits(ctx: &TestContext) {
     let packages = integration_testkit::dag_fakes::heads_under_none(dag_packages());
@@ -337,21 +337,21 @@ pub(super) async fn a_head_under_none_keeps_the_files_its_via_chain_admits(ctx: 
         }
     };
     let (events, both) = run(&["1/100/"]).await;
-    let Some(Rendered::Code(code)) = remote_requests(&events, 1).pop() else {
+    let Some(Rendered::Code(code)) = remote_requests(&events, 2).pop() else {
         panic!("the code stage renders a request");
     };
     assert_eq!(code.repositories, [42, 1000]);
     assert_eq!(strings(&both, "f_path"), ["src/feature.rs", "src/auth.rs"]);
 
     let (events, one) = run(&["1/100/42/"]).await;
-    let Some(Rendered::Code(code)) = remote_requests(&events, 1).pop() else {
+    let Some(Rendered::Code(code)) = remote_requests(&events, 2).pop() else {
         panic!("the code stage renders a request");
     };
     assert_eq!(code.repositories, [42]);
     assert_eq!(strings(&one, "f_path"), ["src/auth.rs"]);
 
     let (events, none) = run(&["1/101/"]).await;
-    assert!(remote_requests(&events, 1).is_empty());
+    assert!(remote_requests(&events, 2).is_empty());
     assert_eq!(strings(&none, "f_path"), Vec::<String>::new());
 }
 

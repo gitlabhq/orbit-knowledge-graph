@@ -105,30 +105,6 @@ pub fn plan(
     })?)
 }
 
-/// The repositories a code plan names: the conditions on its entity's repository columns.
-pub fn named_repositories(
-    logical: &LogicalPlan,
-    code: &Catalog<OrbitCode>,
-    placed: &[(EntityId, StoreId)],
-) -> Result<Vec<Literal>> {
-    let mut entity = None;
-    let mut projects = Vec::new();
-    for node in logical.nodes() {
-        match logical.operation(node) {
-            LogicalOperation::Entities(id) => entity = Some(*id),
-            LogicalOperation::Filter(predicate) => {
-                let repository = repository(code, placed, entity)?;
-                match branch_heads(predicate, repository)? {
-                    Some(heads) => projects.extend(heads.into_iter().map(|(project, _)| project)),
-                    None => projects.extend(repositories(predicate, repository)?),
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(projects)
-}
-
 fn repository(
     code: &Catalog<OrbitCode>,
     placed: &[(EntityId, StoreId)],

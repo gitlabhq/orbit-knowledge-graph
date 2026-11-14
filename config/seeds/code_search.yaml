@@ -1,6 +1,5 @@
 repositories:
   1000:
-    traversal_path: 1/100/1000/
     matches:
       - pattern: todo!($$$MSG)
         language: rust
@@ -14,7 +13,6 @@ repositories:
         line: 1
         captures: {MSG: "\"main branch\""}
   42:
-    traversal_path: 1/9970/42/
     matches:
       - pattern: todo!($$$MSG)
         language: rust
@@ -43,7 +41,6 @@ repositories:
         line: 3
         captures: {ARGS: "query"}
   77:
-    traversal_path: 1/555/77/
     matches:
       - pattern: compile($$$ARGS)
         language: rust

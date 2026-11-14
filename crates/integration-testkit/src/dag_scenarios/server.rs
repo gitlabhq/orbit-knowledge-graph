@@ -59,7 +59,7 @@ fn context(model: &Arc<query_data_model::Model>, query: &str) -> QueryPipelineCo
 #[tokio::test]
 async fn the_server_checks_remote_rows_through_the_deployments_providers() {
     let model = dag_model();
-    let dag = served_stage(&model, Arc::new(SeededGraph(Vec::new())));
+    let dag = served_stage(&model, Arc::new(SeededGraph(super::projects(&[42, 77]))));
     let query = "MATCH (f:File) WHERE f.project_id IN [42, 77] AND f.content MATCHES ast('compile($$$ARGS)', 'rust') RETURN f.project_id, f.path LIMIT 20";
     let mut ctx = context(&model, query);
     let mut obs = NoOpObserver;
@@ -95,6 +95,7 @@ async fn served_output() -> PipelineOutput {
     let graph = Arc::new(SeededGraph(vec![
         row(json!({"mr_iid": 1, "mr_title": "Add feature A", "mr_id": 2000})),
         row(json!({"mr_iid": 2, "mr_title": "Fix bug B", "mr_id": 2001})),
+        row(json!({"scope_id": "T01", "scope1_id": 100})),
     ]));
     let dag = served_stage(&model, graph);
     let mut ctx = context(&model, DISCUSSED);

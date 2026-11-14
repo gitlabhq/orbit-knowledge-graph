@@ -34,7 +34,18 @@ impl Cut<'_> {
     pub fn dag(self, response: super::Response) -> Result<Dag> {
         let debug = response.debug;
         let order = self.order()?;
-        let stage = |group: usize| order.iter().position(|g| *g == group).unwrap_or_default();
+        let lookups = order
+            .iter()
+            .map(|group| self.lookups(*group))
+            .collect::<Result<Vec<_>>>()?;
+        let mut ids = vec![0; self.groups.len()];
+        let mut next = 0;
+        for (group, lookups) in order.iter().zip(&lookups) {
+            next += lookups.len();
+            ids[*group] = next;
+            next += 1;
+        }
+        let stage = |group: usize| ids[group];
         let checked = self.checked(&order);
         let needed = self.needed(&checked)?;
         let contracts = (0..self.groups.len())
@@ -120,15 +131,23 @@ impl Cut<'_> {
             combine_order.push((position(binding, property)?, direction));
         }
         let mut stages = Vec::new();
-        for (id, group) in order.iter().enumerate() {
+        for (group, lookups) in order.iter().zip(&lookups) {
             let peer = self.peer(self.groups[*group].place);
             let (connection, backend) = (peer.connection(), peer.backend());
-            let inputs = self
+            let mut inputs: Vec<Input> = self
                 .crossings
                 .iter()
                 .filter(|crossing| crossing.consumer(&order) == *group)
-                .map(|crossing| self.keys(crossing, &order, &contracts).map(Input::Keys))
+                .map(|crossing| {
+                    self.keys(crossing, &order, &ids, &contracts)
+                        .map(Input::Keys)
+                })
                 .collect::<Result<_>>()?;
+            for lookup in lookups {
+                let scope = self.lookup_stage(lookup, stages.len(), &inputs, debug)?;
+                inputs.extend(self.scopes(lookup, &scope)?);
+                stages.push(scope);
+            }
             let plan = super::sub::plan(
                 self.query,
                 &self.groups[*group],
@@ -137,7 +156,7 @@ impl Cut<'_> {
                 self.connections.ids(),
             )?;
             stages.push(Stage {
-                id,
+                id: stages.len(),
                 backend,
                 runs: super::Runs::On {
                     connection,
@@ -197,7 +216,12 @@ impl Cut<'_> {
             skip,
             nodes,
         };
-        let inputs = (0..stages.len()).map(|from| Input::Rows { from }).collect();
+        let inputs = order
+            .iter()
+            .map(|group| Input::Rows {
+                from: stage(*group),
+            })
+            .collect();
         stages.push(Stage {
             id: stages.len(),
             backend: Backend::Combine,
