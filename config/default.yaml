@@ -183,6 +183,9 @@ schedule:
     namespace-freshness:
       cron: "0 */5 * * * *"
       run_timeout_secs: 1800
+    graph-stats:
+      cron: "0 30 4 * * *"
+      run_timeout_secs: 1800
 
 health_check:
   bind_address: "0.0.0.0:4201"

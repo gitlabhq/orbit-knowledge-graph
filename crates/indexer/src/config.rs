@@ -75,6 +75,8 @@ pub struct DispatcherConfig {
     pub datalake: ClickHouseConfiguration,
     pub schedule: ScheduleConfig,
     pub schema: SchemaConfig,
+    pub gitlab: Option<GitlabClientConfiguration>,
+    pub analytics: AnalyticsConfig,
 }
 
 impl From<&AppConfig> for DispatcherConfig {
@@ -85,6 +87,8 @@ impl From<&AppConfig> for DispatcherConfig {
             datalake: config.datalake.clone(),
             schedule: config.schedule.clone(),
             schema: config.schema.clone(),
+            gitlab: config.gitlab_client_config(),
+            analytics: config.analytics.clone(),
         }
     }
 }
@@ -110,4 +114,10 @@ pub enum DispatcherError {
 
     #[error("schema migration error: {0}")]
     Migration(#[from] crate::schema::migration::DispatcherMigrationError),
+
+    #[error("analytics tracker initialization failed: {0}")]
+    Analytics(#[from] labkit_events::Error),
+
+    #[error("GitLab client initialization failed: {0}")]
+    GitlabClient(#[from] HandlerInitError),
 }

@@ -1,0 +1,18 @@
+---
+description: Daily snapshot of the instance's graph, sent once a day per instance by the Orbit dispatcher, with graph size, live entity counts per ontology node type, and code-indexing coverage
+internal_events: true
+status: active
+action: orbit_graph_stats
+product_group: knowledge_graph
+product_categories:
+- knowledge_graph
+milestone: '19.6'
+introduced_by_url: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/3367
+contexts:
+- orbit_common
+- orbit_graph_stats
+tiers:
+- free
+- premium
+- ultimate
+classification: duo

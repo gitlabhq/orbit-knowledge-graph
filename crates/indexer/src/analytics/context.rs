@@ -24,7 +24,7 @@ pub(crate) enum TriggerType {
 
 /// Clamp to `i64::MAX` so an over-range count can't wrap to a negative,
 /// schema-invalid value (the Iglu schemas cap these fields at `i64::MAX`).
-fn saturating_i64(value: u64) -> i64 {
+pub(crate) fn saturating_i64(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
