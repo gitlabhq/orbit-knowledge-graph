@@ -89,13 +89,13 @@ Script steps enforce these rules:
 - The scripts open docs MRs as drafts and never merge or approve.
 - A push happens only when `check.py` reports no errors and the branch changes nothing but
   user docs. Warnings left after the fix cycles are listed on the MR.
-- Agents see only threads and notes from the flow's identity, Duo Code Review, the feature MR
-  authors and reviewers, the docs MR reviewers, and Developer+ members of this project. Other
-  threads stay open for the person who merges, and the handoff note links them without their text.
+- Agents see only threads and notes from trusted authors. These are the flow's identity, Duo Code
+  Review, feature MR authors and reviewers, docs MR reviewers, and Developer+ members. Other
+  threads stay open for the person who merges. The handoff note links them without their text.
 - The flow resolves only the threads it gave the fixer, and only after the fix is pushed and
   `check.py` is clean. It never resolves a **Needs reviewer decision** thread.
-- The threads path runs only on a docs MR whose branch is in this project, not a fork, and
-  where the flow's identity already has a note.
+- The threads path runs only on a docs MR with a branch in this project, not a fork. The
+  flow's identity must already have a note on it.
   Flow markers count only on notes from the flow's identity or GitLab Duo.
 - The flow discards any commit the review agent makes, and any edit outside `.docs-write/`.
 
