@@ -5,4 +5,4 @@ query:
     MATCH (wi:WorkItem) WHERE wi.weight IN [] RETURN wi.weight LIMIT 10
 
 expect:
-  compile_error: "IN requires 1-100 values"
+  compile_error: schema

@@ -8,4 +8,4 @@ query:
     MATCH (u:User {id: 1}) WHERE u.username <> u.first_name RETURN u.username LIMIT 10
 
 expect:
-  compile_error: "administrator"
+  compile_error: restrict

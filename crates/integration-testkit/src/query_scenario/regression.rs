@@ -126,27 +126,76 @@ fn typed_edges_check_endpoint_types_and_keep_pair_support() {
 }
 
 #[test]
-fn compile_errors_require_all_fragments_and_frontend_configuration() {
+fn compile_errors_assert_the_rejection_reason() {
     let query = json!({"gql": "CREATE (d:Definition)"});
+    run_suite(query.clone(), "compile_error: schema");
+    run_suite(query.clone(), "compile_error: {duckdb: schema, gql: parse}");
+    rejects(
+        query.clone(),
+        "compile_error: parse",
+        "rejected as schema, expected parse",
+    );
+    rejects(
+        query.clone(),
+        "compile_error: {json: schema}",
+        "compile_error names neither backend 'duckdb' nor frontend 'gql'",
+    );
+    rejects(
+        query.clone(),
+        "compile_error: syntax",
+        "unknown rejection reason 'syntax'",
+    );
+    rejects(
+        query.clone(),
+        "compile_error: {cypher: parse}",
+        "compile_error key 'cypher'",
+    );
+    rejects(
+        json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"}),
+        "compile_error: schema",
+        "expected a schema rejection but the query compiled",
+    );
     run_suite(
         query.clone(),
-        "compile_error_contains: {gql: ['Orbit query syntax', 'line 1, column 1']}\ncompile_error_not_contains: [CREATE]",
+        "compile_error: schema\ncompile_error_not_contains: [MERGE, DROP]",
     );
     rejects(
         query.clone(),
-        "compile_error: true\ncompile_error_contains: ['Orbit query syntax', impossible-message]",
-        "does not contain 'impossible-message'",
+        "compile_error: schema\ncompile_error_not_contains: ['Orbit query sy.tax']",
+        "compile error shows /Orbit query sy.tax/",
     );
     rejects(
         query.clone(),
-        "compile_error: {json: error}",
-        "compile_error missing frontend 'gql'",
+        "compile_error_not_contains: [CREATE]",
+        "compile_error_not_contains requires compile_error",
     );
     rejects(
         query,
-        "compile_error: true\ncompile_error_not_contains: {json: []}",
-        "expectation missing frontend 'gql'",
+        "compile_error: schema\ncompile_error_not_contains: ['(']",
+        "regex parse error",
     );
+}
+
+#[test]
+fn compile_errors_never_show_private_details() {
+    super::response::assert_no_private_details(
+        "invalid value at /nodes/0/filters: IN requires 1-100 values; every gl_* alias",
+        "safe",
+    );
+    for (message, shows) in [
+        ("scope \"1/100/1000/\" is hidden", "a traversal path"),
+        ("no access to 2/", "a traversal path"),
+        ("user victim@example.com", "an email address"),
+        ("reading v2_gl_user", "a physical table name"),
+        ("reading gl_merge_request", "a physical table name"),
+        ("value private-query-literal", "a private fixture literal"),
+        ("type NOPE_PRIVATE_TYPE", "a private fixture type"),
+    ] {
+        assert_panics(
+            || super::response::assert_no_private_details(message, "leak"),
+            &format!("compile error shows {shows}"),
+        );
+    }
 }
 
 #[test]
@@ -283,9 +332,8 @@ fn page_expectations_reject_fields_that_are_not_executed() {
     let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
     for field in [
         "repeat_count: 2",
-        "compile_error: true",
-        "compile_error_contains: [error]",
-        "compile_error_not_contains: [error]",
+        "compile_error: parse",
+        "compile_error_not_contains: [secret]",
         "pages: [{}]",
         "all_pages: {page_count: 1}",
     ] {

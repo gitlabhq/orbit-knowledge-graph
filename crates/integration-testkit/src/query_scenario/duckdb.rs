@@ -6,6 +6,7 @@ use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
 use query_engine::compiler::{CompiledQueryContext, Frontend, compile_local, generate_local_ddl};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
+use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
 
 use super::pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
@@ -63,16 +64,20 @@ fn run_step(
         let label = format!("{name} [{key} on duckdb]");
         let expect = &step.expect;
         expect.validate_pages_exclusive(&label);
-        let compiled = compile_local(query, frontend, ontology).map(Arc::new);
-        let Some(compiled) = assert_compilation(compiled, expect, key, &label) else {
+        let compiled = compile_local(query, frontend, ontology)
+            .map(Arc::new)
+            .map_err(PipelineError::from);
+        let Some(compiled) = assert_compilation(compiled, expect, ("duckdb", key), &label) else {
             continue;
         };
         if expect.pages.is_empty() {
             let output = execute(database, &compiled, &label);
             let baseline = assert_output(&output, frontend, expect, &label);
             for run in 2..=repeat_count(expect, &label) {
-                let compiled = compile_local(query, frontend, ontology).map(Arc::new);
-                let compiled = assert_compilation(compiled, expect, key, &label)
+                let compiled = compile_local(query, frontend, ontology)
+                    .map(Arc::new)
+                    .map_err(PipelineError::from);
+                let compiled = assert_compilation(compiled, expect, ("duckdb", key), &label)
                     .expect("repeated query should compile");
                 let output = execute(database, &compiled, &label);
                 let response = assert_output(&output, frontend, expect, &label);

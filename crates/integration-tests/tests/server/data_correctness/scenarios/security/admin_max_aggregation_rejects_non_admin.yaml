@@ -17,5 +17,4 @@ query:
     MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, max(u.is_admin) AS has_admin LIMIT 10
 
 expect:
-  compile_error: true
-  compile_error_contains: [is_admin, aggregation, administrator]
+  compile_error: restrict

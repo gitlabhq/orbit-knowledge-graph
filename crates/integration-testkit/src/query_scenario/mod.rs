@@ -335,7 +335,8 @@ async fn run_frontend(
     expect.validate_pages_exclusive(label);
 
     let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
-    let Some(compiled) = assert_compilation(compiled, expect, frontend_key, label) else {
+    let Some(compiled) = assert_compilation(compiled, expect, ("clickhouse", frontend_key), label)
+    else {
         return;
     };
 
@@ -367,7 +368,7 @@ async fn run_frontend(
     let count = repeat_count(expect, label);
     for run in 2..=count {
         let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
-        let compiled = assert_compilation(compiled, expect, frontend_key, label)
+        let compiled = assert_compilation(compiled, expect, ("clickhouse", frontend_key), label)
             .expect("repeated query should compile");
         let output = execute_output(
             ctx,
