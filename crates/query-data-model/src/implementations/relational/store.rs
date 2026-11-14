@@ -195,19 +195,26 @@ impl RelationalStore {
                 ] {
                     let column = columns.column(field);
                     let entity = graph.entity(endpoint);
-                    let identity = match entity.identity.as_slice() {
-                        [identity] => Some(graph.property(*identity).data_type),
-                        _ => None,
-                    };
-                    let found = table.column(column).and_then(|column| column.data_type);
-                    if found.is_none() || found != identity {
-                        let found = found.map_or("untyped".to_string(), |t| format!("{t:?}"));
-                        let identity =
-                            identity.map_or("composite".to_string(), |t| format!("{t:?}"));
+                    let [identity] = entity.identity.as_slice() else {
                         diagnostics.error(
                             package,
                             format!(
-                                "{} binds edge table {} whose {column} is {found}, but {}'s identity is {identity}; keys are never cast",
+                                "{} keeps its edges in {}, whose {column} holds one key, but {} has a composite identity",
+                                label(),
+                                table.name,
+                                entity.name
+                            ),
+                        );
+                        continue;
+                    };
+                    let identity = graph.property(*identity).data_type;
+                    let found = table.column(column).and_then(|column| column.data_type);
+                    if found != Some(identity) {
+                        let found = found.map_or("untyped".to_string(), |t| format!("{t:?}"));
+                        diagnostics.error(
+                            package,
+                            format!(
+                                "{} binds edge table {} whose {column} is {found}, but {}'s identity is {identity:?}; keys are never cast",
                                 label(),
                                 table.name,
                                 entity.name

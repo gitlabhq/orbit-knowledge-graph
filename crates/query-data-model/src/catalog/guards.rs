@@ -67,7 +67,8 @@ pub(super) fn resolve(
     via_keys(graph, stores, diagnostics);
 }
 
-/// Each `via` step is a foreign key on the entity it leaves, so a lookup can join it.
+/// Each `via` step is a foreign key on the entity it leaves, so a lookup can join it; the first
+/// step's keys cross a stage boundary, so they may be composite.
 fn via_keys(graph: &GraphCatalog, stores: &[Store], diagnostics: &mut Diagnostics) {
     for store in stores {
         for source in store.sources() {
@@ -78,11 +79,17 @@ fn via_keys(graph: &GraphCatalog, stores: &[Store], diagnostics: &mut Diagnostic
             else {
                 continue;
             };
-            for hop in hops {
+            for (index, hop) in hops.iter().enumerate() {
                 let keyed = stores.iter().any(|other| {
+                    let composite = || {
+                        other
+                            .composite_key(hop.variant)
+                            .is_some_and(|(holder, _)| holder == Endpoint::Source)
+                    };
                     other
                         .foreign_key(hop.variant)
                         .is_some_and(|key| key.holder == Endpoint::Source)
+                        || (index == 0 && composite())
                 });
                 if !keyed {
                     diagnostics.error(

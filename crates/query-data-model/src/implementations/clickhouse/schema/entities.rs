@@ -89,6 +89,19 @@ impl Resolver<'_, '_> {
             let Some(spec) = spec else {
                 continue;
             };
+            let stored = super::data_type(&spec.storage_type);
+            if property.data_type == DataType::Enum && stored != Some(DataType::String) {
+                self.diagnostics.error(
+                    source.package,
+                    format!(
+                        "store {} stores {}.{}, an enum, as {}; an enum column holds its labels",
+                        store.name,
+                        graph.entity(source.entity).name,
+                        property.name,
+                        spec.storage_type
+                    ),
+                );
+            }
             columns.push(Column {
                 name: column.name.to_string(),
                 property: Some(id),

@@ -211,16 +211,6 @@ impl Store {
         if identity.is_empty() {
             return None;
         }
-        if identity.len() > 1 && spec.table.is_some() {
-            diagnostics.error(
-                package,
-                format!(
-                    "store {} keys table rows by one column, but {name} has a composite identity",
-                    self.name
-                ),
-            );
-            return None;
-        }
         let stored: Vec<Option<&str>> = identity.iter().map(|part| self.column(*part)).collect();
         let key: Vec<String> = match stored.iter().all(Option::is_some) {
             true => stored.into_iter().flatten().map(str::to_string).collect(),

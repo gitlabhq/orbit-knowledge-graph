@@ -239,6 +239,16 @@ fn resolve_joins(
                 let entity = diagnostics.require(graph.entity_id(&node.entity), package, || {
                     format!("join {table} names unknown entity {}", node.entity)
                 })?;
+                if graph.entity(entity).identity.len() != 1 {
+                    diagnostics.error(
+                        package,
+                        format!(
+                            "store {} join {table} keys {} by one column {}, but {} has a composite identity",
+                            input.store.name, node.entity, node.key, node.entity
+                        ),
+                    );
+                    return None;
+                }
                 let source = diagnostics.require(spec.sources.get(node.source), package, || {
                     format!(
                         "join {table} reads {} from unknown source {}",

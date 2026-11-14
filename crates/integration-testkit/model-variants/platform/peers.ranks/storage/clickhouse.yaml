@@ -11,7 +11,7 @@ entities:
       rank: {immutable: true, backend: {type: String}}
       title: {backend: {type: String}}
       granted_at: {backend: {type: "DateTime64(0, 'UTC')"}}
-      tier: {backend: {type: Int8}}
+      tier: {backend: {type: LowCardinality(String)}}
       badge: {backend: {type: UUID}}
       traversal_path: {backend: {type: String}}
     access: {filter: [guild, rank], order: [guild, rank]}

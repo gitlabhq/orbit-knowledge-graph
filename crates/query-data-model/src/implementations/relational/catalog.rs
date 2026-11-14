@@ -45,12 +45,20 @@ impl<B: StorageBackend> Catalog<B>
 where
     B::Store: RelationalFacts,
 {
-    /// The column that holds the entity's identity in its home store on this connection.
+    /// The column that holds the entity's identity in its home store on this connection; a
+    /// composite identity has none.
     pub fn identity_column(&self, entity: EntityId) -> Option<&str> {
-        match self.source(entity)?.1.key.as_slice() {
+        match self.identity_columns(entity)? {
             [key] => Some(key.as_str()),
             _ => None,
         }
+    }
+
+    /// The columns that hold the entity's identity in its home store on this connection, one per
+    /// identity part.
+    pub fn identity_columns(&self, entity: EntityId) -> Option<&[String]> {
+        let key = self.source(entity)?.1.key.as_slice();
+        (!key.is_empty()).then_some(key)
     }
 
     /// The sort key of the entity's table in its home store on this connection.

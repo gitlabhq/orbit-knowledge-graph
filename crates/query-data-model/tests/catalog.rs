@@ -1132,6 +1132,16 @@ const MANAGED_STORE: &str = r#"    engine: ReplacingMergeTree(_version, _deleted
     settings: { index_granularity: "1024" }
 "#;
 
+const RANK_JOIN: &str = r#"    joins:
+      gl_rank_group:
+        sort_key: [t0_group_id]
+        sources:
+        - table: gl_rank
+          columns: { group_id: t0_group_id, rank: t0_rank }
+        nodes:
+        - { entity: Rank, source: 0, key: t0_group_id }
+"#;
+
 fn managed(extra: &'static str) -> impl Fn(&str, String) -> String {
     move |name, yaml| {
         if name == "gitlab/storage/clickhouse.yaml" {
@@ -1578,6 +1588,90 @@ fn variants_on_the_same_composite_key_columns_clash() {
         errors,
         [
             "overlay: store graph keys SOURCE_HEAD(MergeRequest -> Head) and SOURCE_TIP(MergeRequest -> Tip) on project_id, source_branch without distinct type values"
+        ]
+    );
+}
+
+/// A table store keys rows by every part of a composite identity, and a foreign key reaches it
+/// on one column per part; an edge table endpoint and a materialized join node, each keyed by one
+/// column, cannot hold it.
+#[test]
+fn a_composite_identity_sits_on_a_table_but_not_in_a_single_key_slot() {
+    let load = |slots: bool| {
+        let (graph, authorization, storage, written) = match slots {
+            true => (
+                "  RANKED_BY: {variants: {User -> Rank: {cardinality: many_to_many}}}\n",
+                "  RANKED_BY: {scope: namespace, permission: read, enforce: {clickhouse: {scope_key: traversal_path, of: target}}}\n",
+                "  RANKED_BY:\n    User -> Rank: {edge_table: gl_edge}\n",
+                "relationships:\n  RANKED_BY: [User -> Rank]\n",
+            ),
+            false => ("", "", "", ""),
+        };
+        let mut sources = Packages::embedded().sources().clone();
+        let files = [
+            (
+                "overlay/package.yaml",
+                "kind: package\nname: overlay\nrequires: [gitlab, gitlab.core]\n".to_string(),
+            ),
+            (
+                "overlay/graph.yaml",
+                format!(
+                    "kind: graph\npackage: overlay\nentities:\n  Rank:\n    identity: [group_id, rank]\n    label: rank\n    default_columns: [group_id, rank]\n    properties: {{group_id: int64, rank: string, traversal_path: string}}\nrelationships:\n  RANK_OF: {{variants: {{Rank -> Group: {{cardinality: many_to_one}}}}}}\n{graph}"
+                ),
+            ),
+            (
+                "overlay/authorization.yaml",
+                format!(
+                    "kind: authorization\npackage: overlay\nentities:\n  Rank: {{scope: namespace, permission: read, enforce: {{clickhouse: {{scope_key: traversal_path}}}}, properties: {{open: [group_id, rank], hidden: [traversal_path]}}}}\nrelationships:\n  RANK_OF: {{scope: namespace, permission: read, enforce: {{clickhouse: {{scope_key: traversal_path, of: source}}}}}}\n{authorization}"
+                ),
+            ),
+            (
+                "overlay/sources/rank_sync.yaml",
+                format!(
+                    "kind: source\npackage: overlay\nsource: rank_sync\nentities: [Rank]\n{written}"
+                ),
+            ),
+            (
+                "overlay/storage/clickhouse.yaml",
+                format!(
+                    "kind: storage\npackage: overlay\nstore: graph\nentities:\n  Rank:\n    complete: true\n    accepts: [group_id, rank]\n    table: gl_rank\n    columns:\n      group_id: {{immutable: true, backend: {{type: Int64}}}}\n      rank: {{immutable: true, backend: {{type: String}}}}\n      traversal_path: {{backend: {{type: String}}}}\n    backend:\n      primary_key: [traversal_path, group_id, rank]\nrelationships:\n  RANK_OF:\n    Rank -> Group: {{fk: {{on: source, column: group_id}}}}\n{storage}"
+                ),
+            ),
+        ];
+        for (path, text) in files {
+            sources.insert(path.into(), text);
+        }
+        if slots {
+            let engine = sources.get_mut("gitlab/storage/clickhouse.yaml").unwrap();
+            *engine = engine.replace(
+                "    deleted_column: _deleted\n",
+                &format!("    deleted_column: _deleted\n{RANK_JOIN}"),
+            );
+        }
+        Packages::new(query_data_model::Tier::Platform, sources).deployment("server")
+    };
+    load(false).unwrap();
+    assert_eq!(
+        spec_errors(load(true)),
+        [
+            "gitlab: store graph join gl_rank_group keys Rank by one column t0_group_id, but Rank has a composite identity",
+            "overlay: store graph RANKED_BY(User -> Rank) keeps its edges in gl_edge, whose target_id holds one key, but Rank has a composite identity",
+        ]
+    );
+}
+
+/// No read maps an enum's codes to its labels, so a ClickHouse column stores the labels.
+#[test]
+fn an_enum_column_stores_its_labels() {
+    let packages = query_data_model::testkit::patched([(
+        "gitlab.core/storage/clickhouse.yaml",
+        "table: gl_group\n    columns:\n      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}\n      name: {backend: {type: String, codec: [ZSTD(1)]}}\n      description: {backend: {type: String, codec: [ZSTD(3)]}}\n      visibility_level: {backend: {type: LowCardinality(String), codec: [LZ4]}}",
+        "table: gl_group\n    columns:\n      id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}\n      name: {backend: {type: String, codec: [ZSTD(1)]}}\n      description: {backend: {type: String, codec: [ZSTD(3)]}}\n      visibility_level: {backend: {type: Int8}}",
+    )]);
+    assert_eq!(
+        spec_errors(packages.deployment("server")),
+        [
+            "gitlab.core: store graph stores Group.visibility_level, an enum, as Int8; an enum column holds its labels"
         ]
     );
 }

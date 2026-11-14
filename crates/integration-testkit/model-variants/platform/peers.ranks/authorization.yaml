@@ -12,5 +12,5 @@ entities:
     enforce: {live: {scope_key: {via: RANK_POST_OF}}}
     properties: {open: [id, guild, rank, text]}
 relationships:
-  RANK_OF: {scope: namespace, permission: read, enforce: {}}
+  RANK_OF: {scope: namespace, permission: read, enforce: {clickhouse: {scope_key: traversal_path, of: source}}}
   RANK_POST_OF: {scope: namespace, permission: read, enforce: {}}
