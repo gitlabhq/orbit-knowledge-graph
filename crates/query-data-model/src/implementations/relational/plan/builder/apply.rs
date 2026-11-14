@@ -42,7 +42,7 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
             Operation::Latest { key, version } => self.latest_of(input()?, key, version),
             Operation::LimitBy { count, by } => {
                 let rows = input()?;
-                self.guard(supported(B::CAPABILITIES.limit_by, "limit by"))?;
+                self.guard(supported(B::SQL.limit_by, "limit by"))?;
                 let stage = self.guard(rows.stage.limit_by())?;
                 for value in &by {
                     self.check(value)?;

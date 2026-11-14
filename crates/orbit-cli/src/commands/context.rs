@@ -52,7 +52,7 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
 }
 
 pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
-    let model = query_data_model::Packages::embedded().load()?;
+    let model = crate::deployment::model()?;
     let nodes: Vec<&str> = model
         .graph()
         .entities()

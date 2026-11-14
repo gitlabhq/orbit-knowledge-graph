@@ -5,10 +5,11 @@ mod pattern;
 pub use builder::{CodeBuilder, Field, Matches, Trigrams};
 pub use pattern::{Language, Pattern};
 
-use crate::EntityId;
-use crate::catalog::{Catalog, Guard};
+use crate::catalog::Catalog;
 use crate::implementations::orbit_code::OrbitCode;
+use crate::implementations::orbit_code::Repository;
 use crate::plan::tracking::{self, Declared, Each, Plan, Ref, Rejected, Step};
+use crate::{EntityId, PropertyId, StoreId};
 
 #[derive(Debug)]
 pub struct CodeLanguage;
@@ -17,13 +18,10 @@ pub type CodePlan = Plan<CodeLanguage>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeValue {
-    /// The repository a match is in, named after the key its `via` chain starts from.
-    Repository,
-    Path,
+    /// A column the index's store lists, which every match carries.
+    Column(PropertyId),
     Line,
     Capture,
-    /// The branch whose head a match is at.
-    Branch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +90,8 @@ pub enum CodeError {
         name: String,
         available: Vec<String>,
     },
+    #[error("a repository is named by its integer project key, not {0}")]
+    RepositoryKey(String),
     #[error("top keeps at least one match")]
     EmptyTop,
     #[error("a code request needs {0}")]
@@ -99,54 +99,36 @@ pub enum CodeError {
 }
 
 impl Catalog<OrbitCode> {
-    pub fn index(&self, store: &str, entity: &str) -> Result<Declared<Index>, CodeError> {
+    /// The index of `entity` in `store`, the store placement put the read on.
+    pub fn index(&self, store: StoreId, entity: EntityId) -> Result<Declared<Index>, CodeError> {
         let model = self.model();
-        let found = model
-            .stores()
-            .iter()
-            .position(|candidate| {
-                candidate.name == store && candidate.connection == self.connection()
-            })
-            .and_then(|index| {
-                let entity = model.graph().entity_id(entity)?;
-                model.stores()[index].source(entity)?;
-                Some(Index {
-                    store: index,
-                    entity,
-                })
-            });
-        found
-            .map(|index| Declared::new(model.id(), index))
-            .ok_or_else(|| CodeError::UnknownIndex {
-                name: format!("{store}.{entity}"),
+        let held = model.store(store);
+        if held.connection() != self.connection() || held.source(entity).is_none() {
+            return Err(CodeError::UnknownIndex {
+                name: format!("{}.{}", held.name, model.graph().entity(entity).name),
                 available: self
                     .stores()
-                    .flat_map(|(store, _)| {
-                        store.sources().map(move |source| {
-                            format!(
-                                "{}.{}",
-                                store.name,
-                                model.graph().entity(source.entity).name
-                            )
-                        })
-                    })
+                    .flat_map(|(store, _)| store.sources().map(|source| source.entity))
+                    .map(|indexed| model.graph().entity(indexed).name.clone())
                     .collect(),
-            })
+            });
+        }
+        Ok(Declared::new(
+            model.id(),
+            Index {
+                store: store.index(),
+                entity,
+            },
+        ))
     }
 
-    /// The key that names a match's repository: the foreign key the read's `via` chain starts
-    /// from; none for a read only its checks restrict.
-    pub fn repository_key(&self, index: Index) -> Option<&str> {
-        let crate::catalog::Rule::Via(hops) = &self.index_guard(index)?.rule else {
-            return None;
-        };
-        let key = self.model().foreign_key(hops.first()?.variant)?;
-        (key.holder == crate::Endpoint::Source)
-            .then(|| self.graph().property(key.property).name.as_str())
-    }
-
-    pub fn index_guard(&self, index: Index) -> Option<&Guard> {
-        self.model().stores()[index.store].guard(index.entity)
+    /// The columns `store` names the repository and branch of each row of `entity` by.
+    pub fn repository(&self, store: StoreId, entity: EntityId) -> Option<Repository> {
+        let held = self.model().store(store);
+        self.stores()
+            .find(|(candidate, _)| candidate.id() == held.id())?
+            .1
+            .repository(entity)
     }
 
     pub fn build<'c>(

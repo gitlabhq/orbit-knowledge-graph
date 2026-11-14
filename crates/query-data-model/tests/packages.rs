@@ -5,14 +5,18 @@ use query_data_model::implementations::clickhouse::ClickHouse;
 use query_data_model::{Endpoint, Model, Packages, Tier};
 
 fn model() -> Arc<Model> {
-    Packages::embedded().load().unwrap()
+    Packages::embedded().deployment("server").unwrap()
 }
 
 #[test]
 fn graph_store_entities_filter_on_their_own_path_column() {
     let model = model();
-    let catalog = model.physical::<ClickHouse>("main").unwrap();
-    let store = catalog.store("graph").unwrap();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
+    let store = catalog
+        .model()
+        .store(catalog.names().store("graph").unwrap());
     for entity in model.graph().entities() {
         let guard = store.guard(entity.id).unwrap();
         let expected = match model.access().scope(guard.scope).kind {
@@ -42,7 +46,7 @@ fn every_package_declares_its_manifest_and_requirements() {
     let mut sources = embedded.sources().clone();
     sources.remove("gitlab.ci/package.yaml");
     let error = Packages::new(Tier::Platform, sources)
-        .load()
+        .deployment("server")
         .unwrap_err()
         .to_string();
     assert!(
@@ -55,15 +59,20 @@ fn every_package_declares_its_manifest_and_requirements() {
 fn code_edges_copy_endpoint_project_and_branch_in_the_graph_store_only() {
     let model = model();
     let graph = model.graph();
-    let catalog = model.physical::<ClickHouse>("main").unwrap();
-    let store = catalog.store("graph").unwrap();
+    let names = model.names();
+    let catalog = model
+        .physical::<ClickHouse>(model.names().connection("main").unwrap())
+        .unwrap();
+    let store = catalog
+        .model()
+        .store(catalog.names().store("graph").unwrap());
     let copy = |relationship: &str, source: &str, target: &str, endpoint: Endpoint| {
-        let variant = graph.variant_named(relationship, source, target).unwrap();
+        let variant = graph.variant(names.variant(relationship, source, target).unwrap());
         let entity = match endpoint {
             Endpoint::Source => variant.source,
             Endpoint::Target => variant.target,
         };
-        let branch = graph.property_id(entity, "branch")?;
+        let branch = names.property(entity, "branch").ok()?;
         store.copy(variant.id, endpoint, branch)
     };
     assert_eq!(
@@ -90,10 +99,8 @@ fn code_edges_copy_endpoint_project_and_branch_in_the_graph_store_only() {
             .all(|(_, _, binding)| binding.copies.is_empty())
     };
     assert!(
-        model
-            .stores()
-            .iter()
-            .filter(|store| store.name != "graph")
+        query_data_model::testkit::stores(&model)
+            .filter(|store| store.name() != "graph")
             .all(copies_nothing)
     );
 }
@@ -108,7 +115,7 @@ fn load_error(entry: &str) -> String {
             .into(),
     );
     Packages::new(Tier::Platform, sources)
-        .load()
+        .deployment("server")
         .unwrap_err()
         .to_string()
 }

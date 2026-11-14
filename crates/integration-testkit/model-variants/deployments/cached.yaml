@@ -1,0 +1,12 @@
+identify: gitlab_session
+providers:
+  gitlab_session: {module: fake.cached_paths}
+  rails: {module: gitlab.abilities}
+  slack:
+    module: fake.sign_in
+    handles: {"user:1": slack-sign-in-1}
+    readable: {}
+  jira:
+    module: fake.sign_in
+    handles: {"user:1": jira-sign-in-1}
+    readable: {}

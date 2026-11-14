@@ -1,0 +1,21 @@
+kind: storage
+package: peers.guilds
+store: lake
+entities:
+  Guild:
+    accepts: [id]
+    table: gl_guild
+    columns:
+      id: {immutable: true, backend: {type: BIGINT}}
+      name: {backend: {type: VARCHAR}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {order: [id]}
+  Realm:
+    complete: true
+    accepts: [code]
+    table: gl_realm
+    columns:
+      code: {immutable: true, backend: {type: VARCHAR}}
+      name: {backend: {type: VARCHAR}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {order: [code]}

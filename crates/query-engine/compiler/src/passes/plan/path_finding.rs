@@ -5,10 +5,11 @@
 use orbit_utils::query_types::SqlType;
 use query_data_model::Catalog;
 use query_data_model::constants::*;
-use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
-    BinaryOp, Expr, Function, JoinKind, Order, Relation, RelationalBuilder, Subquery,
+    BinaryOp, Expr, Function, JoinKind, Order, Relation, RelationalBuilder, RelationalError,
+    Subquery,
 };
+use query_data_model::implementations::relational::{EdgeColumns, RelationalBackend};
 use query_data_model::plan::logical::LogicalOperation;
 
 use super::node::Node;
@@ -20,9 +21,10 @@ use crate::passes::plan::Term;
 use crate::passes::plan::build::expr::{self, id_list, id_range, ids, relationship_kinds};
 use crate::passes::plan::build::sources::{Scope, columns, dedup, final_edge_scan, select};
 use crate::passes::plan::build::{
-    Built, and, binary, call, col, computed, conjoin, eq, filtered, int, membership, stored, string,
+    Built, and, binary, call, col, computed, conjoin, edge_columns, eq, filtered, int, membership,
+    stored, string,
 };
-use crate::passes::plan::predicates::Column;
+use crate::passes::plan::predicates::{Column, property_columns};
 
 pub(crate) struct PathFinding<'p> {
     start: Node<'p>,
@@ -156,6 +158,7 @@ fn anchor<B: RelationalBackend>(
     limit: u32,
 ) -> Built<Anchor> {
     let (alias, table) = (node.alias, node.table.unwrap_or_default());
+    let catalog = q.catalog();
     if !force_cte && node.is_id_pinned_only() {
         return Ok(Anchor {
             filter: Some(AnchorFilter::Ids(node.pinned.clone().unwrap_or_default())),
@@ -181,13 +184,11 @@ fn anchor<B: RelationalBackend>(
         inner.push(DELETED_COLUMN);
         let (rows, live) = dedup(q, alias, table, &inner, |scope| {
             let mut parts = Vec::new();
-            for (property, filter) in &node.filters {
-                parts.push(expr::filter::<B>(
-                    scope,
-                    &Column::new(alias, property),
-                    filter,
-                    false,
-                )?);
+            for (_, filter) in &node.filters {
+                let (column, rhs) = property_columns(alias, filter, catalog.graph())
+                    .ok_or(RelationalError::Incomplete("a property filter"))?;
+                let read = (&column, rhs.as_ref());
+                parts.push(expr::filter::<B>(catalog, scope, read, filter, false)?);
             }
             if let Some(pinned) = &node.pinned {
                 let id = col(scope, alias, node.id)?;
@@ -254,9 +255,10 @@ fn scope_cte<B: RelationalBackend>(
 
 /// The one type the edge tables' ID columns share, which the path's node array holds.
 fn id_type<B: SqlBackend>(model: &Catalog<B>, tables: &[String]) -> Result<SqlType> {
+    let edges = edge_columns(model)?;
     let mut types = Vec::new();
     for table in tables {
-        for column in [SOURCE_ID_COLUMN, TARGET_ID_COLUMN] {
+        for column in [edges.source_id.as_str(), edges.target_id.as_str()] {
             let data_type = model
                 .physical_table(table)
                 .and_then(|table| table.column(column)?.data_type)
@@ -290,6 +292,7 @@ struct Frontier<'a> {
     kinds: &'a [String],
     anchor_entity: &'a str,
     edge_tables: &'a [String],
+    edges: &'a EdgeColumns,
     id_type: SqlType,
     scope: Option<&'a str>,
     include_tp: bool,
@@ -320,18 +323,19 @@ fn frontier_arm<B: RelationalBackend>(
     way: Way,
     options: &Frontier<'_>,
 ) -> Built<Relation> {
+    let edges = options.edges;
     let (anchor_col, next_col, next_kind_col, anchor_kind_col) = match way {
         Way::Forward => (
-            SOURCE_ID_COLUMN,
-            TARGET_ID_COLUMN,
-            TARGET_KIND_COLUMN,
-            SOURCE_KIND_COLUMN,
+            edges.source_id.as_str(),
+            edges.target_id.as_str(),
+            edges.target_kind.as_str(),
+            edges.source_kind.as_str(),
         ),
         Way::Backward => (
-            TARGET_ID_COLUMN,
-            SOURCE_ID_COLUMN,
-            SOURCE_KIND_COLUMN,
-            TARGET_KIND_COLUMN,
+            edges.target_id.as_str(),
+            edges.source_id.as_str(),
+            edges.source_kind.as_str(),
+            edges.target_kind.as_str(),
         ),
     };
     let kinds = options.kinds;
@@ -362,7 +366,11 @@ fn frontier_arm<B: RelationalBackend>(
                 ),
             );
         }
-        if let Some(kinds) = relationship_kinds::<B>(&scope, &current, kinds)? {
+        if let Some(kinds) = relationship_kinds::<B>(
+            &scope,
+            &Column::new(&current, &edges.relationship_kind),
+            kinds,
+        )? {
             on = and(on, kinds);
         }
         if let Some(shared) = options.scope {
@@ -377,7 +385,11 @@ fn frontier_arm<B: RelationalBackend>(
         let value = col(&scope, &first, anchor_col)?;
         predicates.push(anchor_filter(q, bodies, filter, value)?);
     }
-    predicates.extend(relationship_kinds::<B>(&scope, &first, kinds)?);
+    predicates.extend(relationship_kinds::<B>(
+        &scope,
+        &Column::new(&first, &edges.relationship_kind),
+        kinds,
+    )?);
     predicates.push(eq(
         col(&scope, &first, anchor_kind_col)?,
         string(options.anchor_entity),
@@ -405,7 +417,11 @@ fn frontier_arm<B: RelationalBackend>(
     };
     let mut kinds_of = Vec::new();
     for index in 1..=depth {
-        kinds_of.push(col(&scope, &hop_alias(index), RELATIONSHIP_KIND_COLUMN)?);
+        kinds_of.push(col(
+            &scope,
+            &hop_alias(index),
+            edges.relationship_kind.as_str(),
+        )?);
     }
     let mut items = vec![
         (
@@ -446,6 +462,7 @@ pub(crate) fn emit<B: RelationalBackend>(
         kinds: &path.kinds,
         anchor_entity: start_entity,
         edge_tables: &path.tables,
+        edges: edge_columns(q.catalog())?,
         id_type: path.id_type,
         scope: scope.as_deref(),
         include_tp: path.scoped,

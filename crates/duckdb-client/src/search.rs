@@ -30,9 +30,12 @@ pub struct NodeHydrator {
 impl NodeHydrator {
     pub fn new(catalog: &Catalog<DuckDb>, entity_type: &str) -> Result<Self> {
         let graph = catalog.graph();
-        let entity = graph
-            .entity_named(entity_type)
-            .with_context(|| format!("entity {entity_type:?} does not exist"))?;
+        let entity = graph.entity(
+            catalog
+                .names()
+                .entity(entity_type)
+                .with_context(|| format!("entity {entity_type:?} does not exist"))?,
+        );
         let (_, source) = catalog
             .source(entity.id)
             .with_context(|| format!("entity {entity_type:?} is not in the local store"))?;
@@ -69,7 +72,8 @@ impl NodeHydrator {
     }
 
     pub fn embedded(entity_type: &str) -> Result<Self> {
-        let catalog = Catalog::<DuckDb>::embedded().context("failed to load the embedded model")?;
+        let catalog =
+            Catalog::<DuckDb>::embedded("local").context("failed to load the embedded model")?;
         Self::new(&catalog, entity_type)
     }
 

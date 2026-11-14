@@ -1,0 +1,10 @@
+kind: authorization
+package: peers.snippets
+entities:
+  Snippet:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}, orbit_code: {scope_key: {via: SNIPPET_IN}}}
+    properties: {open: [id, project_id, branch, path, body], hidden: [traversal_path]}
+relationships:
+  SNIPPET_IN: {scope: namespace, permission: read, enforce: {clickhouse: {scope_key: traversal_path, of: source}}}

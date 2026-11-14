@@ -196,12 +196,20 @@ fn dynamic_node(node: &NodeRef) -> String {
     )
 }
 
-fn node_literal(label: &str, id: &Key, properties: &Map<String, Value>) -> String {
-    let id = match id {
+/// An id as a literal: an integer bare, text quoted, a composite id as the list of its parts.
+fn id_literal(id: &Key) -> String {
+    match id {
         Key::Int(id) => id.to_string(),
         Key::Text(id) | Key::Uuid(id) => quote_escaped(id),
-        Key::Composite(_) => quote_escaped(&id.to_string()),
-    };
+        Key::Composite(parts) => {
+            let parts: Vec<String> = parts.iter().map(id_literal).collect();
+            format!("[{}]", parts.join(", "))
+        }
+    }
+}
+
+fn node_literal(label: &str, id: &Key, properties: &Map<String, Value>) -> String {
+    let id = id_literal(id);
     let mut out = format!("(:{label} {{id: {id}");
     for (key, value) in ordered_pairs(properties) {
         if !value.is_null() {

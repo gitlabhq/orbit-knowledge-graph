@@ -1,26 +1,26 @@
 mod authorization;
 mod graph;
+mod schemas;
 mod service;
 mod source;
-mod storage;
+pub(crate) mod storage;
 
 pub use authorization::{
-    AuthorizationFragment, CheckSpec, DelegatedCheck, DelegatedWord, EdgePolicy, EdgeScope,
-    EntityAccess, PackageManifest, PolicySpec, PolicyWord, PropertyAccess, PropertyClasses,
-    RelationshipAccess, RowCheck, ScopeDeclaration, ScopeKeySpec, ScopeKind, Via,
+    AuthorizationFragment, CheckSpec, EdgePolicy, EdgeScope, PackageManifest, PolicySpec,
+    PolicyWord, PropertyAccess, PropertyClasses, ScopeKeySpec, ScopeKind,
 };
 pub use graph::{
     Attribute, DefaultValue, Entity, GraphFragment, Property, Relationship, RelationshipVariant,
 };
+pub use schemas::schemas;
 pub use service::{Lookup, ServiceFragment};
 pub use source::{
-    CODE_INDEXER_SOURCE, EdgeMapping, Endpoint, EndpointKind, ExtractLookup, GENERATED_QUERY,
-    PathSpec, PipelineSpec, ReindexTrigger, RelationshipSourceSpec, Roles, SourceDeclaration,
-    SourceFragment, TEMPLATE_EXTENSION, Writes,
+    CODE_INDEXER, EdgeMapping, Endpoint, EndpointKind, ExtractLookup, GENERATED_QUERY, PathSpec,
+    PipelineSpec, ReindexTrigger, SourceFragment, SourceKey, TEMPLATE_EXTENSION, Writes,
 };
 pub use storage::{
-    AccessHints, Binding, Block, Blocks, ColumnStorage, CopySources, Discriminator, EdgeIndex,
-    EngineSpec, EntityStorage, Erased, Key, KeySpec, OneOrMany, StorageFragment, Typed,
+    AccessHints, Binding, Block, Blocks, CopySources, Discriminator, EngineSpec, EntityStorage,
+    Key, KeySpec, OneOrMany, StorageFragment, Typed, WrittenBlock,
 };
 
 use std::collections::{BTreeMap, HashMap};
@@ -28,6 +28,7 @@ use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 
 use indexmap::IndexMap;
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -36,8 +37,9 @@ use crate::packages::{Tier, directory};
 use crate::{EntityId, PropertyId, RelationshipId};
 
 /// One package file. Its storage blocks parse only once the store's engine kind is known.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[schemars(bound = "S: JsonSchema")]
 pub enum Fragment<S = Box<StorageFragment>> {
     Graph(GraphFragment),
     Storage(S),
@@ -79,6 +81,35 @@ pub struct Fragments {
     fragments: Vec<Fragment>,
     tiers: BTreeMap<String, Tier>,
     id: ModelId,
+    /// The connections one deployment serves, whose storage fragments alone these keep.
+    served: Option<Vec<String>>,
+    /// What the storage fragments of the stores on unserved connections hold.
+    elsewhere: Elsewhere,
+}
+
+/// The entities and relationship variants the stores of a deployment's unserved connections hold:
+/// they belong to other deployments, not to none.
+#[derive(Debug, Clone, Default)]
+pub struct Elsewhere {
+    entities: std::collections::HashSet<String>,
+    delegated: std::collections::HashSet<String>,
+    variants: std::collections::HashSet<(String, String)>,
+}
+
+impl Elsewhere {
+    pub fn holds(&self, entity: &str) -> bool {
+        self.entities.contains(entity)
+    }
+
+    pub fn delegates(&self, entity: &str) -> bool {
+        self.delegated.contains(entity)
+    }
+
+    /// Whether an unserved store binds the variant `source -> target` of `relationship`.
+    pub fn binds(&self, relationship: &str, source: &str, target: &str) -> bool {
+        self.variants
+            .contains(&(relationship.to_string(), format!("{source}->{target}")))
+    }
 }
 
 impl Fragments {
@@ -165,7 +196,82 @@ impl Fragments {
             fragments,
             tiers,
             id,
+            served: None,
+            elsewhere: Elsewhere::default(),
         })
+    }
+
+    /// Only the storage fragments whose store sits on a connection the deployment shape `shape`
+    /// of `deployments` serves; the model's id names the shape's connections.
+    pub fn deployment(
+        self,
+        deployments: &crate::Deployments,
+        shape: &str,
+    ) -> Result<Self, crate::DataModelError> {
+        Ok(self.serving(deployments.connections(shape)?))
+    }
+
+    /// Only the storage fragments of the shape `shape` in `config/deployments.yaml`.
+    pub fn deploy(self, shape: &str) -> Result<Self, crate::DataModelError> {
+        self.deployment(&crate::Deployments::embedded(), shape)
+    }
+
+    fn serving(mut self, connections: &[String]) -> Self {
+        let mut served = connections.to_vec();
+        served.sort();
+        served.dedup();
+        let on: HashMap<String, (String, String)> = self
+            .fragments
+            .iter()
+            .filter_map(|fragment| match fragment {
+                Fragment::Storage(storage) => storage.engine.as_ref().map(|engine| {
+                    (
+                        storage.store.clone(),
+                        (engine.connection.clone(), engine.kind.clone()),
+                    )
+                }),
+                _ => None,
+            })
+            .collect();
+        let mut elsewhere = Elsewhere::default();
+        self.fragments.retain(|fragment| match fragment {
+            Fragment::Storage(storage) => {
+                let engine = on.get(&storage.store);
+                let kept = engine.is_some_and(|(connection, _)| served.contains(connection));
+                if !kept {
+                    elsewhere.entities.extend(storage.entities.keys().cloned());
+                    let delegates = engine.is_some_and(|(_, kind)| {
+                        crate::catalog::capabilities(kind).is_some_and(|can| can.delegates)
+                    });
+                    if delegates {
+                        elsewhere.delegated.extend(storage.entities.keys().cloned());
+                    }
+                    for (relationship, variants) in &storage.relationships {
+                        for variant in variants.keys() {
+                            let variant: String =
+                                variant.chars().filter(|c| !c.is_whitespace()).collect();
+                            elsewhere.variants.insert((relationship.clone(), variant));
+                        }
+                    }
+                }
+                kept
+            }
+            _ => true,
+        });
+        self.elsewhere = elsewhere;
+        self.id = self.id.tagged(&format!("serving {}", served.join(",")));
+        self.served = Some(served);
+        self
+    }
+
+    /// What the stores on the connections the deployment does not serve hold.
+    pub fn elsewhere(&self) -> &Elsewhere {
+        &self.elsewhere
+    }
+
+    /// The connections the deployment these fragments describe serves.
+    pub fn served(&self) -> Option<&[String]> {
+        self.served.as_deref()
     }
 
     pub fn id(&self) -> ModelId {
@@ -352,6 +458,25 @@ pub struct Short<T>(pub T);
 
 pub trait ShortForm {
     const KEY: &'static str;
+}
+
+impl<T: ShortForm + JsonSchema> JsonSchema for Short<T> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("Short_{}", T::schema_name()).into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let key = T::json_schema(generator)
+            .get("properties")
+            .and_then(|properties| properties.get(T::KEY))
+            .cloned()
+            .expect("a short form's key is a field of its full form");
+        schemars::json_schema!({"anyOf": [key, generator.subschema_for::<T>()]})
+    }
 }
 
 impl<'de, T: ShortForm + Deserialize<'de>> Deserialize<'de> for Short<T> {

@@ -3,10 +3,10 @@
 
 use orbit_server_config::QueryLimits;
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::Model;
-use query_data_model::plan::logical::{Columns, LogicalPlan, PlanError, Projection};
+use query_data_model::plan::logical::{Columns, LogicalPlan, Predicate, Projection};
+use query_data_model::{EntityId, Model, PropertyId};
 
-use crate::error::{QueryError, Result};
+use crate::error::Result;
 use orbit_authorization::Key;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -24,6 +24,9 @@ pub struct HydrationRequest {
 #[derive(Debug)]
 pub struct HydrationArm {
     pub plan: LogicalPlan,
+    /// The identity keys the arm reads, or every row when none are named; a composite key is
+    /// one value per identity part.
+    pub keys: Option<Vec<Key>>,
     pub traversal_paths: Vec<TraversalPath>,
 }
 
@@ -31,42 +34,52 @@ impl HydrationArm {
     pub fn new(
         model: &Model,
         limits: &QueryLimits,
-        entity: &str,
+        entity: EntityId,
         ids: &[Key],
-        columns: &[String],
+        columns: &[PropertyId],
         traversal_paths: Vec<TraversalPath>,
     ) -> Result<Self> {
         let limits = QueryLimits {
             pinned_ids: limits.hydration_rows,
+            in_values: limits.in_values.max(limits.hydration_rows),
             ..*limits
         };
         let catalog = model.logical(&limits);
-        let ids = ids
-            .iter()
-            .map(crate::logical::anchors::literal)
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| QueryError::Validation("a composite key cannot pin one row".into()))?;
-        let key = identity(model, model.entity(entity).map_err(PlanError::from)?)?;
+        let identity = model.graph().entity(entity).identity.clone();
         let plan = catalog.build(|q| {
-            let declared = catalog.entity(entity)?;
+            let declared = catalog.entity(entity);
             let name = q.internal_name("hydrate")?;
             let rows = q.entities_as(declared, &name)?;
             let binding = rows.endpoint()?;
-            let id = binding.property(key)?;
-            let rows = q.pin(rows, id, &ids)?;
-            let entity = binding.entity().ok_or(PlanError::NoEntity)?;
-            let listed = columns
-                .iter()
-                .map(|column| Ok(model.property(entity, column)?.id))
-                .collect::<std::result::Result<_, PlanError>>()?;
+            let rows = match identity.as_slice() {
+                [key] => q.pin(
+                    rows,
+                    binding.property(*key)?,
+                    &crate::dag::keys::single(ids)?,
+                )?,
+                parts => {
+                    let predicate = Predicate::InTuple {
+                        left: parts
+                            .iter()
+                            .map(|part| binding.property(*part))
+                            .collect::<std::result::Result<_, _>>()?,
+                        values: ids
+                            .iter()
+                            .map(|id| crate::dag::keys::tuple(id, parts.len()))
+                            .collect::<std::result::Result<_, _>>()?,
+                    };
+                    q.filter(rows, predicate)?
+                }
+            };
             let projection = Projection::Graph {
                 binding: binding.output(),
-                columns: Columns::Listed(listed),
+                columns: Columns::Listed(columns.to_vec()),
             };
             q.select(rows, [projection.named(&*name)])
         })?;
         Ok(Self {
             plan,
+            keys: Some(ids.to_vec()),
             traversal_paths,
         })
     }
@@ -88,25 +101,13 @@ impl HydrationArm {
     }
 }
 
-/// The name of the one property that identifies the entity's rows.
-pub(crate) fn identity(model: &Model, entity: query_data_model::EntityId) -> Result<&str> {
-    let graph = model.graph();
-    match graph.entity(entity).identity.as_slice() {
-        [identity] => Ok(&graph.property(*identity).name),
-        _ => Err(QueryError::Validation(format!(
-            "{} has a composite identity, which no row read keys by",
-            graph.entity(entity).name
-        ))),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use query_data_model::{Catalog, ClickHouse};
 
     #[test]
     fn every_entity_hydrates_within_the_column_cap() {
-        let model = Catalog::<ClickHouse>::embedded().unwrap();
+        let model = Catalog::<ClickHouse>::embedded("server").unwrap();
         let columns = crate::testkit::limits().columns;
         for entity in model.model().graph().entities() {
             assert!(

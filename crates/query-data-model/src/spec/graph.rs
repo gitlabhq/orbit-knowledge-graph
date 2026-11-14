@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use indexmap::IndexMap;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{Naming, Raw, Resolved, Short, ShortForm};
@@ -8,7 +9,7 @@ use crate::generic::{AttributeId, Style};
 use crate::types::Cardinality;
 use crate::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GraphFragment {
     pub package: String,
@@ -22,8 +23,12 @@ pub struct GraphFragment {
     pub relationships: IndexMap<String, Relationship<Raw>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "")]
+#[schemars(
+    bound = "S::Required<S::Identity>: JsonSchema, S::Required<Vec<S::Property>>: JsonSchema, \
+    S::Members<Short<Property<S>>, PropertyId>: JsonSchema"
+)]
 pub struct Entity<S: Naming = Resolved> {
     #[serde(skip)]
     pub id: S::Loaded<EntityId>,
@@ -36,16 +41,19 @@ pub struct Entity<S: Naming = Resolved> {
     #[serde(default)]
     pub description: Option<String>,
     /// The property, or properties in order, whose values identify a row.
+    #[schemars(required)]
     pub identity: S::Required<S::Identity>,
     pub label: String,
+    #[schemars(required)]
     pub default_columns: S::Required<Vec<S::Property>>,
     #[serde(default)]
     pub style: Style,
     pub properties: S::Members<Short<Property<S>>, PropertyId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "")]
+#[schemars(bound = "S::Type: JsonSchema")]
 pub struct Property<S: Naming = Resolved> {
     #[serde(skip)]
     pub id: S::Loaded<PropertyId>,
@@ -70,7 +78,7 @@ pub struct Property<S: Naming = Resolved> {
 }
 
 /// The value a row takes when its source omits the property.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum DefaultValue {
     Bool(bool),
@@ -79,8 +87,12 @@ pub enum DefaultValue {
     String(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "")]
+#[schemars(
+    bound = "S::Members<RelationshipVariant<S>, RelationshipVariantId>: JsonSchema, \
+    S::Members<Short<Attribute<S>>, AttributeId>: JsonSchema"
+)]
 pub struct Relationship<S: Naming = Resolved> {
     #[serde(skip)]
     pub id: S::Loaded<RelationshipId>,
@@ -93,7 +105,7 @@ pub struct Relationship<S: Naming = Resolved> {
     pub attributes: S::Members<Short<Attribute<S>>, AttributeId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "")]
 pub struct RelationshipVariant<S: Naming = Resolved> {
     #[serde(skip)]
@@ -107,8 +119,9 @@ pub struct RelationshipVariant<S: Naming = Resolved> {
     pub cardinality: Cardinality,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, bound = "")]
+#[schemars(bound = "S::Type: JsonSchema")]
 pub struct Attribute<S: Naming = Resolved> {
     #[serde(skip)]
     pub id: S::Loaded<AttributeId>,

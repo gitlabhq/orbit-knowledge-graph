@@ -67,7 +67,9 @@ pub(super) fn resolve(
     via_keys(graph, stores, diagnostics);
 }
 
-/// Each `via` step is a foreign key on the entity it leaves, so a lookup can join it.
+/// Each `via` step is a foreign key on the entity it leaves, so a lookup can join it; the first
+/// step's keys cross a stage boundary, so they may be composite. The chain past its head stays on
+/// the head's connection, where one lookup stage reads it.
 fn via_keys(graph: &GraphCatalog, stores: &[Store], diagnostics: &mut Diagnostics) {
     for store in stores {
         for source in store.sources() {
@@ -78,11 +80,35 @@ fn via_keys(graph: &GraphCatalog, stores: &[Store], diagnostics: &mut Diagnostic
             else {
                 continue;
             };
-            for hop in hops {
+            let complete = |entity| stores.iter().find(|store| store.complete(entity));
+            if let Some(head) = hops.first().and_then(|hop| complete(hop.to)) {
+                let crossed = hops[1..]
+                    .iter()
+                    .filter_map(|hop| complete(hop.to))
+                    .find(|other| other.connection_name != head.connection_name);
+                if let Some(other) = crossed {
+                    diagnostics.error(
+                        &source.package,
+                        format!(
+                            "{}'s via chain crosses from connection {} to {}",
+                            graph.entity(source.entity).name,
+                            head.connection_name,
+                            other.connection_name
+                        ),
+                    );
+                }
+            }
+            for (index, hop) in hops.iter().enumerate() {
                 let keyed = stores.iter().any(|other| {
+                    let composite = || {
+                        other
+                            .composite_key(hop.variant)
+                            .is_some_and(|(holder, _)| holder == Endpoint::Source)
+                    };
                     other
                         .foreign_key(hop.variant)
                         .is_some_and(|key| key.holder == Endpoint::Source)
+                        || (index == 0 && composite())
                 });
                 if !keyed {
                     diagnostics.error(
@@ -132,8 +158,7 @@ fn entity_guard(
         );
         return None;
     };
-    let renders =
-        registered(&store.kind).is_some_and(|backend| backend.policies().contains(&policy.kind()));
+    let renders = registered(&store.kind).is_some_and(|backend| backend.renders(policy.kind()));
     if !renders {
         diagnostics.error(
             package,
@@ -189,8 +214,8 @@ fn edge_guards(
     diagnostics: &mut Diagnostics,
 ) -> BTreeMap<String, Guard> {
     let mut guards: BTreeMap<String, Guard> = BTreeMap::new();
-    let keyed = registered(&store.kind)
-        .is_some_and(|backend| backend.policies().contains(&PolicyKind::ScopeKey));
+    let keyed =
+        registered(&store.kind).is_some_and(|backend| backend.renders(PolicyKind::ScopeKey));
     for (variant, package, _) in store.bindings() {
         let relationship = graph.variant(variant).relationship;
         let name = &graph.relationship(relationship).name;

@@ -195,7 +195,7 @@ mod tests {
     use super::*;
 
     fn catalog() -> Catalog<ClickHouse> {
-        Catalog::<ClickHouse>::embedded().expect("embedded catalog")
+        Catalog::<ClickHouse>::embedded("server").expect("embedded catalog")
     }
 
     fn build_plans(catalog: &Catalog<ClickHouse>) -> plan::Plans {

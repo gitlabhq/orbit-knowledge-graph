@@ -4,6 +4,7 @@ store: graph
 entities:
   AgentMemory:
     complete: true
+    accepts: [id, project_id]
     table: tenant_agent_memory
     columns:
       id: { immutable: true, backend: { type: Int64 } }

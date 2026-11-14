@@ -120,7 +120,12 @@ async fn does_not_bill_a_query_the_client_abandoned() {
         .execute_query(billable_project_query())
         .await
         .unwrap();
-    harness.clickhouse.received.notified().await;
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        harness.clickhouse.received.notified(),
+    )
+    .await
+    .expect("the query never reached ClickHouse");
     drop(responses);
     let _ = tokio::time::timeout(Duration::from_secs(5), harness.analytics_event()).await;
     harness.clickhouse.answer.notify_one();

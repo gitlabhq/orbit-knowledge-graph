@@ -10,21 +10,38 @@ use serde_json::{Map, Value};
 
 use compiler::orbit_authorization::Key;
 use shared::PipelineOutput;
-use types::{QueryResult, QueryResultRow, identity};
+use types::{QueryResult, QueryResultRow};
 
 use semver::Version;
 
 use super::{FormatName, ResultFormatter, column_value_to_json};
 
-mod id_as_string {
+/// A node id as the response carries it: a single key as text, so an integer keeps every digit,
+/// and a composite key as the list of its typed parts.
+pub(crate) fn id_value(key: &Key) -> Value {
+    match key {
+        Key::Composite(_) => serde_json::to_value(key).unwrap_or(Value::Null),
+        single => Value::String(single.to_string()),
+    }
+}
+
+/// The text a response id cell is matched by.
+pub(crate) fn id_text(id: &Value) -> String {
+    match id {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+mod response_id {
     use compiler::orbit_authorization::Key;
-    use serde::Serializer;
+    use serde::{Serialize, Serializer};
 
     pub fn serialize<S>(value: &Key, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        serializer.serialize_str(&value.to_string())
+        super::id_value(value).serialize(serializer)
     }
 
     /// Tests read ids back without the model, so a decimal id reads as an integer key.
@@ -34,8 +51,27 @@ mod id_as_string {
         D: serde::Deserializer<'de>,
     {
         use serde::Deserialize;
-        let s = String::deserialize(deserializer)?;
-        Ok(s.parse::<i64>().map_or(Key::Text(s), Key::Int))
+        fn key(value: serde_json::Value) -> Key {
+            match value {
+                serde_json::Value::String(text) => {
+                    text.parse::<i64>().map_or(Key::Text(text), Key::Int)
+                }
+                serde_json::Value::Number(number) => number
+                    .as_i64()
+                    .map_or_else(|| Key::Text(number.to_string()), Key::Int),
+                serde_json::Value::Array(parts) => {
+                    Key::Composite(parts.into_iter().map(part).collect())
+                }
+                other => Key::Text(other.to_string()),
+            }
+        }
+        fn part(value: serde_json::Value) -> Key {
+            match value {
+                serde_json::Value::String(text) => Key::Text(text),
+                other => key(other),
+            }
+        }
+        Ok(key(serde_json::Value::deserialize(deserializer)?))
     }
 }
 
@@ -55,10 +91,10 @@ pub(crate) fn group_node_cell<'a>(
 ) -> Option<(&'a str, Key, &'a Map<String, Value>)> {
     let cell = cell.as_object()?;
     let entity = cell.get("type")?.as_str()?;
-    let id = cell.get("id")?.as_str()?;
+    let id = id_text(cell.get("id")?);
     Some((
         entity,
-        ids.get(&(entity.to_string(), id.to_string()))?.clone(),
+        ids.get(&(entity.to_string(), id))?.clone(),
         cell.get("properties")?.as_object()?,
     ))
 }
@@ -119,7 +155,7 @@ pub struct PaginationResponse {
 pub struct GraphNode {
     #[serde(rename = "type")]
     pub entity_type: String,
-    #[serde(with = "id_as_string")]
+    #[serde(with = "response_id")]
     pub id: Key,
     #[serde(flatten)]
     pub properties: serde_json::Map<String, Value>,
@@ -129,10 +165,10 @@ pub struct GraphNode {
 #[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct GraphEdge {
     pub from: String,
-    #[serde(with = "id_as_string")]
+    #[serde(with = "response_id")]
     pub from_id: Key,
     pub to: String,
-    #[serde(with = "id_as_string")]
+    #[serde(with = "response_id")]
     pub to_id: Key,
     #[serde(rename = "type")]
     pub edge_type: String,
@@ -294,13 +330,13 @@ impl GraphFormatter {
                 let Some(edge_type) = row.get_column_string(&meta.type_column) else {
                     continue;
                 };
-                let Some(src_id) = row.get(&meta.src_column).and_then(identity) else {
+                let Some(src_id) = row.key(&meta.src_column, meta.src_parts) else {
                     continue;
                 };
                 let Some(src_type) = row.get_column_string(&meta.src_type_column) else {
                     continue;
                 };
-                let Some(dst_id) = row.get(&meta.dst_column).and_then(identity) else {
+                let Some(dst_id) = row.key(&meta.dst_column, meta.dst_parts) else {
                     continue;
                 };
                 let Some(dst_type) = row.get_column_string(&meta.dst_type_column) else {
@@ -424,8 +460,9 @@ impl GraphFormatter {
 
         let mut obj = Map::new();
         obj.insert("type".to_string(), Value::String(entity_type.to_string()));
-        obj.insert("id".to_string(), Value::String(id.to_string()));
-        group_ids.insert((entity_type.to_string(), id.to_string()), id);
+        let value = id_value(&id);
+        group_ids.insert((entity_type.to_string(), id_text(&value)), id);
+        obj.insert("id".to_string(), value);
         obj.insert(
             "properties".to_string(),
             Value::Object(Self::extract_node_properties(row, &node.alias)),

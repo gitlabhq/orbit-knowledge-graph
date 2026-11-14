@@ -1,0 +1,15 @@
+kind: authorization
+package: peers.clans
+entities:
+  Clan:
+    scope: namespace
+    permission: read
+    enforce: {clickhouse: {scope_key: traversal_path}}
+    properties: {open: [slug, name], hidden: [traversal_path]}
+  ClanPost:
+    scope: namespace
+    permission: read
+    enforce: {live: {scope_key: {via: CLAN_OF}}}
+    properties: {open: [id, clan, channel, text]}
+relationships:
+  CLAN_OF: {scope: namespace, permission: read, enforce: {}}

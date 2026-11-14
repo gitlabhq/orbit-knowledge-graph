@@ -24,7 +24,7 @@ pub fn patched_model(
     assert!(source.contains(find), "{path} does not contain {find:?}");
     *source = source.replacen(find, replace, 1);
     query_data_model::Packages::new(query_data_model::Tier::Platform, sources)
-        .load()
+        .deployment("server")
         .unwrap()
 }
 
@@ -45,7 +45,7 @@ pub fn variant_routes_catalog() -> query_data_model::Catalog<query_data_model::C
 )]
 pub fn siphon_source() -> query_data_model::catalog::sources::DataSource {
     query_data_model::Packages::embedded()
-        .load()
+        .deployment("server")
         .expect("embedded model")
         .sources()
         .enabled_namespaces()
@@ -61,7 +61,7 @@ pub fn siphon_source() -> query_data_model::catalog::sources::DataSource {
 pub fn checkpoint_store(
     client: std::sync::Arc<crate::clickhouse::ArrowClickHouseClient>,
 ) -> crate::checkpoint::ClickHouseCheckpointStore {
-    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
         .expect("embedded catalog");
     crate::checkpoint::ClickHouseCheckpointStore::new(
         client,
@@ -76,7 +76,7 @@ pub fn checkpoint_store(
 )]
 pub fn code_tables() -> crate::modules::code::config::CodeTableNames {
     crate::modules::code::config::CodeTableNames::from_catalog(
-        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
             .expect("embedded catalog"),
     )
     .expect("embedded code tables")

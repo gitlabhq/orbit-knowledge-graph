@@ -1,0 +1,4 @@
+kind: source
+package: peers.ranks
+source: rank_sync
+entities: [GuildRank]

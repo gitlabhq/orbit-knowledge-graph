@@ -68,7 +68,7 @@ pub fn column_value_to_json(value: &ColumnValue) -> Value {
 #[cfg(test)]
 pub(crate) fn compiled(gql: &str) -> compiler::CompiledQueryContext {
     let model = std::sync::Arc::new(
-        query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+        query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
     );
     let ctx = compiler::uniform_grants(model.model(), false, &["1/"]);
     compiler::compile(gql, &model, &ctx, query_data_model::testkit::limits()).unwrap()

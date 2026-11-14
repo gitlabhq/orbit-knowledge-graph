@@ -3,6 +3,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod commands;
 mod database;
+mod deployment;
 mod descriptions;
 mod list;
 mod remote;

@@ -3,22 +3,26 @@
 //! registered for its frontend and backend.
 
 mod columns;
+mod combine;
 mod compile;
+mod connections;
+mod contract;
 mod cut;
-mod engine;
-mod keys;
-mod remotes;
+pub(crate) mod keys;
+mod lookup;
 mod request;
 mod split;
 mod sub;
 
+pub use combine::{CombineEdge, CombineJoin, CombineNode, CombineQuery};
 pub use compile::{
-    Compiled, Env, Inputs, Primary, Source, compile, compile_hydration, split_query,
+    Compiled, Env, Frontend, Inputs, Source, compile, compile_hydration, split_query,
 };
-pub use engine::{EngineColumn, EngineJoin, EngineNode, EngineQuery};
+pub use connections::{Connections, Peer, Place};
+pub use contract::{Column, ColumnType, Contract, Handle, Output};
 pub use keys::{KeySet, bind};
-pub use remotes::Remotes;
 pub use request::{Rendered, Request, describe};
+pub(crate) use split::places;
 pub use split::split;
 
 use query_data_model::implementations::live::Live;
@@ -56,13 +60,13 @@ impl StageBackend for Live {
     const BACKEND: Backend = Backend::Live;
 }
 
-/// The query engine itself, which joins the rows of the other stages.
+/// The Combine stage, which joins the rows of the other stages.
 #[derive(Debug)]
-pub struct Engine;
+pub struct Combine;
 
-impl StageBackend for Engine {
+impl StageBackend for Combine {
     type Catalog = Model;
-    const BACKEND: Backend = Backend::Engine;
+    const BACKEND: Backend = Backend::Combine;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr)]
@@ -77,13 +81,7 @@ pub enum Backend {
     DuckDb,
     OrbitCode,
     Live,
-    Engine,
-}
-
-impl Backend {
-    pub fn relational(self) -> bool {
-        matches!(self, Self::ClickHouse | Self::DuckDb)
-    }
+    Combine,
 }
 
 pub type StageId = usize;
@@ -94,12 +92,12 @@ pub enum StageQuery {
     /// A logical plan over the bindings the stage's connection holds.
     Gql(Statement),
     /// The join of earlier stages' rows, with the query's result columns, order and limit.
-    Engine(EngineQuery, Box<Response>),
+    Combine(CombineQuery, Box<Response>),
     /// The rows a hydration reads by key.
     Hydration(HydrationRequest),
 }
 
-/// What the engine stage's response reports about the query, from its top-level logical plan.
+/// What the Combine stage's response reports about the query, from its top-level logical plan.
 #[derive(Debug)]
 pub struct Response {
     pub shape: crate::passes::result_contract::ResultShape,
@@ -108,42 +106,74 @@ pub struct Response {
 }
 
 /// A key set an earlier stage returns, which this stage reads as an `IN` input before it
-/// plans: the producer's columns, one per key part, pin the consumer binding's properties.
+/// plans: the producer's contract positions, one per key part, pin the consumer binding's
+/// properties.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KeyInput {
     pub from: StageId,
-    pub columns: Vec<String>,
+    pub positions: Vec<usize>,
     pub binding: String,
-    pub properties: Vec<String>,
+    #[serde(skip)]
+    pub properties: Vec<query_data_model::PropertyId>,
+    /// The declared type of each key part, which the producer's rows are read as.
+    pub types: Vec<query_data_model::DataType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Input {
     Keys(KeyInput),
-    Rows { from: StageId },
+    /// The keys a scope lookup admits a remote binding's reads to; the stage's security phase
+    /// reads them, so they bind no condition.
+    Scope(KeyInput),
+    Rows {
+        from: StageId,
+    },
+}
+
+/// Where a stage runs: on one connection, reading each entity from the store placement chose, or
+/// in the query engine, combining the other stages' rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Runs {
+    On {
+        connection: query_data_model::ConnectionId,
+        stores: Vec<(query_data_model::EntityId, query_data_model::StoreId)>,
+    },
+    Combine,
+}
+
+impl Runs {
+    pub fn connection(&self) -> Option<query_data_model::ConnectionId> {
+        match self {
+            Self::On { connection, .. } => Some(*connection),
+            Self::Combine => None,
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct Stage {
     pub id: StageId,
     pub backend: Backend,
-    /// The connection the stage runs on; the engine stage runs in the query engine.
-    pub connection: Option<String>,
+    pub runs: Runs,
     pub query: StageQuery,
     pub inputs: Vec<Input>,
-    /// Whether the stage's rows are the response: the response policy shapes them for the
-    /// caller, where a stage that feeds others hands its rows on whole.
-    pub response: bool,
+    /// The columns a stage that feeds Combine hands on, whole; none for the stage whose rows
+    /// are the response, which the response policy shapes for the caller.
+    pub contract: Option<Contract>,
+    /// The row checks the stage's rows go through before a later stage reads them.
+    pub checks: Vec<RowCheck>,
 }
 
-impl Stage {
-    pub fn keys(&self) -> impl Iterator<Item = &KeyInput> {
-        self.inputs.iter().filter_map(|input| match input {
-            Input::Keys(keys) => Some(keys),
-            Input::Rows { .. } => None,
-        })
-    }
+/// A row check a stage's rows go through, on the contract position that holds each row's key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowCheck {
+    pub provider: String,
+    pub permission: String,
+    pub resource: String,
+    pub position: usize,
+    /// The type of the key the check reads at `position`.
+    pub kind: crate::KeyKind,
 }
 
 #[derive(Debug)]

@@ -10,4 +10,7 @@ pub use walk::{Direction, Hop, Reach, Walk};
 
 pub use crate::spec::{Attribute, Entity, Property, Relationship, RelationshipVariant};
 pub use catalog::{Domain, GraphCatalog, Style};
-pub use ids::{AttributeId, EntityId, PropertyId, RelationshipId, RelationshipVariantId};
+pub use ids::{
+    AttributeId, ConnectionId, EdgeField, EntityId, PropertyId, RelationshipId,
+    RelationshipVariantId, StoreId,
+};

@@ -1,4 +1,5 @@
 use query_data_model::constants::*;
+use query_data_model::implementations::relational::EdgeColumns;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Column as Output, Expr, Function, JoinKind, Order, Relation, RelationalBuilder,
@@ -14,7 +15,8 @@ use crate::passes::plan::build::{
     Built, and, binary, call, col, computed, conjoin, disjoin, eq, filtered, int, scan, stored,
     string,
 };
-use crate::passes::plan::predicates::Column;
+use crate::passes::plan::predicates::{Column, property_columns};
+use query_data_model::implementations::relational::plan::RelationalError;
 
 use super::{Arm, CenterBound, Neighbors, arms};
 
@@ -142,6 +144,9 @@ impl Context<'_> {
         arm: &Arm<'_>,
     ) -> Built<(Relation, Vec<Output>)> {
         let plan = self.plan;
+        let catalog = q.catalog();
+        let graph = catalog.graph();
+        let edges = plan.edges;
         let center = &plan.center;
         let (center_alias, entity) = (center.alias, center.entity);
         let table = center.table.unwrap_or_default();
@@ -149,18 +154,18 @@ impl Context<'_> {
         let (center_edge, center_kind, neighbor_id, neighbor_type, outgoing, direction) =
             match arm.direction {
                 Direction::Outgoing => (
-                    SOURCE_ID_COLUMN,
-                    SOURCE_KIND_COLUMN,
-                    TARGET_ID_COLUMN,
-                    TARGET_KIND_COLUMN,
+                    edges.source_id.as_str(),
+                    edges.source_kind.as_str(),
+                    edges.target_id.as_str(),
+                    edges.target_kind.as_str(),
                     1,
                     DenormalizedDirection::Source,
                 ),
                 Direction::Incoming => (
-                    TARGET_ID_COLUMN,
-                    TARGET_KIND_COLUMN,
-                    SOURCE_ID_COLUMN,
-                    SOURCE_KIND_COLUMN,
+                    edges.target_id.as_str(),
+                    edges.target_kind.as_str(),
+                    edges.source_id.as_str(),
+                    edges.source_kind.as_str(),
                     0,
                     DenormalizedDirection::Target,
                 ),
@@ -174,7 +179,11 @@ impl Context<'_> {
             if let Some(pinned) = &center.pinned {
                 parts.push(Some(ids::<B>(col(scope, alias, center_edge)?, pinned)?));
             }
-            if let Some(kinds) = relationship_kinds::<B>(scope, alias, arm.kinds)? {
+            if let Some(kinds) = relationship_kinds::<B>(
+                scope,
+                &Column::new(alias, &edges.relationship_kind),
+                arm.kinds,
+            )? {
                 parts.push(Some(kinds));
             }
             match arm.bound {
@@ -206,8 +215,16 @@ impl Context<'_> {
             let (joined, live) = dedup(q, center_alias, table, &names, |scope| {
                 let mut parts = Vec::new();
                 for filter in &plan.filters {
-                    let column = Column::new(center_alias, &filter.property);
-                    parts.push(expr::filter::<B>(scope, &column, &filter.filter, false)?);
+                    let (column, rhs) = property_columns(center_alias, &filter.filter, graph)
+                        .ok_or(RelationalError::Incomplete("a property filter"))?;
+                    let read = (&column, rhs.as_ref());
+                    parts.push(expr::filter::<B>(
+                        catalog,
+                        scope,
+                        read,
+                        &filter.filter,
+                        false,
+                    )?);
                 }
                 if let Some(pinned) = &center.pinned {
                     let id = col(scope, center_alias, center.id)?;
@@ -257,12 +274,12 @@ impl Context<'_> {
             ),
             (
                 relationship_type_column().to_string(),
-                col(&scope, edge, RELATIONSHIP_KIND_COLUMN)?,
+                col(&scope, edge, edges.relationship_kind.as_str())?,
             ),
             (neighbor_is_outgoing_column().to_string(), int(outgoing)),
             (
                 neighbor_traversal_path_column().to_string(),
-                neighbor_path(&scope, edge, neighbor_type, paths)?,
+                neighbor_path(edges, &scope, edge, neighbor_type, paths)?,
             ),
         ];
         if center.uses_default_pk() {
@@ -287,6 +304,7 @@ impl Context<'_> {
 }
 
 fn neighbor_path(
+    edges: &EdgeColumns,
     scope: &Scope<'_>,
     edge: &str,
     neighbor_type: &str,
@@ -296,7 +314,7 @@ fn neighbor_path(
     for (relationship, entity) in owned {
         pairs.push(and(
             eq(
-                col(scope, edge, RELATIONSHIP_KIND_COLUMN)?,
+                col(scope, edge, edges.relationship_kind.as_str())?,
                 string(relationship),
             ),
             eq(col(scope, edge, neighbor_type)?, string(entity)),
@@ -325,6 +343,7 @@ fn fused<B: RelationalBackend>(
     plan: &Neighbors<'_>,
     table: &str,
 ) -> Built<(Relation, Vec<Output>)> {
+    let edges = plan.edges;
     let center = &plan.center;
     let (center_alias, entity) = (center.alias, center.entity);
     let edge = neighbor_edge_alias();
@@ -353,15 +372,15 @@ fn fused<B: RelationalBackend>(
         };
         let source = || {
             side(
-                SOURCE_KIND_COLUMN,
-                SOURCE_ID_COLUMN,
+                edges.source_kind.as_str(),
+                edges.source_id.as_str(),
                 DenormalizedDirection::Source,
             )
         };
         let target = || {
             side(
-                TARGET_KIND_COLUMN,
-                TARGET_ID_COLUMN,
+                edges.target_kind.as_str(),
+                edges.target_id.as_str(),
                 DenormalizedDirection::Target,
             )
         };
@@ -380,16 +399,16 @@ fn fused<B: RelationalBackend>(
         let outgoing = tuple(
             source()?,
             1,
-            TARGET_ID_COLUMN,
-            TARGET_KIND_COLUMN,
-            SOURCE_ID_COLUMN,
+            edges.target_id.as_str(),
+            edges.target_kind.as_str(),
+            edges.source_id.as_str(),
         )?;
         let incoming = tuple(
             target()?,
             0,
-            SOURCE_ID_COLUMN,
-            SOURCE_KIND_COLUMN,
-            TARGET_ID_COLUMN,
+            edges.source_id.as_str(),
+            edges.source_kind.as_str(),
+            edges.target_id.as_str(),
         )?;
         let matched = Expr::Lambda {
             param: "_orbit_arm".to_string(),
@@ -409,14 +428,18 @@ fn fused<B: RelationalBackend>(
             (ROW_COLUMN.to_string(), row),
             (
                 relationship.to_string(),
-                col(&scope, edge, RELATIONSHIP_KIND_COLUMN)?,
+                col(&scope, edge, edges.relationship_kind.as_str())?,
             ),
         ];
         if center.has_traversal_path {
             items.push((path.clone(), col(&scope, edge, TRAVERSAL_PATH_COLUMN)?));
         }
         let mut predicates = vec![Some(binary(BinaryOp::Or, source()?, target()?))];
-        if let Some(kinds) = relationship_kinds::<B>(&scope, edge, &plan.kinds)? {
+        if let Some(kinds) = relationship_kinds::<B>(
+            &scope,
+            &Column::new(edge, &edges.relationship_kind),
+            &plan.kinds,
+        )? {
             predicates.push(Some(kinds));
         }
         predicates.push(deleted::<B>(&scope, edge)?);

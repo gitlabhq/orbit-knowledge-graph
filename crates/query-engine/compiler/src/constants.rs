@@ -93,6 +93,11 @@ pub fn primary_key_column(alias: &str) -> String {
     format!("{}{alias}_pk", internal_column_prefix())
 }
 
+/// The column that carries one part of a composite identity held under `column`.
+pub fn identity_part_column(column: &str, part: usize) -> String {
+    format!("{column}_{part}")
+}
+
 pub fn redaction_id_column(alias: &str) -> String {
     format!("{}{alias}_id", internal_column_prefix())
 }

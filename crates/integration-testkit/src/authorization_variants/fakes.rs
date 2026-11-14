@@ -99,6 +99,60 @@ impl Provider<Scopes> for OidcGroups {
     }
 }
 
+/// Identifies callers from an OIDC token and answers hierarchy scopes with its groups as paths,
+/// from a cache that may lag the grants, so its answers are not exact.
+pub struct CachedPaths {
+    globals: BTreeSet<String>,
+}
+
+impl Module for CachedPaths {
+    const KIND: &'static str = "fake.cached_paths";
+    type Options = NoOptions;
+
+    fn build(_: NoOptions) -> Result<Self, AuthError> {
+        Ok(Self {
+            globals: BTreeSet::new(),
+        })
+    }
+
+    fn answers(self: Arc<Self>, needs: &[Need]) -> Result<Answers, AuthError> {
+        let bound = Arc::new(Self {
+            globals: globals(needs),
+        });
+        Ok(Answers {
+            identify: Some(bound.clone()),
+            scopes: Some(bound),
+            scopes_exact: false,
+            ..Answers::default()
+        })
+    }
+}
+
+#[async_trait]
+impl Provider<Identify> for CachedPaths {
+    async fn call(&self, query: Identify) -> Result<Caller, AuthError> {
+        let token = query
+            .request
+            .get::<OidcToken>()
+            .ok_or_else(|| AuthError::Denied("the request carries no OIDC token".into()))?;
+        Ok(Caller::new(token.subject.clone(), false, token.clone()))
+    }
+}
+
+#[async_trait]
+impl Provider<Scopes> for CachedPaths {
+    async fn call(&self, query: Scopes) -> Result<ScopeSet, AuthError> {
+        let token = query
+            .caller
+            .session::<OidcToken>()
+            .ok_or_else(|| AuthError::Invalid("the caller carries no OIDC token".into()))?;
+        Ok(match self.globals.contains(&query.scope) {
+            true => ScopeSet::All,
+            false => ScopeSet::Subtrees(token.groups.clone()),
+        })
+    }
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ZanzibarOptions {

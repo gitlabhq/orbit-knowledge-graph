@@ -331,7 +331,7 @@ mod tests {
         "traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind";
 
     fn groups() -> Vec<ReconciliationGroup> {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         group_mutable_edges_by_emitting_node(&catalog)
     }
 
@@ -423,10 +423,9 @@ mod tests {
 
     #[test]
     fn polymorphic_endpoint_has_no_emitting_node_row_to_compare() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
-        let graph = catalog.graph();
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let polymorphic = EdgeMapping {
-            relationship: graph.relationship_id("HAS_NOTE").unwrap(),
+            relationship: catalog.names().relationship("HAS_NOTE").unwrap(),
             source: Endpoint {
                 field: "noteable_id".to_string(),
                 kind: query_data_model::catalog::sources::EndpointKind::Column {
@@ -438,7 +437,7 @@ mod tests {
             target: Endpoint {
                 field: "user_id".to_string(),
                 kind: query_data_model::catalog::sources::EndpointKind::Entity(
-                    graph.entity_id("User").unwrap(),
+                    catalog.names().entity("User").unwrap(),
                 ),
                 properties: Default::default(),
             },
@@ -446,7 +445,10 @@ mod tests {
             variants: Vec::new(),
         };
         assert_eq!(
-            find_emitting_node_id_column(&polymorphic, graph.entity_id("MergeRequest").unwrap()),
+            find_emitting_node_id_column(
+                &polymorphic,
+                catalog.names().entity("MergeRequest").unwrap()
+            ),
             None
         );
     }

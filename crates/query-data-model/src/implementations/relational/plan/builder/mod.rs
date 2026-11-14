@@ -65,7 +65,7 @@ impl<'c, B: RelationalBackend> RelationalBuilder<'c, B> {
         &mut self,
         settings: impl IntoIterator<Item = (String, String)>,
     ) -> Result<(), RelationalError> {
-        self.guard(supported(B::CAPABILITIES.settings, "query settings"))?;
+        self.guard(supported(B::SQL.settings, "query settings"))?;
         self.settings.extend(settings);
         Ok(())
     }

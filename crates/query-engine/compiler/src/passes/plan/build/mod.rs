@@ -3,11 +3,12 @@ pub(crate) mod predicates;
 pub(crate) mod sources;
 
 use orbit_utils::query_types::SqlType;
+use query_data_model::Catalog;
 use query_data_model::implementations::relational::plan::{
     BinaryOp, Column, Expr, Function, ReadMode, Relation, RelationalBuilder, RelationalError,
     Subquery,
 };
-use query_data_model::implementations::relational::{CurrentRows, RelationalBackend};
+use query_data_model::implementations::relational::{CurrentRows, EdgeColumns, RelationalBackend};
 use query_data_model::plan::tracking::Declare;
 use serde_json::Value;
 
@@ -16,8 +17,14 @@ use crate::passes::plan::predicates::Column as Named;
 
 pub(crate) type Built<T> = std::result::Result<T, RelationalError>;
 
+pub(crate) fn edge_columns<B: RelationalBackend>(catalog: &Catalog<B>) -> Built<&EdgeColumns> {
+    catalog
+        .edge_columns()
+        .ok_or(RelationalError::Unsupported("edge tables"))
+}
+
 pub(crate) fn stored<B: RelationalBackend>() -> bool {
-    B::CAPABILITIES.current_rows == CurrentRows::Stored
+    B::SQL.current_rows == CurrentRows::Stored
 }
 
 pub(crate) fn scan<B: RelationalBackend>(

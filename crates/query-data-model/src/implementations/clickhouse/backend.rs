@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use super::ClickHouse;
 use super::schema::{self, Schema};
 use super::spec::{ClickHouseOptions, ClickHouseSource, ColumnSpec};
-use crate::catalog::{Diagnostics, PolicyKind, StorageBackend, StoreInput};
+use crate::catalog::{Capabilities, Diagnostics, Field, PolicyKind, StorageBackend, StoreInput};
 use crate::implementations::relational::{ReadPaths, RelationalFacts, RelationalStore};
 use crate::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
@@ -59,8 +59,15 @@ impl RelationalFacts for ClickHouseStore {
 
 impl StorageBackend for ClickHouse {
     const KIND: &'static str = "clickhouse";
+    const CAPABILITIES: Capabilities = Capabilities {
+        joins: true,
+        writer: true,
+        search: false,
+        delegates: false,
+    };
     const POLICIES: &'static [PolicyKind] =
         &[PolicyKind::ScopeKey, PolicyKind::Owner, PolicyKind::None];
+    const FIELDS: &'static [Field] = crate::implementations::relational::FIELDS;
     type Options = ClickHouseOptions;
     type SourceOptions = ClickHouseSource;
     type ColumnOptions = Option<ColumnSpec>;
@@ -78,6 +85,7 @@ impl StorageBackend for ClickHouse {
             options.version_column.as_ref(),
             options.deleted_column.as_ref(),
             &edge_tables,
+            options.edge_columns.as_ref(),
             diagnostics,
         );
         let mut read_paths = ReadPaths::default();
@@ -231,6 +239,16 @@ fn resolve_joins(
                 let entity = diagnostics.require(graph.entity_id(&node.entity), package, || {
                     format!("join {table} names unknown entity {}", node.entity)
                 })?;
+                if graph.entity(entity).identity.len() != 1 {
+                    diagnostics.error(
+                        package,
+                        format!(
+                            "store {} join {table} keys {} by one column {}, but {} has a composite identity",
+                            input.store.name, node.entity, node.key, node.entity
+                        ),
+                    );
+                    return None;
+                }
                 let source = diagnostics.require(spec.sources.get(node.source), package, || {
                     format!(
                         "join {table} reads {} from unknown source {}",

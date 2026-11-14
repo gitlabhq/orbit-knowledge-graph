@@ -1,0 +1,26 @@
+kind: authorization
+package: peers.guilds
+entities:
+  Guild:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path}, clickhouse: {scope_key: traversal_path}}
+    properties: {open: [id, name], hidden: [traversal_path]}
+  GuildPost:
+    scope: namespace
+    permission: read
+    enforce: {live: {scope_key: {via: GUILD_OF}}}
+    properties: {open: [id, guild, channel, text]}
+  Realm:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path}}
+    properties: {open: [code, name], hidden: [traversal_path]}
+  RealmPost:
+    scope: namespace
+    permission: read
+    enforce: {live: {scope_key: {via: REALM_OF}}}
+    properties: {open: [id, realm, channel, text]}
+relationships:
+  GUILD_OF: {scope: namespace, permission: read, enforce: {}}
+  REALM_OF: {scope: namespace, permission: read, enforce: {}}

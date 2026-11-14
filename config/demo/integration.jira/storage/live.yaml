@@ -1,0 +1,18 @@
+kind: storage
+package: integration.jira
+store: jira_live
+engine:
+  kind: live
+  connection: data_extraction
+entities:
+  JiraIssue:
+    accepts: [id, key]
+    columns:
+      id: {}
+      key: {}
+      summary: {}
+      description: {}
+    backend:
+      operation: search.issues
+      filters: [id, key]
+      text: description

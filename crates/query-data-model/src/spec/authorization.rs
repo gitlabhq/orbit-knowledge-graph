@@ -1,10 +1,11 @@
 use indexmap::IndexMap;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::OneOrMany;
 
 /// A package's authorization: the platform vocabulary it declares and its entities' policies.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AuthorizationFragment {
     pub package: String,
@@ -18,7 +19,7 @@ pub struct AuthorizationFragment {
     pub relationships: IndexMap<String, RelationshipAccess>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeDeclaration {
     pub kind: ScopeKind,
@@ -27,7 +28,7 @@ pub struct ScopeDeclaration {
     pub entity: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ScopeKind {
     Hierarchy,
@@ -36,7 +37,7 @@ pub enum ScopeKind {
     Global,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EntityAccess {
     pub scope: String,
@@ -45,11 +46,44 @@ pub struct EntityAccess {
     #[serde(default)]
     pub enforce: IndexMap<String, PolicySpec>,
     #[serde(default)]
-    pub checks: Vec<CheckSpec>,
+    pub checks: ChecksSpec,
     pub properties: PropertyClasses,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+/// An entity's row checks, or `open`: the permission alone admits every row of a global entity.
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ChecksSpec {
+    Word(ChecksWord),
+    Listed(Vec<CheckSpec>),
+}
+
+impl Default for ChecksSpec {
+    fn default() -> Self {
+        Self::Listed(Vec::new())
+    }
+}
+
+impl ChecksSpec {
+    pub fn listed(&self) -> &[CheckSpec] {
+        match self {
+            Self::Word(_) => &[],
+            Self::Listed(checks) => checks,
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Word(ChecksWord::Open))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChecksWord {
+    Open,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum PolicySpec {
     Word(PolicyWord),
@@ -57,26 +91,26 @@ pub enum PolicySpec {
     Owner { owner: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyWord {
     None,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ScopeKeySpec {
     Property(String),
     Via(Via),
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Via {
     pub via: OneOrMany,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum CheckSpec {
     Delegated(DelegatedCheck),
@@ -84,21 +118,21 @@ pub enum CheckSpec {
 }
 
 /// The provider answers `Credentials`, and the backend runs the read with the caller's sign-in.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DelegatedCheck {
     pub provider: String,
     pub kind: DelegatedWord,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DelegatedWord {
     Delegated,
 }
 
 /// The provider answers `Check` for the returned rows, or for the `object` each row names.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RowCheck {
     pub provider: String,
@@ -112,7 +146,7 @@ pub struct RowCheck {
 /// reads and filters freely, `exact` filters without pattern matches, `unfiltered` is read but
 /// never filtered, `hidden` is neither, and `admin` and `admin_exact` are `open` and `exact`
 /// for administrators only.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PropertyClasses {
     #[serde(default)]
@@ -148,7 +182,7 @@ impl PropertyClasses {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RelationshipAccess {
     pub scope: String,
@@ -162,7 +196,7 @@ pub struct RelationshipAccess {
 }
 
 /// An edge row's scope key: the copy of `scope_key` it holds, and which endpoints share it.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EdgePolicy<P = String> {
     pub scope_key: P,
@@ -170,7 +204,7 @@ pub struct EdgePolicy<P = String> {
 }
 
 /// Which endpoints an edge row's scope key belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeScope {
     /// The target's key; the source may sit in another scope.
@@ -230,7 +264,7 @@ impl PropertyAccess {
 }
 
 /// A package's manifest.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackageManifest {
     pub name: String,

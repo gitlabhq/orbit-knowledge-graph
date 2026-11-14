@@ -4,6 +4,7 @@ store: graph
 entities:
   Group:
     complete: true
+    accepts: [id]
     table: gl_group
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -29,6 +30,7 @@ entities:
 
   Note:
     complete: true
+    accepts: [id, author_id, noteable_id, project_id]
     table: gl_note
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -69,6 +71,7 @@ entities:
 
   Project:
     complete: true
+    accepts: [id]
     table: gl_project
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -100,6 +103,7 @@ entities:
 
   User:
     complete: true
+    accepts: [id]
     table: gl_user
     path_column:
     columns:

@@ -4,7 +4,10 @@ use indexmap::IndexMap;
 
 use super::Diagnostics;
 use super::store::Store;
-pub use crate::spec::{EdgeMapping, Endpoint, EndpointKind, ExtractLookup, ReindexTrigger};
+pub use crate::spec::{
+    CODE_INDEXER, EdgeMapping, Endpoint, EndpointKind, ExtractLookup, PathSpec, ReindexTrigger,
+    SourceKey,
+};
 use crate::spec::{
     GENERATED_QUERY, PipelineSpec, Raw, Short, SourceFragment, TEMPLATE_EXTENSION, Writes,
     parse_variant, snake_case,
@@ -28,6 +31,7 @@ pub enum Writer {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataSource {
+    pub package: String,
     pub name: String,
     pub connection: String,
     pub version: String,
@@ -39,6 +43,13 @@ pub struct DataSource {
 }
 
 impl DataSource {
+    pub fn key(&self) -> SourceKey<'_> {
+        SourceKey {
+            package: &self.package,
+            name: &self.name,
+        }
+    }
+
     pub fn table(&self, role: &str) -> Result<&str, DataModelError> {
         self.tables.get(role).map(String::as_str).ok_or_else(|| {
             DataModelError::Invalid(format!("source {} declares no {role} table", self.name))
@@ -126,7 +137,7 @@ pub struct Sources {
     derived: Vec<Derived>,
     reindex: BTreeSet<ReindexTrigger>,
     direct: Vec<DirectSource>,
-    roles: BTreeMap<(String, String), Role>,
+    roles: BTreeMap<(String, String, String), Role>,
     pub(super) writers: Writers,
 }
 
@@ -137,6 +148,15 @@ pub struct DirectSource {
     pub package: String,
     pub entities: Vec<EntityId>,
     pub variants: Vec<RelationshipVariantId>,
+}
+
+impl DirectSource {
+    pub fn key(&self) -> SourceKey<'_> {
+        SourceKey {
+            package: &self.package,
+            name: &self.name,
+        }
+    }
 }
 
 /// The one writer of every stored entity and edge-table variant, set by the load check.
@@ -151,8 +171,8 @@ impl Sources {
         &self.sources[pipeline.source]
     }
 
-    pub fn source_named(&self, name: &str) -> Option<&DataSource> {
-        self.sources.iter().find(|source| source.name == name)
+    pub fn source(&self, key: SourceKey<'_>) -> Option<&DataSource> {
+        self.sources.iter().find(|source| source.key() == key)
     }
 
     /// The one source that lists the namespaces enabled for indexing, with that table.
@@ -192,24 +212,36 @@ impl Sources {
         self.writers.variants.get(&variant).copied()
     }
 
-    /// What the source named `source` declares for `role`.
-    pub fn role(&self, source: &str, role: &str) -> Option<&Role> {
-        self.roles.get(&(source.to_string(), role.to_string()))
+    /// What the source declares for `role`.
+    pub fn role(&self, source: SourceKey<'_>, role: &str) -> Option<&Role> {
+        let key = (
+            source.package.to_string(),
+            source.name.to_string(),
+            role.to_string(),
+        );
+        self.roles.get(&key)
     }
 
     pub fn direct_sources(&self) -> &[DirectSource] {
         &self.direct
     }
 
-    pub fn direct_source(&self, name: &str) -> Option<&DirectSource> {
-        self.direct.iter().find(|source| source.name == name)
+    pub fn direct_source(&self, key: SourceKey<'_>) -> Option<&DirectSource> {
+        self.direct.iter().find(|source| source.key() == key)
     }
 
-    /// Whether the source named `name` writes the entity's rows.
-    pub fn writes(&self, name: &str, entity: EntityId) -> bool {
-        self.entity_writer(entity).is_some_and(
-            |writer| matches!(writer, RowWriter::Direct(index) if self.direct[index].name == name),
-        )
+    /// Whether the source writes the entity's rows.
+    pub fn writes(&self, source: SourceKey<'_>, entity: EntityId) -> bool {
+        self.entity_writer(entity)
+            .is_some_and(|writer| self.row_writer_source(writer) == source)
+    }
+
+    /// The source a writer belongs to.
+    pub fn row_writer_source(&self, writer: RowWriter) -> SourceKey<'_> {
+        match writer {
+            RowWriter::Pipeline(index) => self.sources[self.pipelines[index].source].key(),
+            RowWriter::Direct(index) => self.direct[index].key(),
+        }
     }
 
     pub fn row_writer_name(&self, writer: RowWriter) -> &str {
@@ -269,6 +301,7 @@ impl Sources {
         fragments: &[&SourceFragment],
         served: &HashSet<PropertyId>,
         stores: &[Store],
+        elsewhere: &crate::spec::Elsewhere,
         diagnostics: &mut Diagnostics,
     ) -> Self {
         let mut resolver = Resolver {
@@ -282,7 +315,14 @@ impl Sources {
         resolver.declare_sources(fragments);
         let packages = resolver.resolve(fragments);
         let mut sources = resolver.sources;
-        super::writers::assign(graph, stores, &mut sources, &packages, diagnostics);
+        super::writers::assign(
+            graph,
+            stores,
+            &mut sources,
+            &packages,
+            elsewhere,
+            diagnostics,
+        );
         sources
     }
 }
@@ -342,7 +382,11 @@ impl<'a> Resolver<'a> {
                     ),
                 );
             }
-            if self.sources.source_named(&fragment.source).is_some() {
+            let key = SourceKey {
+                package: &fragment.package,
+                name: &fragment.source,
+            };
+            if self.sources.source(key).is_some() {
                 self.diagnostics.error(
                     &fragment.package,
                     format!("source {} is declared twice", fragment.source),
@@ -350,6 +394,7 @@ impl<'a> Resolver<'a> {
                 continue;
             }
             self.sources.sources.push(DataSource {
+                package: fragment.package.clone(),
                 name: fragment.source.clone(),
                 connection: declaration.connection.clone(),
                 version: declaration.version.clone(),
@@ -364,20 +409,23 @@ impl<'a> Resolver<'a> {
     fn resolve(&mut self, fragments: &[&'a SourceFragment]) -> Vec<String> {
         let mut pending = Vec::new();
         for fragment in fragments {
-            self.roles(fragment);
             if fragment.writes != Writes::default() {
                 self.direct(fragment);
+                self.roles(fragment, &fragment.package);
                 continue;
             }
-            let found = self
-                .sources
-                .sources
-                .iter()
-                .position(|source| source.name == fragment.source);
-            let Some(source) = self.diagnostics.require(found, &fragment.package, || {
-                format!("source {} is never declared", fragment.source)
-            }) else {
-                continue;
+            let declared = self.declared(fragment);
+            let owner = match &declared {
+                Ok(source) => self.sources.sources[*source].package.clone(),
+                Err(_) => fragment.package.clone(),
+            };
+            self.roles(fragment, &owner);
+            let source = match declared {
+                Ok(source) => source,
+                Err(message) => {
+                    self.diagnostics.error(&fragment.package, message);
+                    continue;
+                }
             };
             pending.push(Pending { fragment, source });
         }
@@ -473,7 +521,32 @@ impl<'a> Resolver<'a> {
         packages
     }
 
-    fn roles(&mut self, fragment: &SourceFragment) {
+    /// The source a pipeline fragment writes through: the one its own package declares, else
+    /// the one other package that declares that name.
+    fn declared(&self, fragment: &SourceFragment) -> Result<usize, String> {
+        let named = |source: &&DataSource| source.name == fragment.source;
+        let declared = &self.sources.sources;
+        if let Some(own) = declared
+            .iter()
+            .position(|source| named(&source) && source.package == fragment.package)
+        {
+            return Ok(own);
+        }
+        let mut others = declared
+            .iter()
+            .enumerate()
+            .filter(|(_, source)| named(source));
+        match (others.next(), others.next()) {
+            (Some((source, _)), None) => Ok(source),
+            (None, _) => Err(format!("source {} is never declared", fragment.source)),
+            (Some((_, first)), Some((_, second))) => Err(format!(
+                "source {} is declared by both {} and {}, so {} must declare its own",
+                fragment.source, first.package, second.package, fragment.package
+            )),
+        }
+    }
+
+    fn roles(&mut self, fragment: &SourceFragment, owner: &str) {
         let (package, source) = (fragment.package.as_str(), fragment.source.as_str());
         let roles = &fragment.roles;
         let mut resolved = Vec::new();
@@ -490,7 +563,7 @@ impl<'a> Resolver<'a> {
                 .sources
                 .sources
                 .iter_mut()
-                .find(|declared| declared.name == source)
+                .find(|declared| declared.name == source && declared.package == owner)
             {
                 Some(declared) => declared.tables.extend(roles.tables.clone()),
                 None => self.diagnostics.error(
@@ -505,7 +578,7 @@ impl<'a> Resolver<'a> {
             }) else {
                 continue;
             };
-            let key = (source.to_string(), role.clone());
+            let key = (owner.to_string(), source.to_string(), role.clone());
             if self.sources.roles.insert(key, found).is_some() {
                 self.diagnostics.error(
                     package,
@@ -521,7 +594,7 @@ impl<'a> Resolver<'a> {
         let pipelines = !fragment.entities.is_empty()
             || !fragment.relationships.is_empty()
             || !fragment.derived.is_empty();
-        let declared = self.sources.source_named(name).is_some();
+        let declared = self.sources.source(SourceKey { package, name }).is_some();
         if fragment.declare.is_some() || pipelines || declared {
             self.diagnostics.error(
                 package,

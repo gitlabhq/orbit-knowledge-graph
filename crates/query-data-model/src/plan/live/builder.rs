@@ -1,9 +1,11 @@
-use super::{Condition, LiveError, LiveLanguage, LiveOperation, LivePlan, LiveValue, Operation};
-use crate::DataType;
+use super::{
+    Condition, LiveError, LiveLanguage, LiveOperation, LivePlan, LiveValue, Operation, Workspaces,
+};
 use crate::catalog::Catalog;
 use crate::implementations::live::Live;
 use crate::plan::logical::Literal;
 use crate::plan::tracking::{self, Construction, Declared, Ref};
+use crate::{DataType, PropertyId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
@@ -56,13 +58,14 @@ pub struct Calls {
 }
 
 impl Calls {
-    pub fn field(&self, name: &str) -> Result<Field, LiveError> {
+    /// The field the call returns `property` in.
+    pub fn field(&self, property: PropertyId) -> Result<Field, LiveError> {
         self.fields
             .iter()
-            .find(|field| field.name == name)
+            .find(|field| field.value.property == property)
             .cloned()
             .ok_or_else(|| LiveError::UnknownField {
-                name: name.to_string(),
+                name: format!("{property:?}"),
                 available: self.fields.iter().map(|field| field.name.clone()).collect(),
             })
     }
@@ -133,14 +136,15 @@ impl<'c> LiveBuilder<'c> {
         self.apply(operation, vec![calls])
     }
 
-    pub fn workspaces(
-        &mut self,
-        calls: Calls,
-        workspaces: impl IntoIterator<Item = String>,
-    ) -> Result<Calls, LiveError> {
-        let mut workspaces: Vec<String> = workspaces.into_iter().collect();
-        workspaces.sort();
-        workspaces.dedup();
+    pub fn workspaces(&mut self, calls: Calls, workspaces: Workspaces) -> Result<Calls, LiveError> {
+        let workspaces = match workspaces {
+            Workspaces::Any => Workspaces::Any,
+            Workspaces::Only(mut listed) => {
+                listed.sort();
+                listed.dedup();
+                Workspaces::Only(listed)
+            }
+        };
         self.apply(LiveOperation::Workspaces(workspaces), vec![calls])
     }
 

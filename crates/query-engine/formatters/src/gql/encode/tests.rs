@@ -188,6 +188,8 @@ fn returned_relationships_add_columns_in_return_order() {
         dst_column: "_orbit_e0_dst".into(),
         dst_type_column: "_orbit_e0_dst_kind".into(),
         relationship: 0,
+        src_parts: 1,
+        dst_parts: 1,
     });
     assert_eq!(
         encode(&output),

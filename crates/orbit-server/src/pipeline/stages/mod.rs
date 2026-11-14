@@ -7,7 +7,7 @@ mod routing;
 mod security;
 
 pub use authorization::AuthorizationStage;
-pub use dag::graph_executors;
+pub use dag::{PeerExecutors, ServeError, graph_executors};
 pub use execution::ClickHouseExecutor;
 pub use hydration::HydrationStage;
 pub use redaction::RedactionStage;

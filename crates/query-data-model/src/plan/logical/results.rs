@@ -123,7 +123,7 @@ impl<'m> LogicalBuilder<'m> {
                 }
                 for key in checked {
                     if matches!(key, Expr::Attribute { .. })
-                        || matches!(key, Expr::Edge { field, .. } if field != super::EdgeField::Kind)
+                        || matches!(key, Expr::Edge { field, .. } if field != crate::EdgeField::Kind)
                     {
                         return Err(PlanError::shape(
                             "ORDER BY cannot sort by a relationship property; sort by a node property or by type(r)",

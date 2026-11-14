@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use query_data_model::implementations::relational::plan::RelationalBuilder;
 
 use super::filters::{BoundFilter, NullAsEpochColumns};
-use super::predicates::{Column, Predicate, kind_column};
+use super::predicates::{Column, Predicate};
 use super::rows::{ReadScope, Reads, Rel};
 use super::{DenormalizedKey, DenormalizedProperty, sort_key};
 use crate::error::{QueryError, Result};
@@ -26,23 +26,25 @@ use crate::logical::Boolean;
 use crate::logical::Kind;
 use crate::logical::Query;
 use query_data_model::Direction;
+use query_data_model::implementations::relational::{EdgeColumns, TableId, Target};
 use query_data_model::plan::logical::Expr;
 
 #[derive(Clone)]
 pub struct NodePlan {
     pub alias: String,
-    pub entity: Option<String>,
+    pub entity: Option<query_data_model::EntityId>,
     pub table: Option<String>,
     pub joined: bool,
-    pub filters: Vec<(String, BoundFilter)>,
+    pub filters: Vec<(Target, BoundFilter)>,
     pub predicates: Vec<Predicate>,
     pub node_ids: Option<Vec<orbit_authorization::Key>>,
     pub id_range: Option<(i64, i64)>,
     pub has_traversal_path: bool,
     pub read_scope: ReadScope,
-    /// The column holding the node's identity.
-    pub id_column: String,
-    pub redaction_id_column: String,
+    /// The columns holding each part of the node's identity.
+    pub identity: Vec<String>,
+    /// The column redaction reads the node's rows by: its check key, or its one identity column.
+    pub redaction_id_column: Option<String>,
     pub columns: Vec<String>,
     pub emit_select: bool,
     pub null_as_epoch: NullAsEpochColumns,
@@ -53,7 +55,8 @@ pub struct EdgeRelation {
     pub input_index: usize,
     pub rel_types: Vec<String>,
     pub relationships: Vec<query_data_model::RelationshipId>,
-    pub edge_tables: Vec<String>,
+    pub edge_tables: Vec<TableId>,
+    pub edges: Option<EdgeColumns>,
     pub alias: String,
     pub source_entity: Option<query_data_model::EntityId>,
     pub target_entity: Option<query_data_model::EntityId>,
@@ -62,7 +65,7 @@ pub struct EdgeRelation {
     pub direction: Direction,
     pub min_hops: u32,
     pub max_hops: u32,
-    pub filters: Vec<(String, BoundFilter)>,
+    pub filters: Vec<(Target, BoundFilter)>,
     pub fk: Option<Fk>,
 }
 
@@ -81,6 +84,8 @@ pub(crate) struct Pattern<'a, B: SqlBackend> {
     pub relations: Vec<EdgeRelation>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     scans: Vec<Option<String>>,
+    /// Every node joins as a table read, so the rows carry each node's columns inline.
+    inline: bool,
 }
 
 impl<B: SqlBackend> Pattern<'_, B> {
@@ -105,32 +110,33 @@ impl<B: SqlBackend> Pattern<'_, B> {
     }
 
     fn node_conditions(&self, node: &NodePlan) -> Vec<Predicate> {
-        let mut conditions = node.conditions();
+        let mut conditions = node.conditions(self.model.graph());
         conditions.extend(self.shared_column_predicates(node));
         conditions
     }
 
-    fn entity_kind(&self, edge_alias: &str, node: &str, id_column: &str) -> Option<Predicate> {
+    fn kind_predicate(&self, kind: Column, node: &str) -> Option<Predicate> {
         Some(Predicate::EntityKind {
-            column: Column::new(edge_alias, kind_column(id_column)),
-            entity: self.nodes[node].entity.clone()?,
+            column: kind,
+            entity: self.nodes[node].entity?,
         })
     }
 }
 
 impl<'a, B: SqlBackend> Pattern<'a, B> {
-    pub(crate) fn new(query: Query<'a>, model: &'a Catalog<B>) -> Result<Self> {
+    pub(crate) fn new(query: Query<'a>, model: &'a Catalog<B>, inline: bool) -> Result<Self> {
         let facts = query.leaves();
         let nodes = nodes::build_nodes(query, &query.anchors(&facts), model)?;
-        let relations = relations::build_relations(query, &facts, model, &nodes);
+        let relations = relations::build_relations(query, &facts, model, &nodes)?;
         let mut pattern = Self {
             query,
-            conditions: conditions::conditions(query, &relations, &nodes, model)?,
+            conditions: conditions::conditions(query, &relations, model)?,
             model,
             relations,
             nodes,
             denormalized: super::filters::denormalized_facts(query, model),
             scans: Vec::new(),
+            inline,
         };
         let placement = conditions::place_conditions(&pattern)?;
         conditions::bind_scan_conditions(&mut pattern, &placement)?;

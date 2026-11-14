@@ -27,7 +27,10 @@ impl Catalog<ClickHouse> {
         self.stores()
             .find_map(|(_, store)| store.schema())
             .ok_or_else(|| {
-                DataModelError::Invalid(format!("connection {} has no schema", self.connection()))
+                DataModelError::Invalid(format!(
+                    "connection {} has no schema",
+                    self.model().connection(self.connection()).name()
+                ))
             })
     }
 }

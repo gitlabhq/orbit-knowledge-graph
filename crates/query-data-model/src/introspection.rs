@@ -408,14 +408,16 @@ engine:
   backend:
     version_column: _version
     deleted_column: _deleted
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
       gl_edge:
         shared: true
         sort_key: [traversal_path, source_id, relationship_kind, target_id]
-        columns: {source_id: {type: Int64}, target_id: {type: Int64}}
+        columns: {source_id: {type: Int64}, source_kind: {type: String}, relationship_kind: {type: String}, target_kind: {type: String}, target_id: {type: Int64}}
 entities:
   Project:
     complete: true
+    accepts: [id]
     table: gl_project
     columns:
       id: {immutable: true, backend: {type: Int64}}
@@ -424,6 +426,7 @@ entities:
     access: {order: [id]}
   MergeRequest:
     complete: true
+    accepts: [id, project_id]
     table: gl_merge_request
     columns:
       id: {immutable: true, backend: {type: Int64}}
@@ -451,6 +454,7 @@ engine:
   trusted: true
   path_column: traversal_path
   backend:
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
       gl_edge:
         shared: true
@@ -464,6 +468,9 @@ engine:
           traversal_path: string
 entities:
   MergeRequest:
+    complete: true
+    accepts: [id, project_id]
+    exclude: [body]
     table: gl_merge_request
     columns:
       id: {immutable: true, backend: {type: BIGINT}}
@@ -487,19 +494,33 @@ relationships:
   RELATES_TO: [MergeRequest -> MergeRequest, MergeRequest -> Project]
 ";
 
+    /// The fixture as the deployment shape `shape` loads it.
+    fn deployed(shape: &str) -> Model {
+        let sources = [
+            ("test/package.yaml", "kind: package\nname: test\n"),
+            ("test/graph.yaml", GRAPH),
+            ("test/authorization.yaml", AUTHORIZATION),
+            ("test/storage/clickhouse.yaml", GRAPH_STORE),
+            ("test/storage/duckdb.yaml", LOCAL_STORE),
+            ("test/sources/test_writer.yaml", SOURCE),
+        ];
+        let tiers = sources
+            .iter()
+            .map(|(path, _)| {
+                (
+                    crate::packages::directory(path).to_string(),
+                    crate::Tier::Platform,
+                )
+            })
+            .collect();
+        let fragments = crate::spec::Fragments::parse(sources, &tiers)
+            .and_then(|fragments| fragments.deploy(shape))
+            .unwrap();
+        Model::load(&fragments).unwrap()
+    }
+
     fn model() -> Model {
-        Model::from_yaml(
-            crate::Tier::Platform,
-            [
-                ("test/package.yaml", "kind: package\nname: test\n"),
-                ("test/graph.yaml", GRAPH),
-                ("test/authorization.yaml", AUTHORIZATION),
-                ("test/storage/clickhouse.yaml", GRAPH_STORE),
-                ("test/storage/duckdb.yaml", LOCAL_STORE),
-                ("test/sources/test_writer.yaml", SOURCE),
-            ],
-        )
-        .unwrap()
+        deployed("server")
     }
 
     fn json(response: &SchemaResponse) -> serde_json::Value {
@@ -568,7 +589,7 @@ relationships:
         );
         assert_eq!(
             json(&build_compact_schema_response(
-                &model,
+                &deployed("local"),
                 IntrospectionScope::Local,
                 None
             )),
@@ -583,9 +604,13 @@ relationships:
 
     #[test]
     fn unknown_and_out_of_scope_nodes_fail_alike() {
-        let model = model();
+        let (model, local) = (model(), deployed("local"));
         let error = |scope, name: &str| {
-            build_schema_response(&model, scope, &[name.into()])
+            let model = match scope {
+                IntrospectionScope::Local => &local,
+                IntrospectionScope::All => &model,
+            };
+            build_schema_response(model, scope, &[name.into()])
                 .unwrap_err()
                 .to_string()
         };

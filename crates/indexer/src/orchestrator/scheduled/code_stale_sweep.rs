@@ -251,7 +251,7 @@ mod tests {
 
     fn table_names() -> CodeTableNames {
         CodeTableNames::from_catalog(
-            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
         )
         .expect("code tables must resolve")
     }
@@ -364,7 +364,7 @@ mod tests {
             "graph",
         );
         let catalog =
-            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap();
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap();
         let store = Arc::new(
             crate::checkpoint::ClickHouseCheckpointStore::new(
                 Arc::new(graph.clone()),

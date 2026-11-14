@@ -194,7 +194,7 @@ async fn concurrent_identical_publications_return_the_archived_model() {
     let context = TestContext::new().await;
     let (_, catalog) = context.connect_catalog().await;
     let archive = archive_with_distinct_model(1);
-    let expected = archive.packages().load().unwrap().id();
+    let expected = archive.packages().deployment("server").unwrap().id();
 
     let (first, retry) = tokio::join!(catalog.publish(&archive), catalog.publish(&archive));
 
@@ -317,7 +317,9 @@ impl TestContext {
         })
         .await
         .expect("NATS did not become ready");
-        let catalog = ModelCatalog::open(client.clone()).await.unwrap();
+        let catalog = ModelCatalog::open(client.clone(), "server".into())
+            .await
+            .unwrap();
         (client, catalog)
     }
 

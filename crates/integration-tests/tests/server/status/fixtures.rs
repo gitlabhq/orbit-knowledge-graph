@@ -223,7 +223,9 @@ pub async fn seed_namespaces(ctx: &TestContext) {
 
 pub async fn seed_plans(ctx: &TestContext, root: i64, overrides: &[(&str, CheckpointRow)]) {
     let overridden = |plan: &str| overrides.iter().any(|(key, _)| *key == plan);
-    let model = query_data_model::Packages::embedded().load().unwrap();
+    let model = query_data_model::Packages::embedded()
+        .deployment("server")
+        .unwrap();
     let completed_plans = model
         .sources()
         .descriptors(model.graph())

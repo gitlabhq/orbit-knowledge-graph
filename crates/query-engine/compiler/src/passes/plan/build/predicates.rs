@@ -55,18 +55,29 @@ impl Lowering<'_> {
     ) -> Built<Expr> {
         Ok(match value {
             Predicate::Boolean(expression) => self.boolean(q, expression, negated)?,
-            Predicate::Filter { column, filter } => {
-                expr::filter::<B>(self.scope, column, filter, negated)?
-            }
+            Predicate::Filter {
+                column,
+                rhs,
+                filter,
+            } => expr::filter::<B>(
+                q.catalog(),
+                self.scope,
+                (column, rhs.as_ref()),
+                filter,
+                negated,
+            )?,
             Predicate::Ids { column, values } => expr::ids::<B>(self.column(column)?, values)?,
             Predicate::IdRange { column, start, end } => {
                 expr::id_range(self.column(column)?, *start, *end)
             }
             Predicate::Live { alias } => expr::live::<B>(self.scope, alias)?,
-            Predicate::EntityKind { column, entity } => eq(self.column(column)?, string(entity)),
+            Predicate::EntityKind { column, entity } => {
+                let kind = &q.catalog().graph().entity(*entity).name;
+                eq(self.column(column)?, string(kind))
+            }
             Predicate::ColumnEq { left, right } => eq(self.column(left)?, self.column(right)?),
-            Predicate::RelationshipKinds { alias, kinds } => {
-                expr::relationship_kinds::<B>(self.scope, alias, kinds)?
+            Predicate::RelationshipKinds { column, kinds } => {
+                expr::relationship_kinds::<B>(self.scope, column, kinds)?
                     .unwrap_or_else(|| super::literal(true.into()))
             }
             Predicate::Tags { column, values } => expr::tags(self.column(column)?, values),

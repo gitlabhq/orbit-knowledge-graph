@@ -4,6 +4,7 @@ store: graph
 entities:
   Dependency:
     complete: true
+    accepts: [id, project_id]
     table: gl_dependency
     columns:
       id: {backend: {type: Int64, codec: [Delta(8), LZ4]}}
@@ -24,6 +25,7 @@ entities:
 
   Package:
     complete: true
+    accepts: [id, project_id]
     table: gl_package
     columns:
       id: {backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -51,6 +53,7 @@ entities:
 
   PackageFile:
     complete: true
+    accepts: [id, package_id, project_id]
     table: gl_package_file
     columns:
       id: {backend: {type: Int64, codec: [Delta(8), LZ4]}}

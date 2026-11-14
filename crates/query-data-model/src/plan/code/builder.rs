@@ -1,8 +1,11 @@
 use super::{
     CodeError, CodeLanguage, CodeOperation, CodePlan, CodeValue, Index, Language, Pattern,
 };
+use crate::PropertyId;
 use crate::catalog::Catalog;
-use crate::implementations::orbit_code::{OrbitCode, SearchMode};
+use crate::catalog::SearchMode;
+use crate::implementations::orbit_code::OrbitCode;
+use crate::plan::logical::Literal;
 use crate::plan::tracking::{self, Construction, Declared, Ref};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,12 +32,25 @@ pub struct Matches {
 }
 
 impl Matches {
-    pub fn field(&self, name: &str) -> Result<Field, CodeError> {
-        self.find(name, |value| value != CodeValue::Capture)
+    /// The column of the index's store that holds `property`.
+    pub fn column(&self, property: PropertyId) -> Result<Field, CodeError> {
+        self.fields
+            .iter()
+            .find(|field| field.value == CodeValue::Column(property))
+            .cloned()
             .ok_or_else(|| CodeError::UnknownField {
-                name: name.to_string(),
-                available: self.names(|value| value != CodeValue::Capture),
+                name: format!("{property:?}"),
+                available: self.names(|value| matches!(value, CodeValue::Column(_))),
             })
+    }
+
+    /// The line each match starts at.
+    pub fn line(&self) -> Result<Field, CodeError> {
+        self.fields
+            .iter()
+            .find(|field| field.value == CodeValue::Line)
+            .cloned()
+            .ok_or(CodeError::Incomplete("a structural match before its line"))
     }
 
     pub fn capture(&self, name: &str) -> Result<Field, CodeError> {
@@ -121,11 +137,11 @@ impl<'c> CodeBuilder<'c> {
 
     pub(super) fn searchable(&self, index: Index, mode: SearchMode) -> Result<(), CodeError> {
         let graph = self.catalog.graph();
-        let store = &self.catalog.model().stores()[index.store];
-        let facts = self.catalog.backend(&store.name);
+        let store = self.catalog.model().stores()[index.store].id();
+        let facts = self.catalog.facts(store);
         let property = facts.and_then(|facts| facts.structural(index.entity));
         match (facts, property) {
-            (Some(facts), Some(property)) if facts.supports(property, mode) => Ok(()),
+            (Some(facts), Some(property)) if facts.supports(index.entity, property, mode) => Ok(()),
             _ => Err(CodeError::Unsupported(
                 graph.entity(index.entity).name.clone(),
                 match mode {
@@ -136,15 +152,23 @@ impl<'c> CodeBuilder<'c> {
         }
     }
 
+    /// The files of the repositories `projects` names, each a key of the index's repository
+    /// column.
     pub fn repositories(
         &mut self,
         index: Declared<Index>,
-        projects: impl IntoIterator<Item = i64>,
+        projects: impl IntoIterator<Item = Literal>,
     ) -> Result<Matches, CodeError> {
         let index = self
             .construction
             .attempt(|construction| construction.declared(index))?;
-        let mut projects: Vec<i64> = projects.into_iter().collect();
+        let mut projects = projects
+            .into_iter()
+            .map(|project| match project {
+                Literal::Int(project) => Ok(project),
+                other => Err(CodeError::RepositoryKey(format!("{other:?}"))),
+            })
+            .collect::<Result<Vec<i64>, _>>()?;
         projects.sort_unstable();
         projects.dedup();
         self.apply(CodeOperation::Repositories { index, projects }, Vec::new())
@@ -164,9 +188,15 @@ impl<'c> CodeBuilder<'c> {
     pub fn branches(
         &mut self,
         files: Matches,
-        heads: impl IntoIterator<Item = (i64, String)>,
+        heads: impl IntoIterator<Item = (Literal, String)>,
     ) -> Result<Matches, CodeError> {
-        let mut heads: Vec<(i64, String)> = heads.into_iter().collect();
+        let mut heads = heads
+            .into_iter()
+            .map(|(project, branch)| match project {
+                Literal::Int(project) => Ok((project, branch)),
+                other => Err(CodeError::RepositoryKey(format!("{other:?}"))),
+            })
+            .collect::<Result<Vec<(i64, String)>, _>>()?;
         heads.sort();
         heads.dedup();
         self.apply(CodeOperation::Branches(heads), vec![files])

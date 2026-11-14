@@ -7,6 +7,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+pub use query_data_model::Key;
 use serde::de::DeserializeOwned;
 
 pub trait Query: Send + 'static {
@@ -137,49 +138,6 @@ impl ScopeSet {
     }
 }
 
-/// The key of a scope or an object, in the type its declaring property holds.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
-#[serde(untagged)]
-pub enum Key {
-    Int(i64),
-    Text(String),
-    Uuid(String),
-    Composite(Vec<Key>),
-}
-
-impl From<i64> for Key {
-    fn from(key: i64) -> Self {
-        Self::Int(key)
-    }
-}
-
-impl From<String> for Key {
-    fn from(key: String) -> Self {
-        Self::Text(key)
-    }
-}
-
-impl From<&str> for Key {
-    fn from(key: &str) -> Self {
-        Self::Text(key.to_string())
-    }
-}
-
-/// The key as text: an integer in decimal, a string or uuid as itself, a composite as its parts
-/// in parentheses.
-impl std::fmt::Display for Key {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Int(key) => write!(f, "{key}"),
-            Self::Text(key) | Self::Uuid(key) => f.write_str(key),
-            Self::Composite(keys) => {
-                let parts: Vec<String> = keys.iter().map(ToString::to_string).collect();
-                write!(f, "({})", parts.join(", "))
-            }
-        }
-    }
-}
-
 /// A handle to the caller's sign-in; the delegated service holds the secret.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Credential {
@@ -235,6 +193,45 @@ pub trait Module: Sized + Send + Sync + 'static {
 
     /// The queries this module answers, once its options cover every scope it will be asked.
     fn answers(self: Arc<Self>, needs: &[Need]) -> Result<Answers, AuthError>;
+}
+
+/// The `Check` providers a deployment binds, by the provider names packages use.
+#[derive(Clone, Default)]
+pub struct Checks(BTreeMap<String, Arc<dyn Provider<Check>>>);
+
+impl Checks {
+    #[must_use]
+    pub fn with(mut self, provider: impl Into<String>, check: Arc<dyn Provider<Check>>) -> Self {
+        self.0.insert(provider.into(), check);
+        self
+    }
+
+    /// The rows each request allows, asked of the provider the checks name, in one batch.
+    pub async fn check(
+        &self,
+        caller: &Caller,
+        provider: &str,
+        requests: Vec<CheckRequest>,
+    ) -> Result<Vec<BTreeSet<Key>>, AuthError> {
+        let checker = self
+            .0
+            .get(provider)
+            .ok_or_else(|| AuthError::Invalid(format!("no provider {provider} answers Check")))?;
+        let asked = requests.len();
+        let allowed = checker
+            .call(Check {
+                caller: caller.clone(),
+                requests,
+            })
+            .await?;
+        if allowed.len() != asked {
+            return Err(AuthError::Invalid(format!(
+                "provider {provider} answered {} of {asked} checks",
+                allowed.len()
+            )));
+        }
+        Ok(allowed)
+    }
 }
 
 /// The `Scopes` answers for one request, by scope and permission.

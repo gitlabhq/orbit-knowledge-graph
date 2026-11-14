@@ -43,12 +43,16 @@ pub fn defaults(entity: &Entity) -> impl Iterator<Item = PropertyId> + '_ {
 }
 
 /// The properties a binding returns: the listed ones, else the defaults or every readable property.
-pub fn returned<B>(model: &Catalog<B>, entity: EntityId, selection: Option<&Columns>) -> Vec<String>
+pub fn returned<B>(
+    model: &Catalog<B>,
+    entity: EntityId,
+    selection: Option<&Columns>,
+) -> Vec<PropertyId>
 where
     B: SqlBackend,
 {
     let graph = model.graph();
-    let properties: Vec<PropertyId> = match selection {
+    match selection {
         Some(Columns::Listed(listed)) => listed.clone(),
         selection => {
             let entity = graph.entity(entity);
@@ -64,17 +68,13 @@ where
                 .filter(|property| !model.admin_only(*property))
                 .collect()
         }
-    };
-    properties
-        .into_iter()
-        .map(|property| graph.property(property).name.clone())
-        .collect()
+    }
 }
 
 /// The first property other than the id that a row check of the entity keys rows by; the
 /// row carries it in the redaction id column next to the id.
 pub fn redaction_column(model: &Catalog<impl SqlBackend>, entity: EntityId) -> Option<&str> {
-    model.checks(entity).iter().find_map(|check| match check {
+    model.checks(entity).find_map(|check| match check {
         query_data_model::catalog::Check::Rows { id, .. } => {
             let graph = model.graph();
             (graph.entity(entity).identity != [*id]).then(|| graph.property(*id).name.as_str())
@@ -89,11 +89,25 @@ pub fn identity_column(
     model: &Catalog<impl SqlBackend>,
     entity: EntityId,
 ) -> crate::error::Result<&str> {
-    model.identity_column(entity).ok_or_else(|| {
+    match identity_columns(model, entity)? {
+        [column] => Ok(column),
+        _ => Err(crate::error::QueryError::PipelineInvariant(format!(
+            "{} has a composite identity in a single-key slot, which the loader rejects",
+            model.graph().entity(entity).name
+        ))),
+    }
+}
+
+/// The columns holding each part of the entity's identity on the catalog's connection.
+pub fn identity_columns(
+    model: &Catalog<impl SqlBackend>,
+    entity: EntityId,
+) -> crate::error::Result<&[String]> {
+    model.identity_columns(entity).ok_or_else(|| {
         crate::error::QueryError::Lowering(format!(
             "{} has no identity column on connection {}",
             model.graph().entity(entity).name,
-            model.connection()
+            model.model().connection(model.connection()).name()
         ))
     })
 }

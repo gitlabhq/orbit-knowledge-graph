@@ -192,6 +192,11 @@ impl OrbitServiceImpl {
         self
     }
 
+    pub fn with_peers(mut self, peers: crate::pipeline::PeerExecutors) -> Self {
+        self.pipeline = self.pipeline.with_peers(peers);
+        self
+    }
+
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
         self.pipeline = self.pipeline.with_resolver_registry(registry);
         self
@@ -968,7 +973,7 @@ mod tests {
     }
 
     fn test_model() -> Arc<Catalog<ClickHouse>> {
-        Arc::new(Catalog::<ClickHouse>::embedded().expect("model must load"))
+        Arc::new(Catalog::<ClickHouse>::embedded("server").expect("model must load"))
     }
 
     fn test_config() -> ClickHouseConfiguration {
@@ -987,7 +992,10 @@ mod tests {
         test_service_on(&test_config())
     }
 
+    /// A service on `clickhouse` with the embedded query settings installed, as `main` installs
+    /// the loaded ones before it serves.
     fn test_service_on(clickhouse: &ClickHouseConfiguration) -> OrbitServiceImpl {
+        orbit_server_config::query::init_embedded_defaults();
         OrbitServiceImpl::new(
             Arc::new(mock_validator()),
             ActiveSchema::pinned(test_model()),
@@ -1202,8 +1210,10 @@ mod tests {
 
         let snapshot = service.active_schema.snapshot().unwrap();
         let graph = snapshot.data_model.graph();
-        let (outgoing, incoming) =
-            OrbitServiceImpl::get_node_edge_names(graph, graph.entity_id("User").unwrap());
+        let (outgoing, incoming) = OrbitServiceImpl::get_node_edge_names(
+            graph,
+            snapshot.data_model.names().entity("User").unwrap(),
+        );
 
         assert!(
             !outgoing.is_empty() || !incoming.is_empty(),

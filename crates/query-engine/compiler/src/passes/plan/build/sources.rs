@@ -1,9 +1,10 @@
-use query_data_model::constants::{DELETED_COLUMN, EDGE_RESERVED_COLUMNS};
+use query_data_model::Catalog;
+use query_data_model::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN};
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{Expr, Relation, RelationalBuilder};
 
 use super::expr::live;
-use super::{Built, col, computed, filtered, scan, stored, versioning};
+use super::{Built, col, computed, edge_columns, filtered, scan, stored, versioning};
 use crate::constants::union_arm_alias;
 
 pub(crate) type Scope<'r> = [&'r Relation];
@@ -30,11 +31,13 @@ pub(crate) fn columns<'n>(
         .collect()
 }
 
-fn edge_columns() -> impl Iterator<Item = &'static str> {
-    EDGE_RESERVED_COLUMNS
-        .iter()
-        .copied()
+fn edge_row<B: RelationalBackend>(catalog: &Catalog<B>) -> Built<Vec<&str>> {
+    let fields = edge_columns(catalog)?.all().map(|(_, column)| column);
+    Ok([TRAVERSAL_PATH_COLUMN]
+        .into_iter()
+        .chain(fields)
         .chain([DELETED_COLUMN])
+        .collect())
 }
 
 pub(crate) fn deleted<B: RelationalBackend>(scope: &Scope<'_>, alias: &str) -> Built<Option<Expr>> {
@@ -62,7 +65,7 @@ pub(crate) fn edge_scan<B: RelationalBackend>(
             let rows = scan(q, table, &inner, false)?;
             let predicates = arm_where(q, &[&rows], &inner)?;
             let rows = filtered(q, rows, predicates)?;
-            let items = columns(&[&rows], &inner, edge_columns(), stored::<B>())?;
+            let items = columns(&[&rows], &inner, edge_row(q.catalog())?, stored::<B>())?;
             arms.push(select(q, rows, items)?);
         }
         q.union(arms)
@@ -83,7 +86,7 @@ pub(crate) fn final_edge_scan<B: RelationalBackend>(
         let mut arms = Vec::new();
         for table in tables {
             let rows = scan(q, table, &inner, true)?;
-            let items = columns(&[&rows], &inner, edge_columns(), stored::<B>())?;
+            let items = columns(&[&rows], &inner, edge_row(q.catalog())?, stored::<B>())?;
             arms.push(select(q, rows, items)?);
         }
         q.union(arms)

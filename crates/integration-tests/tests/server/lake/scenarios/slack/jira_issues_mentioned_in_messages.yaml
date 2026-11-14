@@ -1,0 +1,54 @@
+cases:
+  - name: allowed
+    description: The Jira lake stage reads the issues and hands their ids to the Slack live stage on issue_id, which searches the text in both workspaces; the Combine stage joins both on MENTIONS_ISSUE
+    config:
+      security: default
+    query: |
+      MATCH (i:JiraIssue)<-[:MENTIONS_ISSUE]-(m:SlackMessage) WHERE i.key IN ['ORB-1', 'SEC-1'] AND m.text CONTAINS 'rollback' RETURN i.summary, m.channel, m.text ORDER BY m.text LIMIT 20
+    expect:
+      node_count: 5
+      skip_requirements: [node_ids, order_by, "filter:key", "filter:text", "relationship:MENTIONS_ISSUE"]
+      nodes:
+        JiraIssue:
+          rows:
+            - { id: "10100", summary: Fix the login redirect }
+            - { id: "10200", summary: Rotate the TLS keys }
+        SlackMessage:
+          rows:
+            - { id: m7, channel: orbit-dev, text: rollback of the TLS keys starts at noon }
+            - { id: m6, channel: orbit-dev, text: the rollback plan for the login fix is ready }
+            - { id: m9, channel: orbit-dev, text: the vault rollback waits on the login fix }
+      edge_count:
+        MENTIONS_ISSUE: 3
+      live_calls: [[T01, T02]]
+
+  - name: partly_denied
+    description: A group reader reads ORB-1, but the workspace lookup admits only its group's workspace, so the call never reaches m9, which mentions ORB-1 from the private group's workspace T02; SEC-1 and m7 drop on both connections
+    config:
+      security: group_100
+    query: |
+      MATCH (i:JiraIssue)<-[:MENTIONS_ISSUE]-(m:SlackMessage) WHERE i.key IN ['ORB-1', 'SEC-1'] AND m.text CONTAINS 'rollback' RETURN i.summary, m.channel, m.text ORDER BY m.text LIMIT 20
+    expect:
+      node_count: 2
+      skip_requirements: [node_ids, order_by, "filter:key", "filter:text", "relationship:MENTIONS_ISSUE"]
+      nodes:
+        JiraIssue:
+          rows:
+            - { id: "10100", summary: Fix the login redirect }
+        SlackMessage:
+          rows:
+            - { id: m6, channel: orbit-dev, text: the rollback plan for the login fix is ready }
+      edge_count:
+        MENTIONS_ISSUE: 1
+      live_calls: [[T01]]
+
+  - name: empty
+    description: A caller whose group holds no Jira rows reads no issue, so no key reaches the live stage and it sends no call
+    config:
+      security: no_integration_rows
+    query: |
+      MATCH (i:JiraIssue)<-[:MENTIONS_ISSUE]-(m:SlackMessage) WHERE i.key IN ['ORB-1', 'SEC-1'] AND m.text CONTAINS 'rollback' RETURN i.summary, m.channel, m.text LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: [node_ids, "filter:key", "filter:text", "relationship:MENTIONS_ISSUE"]
+      live_calls: []

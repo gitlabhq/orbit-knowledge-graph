@@ -1350,7 +1350,6 @@ fn gql_prepares_queries_and_scoped_schema() {
         (All, "CALL db.schema()", None),
         (Local, "CALL db.schema()", None),
         (All, "CALL db.schema('MergeRequest')", Some("MergeRequest")),
-        (Local, "CALL db.schema('File')", Some("File")),
     ] {
         let PreparedStatement::Schema(response) =
             prepare(call, &data_model, &ctx, scope, limits()).unwrap()

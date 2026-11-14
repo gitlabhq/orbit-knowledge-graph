@@ -18,6 +18,7 @@ pub(crate) mod pattern;
 pub mod predicates;
 pub mod remote;
 pub mod rows;
+mod stage;
 mod traversal;
 
 use orbit_server_config::QueryLimits;
@@ -70,6 +71,8 @@ pub struct Planned<P> {
 
 pub enum Request<'a> {
     Query(Query<'a>),
+    /// A stage that feeds Combine: its columns are exactly the contract's.
+    Stage(Query<'a>, &'a crate::dag::Contract),
     Hydration(&'a HydrationRequest),
 }
 
@@ -79,8 +82,9 @@ pub fn plan<B: SqlBackend>(
     model: &Catalog<B>,
     limits: &QueryLimits,
 ) -> Result<Planned<RelationalPlan<B>>> {
-    let query = match request {
-        Request::Query(query) => query,
+    let (query, contract) = match request {
+        Request::Query(query) => (query, None),
+        Request::Stage(query, contract) => (query, Some(contract)),
         Request::Hydration(hydration) => {
             let arms = hydration::arms(hydration, model)?;
             let plan = model
@@ -93,6 +97,10 @@ pub fn plan<B: SqlBackend>(
         }
     };
     match query.kind() {
+        Kind::Traversal => pattern(query, contract, tp_bounds, model, limits.id_range_span),
+        _ if contract.is_some() => Err(QueryError::PipelineInvariant(
+            "a stage that feeds Combine plans a traversal".into(),
+        )),
         Kind::PathFinding => {
             let path = path_finding::PathFinding::new(query, model, limits.path_anchor_rows)?;
             let plan = model
@@ -116,15 +124,14 @@ pub fn plan<B: SqlBackend>(
             };
             Ok(Planned { plan, metadata })
         }
-        Kind::Traversal | Kind::Aggregation => {
-            pattern(query, tp_bounds, model, limits.id_range_span)
-        }
+        Kind::Aggregation => pattern(query, None, tp_bounds, model, limits.id_range_span),
     }
 }
 
 /// Traversal and aggregation: the matched pattern, then the result rows built on it.
 fn pattern<B: SqlBackend>(
     query: Query<'_>,
+    contract: Option<&crate::dag::Contract>,
     tp_bounds: Option<&TpBounds>,
     model: &Catalog<B>,
     id_range_span: i64,
@@ -132,14 +139,14 @@ fn pattern<B: SqlBackend>(
     let limit = query
         .row_limit()
         .ok_or_else(|| QueryError::PipelineInvariant("queries carry a row limit".into()))?;
-    let pattern = pattern::Pattern::new(query, model)?;
+    let pattern = pattern::Pattern::new(query, model, contract.is_some())?;
     let mut planned = None;
     let plan = rows::build(model, |q| {
         let matched = pattern.execution(q, tp_bounds, id_range_span)?;
         let nodes = metadata::bindings(&pattern.nodes, query, &matched.bindings)?;
         let (rows, stable_order) = match query.kind() {
             Kind::Aggregation => {
-                let result = aggregation::aggregation_plan(query, &pattern.nodes, &matched);
+                let result = aggregation::aggregation_plan(query, &pattern.nodes, &matched)?;
                 let stable_order = aggregation::emit::stable_order(&result);
                 let rows = aggregation::emit::emit(q, matched, &result, limit)?;
                 (rows, stable_order)
@@ -147,6 +154,10 @@ fn pattern<B: SqlBackend>(
             _ => {
                 let shape = traversal::shape(&pattern, &matched, query, limit)?;
                 let stable_order = traversal::stable_order(&pattern, &matched, query, &nodes);
+                let matched = match contract {
+                    Some(contract) => stage::outputs(matched, &pattern, query, contract)?,
+                    None => matched,
+                };
                 let rows = traversal::emit(q, matched, &shape)?;
                 (rows, stable_order)
             }
@@ -159,11 +170,21 @@ fn pattern<B: SqlBackend>(
     let edges = pattern
         .relations
         .iter()
-        .map(|hop| PlannedEdge {
-            path_column: (hop.max_hops > 1).then(|| hop.path_nodes_column()),
-            column_prefix: hop.column_prefix(),
-            rel_types: hop.rel_types.clone(),
-            relationship: hop.input_index,
+        .map(|hop| {
+            let (source, target) = hop.stored_endpoints();
+            let parts = |node: &str| {
+                pattern
+                    .nodes
+                    .get(node)
+                    .map_or(1, |node| node.identity.len())
+            };
+            PlannedEdge {
+                variable_length: hop.max_hops > 1,
+                column_prefix: hop.column_prefix(),
+                rel_types: hop.rel_types.clone(),
+                relationship: hop.input_index,
+                parts: (parts(source), parts(target)),
+            }
         })
         .collect();
     let point_lookup = !pattern.nodes.is_empty()

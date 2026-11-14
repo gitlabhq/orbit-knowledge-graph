@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
+use query_data_model::catalog::sources::CODE_INDEXER;
 use query_data_model::catalog::sources::PipelineDescriptor;
-use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, Entity, GraphCatalog};
 
 use super::phase::{Phase, combine_phases};
@@ -28,7 +28,7 @@ pub fn get_domain_statuses(
 ) -> Vec<DomainStatus> {
     let graph = catalog.graph();
     let sources = catalog.model().sources();
-    let indexed_by_code = |entity: &Entity| sources.writes(CODE_INDEXER_SOURCE, entity.id);
+    let indexed_by_code = |entity: &Entity| sources.writes(CODE_INDEXER, entity.id);
     let mut domains = BTreeMap::<&str, Vec<&Entity>>::new();
     for entity in graph.entities() {
         if let Some(domain) = &entity.domain {
@@ -96,14 +96,14 @@ fn plan_belongs_to_domain(
 
     // A node plan's foreign-key edges belong to the node's domain. Only plans that write no node
     // feed the domains of their edge endpoints.
-    if graph.entity_id(&plan.entity).is_some() {
+    if graph.entities().any(|entity| entity.name == plan.entity) {
         return false;
     }
 
-    plan.reindex_targets
-        .iter()
-        .filter_map(|kind| graph.relationship_id(kind))
-        .flat_map(|relationship| &graph.relationship(relationship).variants)
+    graph
+        .relationships()
+        .filter(|relationship| plan.reindex_targets.contains(&relationship.name))
+        .flat_map(|relationship| &relationship.variants)
         .map(|variant| graph.variant(*variant))
         .any(|variant| {
             in_domain(&graph.entity(variant.source).name)

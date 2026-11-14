@@ -9,11 +9,11 @@ use query_data_model::{Catalog, DuckDb};
 use serde_json::json;
 
 fn clickhouse() -> Catalog<ClickHouse> {
-    Catalog::<ClickHouse>::embedded().unwrap()
+    Catalog::<ClickHouse>::embedded("server").unwrap()
 }
 
 fn duckdb() -> Catalog<DuckDb> {
-    Catalog::<DuckDb>::embedded().unwrap()
+    Catalog::<DuckDb>::embedded("local").unwrap()
 }
 
 fn eq(left: Expr, right: Expr) -> Expr {

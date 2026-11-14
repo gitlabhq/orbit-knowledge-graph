@@ -10,24 +10,32 @@ use query_data_model::{Catalog, Model};
 use crate::error::{QueryError, Result};
 
 pub struct ScanGuard {
-    pub column: String,
+    /// The scope key column; none for a global read, which needs the permission in any scope.
+    pub column: Option<String>,
     pub scope: ScopeId,
     pub permission: PermissionId,
 }
 
-/// Every scope key column of the scanned table; none when the table is unknown or its rows
-/// reach their key through relationships, which a relational scan cannot filter.
+/// Every scope key column of the scanned table, and the permission each global read needs; none
+/// when the table is unknown or its rows reach their key through relationships, which a
+/// relational scan cannot filter.
 pub fn scan<B: RelationalBackend>(catalog: &Catalog<B>, table: Table) -> Option<Vec<ScanGuard>> {
     let (store, facts) = catalog.stores().nth(table.store())?;
     let name = catalog.table_name(table);
-    let keyed = |guard: &Guard, column: &str| match &guard.rule {
-        Rule::Column(_) | Rule::Owner(_) => Some(vec![ScanGuard {
-            column: column.to_string(),
-            scope: guard.scope,
-            permission: guard.permission,
-        }]),
-        Rule::Trusted | Rule::Global | Rule::Checked => Some(Vec::new()),
-        Rule::Via(_) => None,
+    let keyed = |guard: &Guard, column: &str| {
+        let guarded = |column| {
+            Some(vec![ScanGuard {
+                column,
+                scope: guard.scope,
+                permission: guard.permission,
+            }])
+        };
+        match &guard.rule {
+            Rule::Column(_) | Rule::Owner(_) => guarded(Some(column.to_string())),
+            Rule::Global => guarded(None),
+            Rule::Trusted | Rule::Checked => Some(Vec::new()),
+            Rule::Via(_) => None,
+        }
     };
     if let Some(source) = store
         .sources()

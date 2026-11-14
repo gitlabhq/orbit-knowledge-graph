@@ -349,6 +349,7 @@ pub(super) fn check(
     graph: &GraphCatalog,
     stores: &[Store],
     served: &HashSet<PropertyId>,
+    elsewhere: &crate::spec::Elsewhere,
     diagnostics: &mut Diagnostics,
 ) {
     for entity in graph.entities() {
@@ -376,7 +377,9 @@ pub(super) fn check(
                 );
             }
             agree_on_text(entity, graph, &holders, *id, diagnostics);
-            let mut stored = holders.iter().filter(|store| store.column(*id).is_some());
+            let mut stored = holders.iter().filter(|store| {
+                store.column(*id).is_some() && store.reads(super::Field::Immutable)
+            });
             if let Some(first) = stored.next()
                 && let Some(other) =
                     stored.find(|store| store.immutable(*id) != first.immutable(*id))
@@ -401,11 +404,13 @@ pub(super) fn check(
         let on = |connection: &str, entity| {
             stores
                 .iter()
-                .any(|store| store.connection == connection && store.source(entity).is_some())
+                .any(|store| store.connection_name == connection && store.source(entity).is_some())
         };
         for store in stores {
-            let holds =
-                store.source(variant.source).is_some() && on(&store.connection, variant.target);
+            let joins = super::capabilities(&store.kind).is_some_and(|can| can.joins);
+            let holds = joins
+                && store.source(variant.source).is_some()
+                && on(&store.connection_name, variant.target);
             match store.binding(variant.id) {
                 Some(binding) => {
                     let unstored = binding.fk.as_ref().map(|key| {
@@ -414,6 +419,7 @@ pub(super) fn check(
                     });
                     if let Some(referenced) = unstored.filter(|entity| {
                         !stores.iter().any(|store| store.source(*entity).is_some())
+                            && !elsewhere.holds(&graph.entity(*entity).name)
                     }) {
                         diagnostics.error(
                             &store.package,
@@ -426,7 +432,7 @@ pub(super) fn check(
                         );
                     }
                     let edges_on_connection = store.edge_table(variant.id).is_none()
-                        || on(&store.connection, variant.target);
+                        || on(&store.connection_name, variant.target);
                     if !edges_on_connection {
                         diagnostics.error(
                             &store.package,
@@ -434,7 +440,7 @@ pub(super) fn check(
                                 "store {} keeps the edges of {} in a table, whose other endpoint is not on connection {}",
                                 store.name,
                                 label(graph, variant),
-                                store.connection
+                                store.connection_name
                             ),
                         );
                     }
@@ -450,9 +456,15 @@ pub(super) fn check(
                 None => {}
             }
         }
-        if !stores
-            .iter()
-            .any(|store| store.declared.contains(&variant.id))
+        let bound_elsewhere = elsewhere.binds(
+            &graph.relationship(variant.relationship).name,
+            &graph.entity(variant.source).name,
+            &graph.entity(variant.target).name,
+        );
+        if !bound_elsewhere
+            && !stores
+                .iter()
+                .any(|store| store.declared.contains(&variant.id))
         {
             let package = &graph.entity(variant.source).package;
             let message = format!("{} is bound in no store", label(graph, variant));

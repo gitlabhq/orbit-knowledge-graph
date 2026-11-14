@@ -20,7 +20,7 @@ fn build_grpc_server(tls_config: Option<ServerTlsConfig>) -> GrpcServer {
     GrpcServer::new(
         validator,
         ActiveSchema::pinned(Arc::new(
-            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
                 .expect("model must load"),
         )),
         clickhouse_config.build_client("graph"),

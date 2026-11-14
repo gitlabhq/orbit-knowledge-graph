@@ -175,8 +175,8 @@ preventable feedback (see #2772, !1416). Check each of these first:
 - **Constants:** prefer deriving values from the model or a typed config field over hardcoding
   magic numbers. If a value is environment-dependent, make it a `HandlersConfiguration` field.
 - **Siphon columns:** hand-written datalake SQL must read the `version`, `watermark`, and
-  `deleted` columns of the model's `siphon` `DataSource`
-  (`model.sources().source_named(SIPHON_SOURCE)`), never literal column names. Resolve the source
+  `deleted` columns of the model's `siphon` `DataSource`, never literal column names. Look the
+  source up by its package and name with `model.sources().source(key)`. Resolve the source
   where the component is built and render the SQL from it. Use the version column for `_version`
   and `argMax`; use the watermark only for change-window predicates.
 

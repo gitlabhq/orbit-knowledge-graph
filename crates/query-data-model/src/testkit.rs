@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+pub use crate::spec::storage::ColumnStorage;
+pub use crate::spec::{Fragment, Fragments};
 use crate::{Packages, Tier};
 
 const OVERLAYS: &str = concat!(env!("ORBIT_CONFIG_DIR"), "/seeds/overlays");
@@ -55,6 +57,12 @@ pub fn with_demo() -> Packages {
     Packages::embedded().with(demo)
 }
 
+/// The deployment shapes tests run as, from `testkit_deployments.yaml`.
+pub fn deployments() -> crate::Deployments {
+    crate::Deployments::parse(include_str!("testkit_deployments.yaml"))
+        .expect("testkit_deployments.yaml is valid")
+}
+
 /// The `query.limits` of the embedded `config/default.yaml`; its query settings are installed
 /// too, as the server installs its loaded ones at startup.
 pub fn limits() -> &'static orbit_server_config::QueryLimits {
@@ -66,4 +74,9 @@ pub fn limits() -> &'static orbit_server_config::QueryLimits {
                 .limits
         });
     &LIMITS
+}
+
+/// Every store of the model, for tests that enumerate what the packages declare.
+pub fn stores(model: &crate::Model) -> impl Iterator<Item = &crate::catalog::Store> {
+    model.stores().iter()
 }

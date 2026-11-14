@@ -324,7 +324,9 @@ impl Cluster {
         let (nats, nats_address) = start_nats().await;
         let config = webserver_config(&graph, &nats_address);
         let nats_client = Arc::new(NatsClient::connect(&config.nats).await.unwrap());
-        let catalog = ModelCatalog::open(nats_client.clone()).await.unwrap();
+        let catalog = ModelCatalog::open(nats_client.clone(), "server".into())
+            .await
+            .unwrap();
 
         let shutdown = CancellationToken::new();
         let active_schema = Arc::new(ActiveSchema::default());
@@ -390,8 +392,13 @@ impl Cluster {
 
     async fn create_tables(&self, versions: &[u32]) {
         for &version in versions {
-            let physical =
-                Schema::from_model(&test_archive(version).packages().load().unwrap()).unwrap();
+            let physical = Schema::from_model(
+                &test_archive(version)
+                    .packages()
+                    .deployment("server")
+                    .unwrap(),
+            )
+            .unwrap();
             let project_table = format!("v{version}_gl_project");
             for table_name in GraphSchema::new(physical, false)
                 .prefixed_table_names(&table_prefix(version))
@@ -460,7 +467,9 @@ impl Cluster {
     }
 
     async fn reopen_catalog(&self) {
-        ModelCatalog::open(self.nats_client.clone()).await.unwrap();
+        ModelCatalog::open(self.nats_client.clone(), "server".into())
+            .await
+            .unwrap();
     }
 
     async fn mark_migrating(&self, version: u32) {

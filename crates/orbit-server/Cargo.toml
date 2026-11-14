@@ -22,6 +22,7 @@ async-trait = { workspace = true }
 orbit-authorization = { path = "../orbit-authorization" }
 clap = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
+duckdb-client = { path = "../duckdb-client" }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-billing = { path = "../orbit-billing" }
 orbit-observability = { workspace = true }

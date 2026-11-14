@@ -35,7 +35,24 @@ pub fn load_with(
     names: &[&str],
     edit: impl Fn(&str, String) -> String,
 ) -> Result<Arc<Model>, DataModelError> {
-    packages(names, edit).load()
+    packages(names, edit).deployment("server")
+}
+
+/// The embedded packages and the `config/demo` packages, each file passed through `edit`.
+pub fn demo(edit: impl Fn(&str, String) -> String) -> Result<Arc<Model>, DataModelError> {
+    let edited = |packages: &Packages, tier| {
+        let sources = packages
+            .sources()
+            .iter()
+            .map(|(name, yaml)| (name.clone(), edit(name, yaml.clone())))
+            .collect();
+        Packages::new(tier, sources)
+    };
+    let root = Path::new(env!("ORBIT_CONFIG_DIR")).join("demo");
+    let demo = Packages::read_dir(&root, Tier::Integration).unwrap();
+    edited(&Packages::embedded(), Tier::Platform)
+        .with(edited(&demo, Tier::Integration))
+        .deployment("demo")
 }
 
 pub fn gitlab() -> Model {
@@ -55,5 +72,10 @@ pub fn branch_attributes(classes: &str) -> Model {
     let access = sources.get_mut("gitlab/authorization.yaml").unwrap();
     let entry = "  ON_BRANCH:\n    scope: namespace\n    permission: read\n    enforce: {clickhouse: {scope_key: traversal_path, of: both}}\n";
     *access = access.replacen(entry, &format!("{entry}    attributes: {classes}\n"), 1);
-    Arc::try_unwrap(Packages::new(Tier::Platform, sources).load().unwrap()).unwrap()
+    Arc::try_unwrap(
+        Packages::new(Tier::Platform, sources)
+            .deployment("server")
+            .unwrap(),
+    )
+    .unwrap()
 }

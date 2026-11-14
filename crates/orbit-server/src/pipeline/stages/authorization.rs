@@ -88,6 +88,7 @@ async fn check(
     let mut authorizations = Vec::new();
     for (provider, requests) in by_provider {
         let allowed = deployment
+            .checks()
             .check(caller, &provider, requests.clone())
             .await
             .map_err(|error| match error {

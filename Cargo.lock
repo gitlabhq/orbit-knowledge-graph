@@ -4449,10 +4449,12 @@ dependencies = [
  "async-trait",
  "clickhouse-client",
  "compiler",
+ "duckdb",
  "duckdb-client",
  "futures",
  "gitalisk-core",
  "jsonschema",
+ "object_store",
  "orbit-arrow",
  "orbit-authorization",
  "orbit-migrations",
@@ -4470,6 +4472,7 @@ dependencies = [
  "sqlparser",
  "tempfile",
  "testcontainers",
+ "testcontainers-modules",
  "tokio",
  "uuid",
 ]
@@ -5315,6 +5318,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest 0.10.7",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5706,16 +5719,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "622acbc9100d3c10e2ee15804b0caa40e55c933d5aa53814cd520805b7958a49"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "bytes",
  "chrono",
+ "form_urlencoded",
  "futures-channel",
  "futures-core",
  "futures-util",
  "http",
+ "http-body-util",
  "humantime",
+ "hyper",
  "itertools 0.14.0",
+ "md-5",
  "parking_lot",
  "percent-encoding",
+ "quick-xml",
+ "rand 0.10.2",
+ "reqwest 0.12.28",
+ "ring",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5900,6 +5925,7 @@ name = "orbit-authorization"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "query-data-model",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -6113,6 +6139,7 @@ dependencies = [
  "clap",
  "clickhouse-client",
  "compiler",
+ "duckdb-client",
  "futures",
  "gitlab-client",
  "health-check",
@@ -7488,6 +7515,7 @@ dependencies = [
  "pest_derive",
  "query-data-model",
  "rust-embed",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -7533,6 +7561,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "types",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.39.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
+dependencies = [
+ "memchr",
+ "serde",
 ]
 
 [[package]]
@@ -8650,6 +8688,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",
@@ -8661,6 +8700,7 @@ dependencies = [
  "log",
  "percent-encoding",
  "pin-project-lite",
+ "quinn",
  "rustls",
  "rustls-native-certs",
  "rustls-pki-types",
@@ -8670,12 +8710,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams 0.4.2",
  "web-sys",
 ]
 
@@ -8716,7 +8758,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams",
+ "wasm-streams 0.5.0",
  "web-sys",
 ]
 
@@ -9086,6 +9128,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
  "dyn-clone",
+ "indexmap 2.14.2",
  "ref-cast",
  "schemars_derive 1.2.1",
  "serde",
@@ -9453,6 +9496,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "types",
+ "uuid",
 ]
 
 [[package]]
@@ -11253,6 +11297,19 @@ dependencies = [
  "indexmap 2.14.2",
  "wasm-encoder",
  "wasmparser",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

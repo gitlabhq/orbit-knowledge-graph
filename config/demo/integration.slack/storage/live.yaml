@@ -1,32 +1,21 @@
 kind: storage
 package: integration.slack
-store: slack
+store: slack_live
 engine:
   kind: live
   connection: data_extraction
 entities:
   SlackMessage:
-    complete: true
+    accepts: [workspace, issue_id]
     columns:
-      id: {immutable: true}
-      workspace: {immutable: true}
-      merge_request_id: {immutable: true}
+      id: {}
+      workspace: {}
       channel: {}
       author: {}
       text: {}
       sent_at: {}
+      issue_id: {}
     backend:
       operation: search.messages
-      filters: [id, channel, author, sent_at, merge_request_id]
+      filters: [workspace, channel, author, sent_at, issue_id]
       text: text
-  SlackWorkspace:
-    columns:
-      id: {immutable: true}
-      name: {}
-    backend:
-      operation: workspaces.list
-relationships:
-  IN_WORKSPACE:
-    SlackMessage -> SlackWorkspace: {fk: {on: source, column: workspace}}
-  DISCUSSES:
-    SlackMessage -> MergeRequest: {fk: {on: source, column: merge_request_id}}

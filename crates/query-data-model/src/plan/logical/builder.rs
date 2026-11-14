@@ -189,7 +189,7 @@ impl<'m> LogicalBuilder<'m> {
                 return Err(PlanError::Duplicate("a structural match".into()));
             }
             let joined = inputs.iter().any(|rows| rows.bound().count() != 1);
-            if joined && !catalog.serves_remotes() {
+            if joined && !catalog.serves_peers() {
                 return Err(PlanError::shape(
                     "MATCHES ast(...) must be a top-level condition of a single-node match",
                 ));

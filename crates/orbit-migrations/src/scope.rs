@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::Schema;
+use query_data_model::catalog::sources::CODE_INDEXER;
 use query_data_model::catalog::sources::{EtlScope, PipelineDescriptor, RowWriter, Writer};
 use query_data_model::implementations::clickhouse::spec::TableRole;
-use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, EntityId, RelationshipId};
 use serde::{Deserialize, Serialize};
 
@@ -222,7 +222,7 @@ pub(crate) fn relationship_tables(
 fn code_indexer_entities(catalog: &Catalog<ClickHouse>) -> impl Iterator<Item = EntityId> + '_ {
     let sources = catalog.model().sources();
     sources
-        .direct_source(CODE_INDEXER_SOURCE)
+        .direct_source(CODE_INDEXER)
         .into_iter()
         .flat_map(|writes| writes.entities.iter().copied())
 }
@@ -232,7 +232,7 @@ fn code_indexer_entities(catalog: &Catalog<ClickHouse>) -> impl Iterator<Item = 
 pub(crate) fn code_domain_tables(catalog: &Catalog<ClickHouse>) -> BTreeSet<String> {
     let sources = catalog.model().sources();
     let code = |writer: Option<RowWriter>| {
-        writer.is_some_and(|writer| sources.row_writer_name(writer) == CODE_INDEXER_SOURCE)
+        writer.is_some_and(|writer| sources.row_writer_source(writer) == CODE_INDEXER)
     };
     let mut edge_tables = BTreeMap::<&str, bool>::new();
     for variant in catalog.graph().variants() {
@@ -453,12 +453,17 @@ mod tests {
     }
 
     fn classify(scope: MigrationScope) -> BTreeMap<String, TableMigrationAction> {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         classify_tables_for_scope(&catalog, &embedded_schema(), &scope)
     }
 
     fn embedded_schema() -> Schema {
-        Schema::from_model(&query_data_model::Packages::embedded().load().unwrap()).unwrap()
+        Schema::from_model(
+            &query_data_model::Packages::embedded()
+                .deployment("server")
+                .unwrap(),
+        )
+        .unwrap()
     }
 
     fn action(map: &BTreeMap<String, TableMigrationAction>, table: &str) -> TableMigrationAction {
@@ -468,7 +473,7 @@ mod tests {
 
     #[test]
     fn shared_edge_writers_force_scope_widening() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let layout = embedded_schema();
 
         assert_eq!(
@@ -585,7 +590,7 @@ mod tests {
 
     #[test]
     fn none_scope_clones_everything_and_invalidates_nothing() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
 
         let map = classify(MigrationScope::None);
         for (table, table_action) in &map {
@@ -607,7 +612,7 @@ mod tests {
 
     #[test]
     fn fk_edge_kind_invalidates_its_emitting_pipeline() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let pipelines = find_invalidated_pipelines(&catalog, &sdlc_scope(&["HAS_NOTE"]));
         assert!(
             pipelines.namespaced.contains(&"Note".to_string()),
@@ -618,7 +623,7 @@ mod tests {
 
     #[test]
     fn full_scope_has_no_orphans_and_skips_code_entities() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let descriptors = catalog.model().sources().descriptors(catalog.graph());
         let invalidated = invalidated_entities(&catalog, &MigrationScope::Full);
         assert!(!code_entity_names(&catalog).is_empty());

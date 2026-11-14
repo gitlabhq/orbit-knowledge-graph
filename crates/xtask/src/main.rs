@@ -8,6 +8,7 @@ mod integration_lanes;
 mod loadtest;
 mod metrics_catalog;
 mod migration_ledger;
+mod model_schema;
 mod query_docs;
 mod schema;
 mod synth;
@@ -49,6 +50,15 @@ enum Command {
         /// Write schema to a file instead of stdout.
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
+    },
+    /// Generate the JSON schemas of data model package files.
+    ModelSchema {
+        /// Write the schemas under this directory instead of config/schemas/model.
+        #[arg(short, long)]
+        dir: Option<std::path::PathBuf>,
+        /// Fail if the committed schemas differ from the generated ones.
+        #[arg(long)]
+        check: bool,
     },
     /// Generate the shared metrics catalog consumed by runbooks dashboards.
     MetricsCatalog {
@@ -376,6 +386,7 @@ async fn main() -> Result<()> {
             }
         },
         Command::Schema { output } => schema::run(output),
+        Command::ModelSchema { dir, check } => model_schema::run(dir, check),
         Command::MigrationLedger { command } => match command {
             MigrationLedgerCommand::Bump {
                 scope,

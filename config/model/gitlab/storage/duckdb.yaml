@@ -7,6 +7,7 @@ engine:
   trusted: true
   path_column: traversal_path
   backend:
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
       gl_edge:
         shared: true

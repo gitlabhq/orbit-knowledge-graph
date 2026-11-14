@@ -9,7 +9,7 @@ pub use versioned::versioned;
 
 use std::sync::Arc;
 
-use super::relational::{Capabilities, CurrentRows, RelationalBackend};
+use super::relational::{CurrentRows, RelationalBackend, SqlCapabilities};
 use facts::{DenormalizedKey, DenormalizedProperty};
 
 use crate::{Catalog, DataModelError, Model, Packages, RelationshipId};
@@ -18,7 +18,7 @@ use crate::{Catalog, DataModelError, Model, Packages, RelationshipId};
 pub struct ClickHouse;
 
 impl RelationalBackend for ClickHouse {
-    const CAPABILITIES: Capabilities = Capabilities {
+    const SQL: SqlCapabilities = SqlCapabilities {
         current_rows: CurrentRows::Final,
         limit_by: true,
         settings: true,
@@ -29,8 +29,17 @@ impl RelationalBackend for ClickHouse {
 }
 
 impl Catalog<ClickHouse> {
-    pub fn versioned(packages: &Packages, table_prefix: &str) -> Result<Self, DataModelError> {
-        let fragments = versioned(packages.fragments()?, table_prefix)?;
+    /// The catalog of `packages` as a deployment of the shape `shape` reads them, with every
+    /// table under `table_prefix`.
+    pub fn versioned(
+        packages: &Packages,
+        shape: &str,
+        table_prefix: &str,
+    ) -> Result<Self, DataModelError> {
+        let fragments = packages
+            .fragments()?
+            .deployment(&crate::Deployments::embedded(), shape)?;
+        let fragments = versioned(fragments, table_prefix)?;
         Self::from_model(&Arc::new(Model::load(&fragments)?))
     }
 

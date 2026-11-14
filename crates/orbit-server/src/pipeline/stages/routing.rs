@@ -4,7 +4,7 @@ use query_data_model::introspection::{IntrospectionScope, SchemaResponse};
 use query_data_model::{Catalog, ClickHouse};
 
 use crate::auth::Claims;
-use query_engine::compiler::dag::Remotes;
+use query_engine::compiler::dag::Connections;
 use query_engine::compiler::gql::RoutedStatement;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -15,11 +15,10 @@ pub enum RoutingOutput {
     Schema(SchemaResponse),
 }
 
-/// Parses against the relational connection and the code and live connections the deployment
-/// serves.
+/// Parses against every connection the deployment serves.
 #[derive(Clone)]
 pub struct RoutingStage {
-    pub remotes: Remotes,
+    pub connections: Connections,
 }
 
 impl RoutingStage {
@@ -34,7 +33,7 @@ impl RoutingStage {
         Ok(query_engine::compiler::gql::route(
             &ctx.query_json,
             data_model,
-            &self.remotes,
+            &self.connections,
             claims.admin,
             IntrospectionScope::All,
             ctx.limits()?,

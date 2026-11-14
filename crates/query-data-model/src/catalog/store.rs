@@ -5,7 +5,10 @@ use std::panic::RefUnwindSafe;
 
 use super::guards::Guard;
 use crate::spec::{AccessHints, Binding, Resolved};
-use crate::{Endpoint, EntityId, FieldSelectivity, ForeignKey, PropertyId, RelationshipVariantId};
+use crate::{
+    ConnectionId, Endpoint, EntityId, FieldSelectivity, ForeignKey, PropertyId,
+    RelationshipVariantId, StoreId,
+};
 
 /// A store's backend facts, which only the backend's catalog reads.
 pub(crate) type Facts = Box<dyn BackendFacts>;
@@ -21,8 +24,13 @@ pub struct Source {
     pub package: String,
     /// The store holds or excludes every property, and plans read the entity here.
     pub complete: bool,
+    /// The stored properties a stage takes key sets on.
+    pub accepts: Vec<PropertyId>,
+    /// Every property the store lists, in declaration order.
+    pub returned: Vec<PropertyId>,
     pub table: Option<String>,
-    /// The columns of the entity's identity, one per part.
+    /// The columns of the entity's identity, one per part; empty when the store returns no
+    /// identity.
     pub key: Vec<String>,
     pub path_column: Option<String>,
     pub access: AccessHints<Resolved>,
@@ -38,12 +46,14 @@ pub struct StoredColumn {
 
 #[derive(Debug)]
 pub struct Store {
-    pub name: String,
-    pub connection: String,
-    pub kind: String,
-    pub trusted: bool,
-    pub path_column: Option<String>,
-    pub package: String,
+    pub(crate) name: String,
+    pub(crate) connection_name: String,
+    pub(crate) connection_id: ConnectionId,
+    pub(crate) id: StoreId,
+    pub(crate) kind: String,
+    pub(crate) trusted: bool,
+    pub(crate) path_column: Option<String>,
+    pub(crate) package: String,
     pub(super) sources: Vec<Option<Source>>,
     pub(super) columns: Vec<Option<StoredColumn>>,
     pub(super) excluded: HashSet<PropertyId>,
@@ -55,6 +65,24 @@ pub struct Store {
 }
 
 impl Store {
+    pub fn id(&self) -> StoreId {
+        self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Nothing restricts the store's reads.
+    pub fn trusted(&self) -> bool {
+        self.trusted
+    }
+
+    /// The connection the store sits on.
+    pub fn connection(&self) -> ConnectionId {
+        self.connection_id
+    }
+
     pub fn source(&self, entity: EntityId) -> Option<&Source> {
         self.sources[entity.index()].as_ref()
     }
@@ -82,6 +110,25 @@ impl Store {
         self.columns[property.index()]
             .as_ref()
             .is_some_and(|column| column.stored_as_text)
+    }
+
+    /// Every property of `entity` the store lists, each of which its reads return.
+    pub fn returns(&self, entity: EntityId) -> impl Iterator<Item = PropertyId> + '_ {
+        self.source(entity)
+            .into_iter()
+            .flat_map(|source| source.returned.iter().copied())
+    }
+
+    /// Whether the store's reads of `entity` return its whole identity.
+    pub fn returns_identity(&self, entity: EntityId) -> bool {
+        self.source(entity)
+            .is_some_and(|source| !source.key.is_empty())
+    }
+
+    /// Whether a stage on this store takes a key set on `property`.
+    pub fn accepts(&self, entity: EntityId, property: PropertyId) -> bool {
+        self.source(entity)
+            .is_some_and(|source| source.accepts.contains(&property))
     }
 
     pub fn complete(&self, entity: EntityId) -> bool {
@@ -114,7 +161,7 @@ impl Store {
         (key.discriminator.is_none() && key.composite.is_empty()).then_some(key.foreign_key)
     }
 
-    /// The holder and the column pairs of a key on a composite identity, which only the engine
+    /// The holder and the column pairs of a key on a composite identity, which only the Combine stage
     /// joins on, between stages.
     pub fn composite_key(
         &self,
@@ -155,6 +202,16 @@ impl Store {
     /// The guard of an edge table the store holds.
     pub fn edge_guard(&self, table: &str) -> Option<&Guard> {
         self.edge_guards.get(table)
+    }
+
+    /// Whether a declared source writes the store's tables, rather than its own service.
+    pub(super) fn takes_writer(&self) -> bool {
+        super::registered(&self.kind).is_some_and(|backend| backend.capabilities().writer)
+    }
+
+    /// Whether the store's backend reads the generic fragment field.
+    pub(super) fn reads(&self, field: super::Field) -> bool {
+        super::registered(&self.kind).is_some_and(|backend| backend.reads(field))
     }
 
     pub(super) fn facts<T: 'static>(&self) -> Option<&T> {

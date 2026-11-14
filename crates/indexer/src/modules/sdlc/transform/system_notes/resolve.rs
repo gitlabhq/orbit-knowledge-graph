@@ -47,7 +47,7 @@ impl ResolveSql {
     ) -> Result<Self, DataModelError> {
         let (graph, sources) = (catalog.graph(), catalog.model().sources());
         let invalid = |what: String| DataModelError::Invalid(what);
-        let entity = |role: &str| match sources.role(&source.name, role) {
+        let entity = |role: &str| match sources.role(source.key(), role) {
             Some(Role::Entity(entity)) => Ok(*entity),
             _ => Err(invalid(format!(
                 "source {} declares no {role} role",

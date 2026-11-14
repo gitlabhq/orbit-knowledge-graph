@@ -1,4 +1,4 @@
-use compiler::{QueryError, compile, compile_local};
+use compiler::{QueryError, compile, compile_local, local_admin};
 
 use super::setup::{embedded_local_model, embedded_model, test_ctx};
 
@@ -12,7 +12,12 @@ fn assert_budget(query: &str, count: usize) {
             &test_ctx(),
             query_data_model::testkit::limits(),
         ),
-        compile_local(query, &local, query_data_model::testkit::limits()),
+        compile_local(
+            query,
+            &local,
+            &local_admin(),
+            query_data_model::testkit::limits(),
+        ),
     ] {
         if count == 16 {
             result.unwrap();

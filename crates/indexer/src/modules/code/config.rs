@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
+use query_data_model::catalog::sources::CODE_INDEXER;
 use query_data_model::catalog::sources::Role;
 use query_data_model::implementations::clickhouse::spec::TableRole;
-use query_data_model::spec::CODE_INDEXER_SOURCE;
 use query_data_model::{Catalog, ClickHouse, DataModelError};
 
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
@@ -30,13 +30,14 @@ impl CodeKinds {
     pub fn from_catalog(catalog: &Catalog<ClickHouse>) -> Result<Self, DataModelError> {
         let graph = catalog.graph();
         let sources = catalog.model().sources();
-        let name = |role: &str| match sources.role(CODE_INDEXER_SOURCE, role) {
+        let name = |role: &str| match sources.role(CODE_INDEXER, role) {
             Some(Role::Entity(entity)) => Ok(graph.entity(*entity).name.clone()),
             Some(Role::Relationship(relationship)) => {
                 Ok(graph.relationship(*relationship).name.clone())
             }
             _ => Err(DataModelError::Invalid(format!(
-                "{CODE_INDEXER_SOURCE} declares no {role} role"
+                "{} declares no {role} role",
+                CODE_INDEXER.name
             ))),
         };
         Ok(Self {
@@ -75,14 +76,15 @@ impl CodeTableNames {
         let writes = catalog
             .model()
             .sources()
-            .direct_source(CODE_INDEXER_SOURCE)
+            .direct_source(CODE_INDEXER)
             .ok_or_else(|| {
                 DataModelError::Invalid(format!(
-                    "the model declares no {CODE_INDEXER_SOURCE} source"
+                    "the model declares no {} source",
+                    CODE_INDEXER.name
                 ))
             })?;
 
-        let foreign = Lifetime::foreign_to(catalog, CODE_INDEXER_SOURCE)?;
+        let foreign = Lifetime::foreign_to(catalog, CODE_INDEXER)?;
         let mut node_columns = HashMap::new();
         let mut foreign_edges = HashMap::new();
         for entity in writes.entities.iter().map(|entity| graph.entity(*entity)) {
@@ -138,8 +140,10 @@ impl CodeTableNames {
 
         let kinds = CodeKinds::from_catalog(catalog)?;
         let table = |name: &str| -> Result<String, DataModelError> {
-            graph
-                .entity_id(name)
+            catalog
+                .names()
+                .entity(name)
+                .ok()
                 .and_then(|entity| catalog.table_of(entity))
                 .map(|table| prefixed_table_name(table, *SCHEMA_VERSION))
                 .ok_or_else(|| DataModelError::Invalid(format!("{name} has no graph table")))
@@ -271,7 +275,7 @@ mod tests {
 
     #[test]
     fn edge_tables_are_the_code_variant_tables_and_the_shared_table() {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let names = CodeTableNames::from_catalog(&catalog).expect("code tables must resolve");
         let gl_code_edge = prefixed_table_name("gl_code_edge", *SCHEMA_VERSION);
         let gl_edge = prefixed_table_name("gl_edge", *SCHEMA_VERSION);

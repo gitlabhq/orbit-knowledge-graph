@@ -83,8 +83,18 @@ impl Packages {
         )
     }
 
-    pub fn load(&self) -> Result<Arc<Model>, DataModelError> {
-        Model::load(&self.fragments()?).map(Arc::new)
+    /// The model of a deployment of the shape `shape` in `config/deployments.yaml`.
+    pub fn deployment(&self, shape: &str) -> Result<Arc<Model>, DataModelError> {
+        self.deployed(&crate::Deployments::embedded(), shape)
+    }
+
+    /// The model of a deployment of the shape `shape` in `deployments`.
+    pub fn deployed(
+        &self,
+        deployments: &crate::Deployments,
+        shape: &str,
+    ) -> Result<Arc<Model>, DataModelError> {
+        Model::load(&self.fragments()?.deployment(deployments, shape)?).map(Arc::new)
     }
 }
 

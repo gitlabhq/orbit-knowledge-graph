@@ -12,6 +12,7 @@ pub mod authorization;
 pub mod billing;
 pub mod clickhouse;
 pub mod clickhouse_setup;
+pub mod connections;
 pub mod engine;
 pub mod features;
 pub mod gitlab;
@@ -34,6 +35,10 @@ pub use authorization::{AuthorizationConfig, ProviderConfig};
 pub use billing::{BillingAuthMode, BillingConfig, QuotaAuthMode, QuotaConfig, QuotaConfigError};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use clickhouse_setup::ClickHouseSetupConfig;
+pub use connections::{
+    ConnectionError, ConnectionsConfig, DuckDbConnection, DuckDbLocation, S3Credentials,
+    S3Endpoint, S3UrlStyle,
+};
 pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
     CronSchedule, DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,

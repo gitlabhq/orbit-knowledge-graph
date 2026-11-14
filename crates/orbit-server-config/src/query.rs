@@ -345,6 +345,7 @@ mod tests {
         let cfg = QueryConfig {
             max_execution_time: Some(30),
             use_query_cache: Some(true),
+            query_cache_system_table_handling: Some("ignore".into()),
             ..Default::default()
         };
         let mut settings = cfg.to_clickhouse_settings()?;
@@ -354,14 +355,21 @@ mod tests {
             vec![
                 ("max_execution_time".into(), "30".into()),
                 (
-                    "query_cache_nondeterministic_function_handling".into(),
-                    "'ignore'".into()
-                ),
-                (
                     "query_cache_system_table_handling".into(),
                     "'ignore'".into()
                 ),
                 ("use_query_cache".into(), "1".into()),
+            ]
+        );
+        let uncached = QueryConfig {
+            use_query_cache: Some(false),
+            ..cfg
+        };
+        assert_eq!(
+            uncached.to_clickhouse_settings()?,
+            vec![
+                ("max_execution_time".into(), "30".into()),
+                ("use_query_cache".into(), "0".into()),
             ]
         );
         Ok(())

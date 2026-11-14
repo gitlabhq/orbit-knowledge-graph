@@ -16,7 +16,7 @@
 //! use compiler::orbit_authorization::{Caller, Grants, ScopeSet};
 //! use query_data_model::{Catalog, ClickHouse};
 //!
-//! let data_model = Arc::new(Catalog::<ClickHouse>::embedded().unwrap());
+//! let data_model = Arc::new(Catalog::<ClickHouse>::embedded("server").unwrap());
 //!
 //! let grants = Grants::new(Caller::new("user:1", false, ()))
 //!     .with("global", "read", ScopeSet::All);
@@ -89,23 +89,29 @@ fn output<T>(produced: Option<T>) -> Result<T> {
     })
 }
 
-/// The top-level pipeline on ClickHouse: parse, normalize, restrict, admit, split into stages.
+/// The server's top-level pipeline over its graph connection alone: parse, normalize,
+/// restrict, admit, split into stages.
 pub fn split(
     source: dag::Source<'_>,
     data_model: &Arc<Catalog<ClickHouse>>,
-    remotes: &dag::Remotes,
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<dag::Dag> {
-    let primary = dag::Primary::ClickHouse(Arc::clone(data_model));
+    let frontend = dag::Frontend::Server(Arc::clone(data_model));
+    let connections = graph_only(data_model);
     let env = dag::Env {
-        primary: &primary,
-        remotes,
+        frontend: &frontend,
+        connections: &connections,
         grants,
         limits,
         trace: false,
     };
     dag::split_query(source, &env)
+}
+
+/// A deployment that serves its graph connection alone.
+pub fn graph_only(data_model: &Arc<Catalog<ClickHouse>>) -> dag::Connections {
+    dag::Connections::new(vec![dag::Peer::ClickHouse(Arc::clone(data_model))])
 }
 
 fn statement(stage: dag::Stage) -> Result<query_data_model::surface::Statement> {
@@ -124,7 +130,7 @@ fn clickhouse_stage(
     limits: &QueryLimits,
 ) -> Result<config::GqlClickhouseCtx> {
     let mut ctx =
-        config::GqlClickhouseCtx::new(grants.clone(), *limits, false, true, Arc::clone(data_model));
+        config::GqlClickhouseCtx::new(grants.clone(), *limits, false, Arc::clone(data_model));
     ctx.set_statement(statement(stage)?);
     config::run_gql_clickhouse(&mut ctx).count_err()?;
     Ok(ctx)
@@ -147,14 +153,7 @@ pub fn subquery_statements(
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<Vec<passes::codegen::SubqueryStatement>> {
-    let stage = split(
-        dag::Source::Text(raw),
-        data_model,
-        &dag::Remotes::default(),
-        grants,
-        limits,
-    )?
-    .into_single()?;
+    let stage = split(dag::Source::Text(raw), data_model, grants, limits)?.into_single()?;
     let ctx = clickhouse_stage(stage, data_model, grants, limits)?;
     let plan = output(ctx.relational().as_ref())?;
     Ok(passes::codegen::subquery_statements(plan, data_model))
@@ -168,29 +167,23 @@ pub fn compile(
     grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
-    let stage = split(
-        dag::Source::Text(raw),
-        data_model,
-        &dag::Remotes::default(),
-        grants,
-        limits,
-    )?
-    .into_single()?;
+    let stage = split(dag::Source::Text(raw), data_model, grants, limits)?.into_single()?;
     compile_stage(stage, data_model, grants, limits)
 }
 
-/// Compile a graph query into DuckDB SQL for local execution.
-///
-/// No security or hydration phases — local mode trusts all data.
+/// Compile a graph query into DuckDB SQL for local execution, as the `grants` caller.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(
     raw: &str,
     data_model: &Arc<Catalog<DuckDb>>,
+    grants: &Grants,
     limits: &QueryLimits,
 ) -> Result<CompiledQueryContext> {
+    let connections = dag::Connections::new(vec![dag::Peer::DuckDb(Arc::clone(data_model))]);
     let mut top = config::GqlLocalCtx::new(
+        grants.clone(),
         *limits,
-        dag::Remotes::default(),
+        connections,
         false,
         Arc::clone(data_model),
     );
@@ -200,17 +193,21 @@ pub fn compile_local(
         .and_then(dag::Dag::into_single)
         .and_then(statement)
         .count_err()?;
-    let mut ctx = config::GqlDuckdbCtx::new(*limits, false, Arc::clone(data_model));
+    let mut ctx = config::GqlDuckdbCtx::new(grants.clone(), *limits, false, Arc::clone(data_model));
     ctx.set_statement(stage);
     config::run_gql_duckdb(&mut ctx)
         .and_then(|()| output(ctx.take_output()))
         .count_err()
 }
 
+/// The grants of a local CLI user, who administers the local database they read.
+pub fn local_admin() -> Grants {
+    Grants::new(orbit_authorization::Caller::new("cli", true, ()))
+}
+
 /// Parse and admit a query without a caller, as startup checks of shipped queries do.
 pub fn check(raw: &str, data_model: &Arc<Catalog<ClickHouse>>, limits: &QueryLimits) -> Result<()> {
-    let mut ctx =
-        config::GqlCheckCtx::new(*limits, dag::Remotes::default(), Arc::clone(data_model));
+    let mut ctx = config::GqlCheckCtx::new(*limits, graph_only(data_model), Arc::clone(data_model));
     ctx.set_raw(raw.to_string());
     config::run_gql_check(&mut ctx).count_err()
 }
@@ -281,8 +278,11 @@ pub(crate) mod testkit {
     use orbit_authorization::Grants;
     use query_data_model::Model;
 
-    static MODEL: LazyLock<std::sync::Arc<Model>> =
-        LazyLock::new(|| query_data_model::Packages::embedded().load().unwrap());
+    static MODEL: LazyLock<std::sync::Arc<Model>> = LazyLock::new(|| {
+        query_data_model::Packages::embedded()
+            .deployment("server")
+            .unwrap()
+    });
 
     pub fn non_admin_ctx() -> Grants {
         crate::test_grants::reporter(&MODEL, &["1/"])
@@ -307,13 +307,14 @@ pub(crate) mod testkit {
 mod tests {
     use super::*;
     use query_data_model::implementations::clickhouse::spec::ColumnSpec;
-    use query_data_model::spec::{ColumnStorage, Fragment, Fragments};
+    use query_data_model::testkit::{ColumnStorage, Fragment, Fragments};
     use std::sync::LazyLock;
 
-    static MODEL: LazyLock<Arc<Catalog<ClickHouse>>> =
-        LazyLock::new(|| Arc::new(Catalog::<ClickHouse>::embedded().expect("model must load")));
+    static MODEL: LazyLock<Arc<Catalog<ClickHouse>>> = LazyLock::new(|| {
+        Arc::new(Catalog::<ClickHouse>::embedded("server").expect("model must load"))
+    });
     static LOCAL: LazyLock<Arc<Catalog<DuckDb>>> =
-        LazyLock::new(|| Arc::new(Catalog::<DuckDb>::embedded().expect("model must load")));
+        LazyLock::new(|| Arc::new(Catalog::<DuckDb>::embedded("local").expect("model must load")));
 
     fn security_ctx() -> orbit_authorization::Grants {
         crate::testkit::non_admin_ctx()
@@ -396,6 +397,7 @@ mod tests {
     fn embedded_fragments() -> Fragments {
         query_data_model::Packages::embedded()
             .fragments()
+            .and_then(|fragments| fragments.deploy("server"))
             .expect("packages must parse")
     }
 
@@ -915,7 +917,7 @@ mod tests {
         ] {
             let query = format!("MATCH (f:File) WHERE f.path {operator} 'ALI' RETURN f LIMIT 10");
 
-            let sql = compile_local(&query, &LOCAL, crate::testkit::limits())
+            let sql = compile_local(&query, &LOCAL, &local_admin(), crate::testkit::limits())
                 .expect("should compile")
                 .base
                 .render();

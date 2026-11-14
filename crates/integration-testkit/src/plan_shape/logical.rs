@@ -1,7 +1,8 @@
 use query_data_model::Direction;
+use query_data_model::EdgeField;
 use query_data_model::plan::logical::{
-    Columns, Comparison, EdgeField, Expr, Literal, LogicalOperation, LogicalPlan, Matching,
-    Measure, Operand, Order, Predicate, Projection,
+    Columns, Comparison, Expr, Literal, LogicalOperation, LogicalPlan, Matching, Measure, Operand,
+    Order, Predicate, Projection,
 };
 use query_data_model::plan::tracking::{NodeId, Ref};
 use query_data_model::{Model, RelationshipId};
@@ -294,9 +295,9 @@ impl Render<'_> {
             } => format!("type({})", self.name(binding)),
             Expr::Edge { binding, field } => {
                 let field = match field {
-                    EdgeField::Source => "source_id",
+                    EdgeField::SourceId => "source_id",
                     EdgeField::SourceKind => "source_kind",
-                    EdgeField::Target => "target_id",
+                    EdgeField::TargetId => "target_id",
                     EdgeField::TargetKind => "target_kind",
                     EdgeField::Kind => "relationship_kind",
                 };

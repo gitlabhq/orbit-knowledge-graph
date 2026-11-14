@@ -1,0 +1,22 @@
+kind: graph
+package: peers.clans
+entities:
+  Clan:
+    identity: slug
+    label: name
+    default_columns: [slug, name]
+    properties:
+      slug: {type: string}
+      name: {type: string}
+      traversal_path: {type: string}
+  ClanPost:
+    identity: id
+    label: text
+    default_columns: [id, text]
+    properties:
+      id: {type: string}
+      clan: {type: string}
+      channel: {type: string}
+      text: {type: string}
+relationships:
+  CLAN_OF: {variants: {ClanPost -> Clan: {cardinality: many_to_one}}}

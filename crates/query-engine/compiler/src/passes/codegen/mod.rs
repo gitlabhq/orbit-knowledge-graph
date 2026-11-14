@@ -3,6 +3,8 @@
 
 pub mod ddl;
 
+use std::sync::Arc;
+
 use orbit_server_config::QueryConfig;
 use query_data_model::implementations::duckdb::render::type_name;
 use query_data_model::implementations::relational::RelationalBackend;
@@ -30,6 +32,9 @@ pub trait SqlBackend:
     const DIALECT: SqlDialect;
 
     fn render(catalog: &Catalog<Self>, plan: &RelationalPlan<Self>) -> ParameterizedSql;
+
+    /// The connection a catalog of this backend serves, as a stage peer.
+    fn peer(catalog: Arc<Catalog<Self>>) -> crate::dag::Peer;
 }
 
 impl SqlBackend for ClickHouse {
@@ -38,6 +43,10 @@ impl SqlBackend for ClickHouse {
     fn render(catalog: &Catalog<Self>, plan: &ClickHousePlan) -> ParameterizedSql {
         catalog.render(plan)
     }
+
+    fn peer(catalog: Arc<Catalog<Self>>) -> crate::dag::Peer {
+        crate::dag::Peer::ClickHouse(catalog)
+    }
 }
 
 impl SqlBackend for DuckDb {
@@ -45,6 +54,10 @@ impl SqlBackend for DuckDb {
 
     fn render(catalog: &Catalog<Self>, plan: &RelationalPlan<DuckDb>) -> ParameterizedSql {
         catalog.render(plan)
+    }
+
+    fn peer(catalog: Arc<Catalog<Self>>) -> crate::dag::Peer {
+        crate::dag::Peer::DuckDb(catalog)
     }
 }
 
@@ -85,9 +98,16 @@ pub fn render<B: SqlBackend>(
     query_config: QueryConfig,
 ) -> ParameterizedQuery {
     let rendered = B::render(model, plan);
+    let root = plan.plan.root();
+    let columns = plan
+        .plan
+        .outputs(root)
+        .map(|output| plan.plan.name(output).unwrap_or_default().to_string())
+        .collect();
     ParameterizedQuery {
         sql: rendered.sql,
         params: rendered.parameters,
+        columns,
         result_context,
         query_config,
         dialect: B::DIALECT,
@@ -133,6 +153,8 @@ pub enum SqlDialect {
 pub struct ParameterizedQuery {
     pub sql: String,
     pub params: HashMap<String, ParamValue>,
+    /// The names of the columns the statement returns, in order.
+    pub columns: Vec<String>,
     pub result_context: ResultContext,
     /// Resolved query settings. Baked into the SQL SETTINGS clause by codegen
     /// and also applied as HTTP-level ClickHouse settings by the execution

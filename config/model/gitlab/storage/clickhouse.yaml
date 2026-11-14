@@ -17,6 +17,7 @@ engine:
       allow_experimental_replacing_merge_with_cleanup: "1"
       enable_block_number_column: "1"
       enable_block_offset_column: "1"
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
       gl_ci_edge:
         sort_key:

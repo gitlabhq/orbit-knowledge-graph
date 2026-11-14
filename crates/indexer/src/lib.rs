@@ -239,7 +239,7 @@ pub async fn run_dispatcher(
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
     let candidate = query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(
-        &archive.packages().load()?,
+        &archive.packages().deployment(&config.schema.deployment)?,
     )?;
     let code_tables = modules::code::config::CodeTableNames::from_catalog(&candidate)?;
     let siphon = candidate
@@ -252,7 +252,11 @@ pub async fn run_dispatcher(
 
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
-    let catalog = ModelCatalog::open(services.nats_client.clone()).await?;
+    let catalog = ModelCatalog::open(
+        services.nats_client.clone(),
+        config.schema.deployment.clone(),
+    )
+    .await?;
     let model = catalog.publish(archive).await?;
     let physical = orbit_migrations::schema::Schema::from_model(&model)?;
 

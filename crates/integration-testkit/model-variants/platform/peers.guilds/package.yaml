@@ -1,0 +1,3 @@
+kind: package
+name: peers.guilds
+requires: [gitlab, integration.slack, peers.deployments]

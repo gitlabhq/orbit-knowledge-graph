@@ -242,7 +242,7 @@ mod tests {
             "33".to_string(),
         );
         let model = Arc::new(
-            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
         );
         let ctx = query_engine::compiler::uniform_grants(model.model(), false, &["1/"]);
         let gql = "MATCH (u:User {id: 1}) RETURN u LIMIT 10";

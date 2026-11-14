@@ -1,0 +1,22 @@
+kind: authorization
+package: peers.lake
+entities:
+  Team:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path}}
+    properties: {open: [id, name], hidden: [traversal_path]}
+  TeamMessage:
+    scope: namespace
+    permission: read
+    enforce: {live: {scope_key: {via: TEAM_OF}}}
+    checks: [{provider: slack, kind: delegated}]
+    properties: {open: [id, team, channel, text]}
+  Escalation:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path}}
+    properties: {open: [id, reason, message_id], hidden: [traversal_path]}
+relationships:
+  TEAM_OF: {scope: namespace, permission: read, enforce: {}}
+  ESCALATES: {scope: namespace, permission: read, enforce: {duckdb: {scope_key: traversal_path, of: source}}}

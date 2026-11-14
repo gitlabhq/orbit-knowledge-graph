@@ -20,6 +20,7 @@ use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::content;
 use orbit_server::grpc::GrpcServer;
 use orbit_server::health_check as health_check_mode;
+use orbit_server::pipeline::PeerExecutors;
 use orbit_server::probes;
 use orbit_server::shutdown;
 use orbit_server_config::AppConfig;
@@ -116,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
                 let indexer_config = IndexerConfig::from(&config);
                 indexer::run(
                     &indexer_config,
-                    query_data_model::Packages::embedded().load()?,
+                    query_data_model::Packages::embedded().deployment(&config.schema.deployment)?,
                     serving,
                     shutdown,
                     indexer_datafusion::sql_transform(),
@@ -164,6 +165,12 @@ async fn run_webserver(
         "billing enforcement"
     );
 
+    let archive = embedded_archive()?;
+    let peers = PeerExecutors::open(
+        &archive.packages().deployment(&config.schema.deployment)?,
+        &config.connections,
+    )?;
+
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
         config.jwt_clock_skew_secs,
@@ -201,11 +208,13 @@ async fn run_webserver(
             .await
             .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
     );
-    let catalog = orbit_migrations::catalog::ModelCatalog::open(nats).await?;
+    let catalog =
+        orbit_migrations::catalog::ModelCatalog::open(nats, config.schema.deployment.clone())
+            .await?;
     ActiveSchema::spawn(
         &active_schema,
         Arc::new(graph.clone()),
-        embedded_archive()?,
+        archive,
         catalog,
         config,
         shutdown.clone(),
@@ -229,6 +238,7 @@ async fn run_webserver(
         config.grpc.clone(),
         Arc::new(config.analytics.clone()),
     )
+    .with_peers(peers)
     .with_resolver_registry(Arc::new(resolver_registry));
 
     orbit_billing::register_metrics();

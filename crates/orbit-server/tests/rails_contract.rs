@@ -64,7 +64,7 @@ impl Snapshot {
     }
 
     fn violations(&self) -> Vec<String> {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded model must load");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded model must load");
         let access = catalog.model().access();
         let config = orbit_server_config::AppConfig::embedded_defaults().authorization;
         let options = serde_json::Value::Object(config.providers[&config.identify].options.clone());

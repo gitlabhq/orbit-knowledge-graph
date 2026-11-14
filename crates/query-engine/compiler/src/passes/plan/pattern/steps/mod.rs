@@ -12,12 +12,12 @@ use std::collections::{HashMap, HashSet};
 use query_data_model::constants::*;
 use query_data_model::implementations::relational::plan::Relation;
 
-use super::relations::edge_columns;
 use super::{EdgeRelation, NodePlan, Pattern};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection, membership};
 use crate::passes::plan::rows::{BindingSource, Reads, Rel};
+use query_data_model::implementations::relational::Target;
 
 type IdSet = (Rel, String);
 
@@ -47,7 +47,7 @@ pub(super) struct RelationBuilder<'a, 'q, 'c, B: SqlBackend> {
     condition: Vec<Predicate>,
     outputs: Vec<Projection>,
     nodes: HashMap<String, PlannedNode>,
-    tagged: HashSet<(String, String, usize)>,
+    tagged: HashSet<(String, Target, usize)>,
 }
 
 #[derive(Default)]
@@ -131,7 +131,7 @@ where
         let read = self.pattern.node_read(&mut self.reads, node)?;
         self.root = Some(self.reads.read(&read, None)?);
         self.outputs = node.outputs();
-        Ok(vec![BindingSource::table(&node.alias, &node.id_column)])
+        Ok(vec![BindingSource::table(&node.alias, &node.identity)])
     }
 
     fn binding(&self, node: &str) -> Option<&BindingSource> {
@@ -163,15 +163,15 @@ where
         &mut self,
         node: &str,
         alias: &str,
-        column: &str,
+        key: &[String],
         property_source: Option<&str>,
         traversal_path: Option<Column>,
     ) {
         self.nodes.entry(node.to_string()).or_default().binding = Some(BindingSource {
             node: node.to_string(),
             alias: alias.to_string(),
-            column: column.to_string(),
-            identity: self.pattern.nodes[node].id_column.clone(),
+            key: key.to_vec(),
+            identity: self.pattern.nodes[node].identity.clone(),
             property_source: property_source.map(str::to_string),
             traversal_path,
         });
@@ -184,7 +184,7 @@ where
         self.set_binding(
             &node.alias,
             &node.alias,
-            &node.id_column,
+            &node.identity,
             Some(&node.alias),
             traversal_path,
         );
@@ -211,21 +211,18 @@ where
             return Ok(());
         }
         let mut node = self.pattern.uncovered_node(alias);
+        let id_column = node.id_column()?.to_string();
         if let Some(ids) = self.reached_ids(alias) {
             node.predicates
-                .push(membership(Column::new(alias, &node.id_column), ids));
+                .push(membership(Column::new(alias, &id_column), ids));
         }
-        let id_column = node.id_column.clone();
         self.attach_table(&node, |builder| {
             let binding = builder.binding(alias).ok_or_else(|| {
                 QueryError::Lowering(format!(
                     "node '{alias}' is not connected to the planned relations"
                 ))
             })?;
-            Ok((
-                Column::new(alias, &id_column),
-                Column::new(&binding.alias, &binding.column),
-            ))
+            Ok((Column::new(alias, &id_column), binding.id()?))
         })
     }
 
@@ -242,7 +239,9 @@ where
         Ok(())
     }
 
-    fn push_relation_outputs(&mut self, relation: &EdgeRelation, values: [OutputValue; 5]) {
+    /// The edge columns of a relation; an endpoint id is one value, or one per part of a
+    /// composite identity.
+    fn push_relation_outputs(&mut self, relation: &EdgeRelation, values: [Vec<OutputValue>; 5]) {
         if self.pattern.aggregate() {
             return;
         }
@@ -254,12 +253,17 @@ where
             EDGE_DST_SUFFIX,
             EDGE_DST_KIND_SUFFIX,
         ];
-        self.outputs.extend(
-            values
-                .into_iter()
-                .zip(suffixes)
-                .map(|(value, suffix)| Projection::new(value, format!("{prefix}{suffix}"))),
-        );
+        for (mut values, suffix) in values.into_iter().zip(suffixes) {
+            let name = format!("{prefix}{suffix}");
+            match values.len() {
+                1 => self.outputs.push(Projection::new(values.remove(0), name)),
+                _ => self
+                    .outputs
+                    .extend(values.into_iter().enumerate().map(|(part, value)| {
+                        Projection::new(value, identity_part_column(&name, part))
+                    })),
+            }
+        }
     }
 
     fn node_read(&mut self, node: &NodePlan) -> Result<Rel> {
@@ -290,14 +294,15 @@ where
         if let Some(ids) = self.ids(&node.alias) {
             return Ok(ids.clone());
         }
+        let id_column = node.id_column()?;
         let source = self.node_read(node)?;
         let id = Projection::new(
-            OutputValue::Column(Column::new(&node.alias, &node.id_column)),
-            &node.id_column,
+            OutputValue::Column(Column::new(&node.alias, id_column)),
+            id_column,
         );
         let ids = (
             self.reads.project(&source, None, &[id])?,
-            node.id_column.clone(),
+            id_column.to_string(),
         );
         self.set_ids(&node.alias, ids.clone());
         Ok(ids)
@@ -311,7 +316,7 @@ where
         source: &Rel,
     ) -> Result<()> {
         let pattern = self.pattern;
-        let (start, end) = edge_columns(relation.direction);
+        let (start, end) = relation.id_columns()?;
         let bounded = [&relation.from_node, &relation.to_node]
             .into_iter()
             .any(|node| self.ids(node).is_some() || pattern.endpoint_is_selective(node));
@@ -323,7 +328,7 @@ where
             let used_later = bounded
                 && pattern.relations[index + 1..]
                     .iter()
-                    .any(|next| next.endpoint_column(node).is_some())
+                    .any(|next| next.endpoint_field(node).is_some())
                 || !stored::<B>()
                     && pattern.nodes[node].joined
                     && (pattern.endpoint_is_selective(other) || self.ids(other).is_some());
@@ -339,7 +344,7 @@ where
         if let Some(ids) = self.ids(node) {
             return Ok(Some(ids.clone()));
         }
-        let id_column = self.pattern.nodes[node].id_column.clone();
+        let id_column = self.pattern.nodes[node].id_column()?.to_string();
         let Some(ids) = self.ids_through_holder(node, &id_column)? else {
             return Ok(None);
         };

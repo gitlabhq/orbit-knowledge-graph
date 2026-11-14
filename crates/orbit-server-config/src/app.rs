@@ -11,6 +11,7 @@ use crate::analytics::AnalyticsConfig;
 use crate::billing::BillingConfig;
 use crate::clickhouse::ClickHouseConfiguration;
 use crate::clickhouse_setup::ClickHouseSetupConfig;
+use crate::connections::ConnectionsConfig;
 use crate::engine::{EngineConfiguration, ScheduleConfig};
 use crate::features::FeaturesConfig;
 use crate::gitlab::{GitlabClientConfiguration, GitlabConfig};
@@ -57,6 +58,7 @@ pub struct AppConfig {
     pub authorization: crate::authorization::AuthorizationConfig,
     pub features: FeaturesConfig,
     pub object_storage: ObjectStorageConfig,
+    pub connections: ConnectionsConfig,
 }
 
 impl AppConfig {

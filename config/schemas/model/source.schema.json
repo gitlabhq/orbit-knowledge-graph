@@ -1,0 +1,505 @@
+{
+  "$defs": {
+    "EdgeMapping": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/PipelineEndpoint"
+        },
+        "label": {
+          "type": "string"
+        },
+        "mutable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "to": {
+          "$ref": "#/$defs/PipelineEndpoint"
+        }
+      },
+      "required": [
+        "label",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "EndpointKind": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "properties": {
+            "derive": {
+              "type": "string"
+            },
+            "mapping": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "derive",
+            "mapping"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ExtractLookup": {
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "type": "string"
+        },
+        "fields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity",
+        "id"
+      ],
+      "type": "object"
+    },
+    "PathSpec": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "dictionary": {
+              "type": "string"
+            },
+            "key_column": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "dictionary",
+            "key_column"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PipelineEndpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "enrich": {
+          "type": "boolean"
+        },
+        "field": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/EndpointKind"
+        }
+      },
+      "required": [
+        "field",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ReindexTrigger": {
+      "additionalProperties": false,
+      "properties": {
+        "table": {
+          "type": "string"
+        },
+        "traversal_path": {
+          "$ref": "#/$defs/PathSpec"
+        }
+      },
+      "required": [
+        "table"
+      ],
+      "type": "object"
+    },
+    "RelationshipSourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "pipelines": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "fields": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "filter": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "from": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/PipelineEndpoint"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lookups": {
+                "items": {
+                  "$ref": "#/$defs/ExtractLookup"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "order_by": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "query": {
+                "type": "string"
+              },
+              "tables": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "to": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/PipelineEndpoint"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "tables",
+              "order_by",
+              "query",
+              "from",
+              "to"
+            ],
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "reindex": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/ReindexTrigger"
+              }
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "pipelines"
+      ],
+      "type": "object"
+    },
+    "Roles": {
+      "additionalProperties": false,
+      "description": "The names the source's own code reads by role, so it names no entity, relationship or\ntable itself.",
+      "properties": {
+        "entities": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "relationships": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "tables": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SourceDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "connection": {
+          "type": "string"
+        },
+        "deleted": {
+          "type": "string"
+        },
+        "enabled_namespaces": {
+          "description": "The table of the source that lists the namespaces enabled for indexing.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": "string"
+        },
+        "watermark": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connection",
+        "version",
+        "watermark",
+        "deleted"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "declare": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SourceDeclaration"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "derived": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "emits": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "order_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "query": {
+            "type": "string"
+          },
+          "reindex": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/ReindexTrigger"
+                }
+              ]
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "transform": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "tables",
+          "order_by",
+          "query",
+          "emits",
+          "transform"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "entities": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "binary": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "columns": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "edges": {
+                "items": {
+                  "$ref": "#/$defs/EdgeMapping"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "enrich": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "filter": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "order_by": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "partition_count": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "query": {
+                "type": "string"
+              },
+              "reindex": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/$defs/ReindexTrigger"
+                    }
+                  ]
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "tables": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "tables",
+              "order_by",
+              "query"
+            ],
+            "type": "object"
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "kind": {
+      "const": "source",
+      "type": "string"
+    },
+    "package": {
+      "type": "string"
+    },
+    "relationships": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "$ref": "#/$defs/RelationshipSourceSpec"
+          }
+        ]
+      },
+      "type": "object"
+    },
+    "roles": {
+      "$ref": "#/$defs/Roles"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "package",
+    "source"
+  ],
+  "type": "object"
+}

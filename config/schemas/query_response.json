@@ -48,6 +48,17 @@
     }
   },
   "$defs": {
+    "node_id": {
+      "oneOf": [
+        {"type": "string"},
+        {
+          "type": "array",
+          "minItems": 2,
+          "items": {"type": ["integer", "string"]},
+          "description": "A composite identity: one typed part per identity property, in identity order."
+        }
+      ]
+    },
     "node": {
       "type": "object",
       "required": ["type", "id"],
@@ -57,8 +68,8 @@
           "description": "Entity type name matching the ontology (e.g. User, MergeRequest, Project). Look up in the cached ontology for label_field, domain, and style."
         },
         "id": {
-          "type": "string",
-          "description": "Entity primary key, serialized as a string to avoid JavaScript precision loss for Int64 values exceeding 2^53-1. Together with type, forms the composite identity (e.g. User:42). Always included even if not selected."
+          "$ref": "#/$defs/node_id",
+          "description": "Entity primary key, serialized as a string to avoid JavaScript precision loss for Int64 values exceeding 2^53-1, or the list of its typed parts when the entity's identity has several. Together with type, it identifies the node (e.g. User:42). Always included even if not selected."
         }
       },
       "additionalProperties": {
@@ -75,16 +86,16 @@
           "description": "Source node entity type."
         },
         "from_id": {
-          "type": "string",
-          "description": "Source node entity ID, serialized as a string."
+          "$ref": "#/$defs/node_id",
+          "description": "Source node entity ID, in the form the node's id takes."
         },
         "to": {
           "type": "string",
           "description": "Target node entity type."
         },
         "to_id": {
-          "type": "string",
-          "description": "Target node entity ID, serialized as a string."
+          "$ref": "#/$defs/node_id",
+          "description": "Target node entity ID, in the form the node's id takes."
         },
         "type": {
           "type": "string",
@@ -181,8 +192,8 @@
           "description": "Entity type name matching the ontology."
         },
         "id": {
-          "type": "string",
-          "description": "Entity primary key, serialized as a string."
+          "$ref": "#/$defs/node_id",
+          "description": "Entity primary key, in the form a node's id takes."
         },
         "properties": {
           "type": "object",

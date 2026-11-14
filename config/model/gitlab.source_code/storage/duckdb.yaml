@@ -3,6 +3,9 @@ package: gitlab.source_code
 store: local
 entities:
   Definition:
+    complete: true
+    accepts: [id]
+    exclude: [content]
     table: gl_definition
     columns:
       id: {immutable: true, backend: {type: BIGINT}}
@@ -23,6 +26,8 @@ entities:
     access: {order: [project_id, branch, id]}
 
   Directory:
+    complete: true
+    accepts: [id]
     table: gl_directory
     columns:
       id: {immutable: true, backend: {type: BIGINT}}
@@ -35,6 +40,9 @@ entities:
     access: {order: [project_id, branch, id]}
 
   File:
+    complete: true
+    accepts: [id]
+    exclude: [content]
     table: gl_file
     columns:
       id: {immutable: true, backend: {type: BIGINT}}
@@ -51,6 +59,8 @@ entities:
     access: {order: [project_id, branch, id]}
 
   ImportedSymbol:
+    complete: true
+    accepts: [id]
     table: gl_imported_symbol
     columns:
       id: {immutable: true, backend: {type: BIGINT}}

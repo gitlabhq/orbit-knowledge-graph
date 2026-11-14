@@ -3,13 +3,13 @@ use serde_json::Value;
 
 use super::Live;
 use crate::catalog::{Catalog, Render};
-use crate::plan::live::{Condition, LiveError, LiveLanguage, LiveOperation, LivePlan};
+use crate::plan::live::{Condition, LiveError, LiveLanguage, LiveOperation, LivePlan, Workspaces};
 
 /// The call the Data Extraction Service runs with the caller's own sign-in.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ExtractionRequest {
     pub operation: String,
-    pub workspaces: Vec<String>,
+    pub workspaces: Workspaces,
     pub filters: Vec<RequestFilter>,
     pub window: Option<Window>,
     pub limit: Option<u64>,

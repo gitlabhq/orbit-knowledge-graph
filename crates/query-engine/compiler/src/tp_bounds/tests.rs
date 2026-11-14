@@ -10,7 +10,7 @@ use crate::logical::Query;
 use crate::surface;
 
 static MODEL: LazyLock<Catalog<ClickHouse>> =
-    LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
+    LazyLock::new(|| Catalog::<ClickHouse>::embedded("server").unwrap());
 
 fn plan(gql: &str) -> LogicalPlan {
     let model = MODEL.model();
@@ -32,7 +32,7 @@ fn keys_of(gql: &str, alias: &str) -> Vec<TpLookupKey> {
 
 fn id(entity: &str, id: i64) -> TpLookupKey {
     TpLookupKey {
-        entity: entity.into(),
+        entity: MODEL.names().entity(entity).unwrap(),
         kind: TraversalPathKind::Id,
         value: TpLookupValue::Numeric(id),
     }
@@ -58,7 +58,7 @@ fn full_paths_and_anchor_keys_yield_lookups() {
             "p"
         ),
         [TpLookupKey {
-            entity: "Project".into(),
+            entity: MODEL.names().entity("Project").unwrap(),
             kind: TraversalPathKind::FullPath,
             value: TpLookupValue::Text("group/project".into()),
         }]

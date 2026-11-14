@@ -42,7 +42,7 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     })
     .await
     .unwrap();
-    let catalog = ModelCatalog::open(services.nats_client.clone())
+    let catalog = ModelCatalog::open(services.nats_client.clone(), "server".into())
         .await
         .unwrap();
     // A served version that differs from this binary's proves the task reads what users query.
@@ -114,7 +114,9 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
         ))
         .await;
 
-    let model = query_data_model::Packages::embedded().load().unwrap();
+    let model = query_data_model::Packages::embedded()
+        .deployment("server")
+        .unwrap();
     let plans_in = |scope: EtlScope| -> Vec<String> {
         model
             .sources()
@@ -127,7 +129,8 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     let plans = plans_in(EtlScope::Namespaced);
     let global_plans = plans_in(EtlScope::Global);
     let (synced_global, never_synced_global) = global_plans.split_first().unwrap();
-    let catalog = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap();
+    let catalog =
+        query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap();
     let schema = catalog.schema().unwrap();
     let served_store =
         ClickHouseCheckpointStore::for_version(Arc::new(graph.clone()), schema, served).unwrap();

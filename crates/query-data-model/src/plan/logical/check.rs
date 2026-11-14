@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use crate::DataType;
 
-use super::{EdgeField, Expr, Logical, LogicalOperation, LogicalType, Measure, PlanError};
+use super::{Expr, Logical, LogicalOperation, LogicalType, Measure, PlanError};
+use crate::EdgeField;
 use crate::catalog::PropertyAccess;
 use crate::generic::AttributeId;
 use crate::plan::tracking::{Construction, Ref};
@@ -189,8 +190,8 @@ pub(super) fn scalar<'m>(
         Expr::Edge { binding, field } => match construction.value(binding)? {
             (_, LogicalType::Edge) => Ok(Typed {
                 data_type: match field {
-                    EdgeField::Source => endpoint_identity(model, construction, binding, true)?,
-                    EdgeField::Target => endpoint_identity(model, construction, binding, false)?,
+                    EdgeField::SourceId => endpoint_identity(model, construction, binding, true)?,
+                    EdgeField::TargetId => endpoint_identity(model, construction, binding, false)?,
                     EdgeField::Kind | EdgeField::SourceKind | EdgeField::TargetKind => {
                         DataType::String
                     }

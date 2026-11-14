@@ -111,8 +111,8 @@ pub fn code_indexing_task_columns(
 pub fn embedded_specs() -> std::sync::Arc<super::ConverterSpecs> {
     std::sync::Arc::new(
         super::ConverterSpecs::new(
-            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
-            &query_data_model::Catalog::<query_data_model::DuckDb>::embedded().unwrap(),
+            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
+            &query_data_model::Catalog::<query_data_model::DuckDb>::embedded("local").unwrap(),
         )
         .unwrap(),
     )

@@ -1,4 +1,4 @@
-//! The `(gql, live)` stage phases: plan a live call, keep the workspaces the caller can read,
+//! The `(gql, live)` stage phases: plan a live call, read the workspaces its policies admit,
 //! prove every call carries that precondition, render the call.
 
 use query_data_model::catalog::Render;
@@ -11,7 +11,8 @@ use crate::passes::remote_security::{check_live, secure_live};
 
 pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()> {
     let statement = require(ctx.statement().as_ref(), "statement")?;
-    let planned = plan_live(&statement.plan, ctx.data_model())?;
+    let placed = require(ctx.placed().as_ref(), "placed")?;
+    let planned = plan_live(&statement.plan, ctx.data_model(), placed)?;
     if *ctx.trace() {
         ctx.set_planned(crate::dag::describe(&planned));
     }
@@ -21,8 +22,8 @@ pub(super) fn plan(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()> {
 
 pub(super) fn security(ctx: &mut impl CompilerCtx<Backend = Live>) -> Result<()> {
     let plan = require(ctx.take_live(), "live plan")?;
-    let namespaces = require(ctx.namespaces().as_ref(), "namespaces")?;
-    let plan = secure_live(ctx.data_model(), plan, ctx.grants(), namespaces)?;
+    let admitted = require(ctx.admitted().as_ref(), "admitted")?;
+    let plan = secure_live(ctx.data_model(), plan, admitted)?;
     ctx.set_live(plan);
     Ok(())
 }

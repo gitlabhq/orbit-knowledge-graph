@@ -8,14 +8,16 @@ engine:
   backend:
     version_column: _version
     deleted_column: _deleted
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
       gl_edge:
         shared: true
         sort_key: [traversal_path, source_id, relationship_kind, target_id]
-        columns: { source_id: { type: Int64 }, target_id: { type: Int64 } }
+        columns: { source_id: { type: Int64 }, source_kind: { type: String }, relationship_kind: { type: String }, target_kind: { type: String }, target_id: { type: Int64 } }
 entities:
   Group:
     complete: true
+    accepts: [id]
     table: gl_group
     columns:
       id: { immutable: true, backend: { type: Int64 } }
@@ -25,6 +27,7 @@ entities:
     access: { order: [id] }
   Project:
     complete: true
+    accepts: [id]
     table: gl_project
     columns:
       id: { immutable: true, backend: { type: Int64 } }
@@ -34,6 +37,7 @@ entities:
     access: { order: [id] }
   User:
     complete: true
+    accepts: [id]
     table: gl_user
     path_column: null
     columns:
@@ -43,6 +47,7 @@ entities:
     access: { order: [id] }
   MergeRequest:
     complete: true
+    accepts: [id, project_id, author_id]
     table: gl_merge_request
     columns:
       id: { immutable: true, backend: { type: Int64 } }
@@ -57,6 +62,7 @@ entities:
       indexes: { title: text, state: set, project_id: bloom_filter, id: [bloom_filter, minmax] }
   Note:
     complete: true
+    accepts: [id, project_id, author_id]
     table: gl_note
     columns:
       id: { immutable: true, backend: { type: Int64 } }

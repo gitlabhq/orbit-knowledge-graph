@@ -4,32 +4,23 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use compiler::dag::{Env, Primary, Remotes, Source};
+use compiler::dag::{Connections, Env, Frontend, Source};
 use compiler::gql::ParsedQuery;
 use compiler::{CompiledQueryContext, QueryError};
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 use query_data_model::{Catalog, ClickHouse};
 
-use crate::dag::{Executed, Executors, NoRemoteChecks, Outcome, RowChecks, Runner, Silent};
+use compiler::orbit_authorization::Checks;
+
+use crate::dag::{Executed, Executors, Outcome, Runner, Silent};
 use crate::types::{ExecutionOutput, QueryExecutionLog};
 
-/// The executors a deployment registers, the code and live connections it serves next to its
-/// relational one, and the provider that checks remote rows.
+/// The executors a deployment registers, every connection it serves, and the providers that
+/// check each stage's rows.
 pub struct DagStage {
     pub executors: Executors,
-    pub remotes: Remotes,
-    pub checks: Arc<dyn RowChecks>,
-}
-
-impl DagStage {
-    /// A deployment that serves its relational connection alone.
-    pub fn relational(executors: Executors) -> Self {
-        Self {
-            executors,
-            remotes: Remotes::default(),
-            checks: Arc::new(NoRemoteChecks),
-        }
-    }
+    pub connections: Connections,
+    pub checks: Checks,
 }
 
 fn data_model(ctx: &QueryPipelineContext) -> Result<Arc<Catalog<ClickHouse>>, PipelineError> {
@@ -79,10 +70,10 @@ impl PipelineStage for DagStage {
         let data_model = data_model(ctx).inspect_err(|e| obs.record_error(e))?;
         let grants = ctx.grants().inspect_err(|e| obs.record_error(e))?;
         let limits = ctx.limits().inspect_err(|e| obs.record_error(e))?;
-        let primary = Primary::ClickHouse(Arc::clone(&data_model));
+        let frontend = Frontend::Server(data_model);
         let env = Env {
-            primary: &primary,
-            remotes: &self.remotes,
+            frontend: &frontend,
+            connections: &self.connections,
             grants,
             limits,
             trace: false,
@@ -92,7 +83,7 @@ impl PipelineStage for DagStage {
             None => Source::Text(&ctx.query_json),
         };
         let mut silent = Silent;
-        let outcome = Runner::new(env, &self.executors, self.checks.as_ref(), &mut silent)
+        let outcome = Runner::new(env, &self.executors, &self.checks, &mut silent)
             .run(source)
             .await
             .map_err(PipelineError::from)

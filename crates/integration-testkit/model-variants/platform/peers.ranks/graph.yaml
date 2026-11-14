@@ -1,0 +1,27 @@
+kind: graph
+package: peers.ranks
+entities:
+  GuildRank:
+    identity: [guild, rank]
+    label: title
+    default_columns: [guild, rank, title]
+    properties:
+      guild: {type: int64}
+      rank: {type: string}
+      title: {type: string}
+      granted_at: {type: timestamp}
+      tier: {type: enum, values: {0: bronze, 1: silver, 2: gold}}
+      badge: {type: uuid}
+      traversal_path: {type: string}
+  RankPost:
+    identity: id
+    label: text
+    default_columns: [id, text]
+    properties:
+      id: {type: string}
+      guild: {type: int64}
+      rank: {type: string}
+      text: {type: string}
+relationships:
+  RANK_OF: {variants: {GuildRank -> Guild: {cardinality: many_to_one}}}
+  RANK_POST_OF: {variants: {RankPost -> GuildRank: {cardinality: many_to_one}}}

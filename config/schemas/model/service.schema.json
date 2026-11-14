@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "Lookup": {
+      "additionalProperties": false,
+      "properties": {
+        "disabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "entity": {
+          "type": "string"
+        },
+        "keys": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "operation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operators": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "provides": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "entity",
+        "provides",
+        "keys"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "service",
+      "type": "string"
+    },
+    "lookups": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Lookup"
+      },
+      "type": "object"
+    },
+    "package": {
+      "type": "string"
+    },
+    "service": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "package",
+    "service",
+    "lookups"
+  ],
+  "type": "object"
+}

@@ -882,7 +882,7 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
 /// `(entity, id)` for every pinned node id in a query, deduplicated.
 fn node_refs(query: &str) -> Result<Vec<(String, Key)>> {
     use query_engine::compiler::logical::Query;
-    let model = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded()?;
+    let model = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")?;
     let limits = orbit_server_config::AppConfig::embedded_defaults()
         .query
         .limits;

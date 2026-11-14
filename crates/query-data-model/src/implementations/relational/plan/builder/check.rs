@@ -44,7 +44,7 @@ impl<B: RelationalBackend> RelationalBuilder<'_, B> {
                 });
             }
             Expr::TextSearch { mode, .. }
-                if *mode != TextMatch::Contains && !B::CAPABILITIES.token_search =>
+                if *mode != TextMatch::Contains && !B::SQL.token_search =>
             {
                 return Err(RelationalError::Unsupported("token search"));
             }

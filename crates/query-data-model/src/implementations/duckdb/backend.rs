@@ -1,21 +1,24 @@
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::DuckDb;
 use crate::DataType;
-use crate::catalog::{Diagnostics, PolicyKind, StorageBackend, StoreInput};
+use crate::catalog::{Capabilities, Diagnostics, Field, PolicyKind, StorageBackend, StoreInput};
 use crate::implementations::relational::{
     Column, RelationalOptions, RelationalStore, Table, entity_layout,
 };
 use crate::spec::parse_word;
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DuckDbSource {
     #[serde(default)]
     pub sort_key: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+impl crate::spec::WrittenBlock for DuckDbSource {}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DuckDbColumn {
     #[serde(rename = "type")]
@@ -24,8 +27,15 @@ pub struct DuckDbColumn {
 
 impl StorageBackend for DuckDb {
     const KIND: &'static str = "duckdb";
+    const CAPABILITIES: Capabilities = Capabilities {
+        joins: true,
+        writer: true,
+        search: false,
+        delegates: false,
+    };
     const POLICIES: &'static [PolicyKind] =
         &[PolicyKind::ScopeKey, PolicyKind::Owner, PolicyKind::None];
+    const FIELDS: &'static [Field] = crate::implementations::relational::FIELDS;
     type Options = RelationalOptions;
     type SourceOptions = DuckDbSource;
     type ColumnOptions = Option<DuckDbColumn>;
@@ -43,6 +53,7 @@ impl StorageBackend for DuckDb {
             options.version_column.as_ref(),
             options.deleted_column.as_ref(),
             &edge_tables,
+            options.edge_columns.as_ref(),
             diagnostics,
         );
         relational.tables = entity_tables(&input, diagnostics);

@@ -1,0 +1,4 @@
+kind: source
+package: peers.lake
+source: lake_sync
+entities: [Team, Escalation]

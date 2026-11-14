@@ -4,17 +4,19 @@ use query_data_model::{Catalog, DataType};
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::Direction;
+use query_data_model::EdgeField;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{
     Column, Expr, Operation, Relation, RelationalBuilder, RelationalError, Selection,
 };
 use query_data_model::plan::logical::{
-    EdgeField, Expr as Logical, LogicalOperation, LogicalType, Measure, Projection,
+    Expr as Logical, LogicalOperation, LogicalType, Measure, Projection,
 };
 use query_data_model::plan::tracking::{Declare, Ref, Step};
 
 use crate::constants::{
-    primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
+    identity_part_column, primary_key_column, redaction_id_column, redaction_type_column,
+    traversal_path_column,
 };
 use crate::error::{QueryError, Result};
 use crate::logical::columns::{free_text, redaction_column};
@@ -57,8 +59,8 @@ pub enum KeyKind {
 }
 
 impl KeyKind {
-    /// The loader admits only integer, string and uuid check keys.
-    pub(crate) fn of(data_type: DataType) -> Self {
+    /// The loader admits only integer, string and uuid keys.
+    pub fn of(data_type: DataType) -> Self {
         match data_type {
             DataType::Int => Self::Int,
             DataType::Uuid => Self::Uuid,
@@ -78,7 +80,6 @@ pub fn entity_auth(model: &Catalog<impl SqlBackend>) -> HashMap<String, Vec<Enti
             let redaction = redaction_column(model, entity.id);
             let checks: Vec<EntityAuthConfig> = model
                 .checks(entity.id)
-                .iter()
                 .filter_map(|check| match check {
                     Check::Rows {
                         provider,
@@ -117,6 +118,9 @@ pub struct RedactionNode {
     pub pk_column: String,
     pub id_column: String,
     pub type_column: String,
+    /// How many parts the node's identity has; a composite identity is carried one part per
+    /// column under `pk_column`.
+    pub parts: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +136,41 @@ pub struct EdgeMeta {
     pub dst_column: String,
     pub dst_type_column: String,
     pub relationship: usize,
+    /// How many identity parts each endpoint has; a composite endpoint is carried one part per
+    /// column under its id column.
+    pub src_parts: usize,
+    pub dst_parts: usize,
+}
+
+impl EdgeMeta {
+    /// The edge a hop's rows carry in the columns under `prefix`, and its path when the hop has
+    /// a variable length.
+    pub(crate) fn hop(
+        prefix: String,
+        variable_length: bool,
+        rel_types: Vec<String>,
+        relationship: usize,
+    ) -> Self {
+        use crate::constants::{
+            EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_PATH_NODES_SUFFIX,
+            EDGE_SRC_KIND_SUFFIX, EDGE_SRC_SUFFIX,
+        };
+        Self {
+            type_column: format!("{prefix}{EDGE_KIND_SUFFIX}"),
+            src_column: format!("{prefix}{EDGE_SRC_SUFFIX}"),
+            src_type_column: format!("{prefix}{EDGE_SRC_KIND_SUFFIX}"),
+            dst_column: format!("{prefix}{EDGE_DST_SUFFIX}"),
+            dst_type_column: format!("{prefix}{EDGE_DST_KIND_SUFFIX}"),
+            path_column: variable_length.then(|| format!("{prefix}{EDGE_PATH_NODES_SUFFIX}")),
+            column_prefix: prefix,
+            rel_types,
+            relationship,
+            from_alias: String::new(),
+            to_alias: String::new(),
+            src_parts: 1,
+            dst_parts: 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -142,7 +181,8 @@ pub struct ResultContext {
     edges: Vec<EdgeMeta>,
     neighbors_center: Option<(String, orbit_authorization::Key)>,
     labels: HashMap<String, String>,
-    /// Nodes whose rows a remote stage already put through every check of their entity.
+    /// Nodes whose rows a remote stage already put through every check of their entity, and
+    /// nodes of entities that declare no row check whose read's scope policy a stage proved.
     stage_checked: HashSet<String>,
 }
 
@@ -157,6 +197,11 @@ impl ResultContext {
     }
 
     pub fn add_node(&mut self, alias: &str, entity_type: &str) {
+        self.add_node_with_parts(alias, entity_type, 1);
+    }
+
+    /// A node whose identity has `parts` parts.
+    pub fn add_node_with_parts(&mut self, alias: &str, entity_type: &str, parts: usize) {
         self.nodes.insert(
             alias.to_string(),
             RedactionNode {
@@ -165,15 +210,30 @@ impl ResultContext {
                 pk_column: primary_key_column(alias),
                 id_column: redaction_id_column(alias),
                 type_column: redaction_type_column(alias),
+                parts,
             },
         );
     }
 
     /// A node of a remote stage, whose rows that stage put through every check of the entity
-    /// before the engine joined them.
-    pub fn add_stage_checked_node(&mut self, alias: &str, entity_type: &str) {
-        self.add_node(alias, entity_type);
+    /// before the Combine stage joined them.
+    pub fn add_stage_checked_node(&mut self, alias: &str, entity_type: &str, parts: usize) {
+        self.add_node_with_parts(alias, entity_type, parts);
         self.stage_checked.insert(alias.to_string());
+    }
+
+    /// Every node in `proved` whose entity declares no row check needs none: the security
+    /// check proved its read's scope filter or global permission, the only policy the entity has.
+    pub fn mark_proved(&mut self, proved: &std::collections::BTreeSet<String>) {
+        let unchecked: Vec<String> = self
+            .nodes
+            .values()
+            .filter(|node| {
+                proved.contains(&node.alias) && self.entity_checks(&node.entity_type).is_empty()
+            })
+            .map(|node| node.alias.clone())
+            .collect();
+        self.stage_checked.extend(unchecked);
     }
 
     pub fn stage_checked(&self, alias: &str) -> bool {
@@ -423,6 +483,48 @@ pub fn apply<B: SqlBackend>(
     model: &Catalog<B>,
 ) -> Result<(RelationalPlan<B>, ResultContext)> {
     let kind = query.kind();
+    let mut ctx = context(query, model);
+    let bindings = query.bindings();
+    let selectable_nodes = selectable(query, model);
+    let contract = return_columns(kind, &bindings, &selectable_nodes, &metadata.nodes, model)?;
+    if matches!(kind, Kind::Traversal | Kind::Aggregation) {
+        for edge in &metadata.edges {
+            ctx.edges.push(EdgeMeta {
+                src_parts: edge.parts.0,
+                dst_parts: edge.parts.1,
+                ..EdgeMeta::hop(
+                    edge.column_prefix.clone(),
+                    edge.variable_length,
+                    edge.rel_types.clone(),
+                    edge.relationship,
+                )
+            });
+        }
+    }
+    let plan = match contract.outputs.is_empty() {
+        true => plan,
+        false => enforce(plan, model, contract, kind)?,
+    };
+    Ok((plan, ctx))
+}
+
+/// The aliases whose nodes a query's rows return.
+fn selectable<'p>(query: Query<'p>, model: &Catalog<impl SqlBackend>) -> HashSet<&'p str> {
+    match query.kind() {
+        Kind::Aggregation => aggregation_row_nodes(query, model),
+        Kind::Traversal | Kind::Neighbors => query
+            .bindings()
+            .iter()
+            .map(|binding| binding.name)
+            .collect(),
+        Kind::PathFinding => HashSet::new(),
+    }
+}
+
+/// The nodes a query returns and the checks of their entities, without the columns that carry
+/// them.
+pub fn context<B: SqlBackend>(query: Query<'_>, model: &Catalog<B>) -> ResultContext {
+    let kind = query.kind();
     let mut ctx = ResultContext::new().with_query_type(kind.into());
     ctx.entity_auth = entity_auth(model);
     let facts = query.leaves();
@@ -439,45 +541,14 @@ pub fn apply<B: SqlBackend>(
             .map(|entity| (entity.name.clone(), entity.label.clone()))
             .collect();
     }
-    let bindings = query.bindings();
-    let selectable_nodes: HashSet<&str> = match kind {
-        Kind::Aggregation => aggregation_row_nodes(query, model),
-        Kind::Traversal | Kind::Neighbors => bindings.iter().map(|binding| binding.name).collect(),
-        Kind::PathFinding => HashSet::new(),
-    };
-    for binding in &bindings {
+    let selectable_nodes = selectable(query, model);
+    for binding in &query.bindings() {
         if selectable_nodes.contains(binding.name) {
-            ctx.add_node(binding.name, &model.graph().entity(binding.entity).name);
+            let entity = model.graph().entity(binding.entity);
+            ctx.add_node_with_parts(binding.name, &entity.name, entity.identity.len());
         }
     }
-    let contract = return_columns(kind, &bindings, &selectable_nodes, &metadata.nodes, model)?;
-    if matches!(kind, Kind::Traversal | Kind::Aggregation) {
-        use crate::constants::{
-            EDGE_DST_KIND_SUFFIX, EDGE_DST_SUFFIX, EDGE_KIND_SUFFIX, EDGE_SRC_KIND_SUFFIX,
-            EDGE_SRC_SUFFIX,
-        };
-        for edge in &metadata.edges {
-            let prefix = edge.column_prefix.clone();
-            ctx.edges.push(EdgeMeta {
-                type_column: format!("{prefix}{EDGE_KIND_SUFFIX}"),
-                src_column: format!("{prefix}{EDGE_SRC_SUFFIX}"),
-                src_type_column: format!("{prefix}{EDGE_SRC_KIND_SUFFIX}"),
-                dst_column: format!("{prefix}{EDGE_DST_SUFFIX}"),
-                dst_type_column: format!("{prefix}{EDGE_DST_KIND_SUFFIX}"),
-                column_prefix: prefix,
-                path_column: edge.path_column.clone(),
-                rel_types: edge.rel_types.clone(),
-                relationship: edge.relationship,
-                from_alias: String::new(),
-                to_alias: String::new(),
-            });
-        }
-    }
-    let plan = match contract.outputs.is_empty() {
-        true => plan,
-        false => enforce(plan, model, contract, kind)?,
-    };
-    Ok((plan, ctx))
+    ctx
 }
 
 /// The aliases an aggregation returns as rows: node groups and free-text property groups.
@@ -540,26 +611,41 @@ fn return_columns(
         else {
             continue;
         };
-        let id_column = crate::logical::columns::identity_column(model, entity_id)?;
-        let redaction_column = redaction_column(model, entity_id).unwrap_or(id_column);
-        let needs_separate_pk = redaction_column != id_column;
-        let authorization_id = if needs_separate_pk {
-            let table_alias = table_alias.as_deref().ok_or_else(|| {
-                QueryError::PipelineInvariant(format!(
-                    "node '{}' is authorized by {redaction_column} but has no table read",
-                    node.name
-                ))
-            })?;
-            Term::Column(Named::new(table_alias, redaction_column))
-        } else {
-            identity.clone()
+        let authorization = match redaction_column(model, entity_id) {
+            Some(column) => {
+                let table_alias = table_alias.as_deref().ok_or_else(|| {
+                    QueryError::PipelineInvariant(format!(
+                        "node '{}' is authorized by {column} but has no table read",
+                        node.name
+                    ))
+                })?;
+                Some(Term::Column(Named::new(table_alias, column)))
+            }
+            None => None,
         };
-        if needs_separate_pk {
-            contract.set(primary_key_column(node.name), identity.clone());
-            contract.group(identity.clone());
+        match (identity.as_slice(), authorization) {
+            ([identity], None) => {
+                contract.set(redaction_id_column(node.name), identity.clone());
+                contract.group(identity.clone());
+            }
+            ([identity], Some(authorization)) => {
+                contract.set(primary_key_column(node.name), identity.clone());
+                contract.group(identity.clone());
+                contract.set(redaction_id_column(node.name), authorization.clone());
+                contract.group(authorization);
+            }
+            (parts, authorization) => {
+                for (part, term) in parts.iter().enumerate() {
+                    let column = identity_part_column(&primary_key_column(node.name), part);
+                    contract.set(column, term.clone());
+                    contract.group(term.clone());
+                }
+                if let Some(authorization) = authorization {
+                    contract.set(redaction_id_column(node.name), authorization.clone());
+                    contract.group(authorization);
+                }
+            }
         }
-        contract.set(redaction_id_column(node.name), authorization_id.clone());
-        contract.group(authorization_id);
         let label = Term::Value(Box::new(OutputValue::Text(entity.clone())));
         contract.set(redaction_type_column(node.name), label);
         if kind != Kind::Aggregation

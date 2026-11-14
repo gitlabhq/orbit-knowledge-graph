@@ -185,7 +185,7 @@ pub(in crate::modules::sdlc) fn register(
 
 #[cfg(test)]
 pub(crate) fn test_resolve_sql() -> ResolveSql {
-    let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+    let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
     ResolveSql::from_catalog(&catalog, &crate::testkit::siphon_source()).expect("resolve sql")
 }
 

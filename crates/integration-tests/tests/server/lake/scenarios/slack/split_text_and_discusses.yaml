@@ -1,0 +1,11 @@
+description: Only the live store holds text and only the lake store holds merge_request_id for DISCUSSES, so placement would split the message node, which the planner does not build
+
+config:
+  security: default
+
+query: |
+  MATCH (m:SlackMessage)-[:DISCUSSES]->(mr:MergeRequest) WHERE m.text CONTAINS 'rollback' RETURN mr.iid, m.author
+
+expect:
+  compile_error: "no one store of SlackMessage serves both a contains match on SlackMessage.text and a read of SlackMessage.merge_request_id"
+  live_calls: []

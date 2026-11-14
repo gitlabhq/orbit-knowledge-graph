@@ -1,4 +1,4 @@
-use query_data_model::Catalog;
+use query_data_model::{Catalog, RelationshipId};
 use std::collections::{HashMap, HashSet};
 
 use crate::passes::codegen::SqlBackend;
@@ -70,15 +70,21 @@ pub(super) fn propagate(
 
 fn scoped(query: Query<'_>, edge: &Edge, model: &Catalog<impl SqlBackend>) -> Scoped {
     let (from, to) = (query.entity(edge.from), query.entity(edge.to));
-    let scope = |kind: &String| super::variant_scope(model, kind, from, to);
+    let scope =
+        |relationship: &RelationshipId| super::variant_scope(model, *relationship, from, to);
+    let named = !edge.relationships.is_empty();
     Scoped {
         from: edge.from,
         to: edge.to,
-        preserving: edge.types.iter().all(|kind| {
-            scope(kind).is_some_and(query_data_model::catalog::EdgeScope::preserves_scope)
-        }),
-        to_source: edge.types.iter().all(|kind| {
-            scope(kind).is_some_and(query_data_model::catalog::EdgeScope::propagates_to_source)
-        }),
+        preserving: named
+            && edge.relationships.iter().all(|relationship| {
+                scope(relationship)
+                    .is_some_and(query_data_model::catalog::EdgeScope::preserves_scope)
+            }),
+        to_source: named
+            && edge.relationships.iter().all(|relationship| {
+                scope(relationship)
+                    .is_some_and(query_data_model::catalog::EdgeScope::propagates_to_source)
+            }),
     }
 }

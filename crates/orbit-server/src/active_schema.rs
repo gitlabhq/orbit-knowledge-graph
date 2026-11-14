@@ -19,6 +19,7 @@ use query_data_model::{Catalog, ClickHouse};
 
 use crate::authorization::{Deployment, Registry};
 use query_engine::compiler::check;
+use query_engine::compiler::dag::Connections;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
@@ -41,6 +42,7 @@ impl ActiveSchema {
         let loader = SnapshotLoader {
             authorization: config.authorization.clone(),
             limits: config.query.limits,
+            deployment: config.schema.deployment.clone(),
             graph,
             embedded,
             catalog,
@@ -180,6 +182,7 @@ impl ActiveSchema {
 pub struct SchemaSnapshot {
     pub migration_version: u32,
     pub data_model: Arc<Catalog<ClickHouse>>,
+    pub connections: Connections,
     pub named_queries: Arc<NamedQueries>,
     pub relationship_patterns: String,
     pub authorization: Arc<Deployment>,
@@ -194,6 +197,7 @@ impl SchemaSnapshot {
         limits: QueryLimits,
     ) -> anyhow::Result<Self> {
         let deployment = Deployment::bind(authorization, data_model.model(), &Registry::gitlab())?;
+        let connections = Connections::of(data_model.shared_model())?;
         let mut named_queries = NamedQueries::load_embedded()?;
         named_queries.retain(|query| match fits_data_model(query, &data_model, &limits) {
             Ok(()) => true,
@@ -213,6 +217,7 @@ impl SchemaSnapshot {
         Ok(Self {
             migration_version,
             data_model,
+            connections,
             named_queries: Arc::new(named_queries),
             relationship_patterns,
             authorization: Arc::new(deployment),
@@ -224,6 +229,7 @@ impl SchemaSnapshot {
 struct SnapshotLoader {
     authorization: AuthorizationConfig,
     limits: QueryLimits,
+    deployment: String,
     graph: Arc<ArrowClickHouseClient>,
     embedded: ModelArchive,
     catalog: ModelCatalog,
@@ -250,6 +256,7 @@ impl SnapshotLoader {
         let prefix = table_prefix(version);
         let data_model = Arc::new(Catalog::<ClickHouse>::versioned(
             &archive.packages(),
+            &self.deployment,
             &prefix,
         )?);
         let physical = data_model.schema()?.clone();

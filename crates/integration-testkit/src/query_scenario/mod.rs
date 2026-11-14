@@ -4,6 +4,7 @@
 
 mod duckdb;
 mod format;
+mod lake;
 mod pagination;
 #[cfg(test)]
 mod regression;
@@ -14,6 +15,8 @@ use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
 
+use compiler::dag::Connections;
+use compiler::orbit_authorization::Checks;
 use format::ExpectedIndex;
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
@@ -36,15 +39,19 @@ use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
 use crate::visitor::{NodeExt, Requirement, ResponseView, int};
 use crate::{SeededColumnResolver, collect_subtest_results, load_data_model};
+use query_engine::compiler::orbit_authorization::Key;
 
 pub use duckdb::run_duckdb_dir;
 pub use format::{
-    PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, QueryStep, RedactionConfig,
-    ScenarioConfig, SecurityOverride,
+    ExpectedFailure, PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, QueryStep,
+    RedactionConfig, ScenarioConfig, SecurityOverride,
 };
+pub use lake::run_lake_dir;
 
 use orbit_server::auth::{Claims, SourceType, TraversalPathClaim};
-use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage, graph_executors};
+use orbit_server::pipeline::{
+    HydrationStage, PeerExecutors, RoutingOutput, RoutingStage, graph_executors,
+};
 use orbit_server::redaction::QueryResult;
 
 /// Parse all YAML scenario files under `root` without executing them.
@@ -78,7 +85,7 @@ pub async fn load_yaml_seed(ctx: &TestContext, presets_dir: &str, name: &str) {
     crate::scenario::seed::apply_seed(ctx, &seed, &Default::default(), &columns, name).await;
 }
 
-fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
+pub fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
     let path = presets_dir.join("seed.yaml");
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("seed presets at {}: {e}", path.display()));
@@ -98,7 +105,15 @@ pub async fn run_query(
     let compiled = compile_like_server(query, &data_model, security)
         .await
         .expect("query should compile");
-    let output = execute_output(ctx, query, &data_model, security, redaction).await;
+    let output = execute_output(
+        ctx,
+        query,
+        &data_model,
+        security,
+        redaction,
+        &PeerExecutors::default(),
+    )
+    .await;
     assert_pagination(&output, "run_query");
     let response = validate_response(&compiled.stats, GraphFormatter.format(&output), "run_query");
     ResponseView::for_query(&compiled.stats, response)
@@ -183,8 +198,34 @@ async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, pr
     } else {
         Ok(())
     };
-    if let Err(failure) = outcome.and(cleanup) {
+    if let Err(failure) = cleanup {
         resume_unwind(failure);
+    }
+    settle(outcome, config.expected_failure.as_ref(), name);
+}
+
+/// A case without an expected failure must pass; a case with one must fail with its message.
+fn settle(outcome: std::thread::Result<()>, expected: Option<&ExpectedFailure>, name: &str) {
+    match (outcome, expected) {
+        (Ok(()), None) => {}
+        (Err(failure), None) => resume_unwind(failure),
+        (Ok(()), Some(expected)) => panic!(
+            "{name}: passes now, so drop its expected failure ({})",
+            expected.reason
+        ),
+        (Err(failure), Some(expected)) => {
+            let message = failure
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| failure.downcast_ref::<&str>().copied())
+                .unwrap_or_default();
+            assert!(
+                message.contains(&expected.message),
+                "{name}: failed with {message:?}, not the expected {:?} ({})",
+                expected.message,
+                expected.reason
+            );
+        }
     }
 }
 
@@ -199,7 +240,7 @@ async fn run_case(
     let ctx = if let Some(database) = database {
         let forked = ctx.fork(database).await;
         if let Some(overlay) = &cfg.model_overlay {
-            let schema = crate::graph_schema(&crate::overlay_fragments(overlay));
+            let schema = crate::graph_schema(&crate::overlay_fragments(overlay, "server"));
             let credentials = orbit_migrations::schema::DictionaryCredentials {
                 database: forked.config.database.clone(),
                 user: forked.config.username.clone(),
@@ -258,7 +299,7 @@ async fn run_case(
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
     let data_model = match &cfg.model_overlay {
-        Some(name) => crate::versioned_data_model(crate::overlay_fragments(name)),
+        Some(name) => crate::versioned_data_model(crate::overlay_fragments(name, "server")),
         None => load_data_model(),
     };
 
@@ -312,6 +353,10 @@ async fn run_query_step(
 ) {
     let label = name;
     expect.validate_pages_exclusive(label);
+    assert!(
+        expect.live_calls.is_none(),
+        "{label}: only lake scenarios record live calls"
+    );
 
     let compiled = compile_like_server(query, data_model, security).await;
     let Some(compiled) = assert_compilation(compiled, expect, label) else {
@@ -338,7 +383,15 @@ async fn run_query_step(
         return;
     }
 
-    let output = execute_output(ctx, query, data_model, security, redaction).await;
+    let output = execute_output(
+        ctx,
+        query,
+        data_model,
+        security,
+        redaction,
+        &PeerExecutors::default(),
+    )
+    .await;
     let baseline = assert_output(&output, expect, label);
     let count = repeat_count(expect, label);
     for run in 2..=count {
@@ -355,7 +408,15 @@ async fn run_query_step(
             )
             .await;
         }
-        let output = execute_output(ctx, query, data_model, security, redaction).await;
+        let output = execute_output(
+            ctx,
+            query,
+            data_model,
+            security,
+            redaction,
+            &PeerExecutors::default(),
+        )
+        .await;
         let rerun = assert_output(&output, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
     }
@@ -385,6 +446,7 @@ async fn assert_indexes_used(
                 let statement = ParameterizedQuery {
                     sql: sql.clone(),
                     params: params.clone(),
+                    columns: Vec::new(),
                     result_context: query.result_context.clone(),
                     query_config: query.query_config.clone(),
                     dialect: query.dialect,
@@ -494,7 +556,15 @@ async fn run_pages(
             .await
             .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}"));
 
-        let output = execute_output(ctx, &query_str, data_model, security, redaction).await;
+        let output = execute_output(
+            ctx,
+            &query_str,
+            data_model,
+            security,
+            redaction,
+            &PeerExecutors::default(),
+        )
+        .await;
         let response = assert_output(&output, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
@@ -508,7 +578,15 @@ async fn run_pages(
             let compiled = compile_like_server(&query, data_model, security)
                 .await
                 .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
-            let output = execute_output(ctx, &query, data_model, security, redaction).await;
+            let output = execute_output(
+                ctx,
+                &query,
+                data_model,
+                security,
+                redaction,
+                &PeerExecutors::default(),
+            )
+            .await;
             assert_pagination(&output, label);
             let response =
                 validate_response(&compiled.stats, GraphFormatter.format(&output), label);
@@ -536,7 +614,7 @@ async fn compile_like_server(
     };
     let mut obs = NoOpObserver;
     let routing = RoutingStage {
-        remotes: Default::default(),
+        connections: Connections::of(data_model.shared_model()).map_err(PipelineError::custom)?,
     };
     if let RoutingOutput::Schema(_) = routing.execute(&mut pipeline_ctx, &mut obs).await? {
         return Err(PipelineError::custom("schema calls are not graph queries"));
@@ -552,26 +630,47 @@ async fn compile_like_server(
 }
 
 /// Runs the query the way the server does: routing, then the DAG runner on the test
-/// ClickHouse, then the caller's checks and the hydration stage.
+/// ClickHouse and on `peers` next to it, then the caller's checks and the hydration stage.
 async fn execute_output(
     ctx: &TestContext,
     query: &str,
     data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
+    peers: &PeerExecutors,
 ) -> PipelineOutput {
+    try_execute_output(ctx, query, data_model, security, redaction, peers)
+        .await
+        .unwrap_or_else(|error| panic!("the DAG should run: {error}"))
+}
+
+async fn try_execute_output(
+    ctx: &TestContext,
+    query: &str,
+    data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
+    security: &SecurityContext,
+    redaction: &MockRedactionService,
+    peers: &PeerExecutors,
+) -> Result<PipelineOutput, PipelineError> {
     let resolver = Arc::new(SeededColumnResolver::from_seed_file());
     let mut resolver_registry = ColumnResolverRegistry::new();
     resolver_registry.register("gitaly", resolver as _);
 
     let client = Arc::new(ctx.create_client());
-    let dag = DagStage::relational(graph_executors(
+    let executors = peers.with_graph(graph_executors(
         Arc::clone(&client),
         data_model,
         "base",
         "gkg;scenario".into(),
         Vec::new(),
     ));
+    let connections =
+        Connections::of(data_model.shared_model()).expect("the data model's connections resolve");
+    let dag = DagStage {
+        executors,
+        connections: connections.clone(),
+        checks: Checks::default().with("rails", Arc::new(redaction.clone())),
+    };
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
     server_extensions.insert(Arc::clone(data_model));
@@ -588,16 +687,10 @@ async fn execute_output(
         phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
-    RoutingStage {
-        remotes: Default::default(),
-    }
-    .execute(&mut pipeline_ctx, &mut obs)
-    .await
-    .expect("the query should route");
-    let executed = dag
+    RoutingStage { connections }
         .execute(&mut pipeline_ctx, &mut obs)
-        .await
-        .expect("the DAG should run");
+        .await?;
+    let executed = dag.execute(&mut pipeline_ctx, &mut obs).await?;
     let compiled = pipeline_ctx
         .compiled
         .clone()
@@ -622,13 +715,13 @@ async fn execute_output(
         .await
         .expect("hydration should succeed");
 
-    pipeline_output(
+    Ok(pipeline_output(
         &compiled,
         hydration_output.query_result,
         hydration_output.redacted_count,
         hydration_output.result_context,
         compiled.base.sql.clone(),
-    )
+    ))
 }
 
 fn pipeline_output(
@@ -707,23 +800,28 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             );
         }
         for row in &ne.rows {
-            let id = row
-                .get("id")
-                .and_then(|v| v.as_i64())
-                .unwrap_or_else(|| panic!("{label}: node {entity} row missing integer 'id'"));
+            let id = match row.get("id") {
+                Some(serde_json::Value::Number(id)) if id.is_i64() => {
+                    Key::Int(id.as_i64().unwrap())
+                }
+                Some(serde_json::Value::String(id)) => {
+                    id.parse::<i64>().map_or(Key::Text(id.clone()), Key::Int)
+                }
+                _ => panic!("{label}: node {entity} row has no integer or string 'id'"),
+            };
             let prop_count = row.keys().filter(|k| *k != "id").count();
             assert!(
                 prop_count > 0,
                 "{label}: node {entity}/{id} row has no property assertions (only 'id')"
             );
             let found = view
-                .find_node(entity, id)
+                .find_node_by_key(entity, &id)
                 .unwrap_or_else(|| panic!("{label}: node {entity}/{id} not found"));
             for (prop, expected) in row {
                 if prop == "id" {
                     continue;
                 }
-                assert_property(found, prop, expected, entity, id, label);
+                assert_property(found, prop, expected, entity, &id, label);
             }
         }
         for prop in &ne.prop_present {
@@ -1097,7 +1195,7 @@ fn assert_property(
     prop: &str,
     expected: &serde_json::Value,
     entity: &str,
-    id: i64,
+    id: &Key,
     label: &str,
 ) {
     match expected {
@@ -1343,6 +1441,29 @@ mod tests {
             assert!(message.contains("Orbit query syntax"), "{message}");
             assert!(message.contains(position), "{message}");
             assert!(!message.contains("private-query-literal"), "{message}");
+        }
+    }
+
+    #[test]
+    fn an_expected_failure_must_fail_with_its_message() {
+        let expected = ExpectedFailure {
+            reason: "a known defect".into(),
+            message: "edge set mismatch".into(),
+        };
+        let failed = |message: &'static str| -> std::thread::Result<()> {
+            Err(Box::new(message.to_string()))
+        };
+        settle(
+            failed("DEVELOPED_IN edge set mismatch"),
+            Some(&expected),
+            "case",
+        );
+        settle(Ok(()), None, "case");
+        for outcome in [Ok(()), failed("node count mismatch")] {
+            let settled = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                settle(outcome, Some(&expected), "case")
+            }));
+            assert!(settled.is_err());
         }
     }
 }

@@ -2,14 +2,17 @@
 //! as a table read or only narrows an edge scan.
 
 use crate::passes::codegen::SqlBackend;
-use query_data_model::Catalog;
+use query_data_model::{Catalog, GraphCatalog};
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::plan::logical::{Columns, Expr, Measure};
 
 use super::{NodePlan, Pattern};
+use crate::error::QueryError;
 use crate::logical::anchors::Anchor;
-use crate::logical::columns::{free_text, identity_column, redaction_column, returned, selections};
+use crate::logical::columns::{
+    free_text, identity_columns, redaction_column, returned, selections,
+};
 use crate::logical::{Query, binding};
 use crate::passes::plan::filters::{bind_facts, unindex_if_key_narrowed};
 use crate::passes::plan::predicates::{
@@ -19,7 +22,6 @@ use crate::passes::plan::rows::ReadScope;
 
 impl NodePlan {
     fn new<B>(
-        query: Query<'_>,
         anchor: &Anchor<'_>,
         selection: Option<&Columns>,
         model: &Catalog<B>,
@@ -29,21 +31,19 @@ impl NodePlan {
     {
         let binding = anchor.binding;
         let entity = binding.entity;
-        let id_column = identity_column(model, entity)?.to_string();
+        let identity = identity_columns(model, entity)?.to_vec();
         let graph = model.graph();
-        let stored = |name: &str| {
-            graph
-                .property_id(entity, name)
-                .and_then(|property| model.lookup(property))
-                .is_none()
-        };
-        let mut filters = bind_facts(query, anchor, binding.name, model);
-        filters.retain(|(property, _)| stored(property));
+        let mut filters = bind_facts(anchor, model);
+        filters.retain(|(_, filter)| {
+            filter
+                .property()
+                .is_some_and(|property| model.lookup(property).is_none())
+        });
         unindex_if_key_narrowed(&mut filters);
         let has_traversal_path = model.has_path_column(entity);
         Ok(Self {
             alias: binding.name.to_string(),
-            entity: Some(graph.entity(entity).name.clone()),
+            entity: Some(entity),
             table: model.table_of(entity).map(String::from),
             joined: false,
             filters,
@@ -57,12 +57,16 @@ impl NodePlan {
                 (true, true) => ReadScope::HighFanOut,
             },
             redaction_id_column: redaction_column(model, entity)
-                .unwrap_or(&id_column)
-                .to_string(),
-            id_column,
+                .or(match identity.as_slice() {
+                    [column] => Some(column.as_str()),
+                    _ => None,
+                })
+                .map(str::to_string),
+            identity,
             columns: returned(model, entity, selection)
                 .into_iter()
-                .filter(|name| stored(name))
+                .filter(|property| model.lookup(*property).is_none())
+                .map(|property| graph.property(property).name.clone())
                 .collect(),
             emit_select: true,
             null_as_epoch: graph
@@ -83,7 +87,19 @@ impl NodePlan {
     }
 
     pub fn uses_default_pk(&self) -> bool {
-        self.redaction_id_column == self.id_column
+        self.identity.len() == 1 && self.redaction_id_column.as_ref() == self.identity.first()
+    }
+
+    /// The column holding the node's identity, for an edge, id set or pin, which only a single
+    /// identity reaches.
+    pub fn id_column(&self) -> crate::error::Result<&str> {
+        match self.identity.as_slice() {
+            [column] => Ok(column),
+            _ => Err(QueryError::PipelineInvariant(format!(
+                "node '{}' has a composite identity in a single-key slot, which the loader rejects",
+                self.alias
+            ))),
+        }
     }
 
     pub(crate) fn is_pinned(&self) -> bool {
@@ -105,14 +121,16 @@ impl NodePlan {
     }
 
     /// Every predicate the node's table read applies: filters, bound conditions, ids, and liveness.
-    pub fn conditions(&self) -> Vec<Predicate> {
+    pub fn conditions(&self, graph: &GraphCatalog) -> Vec<Predicate> {
         let mut predicates: Vec<_> = self
             .filters
             .iter()
-            .map(|(property, filter)| property_filter(&self.alias, property, filter))
+            .filter_map(|(_, filter)| property_filter(&self.alias, filter, graph))
             .collect();
         predicates.extend(self.predicates.iter().cloned());
-        predicates.extend(self.id_predicates(Column::new(&self.alias, &self.id_column)));
+        if let [column] = self.identity.as_slice() {
+            predicates.extend(self.id_predicates(Column::new(&self.alias, column)));
+        }
         predicates.push(live(&self.alias));
         predicates
     }
@@ -146,7 +164,7 @@ where
         .iter()
         .map(|anchor| {
             let selection = selected.get(&anchor.binding.output).copied();
-            let node = NodePlan::new(query, anchor, selection, model)?;
+            let node = NodePlan::new(anchor, selection, model)?;
             Ok((node.alias.clone(), node))
         })
         .collect()
@@ -239,8 +257,9 @@ fn node_access<B: SqlBackend>(
         && !metric_target
         && !ordered
         && !local_predicate;
-    let joined_as_rows = query.steps().is_empty()
-        || !B::CAPABILITIES.deferred_nodes
+    let joined_as_rows = pattern.inline
+        || query.steps().is_empty()
+        || !B::SQL.deferred_nodes
         || group_target
         || metric_target
         || ordered

@@ -7,8 +7,9 @@ use std::sync::{Arc, OnceLock};
 
 fn data_model() -> &'static Arc<Catalog<ClickHouse>> {
     static DATA_MODEL: OnceLock<Arc<Catalog<ClickHouse>>> = OnceLock::new();
-    DATA_MODEL
-        .get_or_init(|| Arc::new(Catalog::<ClickHouse>::embedded().expect("load embedded model")))
+    DATA_MODEL.get_or_init(|| {
+        Arc::new(Catalog::<ClickHouse>::embedded("server").expect("load embedded model"))
+    })
 }
 
 fn ctx() -> &'static Grants {

@@ -104,9 +104,10 @@ impl Dialect for DuckDbSql {
                 return format!("arg_max({})", renderer.list(&measure.args));
             }
         };
-        let argument = match measure.args.first() {
-            Some(argument) => renderer.expr(argument),
-            None => "*".to_string(),
+        let argument = match &measure.args[..] {
+            [] => "*".to_string(),
+            [argument] => renderer.expr(argument),
+            arguments => format!("({})", renderer.list(arguments)),
         };
         let distinct = if measure.distinct { "DISTINCT " } else { "" };
         let expression = format!("{name}({distinct}{argument})");

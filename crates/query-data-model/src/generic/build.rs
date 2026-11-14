@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use crate::DataType;
-use crate::constants::EDGE_RESERVED_COLUMNS;
 use indexmap::IndexMap;
 
 use super::catalog::{Domain, GraphCatalog};
@@ -261,13 +260,6 @@ impl GraphCatalog {
         diagnostics: &mut Diagnostics,
     ) {
         let qualified = format!("{}.{name}", self.relationship(relationship).name);
-        if EDGE_RESERVED_COLUMNS.contains(&name.as_str()) {
-            diagnostics.error(
-                package,
-                format!("attribute {qualified} is a reserved edge column"),
-            );
-            return;
-        }
         let written = &spec.data_type;
         let Some((data_type, nullable)) =
             parse_type(written).filter(|(data_type, _)| *data_type != DataType::Enum)

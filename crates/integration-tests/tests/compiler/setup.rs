@@ -26,9 +26,9 @@ pub fn admin_ctx() -> Grants {
 }
 
 pub fn embedded_model() -> Arc<Catalog<ClickHouse>> {
-    Arc::new(Catalog::<ClickHouse>::embedded().expect("embedded packages must load"))
+    Arc::new(Catalog::<ClickHouse>::embedded("server").expect("embedded packages must load"))
 }
 
 pub fn embedded_local_model() -> Arc<Catalog<DuckDb>> {
-    Arc::new(Catalog::<DuckDb>::embedded().expect("embedded packages must load"))
+    Arc::new(Catalog::<DuckDb>::embedded("local").expect("embedded packages must load"))
 }

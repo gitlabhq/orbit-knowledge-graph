@@ -8,7 +8,13 @@ use crate::{QueryError, Result};
 use orbit_authorization::Grants;
 
 static MODEL: LazyLock<Catalog<ClickHouse>> =
-    LazyLock::new(|| Catalog::<ClickHouse>::embedded().unwrap());
+    LazyLock::new(|| Catalog::<ClickHouse>::embedded("server").unwrap());
+
+static CONNECTIONS: LazyLock<crate::dag::Connections> = LazyLock::new(|| {
+    crate::graph_only(&std::sync::Arc::new(
+        Catalog::<ClickHouse>::embedded("server").unwrap(),
+    ))
+});
 
 const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
     "email",
@@ -25,7 +31,7 @@ const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
 fn restrict(gql: &str, ctx: &Grants) -> Result<()> {
     let model = MODEL.model();
     let statement = surface::parse(gql, model.logical(crate::testkit::limits()).as_admin())?;
-    super::restrict(&statement.plan, model, &*MODEL, &Default::default(), ctx)
+    super::restrict(&statement.plan, model, &*MODEL, &CONNECTIONS, ctx)
 }
 
 fn restricted(gql: &str) -> String {
@@ -85,9 +91,12 @@ fn plans_built_in_code_cannot_read_hidden_or_admin_only_fields() {
             crate::hydration::HydrationArm::new(
                 model,
                 crate::testkit::limits(),
-                entity,
+                model.names().entity(entity).unwrap(),
                 &[orbit_authorization::Key::Int(1)],
-                &[column.into()],
+                &[model
+                    .names()
+                    .property(model.names().entity(entity).unwrap(), column)
+                    .unwrap()],
                 Vec::new(),
             )
             .unwrap(),

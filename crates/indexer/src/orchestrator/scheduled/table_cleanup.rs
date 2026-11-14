@@ -142,12 +142,17 @@ mod tests {
     use query_data_model::{Catalog, ClickHouse};
 
     fn schema() -> Schema {
-        Schema::from_model(&query_data_model::Packages::embedded().load().unwrap()).unwrap()
+        Schema::from_model(
+            &query_data_model::Packages::embedded()
+                .deployment("server")
+                .unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
     fn covers_all_node_and_edge_tables() {
-        let catalog = Catalog::<ClickHouse>::embedded().unwrap();
+        let catalog = Catalog::<ClickHouse>::embedded("server").unwrap();
         let tables = list_graph_tables(&schema());
 
         for entity in catalog.graph().entities() {

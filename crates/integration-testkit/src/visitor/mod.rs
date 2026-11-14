@@ -280,10 +280,14 @@ impl ResponseView {
     }
 
     pub fn find_node(&self, entity_type: &str, id: i64) -> Option<&GraphNode> {
+        self.find_node_by_key(entity_type, &Key::Int(id))
+    }
+
+    pub fn find_node_by_key(&self, entity_type: &str, id: &Key) -> Option<&GraphNode> {
         self.response
             .nodes
             .iter()
-            .find(|n| n.entity_type == entity_type && n.id == Key::Int(id))
+            .find(|n| n.entity_type == entity_type && n.id == *id)
     }
 
     pub fn nodes_of_type(&self, entity_type: &str) -> Vec<&GraphNode> {

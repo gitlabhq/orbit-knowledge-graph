@@ -1,0 +1,18 @@
+kind: storage
+package: peers.lake
+store: slack_live
+entities:
+  TeamMessage:
+    complete: true
+    accepts: [id]
+    columns:
+      id: {}
+      team: {}
+      channel: {}
+      text: {}
+    backend:
+      operation: search.messages
+      filters: [id, channel]
+relationships:
+  TEAM_OF:
+    TeamMessage -> Team: {fk: {on: source, column: team}}

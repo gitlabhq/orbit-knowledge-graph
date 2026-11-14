@@ -5,10 +5,11 @@ use rustc_hash::FxHashMap;
 
 use arrow::array::{
     Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, Date32Array, Date64Array,
-    Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, Int64Builder, LargeStringArray,
-    ListArray, PrimitiveArray, StringArray, StringBuilder, StructArray, TimestampMicrosecondArray,
-    TimestampMicrosecondBuilder, TimestampMillisecondArray, TimestampNanosecondArray,
-    TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
+    FixedSizeBinaryArray, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+    Int64Builder, LargeStringArray, ListArray, PrimitiveArray, StringArray, StringBuilder,
+    StructArray, TimestampMicrosecondArray, TimestampMicrosecondBuilder, TimestampMillisecondArray,
+    TimestampNanosecondArray, TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array,
+    UInt64Array,
 };
 use arrow::compute;
 use arrow::datatypes::{ArrowPrimitiveType, DataType, Field, Schema};
@@ -285,6 +286,11 @@ impl ArrowUtils {
         }
         if let Some(arr) = array.as_any().downcast_ref::<Date64Array>() {
             return date_to_string(arr.value_as_date(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<FixedSizeBinaryArray>()
+            && arr.value_length() == 16
+        {
+            return ColumnValue::String(uuid_text(arr.value(idx)));
         }
 
         ColumnValue::Null
@@ -752,6 +758,19 @@ fn date_to_string(d: Option<chrono::NaiveDate>) -> ColumnValue {
         .unwrap_or(ColumnValue::Null)
 }
 
+/// The hyphenated text of the 16 bytes ClickHouse returns a `UUID` in.
+fn uuid_text(bytes: &[u8]) -> String {
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
+}
+
 /// Single-pass column type fixup for RecordBatches before ClickHouse insertion.
 /// Mutates the vector in place.
 /// - Casts `Utf8View` / `List<Utf8View>` to `Utf8` / `List<Utf8>` (ClickHouse
@@ -858,6 +877,19 @@ mod tests {
     };
     use arrow::datatypes::{DataType, Field, Int64Type, Schema, UInt64Type};
     use std::sync::Arc;
+
+    #[test]
+    fn a_clickhouse_uuid_reads_as_its_hyphenated_text() {
+        let bytes = [
+            0x61, 0xf0, 0xc4, 0x04, 0x5c, 0xb3, 0x11, 0xe7, 0x90, 0x7b, 0xa6, 0x00, 0x6a, 0xd3,
+            0xdb, 0xa0,
+        ];
+        let array = FixedSizeBinaryArray::try_from_iter([bytes].into_iter()).unwrap();
+        assert_eq!(
+            ArrowUtils::extract_value(&array, 0),
+            ColumnValue::String("61f0c404-5cb3-11e7-907b-a6006ad3dba0".into())
+        );
+    }
 
     #[test]
     fn coerce_i64_from_int64() {

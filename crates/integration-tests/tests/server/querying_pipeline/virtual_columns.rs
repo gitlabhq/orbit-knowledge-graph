@@ -18,12 +18,20 @@ fn test_registry_with_batch_size(max_batch_size: usize) -> ColumnResolverRegistr
     registry
 }
 
+fn entity(name: &str) -> query_data_model::EntityId {
+    query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
+        .unwrap()
+        .names()
+        .entity(name)
+        .unwrap()
+}
+
 fn file_property_map() -> PropertyMap {
     let mut props = PropertyRow::new();
     props.insert("path".into(), ColumnValue::String("src/lib.rs".into()));
     let mut map = PropertyMap::new();
-    map.insert(("File".into(), 1.into()), props.clone());
-    map.insert(("File".into(), 2.into()), props);
+    map.insert((entity("File"), 1.into()), props.clone());
+    map.insert((entity("File"), 2.into()), props);
     map
 }
 
@@ -31,7 +39,8 @@ fn file_property_map() -> PropertyMap {
 async fn skips_when_no_virtual_columns() {
     let registry = test_registry();
     let rctx = ResolverContext::default();
-    let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &[])];
+    let specs: Vec<(query_data_model::EntityId, &[VirtualColumnRequest])> =
+        vec![(entity("File"), &[])];
     let mut map = file_property_map();
     let original_len = map.values().next().unwrap().len();
 
@@ -51,7 +60,8 @@ async fn merges_results_into_property_map() {
         service: "gitaly".into(),
         lookup: "blob_content".into(),
     }];
-    let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
+    let specs: Vec<(query_data_model::EntityId, &[VirtualColumnRequest])> =
+        vec![(entity("File"), &vcrs)];
     let mut map = file_property_map();
 
     resolve_virtual_columns(&registry, &rctx, &specs, &mut map, 100)
@@ -75,7 +85,8 @@ async fn errors_for_unknown_service() {
         service: "unknown_service".into(),
         lookup: "blob_content".into(),
     }];
-    let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
+    let specs: Vec<(query_data_model::EntityId, &[VirtualColumnRequest])> =
+        vec![(entity("File"), &vcrs)];
     let mut map = file_property_map();
 
     let err = resolve_virtual_columns(&registry, &rctx, &specs, &mut map, 100)
@@ -96,7 +107,8 @@ async fn skips_unmatched_entity_type() {
         service: "gitaly".into(),
         lookup: "blob_content".into(),
     }];
-    let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("Definition", &vcrs)];
+    let specs: Vec<(query_data_model::EntityId, &[VirtualColumnRequest])> =
+        vec![(entity("Definition"), &vcrs)];
     let mut map = file_property_map();
     let original_len = map.values().next().unwrap().len();
 
@@ -116,7 +128,8 @@ async fn errors_when_batch_size_exceeded() {
         service: "gitaly".into(),
         lookup: "blob_content".into(),
     }];
-    let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
+    let specs: Vec<(query_data_model::EntityId, &[VirtualColumnRequest])> =
+        vec![(entity("File"), &vcrs)];
     let mut map = file_property_map();
 
     let err = resolve_virtual_columns(&registry, &rctx, &specs, &mut map, 1)

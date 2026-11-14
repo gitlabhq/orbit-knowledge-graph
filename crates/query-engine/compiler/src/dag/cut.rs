@@ -1,157 +1,255 @@
-use orbit_server_config::QueryLimits;
-use query_data_model::PropertyId;
-use query_data_model::plan::logical::{Expr, LogicalOperation};
-use query_data_model::plan::tracking::Ref;
+use std::collections::HashMap;
 
-use super::split::{Crossing, Place};
+use orbit_server_config::QueryLimits;
+use query_data_model::plan::combine::Position;
+use query_data_model::plan::logical::{Conjunct, Expr, LogicalOperation, MATCH_LINE, Predicate};
+use query_data_model::plan::tracking::Ref;
+use query_data_model::{DataType, Direction, EdgeField, EntityId, PropertyId};
+
+use super::split::Crossing;
 use super::{
-    Backend, Dag, EngineColumn, EngineJoin, EngineNode, EngineQuery, Input, Remotes, Stage,
-    StageId, StageQuery,
+    Backend, ColumnType, CombineEdge, CombineJoin, CombineNode, CombineQuery, Connections,
+    Contract, Dag, Handle, Input, Output, Peer, RowCheck, Stage, StageQuery,
 };
 use crate::error::{QueryError, Result};
 use crate::logical::Query;
 
 pub(super) struct Group {
-    pub place: Place,
+    /// The connection the group's stage runs on.
+    pub place: query_data_model::ConnectionId,
     pub bindings: Vec<Ref>,
+    /// The placed store of each entity the group reads.
+    pub stores: Vec<(query_data_model::EntityId, query_data_model::StoreId)>,
 }
 
 pub(super) struct Cut<'q> {
     pub query: Query<'q>,
     pub groups: Vec<Group>,
     pub crossings: Vec<Crossing>,
-    /// The primary connection first, then each served remote.
-    pub backends: Vec<(String, Backend)>,
     pub limits: &'q QueryLimits,
-    pub remotes: &'q Remotes,
+    pub connections: &'q Connections,
 }
 
 impl Cut<'_> {
     pub fn dag(self, response: super::Response) -> Result<Dag> {
         let debug = response.debug;
-        let order = self.order()?;
-        let stage = |group: usize| order.iter().position(|g| *g == group).unwrap_or_default();
-        let group_of = |binding: Ref| {
-            self.groups
-                .iter()
-                .position(|group| group.bindings.contains(&binding))
-                .unwrap_or_default()
-        };
-        let mut needed = self.selected()?;
-        for crossing in &self.crossings {
-            for (binding, property) in crossing.pairs.iter().flat_map(|(a, b)| [*a, *b]) {
-                push(needed.entry(binding).or_default(), property);
-            }
+        for condition in conditions(self.query) {
+            self.owner(&condition)?;
         }
+        let order = self.order()?;
+        let lookups = order
+            .iter()
+            .map(|group| self.lookups(*group, &order))
+            .collect::<Result<Vec<_>>>()?;
+        let mut ids = vec![0; self.groups.len()];
+        let mut next = 0;
+        for (group, lookups) in order.iter().zip(&lookups) {
+            next += lookups
+                .iter()
+                .filter(|lookup| lookup.reader.is_none())
+                .count();
+            ids[*group] = next;
+            next += 1;
+        }
+        let stage = |group: usize| ids[group];
+        let checked = self.checked(&order);
+        let needed = self.needed(&checked)?;
+        let contracts = (0..self.groups.len())
+            .map(|group| self.contract(group, &needed))
+            .collect::<Result<Vec<_>>>()?;
+        let position = |binding: Ref, property: PropertyId| {
+            let group = self.group(binding);
+            let output = self.node(group, binding, property)?;
+            let column = contracts[group].position(&output).ok_or_else(|| {
+                QueryError::PipelineInvariant("a stage's contract lacks a needed column".into())
+            })?;
+            Ok::<_, QueryError>(Position {
+                stage: stage(group),
+                column,
+            })
+        };
+        let graph = self.query.model.graph();
+        let access = self.query.model.access();
+        let mut checks: Vec<Vec<RowCheck>> = vec![Vec::new(); self.groups.len()];
         let mut nodes = Vec::new();
         for (index, group) in self.groups.iter().enumerate() {
-            let Place::Remote(remote) = group.place else {
-                continue;
-            };
-            let target = &self.remotes.targets()[remote];
+            let joins = self.peer(group.place).joins();
             for binding in &group.bindings {
                 let Some(entity) = self.query.entity(*binding) else {
                     continue;
                 };
-                for check in &self.query.model.access().entity(entity).checks {
-                    if let query_data_model::catalog::Check::Rows { id, .. } = check {
-                        push(needed.entry(*binding).or_default(), *id);
+                let declared = graph.entity(entity);
+                let key = match joins {
+                    true => self
+                        .redaction_key(entity)
+                        .map(|key| position(*binding, key))
+                        .transpose()?,
+                    false => None,
+                };
+                let own = self.query.model.checks(entity, group.place);
+                for check in own.filter(|_| checked[index]) {
+                    let query_data_model::catalog::Check::Rows {
+                        provider,
+                        permission,
+                        resource,
+                        id,
+                        ..
+                    } = check
+                    else {
+                        continue;
+                    };
+                    let check = RowCheck {
+                        provider: provider.clone(),
+                        permission: access.permission(*permission).name.clone(),
+                        resource: resource.clone(),
+                        position: position(*binding, *id)?.column,
+                        kind: crate::KeyKind::of(graph.property(*id).data_type),
+                    };
+                    if !checks[index].contains(&check) {
+                        checks[index].push(check);
                     }
                 }
-                let graph = self.query.model.graph();
-                let [identity] = graph.entity(entity).identity[..] else {
-                    continue;
-                };
-                if !target.returns_identity(entity, identity) {
+                if !self.returns_identity(index, entity) {
                     continue;
                 }
-                push(needed.entry(*binding).or_default(), identity);
-                nodes.push(EngineNode {
+                let identity = declared
+                    .identity
+                    .iter()
+                    .map(|part| Ok((position(*binding, *part)?, graph.property(*part).data_type)))
+                    .collect::<Result<_>>()?;
+                nodes.push(CombineNode {
                     alias: self.query.name(*binding).to_string(),
-                    entity: graph.entity(entity).name.clone(),
-                    id: self.column(stage(index), *binding, identity),
+                    entity: declared.name.clone(),
+                    stage: stage(index),
+                    identity,
+                    key,
+                    checked: !joins,
                 });
             }
         }
-        let mut engine_order = Vec::new();
+        let mut combine_order = Vec::new();
         for (key, direction) in self.query.sort_keys() {
             let Expr::Property { binding, property } = key else {
                 return Err(QueryError::Validation(
                     "a query across connections orders by node properties".into(),
                 ));
             };
-            push(needed.entry(binding).or_default(), property);
-            engine_order.push((
-                self.column(stage(group_of(binding)), binding, property),
-                direction,
-            ));
+            combine_order.push((position(binding, property)?, direction));
         }
         let mut stages = Vec::new();
-        for (id, group) in order.iter().enumerate() {
-            let (connection, backend) = self.backend(self.groups[*group].place);
-            let inputs = self
+        for (group, lookups) in order.iter().zip(&lookups) {
+            let peer = self.peer(self.groups[*group].place);
+            let (connection, backend) = (peer.connection(), peer.backend());
+            let mut inputs: Vec<Input> = self
                 .crossings
                 .iter()
                 .filter(|crossing| crossing.consumer(&order) == *group)
-                .map(|crossing| Input::Keys(self.keys(crossing, &order)))
-                .collect();
-            let group = &self.groups[*group];
+                .map(|crossing| {
+                    self.keys(crossing, &order, &ids, &contracts)
+                        .map(Input::Keys)
+                })
+                .collect::<Result<_>>()?;
+            for lookup in lookups {
+                let scopes = match &lookup.reader {
+                    Some((reader, heads)) => self.scopes(lookup, ids[*reader], |admit, key| {
+                        let output = self.node(*reader, heads[admit], key)?;
+                        contracts[*reader].position(&output).ok_or_else(|| {
+                            QueryError::PipelineInvariant(
+                                "a stage that reads a scope head returns no key column".into(),
+                            )
+                        })
+                    })?,
+                    None => {
+                        let (scope, scopes) =
+                            self.lookup_stage(lookup, stages.len(), &inputs, debug)?;
+                        stages.push(scope);
+                        scopes
+                    }
+                };
+                inputs.extend(scopes);
+            }
             let plan = super::sub::plan(
                 self.query,
-                group,
-                &needed,
+                &self.groups[*group],
+                &contracts[*group],
                 self.limits,
-                self.remotes.connections(),
+                self.connections.ids(),
             )?;
             stages.push(Stage {
-                id,
+                id: stages.len(),
                 backend,
-                connection: Some(connection),
+                runs: super::Runs::On {
+                    connection,
+                    stores: self.groups[*group].stores.clone(),
+                },
                 query: StageQuery::Gql(query_data_model::surface::Statement { plan, debug }),
                 inputs,
-                response: false,
+                contract: Some(contracts[*group].clone()),
+                checks: std::mem::take(&mut checks[*group]),
             });
         }
         let joins = self
             .crossings
             .iter()
             .map(|crossing| {
-                let (producer, consumer) = crossing.sides(&order, group_of);
-                let side = |pairs: Vec<(Ref, PropertyId)>| {
+                let (producer, consumer) = crossing.sides(&order, |binding| self.group(binding));
+                let side = |pairs: &[(Ref, PropertyId)]| {
                     pairs
-                        .into_iter()
-                        .map(|(binding, property)| {
-                            self.column(stage(group_of(binding)), binding, property)
-                        })
-                        .collect()
+                        .iter()
+                        .map(|(binding, property)| position(*binding, *property))
+                        .collect::<Result<Vec<_>>>()
                 };
-                EngineJoin {
-                    left: side(producer),
-                    right: side(consumer),
-                }
+                Ok(CombineJoin {
+                    types: consumer
+                        .iter()
+                        .map(|(_, property)| graph.property(*property).data_type)
+                        .collect(),
+                    left: side(&producer)?,
+                    right: side(&consumer)?,
+                })
             })
-            .collect();
+            .collect::<Result<_>>()?;
         let (limit, skip) = self
             .query
             .limit()
             .unwrap_or((self.limits.default_rows, None));
-        let engine = EngineQuery {
+        let mut edges: Vec<CombineEdge> = self
+            .crossings
+            .iter()
+            .map(|crossing| CombineEdge::Crossing {
+                step: crossing.step,
+                relationship: graph.relationship(crossing.relationship).name.clone(),
+                source: self.query.name(crossing.ends.0).to_string(),
+                target: self.query.name(crossing.ends.1).to_string(),
+            })
+            .collect();
+        for (group, contract) in contracts.iter().enumerate() {
+            edges.extend(self.stage_edges(group, stage(group), contract)?);
+        }
+        let combine = CombineQuery {
+            edges,
             joins,
             excerpted: self.excerpted()?,
-            columns: self.result_columns(&stage, &group_of)?,
-            order: engine_order,
+            columns: self.result_columns(&position, &stage, &contracts)?,
+            order: combine_order,
             limit,
             skip,
             nodes,
         };
-        let inputs = (0..stages.len()).map(|from| Input::Rows { from }).collect();
+        let inputs = order
+            .iter()
+            .map(|group| Input::Rows {
+                from: stage(*group),
+            })
+            .collect();
         stages.push(Stage {
             id: stages.len(),
-            backend: Backend::Engine,
-            connection: None,
-            query: StageQuery::Engine(engine, Box::new(response)),
+            backend: Backend::Combine,
+            runs: super::Runs::Combine,
+            query: StageQuery::Combine(combine, Box::new(response)),
             inputs,
-            response: true,
+            contract: None,
+            checks: Vec::new(),
         });
         Ok(Dag {
             stages,
@@ -159,51 +257,261 @@ impl Cut<'_> {
         })
     }
 
-    fn backend(&self, place: Place) -> (String, Backend) {
-        match place {
-            Place::Primary => self.backends[0].clone(),
-            Place::Remote(index) => self.backends[index + 1].clone(),
+    pub(super) fn peer(&self, connection: query_data_model::ConnectionId) -> &Peer {
+        self.connections
+            .get(connection)
+            .expect("a group's connection is served")
+    }
+
+    /// The store placement put `entity` on in `group`.
+    pub(super) fn store(
+        &self,
+        group: &Group,
+        entity: query_data_model::EntityId,
+    ) -> &query_data_model::catalog::Store {
+        let (_, store) = group
+            .stores
+            .iter()
+            .find(|(placed, _)| *placed == entity)
+            .expect("every entity a group reads is placed");
+        self.query.model.store(*store)
+    }
+
+    /// Whether each group's stage puts its rows through their entities' row checks: a remote
+    /// stage does, and a relational stage whose keys cross into another.
+    fn checked(&self, order: &[usize]) -> Vec<bool> {
+        let mut checked: Vec<bool> = self
+            .groups
+            .iter()
+            .map(|group| !self.peer(group.place).joins())
+            .collect();
+        for crossing in &self.crossings {
+            let consumer = crossing.consumer(order);
+            let producer = match crossing.groups {
+                (producer, other) if other == consumer => producer,
+                (_, producer) => producer,
+            };
+            checked[producer] = true;
+        }
+        checked
+    }
+
+    /// The key redaction checks a relational node's rows by when it is not the identity.
+    pub(super) fn redaction_key(&self, entity: EntityId) -> Option<PropertyId> {
+        let identity = &self.query.model.graph().entity(entity).identity;
+        self.query
+            .model
+            .access()
+            .entity(entity)
+            .checks
+            .iter()
+            .find_map(|check| match check {
+                query_data_model::catalog::Check::Rows { id, .. } if *identity != [*id] => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+    }
+
+    /// Whether a group's stage returns the identity of `entity`'s nodes: a relational stage
+    /// always does, a live stage when its store returns it, and a code stage never yet.
+    fn returns_identity(&self, group: usize, entity: EntityId) -> bool {
+        let group = &self.groups[group];
+        match self.peer(group.place).backend() {
+            Backend::ClickHouse | Backend::DuckDb => true,
+            Backend::Live => self.store(group, entity).returns_identity(entity),
+            Backend::OrbitCode | Backend::Combine => false,
         }
     }
 
-    /// The name of the column a stage returns a binding's property in.
-    pub(super) fn column(
-        &self,
-        stage: StageId,
-        binding: Ref,
-        property: PropertyId,
-    ) -> EngineColumn {
-        let name = &self.query.model.graph().property(property).name;
-        let group = self
-            .groups
-            .iter()
-            .find(|group| group.bindings.contains(&binding));
-        let relational = group.is_some_and(|group| self.backend(group.place).1.relational());
-        EngineColumn {
-            stage,
-            column: match relational {
-                true => format!("{}_{name}", self.query.name(binding)),
-                false => name.clone(),
-            },
+    /// The contract output that holds a binding's property in its group's stage.
+    pub(super) fn node(&self, group: usize, binding: Ref, property: PropertyId) -> Result<Output> {
+        let entity = self.query.entity(binding).ok_or_else(|| {
+            QueryError::PipelineInvariant("a binding a stage returns has no entity".into())
+        })?;
+        let identity = &self.query.model.graph().entity(entity).identity;
+        let handle = match identity.iter().position(|part| *part == property) {
+            Some(part) if self.returns_identity(group, entity) => Handle::Identity(part),
+            _ => Handle::Property(property),
+        };
+        Ok(Output::Node {
+            binding: self.query.name(binding).to_string(),
+            handle,
+        })
+    }
+
+    /// The columns a group's stage returns: for each node, the properties later stages read and
+    /// its identity when the stage returns it; then each own step's edge, or the match columns.
+    fn contract(&self, group: usize, needed: &HashMap<Ref, Vec<PropertyId>>) -> Result<Contract> {
+        let graph = self.query.model.graph();
+        let mut contract = Contract {
+            columns: Vec::new(),
+        };
+        for binding in &self.groups[group].bindings {
+            let Some(entity) = self.query.entity(*binding) else {
+                continue;
+            };
+            let identity = &graph.entity(entity).identity;
+            let parts = match self.returns_identity(group, entity) {
+                true => identity.as_slice(),
+                false => &[],
+            };
+            let listed = needed.get(binding).map_or(&[][..], Vec::as_slice);
+            for property in listed.iter().chain(parts) {
+                let data_type = ColumnType::Scalar(graph.property(*property).data_type);
+                contract.push(self.node(group, *binding, *property)?, data_type);
+            }
         }
+        for (step, global) in self.own_steps(group).into_iter().enumerate() {
+            let pattern = &self.query.steps()[global];
+            let (source, target) = match pattern.direction {
+                Direction::Outgoing | Direction::Both => (pattern.from, pattern.to),
+                Direction::Incoming => (pattern.to, pattern.from),
+            };
+            let text = ColumnType::Scalar(DataType::String);
+            for (field, data_type) in [
+                (EdgeField::Kind, Some(text)),
+                (EdgeField::SourceId, self.id_type(source)),
+                (EdgeField::SourceKind, Some(text)),
+                (EdgeField::TargetId, self.id_type(target)),
+                (EdgeField::TargetKind, Some(text)),
+            ] {
+                if let Some(data_type) = data_type {
+                    contract.push(Output::Edge { step, field }, data_type);
+                }
+            }
+            if pattern.range.max > 1 {
+                contract.push(Output::Path { step }, ColumnType::Path);
+            }
+        }
+        for item in self.query.selected() {
+            let query_data_model::plan::logical::Projection::Value(Expr::Output(output)) = item
+            else {
+                continue;
+            };
+            if self.matched_group(*output)? != group {
+                continue;
+            }
+            let (column, data_type) = match self.query.name(*output) {
+                MATCH_LINE => (Output::Line, DataType::Int),
+                other => (
+                    Output::Capture(other.strip_prefix("match.").unwrap_or(other).to_string()),
+                    DataType::String,
+                ),
+            };
+            contract.push(column, ColumnType::Scalar(data_type));
+        }
+        Ok(contract)
+    }
+
+    /// The pattern steps whose ends a group holds, in the order its stage follows them.
+    fn own_steps(&self, group: usize) -> Vec<usize> {
+        let bindings = &self.groups[group].bindings;
+        let joins = self.peer(self.groups[group].place).joins();
+        self.query
+            .steps()
+            .iter()
+            .enumerate()
+            .filter(|(_, step)| {
+                joins && bindings.contains(&step.from) && bindings.contains(&step.to)
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// The type of the one identity column an edge's endpoint carries; a composite endpoint's id
+    /// is its node's identity parts, which the stage already returns.
+    fn id_type(&self, binding: Ref) -> Option<ColumnType> {
+        let graph = self.query.model.graph();
+        match graph
+            .entity(self.query.entity(binding)?)
+            .identity
+            .as_slice()
+        {
+            [part] => Some(ColumnType::Scalar(graph.property(*part).data_type)),
+            _ => None,
+        }
+    }
+
+    /// The edges a relational group's stage returns, under the pattern step each stands for.
+    fn stage_edges(
+        &self,
+        group: usize,
+        stage: usize,
+        contract: &Contract,
+    ) -> Result<Vec<CombineEdge>> {
+        let graph = self.query.model.graph();
+        let steps = self.query.steps();
+        let at = |output: Output| {
+            contract
+                .position(&output)
+                .map(|column| Position { stage, column })
+                .ok_or_else(|| {
+                    QueryError::PipelineInvariant("a stage's contract lacks an edge column".into())
+                })
+        };
+        self.own_steps(group)
+            .into_iter()
+            .enumerate()
+            .map(|(local, global)| {
+                let field = |field| at(Output::Edge { step: local, field });
+                let pattern = &steps[global];
+                let (source, target) = match pattern.direction {
+                    Direction::Outgoing | Direction::Both => (pattern.from, pattern.to),
+                    Direction::Incoming => (pattern.to, pattern.from),
+                };
+                let id = |binding: Ref, field: EdgeField| -> Result<Vec<Position>> {
+                    if self.id_type(binding).is_some() {
+                        return Ok(vec![at(Output::Edge { step: local, field })?]);
+                    }
+                    let entity = self.query.entity(binding).ok_or_else(|| {
+                        QueryError::PipelineInvariant("an edge endpoint has no entity".into())
+                    })?;
+                    (0..graph.entity(entity).identity.len())
+                        .map(|part| {
+                            at(Output::Node {
+                                binding: self.query.name(binding).to_string(),
+                                handle: Handle::Identity(part),
+                            })
+                        })
+                        .collect()
+                };
+                let rel_types = match steps[global].relationships {
+                    [] => vec!["*".to_string()],
+                    named => named
+                        .iter()
+                        .map(|relationship| graph.relationship(*relationship).name.clone())
+                        .collect(),
+                };
+                Ok(CombineEdge::Stage {
+                    step: global,
+                    rel_types,
+                    kind: field(EdgeField::Kind)?,
+                    source: id(source, EdgeField::SourceId)?,
+                    source_kind: field(EdgeField::SourceKind)?,
+                    target: id(target, EdgeField::TargetId)?,
+                    target_kind: field(EdgeField::TargetKind)?,
+                    path: match steps[global].range.max > 1 {
+                        true => Some(at(Output::Path { step: local })?),
+                        false => None,
+                    },
+                })
+            })
+            .collect()
     }
 
     /// Stages run from the bounded side of each crossing: a stage whose own bindings carry a
-    /// condition reads first, and the relational connection reads first between equals.
+    /// condition reads first, and a relational connection reads first between equals.
     fn order(&self) -> Result<Vec<usize>> {
-        let bounded = |group: &Group| {
-            self.query
-                .operations()
-                .any(|(_, operation)| match operation {
-                    LogicalOperation::Filter(predicate) => predicate.exprs().iter().all(|expr| {
-                        referenced(*expr).is_some_and(|binding| group.bindings.contains(&binding))
-                    }),
-                    _ => false,
-                })
+        let conditions = conditions(self.query);
+        let bounded = |index: usize| {
+            conditions
+                .iter()
+                .any(|condition| self.owner(condition).ok() == Some(index))
         };
         let rank = |index: usize| {
-            let group = &self.groups[index];
-            (!bounded(group), group.place != Place::Primary, index)
+            let joins = self.peer(self.groups[index].place).joins();
+            (!bounded(index), !joins, index)
         };
         let root = (0..self.groups.len())
             .min_by_key(|index| rank(*index))
@@ -231,9 +539,56 @@ impl Cut<'_> {
     }
 }
 
-fn push(properties: &mut Vec<PropertyId>, property: PropertyId) {
-    if !properties.contains(&property) {
-        properties.push(property);
+impl Cut<'_> {
+    /// The one group whose stage applies `condition`: the group of every node it reads, and of
+    /// both ends of every edge it reads.
+    pub(super) fn owner(&self, condition: &Predicate) -> Result<usize> {
+        let steps = self.query.steps();
+        let mut groups = condition.exprs().into_iter().filter_map(referenced).map(|binding| {
+            match steps.iter().find(|step| step.edge == binding) {
+                Some(step) => {
+                    let ends = (self.group(step.from), self.group(step.to));
+                    (ends.0 == ends.1).then_some(ends.0).ok_or_else(|| {
+                        QueryError::Validation(format!(
+                            "a condition on {} reads an edge that crosses connections, which no stage holds",
+                            self.query.name(binding)
+                        ))
+                    })
+                }
+                None => Ok(self.group(binding)),
+            }
+        });
+        let first = groups.next().transpose()?;
+        for group in groups {
+            if Some(group?) != first {
+                return Err(QueryError::Validation(
+                    "a condition compares nodes on different connections".into(),
+                ));
+            }
+        }
+        first.ok_or_else(|| QueryError::PipelineInvariant("a condition reads no binding".into()))
+    }
+}
+
+/// Each top-level conjunct of the query's filters, which one stage applies whole.
+pub(super) fn conditions(query: Query<'_>) -> Vec<Predicate> {
+    query
+        .operations()
+        .filter_map(|(_, operation)| match operation {
+            LogicalOperation::Filter(predicate) => Some(predicate),
+            _ => None,
+        })
+        .flat_map(|predicate| predicate.conjuncts().into_iter().map(conjunct))
+        .collect()
+}
+
+pub(super) fn conjunct(conjunct: Conjunct<'_>) -> Predicate {
+    match conjunct {
+        Conjunct::Leaf {
+            predicate,
+            negated: false,
+        } => predicate.clone(),
+        Conjunct::Leaf { predicate, .. } | Conjunct::Negated(predicate) => !predicate.clone(),
     }
 }
 

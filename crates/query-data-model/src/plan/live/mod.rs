@@ -7,7 +7,7 @@ use crate::catalog::{Catalog, Guard};
 use crate::implementations::live::{Endpoint, Live};
 use crate::plan::logical::Literal;
 use crate::plan::tracking::{self, Declared, Each, Plan, Ref, Rejected, Step};
-use crate::{DataType, EntityId, PropertyId};
+use crate::{DataType, EntityId, Key, PropertyId, StoreId};
 
 #[derive(Debug)]
 pub struct LiveLanguage;
@@ -43,6 +43,28 @@ impl Condition {
     }
 }
 
+/// The workspaces a call reads: every one the caller's own sign-in reaches, when only the
+/// entity's checks restrict its rows, or only these scope keys.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Workspaces {
+    Any,
+    Only(#[serde(serialize_with = "workspace_list")] Vec<Key>),
+}
+
+/// A workspace as a call names it: a single key as its text, a composite key as the list of its
+/// typed parts.
+pub fn workspace(key: &Key) -> serde_json::Value {
+    match key {
+        Key::Composite(_) => serde_json::to_value(key).unwrap_or(serde_json::Value::Null),
+        single => serde_json::Value::String(single.to_string()),
+    }
+}
+
+fn workspace_list<S: serde::Serializer>(keys: &[Key], serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(keys.iter().map(workspace))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiveOperation {
     Call(Operation),
@@ -52,7 +74,7 @@ pub enum LiveOperation {
         from: Option<String>,
         to: Option<String>,
     },
-    Workspaces(Vec<String>),
+    Workspaces(Workspaces),
     Limit(u64),
     Select(Vec<Ref>),
 }
@@ -111,39 +133,31 @@ pub enum LiveError {
 }
 
 impl Catalog<Live> {
-    pub fn operation(&self, store: &str, entity: &str) -> Result<Declared<Operation>, LiveError> {
+    /// The operation that reads `entity` in `store`, the store placement put the read on.
+    pub fn operation(
+        &self,
+        store: StoreId,
+        entity: EntityId,
+    ) -> Result<Declared<Operation>, LiveError> {
         let model = self.model();
-        let found = model
-            .stores()
-            .iter()
-            .position(|candidate| {
-                candidate.name == store && candidate.connection == self.connection()
-            })
-            .and_then(|index| {
-                let entity = model.graph().entity_id(entity)?;
-                model.stores()[index].source(entity)?;
-                Some(Operation {
-                    store: index,
-                    entity,
-                })
-            });
-        found
-            .map(|operation| Declared::new(model.id(), operation))
-            .ok_or_else(|| LiveError::UnknownOperation {
-                name: format!("{store}.{entity}"),
+        let held = model.store(store);
+        if held.connection() != self.connection() || held.source(entity).is_none() {
+            return Err(LiveError::UnknownOperation {
+                name: format!("{}.{}", held.name, model.graph().entity(entity).name),
                 available: self
                     .stores()
-                    .flat_map(|(store, _)| {
-                        store.sources().map(move |source| {
-                            format!(
-                                "{}.{}",
-                                store.name,
-                                model.graph().entity(source.entity).name
-                            )
-                        })
-                    })
+                    .flat_map(|(store, _)| store.sources().map(|source| source.entity))
+                    .map(|served| model.graph().entity(served).name.clone())
                     .collect(),
-            })
+            });
+        }
+        Ok(Declared::new(
+            model.id(),
+            Operation {
+                store: store.index(),
+                entity,
+            },
+        ))
     }
 
     pub fn endpoint(&self, entity: EntityId) -> Option<&Endpoint> {

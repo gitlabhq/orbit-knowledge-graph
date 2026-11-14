@@ -1,0 +1,26 @@
+kind: storage
+package: peers.lake
+store: lake
+entities:
+  Team:
+    complete: true
+    accepts: [id]
+    table: gl_team
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      name: {backend: {type: VARCHAR}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {order: [id]}
+  Escalation:
+    complete: true
+    accepts: [id, message_id]
+    table: gl_escalation
+    columns:
+      id: {immutable: true, backend: {type: BIGINT}}
+      reason: {backend: {type: VARCHAR}}
+      message_id: {immutable: true, backend: {type: VARCHAR}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {order: [id]}
+relationships:
+  ESCALATES:
+    Escalation -> TeamMessage: {fk: {on: source, column: message_id}}

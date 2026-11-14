@@ -1,24 +1,37 @@
 //! ADR 024 execution DAGs end to end over the seeded fakes: GQL text, the logical plan, the
-//! stage split, each stage's planned, emitted and rendered plan, and the rows the engine returns.
+//! stage split, each stage's planned, emitted and rendered plan, and the rows the Combine stage returns.
 
 mod heads;
 mod joins;
+mod peers;
+mod placement;
+mod policies;
 mod server;
 mod single;
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use compiler::dag::Rendered;
+use compiler::orbit_authorization::Checks;
 use compiler::orbit_authorization::{Grants, Key};
 use query_data_model::catalog::Row;
 use query_engine::pipeline::{AuthorizedPath, SecurityContext};
-use query_engine::shared::dag::{DagError, Event, Outcome, RowChecks};
-use serde_json::Value;
+use query_engine::shared::dag::{DagError, Event, Outcome};
+use serde_json::{Value, json};
 
-use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_model, run_dag};
+use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_model, run_counted, run_dag};
+
+/// The properties `names` of `entity` in the DAG model, as a key input lists them.
+fn properties(entity: &str, names: &[&str]) -> Vec<query_data_model::PropertyId> {
+    let model = dag_model();
+    let entity = model.names().entity(entity).unwrap();
+    names
+        .iter()
+        .map(|name| model.names().property(entity, name).unwrap())
+        .collect()
+}
 
 fn caller(path: &str) -> Grants {
     let session = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new(path, 20)]).unwrap();
@@ -86,6 +99,17 @@ impl Run {
         }
     }
 
+    /// The graph response's edges, with every result check denied.
+    fn edges(&self) -> Vec<String> {
+        match &self.outcome {
+            Ok(outcome) => crate::dag_fakes::response_edges(
+                outcome,
+                &crate::mock_redaction::MockRedactionService::new(),
+            ),
+            Err(error) => panic!("the run failed: {error}"),
+        }
+    }
+
     fn error(self) -> String {
         match self.outcome {
             Ok(_) => panic!("the run succeeded"),
@@ -99,21 +123,45 @@ async fn run_with(
     grants: &Grants,
     graph: Vec<Row>,
     user: &str,
-    checks: &dyn RowChecks,
+    checks: &Checks,
 ) -> Run {
     let graph = Arc::new(SeededGraph(graph));
     let (events, outcome) = run_dag(&dag_model(), graph, query, grants, user, checks).await;
     Run { events, outcome }
 }
 
+/// `run_with`, and the requests each backend's executor ran.
+async fn counted(
+    query: &str,
+    grants: &Grants,
+    graph: Vec<Row>,
+    checks: &Checks,
+) -> (Run, std::collections::BTreeMap<&'static str, usize>) {
+    let graph = Arc::new(SeededGraph(graph));
+    let (events, outcome, requests) =
+        run_counted(&dag_model(), graph, query, grants, "alice", checks).await;
+    (Run { events, outcome }, requests)
+}
+
 /// Runs a query as `alice`, whose code checks allow every seeded repository.
 async fn run(query: &str, grants: &Grants, graph: Vec<Row>) -> Run {
-    let checks = AllowedKeys(BTreeSet::from([Key::Int(42), Key::Int(77)]));
+    let checks = AllowedKeys::checks("project", [Key::Int(42), Key::Int(77)]);
     run_with(query, grants, graph, "alice", &checks).await
 }
 
 fn row(value: Value) -> Row {
     value.as_object().cloned().unwrap()
+}
+
+/// The rows a project lookup returns. The seeded graph runs no SQL, so each scenario seeds what
+/// the lookup's scope filter keeps for its caller.
+fn projects(ids: &[i64]) -> Vec<Row> {
+    ids.iter().map(|id| row(json!({"scope_id": id}))).collect()
+}
+
+/// The rows a workspace lookup on the Slack lake returns.
+fn workspaces(ids: &[&str]) -> Vec<Row> {
+    ids.iter().map(|id| row(json!({"scope_id": id}))).collect()
 }
 
 /// Rows of Arrow batches as JSON, integers as numbers and text as strings.

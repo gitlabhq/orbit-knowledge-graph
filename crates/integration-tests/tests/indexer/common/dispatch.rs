@@ -72,7 +72,9 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
     let checkpoint_store = Arc::new(indexer::testkit::checkpoint_store(Arc::new(
         ctx.config.build_client("graph"),
     )));
-    let model = query_data_model::Packages::embedded().load().unwrap();
+    let model = query_data_model::Packages::embedded()
+        .deployment("server")
+        .unwrap();
     let dispatcher = NamespaceDispatcher::new(
         services.nats,
         ctx.config.build_client("graph"),

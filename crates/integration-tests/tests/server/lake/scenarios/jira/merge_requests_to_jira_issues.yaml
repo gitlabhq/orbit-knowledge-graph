@@ -1,0 +1,73 @@
+cases:
+  - name: allowed
+    description: The bounded merge request stage on ClickHouse feeds its ids to the Jira stage on DuckDB, which reads the issues developed in them
+    config:
+      security: default
+    query: |
+      MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue) WHERE mr.id <= 2002 RETURN mr.title, i.key ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 6
+      skip_requirements: ["filter:id", "relationship:DEVELOPED_IN"]
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001, 2002]
+        JiraIssue:
+          order: [10100, 10101, 10200]
+          rows:
+            - { id: "10100", key: ORB-1 }
+            - { id: "10101", key: ORB-2 }
+            - { id: "10200", key: SEC-1 }
+
+  - name: partly_denied
+    description: A group reader keeps the group's merge requests and issues; the private group's pair drops on both connections
+    config:
+      security: group_100
+    query: |
+      MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue) WHERE mr.id <= 2002 RETURN mr.title, i.key ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 4
+      skip_requirements: ["filter:id", "relationship:DEVELOPED_IN"]
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001]
+        JiraIssue:
+          order: [10100, 10101]
+
+  - name: empty
+    description: A caller whose group holds neither the merge requests nor Jira rows reads nothing on either side
+    config:
+      security: no_integration_rows
+    query: |
+      MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue) WHERE mr.id <= 2002 RETURN mr.title, i.key LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: ["filter:id", "relationship:DEVELOPED_IN"]
+
+  - name: allowed_edges
+    description: The default caller's rows carry the edge of every relationship the pattern follows
+    config:
+      security: default
+    query: |
+      MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue) WHERE mr.id <= 2002 RETURN mr.title, i.key ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 6
+      skip_requirements: ["filter:id", node_ids, order_by]
+      edges:
+        DEVELOPED_IN:
+          - [10100, 2000]
+          - [10101, 2001]
+          - [10200, 2002]
+
+  - name: partly_denied_edges
+    description: The group_100 caller's rows carry the edge of every relationship the pattern follows
+    config:
+      security: group_100
+    query: |
+      MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue) WHERE mr.id <= 2002 RETURN mr.title, i.key ORDER BY i.key LIMIT 20
+    expect:
+      node_count: 4
+      skip_requirements: ["filter:id", node_ids, order_by]
+      edges:
+        DEVELOPED_IN:
+          - [10100, 2000]
+          - [10101, 2001]

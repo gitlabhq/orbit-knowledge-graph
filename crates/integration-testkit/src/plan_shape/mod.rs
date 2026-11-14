@@ -221,7 +221,7 @@ fn check<B: SqlBackend>(
             statement.plan,
             catalog.model(),
             model,
-            &Default::default(),
+            &compiler::dag::Connections::single(model),
             limits(),
         )?;
         Ok(query_data_model::surface::Statement { plan, ..statement })
@@ -344,9 +344,8 @@ fn hydration_request(
                     _ => None,
                 })
                 .unwrap_or_default();
-            let entity = query.entity_name(binding.output).unwrap_or_default();
             let plan = catalog.build(|q| {
-                let rows = q.entities_as(catalog.entity(entity)?, binding.name)?;
+                let rows = q.entities_as(catalog.entity(binding.entity), binding.name)?;
                 let endpoint = rows.endpoint()?;
                 let rows = match &anchor.pinned {
                     None => rows,
@@ -358,13 +357,8 @@ fn hydration_request(
                                     .expect("pinned keys are single")
                             })
                             .collect();
-                        let graph = query.model.graph();
-                        let identity = graph.entity(binding.entity).identity[0];
-                        q.pin(
-                            rows,
-                            endpoint.property(&graph.property(identity).name)?,
-                            &ids,
-                        )?
+                        let identity = query.model.graph().entity(binding.entity).identity[0];
+                        q.pin(rows, endpoint.property(identity)?, &ids)?
                     }
                 };
                 let projection = Projection::Graph {
@@ -382,6 +376,7 @@ fn hydration_request(
                 .collect();
             Ok(HydrationArm {
                 plan,
+                keys: anchor.pinned.clone(),
                 traversal_paths,
             })
         })
@@ -406,8 +401,8 @@ pub fn run_dir(directory: &Path) {
 }
 
 fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
-    let remote = Catalog::<ClickHouse>::embedded().unwrap();
-    let local = Catalog::<DuckDb>::embedded().unwrap();
+    let remote = Catalog::<ClickHouse>::embedded("server").unwrap();
+    let local = Catalog::<DuckDb>::embedded("local").unwrap();
     let mut paths = Vec::new();
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
@@ -429,10 +424,11 @@ fn check_dir(directory: &Path) -> Result<(), Vec<String>> {
             continue;
         }
         let overlay = scenario.model_overlay.as_ref().map(|name| {
-            let model = Arc::new(Model::load(&crate::overlay_fragments(name)).unwrap());
+            let model =
+                |shape| Arc::new(Model::load(&crate::overlay_fragments(name, shape)).unwrap());
             (
-                Catalog::<ClickHouse>::from_model(&model).unwrap(),
-                Catalog::<DuckDb>::from_model(&model).unwrap(),
+                Catalog::<ClickHouse>::from_model(&model("server")).unwrap(),
+                Catalog::<DuckDb>::from_model(&model("local")).unwrap(),
             )
         });
         let (remote, local) = overlay
@@ -770,7 +766,7 @@ reject:
 
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     for (count, dynamic, budget, set, expected_paths) in [
         (256, true, None, false, 256),
         (257, true, None, true, 257),
@@ -780,8 +776,15 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         let paths = (0..count)
             .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
             .collect();
-        let arm =
-            HydrationArm::new(model.model(), limits(), "File", &[1.into()], &[], paths).unwrap();
+        let arm = HydrationArm::new(
+            model.model(),
+            limits(),
+            model.names().entity("File").unwrap(),
+            &[1.into()],
+            &[],
+            paths,
+        )
+        .unwrap();
         let request = HydrationRequest {
             arms: vec![arm],
             options: HydrationCompileOptions {

@@ -265,7 +265,7 @@ fn write_id(out: &mut String, id: &Key) {
             let _ = write!(out, "{id}");
         }
         Key::Text(id) | Key::Uuid(id) => write_text(out, id),
-        Key::Composite(_) => write_text(out, &id.to_string()),
+        Key::Composite(_) => write_text(out, &crate::graph::id_value(id).to_string()),
     }
 }
 

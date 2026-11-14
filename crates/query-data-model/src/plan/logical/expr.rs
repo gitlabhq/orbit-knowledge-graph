@@ -1,6 +1,6 @@
 use super::{Comparison, Matching, Predicate};
 use crate::PropertyId;
-use crate::generic::AttributeId;
+use crate::generic::{AttributeId, EdgeField};
 use crate::plan::tracking::{Named, Ref};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,20 +38,6 @@ pub enum TimeUnit {
     Month,
     Quarter,
     Year,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
-pub enum EdgeField {
-    #[strum(serialize = "relationship_kind")]
-    Kind,
-    #[strum(serialize = "source_id")]
-    Source,
-    #[strum(serialize = "source_kind")]
-    SourceKind,
-    #[strum(serialize = "target_id")]
-    Target,
-    #[strum(serialize = "target_kind")]
-    TargetKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]

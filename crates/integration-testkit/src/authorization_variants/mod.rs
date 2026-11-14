@@ -2,7 +2,7 @@
 //! bind their provider names to seeded fakes of other authorization systems.
 
 pub mod fakes;
-pub mod slack;
+pub mod sign_in;
 
 use std::path::{Path, PathBuf};
 
@@ -44,7 +44,9 @@ pub fn deployment(name: &str) -> AuthorizationConfig {
 pub fn registry() -> Registry {
     Registry::gitlab()
         .with::<fakes::OidcGroups>()
+        .with::<fakes::CachedPaths>()
         .with::<fakes::Zanzibar>()
         .with::<fakes::Cedar>()
-        .with::<slack::SlackSignIn>()
+        .with::<sign_in::SignIn>()
+        .with::<crate::dag_fakes::AllowedKeys>()
 }

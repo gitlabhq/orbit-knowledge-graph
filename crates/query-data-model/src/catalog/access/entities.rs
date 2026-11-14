@@ -48,7 +48,7 @@ pub(super) fn resolve(
             let (Some(scope), Some(permission)) = (scope, permission) else {
                 continue;
             };
-            let kind = access.scope(scope).kind;
+            let global = access.scope(scope).kind == ScopeKind::Global;
             let mut enforce = Vec::new();
             for (backend, written) in &spec.enforce {
                 if registered(backend).is_none() {
@@ -68,7 +68,7 @@ pub(super) fn resolve(
                 .policy(written, scope);
                 enforce.extend(policy.map(|policy| (backend.clone(), policy)));
             }
-            if kind == ScopeKind::Global && !spec.enforce.is_empty() {
+            if global && !spec.enforce.is_empty() {
                 diagnostics.error(
                     package,
                     format!(
@@ -77,7 +77,21 @@ pub(super) fn resolve(
                     ),
                 );
             }
-            let checks = spec.checks.iter().filter_map(|check| {
+            match (global, spec.checks.is_open()) {
+                (true, false) if spec.checks.listed().is_empty() => diagnostics.error(
+                    package,
+                    format!(
+                        "{name} is in global scope {}, so it declares checks or checks: open",
+                        spec.scope
+                    ),
+                ),
+                (false, true) => diagnostics.error(
+                    package,
+                    format!("{name} declares checks: open, which only a global entity may"),
+                ),
+                _ => {}
+            }
+            let checks = spec.checks.listed().iter().filter_map(|check| {
                 Context {
                     access,
                     graph,

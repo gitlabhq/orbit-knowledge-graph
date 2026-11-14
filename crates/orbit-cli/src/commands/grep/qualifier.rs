@@ -26,9 +26,7 @@ static ALIASES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
     let file = GrepAssets::get("qualifiers.yaml").expect("config/grep/qualifiers.yaml is embedded");
     let declared: BTreeMap<String, Vec<String>> =
         orbit_utils::yaml::from_slice(&file.data).expect("config/grep/qualifiers.yaml is valid");
-    let model = query_data_model::Packages::embedded()
-        .load()
-        .expect("embedded model must load");
+    let model = crate::deployment::model().expect("embedded model must load");
     let graph = model.graph();
     let mut aliases = BTreeMap::new();
     let searchable = |node: &str| {
@@ -44,7 +42,7 @@ static ALIASES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
         aliases.insert(snake(node), node.to_string());
     }
     for (node, names) in declared {
-        if graph.entity_id(&node).is_some() && searchable(&node) {
+        if model.names().entity(&node).is_ok() && searchable(&node) {
             aliases.extend(names.into_iter().map(|name| (name, node.clone())));
         }
     }

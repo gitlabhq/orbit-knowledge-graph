@@ -1,8 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
-use orbit_authorization::Key;
+use async_trait::async_trait;
+use orbit_authorization::{AuthError, Check, Key, Provider};
 use orbit_server::redaction::{ResourceAuthorization, ResourceCheck};
 
+#[derive(Clone)]
 pub struct MockRedactionService {
     pub authorizations: HashMap<String, HashMap<Key, bool>>,
 }
@@ -65,5 +67,30 @@ impl MockRedactionService {
                 }
             })
             .collect()
+    }
+}
+
+/// The same answers as the deployment's `rails` row checks, for the checks a DAG runs before a
+/// producer's keys cross a stage.
+#[async_trait]
+impl Provider<Check> for MockRedactionService {
+    async fn call(&self, query: Check) -> Result<Vec<BTreeSet<Key>>, AuthError> {
+        Ok(query
+            .requests
+            .into_iter()
+            .map(|request| {
+                let allowed = self.authorizations.get(&request.resource);
+                request
+                    .ids
+                    .into_iter()
+                    .filter(|id| {
+                        allowed
+                            .and_then(|ids| ids.get(id))
+                            .copied()
+                            .unwrap_or(false)
+                    })
+                    .collect()
+            })
+            .collect())
     }
 }

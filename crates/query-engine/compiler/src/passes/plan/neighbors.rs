@@ -5,11 +5,13 @@
 
 use query_data_model::Catalog;
 use query_data_model::constants::*;
+use query_data_model::implementations::relational::EdgeColumns;
 use query_data_model::plan::logical::{Expr as Logical, LogicalOperation, Order as Sort};
 use query_data_model::{
     DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Direction, RelationshipId,
 };
 
+use super::build::edge_columns;
 use super::filters::BoundFilter;
 use super::node::Node;
 use crate::constants::*;
@@ -29,7 +31,6 @@ struct Tag<'p> {
 }
 
 struct CenterFilter<'p> {
-    property: String,
     filter: BoundFilter,
     source: Option<Tag<'p>>,
     target: Option<Tag<'p>>,
@@ -64,6 +65,7 @@ pub(crate) struct Neighbors<'p> {
     center_sort_key: Vec<String>,
     order: Option<(OutputValue, bool)>,
     limit: u32,
+    edges: &'p EdgeColumns,
 }
 
 impl<'p> Neighbors<'p> {
@@ -204,10 +206,10 @@ impl<'p> Neighbors<'p> {
         let (outgoing_scope_preserving, outgoing_cross_scope) = split_by_path(&outgoing, false);
         let filters: Vec<CenterFilter<'p>> = std::mem::take(&mut center.filters)
             .into_iter()
-            .map(|(property, filter)| {
+            .map(|(_, filter)| {
                 let tag = |direction| {
                     let key = DenormalizedKey {
-                        property: filter.property?,
+                        property: filter.property()?,
                         direction,
                     };
                     let facts = model.denormalized(key)?;
@@ -217,7 +219,6 @@ impl<'p> Neighbors<'p> {
                 CenterFilter {
                     source: tag(DenormalizedDirection::Source),
                     target: tag(DenormalizedDirection::Target),
-                    property,
                     filter,
                 }
             })
@@ -322,6 +323,7 @@ impl<'p> Neighbors<'p> {
             center_sort_key,
             order,
             limit: u32::try_from(rows).unwrap_or(u32::MAX),
+            edges: edge_columns(model)?,
         })
     }
 
@@ -331,6 +333,7 @@ impl<'p> Neighbors<'p> {
 }
 
 pub(crate) fn stable_order(plan: &Neighbors<'_>) -> Vec<Term> {
+    let edges = plan.edges;
     match plan.direction {
         Direction::Both => vec![
             Term::Output(redaction_id_column(plan.center.alias)),
@@ -340,11 +343,11 @@ pub(crate) fn stable_order(plan: &Neighbors<'_>) -> Vec<Term> {
         ],
         _ => [
             TRAVERSAL_PATH_COLUMN,
-            RELATIONSHIP_KIND_COLUMN,
-            SOURCE_ID_COLUMN,
-            TARGET_ID_COLUMN,
-            SOURCE_KIND_COLUMN,
-            TARGET_KIND_COLUMN,
+            edges.relationship_kind.as_str(),
+            edges.source_id.as_str(),
+            edges.target_id.as_str(),
+            edges.source_kind.as_str(),
+            edges.target_kind.as_str(),
         ]
         .into_iter()
         .map(|column| Term::Column(Column::new(neighbor_edge_alias(), column)))

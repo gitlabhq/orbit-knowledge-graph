@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use arrow::array::{Array, Int64Array, ListArray, StringArray, StructArray};
 use arrow::record_batch::RecordBatch;
 use compiler::constants::{
-    edge_kinds_column, neighbor_id_column, neighbor_type_column, path_column,
+    edge_kinds_column, identity_part_column, neighbor_id_column, neighbor_type_column, path_column,
 };
 use compiler::internal_column_prefix;
 use compiler::orbit_authorization::Key;
@@ -95,12 +95,27 @@ impl QueryResultRow {
     }
 
     /// The node's identity key: its primary key column, or its redaction id when the base query
-    /// returned no separate primary key.
+    /// returned no separate primary key; a composite identity reads one column per part.
     pub fn get_public_id(&self, node: &RedactionNode) -> Option<Key> {
-        self.columns
-            .get(&node.pk_column)
-            .and_then(identity)
-            .or_else(|| self.get_id(node))
+        match node.parts {
+            1 => self
+                .columns
+                .get(&node.pk_column)
+                .and_then(identity)
+                .or_else(|| self.get_id(node)),
+            parts => self.key(&node.pk_column, parts),
+        }
+    }
+
+    /// The key held under `column`: that column's value, or a composite of `parts` part columns.
+    pub fn key(&self, column: &str, parts: usize) -> Option<Key> {
+        match parts {
+            1 => identity(self.columns.get(column)?),
+            parts => (0..parts)
+                .map(|part| identity(self.columns.get(&identity_part_column(column, part))?))
+                .collect::<Option<Vec<_>>>()
+                .map(Key::Composite),
+        }
     }
 
     pub fn get_type(&self, node: &RedactionNode) -> Option<&str> {
@@ -882,6 +897,7 @@ mod tests {
                 pk_column: "_orbit_ghost_id".to_string(),
                 id_column: "_orbit_ghost_id".to_string(),
                 type_column: "_orbit_ghost_type".to_string(),
+                parts: 1,
             };
             assert_eq!(row.get_id(&ghost), None);
             assert_eq!(row.get_type(&ghost), None);
@@ -1090,6 +1106,51 @@ mod tests {
             let redacted = result.apply_authorizations(&[]);
             assert_eq!(redacted, 3);
             assert_eq!(result.authorized_count(), 0);
+        }
+
+        #[test]
+        fn a_check_less_node_passes_only_once_its_read_was_proved() {
+            let ctx = || {
+                let mut ctx = test_ctx();
+                ctx.add_node("i", "JiraIssue");
+                ctx
+            };
+            let batch = || {
+                make_batch(vec![
+                    ("_orbit_i_id", Arc::new(Int64Array::from(vec![7, 8, 9]))),
+                    (
+                        "_orbit_i_type",
+                        Arc::new(StringArray::from(vec!["JiraIssue"; 3])),
+                    ),
+                    ("_orbit_u_id", Arc::new(Int64Array::from(vec![1, 2, 3]))),
+                    (
+                        "_orbit_u_type",
+                        Arc::new(StringArray::from(vec!["User"; 3])),
+                    ),
+                    (
+                        "_orbit_p_id",
+                        Arc::new(Int64Array::from(vec![100, 200, 300])),
+                    ),
+                    (
+                        "_orbit_p_type",
+                        Arc::new(StringArray::from(vec!["Project"; 3])),
+                    ),
+                ])
+            };
+            let unproved = ctx();
+            let mut result = QueryResult::from_batches(&[batch()], &unproved).unwrap();
+            assert_eq!(result.apply_authorizations(&full_auth()), 3);
+
+            let mut proved = ctx();
+            proved.mark_proved(&std::collections::BTreeSet::from([
+                "i".to_string(),
+                "u".to_string(),
+            ]));
+            assert!(proved.stage_checked("i"));
+            assert!(!proved.stage_checked("u"), "a node with checks keeps them");
+            let mut result = QueryResult::from_batches(&[batch()], &proved).unwrap();
+            assert_eq!(result.apply_authorizations(&full_auth()), 0);
+            assert_eq!(result.authorized_count(), 3);
         }
 
         #[test]

@@ -7,6 +7,7 @@ use arrow::array::{AsArray, BooleanArray};
 use arrow::datatypes::{DataType as ArrowType, Int64Type, UInt64Type};
 use arrow::record_batch::RecordBatch;
 use orbit_arrow::ArrowUtils;
+use query_data_model::catalog::sources::SourceKey;
 use query_data_model::{
     Catalog, ClickHouse, DEFAULT_PRIMARY_KEY, DELETED_COLUMN, DataModelError, EntityId,
     RelationshipVariantId, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
@@ -102,12 +103,15 @@ impl Lifetime {
 
     /// The rules for the rows `writer` tombstones itself, which reach only the edges of other
     /// writers: its own edges it sweeps with its rows.
-    pub fn foreign_to(catalog: &Catalog<ClickHouse>, writer: &str) -> Result<Self, DataModelError> {
+    pub fn foreign_to(
+        catalog: &Catalog<ClickHouse>,
+        writer: SourceKey<'_>,
+    ) -> Result<Self, DataModelError> {
         let sources = catalog.model().sources();
         Self::build(catalog, |variant| {
             sources
                 .variant_writer(variant)
-                .is_none_or(|own| sources.row_writer_name(own) != writer)
+                .is_none_or(|own| sources.row_writer_source(own) != writer)
         })
     }
 
@@ -373,13 +377,13 @@ mod tests {
     use super::*;
 
     fn lifetime() -> (Catalog<ClickHouse>, Lifetime) {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let lifetime = Lifetime::from_catalog(&catalog).expect("lifetime");
         (catalog, lifetime)
     }
 
     fn entity(catalog: &Catalog<ClickHouse>, name: &str) -> EntityId {
-        catalog.graph().entity_id(name).expect("entity")
+        catalog.names().entity(name).expect("entity")
     }
 
     #[test]

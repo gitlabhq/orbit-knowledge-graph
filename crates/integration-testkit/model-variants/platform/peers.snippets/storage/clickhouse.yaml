@@ -1,0 +1,21 @@
+kind: storage
+package: peers.snippets
+store: graph
+entities:
+  Snippet:
+    complete: true
+    accepts: [id, project_id]
+    table: gl_snippet
+    columns:
+      id: {immutable: true, backend: {type: Int64}}
+      project_id: {immutable: true, backend: {type: Int64}}
+      branch: {immutable: true, backend: {type: String}}
+      path: {immutable: true, backend: {type: String}}
+      body: {backend: {type: String}}
+      traversal_path: {backend: {type: String}}
+    access: {filter: [id, project_id], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]
+relationships:
+  SNIPPET_IN:
+    Snippet -> Project: {fk: {on: source, column: project_id}}

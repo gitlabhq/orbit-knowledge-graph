@@ -40,7 +40,8 @@ const END_MARKER: &str = "<!-- END GENERATED: text-indexed-properties -->";
 const MIN_ENTITIES: usize = 10;
 
 pub fn run(doc: Option<PathBuf>, check: bool) -> Result<()> {
-    let catalog = Catalog::<ClickHouse>::embedded().context("failed to load embedded model")?;
+    let catalog =
+        Catalog::<ClickHouse>::embedded("server").context("failed to load embedded model")?;
     let table = render_table(&text_indexed(&catalog))?;
 
     let paths: Vec<PathBuf> = match doc {
@@ -208,7 +209,7 @@ mod tests {
 
     #[test]
     fn render_table_is_deterministic_and_sorted() {
-        let catalog = Catalog::<ClickHouse>::embedded().unwrap();
+        let catalog = Catalog::<ClickHouse>::embedded("server").unwrap();
         let first = render_table(&text_indexed(&catalog)).unwrap();
         let second = render_table(&text_indexed(&catalog)).unwrap();
         assert_eq!(first, second);

@@ -3,14 +3,14 @@ use orbit_server_config::QueryLimits;
 use super::{LogicalBuilder, LogicalPlan, PlanError, Rows};
 use crate::catalog::Store;
 use crate::plan::tracking::{self, Declared, Each, Step};
-use crate::{EntityId, Model, PropertyId, RelationshipId, RelationshipVariantId};
+use crate::{ConnectionId, EntityId, Model, PropertyId, RelationshipId, RelationshipVariantId};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LogicalCatalog<'m> {
     model: &'m Model,
     admin: bool,
-    connection: Option<&'m str>,
-    remotes: &'m [String],
+    served: &'m [ConnectionId],
+    restricted: bool,
     limits: &'m QueryLimits,
     all_columns: bool,
 }
@@ -20,8 +20,8 @@ impl Model {
         LogicalCatalog {
             model: self,
             admin: false,
-            connection: None,
-            remotes: &[],
+            served: &[],
+            restricted: false,
             limits,
             all_columns: false,
         }
@@ -65,69 +65,80 @@ impl<'m> LogicalCatalog<'m> {
         self.limits
     }
 
+    /// Reads only what the stores of the `served` connections hold, as a query's frontend does.
     #[must_use]
-    pub fn on(self, connection: &'m str) -> Self {
+    pub fn serving(self, served: &'m [ConnectionId]) -> Self {
         Self {
-            connection: Some(connection),
+            served,
+            restricted: true,
             ..self
         }
     }
 
-    /// Whether the deployment serves code or live connections, whose stages the engine joins to
-    /// the relational one.
-    pub fn serves_remotes(self) -> bool {
-        !self.remotes.is_empty()
+    /// Plans across the `served` connections, whose stage plans read what the frontend resolved.
+    #[must_use]
+    pub fn across(self, served: &'m [ConnectionId]) -> Self {
+        Self { served, ..self }
     }
 
-    /// Also reads the stores of the code and live connections the deployment serves.
-    #[must_use]
-    pub fn with_remotes(self, remotes: &'m [String]) -> Self {
-        Self { remotes, ..self }
+    /// Whether the deployment serves several connections, whose stages the Combine stage joins.
+    pub fn serves_peers(self) -> bool {
+        self.served.len() > 1
     }
 
     fn stores(self) -> impl Iterator<Item = &'m Store> {
-        self.model.stores().iter().filter(move |store| {
-            Some(store.connection.as_str()) == self.connection
-                || self.remotes.contains(&store.connection)
-        })
+        self.model
+            .stores()
+            .iter()
+            .filter(move |store| self.served.contains(&store.connection()))
     }
 
+    /// A served store of the entity holds the property, or its complete store looks it up.
     pub(super) fn realized(self, entity: EntityId, property: PropertyId) -> bool {
-        if self.connection.is_none() {
+        if !self.restricted {
             return true;
         }
-        let mut holders = self.stores().filter(|store| store.source(entity).is_some());
-        let Some(first) = holders.next() else {
+        let mut holders = self
+            .stores()
+            .filter(|store| store.source(entity).is_some())
+            .peekable();
+        if holders.peek().is_none() {
             return true;
-        };
-        let home = std::iter::once(first)
-            .chain(holders)
-            .find(|store| store.complete(entity))
-            .unwrap_or(first);
-        !home.excludes(property)
-            && (home.complete(entity) && self.model.lookup(property).is_some()
-                || home.column(property).is_some())
+        }
+        holders.any(|store| {
+            store.column(property).is_some()
+                || store.complete(entity)
+                    && !store.excludes(property)
+                    && self.model.lookup(property).is_some()
+        })
     }
 
     /// Every variant keeps its rows in an edge table, which the loader checks holds each
     /// attribute of the relationship.
     pub(super) fn attribute_realized(self, variants: &[RelationshipVariantId]) -> bool {
-        self.connection.is_none()
+        !self.restricted
             || variants.iter().all(|variant| {
                 self.stores()
                     .any(|store| store.edge_table(*variant).is_some())
             })
     }
 
-    pub fn entity(self, name: &str) -> Result<Declared<EntityId>, PlanError> {
-        Ok(Declared::new(self.model.id(), self.model.entity(name)?))
+    /// The entity a frontend names; nothing after the frontend resolves a name.
+    pub fn entity_named(self, name: &str) -> Result<Declared<EntityId>, PlanError> {
+        Ok(self.entity(self.model.names().entity(name)?))
     }
 
-    pub fn relationship(self, name: &str) -> Result<Declared<RelationshipId>, PlanError> {
-        Ok(Declared::new(
-            self.model.id(),
-            self.model.relationship(name)?,
-        ))
+    /// The relationship a frontend names; nothing after the frontend resolves a name.
+    pub fn relationship_named(self, name: &str) -> Result<Declared<RelationshipId>, PlanError> {
+        Ok(self.relationship(self.model.names().relationship(name)?))
+    }
+
+    pub fn entity(self, entity: EntityId) -> Declared<EntityId> {
+        Declared::new(self.model.id(), entity)
+    }
+
+    pub fn relationship(self, relationship: RelationshipId) -> Declared<RelationshipId> {
+        Declared::new(self.model.id(), relationship)
     }
 
     pub fn build<E: From<PlanError>>(

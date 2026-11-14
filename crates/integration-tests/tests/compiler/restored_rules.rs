@@ -1,4 +1,4 @@
-use compiler::{QueryError, compile, compile_local};
+use compiler::{QueryError, compile, compile_local, local_admin};
 use query_data_model::testkit::limits;
 
 use super::setup::{embedded_local_model, embedded_model, test_ctx};
@@ -63,7 +63,7 @@ fn text_operators_on_relationship_columns_are_rejected() {
 #[test]
 fn measure_inputs_must_be_stored() {
     let query = "MATCH (d:Definition) WHERE d.id = 1 RETURN max(d.content) AS longest";
-    let error = compile_local(query, &embedded_local_model(), limits())
+    let error = compile_local(query, &embedded_local_model(), &local_admin(), limits())
         .expect_err("the local store does not hold Definition.content");
     assert!(
         matches!(&error, QueryError::AllowlistRejected(message)

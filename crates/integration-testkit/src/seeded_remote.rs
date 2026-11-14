@@ -3,13 +3,12 @@
 
 use std::collections::BTreeMap;
 
-use compiler::remote::Namespaces;
-use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::catalog::{ExecuteError, Row};
 use query_data_model::implementations::live::{DataExtraction, ExtractionRequest};
 use query_data_model::implementations::orbit_code::{
     CodeSearch, RequestField, StructuralSearchRequest,
 };
+use query_data_model::plan::live::{Workspaces, workspace};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -35,6 +34,16 @@ struct SeededMatch {
     branch: String,
 }
 
+impl SeededMatch {
+    /// The file column a request names; the seed holds each file's path alone.
+    fn column(&self, name: &str) -> Value {
+        match name {
+            "path" => Value::from(self.path.as_str()),
+            _ => Value::Null,
+        }
+    }
+}
+
 fn main() -> String {
     "main".to_string()
 }
@@ -42,7 +51,6 @@ fn main() -> String {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Repository {
-    traversal_path: String,
     matches: Vec<SeededMatch>,
 }
 
@@ -86,9 +94,7 @@ impl CodeSearch for SeededCodeSearch {
                     .fields
                     .iter()
                     .map(|field| match field {
-                        RequestField::Path => {
-                            ("path".to_string(), Value::from(found.path.as_str()))
-                        }
+                        RequestField::Column(name) => (name.clone(), found.column(name)),
                         RequestField::Line => ("line".to_string(), Value::from(found.line)),
                         RequestField::Repository(name) => (name.clone(), Value::from(project)),
                         RequestField::Branch(name) => {
@@ -104,13 +110,11 @@ impl CodeSearch for SeededCodeSearch {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Workspace {
-    traversal_path: String,
-    messages: Vec<BTreeMap<String, Value>>,
-}
+/// The rows each operation returns in one workspace, by operation name.
+type Workspace = BTreeMap<String, Vec<BTreeMap<String, Value>>>;
 
+/// The rows of every workspace, keyed by the scope key a call names it by: a Slack workspace,
+/// or a Jira project.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SeededDataExtraction {
@@ -129,7 +133,11 @@ fn text(value: Option<&Value>) -> &str {
 
 impl DataExtraction for SeededDataExtraction {
     fn extract(&self, user: &str, request: &ExtractionRequest) -> Result<Vec<Row>, ExecuteError> {
-        if request.operation != "search.messages" {
+        if !self
+            .workspaces
+            .values()
+            .any(|workspace| workspace.contains_key(&request.operation))
+        {
             return Err(ExecuteError(format!(
                 "unknown operation {}",
                 request.operation
@@ -162,11 +170,22 @@ impl DataExtraction for SeededDataExtraction {
             })
         };
         let limit = request.limit.map_or(usize::MAX, |limit| limit as usize);
-        Ok(request
-            .workspaces
-            .iter()
-            .filter_map(|workspace| self.workspaces.get(workspace))
-            .flat_map(|workspace| &workspace.messages)
+        let workspaces: Vec<&Workspace> = match &request.workspaces {
+            Workspaces::Any => self.workspaces.values().collect(),
+            Workspaces::Only(listed) => listed
+                .iter()
+                .filter_map(|key| {
+                    let named = match workspace(key) {
+                        Value::String(name) => name,
+                        parts => parts.to_string(),
+                    };
+                    self.workspaces.get(&named)
+                })
+                .collect(),
+        };
+        Ok(workspaces
+            .into_iter()
+            .flat_map(|workspace| workspace.get(&request.operation).into_iter().flatten())
             .filter(visible)
             .filter(filtered)
             .filter(windowed)
@@ -184,34 +203,5 @@ impl DataExtraction for SeededDataExtraction {
                     .collect()
             })
             .collect())
-    }
-}
-
-/// The traversal path of every seeded repository and workspace, as the lookup on the graph
-/// connection would resolve them.
-pub fn seeded_namespaces() -> Namespaces {
-    let code = SeededCodeSearch::from_seed_file();
-    let live = SeededDataExtraction::from_seed_file();
-    Namespaces {
-        repositories: code
-            .repositories
-            .iter()
-            .map(|(project, repository)| {
-                (
-                    *project,
-                    TraversalPath::new_unchecked(repository.traversal_path.as_str()),
-                )
-            })
-            .collect(),
-        workspaces: live
-            .workspaces
-            .iter()
-            .map(|(workspace, seeded)| {
-                (
-                    workspace.clone(),
-                    TraversalPath::new_unchecked(seeded.traversal_path.as_str()),
-                )
-            })
-            .collect(),
     }
 }

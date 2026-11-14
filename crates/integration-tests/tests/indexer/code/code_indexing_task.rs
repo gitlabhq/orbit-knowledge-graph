@@ -226,7 +226,7 @@ async fn incremental_flag_dead_letters_an_export_the_local_tables_cannot_map() {
     let bindings = engine.find("relationships:").unwrap();
     engine.truncate(bindings);
     let model = query_data_model::Packages::new(query_data_model::Tier::Platform, sources)
-        .load()
+        .deployment("server")
         .unwrap();
     let specs = indexer::modules::code::ConverterSpecs::new(
         &query_data_model::Catalog::<query_data_model::ClickHouse>::from_model(&model).unwrap(),
@@ -772,7 +772,7 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
 
     let graph_client = Arc::new(clickhouse.config.build_client("graph"));
     let table_names = CodeTableNames::from_catalog(
-        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
     )
     .expect("code tables must resolve");
     let cleaner = ClickHouseStaleDataCleaner::new(graph_client, &table_names);

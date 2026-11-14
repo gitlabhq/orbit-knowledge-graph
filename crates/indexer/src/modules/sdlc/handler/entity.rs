@@ -516,7 +516,7 @@ mod tests {
         scope: EtlScope,
         checkpoint_store: Arc<dyn CheckpointStore>,
     ) -> EntityHandler {
-        let catalog = Catalog::<ClickHouse>::embedded().expect("embedded catalog");
+        let catalog = Catalog::<ClickHouse>::embedded("server").expect("embedded catalog");
         let plans = build_plans(
             &catalog,
             crate::modules::sdlc::plan::Sizing {

@@ -2,6 +2,7 @@
 //! non-test source of the query engine, indexer, migrations or server.
 
 mod collisions;
+mod handles;
 mod lexer;
 mod modules;
 
@@ -13,63 +14,71 @@ use query_data_model::{DuckDb, Packages};
 
 use crate::collisions::COLLISIONS;
 
-/// Every entity, relationship, table, store, connection, source and provider name, with its kind.
+/// Every entity, relationship, table, store, connection, source and provider name, with its
+/// kind, across the model of every deployment shape.
 fn declared() -> BTreeMap<String, &'static str> {
-    let model = Packages::embedded().load().unwrap();
-    let graph = model.graph();
+    let deployments = query_data_model::Deployments::embedded();
     let mut names = BTreeMap::new();
+    for shape in deployments.shapes() {
+        let model = Packages::embedded().deployment(shape).unwrap();
+        declared_in(&model, &mut names);
+    }
+    names
+}
+
+fn declared_in(
+    model: &std::sync::Arc<query_data_model::Model>,
+    names: &mut BTreeMap<String, &'static str>,
+) {
+    let graph = model.graph();
+    add(names, "entity", graph.entities().map(|e| e.name.as_str()));
     add(
-        &mut names,
-        "entity",
-        graph.entities().map(|e| e.name.as_str()),
-    );
-    add(
-        &mut names,
+        names,
         "relationship",
         graph.relationships().map(|r| r.name.as_str()),
     );
-    for store in model.stores() {
-        add(&mut names, "store", [store.name.as_str()]);
-        add(&mut names, "connection", [store.connection.as_str()]);
+    for store in query_data_model::testkit::stores(model) {
+        add(names, "store", [store.name()]);
         add(
-            &mut names,
+            names,
+            "connection",
+            [model.connection(store.connection()).name()],
+        );
+        add(
+            names,
             "table",
             store.sources().filter_map(|s| s.table.as_deref()),
         );
         let edges = store
             .bindings()
             .filter_map(|(variant, _, _)| store.edge_table(variant));
-        add(&mut names, "table", edges);
-        match store.kind.as_str() {
+        add(names, "table", edges);
+        match model.connection(store.connection()).kind() {
             "clickhouse" => {
-                let catalog = model.physical::<ClickHouse>(&store.connection).unwrap();
+                let catalog = model.physical::<ClickHouse>(store.connection()).unwrap();
                 let schema = catalog.schema().unwrap();
-                add(&mut names, "table", schema.table_names());
+                add(names, "table", schema.table_names());
                 add(
-                    &mut names,
+                    names,
                     "table",
                     schema.dictionaries().iter().map(|d| d.name.as_str()),
                 );
                 add(
-                    &mut names,
+                    names,
                     "table",
                     schema.views().iter().map(|v| v.name.as_str()),
                 );
                 let refreshable = schema.refreshable_views().iter().map(|v| v.name.as_str());
-                add(&mut names, "table", refreshable);
+                add(names, "table", refreshable);
                 add(
-                    &mut names,
+                    names,
                     "table",
                     schema.graph_tables().iter().map(|t| t.name.as_str()),
                 );
             }
             "duckdb" => {
-                let catalog = model.physical::<DuckDb>(&store.connection).unwrap();
-                add(
-                    &mut names,
-                    "table",
-                    catalog.tables().map(|t| t.name.as_str()),
-                );
+                let catalog = model.physical::<DuckDb>(store.connection()).unwrap();
+                add(names, "table", catalog.tables().map(|t| t.name.as_str()));
             }
             _ => {}
         }
@@ -77,25 +86,20 @@ fn declared() -> BTreeMap<String, &'static str> {
     let sources = model.sources();
     for pipeline in sources.pipelines() {
         let source = sources.data_source(pipeline);
-        add(&mut names, "source", [source.name.as_str()]);
-        add(&mut names, "connection", [source.connection.as_str()]);
+        add(names, "source", [source.name.as_str()]);
+        add(names, "connection", [source.connection.as_str()]);
+        add(names, "table", pipeline.tables.iter().map(String::as_str));
         add(
-            &mut names,
-            "table",
-            pipeline.tables.iter().map(String::as_str),
-        );
-        add(
-            &mut names,
+            names,
             "table",
             pipeline.lookups.iter().map(|l| l.table.as_str()),
         );
     }
     add(
-        &mut names,
+        names,
         "provider",
         model.access().providers().into_iter().map(|(p, _)| p),
     );
-    names
 }
 
 fn add<'a>(
@@ -273,11 +277,74 @@ fn scanner_reads_only_non_test_literals() {
         .map(|literal| (literal.text.as_str(), literal.line))
         .collect();
     let expected = [
-        ("kept", 1),
         ("attribute", 7),
         ("raw \"quoted\"", 9),
         ("not test", 13),
         ("line \\\ncontinued", 18),
+        ("kept", 1),
     ];
     assert_eq!(found, expected);
+}
+
+fn connection_names() -> Vec<String> {
+    let testkit = std::fs::read_to_string(
+        repository().join("crates/query-data-model/src/testkit_deployments.yaml"),
+    )
+    .unwrap();
+    let mut names = std::collections::BTreeSet::new();
+    for deployments in [
+        query_data_model::Deployments::embedded(),
+        query_data_model::Deployments::parse(&testkit).unwrap(),
+    ] {
+        for shape in deployments.shapes() {
+            names.extend(deployments.connections(shape).unwrap().iter().cloned());
+        }
+    }
+    names.into_iter().collect()
+}
+
+#[test]
+fn engine_reads_model_facts_by_handle() {
+    let found = handles::violations(&repository(), &handles::ENGINE, &connection_names());
+    assert!(
+        found.is_empty(),
+        "{} engine files break a handle rule:\n{}",
+        found.len(),
+        found.join("\n")
+    );
+}
+
+const PLANTED: &str = r#"
+fn names(model: &Model) { let _ = model.names(); }
+fn fixture() { let _ = query_data_model::testkit::limits(); }
+fn decode(graph: &GraphCatalog) { let _ = graph.entity_kind("User"); }
+const KEY: &str = "id";
+const PEER: &str = "main";
+fn branch(kind: &str) -> bool { kind == ClickHouse::KIND || kind == "duckdb" }
+#[cfg(test)]
+mod tests {
+    fn allowed(model: &Model) { let _ = model.names(); let _ = "id"; }
+}
+"#;
+
+#[test]
+fn handle_rules_fail_on_planted_violations() {
+    let root = std::env::temp_dir().join(format!("handle-rules-{}", std::process::id()));
+    let src = root.join("crate/src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(root.join("crate/Cargo.toml"), "").unwrap();
+    std::fs::write(src.join("lib.rs"), PLANTED).unwrap();
+    let found = handles::violations(&root, &["crate"], &["main".to_string()]);
+    std::fs::remove_dir_all(&root).unwrap();
+    assert_eq!(
+        found,
+        [
+            "crate/src/lib.rs: Names",
+            "crate/src/lib.rs: Testkit",
+            "crate/src/lib.rs: KindCodec",
+            "crate/src/lib.rs: IdentityColumn",
+            "crate/src/lib.rs: ConnectionName",
+            "crate/src/lib.rs: BackendKind",
+        ]
+    );
 }

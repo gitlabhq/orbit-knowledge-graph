@@ -455,7 +455,7 @@ mod tests {
             .unwrap()
             .unwrap_or_else(|| panic!("v{version} model archive is bundled"))
             .packages()
-            .load()
+            .deployment("server")
             .unwrap_or_else(|error| panic!("v{version} model loads: {error}"))
     }
 
@@ -466,9 +466,9 @@ mod tests {
         assert!(source.contains(from), "{path} contains {from:?}");
         *source = source.replacen(from, to, 1);
         derive_scope(
-            &embedded.load().unwrap(),
+            &embedded.deployment("server").unwrap(),
             &Packages::new(query_data_model::Tier::Platform, sources)
-                .load()
+                .deployment("server")
                 .unwrap(),
         )
         .unwrap()
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn identical_models_derive_no_scope() {
-        let model = Packages::embedded().load().unwrap();
+        let model = Packages::embedded().deployment("server").unwrap();
         let derived = derive_scope(&model, &model).unwrap();
         assert_eq!(derived.scope, MigrationScope::None);
         assert!(derived.tables.is_empty(), "{:?}", derived.tables);

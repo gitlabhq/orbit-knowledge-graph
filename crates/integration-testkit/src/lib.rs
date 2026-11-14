@@ -5,9 +5,15 @@ mod context;
 pub mod dag_fakes;
 #[cfg(test)]
 mod dag_scenarios;
+#[cfg(test)]
+mod deployment_shapes;
+pub mod lake;
 pub mod mock_redaction;
+#[cfg(test)]
+mod placement;
 pub mod plan_shape;
 pub mod query_scenario;
+pub mod s3;
 pub mod scenario;
 mod seed;
 pub mod seeded_remote;
@@ -18,7 +24,8 @@ pub mod visitor;
 #[cfg(test)]
 pub(crate) fn test_stats(query: &str) -> query_engine::compiler::QueryStats {
     use query_engine::compiler::{QueryStats, logical::Query, passes::normalize, surface};
-    let model = query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap();
+    let model =
+        query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap();
     let catalog = model
         .model()
         .logical(query_data_model::testkit::limits())
@@ -29,7 +36,7 @@ pub(crate) fn test_stats(query: &str) -> query_engine::compiler::QueryStats {
         statement.plan,
         catalog.model(),
         &model,
-        &Default::default(),
+        &compiler::dag::Connections::single(&model),
         query_data_model::testkit::limits(),
     )
     .unwrap();
@@ -52,41 +59,45 @@ fn overlay_name() -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-pub fn overlay_fragments(name: &str) -> query_data_model::spec::Fragments {
+/// The fragments of the embedded packages under the overlay `name`, as the deployment shape
+/// `shape` keeps them.
+pub fn overlay_fragments(name: &str, shape: &str) -> query_data_model::testkit::Fragments {
     query_data_model::testkit::overlay(name)
         .fragments()
+        .and_then(|fragments| fragments.deploy(shape))
         .unwrap_or_else(|e| panic!("model overlay '{name}' does not parse: {e}"))
 }
 
-fn unprefixed_fragments() -> query_data_model::spec::Fragments {
+fn unprefixed_fragments(shape: &str) -> query_data_model::testkit::Fragments {
     match overlay_name() {
-        Some(name) => overlay_fragments(&name),
+        Some(name) => overlay_fragments(&name, shape),
         None => query_data_model::Packages::embedded()
             .fragments()
+            .and_then(|fragments| fragments.deploy(shape))
             .expect("embedded packages should parse"),
     }
 }
 
 fn load_model(
-    fragments: &query_data_model::spec::Fragments,
+    fragments: &query_data_model::testkit::Fragments,
 ) -> std::sync::Arc<query_data_model::Model> {
     std::sync::Arc::new(query_data_model::Model::load(fragments).expect("test model should load"))
 }
 
 fn versioned_fragments(
-    fragments: query_data_model::spec::Fragments,
-) -> query_data_model::spec::Fragments {
+    fragments: query_data_model::testkit::Fragments,
+) -> query_data_model::testkit::Fragments {
     query_data_model::implementations::clickhouse::versioned(fragments, &TABLE_PREFIX)
         .expect("test tables should take the schema prefix")
 }
 
 /// The prefixed fragments behind [`load_data_model`].
-pub fn load_fragments() -> query_data_model::spec::Fragments {
-    versioned_fragments(unprefixed_fragments())
+pub fn load_fragments() -> query_data_model::testkit::Fragments {
+    versioned_fragments(unprefixed_fragments("server"))
 }
 
 pub fn versioned_data_model(
-    fragments: query_data_model::spec::Fragments,
+    fragments: query_data_model::testkit::Fragments,
 ) -> std::sync::Arc<query_data_model::Catalog<query_data_model::ClickHouse>> {
     let fragments = versioned_fragments(fragments);
     std::sync::Arc::new(
@@ -98,7 +109,7 @@ pub fn versioned_data_model(
 }
 
 pub fn graph_schema(
-    fragments: &query_data_model::spec::Fragments,
+    fragments: &query_data_model::testkit::Fragments,
 ) -> orbit_migrations::schema::GraphSchema {
     let physical = orbit_migrations::schema::Schema::from_model(&load_model(fragments))
         .expect("test model should resolve a ClickHouse schema");
@@ -108,7 +119,7 @@ pub fn graph_schema(
 pub fn embedded_schema() -> orbit_migrations::schema::Schema {
     orbit_migrations::schema::Schema::from_model(
         &query_data_model::Packages::embedded()
-            .load()
+            .deployment("server")
             .expect("embedded packages should load"),
     )
     .expect("embedded packages should resolve a ClickHouse schema")
@@ -116,14 +127,14 @@ pub fn embedded_schema() -> orbit_migrations::schema::Schema {
 
 pub fn load_data_model() -> std::sync::Arc<query_data_model::Catalog<query_data_model::ClickHouse>>
 {
-    versioned_data_model(unprefixed_fragments())
+    versioned_data_model(unprefixed_fragments("server"))
 }
 
 pub fn load_local_data_model() -> std::sync::Arc<query_data_model::Catalog<query_data_model::DuckDb>>
 {
     std::sync::Arc::new(
         query_data_model::Catalog::<query_data_model::DuckDb>::from_model(&load_model(
-            &unprefixed_fragments(),
+            &unprefixed_fragments("local"),
         ))
         .expect("test model should bind its DuckDB connection"),
     )
@@ -145,7 +156,7 @@ pub fn t(table: &str) -> String {
 /// Generated from the model so integration tests create the same prefixed
 /// tables and materialized views the indexer writes to at runtime.
 pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
-    let schema = graph_schema(&unprefixed_fragments());
+    let schema = graph_schema(&unprefixed_fragments("server"));
 
     let mut stmts: Vec<String> = schema
         .tables
@@ -302,9 +313,9 @@ pub fn embedded_archive(version: u32) -> orbit_migrations::archive::ModelArchive
 pub fn edge_table_for(relationship: &str) -> String {
     let model = load_data_model();
     let id = model
-        .graph()
-        .relationship_id(relationship)
-        .unwrap_or_else(|| panic!("unknown relationship {relationship}"));
+        .names()
+        .relationship(relationship)
+        .unwrap_or_else(|_| panic!("unknown relationship {relationship}"));
     match model.edge_tables(&[id]).as_slice() {
         [table] => table.clone(),
         tables => panic!("{relationship} is stored in {tables:?}, not one table"),
@@ -315,11 +326,11 @@ pub fn edge_table_for(relationship: &str) -> String {
 pub fn variant_edge_table(relationship: &str, source: &str, target: &str) -> String {
     let model = load_data_model();
     let variant = model
-        .graph()
-        .variant_named(relationship, source, target)
+        .names()
+        .variant(relationship, source, target)
         .unwrap_or_else(|| panic!("{relationship} has no {source} -> {target} variant"));
     model
-        .edge_table(variant.id)
+        .edge_table(variant)
         .unwrap_or_else(|| panic!("{relationship} {source} -> {target} has no edge table"))
         .to_string()
 }

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use crate::passes::codegen::SqlBackend;
+use query_data_model::EdgeField;
 use query_data_model::implementations::relational::RelationalBackend;
 use query_data_model::implementations::relational::plan::{Order, Relation, RelationalBuilder};
-use query_data_model::plan::logical::{EdgeField, Expr, Order as Sort};
+use query_data_model::plan::logical::{Expr, Order as Sort};
 
 use crate::constants::EDGE_KIND_SUFFIX;
 use crate::error::{QueryError, Result};
@@ -97,7 +98,7 @@ pub(crate) fn stable_order<B: SqlBackend>(
         .bindings()
         .into_iter()
         .filter_map(|binding| nodes.get(binding.name))
-        .map(|binding| binding.identity().clone());
+        .flat_map(|binding| binding.identity().iter().cloned());
     if query.steps().is_empty() {
         return identities.collect();
     }

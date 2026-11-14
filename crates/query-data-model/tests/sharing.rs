@@ -27,7 +27,7 @@ fn policy() -> SharePolicy {
 
 #[test]
 fn shares_read_twice_become_pruned_bodies_and_shares_read_once_inline() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
     let plan = catalog
@@ -73,7 +73,7 @@ fn shares_read_twice_become_pruned_bodies_and_shares_read_once_inline() {
 
 #[test]
 fn a_share_read_once_without_an_alias_inlines_as_a_named_subquery() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
     let plan = catalog
@@ -103,7 +103,7 @@ fn a_share_read_once_without_an_alias_inlines_as_a_named_subquery() {
 
 #[test]
 fn a_point_lookup_read_twice_is_recomputed_at_each_read() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     let catalog = &model;
     let users = catalog.table("gl_user").unwrap();
     let plan = catalog

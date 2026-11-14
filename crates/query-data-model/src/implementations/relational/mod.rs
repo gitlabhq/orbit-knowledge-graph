@@ -1,7 +1,9 @@
 use indexmap::IndexMap;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::catalog::{Catalog, StorageBackend};
+use crate::EdgeField;
+use crate::catalog::{Catalog, Field, StorageBackend};
 use crate::{ForeignKey, RelationshipVariantId};
 
 mod capabilities;
@@ -11,26 +13,66 @@ pub mod render;
 mod store;
 mod tables;
 
-pub use capabilities::{Capabilities, CurrentRows, RelationalBackend};
+pub use capabilities::{CurrentRows, RelationalBackend, SqlCapabilities};
 pub use catalog::RelationshipRoute;
 pub use store::{ReadPaths, RelationalStore, Versioning, entity_layout};
-pub use tables::{Column, Engine, Index, PathColumn, Projection, Table};
+pub use tables::{Column, ColumnId, Engine, Index, PathColumn, Projection, Table, TableId, Target};
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct RelationalOptions {
     pub version_column: Option<String>,
     pub deleted_column: Option<String>,
     pub edge_tables: IndexMap<String, EdgeTableSpec>,
+    pub edge_columns: Option<EdgeColumns>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+/// The column every edge table of a store keeps each edge field in.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EdgeColumns {
+    pub relationship_kind: String,
+    pub source_id: String,
+    pub source_kind: String,
+    pub target_id: String,
+    pub target_kind: String,
+}
+
+impl EdgeColumns {
+    pub fn column(&self, field: EdgeField) -> &str {
+        match field {
+            EdgeField::Kind => &self.relationship_kind,
+            EdgeField::SourceId => &self.source_id,
+            EdgeField::SourceKind => &self.source_kind,
+            EdgeField::TargetId => &self.target_id,
+            EdgeField::TargetKind => &self.target_kind,
+        }
+    }
+
+    pub fn all(&self) -> [(EdgeField, &str); 5] {
+        [
+            EdgeField::Kind,
+            EdgeField::SourceId,
+            EdgeField::SourceKind,
+            EdgeField::TargetId,
+            EdgeField::TargetKind,
+        ]
+        .map(|field| (field, self.column(field)))
+    }
+}
+
+impl crate::spec::WrittenBlock for RelationalOptions {}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct EdgeTableSpec {
     pub shared: bool,
     pub sort_key: Vec<String>,
     pub columns: IndexMap<String, String>,
 }
+
+/// The relational planner reads every generic fragment field.
+pub(crate) const FIELDS: &[Field] = &Field::ALL;
 
 pub trait RelationalFacts {
     fn relational(&self) -> &RelationalStore;

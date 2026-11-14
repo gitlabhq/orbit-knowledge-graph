@@ -6,7 +6,7 @@ use query_data_model::testkit::overlay;
 use query_data_model::{Catalog, ClickHouse, DuckDb, Model, Packages};
 
 fn overlay_model(name: &str) -> Arc<Model> {
-    overlay(name).load().unwrap()
+    overlay(name).deployment("server").unwrap()
 }
 
 #[test]
@@ -31,20 +31,16 @@ fn reordered_tables_retain_source_columns_and_dependencies() {
 
 #[test]
 fn catalog_routes_preserve_variant_endpoints_on_each_backend() {
-    let overlay = overlay_model("variant_routes");
-    let remote = Catalog::<ClickHouse>::from_model(&overlay).unwrap();
-    let local = Catalog::<DuckDb>::from_model(&overlay).unwrap();
+    let remote = Catalog::<ClickHouse>::from_model(&overlay_model("variant_routes")).unwrap();
+    let local = overlay("variant_routes").deployment("local").unwrap();
+    let local = Catalog::<DuckDb>::from_model(&local).unwrap();
     for (source, target, table) in [
         ("Definition", "Definition", "gl_code_edge"),
         ("File", "Definition", "gl_edge"),
         ("Definition", "ImportedSymbol", "gl_code_edge"),
         ("File", "ImportedSymbol", "gl_edge"),
     ] {
-        let variant = remote
-            .graph()
-            .variant_named("CALLS", source, target)
-            .unwrap()
-            .id;
+        let variant = remote.names().variant("CALLS", source, target).unwrap();
         assert_eq!(remote.edge_table(variant), Some(table));
         assert_eq!(local.edge_table(variant), local.shared_edge_table());
     }
@@ -52,7 +48,7 @@ fn catalog_routes_preserve_variant_endpoints_on_each_backend() {
 
 #[test]
 fn writer_catalog_tracks_exact_node_mapping_routes() {
-    let storage = Schema::from_model(&Packages::embedded().load().unwrap()).unwrap();
+    let storage = Schema::from_model(&Packages::embedded().deployment("server").unwrap()).unwrap();
 
     let code_writers = storage.writers("gl_code_edge").unwrap();
     assert!(code_writers.contains("Branch"));
@@ -137,25 +133,25 @@ fn materialized_bindings_resolve_graph_identities_and_source_columns() {
 
 #[test]
 fn loads_remote_and_local_models_from_the_same_packages() {
-    let remote = Catalog::<ClickHouse>::embedded().unwrap();
-    let local = Catalog::<DuckDb>::embedded().unwrap();
+    let remote = Catalog::<ClickHouse>::embedded("server").unwrap();
+    let local = Catalog::<DuckDb>::embedded("local").unwrap();
 
-    let definition = remote.graph().entity_id("Definition").unwrap();
+    let definition = remote.names().entity("Definition").unwrap();
 
     assert_eq!(remote.table_of(definition).unwrap(), "gl_definition");
     assert_eq!(local.table_of(definition).unwrap(), "gl_definition");
-    let contains = remote.graph().relationship_id("CONTAINS").unwrap();
+    let contains = remote.names().relationship("CONTAINS").unwrap();
     assert!(remote.edge_tables(&[contains]).len() > 1);
     assert_eq!(local.edge_tables(&[contains]), ["gl_edge"]);
 }
 
 #[test]
 fn hides_traversal_path_in_remote_and_local_models() {
-    let remote = Catalog::<ClickHouse>::embedded().unwrap();
-    let local = Catalog::<DuckDb>::embedded().unwrap();
-    let graph = remote.graph();
-    let definition = graph.entity_id("Definition").unwrap();
-    let property = graph.property_id(definition, "traversal_path").unwrap();
+    let remote = Catalog::<ClickHouse>::embedded("server").unwrap();
+    let local = Catalog::<DuckDb>::embedded("local").unwrap();
+    let names = remote.names();
+    let definition = names.entity("Definition").unwrap();
+    let property = names.property(definition, "traversal_path").unwrap();
 
     assert!(remote.model().access().property(property).hidden);
     assert!(local.model().access().property(property).hidden);
@@ -163,11 +159,12 @@ fn hides_traversal_path_in_remote_and_local_models() {
 
 #[test]
 fn resolves_relationship_variants_and_foreign_keys_to_ids() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     let graph = model.graph();
-    let relationship = graph.relationship_id("IN_PROJECT").unwrap();
-    let source = graph.entity_id("Vulnerability").unwrap();
-    let target = graph.entity_id("Project").unwrap();
+    let names = model.names();
+    let relationship = names.relationship("IN_PROJECT").unwrap();
+    let source = names.entity("Vulnerability").unwrap();
+    let target = names.entity("Project").unwrap();
     assert!(graph.variant_id(relationship, source, target).is_some());
     let foreign_key = model
         .shared_foreign_key(&[relationship], source, target)
@@ -178,9 +175,9 @@ fn resolves_relationship_variants_and_foreign_keys_to_ids() {
 
 #[test]
 fn keeps_extraction_sources_separate_from_query_columns() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
-    let entity = model.graph().entity_id("MergeRequest").unwrap();
-    let property = model.graph().property_id(entity, "project_id").unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
+    let entity = model.names().entity("MergeRequest").unwrap();
+    let property = model.names().property(entity, "project_id").unwrap();
     let table = model.table_of(entity).unwrap();
 
     let pipeline = model
@@ -204,9 +201,9 @@ fn keeps_extraction_sources_separate_from_query_columns() {
 
 #[test]
 fn exposes_storage_columns_as_query_identifiers() {
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
-    let entity = model.graph().entity_id("Job").unwrap();
-    let property = model.graph().property_id(entity, "when").unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
+    let entity = model.names().entity("Job").unwrap();
+    let property = model.names().property(entity, "when").unwrap();
     let table = model.table_of(entity).unwrap();
 
     assert_eq!(model.column(property), Some("when"));
@@ -219,7 +216,7 @@ fn exposes_storage_columns_as_query_identifiers() {
 fn foreign_keys_identify_the_endpoint_and_referenced_key() {
     use query_data_model::Endpoint;
 
-    let model = Catalog::<ClickHouse>::embedded().unwrap();
+    let model = Catalog::<ClickHouse>::embedded("server").unwrap();
     for (relationship, source, target, holder, property) in [
         (
             "AUTHORED",
@@ -243,12 +240,9 @@ fn foreign_keys_identify_the_endpoint_and_referenced_key() {
             "auto_canceled_by_id",
         ),
     ] {
-        let graph = model.graph();
-        let ids = [graph.relationship_id(relationship).unwrap()];
-        let (source, target) = (
-            graph.entity_id(source).unwrap(),
-            graph.entity_id(target).unwrap(),
-        );
+        let names = model.names();
+        let ids = [names.relationship(relationship).unwrap()];
+        let (source, target) = (names.entity(source).unwrap(), names.entity(target).unwrap());
         let key = model.shared_foreign_key(&ids, source, target).unwrap();
         assert_eq!(key.holder, holder, "{relationship}");
         assert_eq!(model.graph().property(key.property).name, property);
@@ -262,28 +256,28 @@ fn foreign_keys_identify_the_endpoint_and_referenced_key() {
             }
         );
     }
-    let graph = model.graph();
-    let both = ["AUTHORED", "APPROVED"].map(|name| graph.relationship_id(name).unwrap());
+    let names = model.names();
+    let both = ["AUTHORED", "APPROVED"].map(|name| names.relationship(name).unwrap());
     let (user, request) = (
-        graph.entity_id("User").unwrap(),
-        graph.entity_id("MergeRequest").unwrap(),
+        names.entity("User").unwrap(),
+        names.entity("MergeRequest").unwrap(),
     );
     assert!(model.shared_foreign_key(&both, user, request).is_none());
 }
 
 #[test]
 fn property_realization_reports_backend_availability() {
-    let remote = Catalog::<ClickHouse>::embedded().unwrap();
-    let local = Catalog::<DuckDb>::embedded().unwrap();
-    let remote_entity = remote.graph().entity_id("MergeRequest").unwrap();
-    let local_entity = local.graph().entity_id("MergeRequest").unwrap();
-    let remote_property = remote.graph().property_id(remote_entity, "title").unwrap();
-    let local_property = local.graph().property_id(local_entity, "title").unwrap();
+    let remote = Catalog::<ClickHouse>::embedded("server").unwrap();
+    let local = Catalog::<DuckDb>::embedded("local").unwrap();
+    let remote_entity = remote.names().entity("MergeRequest").unwrap();
+    let local_entity = local.names().entity("MergeRequest").unwrap();
+    let remote_property = remote.names().property(remote_entity, "title").unwrap();
+    let local_property = local.names().property(local_entity, "title").unwrap();
     assert_eq!(remote.column(remote_property), Some("title"));
     assert!(!local.readable(local_property));
 
-    let file = remote.graph().entity_id("File").unwrap();
-    let content = remote.graph().property_id(file, "content").unwrap();
+    let file = remote.names().entity("File").unwrap();
+    let content = remote.names().property(file, "content").unwrap();
     assert!(remote.lookup(content).is_some());
     assert!(remote.column(content).is_none());
 }

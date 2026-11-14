@@ -7,27 +7,46 @@ use serde::de::DeserializeOwned;
 use super::access::EdgeScope;
 use super::guards::Guard;
 use super::guards::PolicyKind;
+use super::placement::Operation;
 use super::store::Facts;
 use super::{Access, Diagnostics, Model, Source, Sources, Store};
 use crate::implementations::{
     clickhouse::ClickHouse, duckdb::DuckDb, live::Live, orbit_code::OrbitCode,
 };
 use crate::plan::tracking::{Language, Plan};
-use crate::spec::{Block, Blocks, StorageFragment, Typed};
-use crate::{DataModelError, EntityId, GraphCatalog, Packages, PropertyId, RelationshipVariantId};
+use crate::spec::{Block, Blocks, StorageFragment, Typed, WrittenBlock};
+use crate::{
+    ConnectionId, DataModelError, EntityId, GraphCatalog, Packages, PropertyId,
+    RelationshipVariantId,
+};
 
 /// A storage backend: the blocks its stores' fragments write, and the facts it resolves them
 /// into. A block the YAML omits reads as its type's default.
 pub trait StorageBackend: Sized + 'static {
     const KIND: &'static str;
-    /// The access policies this backend renders into its plans.
+    const CAPABILITIES: Capabilities;
+    /// The access policies this backend renders into its plans, besides `via`, which every
+    /// backend without joins renders.
     const POLICIES: &'static [PolicyKind];
-    type Options: Block + DeserializeOwned + Default;
-    type SourceOptions: Block + DeserializeOwned + Default;
-    type ColumnOptions: Block + DeserializeOwned + Default;
+    /// The generic storage fragment fields this backend reads; a fragment sets no other.
+    const FIELDS: &'static [Field];
+    type Options: Block + DeserializeOwned + Default + WrittenBlock;
+    type SourceOptions: Block + DeserializeOwned + Default + WrittenBlock;
+    type ColumnOptions: Block + DeserializeOwned + Default + WrittenBlock;
     type Store: Debug + Send + Sync + std::panic::RefUnwindSafe + 'static;
 
     fn resolve(input: StoreInput<'_, Self>, diagnostics: &mut Diagnostics) -> Self::Store;
+
+    /// Whether the store runs `operation` on `property` of `entity` itself, beyond what its
+    /// capabilities and accepts already serve.
+    fn serves(
+        _store: &Self::Store,
+        _entity: EntityId,
+        _property: PropertyId,
+        _operation: Operation,
+    ) -> bool {
+        false
+    }
 }
 
 impl<B: StorageBackend> Blocks for B {
@@ -38,31 +57,72 @@ impl<B: StorageBackend> Blocks for B {
 
 impl<B: StorageBackend> Typed for B {}
 
+/// What a backend kind can do, which engine and loader rules read instead of its kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Capabilities {
+    /// Evaluates scope filters and relationship steps in its own query.
+    pub joins: bool,
+    /// Holds tables that a declared source writes; otherwise its own service writes or serves
+    /// what it reads, and its stores declare no writer.
+    pub writer: bool,
+    /// Evaluates the search modes its stores declare, and searches by repository.
+    pub search: bool,
+    /// Calls an external service at query time with the caller's own sign-in, so it answers an
+    /// entity's delegated check.
+    pub delegates: bool,
+}
+
+/// A generic field of a storage fragment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub enum Field {
+    Trusted,
+    PathColumn,
+    Complete,
+    Accepts,
+    Table,
+    Exclude,
+    Access,
+    Immutable,
+    Column,
+    Selectivity,
+    StoredAsText,
+    Fk,
+    EdgeTable,
+    Index,
+    Copies,
+}
+
+impl Field {
+    pub const ALL: [Self; 15] = [
+        Self::Trusted,
+        Self::PathColumn,
+        Self::Complete,
+        Self::Accepts,
+        Self::Table,
+        Self::Exclude,
+        Self::Access,
+        Self::Immutable,
+        Self::Column,
+        Self::Selectivity,
+        Self::StoredAsText,
+        Self::Fk,
+        Self::EdgeTable,
+        Self::Index,
+        Self::Copies,
+    ];
+
+    pub fn name(self) -> &'static str {
+        self.into()
+    }
+}
+
 /// The options of a backend block that takes none.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NoOptions {}
 
-/// A store that holds no rows names no tables.
-pub fn check_unrelational<B: StorageBackend>(
-    input: &StoreInput<'_, B>,
-    diagnostics: &mut Diagnostics,
-) {
-    let store = input.store;
-    for source in store.sources() {
-        if let Some(table) = &source.table {
-            diagnostics.error(
-                &source.package,
-                format!(
-                    "store {} is {} and holds no table, but binds {} to {table}",
-                    store.name,
-                    store.kind,
-                    input.graph.entity(source.entity).name
-                ),
-            );
-        }
-    }
-}
+impl WrittenBlock for NoOptions {}
 
 /// One result row of a backend service, keyed by the request's field names.
 pub type Row = serde_json::Map<String, serde_json::Value>;
@@ -121,7 +181,7 @@ pub struct StoreInput<'a, B: StorageBackend> {
 #[derive(Debug)]
 pub struct Catalog<B: StorageBackend> {
     model: Arc<Model>,
-    connection: String,
+    connection: ConnectionId,
     stores: Vec<usize>,
     backend: PhantomData<fn() -> B>,
 }
@@ -130,31 +190,37 @@ impl<B: StorageBackend> Catalog<B> {
     /// The catalog of the one connection that holds the model's stores of this backend.
     pub fn from_model(model: &Arc<Model>) -> Result<Self, DataModelError> {
         let mut connections = model
-            .stores
-            .iter()
-            .filter(|store| store.kind == B::KIND)
-            .map(|store| store.connection.as_str());
+            .connections()
+            .filter(|connection| connection.kind() == B::KIND);
         let connection = connections
             .next()
             .ok_or_else(|| DataModelError::UnknownReference {
                 kind: "backend",
                 name: B::KIND.to_string(),
             })?;
-        if let Some(other) = connections.find(|other| *other != connection) {
+        if let Some(other) = connections.next() {
             return Err(DataModelError::Invalid(format!(
-                "{} stores sit on connections {connection} and {other}",
-                B::KIND
+                "{} stores sit on connections {} and {}",
+                B::KIND,
+                connection.name(),
+                other.name()
             )));
         }
-        model.physical(connection)
+        model.physical(connection.id())
     }
 
-    pub fn embedded() -> Result<Self, DataModelError> {
-        Self::from_model(&Packages::embedded().load()?)
+    /// The catalog of the embedded packages as a deployment of the shape `shape` reads them.
+    pub fn embedded(shape: &str) -> Result<Self, DataModelError> {
+        Self::from_model(&Packages::embedded().deployment(shape)?)
     }
 
     pub fn model(&self) -> &Model {
         &self.model
+    }
+
+    /// The model's name resolver, for a frontend and for tests.
+    pub fn names(&self) -> super::Names<'_> {
+        self.model.names()
     }
 
     /// The model, for callers that keep it past this catalog.
@@ -166,8 +232,8 @@ impl<B: StorageBackend> Catalog<B> {
         self.model.graph()
     }
 
-    pub fn connection(&self) -> &str {
-        &self.connection
+    pub fn connection(&self) -> ConnectionId {
+        self.connection
     }
 
     pub fn stores(&self) -> impl Iterator<Item = (&Store, &B::Store)> {
@@ -177,15 +243,10 @@ impl<B: StorageBackend> Catalog<B> {
         })
     }
 
-    pub fn store(&self, name: &str) -> Option<&Store> {
+    /// The backend facts of `store`, when it sits on this connection.
+    pub fn facts(&self, store: crate::StoreId) -> Option<&B::Store> {
         self.stores()
-            .find(|(store, _)| store.name == name)
-            .map(|(store, _)| store)
-    }
-
-    pub fn backend(&self, name: &str) -> Option<&B::Store> {
-        self.stores()
-            .find(|(store, _)| store.name == name)
+            .find(|(held, _)| held.id() == store)
             .map(|(_, facts)| facts)
     }
 
@@ -196,7 +257,7 @@ impl<B: StorageBackend> Catalog<B> {
 
     /// The store on this connection that plans read the entity from: its complete store when the
     /// connection holds it, else the one partial store here.
-    pub fn home(&self, entity: EntityId) -> Option<(&Store, &B::Store)> {
+    pub(crate) fn home(&self, entity: EntityId) -> Option<(&Store, &B::Store)> {
         let mut holders = self
             .stores()
             .filter(|(store, _)| store.source(entity).is_some());
@@ -248,30 +309,34 @@ impl<B: StorageBackend> Catalog<B> {
 }
 
 impl Model {
+    /// The catalog of `connection`, whose stores are all of backend `B`.
     pub fn physical<B: StorageBackend>(
         self: &Arc<Self>,
-        connection: &str,
+        connection: ConnectionId,
     ) -> Result<Catalog<B>, DataModelError> {
         let stores: Vec<usize> = (0..self.stores.len())
-            .filter(|index| self.stores[*index].connection == connection)
+            .filter(|index| self.stores[*index].connection_id == connection)
             .collect();
-        let Some(first) = stores.first().map(|index| &self.stores[*index]) else {
-            return Err(DataModelError::UnknownReference {
-                kind: "connection",
-                name: connection.to_string(),
-            });
-        };
-        if first.kind != B::KIND {
+        let served = self.connection(connection);
+        if served.kind() != B::KIND {
             let mut diagnostics = Diagnostics::default();
+            let package = stores
+                .first()
+                .map_or("", |index| self.stores[*index].package.as_str());
             diagnostics.error(
-                &first.package,
-                format!("connection {connection} is {}, not {}", first.kind, B::KIND),
+                package,
+                format!(
+                    "connection {} is {}, not {}",
+                    served.name(),
+                    served.kind(),
+                    B::KIND
+                ),
             );
             diagnostics.finish()?;
         }
         Ok(Catalog {
             model: Arc::clone(self),
-            connection: connection.to_string(),
+            connection,
             stores,
             backend: PhantomData,
         })
@@ -308,9 +373,32 @@ impl Model {
 pub(crate) trait Registered {
     fn kind(&self) -> &'static str;
 
+    fn capabilities(&self) -> Capabilities;
+
+    fn serves(
+        &self,
+        facts: &Facts,
+        entity: EntityId,
+        property: PropertyId,
+        operation: Operation,
+    ) -> bool;
+
     fn policies(&self) -> &'static [PolicyKind];
 
+    fn fields(&self) -> &'static [Field];
+
+    fn renders(&self, policy: PolicyKind) -> bool {
+        self.policies().contains(&policy) || policy == PolicyKind::Via && !self.capabilities().joins
+    }
+
+    fn reads(&self, field: Field) -> bool {
+        self.fields().contains(&field)
+    }
+
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error>;
+
+    /// The schema of a package file, whose storage fragments are this backend's.
+    fn schema(&self) -> schemars::Schema;
 
     fn resolve(
         &self,
@@ -330,8 +418,16 @@ const REGISTRY: [&dyn Registered; 4] = [
     &Entry::<Live>(PhantomData),
 ];
 
+pub(crate) fn backends() -> impl Iterator<Item = &'static dyn Registered> {
+    REGISTRY.into_iter()
+}
+
 pub(crate) fn registered(kind: &str) -> Option<&'static dyn Registered> {
-    REGISTRY.into_iter().find(|backend| backend.kind() == kind)
+    backends().find(|backend| backend.kind() == kind)
+}
+
+pub(crate) fn capabilities(kind: &str) -> Option<Capabilities> {
+    registered(kind).map(|backend| backend.capabilities())
 }
 
 impl<B: StorageBackend> Registered for Entry<B> {
@@ -339,12 +435,36 @@ impl<B: StorageBackend> Registered for Entry<B> {
         B::KIND
     }
 
+    fn capabilities(&self) -> Capabilities {
+        B::CAPABILITIES
+    }
+
+    fn serves(
+        &self,
+        facts: &Facts,
+        entity: EntityId,
+        property: PropertyId,
+        operation: Operation,
+    ) -> bool {
+        (facts.as_ref() as &dyn std::any::Any)
+            .downcast_ref::<B::Store>()
+            .is_some_and(|store| B::serves(store, entity, property, operation))
+    }
+
     fn policies(&self) -> &'static [PolicyKind] {
         B::POLICIES
     }
 
+    fn fields(&self) -> &'static [Field] {
+        B::FIELDS
+    }
+
     fn parse(&self, yaml: &str) -> Result<StorageFragment, orbit_utils::yaml::Error> {
         StorageFragment::<B>::parse(yaml)
+    }
+
+    fn schema(&self) -> schemars::Schema {
+        schemars::schema_for!(crate::spec::Fragment<StorageFragment<B>>)
     }
 
     fn resolve(
@@ -393,7 +513,7 @@ impl<B: StorageBackend> Registered for Entry<B> {
             connection: model
                 .stores
                 .iter()
-                .filter(|other| other.connection == store.connection)
+                .filter(|other| other.connection_name == store.connection_name)
                 .collect(),
             options,
             entities,

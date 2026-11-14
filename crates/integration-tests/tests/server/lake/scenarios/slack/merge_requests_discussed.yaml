@@ -1,0 +1,53 @@
+cases:
+  - name: allowed
+    description: The bounded merge request stage on ClickHouse and the Slack lake stage on DuckDB, which holds merge_request_id, join on DISCUSSES. The lake returns m2 to alice although the live store hides it from her, because lake reads rely on the scope filter the ETL assigns
+    config:
+      security: default
+    query: |
+      MATCH (mr:MergeRequest)<-[:DISCUSSES]-(m:SlackMessage) WHERE mr.id <= 2002 RETURN mr.title, m.author, m.channel ORDER BY m.author LIMIT 20
+    expect:
+      node_count: 8
+      skip_requirements: [node_ids, order_by, "filter:id", "relationship:DISCUSSES"]
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001, 2002]
+        SlackMessage:
+          rows:
+            - { id: m1, author: ann, channel: orbit-dev }
+            - { id: m4, author: ann, channel: random }
+            - { id: m2, author: ben, channel: orbit-dev }
+            - { id: m5, author: dee, channel: orbit-dev }
+            - { id: m8, author: eve, channel: orbit-dev }
+      edge_count:
+        DISCUSSES: 5
+      live_calls: []
+
+  - name: partly_denied
+    description: A group reader reads merge request 2000, but m8, which discusses it from the private group's workspace T02, drops on the Slack lake's own scope filter; m5 and merge request 2002 drop on both connections
+    config:
+      security: group_100
+    query: |
+      MATCH (mr:MergeRequest)<-[:DISCUSSES]-(m:SlackMessage) WHERE mr.id <= 2002 RETURN mr.title, m.author, m.channel ORDER BY m.author LIMIT 20
+    expect:
+      node_count: 5
+      skip_requirements: [node_ids, order_by, "filter:id", "relationship:DISCUSSES"]
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001]
+        SlackMessage:
+          rows:
+            - { id: m1, author: ann, channel: orbit-dev }
+            - { id: m4, author: ann, channel: random }
+            - { id: m2, author: ben, channel: orbit-dev }
+      edge_count:
+        DISCUSSES: 3
+
+  - name: empty
+    description: A caller whose group holds neither the merge requests nor Slack rows reads nothing on either side
+    config:
+      security: no_integration_rows
+    query: |
+      MATCH (mr:MergeRequest)<-[:DISCUSSES]-(m:SlackMessage) WHERE mr.id <= 2002 RETURN mr.title, m.author, m.channel LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: [node_ids, "filter:id", "relationship:DISCUSSES"]

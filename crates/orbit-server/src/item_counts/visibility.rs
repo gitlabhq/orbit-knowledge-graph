@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn entities_need_a_scope_key_and_a_scope_with_their_permission() {
-        let data_model = Catalog::<ClickHouse>::embedded().unwrap();
+        let data_model = Catalog::<ClickHouse>::embedded("server").unwrap();
         let grants = Grants::new(Caller::new("user:1", false, ()))
             .with(
                 "namespace",

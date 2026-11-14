@@ -284,7 +284,7 @@ fn build_sweep(
     sweeps_per_tick: usize,
 ) -> (CodeStaleSweep, Arc<ClickHouseCheckpointStore>) {
     let table_names = CodeTableNames::from_catalog(
-        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+        &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
     )
     .expect("code tables must resolve");
     let store = Arc::new(indexer::testkit::checkpoint_store(Arc::new(

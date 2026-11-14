@@ -1,15 +1,14 @@
-//! Queries one remote connection serves alone: a one-stage DAG whose stage runs the code or live
-//! sub-pipeline, after the scope lookup its read's `via` chain needs.
-
-use std::collections::BTreeSet;
+//! Queries one remote connection serves alone: the scope lookup stage its read's `via` chain
+//! needs, then the stage that runs the code or live sub-pipeline.
 
 use compiler::dag::Rendered;
 use compiler::orbit_authorization::Key;
 use query_data_model::implementations::live::{ExtractionRequest, RequestFilter};
 use query_data_model::implementations::orbit_code::{RequestField, StructuralSearchRequest};
+use query_engine::shared::dag::Event;
 use serde_json::json;
 
-use super::{caller, row, run, run_with};
+use super::{caller, projects, row, run, run_with, workspaces};
 use crate::dag_fakes::AllowedKeys;
 
 pub(super) const CODE: &str = "MATCH (f:File) WHERE f.project_id = 42 AND f.content MATCHES ast('compile($$$ARGS)', 'rust') RETURN f.path, match.line, match.ARGS LIMIT 50";
@@ -44,8 +43,8 @@ fn live_request(rendered: &[Rendered]) -> &ExtractionRequest {
 
 #[tokio::test]
 async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
-    let ran = run(CODE, &caller("1/9970/"), Vec::new()).await;
-    let planned = ran.plan(0, false);
+    let ran = run(CODE, &caller("1/9970/"), projects(&[42])).await;
+    let planned = ran.plan(1, false);
     assert_eq!(
         ops(&planned),
         [
@@ -57,19 +56,20 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
             "Select"
         ]
     );
-    let emitted = ran.plan(0, true);
+    let emitted = ran.plan(1, true);
     assert_eq!(ops(&emitted)[..2], ["Repositories", "Restrict"]);
     assert!(emitted[1].starts_with("Restrict([42])"), "{emitted:?}");
-    let rendered = ran.rendered(0);
-    let Rendered::Sql { sql, .. } = &rendered[0] else {
-        panic!("the scope lookup renders first: {rendered:?}");
+    let Rendered::Sql { sql, .. } = &ran.rendered(0)[0] else {
+        panic!("the scope lookup stage renders SQL");
     };
     assert_eq!(
-        sql,
-        "SELECT k0.id AS id, k0.traversal_path AS traversal_path FROM gl_project AS k0 FINAL WHERE (startsWith(k0.traversal_path, {p0:String}) AND k0.id IN {p1:Array(Int64)})"
+        sql.split(" SETTINGS").next(),
+        Some(
+            "SELECT scope.id AS scope_id FROM (SELECT * FROM gl_project AS scope WHERE (startsWith(scope.traversal_path, {p0:String}) AND (scope.id = {p1:Int64})) ORDER BY scope.traversal_path ASC, scope.id ASC, scope._version DESC LIMIT 1 BY scope.traversal_path, scope.id) AS scope WHERE (scope._deleted = {p2:Bool}) LIMIT 1002"
+        )
     );
     assert_eq!(
-        *code_request(&rendered),
+        *code_request(&ran.rendered(1)),
         StructuralSearchRequest {
             repositories: vec![42],
             heads: vec![],
@@ -78,7 +78,7 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
             pattern: "compile($$$ARGS)".into(),
             limit: Some(1001),
             fields: vec![
-                RequestField::Path,
+                RequestField::Column("path".into()),
                 RequestField::Repository("project_id".into()),
                 RequestField::Line,
                 RequestField::Capture("ARGS".into()),
@@ -100,28 +100,28 @@ async fn the_code_query_plans_into_a_structural_search_and_returns_matches() {
 
 #[tokio::test]
 async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
-    let ran = run(SLACK, &caller("1/9970/"), Vec::new()).await;
+    let orbit = workspaces(&["T01"]);
+    let ran = run(SLACK, &caller("1/9970/"), orbit.clone()).await;
     assert_eq!(
-        ops(&ran.plan(0, false)),
+        ops(&ran.plan(1, false)),
         ["Call", "Filter", "Limit", "Select"]
     );
     assert_eq!(
-        ops(&ran.plan(0, true)),
+        ops(&ran.plan(1, true)),
         ["Call", "Workspaces", "Filter", "Limit", "Select"]
     );
-    let rendered = ran.rendered(0);
-    let Rendered::Sql { sql, .. } = &rendered[0] else {
-        panic!("the workspace lookup renders first: {rendered:?}");
+    let Rendered::Sql { sql, .. } = &ran.rendered(0)[0] else {
+        panic!("the workspace lookup stage renders SQL");
     };
-    assert_eq!(
-        sql,
-        "SELECT k0.id AS id, k1.traversal_path AS traversal_path FROM gl_slack_workspace AS k0 FINAL INNER JOIN gl_group AS k1 FINAL ON (k0.group_id = k1.id) WHERE startsWith(k1.traversal_path, {p0:String})"
+    assert!(
+        sql.contains("FROM slack_workspace AS scope WHERE starts_with(scope.traversal_path, $1)"),
+        "the lookup reads the workspaces on the Slack lake under their guard: {sql}"
     );
     assert_eq!(
-        *live_request(&rendered),
+        *live_request(&ran.rendered(1)),
         ExtractionRequest {
             operation: "search.messages".into(),
-            workspaces: vec!["T01".into()],
+            workspaces: query_data_model::plan::live::Workspaces::Only(vec!["T01".into()]),
             filters: vec![
                 RequestFilter {
                     field: "channel".into(),
@@ -145,17 +145,24 @@ async fn the_slack_query_plans_into_a_live_call_and_returns_visible_messages() {
             json!({"m_author": "ann", "m_text": "deploy to staging at 5pm", "_orbit_m_id": "m1", "_orbit_m_type": "SlackMessage"})
         )]
     );
-    let checks = AllowedKeys(BTreeSet::new());
-    let bob = run_with(SLACK, &caller("1/9970/"), Vec::new(), "bob", &checks).await;
+    let checks = AllowedKeys::checks("project", []);
+    let bob = run_with(SLACK, &caller("1/9970/"), orbit, "bob", &checks).await;
     assert_eq!(bob.rows().len(), 2);
 }
 
+/// The project lookup reads the projects the code read names under the caller's scope, and the
+/// code request reads only the ones it returns.
 #[tokio::test]
-async fn the_repository_restriction_drops_projects_the_caller_cannot_read() {
+async fn the_repository_restriction_keeps_the_projects_the_lookup_returns() {
     let query = CODE.replace("f.project_id = 42", "f.project_id IN [42, 77]");
-    let narrow = run(&query, &caller("1/9970/"), Vec::new()).await;
-    assert!(narrow.plan(0, false)[0].contains("projects: [42, 77]"));
-    assert_eq!(code_request(&narrow.rendered(0)).repositories, [42]);
+    let narrow = run(&query, &caller("1/9970/"), projects(&[42])).await;
+    let Rendered::Sql { params, .. } = &narrow.rendered(0)[0] else {
+        panic!("the scope lookup stage renders SQL");
+    };
+    let values: Vec<&serde_json::Value> = params.iter().map(|(_, value)| value).collect();
+    assert_eq!(values[..2], [&json!("1/9970/"), &json!([42, 77])]);
+    assert!(narrow.plan(1, false)[0].contains("projects: [42, 77]"));
+    assert_eq!(code_request(&narrow.rendered(1)).repositories, [42]);
     let paths: Vec<_> = narrow
         .rows()
         .into_iter()
@@ -163,7 +170,7 @@ async fn the_repository_restriction_drops_projects_the_caller_cannot_read() {
         .collect();
     assert!(!paths.contains(&json!("src/vault.rs")), "{paths:?}");
 
-    let wide = run(&query, &caller("1/"), Vec::new()).await;
+    let wide = run(&query, &caller("1/"), projects(&[42, 77])).await;
     let paths: Vec<_> = wide
         .rows()
         .into_iter()
@@ -174,14 +181,15 @@ async fn the_repository_restriction_drops_projects_the_caller_cannot_read() {
 
 #[tokio::test]
 async fn the_workspace_precondition_keeps_unreadable_namespaces_out_of_the_call() {
-    let everywhere = run(SLACK, &caller("1/"), Vec::new()).await;
+    let both = workspaces(&["T01", "T02"]);
+    let everywhere = run(SLACK, &caller("1/"), both).await;
     assert_eq!(
-        live_request(&everywhere.rendered(0)).workspaces,
-        ["T01", "T02"]
+        live_request(&everywhere.rendered(1)).workspaces,
+        query_data_model::plan::live::Workspaces::Only(vec!["T01".into(), "T02".into()])
     );
     assert_eq!(everywhere.rows().len(), 2);
 
-    let narrow = run(SLACK, &caller("1/9970/"), Vec::new()).await;
+    let narrow = run(SLACK, &caller("1/9970/"), workspaces(&["T01"])).await;
     let texts: Vec<_> = narrow
         .rows()
         .into_iter()
@@ -190,18 +198,14 @@ async fn the_workspace_precondition_keeps_unreadable_namespaces_out_of_the_call(
     assert!(!texts.contains(&json!("deploy uses the production keys")));
 }
 
-/// The lookup resolves only scope keys outside the caller's scope, so the stage reads nothing:
-/// no request goes out and the result is empty, as for a relational read.
+/// The lookup returns no key under the caller's scope, so the remote stage reads nothing: no
+/// request goes out and the result is empty, as for a relational read.
 #[tokio::test]
 async fn a_caller_who_can_read_nothing_gets_no_request() {
     for query in [CODE, SLACK] {
         let ran = run(query, &caller("1/424242/"), Vec::new()).await;
-        assert!(ran.kinds().contains(&"finished 0".to_string()));
-        assert!(
-            ran.rendered(0)
-                .iter()
-                .all(|request| matches!(request, Rendered::Sql { .. }))
-        );
+        assert!(ran.kinds().contains(&"finished 1".to_string()));
+        assert!(ran.rendered(1).is_empty());
         assert!(ran.rows().is_empty());
     }
 }
@@ -210,14 +214,14 @@ async fn a_caller_who_can_read_nothing_gets_no_request() {
 async fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture() {
     let ctx = caller("1/9970/");
     let pushed = run(
-        "MATCH (m:SlackMessage) WHERE m.workspace = 'T01' RETURN m.text LIMIT 5",
+        "MATCH (m:SlackMessage) WHERE m.id = 'm1' RETURN m.text LIMIT 5",
         &ctx,
         Vec::new(),
     )
     .await;
     assert_eq!(
         pushed.error(),
-        "schema violation: search.messages cannot push down equality on SlackMessage.workspace; it filters on id, channel, author, sent_at, merge_request_id, text (contains)"
+        "allowlist rejected: no one store of SlackMessage serves both a read of SlackMessage.text and equality on SlackMessage.id"
     );
     let capture = run(&CODE.replace("match.ARGS", "match.BODY"), &ctx, Vec::new()).await;
     assert_eq!(
@@ -227,23 +231,52 @@ async fn construction_rejects_a_filter_without_push_down_and_an_unknown_capture(
     let relational = compiler::compile(
         CODE,
         &std::sync::Arc::new(
-            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+            query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
         ),
         &ctx,
         query_data_model::testkit::limits(),
     );
     assert_eq!(
         relational.err().unwrap().to_string(),
-        "schema violation: structural matches run on an orbit_code connection, not in SQL"
+        "allowlist rejected: no store serves a structural search on File.content"
     );
 }
 
 #[tokio::test]
 async fn code_rows_go_through_the_read_code_check() {
-    let none = AllowedKeys(BTreeSet::new());
-    let denied = run_with(CODE, &caller("1/9970/"), Vec::new(), "alice", &none).await;
+    let none = AllowedKeys::checks("project", []);
+    let denied = run_with(CODE, &caller("1/9970/"), projects(&[42]), "alice", &none).await;
     assert!(denied.rows().is_empty());
-    let only = AllowedKeys(BTreeSet::from([Key::Int(42)]));
-    let allowed = run_with(CODE, &caller("1/9970/"), Vec::new(), "alice", &only).await;
+    let only = AllowedKeys::checks("project", [Key::Int(42)]);
+    let allowed = run_with(CODE, &caller("1/9970/"), projects(&[42]), "alice", &only).await;
     assert_eq!(allowed.rows().len(), 2);
+}
+
+/// The project lookup runs `Project`'s `read_code` check like any read, so a project the caller
+/// may not read code of never reaches the code stage, while the ones it may are searched.
+#[tokio::test]
+async fn a_project_denied_read_code_never_reaches_the_code_stage() {
+    let query = CODE.replace("f.project_id = 42", "f.project_id IN [42, 77]");
+    let only = AllowedKeys::checks("project", [Key::Int(42)]);
+    let ran = run_with(&query, &caller("1/"), projects(&[42, 77]), "alice", &only).await;
+    let scoped = ran.events.iter().find_map(|event| match event {
+        Event::Keys {
+            from: 0,
+            to: 1,
+            sample,
+            ..
+        } => Some(sample.clone()),
+        _ => None,
+    });
+    assert_eq!(scoped, Some(vec![Key::Int(42)]));
+    let request = code_request(&ran.rendered(1)).clone();
+    assert_eq!(request.repositories, [42]);
+    assert!(!request.repositories.contains(&77));
+    let paths: Vec<_> = ran
+        .rows()
+        .into_iter()
+        .map(|row| row["f_path"].clone())
+        .collect();
+    assert!(!paths.contains(&json!("src/vault.rs")), "{paths:?}");
+    assert!(!paths.is_empty());
 }

@@ -1,0 +1,4 @@
+kind: source
+package: peers.clans
+source: clan_sync
+entities: [Clan]

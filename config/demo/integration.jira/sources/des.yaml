@@ -1,0 +1,14 @@
+kind: source
+package: integration.jira
+source: des
+declare:
+  connection: jira_lake
+  version: _siphon_replicated_at
+  watermark: _siphon_watermark
+  deleted: _siphon_deleted
+entities:
+  JiraProject: {tables: [jira_project], order_by: [traversal_path, id], query: generated}
+  JiraIssue: {tables: [jira_issue], order_by: [traversal_path, id], query: generated}
+  JiraUser: {tables: [jira_user], order_by: [traversal_path, account_id], query: generated}
+  JiraComment: {tables: [jira_comment], order_by: [traversal_path, id], query: generated}
+  GitLabRef: {tables: [jira_gitlab_ref], order_by: [traversal_path, id], query: generated}

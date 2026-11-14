@@ -36,7 +36,7 @@ pub fn tree<B: RelationalBackend>(plan: &RelationalPlan<B>, catalog: &Catalog<B>
         plan,
         catalog,
         owners,
-        current_is_final: B::CAPABILITIES.current_rows == CurrentRows::Final,
+        current_is_final: B::SQL.current_rows == CurrentRows::Final,
         readers,
         shares,
     };

@@ -1,28 +1,81 @@
 //! Executors over the seeded fakes, so DAG scenarios run code and live stages end to end the
 //! way `SeededColumnResolver` fakes Gitaly. Only tests register them; the server registers none.
 
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use compiler::dag::Request;
+use compiler::dag::{Backend, Connections, Contract, Env, Frontend, Peer, Request, Source};
 use compiler::orbit_authorization::Key;
-use compiler::remote::{Resolves, RowCheck};
+use compiler::orbit_authorization::{Answers, AuthError, Check, Checks, Module, Need, Provider};
 use query_data_model::catalog::Row;
-use query_data_model::implementations::live::DataExtraction;
+use query_data_model::implementations::live::{DataExtraction, ExtractionRequest};
 use query_data_model::implementations::orbit_code::{CodeSearch, RequestField};
-use query_engine::shared::dag::{Executed, Executor, ExecutorError, RowChecks, from_rows};
-use serde_json::{Value, json};
+use query_data_model::{Catalog, ClickHouse, Model};
+use query_engine::shared::dag::{
+    DagError, Event, Executed, Executor, ExecutorError, Executors, Outcome, Recording, Runner,
+    from_rows,
+};
+use serde_json::Value;
 
-use crate::seeded_remote::{SeededCodeSearch, SeededDataExtraction, seeded_namespaces};
+use crate::seeded_remote::{SeededCodeSearch, SeededDataExtraction};
 
 fn unexpected(request: &Request) -> ExecutorError {
     ExecutorError(format!("this fake runs no {request:?}"))
 }
 
-fn batch(rows: &[Row], fields: &[String]) -> Result<Executed, ExecutorError> {
+/// The rows a fake returns, field by field in contract order.
+fn batch(
+    rows: &[Row],
+    fields: &[String],
+    contract: Option<&Contract>,
+) -> Result<Executed, ExecutorError> {
+    let contract =
+        contract.ok_or_else(|| ExecutorError("a fake stage request carries a contract".into()))?;
     Ok(Executed {
-        batches: vec![from_rows(rows, fields)?],
+        batches: vec![from_rows(rows, fields, contract)?],
+        log: Vec::new(),
+    })
+}
+
+/// Rows of a request without a contract, as a backend names them: integers as Int64, anything
+/// else as text.
+fn named(rows: &[Row], fields: &[String]) -> Result<Executed, ExecutorError> {
+    use arrow::array::{ArrayRef, Int64Array, StringArray};
+    use arrow::datatypes::{Field, Schema};
+    let mut schema = Vec::new();
+    let mut arrays: Vec<ArrayRef> = Vec::new();
+    for field in fields {
+        let values: Vec<&Value> = rows
+            .iter()
+            .map(|row| row.get(field).unwrap_or(&Value::Null))
+            .collect();
+        let array: ArrayRef = match values.iter().all(|value| value.is_null() || value.is_i64()) {
+            true => Arc::new(
+                values
+                    .iter()
+                    .map(|value| value.as_i64())
+                    .collect::<Int64Array>(),
+            ),
+            false => Arc::new(
+                values
+                    .iter()
+                    .map(|value| match value {
+                        Value::Null => None,
+                        Value::String(text) => Some(text.clone()),
+                        other => Some(other.to_string()),
+                    })
+                    .collect::<StringArray>(),
+            ),
+        };
+        schema.push(Field::new(field, array.data_type().clone(), true));
+        arrays.push(array);
+    }
+    let batch = arrow::record_batch::RecordBatch::try_new(Arc::new(Schema::new(schema)), arrays)
+        .map_err(|error| ExecutorError(error.to_string()))?;
+    Ok(Executed {
+        batches: vec![batch],
         log: Vec::new(),
     })
 }
@@ -32,7 +85,11 @@ pub struct CodeExecutor(pub SeededCodeSearch);
 
 #[async_trait]
 impl Executor for CodeExecutor {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
         let Request::Code(search) = request else {
             return Err(unexpected(request));
         };
@@ -44,14 +101,14 @@ impl Executor for CodeExecutor {
             .fields
             .iter()
             .map(|field| match field {
-                RequestField::Path => "path".to_string(),
                 RequestField::Line => "line".to_string(),
-                RequestField::Capture(name)
+                RequestField::Column(name)
+                | RequestField::Capture(name)
                 | RequestField::Repository(name)
                 | RequestField::Branch(name) => name.clone(),
             })
             .collect();
-        batch(&rows, &fields)
+        batch(&rows, &fields, contract)
     }
 }
 
@@ -63,7 +120,11 @@ pub struct LiveExecutor {
 
 #[async_trait]
 impl Executor for LiveExecutor {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
         let Request::Live(call) = request else {
             return Err(unexpected(request));
         };
@@ -71,66 +132,99 @@ impl Executor for LiveExecutor {
             .service
             .extract(&self.user, call)
             .map_err(|error| ExecutorError(error.0))?;
-        batch(&rows, &call.fields)
+        batch(&rows, &call.fields, contract)
     }
 }
 
-/// The graph connection in tests that assert plans without a container: each query returns the
-/// seeded rows, and each scope lookup the seeded namespaces.
+/// The relational connections in tests that assert plans without a container: each query returns the
+/// seeded rows that hold any of the names its SQL gives its columns, so each stage reads the rows
+/// seeded for its own bindings.
 pub struct SeededGraph(pub Vec<Row>);
 
 #[async_trait]
 impl Executor for SeededGraph {
-    async fn execute(&self, request: &Request) -> Result<Executed, ExecutorError> {
-        match request {
-            Request::Query(_) if self.0.is_empty() => Ok(Executed::default()),
-            Request::Query(_) => {
-                let mut fields: Vec<String> = Vec::new();
-                for key in self.0.iter().flat_map(|row| row.keys()) {
-                    if !fields.contains(key) {
-                        fields.push(key.clone());
-                    }
-                }
-                batch(&self.0, &fields)
-            }
-            Request::Lookup(lookup) => {
-                let seeded = seeded_namespaces();
-                let row = |id: Value, path: &str| {
-                    json!({compiler::remote::KEY: id, lookup.scope.as_str(): path})
-                        .as_object()
-                        .cloned()
-                        .unwrap_or_default()
-                };
-                let rows: Vec<Row> = match lookup.resolves {
-                    Resolves::Repositories => seeded
-                        .repositories
-                        .iter()
-                        .map(|(id, path)| row(Value::from(*id), path.as_str()))
-                        .collect(),
-                    Resolves::Workspaces => seeded
-                        .workspaces
-                        .iter()
-                        .map(|(id, path)| row(Value::from(id.as_str()), path.as_str()))
-                        .collect(),
-                };
-                let fields = [compiler::remote::KEY.to_string(), lookup.scope.clone()];
-                batch(&rows, &fields)
-            }
-            other => Err(unexpected(other)),
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
+        let Request::Query(compiled) = request else {
+            return Err(unexpected(request));
+        };
+        let columns = &compiled.base.columns;
+        let rows: Vec<Row> = self
+            .0
+            .iter()
+            .filter(|row| columns.iter().any(|column| row.contains_key(column)))
+            .cloned()
+            .collect();
+        match (rows.is_empty(), contract) {
+            (true, _) => Ok(Executed::default()),
+            (false, Some(_)) => batch(&rows, columns, contract),
+            (false, None) => named(&rows, columns),
         }
     }
 }
 
-/// A Rails stand-in that allows the listed keys of every row check.
-pub struct AllowedKeys(pub BTreeSet<Key>);
+/// A Rails stand-in whose checks on `resource` allow the listed keys; it allows every key of any
+/// other resource.
+pub struct AllowedKeys {
+    pub resource: String,
+    pub allowed: BTreeSet<Key>,
+}
 
 #[async_trait]
-impl RowChecks for AllowedKeys {
-    async fn allowed(&self, _: &RowCheck, keys: Vec<Key>) -> Result<BTreeSet<Key>, ExecutorError> {
-        Ok(keys
+impl Provider<Check> for AllowedKeys {
+    async fn call(&self, query: Check) -> Result<Vec<BTreeSet<Key>>, AuthError> {
+        Ok(query
+            .requests
             .into_iter()
-            .filter(|key| self.0.contains(key))
+            .map(|request| {
+                let listed = request.resource == self.resource;
+                request
+                    .ids
+                    .into_iter()
+                    .filter(|key| !listed || self.allowed.contains(key))
+                    .collect()
+            })
             .collect())
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AllowedOptions {
+    pub resource: String,
+    pub allowed: Vec<i64>,
+}
+
+impl Module for AllowedKeys {
+    const KIND: &'static str = "fake.rails";
+    type Options = AllowedOptions;
+
+    fn build(options: AllowedOptions) -> Result<Self, AuthError> {
+        Ok(Self {
+            resource: options.resource,
+            allowed: options.allowed.into_iter().map(Key::Int).collect(),
+        })
+    }
+
+    fn answers(self: Arc<Self>, _: &[Need]) -> Result<Answers, AuthError> {
+        Ok(Answers {
+            check: Some(self),
+            ..Answers::default()
+        })
+    }
+}
+
+impl AllowedKeys {
+    /// The deployment's `rails` checks, which allow only `allowed` of `resource`.
+    pub fn checks(resource: &str, allowed: impl IntoIterator<Item = Key>) -> Checks {
+        let check = Self {
+            resource: resource.to_string(),
+            allowed: allowed.into_iter().collect(),
+        };
+        Checks::default().with("rails", Arc::new(check))
     }
 }
 
@@ -151,57 +245,274 @@ pub fn dag_packages() -> query_data_model::Packages {
     query_data_model::testkit::with_demo().with(heads)
 }
 
-pub fn dag_model() -> Arc<query_data_model::Model> {
-    dag_packages().load().unwrap()
+/// The DAG packages, plus releases on a second ClickHouse connection keyed by UUID, the
+/// deployments that name them on the graph connection, reviews on a DuckDB connection,
+/// snippets that a code store on their own connection searches, and live posts whose `via`
+/// heads are keyed by an integer, by an identity not named `id` and by a composite identity on
+/// ClickHouse.
+pub fn peer_packages() -> query_data_model::Packages {
+    let peers = crate::authorization_variants::platform(&[
+        "peers.releases",
+        "peers.deployments",
+        "peers.lake",
+        "peers.snippets",
+        "peers.guilds",
+        "peers.clans",
+        "peers.ranks",
+    ]);
+    dag_packages().with(peers)
 }
 
-/// `graph` on the relational connection and the seeded code and live fakes on every served
+/// `packages` with text replaced in some fragments, keeping each package's tier.
+pub fn edited(
+    packages: query_data_model::Packages,
+    edits: &[(&str, &str, &str)],
+) -> query_data_model::Packages {
+    use std::collections::BTreeMap;
+    let tiers = packages.tiers().clone();
+    let mut by_tier: BTreeMap<query_data_model::Tier, BTreeMap<String, String>> = BTreeMap::new();
+    for (name, text) in packages.sources() {
+        let mut text = text.clone();
+        for (path, find, with) in edits.iter().filter(|(path, ..)| *path == name) {
+            assert!(text.contains(find), "{path} holds {find}");
+            text = text.replace(find, with);
+        }
+        let tier = tiers[name.split('/').next().unwrap_or_default()];
+        by_tier.entry(tier).or_default().insert(name.clone(), text);
+    }
+    by_tier
+        .into_iter()
+        .map(|(tier, sources)| query_data_model::Packages::new(tier, sources))
+        .reduce(query_data_model::Packages::with)
+        .expect("at least one package")
+}
+
+/// `packages` with `Head` enforcing only its `read_code` check on the code store.
+pub fn heads_under_none(packages: query_data_model::Packages) -> query_data_model::Packages {
+    edited(
+        packages,
+        &[(
+            "orbit_next.heads/authorization.yaml",
+            "enforce: {orbit_code: {scope_key: {via: HEAD_IN}}}",
+            "enforce: {orbit_code: none}\n    checks: [{provider: rails, permission: read_code, resource: project, object: Project, id: project_id}]",
+        )],
+    )
+}
+
+pub fn dag_model() -> Arc<query_data_model::Model> {
+    dag_packages().deployment("demo").unwrap()
+}
+
+/// Every connection of a deployment's model, and its ClickHouse graph connection.
+pub fn dag_connections(model: &Arc<Model>) -> (Arc<Catalog<ClickHouse>>, Connections) {
+    let connections = Connections::of(model).unwrap();
+    let graph = connections
+        .peers()
+        .iter()
+        .find_map(|peer| match peer {
+            Peer::ClickHouse(catalog) => Some(Arc::clone(catalog)),
+            _ => None,
+        })
+        .expect("the deployment stores a graph on ClickHouse");
+    (graph, connections)
+}
+
+/// An executor that counts the requests it runs.
+pub struct Counted {
+    pub inner: Arc<dyn Executor>,
+    pub requests: AtomicUsize,
+}
+
+#[async_trait]
+impl Executor for Counted {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
+        self.requests.fetch_add(1, Ordering::Relaxed);
+        self.inner.execute(request, contract).await
+    }
+}
+
+/// An executor that records the live calls it runs.
+pub struct Recorded {
+    pub inner: Arc<dyn Executor>,
+    pub calls: Mutex<Vec<ExtractionRequest>>,
+}
+
+#[async_trait]
+impl Executor for Recorded {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
+        if let Request::Live(call) = request {
+            self.calls.lock().unwrap().push(call.clone());
+        }
+        self.inner.execute(request, contract).await
+    }
+}
+
+/// The fake each served backend runs on: `graph` for the relational backends, the seeded code
+/// and live fakes for the remotes, signed in to the live service as `user`.
+fn fake(backend: Backend, graph: &Arc<dyn Executor>, user: &str) -> Option<Arc<dyn Executor>> {
+    match backend {
+        Backend::ClickHouse | Backend::DuckDb => Some(Arc::clone(graph)),
+        Backend::OrbitCode => Some(seeded_code()),
+        Backend::Live => Some(seeded_live(user)),
+        _ => None,
+    }
+}
+
+/// `graph` on every relational connection and the seeded code and live fakes on every served
 /// remote, signed in to the live service as `user`.
-pub fn dag_executors(
-    remotes: &compiler::dag::Remotes,
-    connection: &str,
-    graph: Arc<dyn Executor>,
-    user: &str,
-) -> query_engine::shared::dag::Executors {
-    let mut executors = query_engine::shared::dag::Executors::default().with(connection, graph);
-    for target in remotes.targets() {
-        let executor = match target.backend() {
-            compiler::dag::Backend::OrbitCode => seeded_code(),
-            _ => seeded_live(user),
-        };
-        executors = executors.with(target.connection(), executor);
+pub fn dag_executors(connections: &Connections, graph: Arc<dyn Executor>, user: &str) -> Executors {
+    let mut executors = Executors::default();
+    for peer in connections.peers() {
+        if let Some(executor) = fake(peer.backend(), &graph, user) {
+            executors = executors.with(peer.connection(), executor);
+        }
     }
     executors
 }
 
-/// Runs a query through the DAG runner with `graph` on the relational connection and the seeded
-/// code and live fakes on theirs, signed in to the live service as `user`.
-pub async fn run_dag(
-    model: &Arc<query_data_model::Model>,
+/// `run_dag` with every executor counted: the events, the outcome, and the requests each
+/// backend's executor ran.
+pub async fn run_counted(
+    model: &Arc<Model>,
     graph: Arc<dyn Executor>,
     query: &str,
     grants: &compiler::orbit_authorization::Grants,
     user: &str,
-    checks: &dyn RowChecks,
+    checks: &Checks,
 ) -> (
-    Vec<query_engine::shared::dag::Event>,
-    Result<query_engine::shared::dag::Outcome, query_engine::shared::dag::DagError>,
+    Vec<Event>,
+    Result<Outcome, DagError>,
+    BTreeMap<&'static str, usize>,
 ) {
-    use compiler::dag::{Env, Primary, Remotes, Source};
-    use query_data_model::{Catalog, ClickHouse};
-    let primary = Primary::ClickHouse(Arc::new(Catalog::<ClickHouse>::from_model(model).unwrap()));
-    let remotes = Remotes::all(model);
-    let executors = dag_executors(&remotes, primary.connection(), graph, user);
+    let (catalog, connections) = dag_connections(model);
+    let mut executors = Executors::default();
+    let mut counted = Vec::new();
+    for peer in connections.peers() {
+        if let Some(inner) = fake(peer.backend(), &graph, user) {
+            let executor = Arc::new(Counted {
+                inner,
+                requests: AtomicUsize::new(0),
+            });
+            counted.push((<&str>::from(peer.backend()), Arc::clone(&executor)));
+            executors = executors.with(peer.connection(), executor);
+        }
+    }
+    let frontend = Frontend::Server(catalog);
+    let (events, outcome) =
+        run_served(&frontend, &connections, &executors, query, grants, checks).await;
+    let requests = counted
+        .into_iter()
+        .map(|(backend, executor)| (backend, executor.requests.load(Ordering::Relaxed)))
+        .collect();
+    (events, outcome, requests)
+}
+
+/// Runs a query through the DAG runner with `graph` on the relational connections and the seeded
+/// code and live fakes on theirs, signed in to the live service as `user`.
+pub async fn run_dag(
+    model: &Arc<Model>,
+    graph: Arc<dyn Executor>,
+    query: &str,
+    grants: &compiler::orbit_authorization::Grants,
+    user: &str,
+    checks: &Checks,
+) -> (Vec<Event>, Result<Outcome, DagError>) {
+    let (catalog, connections) = dag_connections(model);
+    let executors = dag_executors(&connections, graph, user);
+    run_served(
+        &Frontend::Server(catalog),
+        &connections,
+        &executors,
+        query,
+        grants,
+        checks,
+    )
+    .await
+}
+
+/// Runs a query through the DAG runner of a deployment that serves `connections` through
+/// `executors`, recording every event.
+pub async fn run_served(
+    frontend: &Frontend,
+    connections: &Connections,
+    executors: &Executors,
+    query: &str,
+    grants: &compiler::orbit_authorization::Grants,
+    checks: &Checks,
+) -> (Vec<Event>, Result<Outcome, DagError>) {
     let env = Env {
-        primary: &primary,
-        remotes: &remotes,
+        frontend,
+        connections,
         grants,
         limits: query_data_model::testkit::limits(),
         trace: true,
     };
-    let mut observer = query_engine::shared::dag::Recording::default();
-    let outcome = query_engine::shared::dag::Runner::new(env, &executors, checks, &mut observer)
+    let mut observer = Recording::default();
+    let outcome = Runner::new(env, executors, checks, &mut observer)
         .run(Source::Text(query))
         .await;
     (observer.0, outcome)
+}
+
+/// The graph response of `outcome` once `redaction` answers its result's checks, as JSON.
+pub fn response(
+    outcome: &Outcome,
+    redaction: &crate::mock_redaction::MockRedactionService,
+) -> serde_json::Value {
+    use query_engine::formatters::GraphFormatter;
+    let compiled = &outcome.compiled;
+    let context = &compiled.base.result_context;
+    let mut result =
+        orbit_server::redaction::QueryResult::from_batches(&outcome.executed.batches, context)
+            .expect("the joined rows read as a result");
+    let redacted_count = result.apply_authorizations(&redaction.check(&result.resource_checks()));
+    let output = query_engine::shared::PipelineOutput {
+        row_count: result.authorized_count(),
+        redacted_count,
+        query_type: compiled.query_type.to_string(),
+        raw_query_strings: Vec::new(),
+        compiled: Arc::clone(compiled),
+        query_result: result,
+        result_context: context.clone(),
+        execution_log: Vec::new(),
+        pagination: None,
+    };
+    serde_json::to_value(GraphFormatter.build_response(&output)).expect("a response is JSON")
+}
+
+/// The edges the graph response of `outcome` returns once `redaction` answers its result's
+/// checks, each as `From:id -TYPE-> To:id` with each id as the response writes it, sorted.
+pub fn response_edges(
+    outcome: &Outcome,
+    redaction: &crate::mock_redaction::MockRedactionService,
+) -> Vec<String> {
+    let id = |value: &serde_json::Value| match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    };
+    let mut edges: Vec<String> = response(outcome, redaction)["edges"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|edge| {
+            format!(
+                "{}:{} -{}-> {}:{}",
+                edge["from"].as_str().unwrap_or_default(),
+                id(&edge["from_id"]),
+                edge["type"].as_str().unwrap_or_default(),
+                edge["to"].as_str().unwrap_or_default(),
+                id(&edge["to_id"])
+            )
+        })
+        .collect();
+    edges.sort();
+    edges
 }

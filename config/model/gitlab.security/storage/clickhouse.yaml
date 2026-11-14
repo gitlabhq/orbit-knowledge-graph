@@ -4,6 +4,7 @@ store: graph
 entities:
   Finding:
     complete: true
+    accepts: [id, scanner_id, scan_id, project_id]
     table: gl_finding
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -34,6 +35,7 @@ entities:
 
   SecurityScan:
     complete: true
+    accepts: [id, pipeline_id, project_id, build_id]
     table: gl_security_scan
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -62,6 +64,7 @@ entities:
 
   Vulnerability:
     complete: true
+    accepts: [id, author_id, confirmed_by_id, dismissed_by_id, finding_id, project_id, resolved_by_id]
     table: gl_vulnerability
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -110,6 +113,7 @@ entities:
 
   VulnerabilityIdentifier:
     complete: true
+    accepts: [id, project_id]
     table: gl_vulnerability_identifier
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -136,6 +140,7 @@ entities:
 
   VulnerabilityOccurrence:
     complete: true
+    accepts: [id, scanner_id, project_id, vulnerability_id]
     table: gl_vulnerability_occurrence
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}
@@ -177,6 +182,7 @@ entities:
 
   VulnerabilityScanner:
     complete: true
+    accepts: [id, project_id]
     table: gl_vulnerability_scanner
     columns:
       id: {immutable: true, backend: {type: Int64, codec: [T64, ZSTD(1)]}}

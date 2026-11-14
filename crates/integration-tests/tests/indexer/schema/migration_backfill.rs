@@ -69,7 +69,7 @@ impl TestContext {
         })
         .await
         .unwrap();
-        let catalog = ModelCatalog::open(scheduler_services.nats_client.clone())
+        let catalog = ModelCatalog::open(scheduler_services.nats_client.clone(), "server".into())
             .await
             .unwrap();
         Self {
@@ -96,7 +96,8 @@ impl TestContext {
             self.clickhouse.create_client(),
             Arc::new(indexer::testkit::MockLockService::new()),
             Arc::new(
-                query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+                query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server")
+                    .unwrap(),
             ),
             integration_testkit::embedded_schema(),
             orbit_server_config::AppConfig::embedded_defaults().schema,
@@ -129,7 +130,7 @@ impl TestContext {
 
     async fn complete_required_pipelines_except(&self, namespace_ids: &[i64], left_out: &[&str]) {
         let invalidated = orbit_migrations::scope::find_invalidated_pipelines(
-            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded().unwrap(),
+            &query_data_model::Catalog::<query_data_model::ClickHouse>::embedded("server").unwrap(),
             &orbit_migrations::scope::MigrationScope::Full,
         );
         let global_keys = invalidated

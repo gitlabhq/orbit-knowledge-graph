@@ -1,0 +1,32 @@
+kind: graph
+package: peers.lake
+entities:
+  Team:
+    identity: id
+    label: name
+    default_columns: [id, name]
+    properties:
+      id: {type: string}
+      name: {type: string}
+      traversal_path: {type: string}
+  TeamMessage:
+    identity: id
+    label: text
+    default_columns: [id, text]
+    properties:
+      id: {type: string}
+      team: {type: string}
+      channel: {type: string}
+      text: {type: string}
+  Escalation:
+    identity: id
+    label: reason
+    default_columns: [id, reason]
+    properties:
+      id: {type: int64}
+      reason: {type: string}
+      message_id: {type: string}
+      traversal_path: {type: string}
+relationships:
+  TEAM_OF: {variants: {TeamMessage -> Team: {cardinality: many_to_one}}}
+  ESCALATES: {variants: {Escalation -> TeamMessage: {cardinality: many_to_one}}}

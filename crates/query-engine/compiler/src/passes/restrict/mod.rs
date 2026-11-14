@@ -1,9 +1,9 @@
 //! Access restriction on the logical plan.
 //!
-//! Rejects entities for which the caller holds the entity's permission in no scope, and, for
-//! callers that are not instance administrators, every read of an `admin_only` property and
-//! every aggregation in which an entity without a scope key is not reachable from one with a
-//! scope key, since aggregation bypasses the row checks.
+//! Rejects entities for which the caller holds the entity's permission in no scope unless a
+//! trusted connection reads them, and, for callers that are not instance administrators, every
+//! read of an `admin_only` property and every aggregation in which an entity without a scope key
+//! is not reachable from one with a scope key, since aggregation bypasses the row checks.
 
 mod hydration;
 mod properties;
@@ -21,7 +21,7 @@ use query_data_model::plan::logical::{LogicalOperation, LogicalPlan};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::{EntityId, Model};
 
-use crate::dag::Remotes;
+use crate::dag::Connections;
 use crate::error::{QueryError, Result};
 use crate::logical::Kind;
 use crate::logical::Query;
@@ -32,17 +32,31 @@ pub fn restrict(
     plan: &LogicalPlan,
     logical: &Model,
     model: &Catalog<impl SqlBackend>,
-    remotes: &Remotes,
+    connections: &Connections,
     grants: &Grants,
 ) -> Result<()> {
     let query = Query::new(plan, logical);
     let entities = entities(query);
-    for (_, entity) in &entities {
-        readable(*entity, model, remotes, grants)?;
+    let places = crate::dag::places(query, connections)?;
+    let guard = |binding: &Ref, entity: EntityId| {
+        places
+            .get(binding)
+            .and_then(|place| logical.store(place.store).guard(entity))
+    };
+    for (binding, entity) in &entities {
+        readable(*entity, guard(binding, *entity), model, grants)?;
     }
     let admin = grants.caller().admin();
     if !admin && query.kind() == Kind::Aggregation {
-        aggregation_scope(query, &entities, model)?;
+        let scoped = entities
+            .iter()
+            .filter(|(binding, entity)| {
+                guard(binding, *entity)
+                    .is_some_and(|guard| matches!(guard.rule, Rule::Column(_) | Rule::Owner(_)))
+            })
+            .map(|(binding, _)| *binding)
+            .collect();
+        aggregation_scope(query, &entities, model, scoped)?;
     }
     properties::fields(query, model, admin)
 }
@@ -55,21 +69,24 @@ fn entities(query: Query<'_>) -> Vec<(Ref, EntityId)> {
         .collect()
 }
 
-/// The caller holds the entity's permission in at least one scope.
+/// The caller holds the entity's permission in at least one scope, unless a trusted connection
+/// reads it; `guard` is the policy of the connection that reads it.
 pub(super) fn readable(
     entity: EntityId,
+    guard: Option<&query_data_model::catalog::Guard>,
     model: &Catalog<impl SqlBackend>,
-    remotes: &Remotes,
     grants: &Grants,
 ) -> Result<()> {
     let name = &model.graph().entity(entity).name;
-    let remote = || remotes.holding(entity)?.guard(entity);
-    let guard = model.guard(entity).or_else(remote).ok_or_else(|| {
+    let guard = guard.ok_or_else(|| {
         QueryError::Security(format!(
             "{name} has no guard on connection {}",
-            model.connection()
+            model.model().connection(model.connection()).name()
         ))
     })?;
+    if guard.rule == Rule::Trusted {
+        return Ok(());
+    }
     if scope_set(grants, model.model(), guard.scope, guard.permission)?.is_empty() {
         let access = model.model().access();
         return Err(QueryError::Authorization(format!(
@@ -81,22 +98,12 @@ pub(super) fn readable(
     Ok(())
 }
 
-fn scoped(model: &Catalog<impl SqlBackend>, entity: EntityId) -> bool {
-    model
-        .guard(entity)
-        .is_some_and(|guard| matches!(guard.rule, Rule::Column(_) | Rule::Owner(_)))
-}
-
 fn aggregation_scope(
     query: Query<'_>,
     entities: &[(Ref, EntityId)],
     model: &Catalog<impl SqlBackend>,
+    mut reachable: HashSet<Ref>,
 ) -> Result<()> {
-    let mut reachable: HashSet<Ref> = entities
-        .iter()
-        .filter(|(_, entity)| scoped(model, *entity))
-        .map(|(output, _)| *output)
-        .collect();
     if reachable.is_empty() {
         let global: Vec<&str> = entities
             .iter()

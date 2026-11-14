@@ -3,6 +3,10 @@ providers:
   oidc: {module: fake.oidc}
   directory: {module: fake.oidc}
   slack:
-    module: fake.slack
+    module: fake.sign_in
     handles: {}
     readable: {alice: [m1, m3]}
+  jira:
+    module: fake.sign_in
+    handles: {}
+    readable: {}

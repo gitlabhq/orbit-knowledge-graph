@@ -7,12 +7,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use orbit_authorization::{
-    Answers, AuthError, Caller, Check, CheckRequest, Credential, Credentials, Grants, Identify,
-    Key, Module, Need, Provider, Request, ScopeKind, Scopes,
+    Answers, AuthError, Caller, Checks, Credential, Credentials, Grants, Identify, Module, Need,
+    Provider, Request, ScopeKind, Scopes,
 };
 use orbit_server_config::AuthorizationConfig;
 use query_data_model::Model;
-use query_data_model::catalog::{ProviderUse, ScopeKind as DeclaredKind};
+use query_data_model::catalog::{Check, ProviderUse, ScopeKind as DeclaredKind};
 
 type Builder = Box<dyn Fn(serde_json::Value, &[Need]) -> Result<Answers, AuthError> + Send + Sync>;
 
@@ -46,7 +46,7 @@ impl Registry {
 pub struct Deployment {
     identify: Arc<dyn Provider<Identify>>,
     needs: Vec<(Need, Arc<dyn Provider<Scopes>>)>,
-    checks: BTreeMap<String, Arc<dyn Provider<Check>>>,
+    checks: Checks,
     credentials: BTreeMap<String, Arc<dyn Provider<Credentials>>>,
 }
 
@@ -124,7 +124,7 @@ impl Deployment {
                 None => {}
             }
         }
-        let mut checks = BTreeMap::new();
+        let mut checks = Checks::default();
         let mut credentials = BTreeMap::new();
         for (name, used) in &uses {
             let Some((_, built)) = answers.get(name) else {
@@ -132,9 +132,7 @@ impl Deployment {
             };
             if used.contains(&ProviderUse::Check) {
                 match &built.check {
-                    Some(check) => {
-                        checks.insert(name.to_string(), Arc::clone(check));
-                    }
+                    Some(check) => checks = checks.with(*name, Arc::clone(check)),
                     None => missing(name, "Check", &mut errors),
                 }
             }
@@ -178,24 +176,9 @@ impl Deployment {
         Ok(grants)
     }
 
-    /// The rows each request allows, asked of the provider the checks name.
-    pub async fn check(
-        &self,
-        caller: &Caller,
-        provider: &str,
-        requests: Vec<CheckRequest>,
-    ) -> Result<Vec<BTreeSet<Key>>, AuthError> {
-        let checker = self
-            .checks
-            .get(provider)
-            .ok_or_else(|| AuthError::Invalid(format!("no provider {provider} answers Check")))?;
-        let allowed = checker
-            .call(Check {
-                caller: caller.clone(),
-                requests,
-            })
-            .await?;
-        Ok(allowed)
+    /// The row checks of every provider the packages name.
+    pub fn checks(&self) -> &Checks {
+        &self.checks
     }
 
     /// The caller's sign-in for a delegated service, from the provider a check names.
@@ -216,23 +199,35 @@ impl Deployment {
     }
 }
 
-/// An entity whose scope answer is not exact must declare a check to confirm its rows.
+/// An entity the shape serves without a row check is returned on its proved scope filter alone,
+/// so its scope answer must be exact. A delegated check does not count: lake reads rely on the scope filter.
 fn inexact_without_checks(
     model: &Model,
     answers: &BTreeMap<&str, (&str, Answers)>,
     errors: &mut Vec<String>,
 ) {
     let access = model.access();
-    for entity in model.graph().entities() {
+    let served = model
+        .graph()
+        .entities()
+        .filter(|entity| model.stores_entity(entity.id));
+    for entity in served {
         let declared = access.entity(entity.id);
-        let provider = &access.scope(declared.scope).provider;
+        let scope = access.scope(declared.scope);
+        let provider = &scope.provider;
         let exact = answers
             .get(provider.as_str())
             .is_some_and(|(_, a)| a.scopes_exact);
-        if !exact && answers.contains_key(provider.as_str()) && declared.checks.is_empty() {
+        let checked = declared
+            .checks
+            .iter()
+            .any(|check| matches!(check, Check::Rows { .. }));
+        if !exact && answers.contains_key(provider.as_str()) && !checked {
             errors.push(format!(
-                "{}'s scope answer from {provider} is not exact, so it needs a check",
-                entity.name
+                "{} declares no row check, but provider {provider} answers its {:?} scope {} inexactly",
+                entity.name,
+                kind(scope.kind),
+                scope.name
             ));
         }
     }
@@ -254,13 +249,17 @@ pub(crate) mod tests {
     use super::*;
 
     pub(crate) fn deployment() -> Deployment {
-        let model = query_data_model::Packages::embedded().load().unwrap();
+        let model = query_data_model::Packages::embedded()
+            .deployment("server")
+            .unwrap();
         let config = AppConfig::embedded_defaults().authorization;
         Deployment::bind(&config, &model, &Registry::gitlab()).unwrap()
     }
 
     fn bind_errors(edit: impl FnOnce(&mut AuthorizationConfig)) -> Vec<String> {
-        let model = query_data_model::Packages::embedded().load().unwrap();
+        let model = query_data_model::Packages::embedded()
+            .deployment("server")
+            .unwrap();
         let mut config = AppConfig::embedded_defaults().authorization;
         edit(&mut config);
         match Deployment::bind(&config, &model, &Registry::gitlab()) {

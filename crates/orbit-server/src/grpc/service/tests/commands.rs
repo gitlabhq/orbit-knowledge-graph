@@ -364,7 +364,7 @@ async fn test_expand_all_wildcard() {
 
 fn custom_node_model() -> Arc<Catalog<ClickHouse>> {
     let graph = "kind: graph\npackage: test\nentities:\n  CustomNode:\n    identity: id\n    label: id\n    default_columns: [id]\n    properties: {id: int64}\n";
-    let authorization = "kind: authorization\npackage: test\npermissions: [read]\nscopes: {global: {kind: global, provider: gitlab_session}}\nentities:\n  CustomNode: {scope: global, permission: read, properties: {open: [id]}}\n";
+    let authorization = "kind: authorization\npackage: test\npermissions: [read]\nscopes: {global: {kind: global, provider: gitlab_session}}\nentities:\n  CustomNode: {scope: global, permission: read, checks: open, properties: {open: [id]}}\n";
     let storage = "kind: storage
 package: test
 store: graph
@@ -374,17 +374,23 @@ engine:
   backend:
     version_column: _version
     deleted_column: _deleted
+    edge_columns: {relationship_kind: relationship_kind, source_id: source_id, source_kind: source_kind, target_id: target_id, target_kind: target_kind}
     edge_tables:
-      gl_edge: {shared: true, sort_key: [source_id, relationship_kind, target_id]}
+      gl_edge:
+        shared: true
+        sort_key: [source_id, relationship_kind, target_id]
+        columns: {source_id: {type: Int64}, source_kind: {type: String}, relationship_kind: {type: String}, target_id: {type: Int64}, target_kind: {type: String}}
 entities:
   CustomNode:
     complete: true
+    accepts: [id]
     table: gl_custom_node
     columns: {id: {immutable: true, backend: {type: Int64}}}
     access: {order: [id]}
 ";
     let model = query_data_model::Model::from_yaml(
         query_data_model::Tier::Platform,
+        "server",
         [
             ("test/package.yaml", "kind: package\nname: test\n"),
             ("test/graph.yaml", graph),
