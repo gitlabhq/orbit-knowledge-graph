@@ -1,12 +1,11 @@
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use futures::FutureExt;
 
-use compiler::dag::Peer;
-use duckdb_client::DuckDbClient;
-use duckdb_client::dag::DuckDbExecutor;
+use orbit_server::pipeline::PeerExecutors;
+use orbit_server_config::ConnectionsConfig;
 use query_data_model::{DuckDb, Packages};
 
 use super::{
@@ -48,12 +47,11 @@ pub async fn run_lake_dir(
         |_, _, declared| declared.to_string(),
     )
     .await;
-    let client = DuckDbClient::open_s3(connection, &lake.connection, &lake_catalog)
-        .unwrap_or_else(|error| panic!("open {connection}: {error}"));
-    let executor = DuckDbExecutor {
-        client: Arc::new(Mutex::new(client)),
+    let config = ConnectionsConfig {
+        duckdb: [(connection.to_string(), lake.connection.clone())].into(),
     };
-    let peers = [(Peer::DuckDb(lake_catalog), Arc::new(executor) as _)];
+    let peers = PeerExecutors::open(graph.shared_model(), &config)
+        .unwrap_or_else(|error| panic!("open {connection}: {error}"));
     let mut files = Vec::new();
     discover(root, &mut files);
     files.sort();
@@ -103,7 +101,7 @@ async fn run_step(
     graph: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &query_engine::pipeline::SecurityContext,
     redaction: &crate::mock_redaction::MockRedactionService,
-    peers: &[(Peer, Arc<dyn query_engine::shared::dag::Executor>)],
+    peers: &PeerExecutors,
     step: &QueryStep,
     label: &str,
 ) {

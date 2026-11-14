@@ -504,7 +504,7 @@ async fn main() -> Result<()> {
         None
     };
 
-    let service = ProfilerPipelineService::new(data_model, Arc::clone(&client), limits);
+    let service = ProfilerPipelineService::new(data_model, Arc::clone(&client), limits)?;
     let run_ctx = RunContext {
         service: &service,
         client: &client,

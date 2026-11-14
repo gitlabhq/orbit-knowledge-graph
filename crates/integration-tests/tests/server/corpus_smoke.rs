@@ -391,16 +391,18 @@ async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, Pi
         .get::<Arc<query_data_model::Catalog<query_data_model::ClickHouse>>>()
         .cloned()
         .ok_or_else(missing)?;
-    let stage = DagStage::relational(
-        graph_executors(
+    let stage = DagStage {
+        executors: graph_executors(
             client,
             &model,
             "base",
             "gkg;corpus_smoke".into(),
             Vec::new(),
         ),
-        Default::default(),
-    );
+        connections: query_engine::compiler::dag::Connections::of(model.shared_model())
+            .map_err(PipelineError::custom)?,
+        checks: Default::default(),
+    };
     let mut obs = NoOpObserver;
     PipelineRunner::start(ctx, &mut obs)
         .then(&Traced(security, &SecurityStage))

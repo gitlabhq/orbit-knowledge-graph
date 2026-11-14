@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use clickhouse_client::ArrowClickHouseClient;
-use compiler::dag::Request;
+use compiler::dag::{Connections, Request};
 use pipeline::SecurityContext;
 use pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
@@ -32,6 +32,7 @@ pub fn grants(
 
 pub struct ProfilerPipelineService {
     data_model: Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
+    connections: Connections,
     client: Arc<ArrowClickHouseClient>,
     limits: compiler::QueryLimits,
 }
@@ -41,12 +42,13 @@ impl ProfilerPipelineService {
         data_model: Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
         client: Arc<ArrowClickHouseClient>,
         limits: compiler::QueryLimits,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, query_data_model::DataModelError> {
+        Ok(Self {
+            connections: Connections::of(data_model.shared_model())?,
             data_model,
             client,
             limits,
-        }
+        })
     }
 
     pub async fn run_query(
@@ -65,7 +67,11 @@ impl ProfilerPipelineService {
             client: Arc::clone(&self.client),
         };
         let executors = Executors::default().with(self.data_model.connection(), Arc::new(executor));
-        let dag = DagStage::relational(executors, Default::default());
+        let dag = DagStage {
+            executors,
+            connections: self.connections.clone(),
+            checks: Default::default(),
+        };
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
             compiled: None,

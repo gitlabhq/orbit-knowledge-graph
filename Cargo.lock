@@ -6112,6 +6112,7 @@ dependencies = [
  "clap",
  "clickhouse-client",
  "compiler",
+ "duckdb-client",
  "futures",
  "gitlab-client",
  "health-check",

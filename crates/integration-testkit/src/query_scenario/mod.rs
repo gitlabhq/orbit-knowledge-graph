@@ -15,7 +15,7 @@ use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
 
-use compiler::dag::Peer;
+use compiler::dag::Connections;
 use compiler::orbit_authorization::Checks;
 use format::ExpectedIndex;
 use futures::FutureExt;
@@ -28,7 +28,6 @@ use query_engine::pipeline::{
     Realm, SecurityContext, TypeMap,
 };
 use query_engine::shared::content::ColumnResolverRegistry;
-use query_engine::shared::dag::Executor;
 use query_engine::shared::{DagStage, PipelineOutput, RedactionOutput};
 use response::{
     assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
@@ -50,7 +49,9 @@ pub use format::{
 pub use lake::run_lake_dir;
 
 use orbit_server::auth::{Claims, SourceType, TraversalPathClaim};
-use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage, graph_executors};
+use orbit_server::pipeline::{
+    HydrationStage, PeerExecutors, RoutingOutput, RoutingStage, graph_executors,
+};
 use orbit_server::redaction::QueryResult;
 
 /// Parse all YAML scenario files under `root` without executing them.
@@ -104,7 +105,15 @@ pub async fn run_query(
     let compiled = compile_like_server(query, &data_model, security)
         .await
         .expect("query should compile");
-    let output = execute_output(ctx, query, &data_model, security, redaction, &[]).await;
+    let output = execute_output(
+        ctx,
+        query,
+        &data_model,
+        security,
+        redaction,
+        &PeerExecutors::default(),
+    )
+    .await;
     assert_pagination(&output, "run_query");
     let response = validate_response(&compiled.stats, GraphFormatter.format(&output), "run_query");
     ResponseView::for_query(&compiled.stats, response)
@@ -370,7 +379,15 @@ async fn run_query_step(
         return;
     }
 
-    let output = execute_output(ctx, query, data_model, security, redaction, &[]).await;
+    let output = execute_output(
+        ctx,
+        query,
+        data_model,
+        security,
+        redaction,
+        &PeerExecutors::default(),
+    )
+    .await;
     let baseline = assert_output(&output, expect, label);
     let count = repeat_count(expect, label);
     for run in 2..=count {
@@ -387,7 +404,15 @@ async fn run_query_step(
             )
             .await;
         }
-        let output = execute_output(ctx, query, data_model, security, redaction, &[]).await;
+        let output = execute_output(
+            ctx,
+            query,
+            data_model,
+            security,
+            redaction,
+            &PeerExecutors::default(),
+        )
+        .await;
         let rerun = assert_output(&output, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
     }
@@ -527,7 +552,15 @@ async fn run_pages(
             .await
             .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}"));
 
-        let output = execute_output(ctx, &query_str, data_model, security, redaction, &[]).await;
+        let output = execute_output(
+            ctx,
+            &query_str,
+            data_model,
+            security,
+            redaction,
+            &PeerExecutors::default(),
+        )
+        .await;
         let response = assert_output(&output, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
@@ -541,7 +574,15 @@ async fn run_pages(
             let compiled = compile_like_server(&query, data_model, security)
                 .await
                 .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
-            let output = execute_output(ctx, &query, data_model, security, redaction, &[]).await;
+            let output = execute_output(
+                ctx,
+                &query,
+                data_model,
+                security,
+                redaction,
+                &PeerExecutors::default(),
+            )
+            .await;
             assert_pagination(&output, label);
             let response =
                 validate_response(&compiled.stats, GraphFormatter.format(&output), label);
@@ -568,7 +609,9 @@ async fn compile_like_server(
         phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
-    let routing = RoutingStage::default();
+    let routing = RoutingStage {
+        connections: Connections::of(data_model.shared_model()).map_err(PipelineError::custom)?,
+    };
     if let RoutingOutput::Schema(_) = routing.execute(&mut pipeline_ctx, &mut obs).await? {
         return Err(PipelineError::custom("schema calls are not graph queries"));
     }
@@ -590,27 +633,25 @@ async fn execute_output(
     data_model: &Arc<query_data_model::Catalog<query_data_model::ClickHouse>>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
-    peers: &[(Peer, Arc<dyn Executor>)],
+    peers: &PeerExecutors,
 ) -> PipelineOutput {
     let resolver = Arc::new(SeededColumnResolver::from_seed_file());
     let mut resolver_registry = ColumnResolverRegistry::new();
     resolver_registry.register("gitaly", resolver as _);
 
     let client = Arc::new(ctx.create_client());
-    let executors = peers.iter().fold(
-        graph_executors(
-            Arc::clone(&client),
-            data_model,
-            "base",
-            "gkg;scenario".into(),
-            Vec::new(),
-        ),
-        |executors, (peer, executor)| executors.with(peer.connection(), Arc::clone(executor)),
-    );
-    let peers: Vec<Peer> = peers.iter().map(|(peer, _)| peer.clone()).collect();
+    let executors = peers.with_graph(graph_executors(
+        Arc::clone(&client),
+        data_model,
+        "base",
+        "gkg;scenario".into(),
+        Vec::new(),
+    ));
+    let connections =
+        Connections::of(data_model.shared_model()).expect("the data model's connections resolve");
     let dag = DagStage {
         executors,
-        peers: peers.clone(),
+        connections: connections.clone(),
         checks: Checks::default().with("rails", Arc::new(redaction.clone())),
     };
     let mut server_extensions = TypeMap::default();
@@ -629,7 +670,7 @@ async fn execute_output(
         phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
-    RoutingStage { peers }
+    RoutingStage { connections }
         .execute(&mut pipeline_ctx, &mut obs)
         .await
         .expect("the query should route");
