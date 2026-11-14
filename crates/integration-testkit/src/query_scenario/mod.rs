@@ -353,6 +353,10 @@ async fn run_query_step(
 ) {
     let label = name;
     expect.validate_pages_exclusive(label);
+    assert!(
+        expect.live_calls.is_none(),
+        "{label}: only lake scenarios record live calls"
+    );
 
     let compiled = compile_like_server(query, data_model, security).await;
     let Some(compiled) = assert_compilation(compiled, expect, label) else {

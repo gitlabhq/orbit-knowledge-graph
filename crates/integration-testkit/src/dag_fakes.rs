@@ -2,15 +2,15 @@
 //! way `SeededColumnResolver` fakes Gitaly. Only tests register them; the server registers none.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use compiler::dag::{Backend, Connections, Contract, Env, Frontend, Peer, Request, Source};
 use compiler::orbit_authorization::Key;
 use compiler::orbit_authorization::{Answers, AuthError, Check, Checks, Module, Need, Provider};
 use query_data_model::catalog::Row;
-use query_data_model::implementations::live::DataExtraction;
+use query_data_model::implementations::live::{DataExtraction, ExtractionRequest};
 use query_data_model::implementations::orbit_code::{CodeSearch, RequestField};
 use query_data_model::{Catalog, ClickHouse, Model};
 use query_engine::shared::dag::{
@@ -331,6 +331,26 @@ impl Executor for Counted {
         contract: Option<&Contract>,
     ) -> Result<Executed, ExecutorError> {
         self.requests.fetch_add(1, Ordering::Relaxed);
+        self.inner.execute(request, contract).await
+    }
+}
+
+/// An executor that records the live calls it runs.
+pub struct Recorded {
+    pub inner: Arc<dyn Executor>,
+    pub calls: Mutex<Vec<ExtractionRequest>>,
+}
+
+#[async_trait]
+impl Executor for Recorded {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
+        if let Request::Live(call) = request {
+            self.calls.lock().unwrap().push(call.clone());
+        }
         self.inner.execute(request, contract).await
     }
 }

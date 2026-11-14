@@ -76,6 +76,10 @@ fn run_step(
     let label = format!("{name} [duckdb]");
     let expect = &step.expect;
     expect.validate_pages_exclusive(&label);
+    assert!(
+        expect.live_calls.is_none(),
+        "{label}: only lake scenarios record live calls"
+    );
     let compiled = compile_local(query, data_model, &local_admin(), limits()).map(Arc::new);
     if assert_compilation(compiled, expect, &label).is_none() {
         return;

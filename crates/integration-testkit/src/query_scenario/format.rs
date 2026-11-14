@@ -216,6 +216,10 @@ pub struct QueryExpect {
     pub pages: Vec<QueryExpect>,
     #[serde(default)]
     pub skip_requirements: Vec<String>,
+    /// The live calls the query sends, in order, each as the workspaces it names: `[[T01, T02]]`
+    /// is one call to both, `[]` is no call. Only the lake runner records them.
+    #[serde(default)]
+    pub live_calls: Option<Vec<Vec<serde_json::Value>>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
