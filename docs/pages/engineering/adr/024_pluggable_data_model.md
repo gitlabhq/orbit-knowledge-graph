@@ -280,6 +280,7 @@ Composition rules:
 
 - A package names only packages in its `requires`, and a version activates only when every required package is active.
 - A package cannot redeclare another package's entity or add a second authorization entry.
+- Entity and relationship names are global across all loaded packages. So an integration names its own relationships apart from the platform's names.
 - A package can add variants to a platform relationship, and bind its own entities to another package's store.
 
 ### 2. The loader checks every package once

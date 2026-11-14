@@ -17,6 +17,8 @@ Each extension writes only a package, a frontend or a backend:
 
 An entity has one fragment of each kind it needs. The graph fragment declares every property and each relationship variant that the package adds. It names no columns or tables.
 
+Relationship names are global across all loaded packages. A graph fragment that names an existing relationship adds variants to it, and that relationship keeps its one authorization entry. An integration therefore gives its relationships their own names, such as `MENTIONS_ISSUE`, which keeps them apart from platform names.
+
 ```yaml
 # packages/gitlab.code_review/graph.yaml
 kind: graph
@@ -336,7 +338,7 @@ entities:
 
 Its authorization adds a `live` policy and the check: `live: {scope_key: {via: IN_JIRA_PROJECT}}` next to the `duckdb` policy, and `checks: [{provider: jira, kind: delegated}]`.
 
-Slack keeps its history in a lake store and adds a live store for search. `MENTIONS` links a message to the Jira issue it names, so `integration.slack` requires `integration.jira`. `DISCUSSES` links a message to a merge request, so it also requires `gitlab.code_review`:
+Slack keeps its history in a lake store and adds a live store for search. `MENTIONS_ISSUE` links a message to the Jira issue it names, so `integration.slack` requires `integration.jira`. `DISCUSSES` links a message to a merge request, so it also requires `gitlab.code_review`:
 
 ```yaml
 # packages/integration.slack/graph.yaml
@@ -371,7 +373,7 @@ relationships:
     variants: {SlackMessage -> SlackWorkspace: {cardinality: many_to_one}}
   INSTALLED_IN:
     variants: {SlackWorkspace -> Group: {cardinality: many_to_one}}
-  MENTIONS:
+  MENTIONS_ISSUE:
     variants: {SlackMessage -> JiraIssue: {cardinality: many_to_one}}
   DISCUSSES:
     variants: {SlackMessage -> MergeRequest: {cardinality: many_to_one}}
@@ -411,7 +413,7 @@ relationships:
     scope: namespace
     permission: read
     enforce: {duckdb: {scope_key: traversal_path, of: holder}}
-  MENTIONS:
+  MENTIONS_ISSUE:
     scope: namespace
     permission: read
     enforce: {duckdb: {scope_key: traversal_path, of: source}}
@@ -462,7 +464,7 @@ relationships:
     SlackMessage -> SlackWorkspace: {fk: {on: source, column: workspace}}
   INSTALLED_IN:
     SlackWorkspace -> Group: {fk: {on: source, column: namespace_id}}
-  MENTIONS:
+  MENTIONS_ISSUE:
     SlackMessage -> JiraIssue: {fk: {on: source, column: issue_id}}
   DISCUSSES:
     SlackMessage -> MergeRequest: {fk: {on: source, column: merge_request_id}}
@@ -542,13 +544,13 @@ The `live` policy follows each message to the namespace that installed its works
 One query can read the lake for one node and live for another:
 
 ```cypher
-MATCH (i:JiraIssue)<-[:MENTIONS]-(m:SlackMessage)
+MATCH (i:JiraIssue)<-[:MENTIONS_ISSUE]-(m:SlackMessage)
 WHERE i.key = 'ORBIT-42' AND m.text CONTAINS 'rollback'
 RETURN i.summary, m.channel, m.text LIMIT 20
 ```
 
 `JiraIssue` reads from the Jira lake store, which serves the filter on `key` and the `summary` column. `SlackMessage` reads from the Slack live store, because only it holds `text`.
-The lake stage hands the issue IDs to the live stage, which takes them on `issue_id` from its `accepts:`. The combine stage combines both stages' rows on `MENTIONS`.
+The lake stage hands the issue IDs to the live stage, which takes them on `issue_id` from its `accepts:`. The combine stage combines both stages' rows on `MENTIONS_ISSUE`.
 
 One node can also read from two stores:
 
@@ -972,4 +974,4 @@ The loader collects every error with its package and fails once. A missing decla
 ### Composition rules
 
 - A package cannot redeclare an entity that another package owns, or add a second authorization entry for an entity, property or relationship.
-- A package can add variants to a platform relationship, and bind more entities to a store that another package declares.
+- A package can add variants to a platform relationship, which keeps the platform's authorization entry. It can also bind more entities to a store that another package declares.
