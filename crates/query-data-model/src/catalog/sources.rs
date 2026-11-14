@@ -353,10 +353,16 @@ impl<'a> Resolver<'a> {
                     ),
                 );
             }
-            if self.sources.source_named(&fragment.source).is_some() {
+            let declared = self.sources.sources.iter().any(|source| {
+                source.name == fragment.source && source.connection == declaration.connection
+            });
+            if declared {
                 self.diagnostics.error(
                     &fragment.package,
-                    format!("source {} is declared twice", fragment.source),
+                    format!(
+                        "source {} is declared twice on connection {}",
+                        fragment.source, declaration.connection
+                    ),
                 );
                 continue;
             }
@@ -380,15 +386,37 @@ impl<'a> Resolver<'a> {
                 self.direct(fragment);
                 continue;
             }
-            let found = self
+            let mut found = self
                 .sources
                 .sources
                 .iter()
-                .position(|source| source.name == fragment.source);
-            let Some(source) = self.diagnostics.require(found, &fragment.package, || {
-                format!("source {} is never declared", fragment.source)
-            }) else {
-                continue;
+                .enumerate()
+                .filter(|(_, source)| {
+                    source.name == fragment.source
+                        && fragment
+                            .declare
+                            .as_ref()
+                            .is_none_or(|declared| declared.connection == source.connection)
+                });
+            let source = match (found.next(), found.next()) {
+                (Some((source, _)), None) => source,
+                (None, _) => {
+                    self.diagnostics.error(
+                        &fragment.package,
+                        format!("source {} is never declared", fragment.source),
+                    );
+                    continue;
+                }
+                (Some(_), Some(_)) => {
+                    self.diagnostics.error(
+                        &fragment.package,
+                        format!(
+                            "source {} is declared on more than one connection, so its fragment declares which",
+                            fragment.source
+                        ),
+                    );
+                    continue;
+                }
             };
             pending.push(Pending { fragment, source });
         }

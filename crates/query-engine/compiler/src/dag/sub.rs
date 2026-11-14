@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use orbit_server_config::QueryLimits;
 use query_data_model::plan::logical::{
-    Columns, Logical, LogicalOperation, LogicalPlan, MATCH_LINE, Projection, Step,
+    Columns, Logical, LogicalOperation, LogicalPlan, MATCH_LINE, Predicate, Projection, Step,
 };
 use query_data_model::plan::tracking::{Language, Ref};
 
@@ -72,32 +72,40 @@ pub(super) fn plan(
                     }
                 }
                 LogicalOperation::Filter(predicate) => {
-                    let mut operation = LogicalOperation::Filter(predicate.clone());
-                    let mut foreign = false;
-                    let mut touched = false;
-                    Logical::references(
-                        &mut operation,
-                        &mut |reference| match map.get(reference) {
+                    let mut held: Option<Predicate> = None;
+                    for conjunct in conjuncts(predicate) {
+                        let mut operation = LogicalOperation::Filter(conjunct);
+                        let mut foreign = false;
+                        let mut touched = false;
+                        Logical::references(&mut operation, &mut |reference| match map
+                            .get(reference)
+                        {
                             Some(mapped) => {
                                 touched = true;
                                 *reference = *mapped;
                             }
                             None => foreign = true,
-                        },
-                    );
-                    match (touched, foreign) {
-                        (true, true) => {
-                            return Err(QueryError::Validation(
-                                "a condition compares nodes on different connections".into(),
-                            ));
+                        });
+                        let LogicalOperation::Filter(conjunct) = operation else {
+                            unreachable!("a filter stays a filter");
+                        };
+                        match (touched, foreign) {
+                            (true, true) => {
+                                return Err(QueryError::Validation(
+                                    "a condition compares nodes on different connections".into(),
+                                ));
+                            }
+                            (true, false) => {
+                                held = Some(match held {
+                                    Some(held) => held.and(conjunct),
+                                    None => conjunct,
+                                });
+                            }
+                            _ => {}
                         }
-                        (true, false) => {
-                            let LogicalOperation::Filter(predicate) = operation else {
-                                unreachable!("a filter stays a filter");
-                            };
-                            rows = q.filter(rows, predicate)?;
-                        }
-                        _ => {}
+                    }
+                    if let Some(held) = held {
+                        rows = q.filter(rows, held)?;
                     }
                 }
                 LogicalOperation::Structural(structural) => {
@@ -156,4 +164,11 @@ pub(super) fn plan(
         let rows = q.select(rows, items)?;
         Ok(q.limit(rows, limits.stage_keys as u64 + 1)?)
     })
+}
+
+fn conjuncts(predicate: &Predicate) -> Vec<Predicate> {
+    match predicate {
+        Predicate::And(all) => all.iter().flat_map(conjuncts).collect(),
+        other => vec![other.clone()],
+    }
 }

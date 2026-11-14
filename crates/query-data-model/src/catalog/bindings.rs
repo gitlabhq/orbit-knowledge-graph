@@ -407,7 +407,10 @@ pub(super) fn check(
                 .any(|store| store.connection_name == connection && store.source(entity).is_some())
         };
         for store in stores {
-            let holds = store.source(variant.source).is_some()
+            let joins =
+                super::registered(&store.kind).is_some_and(|backend| backend.capabilities().joins);
+            let holds = joins
+                && store.source(variant.source).is_some()
                 && on(&store.connection_name, variant.target);
             match store.binding(variant.id) {
                 Some(binding) => {

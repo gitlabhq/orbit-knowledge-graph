@@ -12,7 +12,7 @@ use orbit_authorization::{
 };
 use orbit_server_config::AuthorizationConfig;
 use query_data_model::Model;
-use query_data_model::catalog::{ProviderUse, ScopeKind as DeclaredKind};
+use query_data_model::catalog::{Check, ProviderUse, ScopeKind as DeclaredKind};
 
 type Builder = Box<dyn Fn(serde_json::Value, &[Need]) -> Result<Answers, AuthError> + Send + Sync>;
 
@@ -200,7 +200,7 @@ impl Deployment {
 }
 
 /// An entity without a row check is returned on its proved scope filter alone, so its scope
-/// answer must be exact.
+/// answer must be exact. A delegated check does not count: lake reads rely on the scope filter.
 fn inexact_without_checks(
     model: &Model,
     answers: &BTreeMap<&str, (&str, Answers)>,
@@ -214,7 +214,11 @@ fn inexact_without_checks(
         let exact = answers
             .get(provider.as_str())
             .is_some_and(|(_, a)| a.scopes_exact);
-        if !exact && answers.contains_key(provider.as_str()) && declared.checks.is_empty() {
+        let checked = declared
+            .checks
+            .iter()
+            .any(|check| matches!(check, Check::Rows { .. }));
+        if !exact && answers.contains_key(provider.as_str()) && !checked {
             errors.push(format!(
                 "{} declares no row check, but provider {provider} answers its {:?} scope {} inexactly",
                 entity.name,

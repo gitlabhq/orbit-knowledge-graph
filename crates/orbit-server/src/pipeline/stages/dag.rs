@@ -61,6 +61,15 @@ pub struct PeerExecutors(Vec<(ConnectionId, Arc<dyn Executor>)>);
 impl PeerExecutors {
     /// Opens every connection of `model` but its graph connection, each from its entry in `config`.
     pub fn open(model: &Arc<Model>, config: &ConnectionsConfig) -> Result<Self, ServeError> {
+        Self::open_with(model, config, |_| None)
+    }
+
+    /// `open`, with test executors for the code and live connections the server cannot open.
+    pub fn open_with(
+        model: &Arc<Model>,
+        config: &ConnectionsConfig,
+        remote: impl Fn(&Peer) -> Option<Arc<dyn Executor>>,
+    ) -> Result<Self, ServeError> {
         let graph = Catalog::<ClickHouse>::from_model(model)?;
         let mut peers = Vec::new();
         for peer in Connections::of(model)?.peers() {
@@ -82,6 +91,9 @@ impl PeerExecutors {
                     let executor: Arc<dyn Executor> = Arc::new(DuckDbExecutor {
                         client: Arc::new(Mutex::new(client)),
                     });
+                    peers.push((connection, executor));
+                }
+                Peer::Remote(_) if let Some(executor) = remote(peer) => {
                     peers.push((connection, executor));
                 }
                 Peer::ClickHouse(_) | Peer::Remote(_) => {

@@ -154,7 +154,7 @@ impl Model {
         let mut diagnostics = Diagnostics::default();
         model.resolve_backends(&blocks, &mut diagnostics);
         model.check_placement(&mut diagnostics);
-        model.check_delegation(&mut diagnostics);
+        model.check_delegation(elsewhere, &mut diagnostics);
         diagnostics.finish()?;
         Ok(model)
     }
@@ -249,8 +249,8 @@ impl Model {
     }
 
     /// A delegated check is answered only by a read that signs in as the caller, so a stored
-    /// entity with one has a store on a delegating backend.
-    fn check_delegation(&self, diagnostics: &mut Diagnostics) {
+    /// entity with one has a store on a delegating backend, in this deployment or another.
+    fn check_delegation(&self, elsewhere: &crate::spec::Elsewhere, diagnostics: &mut Diagnostics) {
         for entity in self.graph.entities() {
             let delegated = self
                 .access
@@ -266,7 +266,8 @@ impl Model {
             let delegating = holders
                 .iter()
                 .any(|store| self.connection(store.connection()).capabilities().delegates);
-            if delegated && !holders.is_empty() && !delegating {
+            if delegated && !holders.is_empty() && !delegating && !elsewhere.delegates(&entity.name)
+            {
                 diagnostics.error(
                     &entity.package,
                     format!(

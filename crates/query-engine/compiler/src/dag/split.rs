@@ -147,7 +147,7 @@ pub(super) fn place(
 }
 
 /// What each binding reads and applies: the properties its projections, groups and order read,
-/// the conditions on them, and its structural matches.
+/// the conditions on them, its structural matches, and the keys its single-hop steps join on.
 fn needs(query: Query<'_>) -> HashMap<Ref, Needs> {
     let mut needs: HashMap<Ref, Needs> = HashMap::new();
     for (_, operation) in query.operations() {
@@ -209,6 +209,14 @@ fn needs(query: Query<'_>) -> HashMap<Ref, Needs> {
                 }
             }
             _ => {}
+        }
+    }
+    for step in query.steps() {
+        if let Some(joined) = step_keys(query, &step) {
+            for (held, key) in joined.keys {
+                needs.entry(joined.holder).or_default().read(held);
+                needs.entry(joined.referenced).or_default().read(key);
+            }
         }
     }
     needs
@@ -328,29 +336,28 @@ fn group_of(groups: &[Group], binding: Ref) -> Option<usize> {
 }
 
 /// The foreign key of the step's one relationship variant, as the key pair the Combine stage joins on.
-pub(super) fn crossing(
-    query: Query<'_>,
-    index: usize,
-    step: Step<'_>,
-    groups: (usize, usize),
-) -> Result<Crossing> {
-    let graph = query.model.graph();
-    let (source, target) = match step.direction {
+fn ends(step: &Step<'_>) -> (Ref, Ref) {
+    match step.direction {
         Direction::Incoming => (step.to, step.from),
         _ => (step.from, step.to),
-    };
+    }
+}
+
+struct StepKeys {
+    holder: Ref,
+    referenced: Ref,
+    keys: Vec<(PropertyId, PropertyId)>,
+}
+
+fn step_keys(query: Query<'_>, step: &Step<'_>) -> Option<StepKeys> {
+    let (source, target) = ends(step);
     let (source_entity, target_entity) = (query.entity(source), query.entity(target));
-    let unjoinable = || {
-        QueryError::Validation(format!(
-            "{} -> {} crosses connections, so it needs one relationship with a foreign key the Combine stage joins on",
-            query.name(source),
-            query.name(target)
-        ))
-    };
     let [relationship] = step.relationships else {
-        return Err(unjoinable());
+        return None;
     };
-    let (endpoint, keys) = graph
+    let (endpoint, keys) = query
+        .model
+        .graph()
         .variants()
         .filter(|variant| variant.relationship == *relationship)
         .filter(|variant| Some(variant.source) == source_entity)
@@ -362,16 +369,40 @@ pub(super) fn crossing(
                 .composite_key(variant.id)
                 .map(|(holder, pairs)| (holder, pairs.to_vec())),
         })
-        .filter(|_| step.range.max == 1)
-        .ok_or_else(unjoinable)?;
+        .filter(|_| step.range.max == 1)?;
     let (holder, referenced) = match endpoint {
         Endpoint::Source => (source, target),
         Endpoint::Target => (target, source),
     };
+    Some(StepKeys {
+        holder,
+        referenced,
+        keys,
+    })
+}
+
+pub(super) fn crossing(
+    query: Query<'_>,
+    index: usize,
+    step: Step<'_>,
+    groups: (usize, usize),
+) -> Result<Crossing> {
+    let (source, target) = ends(&step);
+    let StepKeys {
+        holder,
+        referenced,
+        keys,
+    } = step_keys(query, &step).ok_or_else(|| {
+        QueryError::Validation(format!(
+            "{} -> {} crosses connections, so it needs one relationship with a foreign key the Combine stage joins on",
+            query.name(source),
+            query.name(target)
+        ))
+    })?;
     Ok(Crossing {
         groups,
         step: index,
-        relationship: *relationship,
+        relationship: step.relationships[0],
         ends: (source, target),
         pairs: keys
             .into_iter()

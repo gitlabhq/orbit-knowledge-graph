@@ -1,8 +1,10 @@
 peers:
   connections: [main, releases, lake]
 lake:
-  connections: [main, lake, data_extraction]
+  connections: [main, lake, data_extraction, jira_lake, slack_lake]
 jira:
   connections: [main, jira_lake]
+integrations:
+  connections: [main, jira_lake, slack_lake, data_extraction]
 snippets:
   connections: [main, snippet_search]

@@ -93,22 +93,24 @@ impl<'m> LogicalCatalog<'m> {
             .filter(move |store| self.served.contains(&store.connection()))
     }
 
-    /// The entity's home store among the served ones holds the property.
+    /// A served store of the entity holds the property, or its complete store looks it up.
     pub(super) fn realized(self, entity: EntityId, property: PropertyId) -> bool {
         if !self.restricted {
             return true;
         }
-        let mut holders = self.stores().filter(|store| store.source(entity).is_some());
-        let Some(first) = holders.next() else {
+        let mut holders = self
+            .stores()
+            .filter(|store| store.source(entity).is_some())
+            .peekable();
+        if holders.peek().is_none() {
             return true;
-        };
-        let home = std::iter::once(first)
-            .chain(holders)
-            .find(|store| store.complete(entity))
-            .unwrap_or(first);
-        !home.excludes(property)
-            && (home.complete(entity) && self.model.lookup(property).is_some()
-                || home.column(property).is_some())
+        }
+        holders.any(|store| {
+            store.column(property).is_some()
+                || store.complete(entity)
+                    && !store.excludes(property)
+                    && self.model.lookup(property).is_some()
+        })
     }
 
     /// Every variant keeps its rows in an edge table, which the loader checks holds each

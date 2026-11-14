@@ -92,12 +92,17 @@ pub struct Fragments {
 #[derive(Debug, Clone, Default)]
 pub struct Elsewhere {
     entities: std::collections::HashSet<String>,
+    delegated: std::collections::HashSet<String>,
     variants: std::collections::HashSet<(String, String)>,
 }
 
 impl Elsewhere {
     pub fn holds(&self, entity: &str) -> bool {
         self.entities.contains(entity)
+    }
+
+    pub fn delegates(&self, entity: &str) -> bool {
+        self.delegated.contains(entity)
     }
 
     /// Whether an unserved store binds the variant `source -> target` of `relationship`.
@@ -215,25 +220,33 @@ impl Fragments {
         let mut served = connections.to_vec();
         served.sort();
         served.dedup();
-        let on: HashMap<String, String> = self
+        let on: HashMap<String, (String, String)> = self
             .fragments
             .iter()
             .filter_map(|fragment| match fragment {
-                Fragment::Storage(storage) => storage
-                    .engine
-                    .as_ref()
-                    .map(|engine| (storage.store.clone(), engine.connection.clone())),
+                Fragment::Storage(storage) => storage.engine.as_ref().map(|engine| {
+                    (
+                        storage.store.clone(),
+                        (engine.connection.clone(), engine.kind.clone()),
+                    )
+                }),
                 _ => None,
             })
             .collect();
         let mut elsewhere = Elsewhere::default();
         self.fragments.retain(|fragment| match fragment {
             Fragment::Storage(storage) => {
-                let kept = on
-                    .get(&storage.store)
-                    .is_some_and(|connection| served.contains(connection));
+                let engine = on.get(&storage.store);
+                let kept = engine.is_some_and(|(connection, _)| served.contains(connection));
                 if !kept {
                     elsewhere.entities.extend(storage.entities.keys().cloned());
+                    let delegates = engine.is_some_and(|(_, kind)| {
+                        crate::catalog::registered(kind)
+                            .is_some_and(|backend| backend.capabilities().delegates)
+                    });
+                    if delegates {
+                        elsewhere.delegated.extend(storage.entities.keys().cloned());
+                    }
                     for (relationship, variants) in &storage.relationships {
                         for variant in variants.keys() {
                             let variant: String =
