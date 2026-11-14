@@ -7,7 +7,7 @@ use clickhouse_client::ArrowClickHouseClient;
 use duckdb_client::dag::DuckDbExecutor;
 use duckdb_client::{DuckDbClient, DuckDbError};
 use orbit_server_config::ConnectionsConfig;
-use query_data_model::{Catalog, ClickHouse, DataModelError, Model};
+use query_data_model::{Catalog, ClickHouse, ConnectionId, DataModelError, Model};
 use query_engine::compiler::dag::{Connections, Env, Frontend, Peer};
 use query_engine::compiler::orbit_authorization::Checks;
 use query_engine::compiler::{self, HydrationRequest};
@@ -56,7 +56,7 @@ pub enum ServeError {
 /// The executors of every connection a deployment shape serves next to its graph connection,
 /// opened once at startup.
 #[derive(Clone, Default)]
-pub struct PeerExecutors(Vec<(String, Arc<dyn Executor>)>);
+pub struct PeerExecutors(Vec<(ConnectionId, Arc<dyn Executor>)>);
 
 impl PeerExecutors {
     /// Opens every connection of `model` but its graph connection, each from its entry in `config`.
@@ -65,6 +65,7 @@ impl PeerExecutors {
         let mut peers = Vec::new();
         for peer in Connections::of(model)?.peers() {
             let connection = peer.connection();
+            let name = model.connection(connection).name();
             let backend: &'static str = peer.backend().into();
             match peer {
                 Peer::ClickHouse(_) if connection == graph.connection() => {}
@@ -72,20 +73,20 @@ impl PeerExecutors {
                     let settings =
                         config
                             .duckdb
-                            .get(connection)
+                            .get(name)
                             .ok_or_else(|| ServeError::Unconfigured {
-                                connection: connection.to_string(),
+                                connection: name.to_string(),
                                 backend,
                             })?;
-                    let client = DuckDbClient::open_s3(connection, settings, catalog)?;
+                    let client = DuckDbClient::open_s3(name, settings, catalog)?;
                     let executor: Arc<dyn Executor> = Arc::new(DuckDbExecutor {
                         client: Arc::new(Mutex::new(client)),
                     });
-                    peers.push((connection.to_string(), executor));
+                    peers.push((connection, executor));
                 }
                 Peer::ClickHouse(_) | Peer::Remote(_) => {
                     return Err(ServeError::Unserved {
-                        connection: connection.to_string(),
+                        connection: name.to_string(),
                         backend,
                     });
                 }
@@ -99,7 +100,7 @@ impl PeerExecutors {
         self.0
             .iter()
             .fold(graph, |executors, (connection, executor)| {
-                executors.with(connection.clone(), Arc::clone(executor))
+                executors.with(*connection, Arc::clone(executor))
             })
     }
 }
@@ -207,7 +208,7 @@ mod tests {
             Vec::new(),
         ));
         let connections = Connections::of(&model).unwrap();
-        assert_eq!(connections.names(), [graph.connection()]);
+        assert_eq!(connections.ids(), [graph.connection()]);
         executors.get(graph.connection()).unwrap();
     }
 

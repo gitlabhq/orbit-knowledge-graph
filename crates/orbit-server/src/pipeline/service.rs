@@ -257,8 +257,8 @@ mod tests {
         );
         let (routing, dag) = service.stages(&schema, String::new(), Vec::new());
         let expected = Connections::of(&model).unwrap();
-        assert_ne!(expected.names()[0], graph.connection());
-        assert_eq!(routing.connections.names(), expected.names());
-        assert_eq!(dag.connections.names(), expected.names());
+        assert_ne!(expected.ids()[0], graph.connection());
+        assert_eq!(routing.connections.ids(), expected.ids());
+        assert_eq!(dag.connections.ids(), expected.ids());
     }
 }
