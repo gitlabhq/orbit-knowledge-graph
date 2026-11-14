@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use arrow::array::{
     Array, ArrayRef, BooleanArray, FixedSizeBinaryArray, Float64Array, Int64Array, StringArray,
+    TimestampMicrosecondArray,
 };
 use arrow::compute::{cast, concat_batches, filter_record_batch};
 use arrow::datatypes::{DataType as ArrowType, Field, Schema, SchemaRef, TimeUnit};
@@ -212,6 +213,19 @@ fn decoded(array: &ArrayRef, data_type: ColumnType) -> Result<ArrayRef, Executor
             .map_err(failed)?;
         return Ok(Arc::new(text));
     }
+    if let (
+        ArrowType::Timestamp(_, None),
+        ArrowType::Timestamp(TimeUnit::Microsecond, Some(zone)),
+    ) = (array.data_type(), &target)
+    {
+        let micros =
+            cast(array, &ArrowType::Timestamp(TimeUnit::Microsecond, None)).map_err(failed)?;
+        let micros = micros
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>()
+            .ok_or_else(|| ExecutorError("a timestamp casts to microseconds".into()))?;
+        return Ok(Arc::new(micros.clone().with_timezone(zone.clone())));
+    }
     cast(array, &target).map_err(failed)
 }
 
@@ -349,5 +363,30 @@ mod tests {
         assert_eq!(scalar(&binary, 0, KeyKind::Uuid).unwrap(), expected);
         assert_eq!(scalar(&text, 0, KeyKind::Uuid).unwrap(), expected);
         assert!(scalar(&binary, 0, KeyKind::Text).is_err());
+    }
+
+    #[test]
+    fn a_zone_less_lake_timestamp_decodes_as_utc() {
+        use arrow::array::{Array, TimestampMicrosecondArray, TimestampNanosecondArray};
+        use arrow::datatypes::{DataType as ArrowType, TimeUnit};
+        use query_data_model::DataType;
+
+        use super::{ColumnType, decoded};
+
+        let nanos: ArrayRef = Arc::new(TimestampNanosecondArray::from(vec![
+            Some(1_772_366_400_000_000_000),
+            None,
+        ]));
+        let out = decoded(&nanos, ColumnType::Scalar(DataType::DateTime)).unwrap();
+        assert_eq!(
+            out.data_type(),
+            &ArrowType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
+        );
+        let micros = out
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>()
+            .unwrap();
+        assert_eq!(micros.value(0), 1_772_366_400_000_000);
+        assert!(micros.is_null(1));
     }
 }
