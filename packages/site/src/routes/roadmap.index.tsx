@@ -1,5 +1,7 @@
-import { findPage, Icon, pageHeadOf } from "@gitlab-org/orbit-site";
+import { cn, findPage, Icon, pageHeadOf } from "@gitlab-org/orbit-site";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { Frame } from "../components/Frame";
+import { PageFooter } from "../components/PageFooter";
 import { Board } from "../roadmap/Board";
 import { formatDate, quarterLabel, quarterMonths } from "../roadmap/calendar";
 import { EmptyState } from "../roadmap/EmptyState";
@@ -19,21 +21,31 @@ export const Route = createFileRoute("/roadmap/")({
   component: RoadmapPage,
 });
 
-const VIEW = "gl-button no-underline";
-const VIEW_ON = { className: "selected" };
+const VIEWS = [
+  { id: undefined, label: "Timeline", icon: "calendar" },
+  { id: "board" as const, label: "Board", icon: "overview" },
+];
 
-function ViewSwitch() {
+// One switcher, as in the Orbit Portal: a gray track with the open view raised on it.
+function ViewSwitch({ view }: { view?: "board" }) {
   return (
-    <div role="group" aria-label="View" className="gl-button-group">
-      <Link to="." search={(prev) => ({ ...prev, view: undefined })} activeOptions={EXACT} activeProps={VIEW_ON} className={VIEW}>
-        <Icon name="calendar" size={16} />
-        Timeline
-      </Link>
-      <Link to="." search={(prev) => ({ ...prev, view: "board" as const })} activeOptions={EXACT} activeProps={VIEW_ON} className={VIEW}>
-        <Icon name="overview" size={16} />
-        Board
-      </Link>
-    </div>
+    <nav aria-label="Roadmap view" className="inline-flex items-center gap-0.5 rounded-[var(--gl-nav-item-border-radius)] bg-[var(--gl-background-color-strong)] p-0.5">
+      {VIEWS.map((option) => (
+        <Link
+          key={option.label}
+          to="."
+          search={(prev) => ({ ...prev, view: option.id })}
+          activeOptions={EXACT}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-[calc(var(--gl-nav-item-border-radius)-2px)] px-2.5 py-1 text-xs text-subtle no-underline transition-colors hover:text-default",
+            view === option.id && "bg-page text-default shadow-[0_1px_2px_rgb(0_0_0/0.08)]",
+          )}
+        >
+          <Icon name={option.icon} size={12} />
+          {option.label}
+        </Link>
+      ))}
+    </nav>
   );
 }
 
@@ -44,47 +56,45 @@ function RoadmapPage() {
   const open = filtered.filter((item) => item.status !== "shipped");
   const shipped = filtered.filter((item) => item.status === "shipped").reverse();
   return (
-    <div className="page-container py-8">
-      <header className="mb-6 border-b border-border pb-6">
-        <div className="flex flex-wrap items-end justify-between gap-6">
-          <div className="min-w-0">
-            <h1 className="m-0 text-3xl font-semibold text-default">{page?.meta.title}</h1>
-            {page?.meta.description && <p className="mt-2 mb-0 max-w-2xl text-base text-subtle">{page.meta.description}</p>}
-          </div>
-          <ViewSwitch />
-        </div>
-        <p className="mt-4 mb-0 text-xs text-subtle">
+    <Frame
+      title={page?.meta.title ?? "Roadmap"}
+      description={page?.meta.description}
+      header={
+        <p className="mt-3 mb-0 text-xs text-subtle">
           Updated {formatDate(roadmapUpdated)}. This quarter is {quarterLabel(roadmapQuarter)} ({quarterMonths(roadmapQuarter)}). The GitLab fiscal year starts on February 1. Dates are targets, not commitments.
         </p>
-      </header>
-      {themes.length > 0 && (
-        <div className="mb-6">
-          <ThemeFilter />
-        </div>
-      )}
-      {items.length === 0 ? (
-        <EmptyState message="The roadmap has no items." reset={false} />
-      ) : view === "board" ? (
-        open.length > 0 ? <Board items={filtered} /> : <EmptyState message="This theme has no upcoming items." />
-      ) : (
-        <Timeline items={filtered} />
-      )}
-      {view === "board" && shipped.length > 0 && (
-        <section aria-labelledby="shipped" className="mt-14">
-          <h2 id="shipped" className="m-0 mb-1 flex items-center gap-2 text-xl font-semibold text-default">
-            <Icon name="status-success" className="text-success" />
-            Recently shipped
-          </h2>
-          <p className="mt-0 mb-4 text-sm text-subtle">Work that is available today.</p>
-          <ul className="m-0 grid list-none gap-2 p-0 sm:grid-cols-2 lg:grid-cols-3">
-            {shipped.map((item) => (
-              <li key={item.slug}>
-                <ItemCard item={item} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
+      }
+      footer={page && <PageFooter page={page} />}
+    >
+      <div className="not-prose -mt-3 mb-6 flex flex-col items-start gap-2">
+        <ViewSwitch view={view} />
+        {themes.length > 0 && <ThemeFilter theme={theme} />}
+      </div>
+      <div className="page-bleed">
+        {items.length === 0 ? (
+          <EmptyState message="The roadmap has no items." reset={false} />
+        ) : view === "board" ? (
+          open.length > 0 ? <Board items={filtered} /> : <EmptyState message="This theme has no upcoming items." />
+        ) : (
+          <Timeline items={filtered} />
+        )}
+        {view === "board" && shipped.length > 0 && (
+          <section aria-labelledby="shipped" className="mt-12">
+            <h2 id="shipped" className="m-0 mb-1 flex items-center gap-2 text-xl font-semibold text-default">
+              <Icon name="status-success" className="text-success" />
+              Recently shipped
+            </h2>
+            <p className="mt-0 mb-4 text-sm text-subtle">Work that is available today.</p>
+            <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
+              {shipped.map((item) => (
+                <li key={item.slug}>
+                  <ItemCard item={item} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+    </Frame>
   );
 }

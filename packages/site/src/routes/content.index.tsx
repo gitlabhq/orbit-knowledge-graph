@@ -1,10 +1,9 @@
-import { findPage, pageHeadOf } from "@gitlab-org/orbit-site";
+import { Embed, EmbedGrid, findPage, pageHeadOf, Video, VideoGrid } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
-import { ContentHeader } from "../content/ContentHeader";
+import { Frame } from "../components/Frame";
+import { PageFooter } from "../components/PageFooter";
 import { links, videos } from "../content/demos";
 import { EmptyState } from "../roadmap/EmptyState";
-import { LinkCard } from "../ui/LinkCard";
-import { Video } from "../ui/Video";
 
 export const Route = createFileRoute("/content/")({
   head: () => pageHeadOf(findPage("content")),
@@ -13,37 +12,33 @@ export const Route = createFileRoute("/content/")({
 
 function ContentPage() {
   const page = findPage("content");
-  const [featured, ...rest] = videos;
   return (
-    <div className="page-container pb-14">
-      <ContentHeader title={page?.meta.title ?? "Content"} description={page?.meta.description} />
-      <div className="flex flex-col gap-10">
-        {featured && <Video video={featured} featured />}
-        {rest.length > 0 && (
-          <ul className="m-0 grid list-none gap-4 p-0 md:grid-cols-3">
-            {rest.map((video) => (
-              <li key={video.id}>
-                <Video video={video} />
-              </li>
+    <Frame title={page?.meta.title ?? "Content"} description={page?.meta.description} footer={page && <PageFooter page={page} />}>
+      {videos.length > 0 && (
+        <section aria-labelledby="videos">
+          <h2 id="videos" className="m-0 text-xl font-semibold text-default">
+            Videos
+          </h2>
+          <VideoGrid>
+            {videos.map((video) => (
+              <Video key={video.id} {...video} />
             ))}
-          </ul>
-        )}
-        {links.length > 0 && (
-          <section aria-labelledby="related" className="flex flex-col gap-4">
-            <h2 id="related" className="m-0 text-xl font-semibold text-default">
-              Related links
-            </h2>
-            <ul className="m-0 grid list-none gap-3 p-0 lg:grid-cols-2">
-              {links.map((link) => (
-                <li key={link.href}>
-                  <LinkCard link={link} />
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {!featured && links.length === 0 && <EmptyState message="No demos are available." reset={false} />}
-      </div>
-    </div>
+          </VideoGrid>
+        </section>
+      )}
+      {links.length > 0 && (
+        <section aria-labelledby="related" className="mt-6">
+          <h2 id="related" className="m-0 text-xl font-semibold text-default">
+            Related links
+          </h2>
+          <EmbedGrid>
+            {links.map((link) => (
+              <Embed key={link.href} {...link} />
+            ))}
+          </EmbedGrid>
+        </section>
+      )}
+      {videos.length === 0 && links.length === 0 && <EmptyState message="No demos are available." reset={false} />}
+    </Frame>
   );
 }
