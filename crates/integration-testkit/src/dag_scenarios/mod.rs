@@ -20,7 +20,7 @@ use query_engine::pipeline::{AuthorizedPath, SecurityContext};
 use query_engine::shared::dag::{DagError, Event, Outcome};
 use serde_json::{Value, json};
 
-use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_model, run_dag};
+use crate::dag_fakes::{AllowedKeys, SeededGraph, dag_model, run_counted, run_dag};
 
 /// The properties `names` of `entity` in the DAG model, as a key input lists them.
 fn properties(entity: &str, names: &[&str]) -> Vec<query_data_model::PropertyId> {
@@ -127,6 +127,19 @@ async fn run_with(
     let graph = Arc::new(SeededGraph(graph));
     let (events, outcome) = run_dag(&dag_model(), graph, query, grants, user, checks).await;
     Run { events, outcome }
+}
+
+/// `run_with`, and the requests each backend's executor ran.
+async fn counted(
+    query: &str,
+    grants: &Grants,
+    graph: Vec<Row>,
+    checks: &Checks,
+) -> (Run, std::collections::BTreeMap<&'static str, usize>) {
+    let graph = Arc::new(SeededGraph(graph));
+    let (events, outcome, requests) =
+        run_counted(&dag_model(), graph, query, grants, "alice", checks).await;
+    (Run { events, outcome }, requests)
 }
 
 /// Runs a query as `alice`, whose code checks allow every seeded repository.

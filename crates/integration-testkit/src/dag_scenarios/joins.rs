@@ -7,7 +7,7 @@ use query_engine::shared::dag::Event;
 use serde_json::json;
 
 use super::single::ops;
-use super::{caller, projects, row, run, run_with, workspaces};
+use super::{caller, counted, projects, row, run, run_with, workspaces};
 use crate::dag_fakes::AllowedKeys;
 
 const MENTIONS: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, mr.title, m.author, m.text ORDER BY mr.iid LIMIT 10";
@@ -125,53 +125,165 @@ async fn merge_requests_join_the_slack_messages_that_mention_them() {
     );
 }
 
-#[tokio::test]
-async fn a_code_search_is_bounded_by_the_callers_readable_projects() {
-    let mut graph = vec![
-        row(json!({"p_full_path": "gitlab-org/orbit", "p_id": 42})),
-        row(json!({"p_full_path": "secret/vault", "p_id": 77})),
-    ];
-    graph.extend(projects(&[42]));
-    let ran = run(BOUNDED, &caller("1/9970/"), graph).await;
-    let split = ran
-        .events
+fn split(ran: &super::Run) -> Vec<query_engine::shared::dag::StageInfo> {
+    ran.events
         .iter()
         .find_map(|event| match event {
             Event::Split { stages } => Some(stages.clone()),
             _ => None,
         })
-        .unwrap();
-    assert_eq!(
-        split[1].inputs,
-        [Input::Keys(KeyInput {
-            from: 0,
-            positions: vec![1],
-            binding: "scope".into(),
-            properties: super::properties("Project", &["id"]),
-            types: vec![query_data_model::DataType::Int],
-        })]
-    );
-    let request = ran
-        .rendered(2)
+        .unwrap()
+}
+
+fn code_request(
+    ran: &super::Run,
+    stage: usize,
+) -> query_data_model::implementations::orbit_code::StructuralSearchRequest {
+    ran.rendered(stage)
         .into_iter()
         .find_map(|request| match request {
             Rendered::Code(request) => Some(request),
             _ => None,
         })
-        .unwrap();
-    assert_eq!(request.repositories, [42]);
-    assert!(ran.plan(2, false)[0].contains("projects: [42, 77]"));
+        .unwrap()
+}
+
+/// The rows `BOUNDED` returns for a caller who may read project 42's code.
+fn bounded_rows() -> [query_data_model::catalog::Row; 2] {
+    [
+        row(
+            json!({"p_full_path": "gitlab-org/orbit", "f_path": "crates/orbit-server/src/query.rs", "match.line": 48, "_orbit_p_id": 42, "_orbit_p_type": "Project"}),
+        ),
+        row(
+            json!({"p_full_path": "gitlab-org/orbit", "f_path": "crates/query-engine/compiler/src/lib.rs", "match.line": 120, "_orbit_p_id": 42, "_orbit_p_type": "Project"}),
+        ),
+    ]
+}
+
+/// The project stage reads the projects the files are joined to, under Project's guard and its
+/// `read_code` check, so its keys are the files' scope keys: the graph runs one request, not a
+/// second lookup of the same projects.
+#[tokio::test]
+async fn a_pattern_that_reads_the_scope_head_reads_it_once() {
+    let graph = vec![row(json!({"p_full_path": "gitlab-org/orbit", "p_id": 42}))];
+    let all = AllowedKeys::checks("project", [Key::Int(42), Key::Int(77)]);
+    let (ran, requests) = counted(BOUNDED, &caller("1/9970/"), graph, &all).await;
     assert_eq!(
-        ran.rows(),
+        requests,
+        [("clickhouse", 1), ("live", 0), ("orbit_code", 1)].into()
+    );
+    let split = split(&ran);
+    let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
+    assert_eq!(
+        backends,
+        [Backend::ClickHouse, Backend::OrbitCode, Backend::Combine]
+    );
+    let key = KeyInput {
+        from: 0,
+        positions: vec![1],
+        binding: "f".into(),
+        properties: super::properties("File", &["project_id"]),
+        types: vec![query_data_model::DataType::Int],
+    };
+    assert_eq!(
+        split[1].inputs,
+        [Input::Keys(key.clone()), Input::Scope(key)]
+    );
+    let Rendered::Sql { sql, params, .. } = &ran.rendered(0)[0] else {
+        panic!("the project stage renders SQL");
+    };
+    assert!(
+        sql.starts_with("SELECT p.full_path AS p_full_path, p.id AS p_id FROM ")
+            && sql
+                .contains("FROM gl_project AS p WHERE (startsWith(p.traversal_path, {p0:String})"),
+        "{sql}"
+    );
+    assert_eq!(params[0].1, json!("1/9970/"));
+    let request = code_request(&ran, 1);
+    assert_eq!(request.repositories, [42]);
+    assert!(ran.plan(1, false)[0].contains("projects: [42]"));
+    assert_eq!(ran.rows(), bounded_rows());
+}
+
+/// Reading the head in the pattern runs the same `read_code` check the lookup ran: a project
+/// the caller's scope reaches but whose code it may not read never reaches the code stage.
+#[tokio::test]
+async fn a_project_the_pattern_reads_but_read_code_denies_never_reaches_the_code_stage() {
+    let graph = vec![
+        row(json!({"p_full_path": "gitlab-org/orbit", "p_id": 42})),
+        row(json!({"p_full_path": "secret/vault", "p_id": 77})),
+    ];
+    let only = AllowedKeys::checks("project", [Key::Int(42)]);
+    let (ran, requests) = counted(BOUNDED, &caller("1/"), graph, &only).await;
+    assert_eq!(
+        requests,
+        [("clickhouse", 1), ("live", 0), ("orbit_code", 1)].into()
+    );
+    let handed: Vec<Vec<Key>> = ran
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Keys {
+                from: 0,
+                to: 1,
+                sample,
+                ..
+            } => Some(sample.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(handed, [vec![Key::Int(42)], vec![Key::Int(42)]]);
+    assert_eq!(code_request(&ran, 1).repositories, [42]);
+    assert_eq!(ran.rows(), bounded_rows());
+}
+
+const UNRELATED: &str = "MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN p.full_path, mr.iid, f.path ORDER BY mr.iid LIMIT 20";
+
+/// The pattern reads a project, but through the merge request, not through the heads' or the
+/// files' own steps, so its rows are not their scope keys and the lookup stage still runs.
+#[tokio::test]
+async fn a_head_read_only_by_an_unrelated_variable_keeps_its_lookup() {
+    let mut graph = vec![row(json!({
+        "p_full_path": "gitlab-org/orbit", "p_id": 42,
+        "mr_iid": 1, "mr_id": 2000, "mr_project_id": 42, "mr_source_branch": "feature-a",
+        "_orbit_e0_kind": "IN_PROJECT", "_orbit_e0_src": 2000, "_orbit_e0_src_kind": "MergeRequest",
+        "_orbit_e0_dst": 42, "_orbit_e0_dst_kind": "Project",
+    }))];
+    graph.extend(projects(&[42]));
+    let all = AllowedKeys::checks("project", [Key::Int(42), Key::Int(77)]);
+    let (ran, requests) = counted(UNRELATED, &caller("1/9970/"), graph, &all).await;
+    assert_eq!(
+        requests,
+        [("clickhouse", 2), ("live", 0), ("orbit_code", 1)].into()
+    );
+    let split = split(&ran);
+    let backends: Vec<Backend> = split.iter().map(|stage| stage.backend).collect();
+    assert_eq!(
+        backends,
         [
-            row(
-                json!({"p_full_path": "gitlab-org/orbit", "f_path": "crates/orbit-server/src/query.rs", "match.line": 48, "_orbit_p_id": 42, "_orbit_p_type": "Project"})
-            ),
-            row(
-                json!({"p_full_path": "gitlab-org/orbit", "f_path": "crates/query-engine/compiler/src/lib.rs", "match.line": 120, "_orbit_p_id": 42, "_orbit_p_type": "Project"})
-            ),
+            Backend::ClickHouse,
+            Backend::ClickHouse,
+            Backend::OrbitCode,
+            Backend::Combine
         ]
     );
+    assert!(split[1].logical[0].ends_with("-> [scope]"));
+    let scopes: Vec<usize> = split[2]
+        .inputs
+        .iter()
+        .filter_map(|input| match input {
+            Input::Scope(scope) => Some(scope.from),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(scopes, [1, 1]);
+    assert_eq!(code_request(&ran, 2).repositories, [42]);
+    let paths: Vec<_> = ran
+        .rows()
+        .into_iter()
+        .map(|row| row["f_path"].clone())
+        .collect();
+    assert_eq!(paths, [json!("src/auth.rs")]);
 }
 
 #[tokio::test]

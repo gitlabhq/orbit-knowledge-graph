@@ -1,8 +1,9 @@
 //! Executors over the seeded fakes, so DAG scenarios run code and live stages end to end the
 //! way `SeededColumnResolver` fakes Gitaly. Only tests register them; the server registers none.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use compiler::dag::{Backend, Connections, Contract, Env, Frontend, Peer, Request, Source};
@@ -313,20 +314,82 @@ pub fn dag_connections(model: &Arc<Model>) -> (Arc<Catalog<ClickHouse>>, Connect
     (graph, connections)
 }
 
+/// An executor that counts the requests it runs.
+pub struct Counted {
+    pub inner: Arc<dyn Executor>,
+    pub requests: AtomicUsize,
+}
+
+#[async_trait]
+impl Executor for Counted {
+    async fn execute(
+        &self,
+        request: &Request,
+        contract: Option<&Contract>,
+    ) -> Result<Executed, ExecutorError> {
+        self.requests.fetch_add(1, Ordering::Relaxed);
+        self.inner.execute(request, contract).await
+    }
+}
+
+/// The fake each served backend runs on: `graph` for ClickHouse, the seeded code and live fakes
+/// for the remotes, signed in to the live service as `user`.
+fn fake(backend: Backend, graph: &Arc<dyn Executor>, user: &str) -> Option<Arc<dyn Executor>> {
+    match backend {
+        Backend::ClickHouse => Some(Arc::clone(graph)),
+        Backend::OrbitCode => Some(seeded_code()),
+        Backend::Live => Some(seeded_live(user)),
+        _ => None,
+    }
+}
+
 /// `graph` on the ClickHouse connection and the seeded code and live fakes on every served
 /// remote, signed in to the live service as `user`.
 pub fn dag_executors(connections: &Connections, graph: Arc<dyn Executor>, user: &str) -> Executors {
     let mut executors = Executors::default();
     for peer in connections.peers() {
-        let executor = match peer.backend() {
-            Backend::ClickHouse => Arc::clone(&graph),
-            Backend::OrbitCode => seeded_code(),
-            Backend::Live => seeded_live(user),
-            _ => continue,
-        };
-        executors = executors.with(peer.connection(), executor);
+        if let Some(executor) = fake(peer.backend(), &graph, user) {
+            executors = executors.with(peer.connection(), executor);
+        }
     }
     executors
+}
+
+/// `run_dag` with every executor counted: the events, the outcome, and the requests each
+/// backend's executor ran.
+pub async fn run_counted(
+    model: &Arc<Model>,
+    graph: Arc<dyn Executor>,
+    query: &str,
+    grants: &compiler::orbit_authorization::Grants,
+    user: &str,
+    checks: &Checks,
+) -> (
+    Vec<Event>,
+    Result<Outcome, DagError>,
+    BTreeMap<&'static str, usize>,
+) {
+    let (catalog, connections) = dag_connections(model);
+    let mut executors = Executors::default();
+    let mut counted = Vec::new();
+    for peer in connections.peers() {
+        if let Some(inner) = fake(peer.backend(), &graph, user) {
+            let executor = Arc::new(Counted {
+                inner,
+                requests: AtomicUsize::new(0),
+            });
+            counted.push((<&str>::from(peer.backend()), Arc::clone(&executor)));
+            executors = executors.with(peer.connection(), executor);
+        }
+    }
+    let frontend = Frontend::Server(catalog);
+    let (events, outcome) =
+        run_served(&frontend, &connections, &executors, query, grants, checks).await;
+    let requests = counted
+        .into_iter()
+        .map(|(backend, executor)| (backend, executor.requests.load(Ordering::Relaxed)))
+        .collect();
+    (events, outcome, requests)
 }
 
 /// Runs a query through the DAG runner with `graph` on the graph connection and the seeded code
