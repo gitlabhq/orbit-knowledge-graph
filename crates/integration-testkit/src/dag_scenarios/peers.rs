@@ -3,9 +3,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use compiler::HydrationPlan;
 use compiler::dag::{
-    Connections, Env, Frontend, Inputs, Rendered, Request, Runs, Source, compile, split_query,
+    Connections, Env, Frontend, Handle, Output, Rendered, Runs, Source, split_query,
 };
 use compiler::orbit_authorization::{Checks, Grants};
 use duckdb_client::dag::DuckDbExecutor;
@@ -270,10 +269,10 @@ fn a_duckdb_frontend_restricts_a_statement_parsed_for_an_administrator() {
     split(true).unwrap();
 }
 
-/// A node a DuckDB frontend returns whole from another connection's stage hydrates no
+/// A node a DuckDB frontend returns whole from another connection's stage carries no
 /// admin-only property, as a node a single stage returns whole does.
 #[test]
-fn a_whole_node_across_connections_hydrates_no_admin_only_property() {
+fn a_whole_node_across_connections_returns_no_admin_only_property() {
     let lake = lake();
     let query = "MATCH (v:Review)-[:REVIEWS]->(m:MergeRequest)<-[:AUTHORED]-(u:User) RETURN v.id, u LIMIT 5";
     let names = lake.model.names();
@@ -290,20 +289,16 @@ fn a_whole_node_across_connections_hydrates_no_admin_only_property() {
             .into_iter()
             .find(|stage| matches!(stage.runs, Runs::On { connection, .. } if connection == main))
             .unwrap();
-        let Request::Query(compiled) = compile(graph, Inputs::default(), &env).unwrap().request
-        else {
-            panic!("the graph stage compiles a relational query");
+        let contract = graph.contract.expect("the graph stage feeds Combine");
+        let returns = |property| {
+            let output = Output::Node {
+                binding: "u".into(),
+                handle: Handle::Property(property),
+            };
+            contract.position(&output).is_some()
         };
-        let HydrationPlan::Static(templates) = &compiled.hydration else {
-            panic!("the graph stage hydrates its nodes");
-        };
-        let columns = &templates
-            .iter()
-            .find(|template| template.entity == user)
-            .unwrap()
-            .columns;
-        assert!(columns.contains(&username), "{columns:?}");
-        assert!(!columns.contains(&first_name), "{columns:?}");
+        assert!(returns(username), "{contract:?}");
+        assert!(!returns(first_name), "{contract:?}");
     }
 }
 

@@ -49,7 +49,6 @@ pub const EXEMPT: &[Exempt] = &[
     exempt("crates/query-engine/compiler/src/passes/scope_lookup.rs", Rule::IdentityColumn, "the scope lookup's key column; the placement rework replaces it"),
     exempt("crates/query-engine/compiler/src/constants.rs", Rule::IdentityColumn, "an internal column name of the compiler's own id-set relations, not an entity's identity"),
     exempt("crates/orbit-server/src/content/gitaly/mr_diff.rs", Rule::IdentityColumn, "the diff lookup reads the key properties its declaration lists"),
-    exempt("crates/duckdb-client/src/dag.rs", Rule::ConnectionName, "the local caller's identity, not a connection"),
     exempt("crates/orbit-server/src/health_check.rs", Rule::BackendKind, "the health report's component name for the ClickHouse instance"),
     exempt("crates/orbit-server/src/health_client.rs", Rule::BackendKind, "the health report's component name for the ClickHouse instance"),
     exempt("crates/orbit-server/src/cluster_health.rs", Rule::BackendKind, "the health report's component name for the ClickHouse instance"),
