@@ -953,6 +953,7 @@ The loader collects every error with its package and fails once. A missing decla
 - A backend that stores a non-global entity but has no `enforce` entry for it. A store whose backend joins and that binds a relationship without one.
 - A scope kind the backend cannot render, or a policy that names a property or relationship the graph lacks.
 - A `via` chain that does not reach an entity that holds the scope key, or a step with more than one target.
+- A `via` chain whose entities' complete stores sit on different connections in the deployment shape.
 - An `enforce` entry of `none` with no `checks`.
 - A `Credentials` check on an entity that no delegating backend stores.
 - A provider name the deployment does not bind, or one bound to a module that does not answer the query the check needs.
