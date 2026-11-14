@@ -10,6 +10,26 @@
         }
       ]
     },
+    "ChecksSpec": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChecksWord"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/CheckSpec"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "An entity's row checks, or `open`: the permission alone admits every row of a global entity."
+    },
+    "ChecksWord": {
+      "enum": [
+        "open"
+      ],
+      "type": "string"
+    },
     "DelegatedCheck": {
       "additionalProperties": false,
       "description": "The provider answers `Credentials`, and the backend runs the read with the caller's sign-in.",
@@ -89,10 +109,7 @@
       "additionalProperties": false,
       "properties": {
         "checks": {
-          "items": {
-            "$ref": "#/$defs/CheckSpec"
-          },
-          "type": "array"
+          "$ref": "#/$defs/ChecksSpec"
         },
         "enforce": {
           "additionalProperties": {
