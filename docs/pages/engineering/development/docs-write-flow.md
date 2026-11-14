@@ -43,7 +43,7 @@ flowchart TD
       R
     end
 
-    classDef agent fill:#fdf1dd,stroke:#c17d10
+    classDef agent fill:#fdf1dd,stroke:#c17d10,color:#3d2a05
     class W,F,R agent
 ```
 
