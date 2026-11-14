@@ -1,6 +1,5 @@
 mod dialects;
 mod ontology;
-mod plan_shape;
 mod predicate_limits;
 mod setup;
 #[allow(dead_code)]

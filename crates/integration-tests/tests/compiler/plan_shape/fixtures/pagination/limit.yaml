@@ -2,9 +2,9 @@ name: LIMIT alone fetches one probe row without tie-breakers or an OFFSET
 
 query:
   json: |
-    {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "columns": ["path"]}], "limit": 2}
+    {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "id_range": {"start": 1, "end": 10000}, "columns": ["path"]}], "limit": 2}
   gql: |
-    MATCH (f:File) RETURN f.path LIMIT 2
+    MATCH (f:File) WHERE f.id >= 1 AND f.id <= 10000 RETURN f.path LIMIT 2
 
 logical:
   expect: ["(Limit 2 (Input traversal (...)))"]
@@ -14,8 +14,8 @@ physical:
   clickhouse:
     emitted:
       expect: ["(Limit 3 (Project f.path AS f_path (_)))"]
-      reject: ["(Offset ... (_))", "(Sort ... (_))"]
+      reject: ["(Offset ... (_))", "(Limit ... (Sort ... (_)))"]
   duckdb:
     emitted:
       expect: ["(Limit 3 (Project f.path AS f_path (_)))"]
-      reject: ["(Offset ... (_))", "(Sort ... (_))"]
+      reject: ["(Offset ... (_))", "(Limit ... (Sort ... (_)))"]

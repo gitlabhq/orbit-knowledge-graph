@@ -1,13 +1,73 @@
 # Planner optimization coverage
 
 Run `mise test:plan-shape`. The runner discovers YAML files recursively under
-`fixtures/`. Each fixture checks normalized input, the selected plan, the lowered
-SQL AST, and/or the final secured AST. Most fixtures run through both JSON and GQL.
+`fixtures/`. Each fixture runs the production compiler pipeline for each
+frontend and backend, and checks the state that named phases leave behind. Most
+fixtures run through both JSON and GQL.
 
-The emitted AST includes the ClickHouse text-excerpt pass and the row window
-pass, so `Limit` shows the fetched rows (the page plus one probe row) and
-`Offset` shows the lowered SKIP. In the logical tree, `Limit` and `Offset` show
-the requested LIMIT and SKIP.
+Assertions live under `physical.<backend>.<phase>.<state field>`:
+
+```yaml
+physical:
+  clickhouse:
+    normalize:
+      input: {expect: ["(Limit 2 (Input traversal (...)))"]}
+    plan_clickhouse:
+      query_plan: {expect: ["(Scan Table(gl_user) AS u)"], point_lookup: true}
+    response_policy:
+      node: {expect: ["(Limit 3 (Project u.username AS u_username (_)))"]}
+    settings:
+      query_config: {equals: {transform_null_in: "0"}, absent: [join_order_algorithm]}
+    hydrate_plan:
+      hydration_plan: static
+    security:
+      node: {expect: ["(Filter false, ... (_))"]}
+    codegen:
+      output:
+        sql: {contains: [gl_merge_request], not_contains: [gl_edge]}
+        indexes: [{table: gl_merge_request, name: idx_title}]
+```
+
+Common targets have aliases, declared in one table in
+`integration-testkit/src/plan_shape/aliases.rs`:
+
+| Alias | Target |
+|---|---|
+| `logical` (top level) | `normalize.input`, or `plan_clickhouse.input` for hydration fixtures |
+| `planned`, `point_lookup` | `plan_clickhouse.query_plan` or `plan_duckdb.query_plan` |
+| `emitted` | `response_policy.node` on ClickHouse, `paginate.node` on DuckDB |
+| `final_ast` | `security.node` |
+| `hydration` | `hydrate_plan.hydration_plan` |
+| `settings` | `settings.query_config` |
+| `sql`, `indexes` | `codegen.output` |
+
+An alias and an explicit phase entry cannot set the same state field.
+
+A phase key must name a phase of that pipeline, and each state field must be one
+the phase writes. The runner rejects other keys. Each state field has one
+contract:
+
+| State field | Contract |
+|---|---|
+| `input` | Patterns on the logical tree |
+| `query_plan` | Patterns on the planned tree, and `point_lookup` |
+| `node` | Patterns on the SQL AST |
+| `query_config` | `exact`, `equals`, and `absent` on the resolved ClickHouse settings |
+| `hydration_plan` | `none`, `static`, or `dynamic` |
+| `output` | `sql` text checks, and `indexes` that the layout declares and the final query scans |
+
+The plan-shape binary loads the embedded query config, so `settings` sees the
+production settings, such as the query cache. The container suite runs EXPLAIN
+on the seeded ClickHouse for every fixture with `indexes`. It first adds an older
+decoy copy of each row in its own part, with string values that no fixture
+matches. With the table's other skip indexes ignored, each listed skip index must
+apply to a read of its table and prune granules. Other fixtures need no ClickHouse.
+
+After `paginate`, `Limit` shows the fetched rows (the page plus one probe row)
+and `Offset` shows the lowered SKIP. In `input`, `Limit` and `Offset` show the
+requested LIMIT and SKIP. `security` sets the user, with the same shape as a
+query scenario's `config.security`. Hydration fixtures run the hydration
+pipeline, which has no `normalize` or `paginate` phase.
 
 Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
 for one fixture. Other fixtures keep the default ontology.
@@ -26,31 +86,13 @@ is a default for each case, and each case needs its own `name`.
 
 The fixtures cover access-path choices and their important eligibility guards.
 
-Final-output assertions use these optional ClickHouse fields:
-
-```yaml
-physical:
-  clickhouse:
-    final_ast:
-      expect: ["(Filter false, ... (_))"]
-    sql:
-      contains: ["SETTINGS use_query_cache = 0"]
-      not_contains: ["gl_edge"]
-    indexes:
-      - { table: gl_merge_request, name: idx_title }
-```
-
-`sql` checks the rendered query. `indexes` checks the ClickHouse layout and
-requires the final query to scan that table. `hydration` checks the hydration plan kind: `none`, `static`,
-or `dynamic`. Data-correctness scenarios reject these fields.
-
 `scenarios/` holds the compiler checks for the data-correctness scenarios. It
 mirrors the scenario tree: `scenarios/search/filter_starts_with.yaml` checks the
 query in `server/data_correctness/scenarios/search/filter_starts_with.yaml`.
 Production route cases stay in `edge_scans/production_variant_routes.yaml`.
 
 CTE assertions refer to top-level named query definitions, not execution order.
-Use one of these forms in a planned or emitted assertion block:
+Use one of these forms in a pattern block:
 
 ```yaml
 ctes:
@@ -90,8 +132,8 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
   The YAML fixture independently covers the large dynamic mode.
 - The explain view flattens associative OR expressions. Static prefix fixtures
   verify predicate content, but do not assert the internal balanced-tree depth.
-- Scope enforcement, role scans, virtual-property hydration, and backend
-  code-generation optimizations are outside this harness.
+- Virtual-property hydration and backend code-generation optimizations are
+  outside this harness.
 
 ## Keep in Rust
 

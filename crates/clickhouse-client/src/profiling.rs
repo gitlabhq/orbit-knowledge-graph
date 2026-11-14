@@ -36,11 +36,22 @@ impl ArrowClickHouseClient {
     }
 
     pub async fn explain_plan(&self, sql: &str) -> Result<String, ClickHouseError> {
+        self.explain_plan_with(sql, &[]).await
+    }
+
+    pub async fn explain_plan_with(
+        &self,
+        sql: &str,
+        settings: &[(&str, &str)],
+    ) -> Result<String, ClickHouseError> {
         let sql = format!("EXPLAIN PLAN json=1, indexes=1, description=1, actions=0 {sql}");
-        let mut cursor = self
-            .query(&sql)
-            .with_setting("use_query_condition_cache", "0")
-            .with_setting("use_skip_indexes_on_data_read", "0")
+        let query = settings.iter().fold(
+            self.query(&sql)
+                .with_setting("use_query_condition_cache", "0")
+                .with_setting("use_skip_indexes_on_data_read", "0"),
+            |query, (name, value)| query.with_setting(*name, *value),
+        );
+        let mut cursor = query
             .inner
             .fetch_bytes("TabSeparatedRaw")
             .map_err(ClickHouseError::Query)?;

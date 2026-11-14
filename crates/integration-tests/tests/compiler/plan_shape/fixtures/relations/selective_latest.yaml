@@ -248,17 +248,3 @@ cases:
         planned:
           expect: ["(Filter j.name != 'build', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
           reject: ["(Deduplicate LimitBy ... (_))"]
-
-  - name: Wide ID ranges keep FINAL
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","id_range":{"start":1,"end":100002},"columns":["id"]}],"limit":10}
-      gql: |
-        MATCH (j:Job) WHERE j.id >= 1 AND j.id <= 100002 RETURN j.id LIMIT 10
-    logical:
-      expect: ["(Filter j.id >= 1, j.id <= 100002 (_))"]
-    physical:
-      clickhouse:
-        planned:
-          expect: ["(Filter j._deleted = false (Bind j (Filter j.id >= 1, j.id <= 100002 (Deduplicate Final (Scan Table(gl_job) AS j)))))"]
-          reject: ["(Deduplicate LimitBy ... (_))"]

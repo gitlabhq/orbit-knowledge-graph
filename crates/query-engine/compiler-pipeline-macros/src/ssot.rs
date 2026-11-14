@@ -427,6 +427,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
             }
         }
 
+        let run_observed_fn = format_ident!("run_{}_observed", pipeline.name);
         let phase_calls: Vec<_> = pipeline
             .run
             .iter()
@@ -435,7 +436,26 @@ pub fn generate(input: TokenStream) -> TokenStream {
                 quote! {
                     ctx.set_current_phase(#phase_str);
                     #phase_name(ctx)?;
+                    ctx.set_current_phase("");
+                    observe(#phase_str, ctx);
                 }
+            })
+            .collect();
+        let phase_table: Vec<_> = pipeline
+            .run
+            .iter()
+            .map(|phase_name| {
+                let phase_str = phase_name.to_string();
+                let mutates: Vec<String> = ctx
+                    .phases
+                    .iter()
+                    .find(|phase| phase.name == *phase_name)
+                    .unwrap_or_else(|| panic!("unknown phase: `{phase_name}`"))
+                    .mutates
+                    .iter()
+                    .map(Ident::to_string)
+                    .collect();
+                quote! { (#phase_str, &[#(#mutates),*]) }
             })
             .collect();
 
@@ -448,6 +468,9 @@ pub fn generate(input: TokenStream) -> TokenStream {
             }
 
             impl #ctx_name {
+                pub const PHASES: &'static [(&'static str, &'static [&'static str])] =
+                    &[#(#phase_table),*];
+
                 pub fn new(#(#ctor_params,)* #model_param) -> Self {
                     Self {
                         data_model,
@@ -463,8 +486,14 @@ pub fn generate(input: TokenStream) -> TokenStream {
             }
 
             pub fn #run_fn(ctx: &mut #ctx_name) -> crate::error::Result<()> {
+                #run_observed_fn(ctx, |_, _| {})
+            }
+
+            pub fn #run_observed_fn(
+                ctx: &mut #ctx_name,
+                mut observe: impl FnMut(&'static str, &#ctx_name),
+            ) -> crate::error::Result<()> {
                 #(#phase_calls)*
-                ctx.set_current_phase("");
                 Ok(())
             }
         });

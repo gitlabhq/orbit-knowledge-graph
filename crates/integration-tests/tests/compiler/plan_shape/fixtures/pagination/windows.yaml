@@ -39,7 +39,7 @@ cases:
   - name: SKIP without LIMIT pages the default window
     query:
       gql: |
-        MATCH (u:User) RETURN u.username SKIP 4
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 4
     logical:
       expect: ["(Limit 30 (Offset 4 (Input traversal (...))))"]
     physical:
@@ -50,7 +50,7 @@ cases:
   - name: Tie-breakers extend the requested sort
     query:
       gql: |
-        MATCH (u:User) RETURN u.username ORDER BY u.username DESC SKIP 4 LIMIT 2
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.username DESC SKIP 4 LIMIT 2
     logical:
       expect: ["(Limit 2 (Offset 4 (Sort u.username DESC (_))))"]
     physical:
@@ -61,7 +61,7 @@ cases:
   - name: A requested sort on the identity is not repeated as a tie-breaker
     query:
       gql: |
-        MATCH (u:User) RETURN u.username ORDER BY u.id DESC SKIP 4 LIMIT 2
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id DESC SKIP 4 LIMIT 2
     logical:
       expect: ["(Limit 2 (Offset 4 (Sort u.id DESC (_))))"]
     physical:
@@ -72,7 +72,7 @@ cases:
   - name: Relationship SKIP sorts by every node identity
     query:
       gql: |
-        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr SKIP 4 LIMIT 2
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, mr SKIP 4 LIMIT 2
     logical:
       expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
     physical:
@@ -83,7 +83,7 @@ cases:
   - name: Multi-type relationship SKIP adds the edge type to the tie-breakers
     query:
       gql: |
-        MATCH (u:User)-[:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN u, mr SKIP 4 LIMIT 2
+        MATCH (u:User)-[:AUTHORED|APPROVED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, mr SKIP 4 LIMIT 2
     logical:
       expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
     physical:
@@ -95,7 +95,7 @@ cases:
   - name: Code-graph relationship SKIP sorts by each backend's node identities
     query:
       gql: |
-        MATCH (a:Definition)-[:CALLS]->(b:Definition) RETURN a, b SKIP 4 LIMIT 2
+        MATCH (a:Definition)-[:CALLS]->(b:Definition) WHERE a.id >= 1 AND a.id <= 10000 RETURN a, b SKIP 4 LIMIT 2
     logical:
       expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
     physical:
@@ -109,7 +109,7 @@ cases:
   - name: DuckDB SKIP keeps the requested sort ahead of the tie-breaker
     query:
       gql: |
-        MATCH (f:File) RETURN f.path ORDER BY f.path SKIP 4 LIMIT 2
+        MATCH (f:File) WHERE f.id >= 1 AND f.id <= 10000 RETURN f.path ORDER BY f.path SKIP 4 LIMIT 2
     logical:
       expect: ["(Limit 2 (Offset 4 (Sort f.path (_))))"]
     physical:
