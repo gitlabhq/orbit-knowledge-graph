@@ -1,0 +1,36 @@
+cases:
+  - name: A type(r) name that the schema does not have rejects with a static message that says names are uppercase and case-sensitive, and does not echo the literal
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+        WHERE type(r) = 'NOPE_PRIVATE_TYPE'
+        RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains:
+            - type() names a relationship type that the schema does not have; relationship type names are uppercase and case-sensitive
+          not_contains:
+            - NOPE_PRIVATE_TYPE
+
+  - name: NOT type(r) IN [...] with one name that the schema does not have rejects with the same static message and does not echo the unknown name.
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+        WHERE NOT type(r) IN ['AUTHORED', 'NOPE_PRIVATE_TYPE']
+        RETURN u LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains:
+            - type() names a relationship type that the schema does not have
+          not_contains:
+            - NOPE_PRIVATE_TYPE

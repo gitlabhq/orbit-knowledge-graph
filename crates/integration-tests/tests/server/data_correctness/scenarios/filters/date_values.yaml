@@ -93,16 +93,6 @@ cases:
     expect:
       compile_error: schema
 
-  - name: date_field_rejects_time_of_day
-    description: A date field takes only YYYY-MM-DD, because a time of day has no meaning on a date
-    query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [4000], "filters": {"due_date": "2024-06-10T10:00:00Z"}}]}
-      gql: |
-        MATCH (w:WorkItem {id: 4000}) WHERE w.due_date = datetime('2024-06-10T10:00:00Z') RETURN w
-    expect:
-      compile_error: schema
-
   - name: date_field_bound_executes
     description: A valid date bound on a date field runs and excludes rows with no date
     query:

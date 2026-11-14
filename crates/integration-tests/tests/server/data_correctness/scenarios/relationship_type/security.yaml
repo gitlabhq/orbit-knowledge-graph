@@ -143,17 +143,6 @@ cases:
         AUTHORED:
           - [1, 2001]
 
-  - name: not_unknown_name_no_echo
-    description: NOT type(r) IN [...] with one name that the schema does not have rejects with the same
-      static message and does not echo the unknown name.
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE NOT type(r) IN ['AUTHORED', 'NOPE_PRIVATE_TYPE']
-        RETURN u LIMIT 10
-    expect:
-      compile_error: schema
-
   - name: path_finding_scoped_excludes
     description: RETURN type(r) in path finding does not widen the scope. Scoped to 1/100/, the one-hop
       path to Group 100 is found and the path to Group 102 in 1/102/ is not.
@@ -169,14 +158,3 @@ cases:
       path_count: 1
       path_destinations:
         Group: [100]
-
-  - name: unknown_name_no_echo
-    description: A type(r) name that the schema does not have rejects with a static message that says names
-      are uppercase and case-sensitive, and does not echo the literal
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-        WHERE type(r) = 'NOPE_PRIVATE_TYPE'
-        RETURN u LIMIT 10
-    expect:
-      compile_error: schema

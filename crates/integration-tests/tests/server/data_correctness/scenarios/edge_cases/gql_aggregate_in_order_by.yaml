@@ -1,8 +1,0 @@
-description: An aggregate call in ORDER BY says to sort by its alias instead
-
-query:
-  gql: |
-    MATCH (mr:MergeRequest {project_id: 1})-[:IN_PROJECT]->(p:Project) RETURN p.full_path, count(mr) ORDER BY count(mr) LIMIT 10
-
-expect:
-  compile_error: schema

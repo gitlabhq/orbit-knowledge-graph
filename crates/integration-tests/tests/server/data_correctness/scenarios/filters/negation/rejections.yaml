@@ -16,14 +16,6 @@ cases:
         MATCH (wi:WorkItem {id: 4000}) WHERE NOT wi.id IN ['bad'] RETURN wi.id
     expect: { compile_error: schema }
 
-  - name: is_true_rejected_names_not
-    description: IS TRUE is not supported, and the syntax error names NULL or NOT NULL instead of a grammar rule
-    query:
-      gql: |
-        MATCH (wi:WorkItem {id: 4000}) WHERE wi.confidential IS TRUE RETURN wi.id
-    expect:
-      compile_error: schema
-
   - name: literal_comparison_rejected
     description: A comparison of two literals without NOT is rejected for the same reason
     query:
@@ -104,17 +96,6 @@ cases:
         RETURN wi.weight LIMIT 10
     expect: { compile_error: schema }
 
-  - name: not_in_operator_rejected
-    description: GQL rejects the x NOT IN [...] spelling and names the supported form
-    query:
-      gql: |
-        MATCH (wi:WorkItem)
-        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.state NOT IN ['closed']
-        RETURN wi.state LIMIT 10
-    expect:
-      compile_error: schema
-      compile_error_not_contains: [closed]
-
   - name: not_list_only_needs_anchor
     description: A node whose only condition is NOT over a list is not anchored
     query:
@@ -124,41 +105,11 @@ cases:
         MATCH (u:User) WHERE NOT u.id IN [1] RETURN u
     expect: { compile_error: schema }
 
-  - name: not_literal_comparison_rejected
-    description: NOT over a comparison of two literals is rejected. A comparison must start with a property of a pattern variable, and a JSON not key must be a property name.
-    query:
-      gql: |
-        MATCH (wi:WorkItem {id: 4000}) WHERE NOT 'private-query-literal' = 'private-query-literal' RETURN wi.id
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{"1":"private-query-literal"}}],"limit":10}
-    expect:
-      compile_error: schema
-
   - name: not_literal_left_rejected
     description: A literal on the left of a comparison is rejected, even when the right side is a property
     query:
       gql: |
         MATCH (wi:WorkItem {id: 4000}) WHERE NOT 'private-query-literal' < wi.title RETURN wi.id
-    expect:
-      compile_error: schema
-
-  - name: not_neighbors_endpoint_rejected
-    description: A NOT list on the neighbors endpoint gets the neighbors shape message
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[:MEMBER_OF]->(x)
-        WHERE NOT x.name IN ['private-query-literal']
-        RETURN x
-    expect:
-      compile_error: schema
-
-  - name: not_path_relationship_rejected
-    description: A NOT list on the shortest-path relationship gets the path shape message
-    query:
-      gql: |
-        MATCH p = ANY SHORTEST (u:User {id: 1})-[r]->(g:Group {id: 100})
-        WHERE NOT r.source_id IN [1, 2]
-        RETURN p
     expect:
       compile_error: schema
 
@@ -185,17 +136,6 @@ cases:
     expect:
       compile_error: schema
       compile_error_not_contains: [secret]
-
-  - name: or_rejected
-    description: GQL rejects OR with a message that points to AND, NOT, and IN
-    query:
-      gql: |
-        MATCH (wi:WorkItem)
-        WHERE wi.id = 4000 OR wi.id = 4001
-        RETURN wi.state LIMIT 10
-    expect:
-      compile_error: schema
-      compile_error_not_contains: ["4001"]
 
   - name: same_property_comparison_rejected
     description: A comparison of a property with itself is rejected, with or without NOT

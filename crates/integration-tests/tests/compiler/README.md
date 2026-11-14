@@ -86,6 +86,27 @@ is a default for each case, and each case needs its own `name`.
 
 The fixtures cover access-path choices and their important eligibility guards.
 
+A fixture that the compiler must reject sets `rejected` under a backend:
+
+```yaml
+physical:
+  clickhouse:
+    rejected:
+      phase: gql_parse
+      reason: schema
+      contains: ["expected end of query, ORDER BY, SKIP, LIMIT, or DEBUG"]
+      not_contains: [EOI, function]
+```
+
+`phase` is the phase that returns the error, and `reason` is its rejection
+reason. `contains` and `not_contains` check the error message. Each field takes
+one value or a `{json, gql}` map. Phases at or after the rejecting phase cannot
+have assertions. Every rejection is also checked for a traversal path, an email
+address, a physical table name, and the private fixture markers.
+
+`rejections/` holds the error-message checks. Data-correctness scenarios check
+only the rejection reason.
+
 `scenarios/` holds the compiler checks for the data-correctness scenarios. It
 mirrors the scenario tree: `scenarios/search/filter_starts_with.yaml` checks the
 query in `server/data_correctness/scenarios/search/filter_starts_with.yaml`.
