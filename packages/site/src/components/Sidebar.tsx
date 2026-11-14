@@ -1,4 +1,4 @@
-import { DocsNav, findPage, type NavItem, type Page, pages } from "@gitlab-org/orbit-site";
+import { findPage, type NavItem, type Page, pages, SectionNav } from "@gitlab-org/orbit-site";
 import { ENGINEERING } from "../sections";
 
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
@@ -21,11 +21,5 @@ const items = (): NavItem[] => [
 ];
 
 export function Sidebar() {
-  return (
-    <DocsNav
-      items={items()}
-      label="Engineering"
-      className="max-h-48 shrink-0 overflow-y-auto border-b border-border px-3 py-3 md:sticky md:top-[var(--header-h)] md:h-[calc(100vh-var(--header-h))] md:max-h-none md:w-72 md:border-r md:border-b-0 md:py-6"
-    />
-  );
+  return <SectionNav items={items()} label="Engineering" storageKey="orbit-site.sidebar-collapsed" />;
 }

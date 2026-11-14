@@ -3,7 +3,6 @@ export const HOME = { title: "GitLab Orbit", description: "The roadmap, content,
 export type Tab = { route: string; label: string; menu?: { route: string; label: string; description: string }[] };
 
 export const TABS: Tab[] = [
-  { route: "", label: "Home" },
   { route: "roadmap", label: "Roadmap" },
   { route: "content", label: "Content" },
   {

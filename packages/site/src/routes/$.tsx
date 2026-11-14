@@ -1,6 +1,7 @@
-import { findPage, NotFound, pageHeadOf } from "@gitlab-org/orbit-site";
+import { baseMdxComponents, findPage, NotFound, PageLayout, pageHeadOf } from "@gitlab-org/orbit-site";
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { PageView } from "../components/PageView";
+import { PageFooter } from "../components/PageFooter";
+import { Sidebar } from "../components/Sidebar";
 
 export const Route = createFileRoute("/$")({
   loader: async ({ params }) => {
@@ -15,5 +16,13 @@ export const Route = createFileRoute("/$")({
 
 function ContentRoute() {
   const { page, body } = Route.useLoaderData();
-  return <PageView page={page} body={body} sidebar={page.path.startsWith("engineering")} />;
+  return (
+    <PageLayout
+      page={page}
+      body={body}
+      components={baseMdxComponents}
+      nav={page.path.startsWith("engineering") ? <Sidebar /> : undefined}
+      owners={<PageFooter page={page} />}
+    />
+  );
 }

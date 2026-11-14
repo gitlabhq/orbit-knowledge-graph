@@ -1,6 +1,8 @@
-import { Badge, Icon, NotFound, pageHead, SiteLink, type Tone } from "@gitlab-org/orbit-site";
+import { Badge, Icon, NotFound, PageContent, pageHead, SiteLink, type Tone, useHeadingLinks } from "@gitlab-org/orbit-site";
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { PageView } from "../components/PageView";
+import { useRef } from "react";
+import { Frame } from "../components/Frame";
+import { PageFooter } from "../components/PageFooter";
 import type { Health, Tracker } from "../../build/trackers";
 import { formatDate } from "../roadmap/calendar";
 import { itemRange } from "../roadmap/ItemCard";
@@ -46,33 +48,44 @@ function TrackerStatus({ tracker }: { tracker: Tracker }) {
 function ItemPage() {
   const { item, body } = Route.useLoaderData();
   const range = itemRange(item);
+  const content = useRef<HTMLDivElement>(null);
+  useHeadingLinks(content, item.page.path);
   return (
-    <PageView page={item.page} body={body}>
-      <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-subtle">
-        <StatusBadge status={item.status} />
-        <span className="inline-flex items-center gap-1.5">
-          <Icon name="calendar" size={16} />
-          <span className="font-semibold text-default">{range.label}</span>
-          <span>({range.months})</span>
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <Icon name={item.theme.icon} size={16} />
-          {item.theme.title}
-        </span>
-        {item.tracking && (
-          <SiteLink href={item.tracking} className="gl-link inline-flex items-center gap-1.5">
-            Tracking: {trackingLabel(item.tracking)}
-            <Icon name="external-link" size={12} />
-          </SiteLink>
-        )}
-        {item.tracker && <TrackerStatus tracker={item.tracker} />}
-        {item.link && (
-          <SiteLink href={item.link} className="gl-link inline-flex items-center gap-1.5">
-            {linkLabel(item.link)}
-            <Icon name="external-link" size={12} />
-          </SiteLink>
-        )}
+    <Frame
+      title={item.title}
+      description={item.description}
+      footer={<PageFooter page={item.page} />}
+      header={
+        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-subtle">
+          <StatusBadge status={item.status} />
+          <span className="inline-flex items-center gap-1.5">
+            <Icon name="calendar" size={16} className="tile-icon" />
+            <span className="font-semibold text-default">{range.label}</span>
+            <span>({range.months})</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Icon name={item.theme.icon} size={16} className="tile-icon" />
+            {item.theme.title}
+          </span>
+          {item.tracking && (
+            <SiteLink href={item.tracking} className="gl-link inline-flex items-center gap-1.5">
+              Tracking: {trackingLabel(item.tracking)}
+              <Icon name="external-link" size={12} />
+            </SiteLink>
+          )}
+          {item.tracker && <TrackerStatus tracker={item.tracker} />}
+          {item.link && (
+            <SiteLink href={item.link} className="gl-link inline-flex items-center gap-1.5">
+              {linkLabel(item.link)}
+              <Icon name="external-link" size={12} />
+            </SiteLink>
+          )}
+        </div>
+      }
+    >
+      <div ref={content}>
+        <PageContent body={body} />
       </div>
-    </PageView>
+    </Frame>
   );
 }
