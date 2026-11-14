@@ -354,7 +354,7 @@ An entity declares its scope, the permission that a read needs, and one `enforce
 | Policy | Example |
 |---|---|
 | `scope_key` on the entity | `MergeRequest`: `{clickhouse: {scope_key: traversal_path}}` |
-| `scope_key` through relationships | `File`: `{orbit_code: {scope_key: {via: IN_PROJECT}}}`, `SlackMessage`: `{live: {scope_key: {via: [IN_WORKSPACE, INSTALLED_IN]}}}` |
+| `scope_key` through relationships | `File`: `{orbit_code: {scope_key: {via: IN_PROJECT}}}`, `SlackMessage`: `{live: {scope_key: {via: IN_WORKSPACE}}}` |
 | `owner` through a relationship | todo: `{clickhouse: {owner: OWNS}}` |
 | `none`, only with a check | a check-only entity |
 
@@ -621,6 +621,7 @@ The planning phase turns one logical plan into the physical plan of the connecti
 | Slack | live | a push-down filter | workspace precondition, then the provider check | Data Extraction Service call |
 
 A store whose backend does not join reaches its scope key through a `via` chain. So its read needs a scope lookup stage, which resolves the chain before the read's request goes out.
+A `via` chain stays on one connection. Every entity on the chain lives on the connection of the chain's first entity, and the scope lookup reads the whole chain there.
 The scope lookup is an ordinary stage, planned like any read. It runs on the connection of the complete store of the chain's first entity, never by connection order.
 It returns the keys of that entity in the caller's scope set, and the request names only those keys. For example, the keys are repositories for Orbit Next and workspaces for Slack.
 A `none` or `global` read needs no lookup and admits every key.
@@ -637,7 +638,7 @@ RETURN mr.iid, b.name, f.path
 ```
 
 An entity has one complete store and any number of partial stores. A partial store holds a subset of the columns, or it offers an operation that the complete store does not.
-Placement picks each node's stores with one call, `model.get_store(entity, &needs) -> Result<Placement>`. A `Placement` holds one or more stores, each with the needs it serves. The needs are what the query needs from that node: the properties it reads and the operations it applies, meaning filter operators and search modes.
+Placement picks each node's stores with one call, `model.get_store(entity, &needs) -> Result<Placement>`. A `Placement` holds one or more stores, each with the needs it serves. The needs are what the query needs from that node: the properties it reads and the operations it applies, meaning filter operators and search modes. They also include the foreign key columns that the node's single-hop steps use.
 
 1. `get_store` returns the complete store if it serves every need.
 2. Otherwise, it returns the one partial store that serves every need. For example, a `File` read with a structural match on `content` reads from the Orbit Next store.

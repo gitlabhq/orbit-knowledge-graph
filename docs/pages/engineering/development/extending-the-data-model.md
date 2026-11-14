@@ -148,7 +148,7 @@ relationships:
 In each deployment's model, every stored entity marks exactly one store `complete: true`, even when it has only one store. That store must list every graph property or exclude it by name with `exclude: [...]`. Every other store is partial and lists exactly the properties it holds. A partial store holds a subset of the columns, or it offers an operation that the complete store does not. `File`'s Orbit Next store is partial: it holds a few `File` columns and offers the structural search that the complete ClickHouse store lacks.
 A store whose backend has no writer capability holds no table, for example a live or code store. It lists the properties it serves, and its backend checks its own fields.
 
-A query's needs from a node are the properties it reads, its filter operators and its search modes. Placement reads the node from its complete store when that store serves every need. Otherwise it reads from the one partial store that serves every need. Otherwise it splits the node across the fewest stores that together serve every need, and their stages cross on the entity's identity. [Add an integration's live store](#add-an-integrations-live-store) shows a split node. If no combination of stores serves every need, the query fails, and the error names the unmet need. If the deployment does not serve the chosen store's connection, the query fails with an error that names the entity and the connection.
+A query's needs from a node are the properties it reads, its filter operators and its search modes. They also include the foreign key columns that its single-hop steps use. Placement reads the node from its complete store when that store serves every need. Otherwise it reads from the one partial store that serves every need. Otherwise it splits the node across the fewest stores that together serve every need, and their stages cross on the entity's identity. [Add an integration's live store](#add-an-integrations-live-store) shows a split node. If no combination of stores serves every need, the query fails, and the error names the unmet need. If the deployment does not serve the chosen store's connection, the query fails with an error that names the entity and the connection.
 
 `AUTHORED` is a foreign key: the `author_id` column on the `MergeRequest` row holds the author. `APPROVED` is many-to-many, so its rows live in an edge table. Every variant binds to one of the two, or the load fails.
 
@@ -389,7 +389,7 @@ entities:
     permission: read
     enforce:
       duckdb: {scope_key: traversal_path}
-      live: {scope_key: {via: [IN_WORKSPACE, INSTALLED_IN]}}
+      live: {scope_key: {via: IN_WORKSPACE}}
     checks:
       - {provider: slack, kind: delegated}
     properties:
@@ -539,7 +539,7 @@ let request = live.render(&plan)?;
 Placement put `message` on the live store, because the lake store does not hold `text`. `get_store(message, &needs)` returned that store, and the stage carries it in `Runs::On` with the store's `ConnectionId`.
 The frontend resolves only the query's names, once, at parse. Everything else comes from those handles through the model, and tests resolve names with the explicit `Names` resolver, `model.names()`.
 
-The `live` policy follows each message to the namespace that installed its workspace. A scope lookup on the Slack lake connection resolves that chain first, because the complete store of `SlackWorkspace` is there. The live backend sends the request only for workspaces in namespaces where the caller holds `read`. The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through that sign-in.
+The `live` policy follows each message to its workspace in one hop. The lake's `SlackWorkspace` carries the installing namespace's `traversal_path` from the ETL, so that hop admits the same messages as a chain through `INSTALLED_IN`. A `via` chain stays on one connection, and `Group` lives on the graph connection, so the chain stops at the workspace. A scope lookup on the Slack lake connection resolves it first, because the complete store of `SlackWorkspace` is there. The live backend sends the request only for workspaces in namespaces where the caller holds `read`. The Data Extraction Service runs the request with the caller's own Slack sign-in, and tokens never leave the service. The `slack` provider answers `Credentials`, so Slack then applies its own visibility through that sign-in.
 
 One query can read the lake for one node and live for another:
 
