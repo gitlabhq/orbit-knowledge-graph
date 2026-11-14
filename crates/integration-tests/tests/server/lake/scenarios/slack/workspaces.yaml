@@ -31,7 +31,7 @@ cases:
   - name: empty
     description: A caller whose group holds no workspace reads none
     config:
-      security: no_jira_rows
+      security: no_integration_rows
     query: |
       MATCH (w:SlackWorkspace) WHERE w.id IN ['T01', 'T02'] RETURN w.name LIMIT 20
     expect:

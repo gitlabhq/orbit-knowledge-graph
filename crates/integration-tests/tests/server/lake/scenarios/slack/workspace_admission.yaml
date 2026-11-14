@@ -1,0 +1,44 @@
+cases:
+  - name: both_groups
+    description: The workspace lookup reads each SlackWorkspace under the caller's paths, so a reader of both groups sends one call to both workspaces and reads every deploy message alice can see
+    config:
+      security: { paths: ["1/100/", "1/101/"] }
+    query: |
+      MATCH (m:SlackMessage) WHERE m.text CONTAINS 'deploy' RETURN m.author, m.text ORDER BY m.text LIMIT 20
+    expect:
+      node_count: 3
+      skip_requirements: [node_ids, order_by, "filter:text"]
+      nodes:
+        SlackMessage:
+          rows:
+            - { id: m4, author: ann, text: deploy memes }
+            - { id: m1, author: ann, text: deploy to staging at 5pm }
+            - { id: m5, author: dee, text: deploy uses the production keys }
+      live_calls: [[T01, T02]]
+
+  - name: one_group
+    description: A reader of group 100 sends the call to its group's workspace alone
+    config:
+      security: { paths: ["1/100/"] }
+    query: |
+      MATCH (m:SlackMessage) WHERE m.text CONTAINS 'deploy' RETURN m.author, m.text ORDER BY m.text LIMIT 20
+    expect:
+      node_count: 2
+      skip_requirements: [node_ids, order_by, "filter:text"]
+      nodes:
+        SlackMessage:
+          rows:
+            - { id: m4, author: ann, text: deploy memes }
+            - { id: m1, author: ann, text: deploy to staging at 5pm }
+      live_calls: [[T01]]
+
+  - name: no_workspace
+    description: A reader of one project under group 100 reads no workspace, so it sends no call and reads nothing
+    config:
+      security: { paths: ["1/100/1000/"] }
+    query: |
+      MATCH (m:SlackMessage) WHERE m.text CONTAINS 'deploy' RETURN m.author, m.text ORDER BY m.text LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: [node_ids, order_by, "filter:text"]
+      live_calls: []

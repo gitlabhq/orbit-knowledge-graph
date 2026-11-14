@@ -51,6 +51,13 @@ workspaces:
         text: rollback of the TLS keys starts at noon
         sent_at: "2026-11-05T10:00:00Z"
         visible_to: [alice, bob]
+      - id: m9
+        issue_id: "10100"
+        channel: orbit-dev
+        author: eve
+        text: the vault rollback waits on the login fix
+        sent_at: "2026-11-05T12:00:00Z"
+        visible_to: [alice, bob]
   "7":
     search.messages:
       - id: g1
@@ -119,6 +126,11 @@ workspaces:
         summary: Flaky deploy job
         description: The deploy job times out on large runners
         visible_to: [alice, bob]
+      - id: "10103"
+        key: ORB-4
+        summary: Audit the admin login
+        description: Review who used the admin login during the incident
+        visible_to: [bob]
   "10001":
     search.issues:
       - id: "10200"

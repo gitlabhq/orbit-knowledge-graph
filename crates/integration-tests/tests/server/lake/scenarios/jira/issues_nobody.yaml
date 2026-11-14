@@ -1,7 +1,7 @@
 description: A caller whose group holds no Jira rows reads nothing
 
 config:
-  security: no_jira_rows
+  security: no_integration_rows
 
 query: |
   MATCH (i:JiraIssue) WHERE i.id IN ['10100', '10101', '10102', '10200', '10300'] RETURN i.key, i.summary LIMIT 20

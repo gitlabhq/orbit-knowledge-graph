@@ -36,7 +36,7 @@ cases:
   - name: empty
     description: A caller whose group holds neither the merge requests nor Jira rows reads nothing on either side
     config:
-      security: no_jira_rows
+      security: no_integration_rows
     query: |
       MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue) WHERE mr.id <= 2002 RETURN mr.title, i.key LIMIT 20
     expect:

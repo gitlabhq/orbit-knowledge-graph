@@ -173,6 +173,7 @@ async fn a_duckdb_frontend_looks_up_a_live_stages_workspaces_on_duckdb() {
             json!("lunch at noon?"),
             json!("rollback of the TLS keys starts at noon"),
             json!("the rollback plan for the login fix is ready"),
+            json!("the vault rollback waits on the login fix"),
         ]
     );
 

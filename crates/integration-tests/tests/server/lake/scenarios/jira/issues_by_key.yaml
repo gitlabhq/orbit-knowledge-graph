@@ -34,7 +34,7 @@ cases:
   - name: empty
     description: A caller whose group holds no Jira rows reads none
     config:
-      security: no_jira_rows
+      security: no_integration_rows
     query: |
       MATCH (i:JiraIssue) WHERE i.key IN ['ORB-1', 'ORB-2', 'SEC-1'] RETURN i.key, i.summary LIMIT 20
     expect:
