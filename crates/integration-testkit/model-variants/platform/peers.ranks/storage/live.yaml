@@ -1,0 +1,18 @@
+kind: storage
+package: peers.ranks
+store: slack
+entities:
+  RankPost:
+    complete: true
+    accepts: [id]
+    columns:
+      id: {}
+      guild: {}
+      rank: {}
+      text: {}
+    backend:
+      operation: search.messages
+      filters: [id]
+relationships:
+  RANK_POST_OF:
+    RankPost -> GuildRank: {fk: {on: source, column: [guild, rank]}}
