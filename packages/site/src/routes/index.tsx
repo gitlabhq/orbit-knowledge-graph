@@ -1,43 +1,46 @@
-import { findPage, Icon, LinkCard, LinkCards, pageHead, pageLink, SEGMENTS, SiteLink, segment, site, Video, VideoGrid } from "@gitlab-org/orbit-site";
+import { Icon, LinkCard, LinkCards, OrbitHero, pageHead, SiteLink, segment, site } from "@gitlab-org/orbit-site";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Frame } from "../components/Frame";
-import { videos } from "../content/demos";
 import { Board } from "../roadmap/Board";
 import { formatDate, quarterLabel, quarterMonths } from "../roadmap/calendar";
 import { items, roadmapQuarter, roadmapUpdated, themes } from "../roadmap/model";
-import { ENGINEERING, USER_DOCS } from "../sections";
+import { Upcoming } from "../roadmap/Upcoming";
+import { USER_DOCS } from "../sections";
 
 export const Route = createFileRoute("/")({
   head: () => pageHead(site.name),
   component: HomePage,
 });
 
-function Intro() {
+const OUTBOUND = [
+  { label: "Documentation", href: USER_DOCS.href },
+  { label: "Product page", href: "https://about.gitlab.com/gitlab-orbit/" },
+  { label: "Click-through demo", href: "https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/" },
+  { label: "Source code", href: "https://gitlab.com/gitlab-org/orbit/knowledge-graph" },
+];
+
+// As on the Orbit Portal home page, the negative bottom margin offsets the hero padding and the tile
+// margin, so the buttons sit about as far from the tiles as the tiles sit from each other.
+function Hero() {
   return (
-    <section className="mb-10">
-      <h1 className="m-0 text-3xl font-semibold text-default">GitLab Orbit</h1>
-      <p className="mt-4 mb-0 max-w-2xl text-base text-subtle">
-        Orbit is a context graph of your code and your software delivery data. Agents and engineers query the graph for fast, correct answers that respect GitLab permissions.
+    <OrbitHero className="-mb-[1.625rem]">
+      <p className="orbit-hero-title">
+        One context layer
+        <br />
+        <span className="orbit-fade">for all your agents.</span>
       </p>
-      <div className={`mt-6 ${SEGMENTS}`}>
-        <Link to="/roadmap" className={segment(false, true)}>
-          See the roadmap
-        </Link>
-        <Link to="/content" className={segment(false, true)}>
-          Content
-        </Link>
-        <Link {...pageLink("engineering")} className={segment(false, true)}>
-          Engineering
-        </Link>
-        <SiteLink href={USER_DOCS.href} className={segment(false, true)}>
-          User documentation
-          <Icon name="external-link" size={12} className="tile-icon" />
-        </SiteLink>
+      <p className="mt-5 max-w-[37rem] text-base text-balance text-subtle">
+        GitLab Orbit is a context graph of your code and software delivery data. Your agents query it for fast, correct answers that respect GitLab permissions.
+      </p>
+      <div className="mt-16 flex flex-wrap gap-1">
+        {OUTBOUND.map((link) => (
+          <SiteLink key={link.href} href={link.href} className={segment(false, true)}>
+            <span>{link.label}</span>
+            <Icon name="external-link" size={12} className="hero-ext" />
+          </SiteLink>
+        ))}
       </div>
-      <p className="mt-6 mb-0 text-xs text-subtle">
-        This quarter: <span className="font-semibold text-default">{quarterLabel(roadmapQuarter)}</span> ({quarterMonths(roadmapQuarter)}) · Updated {formatDate(roadmapUpdated)}
-      </p>
-    </section>
+    </OrbitHero>
   );
 }
 
@@ -86,10 +89,22 @@ function Themes() {
 function HomePage() {
   return (
     <Frame title={site.name} hideHeader>
-      <Intro />
-      <div className="flex flex-col gap-12">
+      <Hero />
+      <LinkCards>
+        <LinkCard title="Roadmap" href="/roadmap" icon="calendar" description="What we build next, by quarter and by theme." />
+        <LinkCard title="Content" href="/content" icon="play" description="Videos, demos, and articles about Orbit." />
+        <LinkCard title="Engineering" href="/engineering" icon="code" description="Architecture, runbooks, ADRs, and testing." />
+        <LinkCard title="Team" href="/team" icon="group" description="The people who build GitLab Orbit." />
+      </LinkCards>
+      <Upcoming />
+      <div className="mt-12 flex flex-col gap-12">
         <section aria-labelledby="horizons">
-          <SectionHeading id="horizons" title="Now, next, and later" description="The top items in each horizon." action={{ label: "Full roadmap", to: "/roadmap" }} />
+          <SectionHeading
+            id="horizons"
+            title="Now, next, and later"
+            description={`The top items in each horizon. This quarter is ${quarterLabel(roadmapQuarter)} (${quarterMonths(roadmapQuarter)}). Updated ${formatDate(roadmapUpdated)}.`}
+            action={{ label: "Full roadmap", to: "/roadmap" }}
+          />
           <div className="page-bleed">
             <Board items={items} limit={3} compact headingLevel={3} />
           </div>
@@ -98,24 +113,6 @@ function HomePage() {
           <section aria-labelledby="themes">
             <SectionHeading id="themes" title="Themes" description="Roadmap items, grouped by area." />
             <Themes />
-          </section>
-        )}
-        <section aria-labelledby="engineering">
-          <SectionHeading id="engineering" title="Engineering" description="How the Orbit team builds, tests, and runs Orbit." action={{ label: "Engineering docs", to: "/engineering" }} />
-          <LinkCards>
-            {ENGINEERING.map(({ route, label }) => (
-              <LinkCard key={route} title={label} href={`/${route}`} icon="book" description={findPage(route)?.meta.description} />
-            ))}
-          </LinkCards>
-        </section>
-        {videos.length > 0 && (
-          <section aria-labelledby="demos">
-            <SectionHeading id="demos" title="Demos" description="Videos and talks that show how Orbit works." action={{ label: "All content", to: "/content" }} />
-            <VideoGrid>
-              {videos.slice(0, 2).map((video) => (
-                <Video key={video.id} {...video} />
-              ))}
-            </VideoGrid>
           </section>
         )}
       </div>

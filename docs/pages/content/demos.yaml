@@ -62,7 +62,6 @@ links:
   - href: https://about.gitlab.com/gitlab-orbit/
     title: GitLab Orbit product page
     description: The context layer for AI agents.
-    image: https://about.gitlab.com/img/og?title=GitLab%20Orbit%3A%20The%20context%20layer%20for%20AI%20agents
     meta: about.gitlab.com
   - href: https://docs.gitlab.com/orbit/
     title: GitLab Orbit documentation

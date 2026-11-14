@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Frame } from "../components/Frame";
 import { PageFooter } from "../components/PageFooter";
 import { Board } from "../roadmap/Board";
-import { formatDate, quarterLabel, quarterMonths } from "../roadmap/calendar";
+import { formatDate, quarterIndex, quarterLabel, quarterMonths } from "../roadmap/calendar";
 import { EmptyState } from "../roadmap/EmptyState";
 import { ItemCard } from "../roadmap/ItemCard";
 import { items, roadmapQuarter, roadmapUpdated, themeById, themes } from "../roadmap/model";
@@ -54,7 +54,7 @@ function RoadmapPage() {
   const page = findPage("roadmap");
   const filtered = theme ? items.filter((item) => item.theme.id === theme) : items;
   const open = filtered.filter((item) => item.status !== "shipped");
-  const shipped = filtered.filter((item) => item.status === "shipped").reverse();
+  const shipped = filtered.filter((item) => item.status === "shipped").sort((a, b) => quarterIndex(b.end) - quarterIndex(a.end));
   return (
     <Frame
       title={page?.meta.title ?? "Roadmap"}
@@ -78,13 +78,15 @@ function RoadmapPage() {
         ) : (
           <Timeline items={filtered} />
         )}
-        {view === "board" && shipped.length > 0 && (
-          <section aria-labelledby="shipped" className="mt-12">
-            <h2 id="shipped" className="m-0 mb-1 flex items-center gap-2 text-xl font-semibold text-default">
-              <Icon name="status-success" className="text-success" />
-              Recently shipped
-            </h2>
-            <p className="mt-0 mb-4 text-sm text-subtle">Work that is available today.</p>
+      </div>
+      {view === "board" && shipped.length > 0 && (
+        <section aria-labelledby="shipped" className="mt-12">
+          <h2 id="shipped" className="m-0 mb-1 flex items-center gap-2 text-xl font-semibold text-default">
+            <Icon name="status-success" className="text-success" />
+            Recently shipped
+          </h2>
+          <p className="mt-0 mb-4 text-sm text-subtle">Work that is available today, newest first.</p>
+          <div className="page-bleed">
             <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
               {shipped.map((item) => (
                 <li key={item.slug}>
@@ -92,9 +94,9 @@ function RoadmapPage() {
                 </li>
               ))}
             </ul>
-          </section>
-        )}
-      </div>
+          </div>
+        </section>
+      )}
     </Frame>
   );
 }

@@ -2,7 +2,7 @@
 title: GitLab Orbit generally available
 description: Orbit moves from beta to general availability on every GitLab deployment type.
 theme: platform
-status: in-progress
+status: shipped
 start: FY27 Q3
 end: FY27 Q3
 rank: 1

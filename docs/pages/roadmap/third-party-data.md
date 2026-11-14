@@ -1,9 +1,9 @@
 ---
-title: Third-party data sources
+title: Third-party data connectors
 description: Connect data from more than 20 other tools to the graph, such as planning, documentation, and chat.
 theme: data
-status: planned
-start: FY28 Q1
+status: in-progress
+start: FY27 Q4
 end: FY28 Q1
 rank: 1
 tracking: https://gitlab.com/groups/gitlab-org/orbit/-/work_items/20
