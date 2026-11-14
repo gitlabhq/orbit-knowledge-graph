@@ -1,0 +1,15 @@
+kind: storage
+package: peers.guilds
+store: graph
+entities:
+  Guild:
+    complete: true
+    accepts: [id]
+    table: gl_guild
+    columns:
+      id: {immutable: true, backend: {type: Int64}}
+      name: {backend: {type: String}}
+      traversal_path: {backend: {type: String}}
+    access: {filter: [id], order: [id]}
+    backend:
+      primary_key: [traversal_path, id]

@@ -1,0 +1,40 @@
+kind: graph
+package: peers.guilds
+entities:
+  Guild:
+    identity: id
+    label: name
+    default_columns: [id, name]
+    properties:
+      id: {type: int64}
+      name: {type: string}
+      traversal_path: {type: string}
+  GuildPost:
+    identity: id
+    label: text
+    default_columns: [id, text]
+    properties:
+      id: {type: string}
+      guild: {type: int64}
+      channel: {type: string}
+      text: {type: string}
+  Realm:
+    identity: code
+    label: name
+    default_columns: [code, name]
+    properties:
+      code: {type: string}
+      name: {type: string}
+      traversal_path: {type: string}
+  RealmPost:
+    identity: id
+    label: text
+    default_columns: [id, text]
+    properties:
+      id: {type: string}
+      realm: {type: string}
+      channel: {type: string}
+      text: {type: string}
+relationships:
+  GUILD_OF: {variants: {GuildPost -> Guild: {cardinality: many_to_one}}}
+  REALM_OF: {variants: {RealmPost -> Realm: {cardinality: many_to_one}}}

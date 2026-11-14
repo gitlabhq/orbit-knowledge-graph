@@ -6,13 +6,13 @@ use std::sync::{Arc, Mutex};
 use compiler::dag::{
     Connections, Env, Frontend, Handle, Output, Rendered, Runs, Source, split_query,
 };
-use compiler::orbit_authorization::{Checks, Grants};
+use compiler::orbit_authorization::{Checks, Grants, Key};
 use duckdb_client::dag::DuckDbExecutor;
 use duckdb_client::{DuckDbClient, OpenMode};
 use query_data_model::plan::live::Workspaces;
 use query_data_model::{DuckDb, Model};
 use query_engine::pipeline::{AuthorizedPath, SecurityContext};
-use query_engine::shared::dag::Executors;
+use query_engine::shared::dag::{Event, Executors};
 use serde_json::{Value, json};
 
 use super::{Run, caller, json_rows, row, run};
@@ -30,8 +30,8 @@ fn grants(model: &Model, paths: &[&str], admin: bool) -> Grants {
     orbit_server::authorization::gitlab::session_grants(&config, model, session).unwrap()
 }
 
-/// The `lake` DuckDB connection as the frontend, with its teams and escalations, and the Data
-/// Extraction Service fake signed in as alice.
+/// The `lake` DuckDB connection as the frontend, with its teams, escalations, guilds and realms,
+/// and the Data Extraction Service fake signed in as alice.
 struct Lake {
     model: Arc<Model>,
     frontend: Frontend,
@@ -40,6 +40,11 @@ struct Lake {
 }
 
 fn lake() -> Lake {
+    lake_with(&[])
+}
+
+/// The lake, with `statements` run on its database after the seed.
+fn lake_with(statements: &[&str]) -> Lake {
     let model = peer_packages()
         .deployed(&query_data_model::testkit::deployments(), "lake")
         .unwrap();
@@ -53,7 +58,12 @@ fn lake() -> Lake {
     for statement in [
         "INSERT INTO gl_team (id, name, traversal_path) VALUES ('T01', 'Orbit', '1/9970/'), ('T02', 'Vault', '1/555/')",
         "INSERT INTO gl_escalation (id, reason, message_id, traversal_path) VALUES (1, 'paged', 'm1', '1/9970/'), (2, 'paged', 'm5', '1/555/'), (3, 'leak', 'm4', '1/9970/')",
-    ] {
+        "INSERT INTO gl_guild (id, name, traversal_path) VALUES (8, 'Masons', '1/9970/')",
+        "INSERT INTO gl_realm (code, name, traversal_path) VALUES ('north', 'North', '1/9970/'), ('south', 'South', '1/555/')",
+    ]
+    .iter()
+    .chain(statements)
+    {
         client.execute(statement, &[]).unwrap();
     }
     let connections = Connections::of(&model).unwrap();
@@ -341,4 +351,141 @@ async fn a_duckdb_frontend_knows_no_hidden_property() {
             assert!(error.contains(unknown), "{error}");
         }
     }
+}
+
+const GUILD_POSTS: &str =
+    "MATCH (p:GuildPost) WHERE p.channel = 'guild-chat' RETURN p.text ORDER BY p.text LIMIT 10";
+
+const REALM_POSTS: &str =
+    "MATCH (p:RealmPost) WHERE p.channel = 'realm-chat' RETURN p.text ORDER BY p.text LIMIT 10";
+
+/// The lake with guild 7 on the graph connection, Guild's complete store; the lake's own copy
+/// of guilds holds only guild 8.
+fn guilds() -> Lake {
+    let mut lake = lake();
+    let main = lake.model.names().connection("main").unwrap();
+    let graph = SeededGraph(vec![row(json!({"scope_id": 7}))]);
+    lake.executors = lake.executors.with(main, Arc::new(graph));
+    lake
+}
+
+/// A `via` head keyed by an integer hands its keys on as integers, and the live call names them
+/// as its workspaces.
+#[tokio::test]
+async fn a_lookup_hands_on_integer_head_keys() {
+    let ran = guilds().run(GUILD_POSTS, &["1/9970/"]).await;
+    let scoped = ran.events.iter().find_map(|event| match event {
+        Event::Keys {
+            from: 0, sample, ..
+        } => Some(sample.clone()),
+        _ => None,
+    });
+    assert_eq!(scoped, Some(vec![Key::Int(7)]));
+    assert_eq!(calls(&ran, 1), [Workspaces::Only(vec!["7".into()])]);
+    assert_eq!(column(ran, "p_text"), [json!("smiths forge at dawn")]);
+}
+
+/// A `via` head whose identity is `code` is read by that column, and each caller's live call
+/// names the realms its scope holds.
+#[tokio::test]
+async fn a_lookup_reads_a_head_identity_not_named_id() {
+    let lake = lake();
+    let one = lake.run(REALM_POSTS, &["1/9970/"]).await;
+    assert!(
+        lookups(&one, 0)[0].starts_with("SELECT scope.code AS scope_code FROM "),
+        "{:?}",
+        lookups(&one, 0)
+    );
+    assert_eq!(calls(&one, 1), [Workspaces::Only(vec!["north".into()])]);
+    assert_eq!(column(one, "p_text"), [json!("snow in the north pass")]);
+
+    let both = lake.run(REALM_POSTS, &["1/9970/", "1/555/"]).await;
+    assert_eq!(
+        calls(&both, 1),
+        [Workspaces::Only(vec!["north".into(), "south".into()])]
+    );
+    assert_eq!(
+        column(both, "p_text"),
+        [
+            json!("harvest in the south"),
+            json!("snow in the north pass")
+        ]
+    );
+}
+
+/// The lookup runs where placement puts its head, on Guild's complete store, whichever order the
+/// deployment lists its peers in: both orders place it on the same store and read the same rows.
+#[tokio::test]
+async fn a_lookup_runs_on_the_heads_complete_store_in_any_peer_order() {
+    let lake = guilds();
+    let names = lake.model.names();
+    let (main, guild, graph) = (
+        names.connection("main").unwrap(),
+        names.entity("Guild").unwrap(),
+        names.store("graph").unwrap(),
+    );
+    let grants = grants(&lake.model, &["1/9970/"], false);
+    let listed = lake.connections.peers().to_vec();
+    let reversed: Vec<_> = listed.iter().rev().cloned().collect();
+    let mut placed = Vec::new();
+    let mut texts = Vec::new();
+    for peers in [listed, reversed] {
+        let connections = Connections::new(peers);
+        let env = Env {
+            connections: &connections,
+            ..lake.env(&grants)
+        };
+        let dag = split_query(Source::Text(GUILD_POSTS), &env).unwrap();
+        placed.push(dag.stages[0].runs.clone());
+        let (events, outcome) = run_served(
+            &lake.frontend,
+            &connections,
+            &lake.executors,
+            GUILD_POSTS,
+            &grants,
+            &Checks::default(),
+        )
+        .await;
+        texts.push(column(Run { events, outcome }, "p_text"));
+    }
+    assert_eq!(
+        placed,
+        vec![
+            Runs::On {
+                connection: main,
+                stores: vec![(guild, graph)],
+            };
+            2
+        ]
+    );
+    assert_eq!(texts, vec![vec![json!("smiths forge at dawn")]; 2]);
+}
+
+/// A lookup is a stage, so the stage cap bounds it: the caller's 1,000 teams reach the live call,
+/// and a 1,001st fails the query instead of widening the call.
+#[tokio::test]
+async fn a_lookup_past_the_stage_cap_fails_and_one_at_it_runs() {
+    let teams = |count: usize| {
+        format!("INSERT INTO gl_team SELECT 'X' || i, 'bulk', '1/9970/' FROM range({count}) t(i)")
+    };
+    let at = teams(999);
+    let ran = lake_with(&[&at]).run(MESSAGES, &["1/9970/"]).await;
+    let [Workspaces::Only(workspaces)] = &calls(&ran, 1)[..] else {
+        panic!("the live stage renders one call");
+    };
+    assert_eq!(workspaces.len(), 1000);
+    assert_eq!(
+        column(ran, "m_text"),
+        [json!("deploy to staging at 5pm"), json!("lunch at noon?")]
+    );
+
+    let past = teams(1000);
+    let error = lake_with(&[&past])
+        .run(MESSAGES, &["1/9970/"])
+        .await
+        .error();
+    assert_eq!(
+        error,
+        "limit exceeded: stage 0 returned more than 1000 rows; a stage hands at most 1000 rows to the next"
+    );
 }

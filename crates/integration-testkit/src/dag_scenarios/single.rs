@@ -5,6 +5,7 @@ use compiler::dag::Rendered;
 use compiler::orbit_authorization::Key;
 use query_data_model::implementations::live::{ExtractionRequest, RequestFilter};
 use query_data_model::implementations::orbit_code::{RequestField, StructuralSearchRequest};
+use query_engine::shared::dag::Event;
 use serde_json::json;
 
 use super::{caller, projects, row, run, run_with, workspaces};
@@ -251,4 +252,33 @@ async fn code_rows_go_through_the_read_code_check() {
     let only = AllowedKeys::checks("project", [Key::Int(42)]);
     let allowed = run_with(CODE, &caller("1/9970/"), projects(&[42]), "alice", &only).await;
     assert_eq!(allowed.rows().len(), 2);
+}
+
+/// The project lookup runs `Project`'s `read_code` check like any read, so a project the caller
+/// may not read code of never reaches the code stage, while the ones it may are searched.
+#[tokio::test]
+async fn a_project_denied_read_code_never_reaches_the_code_stage() {
+    let query = CODE.replace("f.project_id = 42", "f.project_id IN [42, 77]");
+    let only = AllowedKeys::checks("project", [Key::Int(42)]);
+    let ran = run_with(&query, &caller("1/"), projects(&[42, 77]), "alice", &only).await;
+    let scoped = ran.events.iter().find_map(|event| match event {
+        Event::Keys {
+            from: 0,
+            to: 1,
+            sample,
+            ..
+        } => Some(sample.clone()),
+        _ => None,
+    });
+    assert_eq!(scoped, Some(vec![Key::Int(42)]));
+    let request = code_request(&ran.rendered(1)).clone();
+    assert_eq!(request.repositories, [42]);
+    assert!(!request.repositories.contains(&77));
+    let paths: Vec<_> = ran
+        .rows()
+        .into_iter()
+        .map(|row| row["f_path"].clone())
+        .collect();
+    assert!(!paths.contains(&json!("src/vault.rs")), "{paths:?}");
+    assert!(!paths.is_empty());
 }

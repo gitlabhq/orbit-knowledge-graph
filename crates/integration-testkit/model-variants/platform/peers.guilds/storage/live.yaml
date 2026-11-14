@@ -1,0 +1,31 @@
+kind: storage
+package: peers.guilds
+store: slack
+entities:
+  GuildPost:
+    complete: true
+    accepts: [id]
+    columns:
+      id: {}
+      guild: {}
+      channel: {}
+      text: {}
+    backend:
+      operation: search.messages
+      filters: [id, channel]
+  RealmPost:
+    complete: true
+    accepts: [id]
+    columns:
+      id: {}
+      realm: {}
+      channel: {}
+      text: {}
+    backend:
+      operation: search.messages
+      filters: [id, channel]
+relationships:
+  GUILD_OF:
+    GuildPost -> Guild: {fk: {on: source, column: guild}}
+  REALM_OF:
+    RealmPost -> Realm: {fk: {on: source, column: realm}}

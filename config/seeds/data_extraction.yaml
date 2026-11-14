@@ -37,3 +37,31 @@ workspaces:
         text: deploy uses the production keys
         sent_at: "2026-11-04T09:00:00Z"
         visible_to: [alice, bob]
+  "7":
+    messages:
+      - id: g1
+        guild: 7
+        channel: guild-chat
+        text: smiths forge at dawn
+        visible_to: [alice, bob]
+  "8":
+    messages:
+      - id: g2
+        guild: 8
+        channel: guild-chat
+        text: masons meet at noon
+        visible_to: [alice, bob]
+  north:
+    messages:
+      - id: r1
+        realm: north
+        channel: realm-chat
+        text: snow in the north pass
+        visible_to: [alice, bob]
+  south:
+    messages:
+      - id: r2
+        realm: south
+        channel: realm-chat
+        text: harvest in the south
+        visible_to: [alice, bob]

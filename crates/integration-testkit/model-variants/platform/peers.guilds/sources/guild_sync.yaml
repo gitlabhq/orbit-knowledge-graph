@@ -1,0 +1,4 @@
+kind: source
+package: peers.guilds
+source: guild_sync
+entities: [Guild, Realm]
