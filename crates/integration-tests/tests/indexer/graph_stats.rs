@@ -7,7 +7,10 @@ use indexer::schema::version::{
 };
 use ontology::archive::OntologyArchive;
 use ontology::migrations::embedded_sources;
-use orbit_analytics::{GitlabInstanceWatch, InMemoryAnalyticsTracker, ORBIT_GRAPH_STATS_SCHEMA};
+use orbit_analytics::{
+    GitlabInstanceWatch, InMemoryAnalyticsTracker, ORBIT_COMMON_SCHEMA, ORBIT_GRAPH_STATS_SCHEMA,
+    ORBIT_NAMESPACE_GRAPH_STATS_SCHEMA,
+};
 use orbit_server_config::{AppConfig, NatsConfiguration};
 
 use super::common::siphon::create_namespace;
@@ -17,7 +20,7 @@ const ENABLED: i64 = 100;
 const NOT_ENABLED: i64 = 900;
 
 #[tokio::test]
-async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
+async fn snapshot_counts_the_instance_and_each_enabled_namespace() {
     let clickhouse = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     let (_nats, nats_url) = start_nats().await;
     let services = indexer::orchestrator::scheduled::connect(&NatsConfiguration {
@@ -36,6 +39,25 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
     let graph = clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
     mark_version_active(&graph, *SCHEMA_VERSION).await.unwrap();
+    let schema = orbit_migrations::schema::GraphSchema::from_ontology(
+        &ontology::Ontology::load_embedded().unwrap(),
+    )
+    .unwrap();
+    orbit_migrations::execute::create_unversioned_definitions(&graph, &schema)
+        .await
+        .unwrap();
+    let version = *SCHEMA_VERSION;
+    clickhouse
+        .execute(&format!(
+            "INSERT INTO namespace_storage_snapshot \
+             (snapshot_date, schema_version, logical_table, top_level_namespace, compressed_bytes) VALUES \
+             (today(), {version}, 'gl_project', '1/{ENABLED}', 5000), \
+             (today(), {version}, 'gl_edge', '1/{ENABLED}', 700), \
+             (today() - 1, {version}, 'gl_project', '1/{ENABLED}', 1), \
+             (today(), {version}, 'gl_project', '1/{NOT_ENABLED}', 900), \
+             (today(), {version}, 'gl_user', '0/', 300)"
+        ))
+        .await;
 
     for id in [ENABLED, NOT_ENABLED] {
         create_namespace(&clickhouse, id, None, 20, &format!("1/{id}/")).await;
@@ -103,14 +125,13 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
     task.run().await.unwrap();
 
     let events = tracker.drain();
-    assert_eq!(events.len(), 1, "one snapshot per run");
+    assert_eq!(
+        events.len(),
+        2,
+        "one instance event and one event for the enabled namespace"
+    );
     assert_eq!(events[0].action(), "orbit_graph_stats");
-    let stats = &events[0]
-        .contexts()
-        .iter()
-        .find(|context| context.schema == *ORBIT_GRAPH_STATS_SCHEMA)
-        .expect("orbit_graph_stats context")
-        .data;
+    let stats = context(&events[0], ORBIT_GRAPH_STATS_SCHEMA);
 
     assert_eq!(
         stats["entity_counts"]["Project"], 2,
@@ -131,4 +152,30 @@ async fn snapshot_counts_live_rows_and_projects_of_enabled_namespaces() {
         "an unindexed branch, a deleted project and another namespace do not count"
     );
     assert!(stats["graph_bytes"].as_i64().unwrap() > 0, "{stats}");
+
+    assert_eq!(events[1].action(), "orbit_namespace_graph_stats");
+    assert_eq!(
+        context(&events[1], ORBIT_COMMON_SCHEMA)["root_namespace_ids"],
+        serde_json::json!([ENABLED])
+    );
+    let namespace = context(&events[1], ORBIT_NAMESPACE_GRAPH_STATS_SCHEMA);
+    assert_eq!(
+        namespace["graph_bytes"], 5700,
+        "the latest snapshot: {namespace}"
+    );
+    assert_eq!(namespace["entity_counts"]["Project"], 2, "{namespace}");
+    assert!(
+        namespace["entity_counts"].get("User").is_none(),
+        "a node type without a traversal path is not listed: {namespace}"
+    );
+    assert_eq!(namespace["projects_indexed"], 2);
+}
+
+fn context<'a>(event: &'a labkit_events::StructuredEvent, schema: &str) -> &'a serde_json::Value {
+    &event
+        .contexts()
+        .iter()
+        .find(|context| context.schema == schema)
+        .unwrap_or_else(|| panic!("{schema} context attached"))
+        .data
 }

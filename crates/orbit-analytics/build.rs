@@ -39,6 +39,7 @@ const SCHEMAS: &[(&str, &str)] = &[
     ("orbit_cli_command", "OrbitCliCommand"),
     ("orbit_cli_setup", "OrbitCliSetup"),
     ("orbit_graph_stats", "OrbitGraphStats"),
+    ("orbit_namespace_graph_stats", "OrbitNamespaceGraphStats"),
 ];
 
 fn main() {

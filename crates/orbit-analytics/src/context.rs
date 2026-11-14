@@ -219,6 +219,28 @@ impl SnowplowContext for OrbitGraphStatsContext {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct OrbitNamespaceGraphStatsContext {
+    pub data: orbit_namespace_graph_stats::OrbitNamespaceGraphStats,
+}
+
+impl OrbitNamespaceGraphStatsContext {
+    pub fn new(data: orbit_namespace_graph_stats::OrbitNamespaceGraphStats) -> Self {
+        Self { data }
+    }
+}
+
+impl SnowplowContext for OrbitNamespaceGraphStatsContext {
+    fn schema(&self) -> &str {
+        orbit_namespace_graph_stats::SCHEMA_URI
+    }
+
+    fn data(&self) -> serde_json::Value {
+        serde_json::to_value(&self.data)
+            .expect("generated OrbitNamespaceGraphStats is always serializable")
+    }
+}
+
 // Re-exported for callers that need the bare URI string, e.g. assertions in
 // observer and integration tests.
 pub const ORBIT_COMMON_SCHEMA: &str = orbit_common::SCHEMA_URI;
@@ -229,6 +251,7 @@ pub const ORBIT_CLI_SCHEMA: &str = orbit_cli::SCHEMA_URI;
 pub const ORBIT_CLI_COMMAND_SCHEMA: &str = orbit_cli_command::SCHEMA_URI;
 pub const ORBIT_CLI_SETUP_SCHEMA: &str = orbit_cli_setup::SCHEMA_URI;
 pub const ORBIT_GRAPH_STATS_SCHEMA: &str = orbit_graph_stats::SCHEMA_URI;
+pub const ORBIT_NAMESPACE_GRAPH_STATS_SCHEMA: &str = orbit_namespace_graph_stats::SCHEMA_URI;
 
 #[cfg(any(test, feature = "testkit"))]
 const IGLU_SELF_DESCRIBING_BASE_DIALECT: &str = "http://json-schema.org/draft-04/schema#";
@@ -248,6 +271,7 @@ pub fn load_schema_json(name: &str) -> serde_json::Value {
         "orbit_cli_command" => orbit_cli_command::SCHEMA_JSON,
         "orbit_cli_setup" => orbit_cli_setup::SCHEMA_JSON,
         "orbit_graph_stats" => orbit_graph_stats::SCHEMA_JSON,
+        "orbit_namespace_graph_stats" => orbit_namespace_graph_stats::SCHEMA_JSON,
         other => panic!("unknown iglu schema {other:?}"),
     };
     let mut schema: serde_json::Value =

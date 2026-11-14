@@ -1,7 +1,8 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
+use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use clickhouse_client::{ArrowQuery, FromArrowColumn};
 use orbit_log_fields::{info, warn};
@@ -11,7 +12,7 @@ use orbit_migrations::version::{prefixed_table_name, read_active_version};
 use orbit_server_config::{GraphStatsConfig, ScheduleConfiguration};
 use orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
 
-use crate::analytics::{GraphStats, GraphStatsReporter};
+use crate::analytics::{GraphStats, GraphStatsReporter, NamespaceGraphStats};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::dispatch::enabled_namespaces::resolved_enabled_namespaces_sql;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
@@ -29,20 +30,32 @@ WHERE active
   AND database = currentDatabase()
   AND table IN {tables:Array(String)}"#;
 
-const LIVE_ROWS_SQL: &str = r#"SELECT toInt64(count()) AS live_rows
+const LIVE_ROWS_BY_ROOT_SQL: &str = r#"SELECT toInt64OrZero(splitByChar('/', traversal_path)[2]) AS root_id,
+       toInt64(count()) AS live_rows
+FROM {table:Identifier} FINAL
+WHERE _deleted = false
+GROUP BY root_id"#;
+
+const GLOBAL_LIVE_ROWS_SQL: &str = r#"SELECT toInt64(0) AS root_id, toInt64(count()) AS live_rows
 FROM {table:Identifier} FINAL
 WHERE _deleted = false"#;
 
+const GRAPH_BYTES_BY_ROOT_SQL: &str = r#"SELECT toInt64OrZero(splitByChar('/', top_level_namespace)[2]) AS root_id,
+       toInt64(sum(compressed_bytes)) AS bytes
+FROM namespace_storage_snapshot FINAL
+WHERE snapshot_date = (SELECT max(snapshot_date) FROM namespace_storage_snapshot)
+GROUP BY root_id"#;
+
 static ENABLED_ROOTS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "SELECT toInt64(count()) AS roots FROM ({})",
+        "SELECT root_namespace_id FROM ({})",
         resolved_enabled_namespaces_sql()
     )
 });
 
 static ELIGIBLE_PROJECTS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        r#"SELECT DISTINCT id
+        r#"SELECT DISTINCT id, toInt64OrZero(splitByChar('/', traversal_path)[2]) AS root_id
 FROM project_namespace_traversal_paths FINAL
 WHERE deleted = false
   AND extract(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}') IN (
@@ -89,18 +102,39 @@ impl GraphStatsSnapshot {
         let Some((version, ontology)) = self.served_ontology().await? else {
             return Ok(None);
         };
-        let (graph_bytes, entity_counts, projects_indexed, top_level_groups_indexed) = tokio::try_join!(
+        let (graph_bytes, mut entity_counts_by_root, indexed_by_root, roots, bytes_by_root) = tokio::try_join!(
             self.graph_bytes(&ontology, version),
-            self.entity_counts(&ontology, version),
-            self.projects_indexed(version),
+            self.entity_counts_by_root(&ontology, version),
+            self.projects_indexed_by_root(version),
             self.enabled_roots(),
+            self.graph_bytes_by_root(),
         )?;
+
+        let entity_counts = ontology
+            .nodes()
+            .map(|node| {
+                let total = entity_counts_by_root
+                    .values()
+                    .filter_map(|counts| counts.get(&node.name))
+                    .sum();
+                (node.name.clone(), total)
+            })
+            .collect();
+        let namespaces = roots
+            .into_iter()
+            .map(|root| NamespaceGraphStats {
+                root_namespace_id: root,
+                graph_bytes: bytes_by_root.get(&root).copied().unwrap_or_default(),
+                entity_counts: entity_counts_by_root.remove(&root).unwrap_or_default(),
+                projects_indexed: indexed_by_root.get(&root).copied().unwrap_or_default(),
+            })
+            .collect();
 
         Ok(Some(GraphStats {
             graph_bytes,
             entity_counts,
-            projects_indexed,
-            top_level_groups_indexed,
+            projects_indexed: indexed_by_root.values().sum(),
+            namespaces,
         }))
     }
 
@@ -135,73 +169,84 @@ impl GraphStatsSnapshot {
             .map(|table| prefixed_table_name(&table.name, version))
             .collect();
         let batches = self
-            .graph
-            .query(GRAPH_BYTES_SQL)
-            .param("tables", &tables)
-            .fetch_arrow()
-            .await
-            .map_err(|error| self.query_error(error))?;
+            .fetch(self.graph.query(GRAPH_BYTES_SQL).param("tables", &tables))
+            .await?;
         first_count(&batches)
     }
 
-    async fn entity_counts(
+    async fn entity_counts_by_root(
         &self,
         ontology: &ontology::Ontology,
         version: u32,
-    ) -> Result<BTreeMap<String, u64>, TaskError> {
-        let mut counts = BTreeMap::new();
+    ) -> Result<HashMap<i64, BTreeMap<String, u64>>, TaskError> {
+        let mut by_root: HashMap<i64, BTreeMap<String, u64>> = HashMap::new();
         for node in ontology.nodes() {
             let table = prefixed_table_name(&node.destination_table, version);
+            let sql = if node.has_traversal_path {
+                LIVE_ROWS_BY_ROOT_SQL
+            } else {
+                GLOBAL_LIVE_ROWS_SQL
+            };
             let started = Instant::now();
             let batches = self
-                .graph
-                .query(LIVE_ROWS_SQL)
-                .param("table", table.as_str())
-                .fetch_arrow()
-                .await
-                .map_err(|error| self.query_error(error))?;
+                .fetch(self.graph.query(sql).param("table", table.as_str()))
+                .await?;
             self.metrics
                 .record_query_duration(&table, started.elapsed().as_secs_f64());
-            counts.insert(node.name.clone(), first_count(&batches)?);
+            for (root, count) in counts_by_root(&batches)? {
+                by_root
+                    .entry(root)
+                    .or_default()
+                    .insert(node.name.clone(), count);
+            }
         }
-        Ok(counts)
+        Ok(by_root)
     }
 
-    async fn projects_indexed(&self, version: u32) -> Result<u64, TaskError> {
+    async fn projects_indexed_by_root(&self, version: u32) -> Result<HashMap<i64, u64>, TaskError> {
         let code_checkpoint = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, version);
         let (eligible, indexed) = tokio::try_join!(
-            self.project_ids(self.datalake.query(&ELIGIBLE_PROJECTS_SQL)),
-            self.project_ids(
+            self.fetch(self.datalake.query(&ELIGIBLE_PROJECTS_SQL)),
+            self.fetch(
                 self.graph
                     .query(INDEXED_PROJECTS_SQL)
                     .param("table", code_checkpoint.as_str())
             ),
         )?;
-        let eligible: HashSet<i64> = eligible.into_iter().collect();
-        let indexed = indexed
+        let indexed: HashSet<i64> = i64::extract_column(&indexed, 0)
+            .map_err(TaskError::new)?
             .into_iter()
-            .filter(|id| eligible.contains(id))
-            .collect::<HashSet<_>>()
-            .len();
-        Ok(indexed as u64)
+            .collect();
+        let projects = i64::extract_column(&eligible, 0).map_err(TaskError::new)?;
+        let roots = i64::extract_column(&eligible, 1).map_err(TaskError::new)?;
+        let mut by_root = HashMap::new();
+        for (_, root) in projects
+            .into_iter()
+            .zip(roots)
+            .filter(|(project, _)| indexed.contains(project))
+        {
+            *by_root.entry(root).or_default() += 1;
+        }
+        Ok(by_root)
     }
 
-    async fn project_ids(&self, query: ArrowQuery) -> Result<Vec<i64>, TaskError> {
-        let batches = query
-            .fetch_arrow()
-            .await
-            .map_err(|error| self.query_error(error))?;
+    async fn enabled_roots(&self) -> Result<Vec<i64>, TaskError> {
+        let batches = self.fetch(self.datalake.query(&ENABLED_ROOTS_SQL)).await?;
         i64::extract_column(&batches, 0).map_err(TaskError::new)
     }
 
-    async fn enabled_roots(&self) -> Result<u64, TaskError> {
+    async fn graph_bytes_by_root(&self) -> Result<HashMap<i64, u64>, TaskError> {
         let batches = self
-            .datalake
-            .query(&ENABLED_ROOTS_SQL)
+            .fetch(self.graph.query(GRAPH_BYTES_BY_ROOT_SQL))
+            .await?;
+        counts_by_root(&batches)
+    }
+
+    async fn fetch(&self, query: ArrowQuery) -> Result<Vec<RecordBatch>, TaskError> {
+        query
             .fetch_arrow()
             .await
-            .map_err(|error| self.query_error(error))?;
-        first_count(&batches)
+            .map_err(|error| self.query_error(error))
     }
 
     fn query_error(&self, error: impl std::fmt::Display) -> TaskError {
@@ -260,7 +305,17 @@ impl GraphStatsSnapshot {
     }
 }
 
-fn first_count(batches: &[arrow::record_batch::RecordBatch]) -> Result<u64, TaskError> {
+fn counts_by_root(batches: &[RecordBatch]) -> Result<HashMap<i64, u64>, TaskError> {
+    let roots = i64::extract_column(batches, 0).map_err(TaskError::new)?;
+    let counts = i64::extract_column(batches, 1).map_err(TaskError::new)?;
+    Ok(roots
+        .into_iter()
+        .zip(counts)
+        .map(|(root, count)| (root, u64::try_from(count).unwrap_or(0)))
+        .collect())
+}
+
+fn first_count(batches: &[RecordBatch]) -> Result<u64, TaskError> {
     let value = i64::extract_column(batches, 0)
         .map_err(TaskError::new)?
         .into_iter()

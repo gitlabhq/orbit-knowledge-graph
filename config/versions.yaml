@@ -49,3 +49,4 @@ vendored:
       orbit_code_indexing: 2-0-0
       orbit_sdlc_indexing: 3-0-0
       orbit_graph_stats: 2-0-0
+      orbit_namespace_graph_stats: 1-0-0

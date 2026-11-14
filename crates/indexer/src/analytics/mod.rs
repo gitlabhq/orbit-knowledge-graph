@@ -19,7 +19,7 @@ use orbit_server_config::{
 };
 
 use crate::observer::IndexingObserver;
-pub use graph_stats::{GraphStats, GraphStatsReporter};
+pub use graph_stats::{GraphStats, GraphStatsReporter, NamespaceGraphStats};
 pub use observer::SnowplowIndexingObserver;
 
 #[derive(Clone)]
