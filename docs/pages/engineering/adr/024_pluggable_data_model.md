@@ -321,7 +321,8 @@ Each fragment kind and each engine kind has one schema, generated from the spec 
 
 Every reference in a fragment must resolve to a declared fact of the right type. Every declared fact must also have a reader. Each backend states which fragment fields it reads, and a declaration that nothing reads fails the load. A missing declaration is always a load error, never a default.
 
-The loader seals its output into one `Model` per deployment shape. The model holds typed handles: `EntityId`, `PropertyId`, `RelationshipId`, `RelationshipVariantId`, `AttributeId`, `ConnectionId` and `StoreId`, with typed keys and columns. The raw spec types are private to the data model crate. The model's API returns only handles, and it has no access to the raw spec, so no phase can read an undeclared fact. Its one lookup by name is `Names<'m>`, which only the frontend and tests call. Compiler phases, the stage split, the runner and the executors read entity facts only through the model. Every plan carries the `ModelId` it was built against.
+The loader seals its output into one `Model` per deployment shape. The model holds typed handles: `EntityId`, `PropertyId`, `RelationshipId`, `RelationshipVariantId`, `AttributeId`, `ConnectionId` and `StoreId`, with typed keys and columns. The raw spec types are private to the data model crate. The model's API returns only handles, and it has no access to the raw spec, so no phase can read an undeclared fact.
+`Names<'m>` is the one lookup by name. The engine calls it only in the frontend. Tests and tools outside the engine, namely the indexer, the CLI, xtask and migrations, may call it too. A CI guard keeps it out of every other engine path. Compiler phases, the stage split, the runner and the executors read entity facts only through the model. Every plan carries the `ModelId` it was built against.
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear"}}}%%
@@ -644,6 +645,7 @@ Placement picks each node's stores with one call, `model.get_store(entity, &need
    If no combination of stores serves every need, the query fails, and the error names the unmet need.
 
 An integration's entity reads from its lake store unless a node needs what the lake does not declare. That is an operation such as full-text search, or a column that the ETL does not extract. So one query can read the lake for one node and live for another, and one node can read both.
+A full-text search wins placement only as a declared `search:` mode on a backend with the search capability. The lake serves a substring `CONTAINS` on a column it lists.
 
 A store serves a need only through declared facts: its listed columns, its backend's capabilities, its search modes and its `accepts:`.
 Two different minimal combinations of stores that serve the same needs are a load error, so placement never depends on order. A combination that includes the complete store wins over one that does not. Search is one kind of need, not a special case.
