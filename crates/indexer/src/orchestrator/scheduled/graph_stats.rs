@@ -1,16 +1,8 @@
-//! `analytics.graph_stats`: the daily `orbit_graph_stats` snapshot of the served graph.
-//!
-//! The cadence lock lets one dispatcher replica run it per day, so each
-//! instance sends one snapshot. Counts drop soft-deleted rows: node counts read
-//! `FINAL` and skip `_deleted`, and projects count only when the datalake still
-//! has them under an enabled namespace.
-
 use std::collections::{BTreeMap, HashSet};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use clickhouse_client::{ArrowQuery, FromArrowColumn};
 use orbit_log_fields::{info, warn};
 use orbit_migrations::catalog::OntologyCatalog;
@@ -21,9 +13,7 @@ use orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
 
 use crate::analytics::{GraphStats, GraphStatsReporter};
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::orchestrator::dispatch::enabled_namespaces::{
-    enabled_roots_with_enabled_at_sql, resolved_enabled_namespaces_sql,
-};
+use crate::orchestrator::dispatch::enabled_namespaces::resolved_enabled_namespaces_sql;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::retry::{Backoff, LocalRetry, Step, drive};
 
@@ -43,6 +33,13 @@ const LIVE_ROWS_SQL: &str = r#"SELECT toInt64(count()) AS live_rows
 FROM {table:Identifier} FINAL
 WHERE _deleted = false"#;
 
+static ENABLED_ROOTS_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT toInt64(count()) AS roots FROM ({})",
+        resolved_enabled_namespaces_sql()
+    )
+});
+
 static ELIGIBLE_PROJECTS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         r#"SELECT DISTINCT id
@@ -59,11 +56,6 @@ FROM {table:Identifier} FINAL
 WHERE _deleted = false
   AND is_default_branch
   AND indexed_at IS NOT NULL"#;
-
-struct EnabledRoot {
-    id: i64,
-    enabled_at: DateTime<Utc>,
-}
 
 pub struct GraphStatsSnapshot {
     graph: ArrowClickHouseClient,
@@ -97,25 +89,21 @@ impl GraphStatsSnapshot {
         let Some((version, ontology)) = self.served_ontology().await? else {
             return Ok(None);
         };
-        let roots = self.enabled_roots().await?;
-        let (graph_bytes, entity_counts, projects_indexed) = tokio::try_join!(
+        let (graph_bytes, entity_counts, projects_indexed, top_level_groups_indexed) = tokio::try_join!(
             self.graph_bytes(&ontology, version),
             self.entity_counts(&ontology, version),
             self.projects_indexed(version),
+            self.enabled_roots(),
         )?;
 
         Ok(Some(GraphStats {
             graph_bytes,
             entity_counts,
             projects_indexed,
-            groups_enabled_at: roots
-                .into_iter()
-                .map(|root| (root.id, root.enabled_at))
-                .collect(),
+            top_level_groups_indexed,
         }))
     }
 
-    /// The active schema version and the ontology it was built from.
     async fn served_ontology(&self) -> Result<Option<(u32, ontology::Ontology)>, TaskError> {
         let Some(version) = read_active_version(&self.graph)
             .await
@@ -206,20 +194,14 @@ impl GraphStatsSnapshot {
         i64::extract_column(&batches, 0).map_err(TaskError::new)
     }
 
-    async fn enabled_roots(&self) -> Result<Vec<EnabledRoot>, TaskError> {
+    async fn enabled_roots(&self) -> Result<u64, TaskError> {
         let batches = self
             .datalake
-            .query(enabled_roots_with_enabled_at_sql())
+            .query(&ENABLED_ROOTS_SQL)
             .fetch_arrow()
             .await
             .map_err(|error| self.query_error(error))?;
-        let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
-        let enabled_ats = DateTime::<Utc>::extract_column(&batches, 2).map_err(TaskError::new)?;
-        Ok(ids
-            .into_iter()
-            .zip(enabled_ats)
-            .map(|(id, enabled_at)| EnabledRoot { id, enabled_at })
-            .collect())
+        first_count(&batches)
     }
 
     fn query_error(&self, error: impl std::fmt::Display) -> TaskError {

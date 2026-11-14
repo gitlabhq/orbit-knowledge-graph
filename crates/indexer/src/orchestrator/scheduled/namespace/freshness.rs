@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -21,7 +21,9 @@ use crate::checkpoint::{
     namespace_position_key,
 };
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
-use crate::orchestrator::dispatch::enabled_namespaces::enabled_roots_with_enabled_at_sql;
+use crate::orchestrator::dispatch::enabled_namespaces::{
+    ENABLED_NAMESPACE_TABLE, resolved_enabled_namespaces_sql,
+};
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 
 // The last sweep syncs idle entities; the margin keeps a late or slow sweep inside the scan.
@@ -31,6 +33,17 @@ const FRESHNESS_QUERY_SQL: &str = r#"SELECT root_path, target, max(watermark) AS
 FROM changed
 WHERE root_path IN (SELECT traversal_path FROM enabled)
 GROUP BY root_path, target"#;
+
+static ENABLED_ROOTS_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT enabled.root_namespace_id, enabled.traversal_path, enrolled.enabled_at \
+FROM ({}) AS enabled \
+INNER JOIN (SELECT root_namespace_id, max(created_at) AS enabled_at \
+FROM {ENABLED_NAMESPACE_TABLE} GROUP BY root_namespace_id) AS enrolled \
+ON enabled.root_namespace_id = enrolled.root_namespace_id",
+        resolved_enabled_namespaces_sql()
+    )
+});
 
 pub struct NamespaceFreshness {
     graph: ArrowClickHouseClient,
@@ -99,7 +112,7 @@ impl NamespaceFreshness {
     async fn enabled_roots(&self) -> Result<Vec<Root>, TaskError> {
         let batches = self
             .datalake
-            .query(enabled_roots_with_enabled_at_sql())
+            .query(&ENABLED_ROOTS_SQL)
             .fetch_arrow()
             .await
             .map_err(TaskError::new)?;

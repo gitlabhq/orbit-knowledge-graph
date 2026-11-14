@@ -25,17 +25,6 @@ AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}$')"
     )
 });
 
-static ENABLED_ROOTS_WITH_ENABLED_AT_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT enabled.root_namespace_id, enabled.traversal_path, enrolled.enabled_at \
-FROM ({}) AS enabled \
-INNER JOIN (SELECT root_namespace_id, max(created_at) AS enabled_at \
-FROM {ENABLED_NAMESPACE_TABLE} GROUP BY root_namespace_id) AS enrolled \
-ON enabled.root_namespace_id = enrolled.root_namespace_id",
-        *RESOLVED_ENABLED_NAMESPACES_SQL
-    )
-});
-
 static RESOLVED_PATHS_FOR_NAMESPACE_IDS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT id, argMax(traversal_path, version) AS traversal_path \
@@ -49,10 +38,6 @@ AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}$')"
 
 pub fn resolved_enabled_namespaces_sql() -> &'static str {
     &RESOLVED_ENABLED_NAMESPACES_SQL
-}
-
-pub fn enabled_roots_with_enabled_at_sql() -> &'static str {
-    &ENABLED_ROOTS_WITH_ENABLED_AT_SQL
 }
 
 pub fn resolved_paths_for_namespace_ids_sql() -> &'static str {
