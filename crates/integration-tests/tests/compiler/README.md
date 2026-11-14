@@ -105,7 +105,7 @@ have assertions. Every rejection is also checked for a traversal path, an email
 address, a physical table name, and the private fixture markers.
 
 `rejections/` holds the error-message checks. Data-correctness scenarios check
-only the rejection reason.
+the rejection reason and leak checks, never the wording.
 
 `scenarios/` holds the compiler checks for the data-correctness scenarios. It
 mirrors the scenario tree: `scenarios/search/filter_starts_with.yaml` checks the
