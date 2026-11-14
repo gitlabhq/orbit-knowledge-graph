@@ -365,6 +365,7 @@ An entity's `checks:` is either a list of checks or the word `open`. A global en
 With `checks: open`, the rows that a global read admits come back without a row check.
 Rows that the Data Extraction Service writes carry `traversal_path` from its ETL, and that path is their scope key. A `Credentials` check is answered only on a backend that delegates, for example the live backend for a Slack message read.
 Reads of the same entity on other backends rely on their scope filter, so a lake read uses `scope_key: traversal_path`.
+A deployment shape can serve an integration's lake store but no delegating backend for the entity. In that shape, the entity's `Credentials` check does not apply. Its reads rely on the lake's scope filter, `scope_key: traversal_path` from the ETL.
 
 Every property and edge attribute has exactly one access class. If it has none or two, the load fails. The security phase enforces the classes on every plan, including plans that a phase builds directly.
 
@@ -594,7 +595,7 @@ The same contract fits other authorization systems:
 
 GitLab access levels appear only in the GitLab module's options, which map each permission to a role.
 A scope answer is exact when the provider owns the grants, as GitLab paths, SpiceDB lookups and group claims do.
-If an entity has no row checks and its scope provider does not answer exactly, binding the deployment fails.
+If an entity has no row checks and its scope provider does not answer exactly, binding the deployment fails. The bind checks only the entities that the deployment shape serves.
 
 ### 7. The same path for every backend
 
