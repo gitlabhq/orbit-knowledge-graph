@@ -447,7 +447,7 @@ entities:
       merge_request_id: {backend: {type: BIGINT}}
       traversal_path: {backend: {type: VARCHAR}}
     exclude: [text]
-    accepts: [id, workspace, issue_id]
+    accepts: [id, workspace, issue_id, merge_request_id]
     access: {filter: [workspace, channel, author, sent_at], order: [id]}
   SlackWorkspace:
     complete: true
@@ -971,6 +971,16 @@ The loader collects every error with its package and fails once. A missing decla
 - An edge table copy that names no property of that endpoint, or a graph attribute with no edge column.
 - A store with edge tables whose `edge_columns:` misses an edge field, or an edge table whose columns do not match its store's `edge_columns:`.
 - Two backends, or a trusted and an untrusted store, on one connection.
+
+### Query errors
+
+A query fails with a named error in these cases. Every top-level condition has exactly one stage that owns it, and the combine stage has no filter step.
+
+- No combination of stores serves every need of a node. The error names the unmet need.
+- The deployment does not serve the connection of the store that placement chose. The error names the entity and the connection.
+- A stage hands more than `query.limits.stage_keys` rows to the next stage.
+- A condition reads an edge that crosses connections, such as a `WHERE` on `e` in `(a)-[e]->(b)` with `a` and `b` in different stages.
+- A condition compares nodes on different connections.
 
 ### Composition rules
 

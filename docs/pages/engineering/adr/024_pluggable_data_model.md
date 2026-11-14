@@ -685,6 +685,7 @@ The planner orders stages by selectivity: the few open merge requests limit the 
 The content match runs before order, limit and pagination, so those apply to matched rows only.
 
 The combine stage combines the stages' rows on their keys in process, applies the response policy, and orders, limits and pages the result. The combine stage pipeline is `[plan, result_contract, response_policy, paginate]`. Its result contract selects the result columns, tags nodes and edges, and excerpts text.
+Every top-level condition has exactly one stage that owns it, and the combine stage has no filter step. So a condition on an edge that crosses connections fails with a named error. An example is a `WHERE` on `e` in `(a)-[e]->(b)`, with `a` and `b` in different stages.
 A relationship that crosses a stage boundary returns its edges. Each edge comes from a key pair of the crossing. An edge stays only when both of its endpoints survive redaction.
 
 Every stage carries its own policy. Every node that a stage reads adds its declared checks to that stage.
