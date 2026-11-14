@@ -35,11 +35,13 @@ const HEALTH: Record<Health, { label: string; tone: Tone }> = {
   atRisk: { label: "At risk", tone: "danger" },
 };
 
-function TrackerStatus({ tracker }: { tracker: Tracker }) {
+// A shipped item can keep an open tracker with a health status. That health is about the remaining
+// work item, not the shipped feature, so a shipped item does not show it.
+function TrackerStatus({ tracker, shipped }: { tracker: Tracker; shipped: boolean }) {
   return (
     <>
       {tracker.state === "CLOSED" && <Badge tone="neutral">Closed</Badge>}
-      {tracker.health && <Badge tone={HEALTH[tracker.health].tone}>{HEALTH[tracker.health].label}</Badge>}
+      {tracker.health && !shipped && <Badge tone={HEALTH[tracker.health].tone}>{HEALTH[tracker.health].label}</Badge>}
       {tracker.dueDate && <span>Due {formatDate(tracker.dueDate)}</span>}
     </>
   );
@@ -73,7 +75,7 @@ function ItemPage() {
               <Icon name="external-link" size={12} />
             </SiteLink>
           )}
-          {item.tracker && <TrackerStatus tracker={item.tracker} />}
+          {item.tracker && <TrackerStatus tracker={item.tracker} shipped={item.status === "shipped"} />}
           {item.link && (
             <SiteLink href={item.link} className="gl-link inline-flex items-center gap-1.5">
               {linkLabel(item.link)}

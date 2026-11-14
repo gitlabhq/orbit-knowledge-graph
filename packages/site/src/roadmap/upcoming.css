@@ -1,0 +1,112 @@
+.upcoming {
+  --upcoming-muted: color-mix(in srgb, var(--gl-text-color-subtle) 85%, var(--color-page));
+}
+
+.upcoming-grid {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  align-items: center;
+  column-gap: 0.75rem;
+}
+
+@media (min-width: 640px) {
+  .upcoming-grid {
+    grid-template-columns: 16rem 1fr;
+  }
+}
+
+.upcoming-name {
+  display: flex;
+  min-width: 0;
+  height: 1.75rem;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--gl-text-color-default);
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+.upcoming-name:hover .upcoming-name-text {
+  text-decoration: underline;
+}
+
+.upcoming-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upcoming-lane {
+  position: relative;
+  height: 1.75rem;
+  margin-right: 2.75rem;
+}
+
+.upcoming-month-lane {
+  height: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+.upcoming-month {
+  position: absolute;
+  top: 0;
+  color: var(--upcoming-muted);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.upcoming-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.upcoming-track,
+.upcoming-fill {
+  position: absolute;
+  top: 50%;
+  height: 10px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+}
+
+.upcoming-track {
+  right: 0;
+  left: 0;
+  background: color-mix(in srgb, var(--gl-text-color-default) 11%, var(--color-page));
+}
+
+.upcoming-fill {
+  left: 0;
+  background: var(--orbit-fade);
+}
+
+.upcoming-end {
+  position: absolute;
+  top: 50%;
+  padding-left: 0.5rem;
+  color: var(--upcoming-muted);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+
+@media (max-width: 640px) {
+  .upcoming-end {
+    display: none;
+  }
+
+  .upcoming-lane {
+    margin-right: 0.5rem;
+  }
+
+  /* Every month label does not fit on a phone, so every other one shows. */
+  .upcoming-month:nth-child(even) {
+    display: none;
+  }
+}

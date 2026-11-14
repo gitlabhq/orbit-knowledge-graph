@@ -1,8 +1,8 @@
 ---
-title: One-step setup for Orbit CLI
+title: One-step setup for the GitLab Orbit CLI
 description: Turn on Orbit in one step, and connect any agent to the graph with one CLI.
 theme: agents
-status: in-progress
+status: shipped
 start: FY27 Q3
 end: FY27 Q3
 rank: 3
