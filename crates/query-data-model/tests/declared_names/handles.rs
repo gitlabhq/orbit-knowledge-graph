@@ -53,7 +53,6 @@ pub const EXEMPT: &[Exempt] = &[
     exempt("crates/orbit-server/src/health_check.rs", Rule::BackendKind, "the health report's component name for the ClickHouse instance"),
     exempt("crates/orbit-server/src/health_client.rs", Rule::BackendKind, "the health report's component name for the ClickHouse instance"),
     exempt("crates/orbit-server/src/cluster_health.rs", Rule::BackendKind, "the health report's component name for the ClickHouse instance"),
-    exempt("crates/query-engine/compiler/src/passes/admit/mod.rs", Rule::BackendKind, "names the code backend in a rejection message"),
     exempt("crates/query-engine/compiler/src/passes/plan/remote/code.rs", Rule::BackendKind, "names the backend in unsupported-shape errors"),
     exempt("crates/query-engine/compiler/src/passes/plan/remote/live.rs", Rule::BackendKind, "names the backend in unsupported-shape errors"),
 ];
