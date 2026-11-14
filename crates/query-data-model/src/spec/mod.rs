@@ -241,8 +241,7 @@ impl Fragments {
                 if !kept {
                     elsewhere.entities.extend(storage.entities.keys().cloned());
                     let delegates = engine.is_some_and(|(_, kind)| {
-                        crate::catalog::registered(kind)
-                            .is_some_and(|backend| backend.capabilities().delegates)
+                        crate::catalog::capabilities(kind).is_some_and(|can| can.delegates)
                     });
                     if delegates {
                         elsewhere.delegated.extend(storage.entities.keys().cloned());

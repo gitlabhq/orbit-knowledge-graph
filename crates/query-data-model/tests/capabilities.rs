@@ -171,3 +171,29 @@ fn a_push_down_or_search_names_a_declared_fact() {
         ["gitlab.source_code: store code searches unknown property File.body"]
     );
 }
+
+#[test]
+fn a_via_chain_whose_stores_sit_on_two_connections_fails_the_load() {
+    assert_eq!(
+        errors(&[(
+            SLACK_AUTHORIZATION,
+            "live: {scope_key: {via: IN_WORKSPACE}}",
+            "live: {scope_key: {via: [IN_WORKSPACE, INSTALLED_IN]}}",
+        )]),
+        ["integration.slack: SlackMessage's via chain crosses from connection slack_lake to main"]
+    );
+}
+
+#[test]
+fn a_shape_that_serves_the_lake_but_no_delegating_store_loads() {
+    let model = testkit::with_demo()
+        .deployed(&testkit::deployments(), "jira")
+        .unwrap();
+    let issue = model.names().entity("JiraIssue").unwrap();
+    let lake = model.names().connection("jira_lake").unwrap();
+    assert!(
+        !model
+            .checks(issue, lake)
+            .any(|check| matches!(check, Check::Delegated { .. }))
+    );
+}

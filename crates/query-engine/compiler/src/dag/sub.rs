@@ -73,35 +73,21 @@ pub(super) fn plan(
                 }
                 LogicalOperation::Filter(predicate) => {
                     let mut held: Option<Predicate> = None;
-                    for conjunct in conjuncts(predicate) {
-                        let mut operation = LogicalOperation::Filter(conjunct);
-                        let mut foreign = false;
-                        let mut touched = false;
+                    for conjunct in predicate.conjuncts() {
+                        let mut operation =
+                            LogicalOperation::Filter(super::cut::conjunct(conjunct));
+                        let mut own = true;
                         Logical::references(&mut operation, &mut |reference| match map
                             .get(reference)
                         {
-                            Some(mapped) => {
-                                touched = true;
-                                *reference = *mapped;
-                            }
-                            None => foreign = true,
+                            Some(mapped) => *reference = *mapped,
+                            None => own = false,
                         });
-                        let LogicalOperation::Filter(conjunct) = operation else {
-                            unreachable!("a filter stays a filter");
-                        };
-                        match (touched, foreign) {
-                            (true, true) => {
-                                return Err(QueryError::Validation(
-                                    "a condition compares nodes on different connections".into(),
-                                ));
-                            }
-                            (true, false) => {
-                                held = Some(match held {
-                                    Some(held) => held.and(conjunct),
-                                    None => conjunct,
-                                });
-                            }
-                            _ => {}
+                        if let (true, LogicalOperation::Filter(conjunct)) = (own, operation) {
+                            held = Some(match held {
+                                Some(held) => held.and(conjunct),
+                                None => conjunct,
+                            });
                         }
                     }
                     if let Some(held) = held {
@@ -164,11 +150,4 @@ pub(super) fn plan(
         let rows = q.select(rows, items)?;
         Ok(q.limit(rows, limits.stage_keys as u64 + 1)?)
     })
-}
-
-fn conjuncts(predicate: &Predicate) -> Vec<Predicate> {
-    match predicate {
-        Predicate::And(all) => all.iter().flat_map(conjuncts).collect(),
-        other => vec![other.clone()],
-    }
 }

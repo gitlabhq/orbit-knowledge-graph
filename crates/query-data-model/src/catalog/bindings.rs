@@ -407,8 +407,7 @@ pub(super) fn check(
                 .any(|store| store.connection_name == connection && store.source(entity).is_some())
         };
         for store in stores {
-            let joins =
-                super::registered(&store.kind).is_some_and(|backend| backend.capabilities().joins);
+            let joins = super::capabilities(&store.kind).is_some_and(|can| can.joins);
             let holds = joins
                 && store.source(variant.source).is_some()
                 && on(&store.connection_name, variant.target);

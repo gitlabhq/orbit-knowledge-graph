@@ -426,6 +426,10 @@ pub(crate) fn registered(kind: &str) -> Option<&'static dyn Registered> {
     backends().find(|backend| backend.kind() == kind)
 }
 
+pub(crate) fn capabilities(kind: &str) -> Option<Capabilities> {
+    registered(kind).map(|backend| backend.capabilities())
+}
+
 impl<B: StorageBackend> Registered for Entry<B> {
     fn kind(&self) -> &'static str {
         B::KIND

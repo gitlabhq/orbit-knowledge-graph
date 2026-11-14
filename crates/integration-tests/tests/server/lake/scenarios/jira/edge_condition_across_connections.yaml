@@ -1,0 +1,10 @@
+description: A condition on an edge that crosses from ClickHouse to the Jira lake has no stage to apply it, so the query fails instead of returning every developed pair
+
+config:
+  security: default
+
+query: |
+  MATCH (mr:MergeRequest)<-[e:DEVELOPED_IN]-(i:JiraIssue) WHERE mr.id <= 2002 AND e.target_id = 2000 RETURN mr.title, i.key LIMIT 20
+
+expect:
+  compile_error: "a condition on e reads an edge that crosses connections, which no stage holds"

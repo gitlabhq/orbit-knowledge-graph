@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use orbit_server_config::QueryLimits;
 use query_data_model::plan::combine::Position;
-use query_data_model::plan::logical::{Expr, LogicalOperation, MATCH_LINE};
+use query_data_model::plan::logical::{Conjunct, Expr, LogicalOperation, MATCH_LINE, Predicate};
 use query_data_model::plan::tracking::Ref;
 use query_data_model::{DataType, Direction, EdgeField, EntityId, PropertyId};
 
@@ -33,6 +33,9 @@ pub(super) struct Cut<'q> {
 impl Cut<'_> {
     pub fn dag(self, response: super::Response) -> Result<Dag> {
         let debug = response.debug;
+        for condition in conditions(self.query) {
+            self.owner(&condition)?;
+        }
         let order = self.order()?;
         let lookups = order
             .iter()
@@ -500,20 +503,15 @@ impl Cut<'_> {
     /// Stages run from the bounded side of each crossing: a stage whose own bindings carry a
     /// condition reads first, and a relational connection reads first between equals.
     fn order(&self) -> Result<Vec<usize>> {
-        let bounded = |group: &Group| {
-            self.query
-                .operations()
-                .any(|(_, operation)| match operation {
-                    LogicalOperation::Filter(predicate) => predicate.exprs().iter().all(|expr| {
-                        referenced(*expr).is_some_and(|binding| group.bindings.contains(&binding))
-                    }),
-                    _ => false,
-                })
+        let conditions = conditions(self.query);
+        let bounded = |index: usize| {
+            conditions
+                .iter()
+                .any(|condition| self.owner(condition).ok() == Some(index))
         };
         let rank = |index: usize| {
-            let group = &self.groups[index];
-            let joins = self.peer(group.place).joins();
-            (!bounded(group), !joins, index)
+            let joins = self.peer(self.groups[index].place).joins();
+            (!bounded(index), !joins, index)
         };
         let root = (0..self.groups.len())
             .min_by_key(|index| rank(*index))
@@ -538,6 +536,59 @@ impl Cut<'_> {
             order.push(next);
         }
         Ok(order)
+    }
+}
+
+impl Cut<'_> {
+    /// The one group whose stage applies `condition`: the group of every node it reads, and of
+    /// both ends of every edge it reads.
+    pub(super) fn owner(&self, condition: &Predicate) -> Result<usize> {
+        let steps = self.query.steps();
+        let mut groups = condition.exprs().into_iter().filter_map(referenced).map(|binding| {
+            match steps.iter().find(|step| step.edge == binding) {
+                Some(step) => {
+                    let ends = (self.group(step.from), self.group(step.to));
+                    (ends.0 == ends.1).then_some(ends.0).ok_or_else(|| {
+                        QueryError::Validation(format!(
+                            "a condition on {} reads an edge that crosses connections, which no stage holds",
+                            self.query.name(binding)
+                        ))
+                    })
+                }
+                None => Ok(self.group(binding)),
+            }
+        });
+        let first = groups.next().transpose()?;
+        for group in groups {
+            if Some(group?) != first {
+                return Err(QueryError::Validation(
+                    "a condition compares nodes on different connections".into(),
+                ));
+            }
+        }
+        first.ok_or_else(|| QueryError::PipelineInvariant("a condition reads no binding".into()))
+    }
+}
+
+/// Each top-level conjunct of the query's filters, which one stage applies whole.
+pub(super) fn conditions(query: Query<'_>) -> Vec<Predicate> {
+    query
+        .operations()
+        .filter_map(|(_, operation)| match operation {
+            LogicalOperation::Filter(predicate) => Some(predicate),
+            _ => None,
+        })
+        .flat_map(|predicate| predicate.conjuncts().into_iter().map(conjunct))
+        .collect()
+}
+
+pub(super) fn conjunct(conjunct: Conjunct<'_>) -> Predicate {
+    match conjunct {
+        Conjunct::Leaf {
+            predicate,
+            negated: false,
+        } => predicate.clone(),
+        Conjunct::Leaf { predicate, .. } | Conjunct::Negated(predicate) => !predicate.clone(),
     }
 }
 

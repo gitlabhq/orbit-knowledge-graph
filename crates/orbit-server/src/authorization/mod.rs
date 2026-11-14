@@ -199,15 +199,19 @@ impl Deployment {
     }
 }
 
-/// An entity without a row check is returned on its proved scope filter alone, so its scope
-/// answer must be exact. A delegated check does not count: lake reads rely on the scope filter.
+/// An entity the shape serves without a row check is returned on its proved scope filter alone,
+/// so its scope answer must be exact. A delegated check does not count: lake reads rely on the scope filter.
 fn inexact_without_checks(
     model: &Model,
     answers: &BTreeMap<&str, (&str, Answers)>,
     errors: &mut Vec<String>,
 ) {
     let access = model.access();
-    for entity in model.graph().entities() {
+    let served = model
+        .graph()
+        .entities()
+        .filter(|entity| model.stores_entity(entity.id));
+    for entity in served {
         let declared = access.entity(entity.id);
         let scope = access.scope(declared.scope);
         let provider = &scope.provider;

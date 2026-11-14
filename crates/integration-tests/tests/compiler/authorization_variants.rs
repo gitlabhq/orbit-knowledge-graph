@@ -310,6 +310,25 @@ fn a_check_less_entity_fails_the_bind_when_its_scope_answer_is_not_exact() {
     assert!(Deployment::bind(&deployment("slack"), &model, &registry()).is_ok());
 }
 
+#[test]
+fn the_inexact_scope_bind_checks_only_the_entities_the_shape_serves() {
+    let model = query_data_model::testkit::with_demo()
+        .deployed(&query_data_model::testkit::deployments(), "jira")
+        .unwrap();
+    let Err(BindError(errors)) = Deployment::bind(&deployment("cached"), &model, &registry())
+    else {
+        panic!("a cached scope answer is not exact");
+    };
+    assert!(
+        errors.iter().any(|error| error.starts_with("JiraIssue ")),
+        "{errors:?}"
+    );
+    assert!(
+        !errors.iter().any(|error| error.starts_with("Slack")),
+        "{errors:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_check_answers_string_keyed_rows_with_text_keys() {
     let (_, deployment) = bind("messages", &["acme", "acme.messages"]);

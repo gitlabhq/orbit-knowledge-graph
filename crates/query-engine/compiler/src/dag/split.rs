@@ -335,7 +335,6 @@ fn group_of(groups: &[Group], binding: Ref) -> Option<usize> {
         .position(|group| group.bindings.contains(&binding))
 }
 
-/// The foreign key of the step's one relationship variant, as the key pair the Combine stage joins on.
 fn ends(step: &Step<'_>) -> (Ref, Ref) {
     match step.direction {
         Direction::Incoming => (step.to, step.from),
@@ -381,6 +380,7 @@ fn step_keys(query: Query<'_>, step: &Step<'_>) -> Option<StepKeys> {
     })
 }
 
+/// The foreign key of the step's one relationship variant, as the key pair the Combine stage joins on.
 pub(super) fn crossing(
     query: Query<'_>,
     index: usize,

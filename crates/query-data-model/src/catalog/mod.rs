@@ -21,7 +21,7 @@ pub use backend::{
     Capabilities, Catalog, ColumnInput, ExecuteError, Field, NoOptions, Render, Row, SourceInput,
     StorageBackend, StoreInput,
 };
-pub(crate) use backend::{backends, registered};
+pub(crate) use backend::{backends, capabilities, registered};
 pub use diagnostics::{Diagnostics, SpecError};
 pub use guards::{Guard, PolicyKind, Rule};
 pub use lookups::{Lookup, Lookups};
@@ -191,6 +191,13 @@ impl Model {
         self.connections.iter()
     }
 
+    /// Whether a store of this deployment holds the entity.
+    pub fn stores_entity(&self, entity: EntityId) -> bool {
+        self.stores
+            .iter()
+            .any(|store| store.source(entity).is_some())
+    }
+
     pub fn store(&self, id: crate::StoreId) -> &Store {
         &self.stores[id.index()]
     }
@@ -248,8 +255,9 @@ impl Model {
             .filter(move |check| delegates || !matches!(check, Check::Delegated { .. }))
     }
 
-    /// A delegated check is answered only by a read that signs in as the caller, so a stored
-    /// entity with one has a store on a delegating backend, in this deployment or another.
+    /// A delegated check is answered only by a read that signs in as the caller, so an entity
+    /// with one that any loaded package stores has a delegating store in some package. A shape
+    /// that serves none of them reads the entity on its scope filter alone.
     fn check_delegation(&self, elsewhere: &crate::spec::Elsewhere, diagnostics: &mut Diagnostics) {
         for entity in self.graph.entities() {
             let delegated = self
@@ -266,8 +274,8 @@ impl Model {
             let delegating = holders
                 .iter()
                 .any(|store| self.connection(store.connection()).capabilities().delegates);
-            if delegated && !holders.is_empty() && !delegating && !elsewhere.delegates(&entity.name)
-            {
+            let stored = !holders.is_empty() || elsewhere.holds(&entity.name);
+            if delegated && stored && !delegating && !elsewhere.delegates(&entity.name) {
                 diagnostics.error(
                     &entity.package,
                     format!(

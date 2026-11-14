@@ -68,7 +68,8 @@ pub(super) fn resolve(
 }
 
 /// Each `via` step is a foreign key on the entity it leaves, so a lookup can join it; the first
-/// step's keys cross a stage boundary, so they may be composite.
+/// step's keys cross a stage boundary, so they may be composite. The chain past its head stays on
+/// the head's connection, where one lookup stage reads it.
 fn via_keys(graph: &GraphCatalog, stores: &[Store], diagnostics: &mut Diagnostics) {
     for store in stores {
         for source in store.sources() {
@@ -79,6 +80,24 @@ fn via_keys(graph: &GraphCatalog, stores: &[Store], diagnostics: &mut Diagnostic
             else {
                 continue;
             };
+            let complete = |entity| stores.iter().find(|store| store.complete(entity));
+            if let Some(head) = hops.first().and_then(|hop| complete(hop.to)) {
+                let crossed = hops[1..]
+                    .iter()
+                    .filter_map(|hop| complete(hop.to))
+                    .find(|other| other.connection_name != head.connection_name);
+                if let Some(other) = crossed {
+                    diagnostics.error(
+                        &source.package,
+                        format!(
+                            "{}'s via chain crosses from connection {} to {}",
+                            graph.entity(source.entity).name,
+                            head.connection_name,
+                            other.connection_name
+                        ),
+                    );
+                }
+            }
             for (index, hop) in hops.iter().enumerate() {
                 let keyed = stores.iter().any(|other| {
                     let composite = || {

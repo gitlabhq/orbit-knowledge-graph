@@ -4,6 +4,7 @@
 mod heads;
 mod joins;
 mod peers;
+mod placement;
 mod policies;
 mod server;
 mod single;
