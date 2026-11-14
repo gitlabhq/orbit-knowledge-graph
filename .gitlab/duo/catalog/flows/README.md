@@ -10,15 +10,22 @@ and `docs-review` for the reviewer. File shapes and route tokens:
 `skills/docs-write/references/contracts.md` there.
 
 `docs-write.yml` is the reviewable copy. The AI Catalog item is what runs:
-after a change here, update the catalog item from the file.
+after a change here, update the catalog item from the file, then update
+this table.
+
+| Setting | Value |
+|---|---|
+| `SKILLS_REF` in `docs-write.yml` | `84374501ff3e5acb84b8fdecc3ff88120af46680` |
+| `MODE` in `docs-write.yml` | `shadow` |
+| AI Catalog item in this project | Not registered yet |
 
 ## How the flow runs
 
 1. `setup` fetches `SKILLS_REPO` at `SKILLS_REF` with the flow's
    `GITLAB_TOKEN`, then runs the gate (threshold 6) and the related-MR check.
    Most MRs end here, with no model call and no GitLab Credits.
-1. `MODE=shadow` in `setup` stops after the gate and logs one line per MR.
-   `MODE=full` runs the rest.
+1. `MODE=shadow`, the committed default, stops after the gate and logs one
+   line per MR. `MODE=full` runs the rest.
 1. A writer agent writes the change in one context. It runs `check.py`, the
    docs linters and the rules a script can check, until the check is clean.
 1. `publish` checks the writer report, runs `check.py` again as a hard gate,
@@ -34,18 +41,39 @@ after a change here, update the catalog item from the file.
    `For agent: docs review`, with every finding numbered. Each finding that
    needs a person also gets a thread titled **Needs reviewer decision**.
 1. A fresh fixer agent, one per cycle and four at most, fixes the numbered
-   items in one pass, and any unresolved thread from Duo Code Review or a
-   person. The flow replies once on the review comment and once per thread.
-   It resolves what it fixed once `check.py` is clean. A thread it cannot
-   fix gets a reply and stays open as a reviewer decision.
-1. When CI is green and only decision threads are open, the flow removes
-   `Draft:`, assigns the feature MR author as reviewer, and posts one note
-   that lists the decision threads. Otherwise the MR stays in draft, with the
-   reason in its description. A person always merges the docs MR.
+   items in one pass, and the unresolved threads from the feature MR author,
+   its reviewers, project members with the Developer role or higher, and
+   Duo Code Review. The flow never shows threads from anyone else to an
+   agent. It leaves them open for the person who merges. The flow replies
+   once on the review comment and once per thread. It resolves what it fixed
+   once `check.py` is clean. A thread it cannot fix gets a reply and stays
+   open as a reviewer decision.
+1. When CI is green and only decision threads and threads from other people
+   are open, the flow removes `Draft:`, adds the feature MR author as
+   reviewer, and posts one note that lists those threads. Otherwise the MR
+   stays in draft, with the reason in its description. A person always
+   merges the docs MR.
 
-Agents have no GitLab write tool. `run_command` is a shell, so tool options
-cannot restrict it: the prompts forbid pushes and writes, and the flow steps
-check the result (the push guard, the reviewer read-only check).
+## Guardrails and residual risk
+
+Every agent has `run_command`, a shell in the same workload as the run's
+`GITLAB_TOKEN`. Tool options cannot restrict a shell, so an agent can read
+the token or call the GitLab API. What stands between text an agent reads
+and a write:
+
+- The prompts forbid pushes, API writes, and resolving threads, and treat
+  MR, thread, and file text as data.
+- Script steps check the result. `publish` runs `check.py` as a gate and
+  refuses a branch that changes files outside the user docs. The flow
+  discards reviewer edits outside `.docs-write/`.
+- Thread intake limits who can put text in front of a fixer: the feature
+  MR author, its reviewers, Developer+ members, and Duo Code Review.
+
+Residual risk: a prompt injection in text the agents do read (the feature
+MR diff and code, or a thread from an allowed author) could make an agent
+use the token before any check runs. The token has the scope of the person
+who triggered the run. The checks cannot undo an API write or a push to
+another branch.
 
 ```mermaid
 flowchart TD
@@ -93,8 +121,9 @@ Prerequisites:
 1. In **Display name**, enter `docs-write`.
 1. For **Visibility**, select **Private**.
 1. Under **Configuration**, select **Flow**, and paste `docs-write.yml`.
-1. In `setup`, set `MODE` (`shadow` first) and `SKILLS_REF`. Pin a commit
-   or tag outside the sandbox.
+1. Keep `setup` as committed: `MODE=shadow` and `SKILLS_REF` pinned to a
+   `team/skills` commit. Full mode is a one-word change to `MODE=full`,
+   made and reviewed in an MR here first.
 1. Select **Create flow**.
 
 The GraphQL mutations are `aiCatalogFlowCreate` (with `visibility: PRIVATE`
@@ -118,11 +147,14 @@ and add these conditions:
 |---|---|---|
 | **Merge request** | **Created** | New MRs. The gate skips drafts. |
 | **Merge request** | **Marked ready** | Draft MRs that become ready. |
-| **Mention** | | On a feature MR: run on demand. On a docs MR the flow opened: fix its open threads, then hand off again. |
+| **Mention** | | On a feature MR: run the gate again on demand. On a docs MR the flow opened: fix open threads from the feature MR author, its reviewers, Developer+ members, and Duo Code Review, then hand off again. |
 
 Leave **Instructions** empty. GraphQL: `aiFlowTriggerCreate` with
 `eventTypes: [0, 4, 6]` (mention, merge request ready, merge request) and
 the filter `{"merge_request": {"rules": [{"field": "action", "operator": "in", "value": ["created"]}]}}`.
+Filters are keyed by event type, so this one applies only to **Merge
+request** events. **Marked ready** events have no filter and always start
+the flow (`Ai::FlowTriggers::FilterEvaluator` in `gitlab-org/gitlab`).
 
 Events that a flow causes start triggers too, so the docs MR the flow opens
 starts the flow again. The gate ends that run with no model call: it skips
@@ -132,7 +164,7 @@ MRs on a `docs-write/` branch or with the docs-write marker, and MRs with
 
 ## Shadow mode (rollout stage 1)
 
-Set `MODE=shadow` in `setup`. Each run logs one line in the session
+`MODE=shadow` is the committed default. Each run logs one line in the session
 (**AI** > **Sessions**, and the workload job log), and writes nothing:
 
 ```plaintext

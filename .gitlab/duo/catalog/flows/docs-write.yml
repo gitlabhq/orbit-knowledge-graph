@@ -18,8 +18,12 @@ components:
     toolset: [run_command]
     inputs:
       - from: >-
-          SKILLS_REPO=gitlab-org/orbit/team/skills; SKILLS_REF=main; MODE=full;
+          SKILLS_REPO=gitlab-org/orbit/team/skills;
+          SKILLS_REF=84374501ff3e5acb84b8fdecc3ff88120af46680;
+          MODE=shadow;
           D=.docs-write; rm -rf $D; mkdir -p $D/route; U="${GITLAB_BASE_URL:-https://gitlab.com}";
+          X=$(git rev-parse --git-path info/exclude); mkdir -p "${X%/*}";
+          grep -qxF "$D/" "$X" 2>/dev/null || echo "$D/" >> "$X";
           printf '#!/bin/sh\nexport LEFTHOOK=0\nexec uv run -q --no-project --python 3.12 python
           .docs-write/skills/docs-write/scripts/flow_step.py "$@"\n' > $D/step;
           if git -C "$D" init -q ts && git -C "$D/ts" fetch -q --depth 1
