@@ -22,7 +22,7 @@ DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 RUSTC_WRAPPER = "{% if env.RUSTC_WRAPPER is defined %}{{env.RUSTC_WRAPPER}}{% elif env.CI is defined %}{% else %}sccache{% endif %}"
 
 [tools]
-"rust" = { version = "1.98.1", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/checks/check-rust-toolchain.sh --write" }
+"rust" = { version = "1.100.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/checks/check-rust-toolchain.sh --write" }
 "cargo:cargo-nextest" = "0.9.123"
 "cargo:cargo-edit" = "0.13.8"
 "cargo:cargo-audit" = "0.22.0"
@@ -306,6 +306,10 @@ description = "Run a measured code indexing benchmark"
 extends = "bench:engine"
 vars = { action = "smoke" }
 description = "Run one code indexing pass against each benchmark repository"
+
+[tasks."proto:config"]
+run = "cargo xtask proto-config"
+description = "Regenerate the config prost types and descriptor set"
 
 [tasks."proto:go"]
 run = "scripts/dev/proto-go.sh generate"

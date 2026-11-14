@@ -55,6 +55,7 @@ orbit-observability = { path = "crates/orbit-observability" }
 orbit-log-fields = { path = "crates/orbit-log-fields" }
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0" }
 labkit-fields = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0" }
+labkit-config = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0" }
 # No bundled ring provider: every binary installs its rustls provider before building a Tracker.
 labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0", default-features = false }
 arrow = { version = "60.0.0", default-features = false }
@@ -102,7 +103,6 @@ typed-path = "0.12.3"
 
 # Indexer dependencies
 anyhow = "1.0.100"
-config = { version = "0.15", default-features = false, features = ["yaml"] }
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
 tokio = { version = "1.49.0", features = ["full"] }
 strum = { version = "0.28.0", features = ["derive"] }
@@ -188,11 +188,12 @@ ra_ap_vfs = "0.0.358"
 sqlparser = { version = "0.62.0", features = ["visitor"] }
 prost = "0.14.3"
 prost-build = "0.14.3"
+prost-protovalidate-types = "0.6.0"
+prost-reflect = "0.16.5"
 prost-types = "0.14.3"
 protoc-bin-vendored = "3.2.0"
 tar = "0.4.44"
 tonic = { version = "0.14.2", features = ["tls-aws-lc", "gzip", "zstd"] }
-tonic-build = "0.14.2"
 tonic-prost = "0.14.2"
 tonic-prost-build = "0.14.2"
 tonic-types = "0.14.2"
@@ -213,6 +214,7 @@ secrecy = "0.10.3"
 kube = { version = "4.2", default-features = false, features = ["client", "rustls-tls", "aws-lc-rs"] }
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls-no-provider"] }
+httpdate = "1.0.3"
 rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs"] }
 aws-lc-rs = { version = "1.18.1", default-features = false }
 health-check = { path = "crates/health-check" }

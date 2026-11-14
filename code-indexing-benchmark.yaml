@@ -1,10 +1,10 @@
 repos:
-  # GitLab (Ruby + TypeScript)
+  # GitLab (Ruby + TypeScript + Markdown)
   - name: gitlab
     source: gitlab
     project: gitlab-org/gitlab
     version: v18.9.1-ee
-    groups: [ruby, typescript]
+    groups: [ruby, typescript, markdown]
 
   - name: gitlab-shell
     source: gitlab

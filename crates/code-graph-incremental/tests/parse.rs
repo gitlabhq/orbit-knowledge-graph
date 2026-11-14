@@ -83,7 +83,11 @@ fn every_configured_language_parses_when_classified_for_parsing() {
     for (lang, entry) in all_languages() {
         let repo = tempfile::tempdir().unwrap();
         let path = format!("a.{}", entry.extensions()[0]);
-        write_all(repo.path(), &[(&path, b"x")]);
+        let source: &[u8] = match lang {
+            SupportLang::Markdown => b"# x",
+            _ => b"x",
+        };
+        write_all(repo.path(), &[(&path, source)]);
         let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
 
         let parsed = parse_repo(&env, repo.path());
@@ -213,4 +217,45 @@ fn languages_in_one_family_share_a_qualified_name_separator() {
             );
         }
     }
+}
+
+#[test]
+fn container_build_files_are_recognized_by_name() {
+    for path in [
+        "Dockerfile",
+        "Containerfile",
+        "Dockerfile.dev",
+        "svc/api/Containerfile.prod",
+        "build/app.dockerfile",
+        "dockerfile",
+        "DOCKERFILE",
+        "app.Dockerfile",
+        "build.Containerfile",
+        "Dockerfile.mri.release",
+    ] {
+        assert_eq!(
+            SupportLang::from_path(path),
+            Some(SupportLang::Dockerfile),
+            "{path}"
+        );
+    }
+    for path in [
+        "Dockerfile-notes.md",
+        "MyDockerfile",
+        "Dockerfile.md",
+        "Dockerfile.tt",
+        "Dockerfile.mri.erb",
+        "Containerfile.template",
+        "Dockerfile.wip.diff",
+    ] {
+        assert_ne!(
+            SupportLang::from_path(path),
+            Some(SupportLang::Dockerfile),
+            "{path}"
+        );
+    }
+    assert_eq!(
+        SupportLang::from_path("Dockerfile.py"),
+        Some(SupportLang::Python)
+    );
 }

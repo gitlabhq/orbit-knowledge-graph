@@ -71,3 +71,6 @@ tree-sitter-yaml = ["dep:tree-sitter-yaml"]
 tree-sitter-zig = ["dep:tree-sitter-zig"]
 
 [dev-dependencies]
+
+[lints]
+workspace = true

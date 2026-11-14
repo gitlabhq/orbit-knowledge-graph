@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use cynic::{GraphQlResponse, Operation};
 use serde::de::DeserializeOwned;
@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::api::{Api, ErrorExtensions};
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
+use super::retry::{self, Policy};
 
 const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -35,6 +36,7 @@ pub(crate) struct SkillHttpResponse {
 pub(crate) struct OrbitClient {
     endpoint: ResolvedEndpoint,
     http: reqwest::Client,
+    retries_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -92,7 +94,16 @@ impl OrbitClient {
             .map_err(|e| {
                 RemoteError::new(EXIT_GENERIC, format!("failed to build HTTP client: {e}"))
             })?;
-        Ok(Self { endpoint, http })
+        Ok(Self {
+            endpoint,
+            http,
+            retries_enabled: true,
+        })
+    }
+
+    pub(crate) fn without_retries(mut self) -> Self {
+        self.retries_enabled = false;
+        self
     }
 
     pub(crate) fn origin(&self) -> Result<String, RemoteError> {
@@ -160,17 +171,18 @@ impl OrbitClient {
                     .get(self.url(GREP_PATH))
                     .query(params)
                     .timeout(GREP_REQUEST_TIMEOUT),
+                Policy::BEST_EFFORT,
             )
             .await?;
         read_body(response).await
     }
 
     pub(crate) async fn post_context(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
-        self.post_json(CONTEXT_PATH, body).await
+        self.post_json(CONTEXT_PATH, body, Policy::QUERY).await
     }
 
     pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
-        self.post_json(QUERY_PATH, body).await
+        self.post_json(QUERY_PATH, body, Policy::QUERY).await
     }
 
     pub(crate) async fn grep_query(&self, body: Vec<u8>) -> Result<(u16, Vec<u8>), RemoteError> {
@@ -205,6 +217,18 @@ impl OrbitClient {
         Q: DeserializeOwned,
         V: Serialize,
     {
+        self.graphql_with_policy(operation, Policy::READ_ONLY).await
+    }
+
+    pub(crate) async fn graphql_with_policy<Q, V>(
+        &self,
+        operation: &Operation<Q, V>,
+        policy: Policy,
+    ) -> Result<Option<GraphQlResponse<Q, ErrorExtensions>>, RemoteError>
+    where
+        Q: DeserializeOwned,
+        V: Serialize,
+    {
         if Api::selected() == Some(Api::Rest) {
             return Ok(None);
         }
@@ -214,7 +238,7 @@ impl OrbitClient {
                 format!("could not encode GraphQL query: {error}"),
             )
         })?;
-        let body = self.post_json(GRAPHQL_PATH, request).await?;
+        let body = self.post_json(GRAPHQL_PATH, request, policy).await?;
         let response: GraphQlResponse<Q, ErrorExtensions> =
             serde_json::from_slice(&body).map_err(|error| {
                 RemoteError::new(
@@ -226,13 +250,19 @@ impl OrbitClient {
         Ok((api == Api::Graphql).then_some(response))
     }
 
-    async fn post_json(&self, path: &str, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+    async fn post_json(
+        &self,
+        path: &str,
+        body: Vec<u8>,
+        policy: Policy,
+    ) -> Result<Vec<u8>, RemoteError> {
         let response = self
             .send(
                 self.http
                     .post(self.url(path))
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .body(body),
+                policy,
             )
             .await?;
         read_body(response).await
@@ -244,7 +274,10 @@ impl OrbitClient {
         params: &[(&str, String)],
     ) -> Result<Vec<u8>, RemoteError> {
         let response = self
-            .send(self.http.get(self.url(path)).query(params))
+            .send(
+                self.http.get(self.url(path)).query(params),
+                Policy::READ_ONLY,
+            )
             .await?;
         read_body(response).await
     }
@@ -253,36 +286,69 @@ impl OrbitClient {
         format!("{}{path}", self.endpoint.base_url.trim_end_matches('/'))
     }
 
-    /// Retries once only when the connection failed, so the server never saw the request. A timeout or a
-    /// server error is not retried: the server may have run the query, and a graph query is billed.
     async fn send(
         &self,
         request: reqwest::RequestBuilder,
+        policy: Policy,
     ) -> Result<reqwest::Response, RemoteError> {
+        let max_retries = if self.retries_enabled {
+            retry::max_retries()
+        } else {
+            0
+        };
+        let mut retries = 0_u32;
+        let mut waited = Duration::ZERO;
         let mut pending = Some(request);
-        let mut attempt = 0_u8;
-        let response = loop {
-            attempt += 1;
+        loop {
             let current = pending.take().expect("a request remains");
-            pending = current.try_clone().filter(|_| attempt == 1);
-            match self.send_raw(current).await {
-                Ok(response) => break response,
-                Err(error) if pending.is_some() && error.is_connect() => {}
+            pending = current.try_clone().filter(|_| retries < max_retries);
+            let retryable = match self.send_raw(current).await {
+                Ok(response) if response.status().is_success() => return Ok(response),
+                Ok(response) => {
+                    let status = response.status().as_u16();
+                    let retry_after = response
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| retry::parse_retry_after(value, SystemTime::now()));
+                    let body = response.text().await.unwrap_or_default();
+                    let mut error = map_http_error(status, &body);
+                    if status == 429 {
+                        error
+                            .message
+                            .push_str(&retry::rate_limit_note(retries, retry_after));
+                    }
+                    if pending.is_none()
+                        || !retry::is_retryable_status(status, policy.retry_unavailable)
+                    {
+                        return Err(error);
+                    }
+                    (format!("HTTP {status}"), retry_after, error)
+                }
                 Err(error) => {
-                    return Err(RemoteError::new(
+                    let failure = RemoteError::new(
                         EXIT_GENERIC,
                         request_failure_message("Orbit request", &error),
-                    ));
+                    );
+                    if pending.is_none() || !error.is_connect() {
+                        return Err(failure);
+                    }
+                    ("connection failed".to_string(), None, failure)
                 }
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        };
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(map_http_error(status.as_u16(), &body));
+            };
+            let (reason, retry_after, error) = retryable;
+            retries += 1;
+            let Some(delay) = retry::next_delay(retries, retry_after, waited, policy.wait_budget)
+            else {
+                return Err(error);
+            };
+            eprintln!(
+                "orbit: {reason}; retrying in {:.1}s (retry {retries}/{max_retries})",
+                delay.as_secs_f32()
+            );
+            tokio::time::sleep(delay).await;
+            waited += delay;
         }
-        Ok(response)
     }
 
     async fn send_authenticated(
@@ -422,7 +488,8 @@ impl std::error::Error for MissingCredential {}
 
 impl OrbitClient {
     pub(crate) async fn schema_overview(&self, request: Vec<u8>) -> Option<String> {
-        let body = tokio::time::timeout(SHORT_REQUEST_TIMEOUT, self.query_raw(request))
+        let client = self.clone().without_retries();
+        let body = tokio::time::timeout(SHORT_REQUEST_TIMEOUT, client.query_raw(request))
             .await
             .ok()?
             .ok()?;
@@ -534,6 +601,38 @@ mod tests {
 
     use super::*;
     use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn a_client_without_retries_sends_a_rate_limited_request_once() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let served = tokio::spawn(async move {
+            let mut count = 0_u32;
+            while let Ok(Ok((mut stream, _))) =
+                tokio::time::timeout(Duration::from_secs(2), listener.accept()).await
+            {
+                count += 1;
+                let _ = stream.read(&mut [0; 4096]).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 429 X\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+            }
+            count
+        });
+        let client = OrbitClient::new(ResolvedEndpoint {
+            base_url,
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap()
+        .without_retries();
+
+        assert!(client.query_raw(b"{}".to_vec()).await.is_err());
+        assert_eq!(served.await.unwrap(), 1);
+    }
 
     #[tokio::test]
     async fn unresponsive_host_reports_timeout() {

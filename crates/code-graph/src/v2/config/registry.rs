@@ -18,15 +18,61 @@ fn detect_language_from_extension(extension: &str) -> Option<Language> {
 }
 
 pub fn detect_language_from_path(path: &str) -> Option<Language> {
-    let ext = std::path::Path::new(path)
+    let extension = std::path::Path::new(path)
         .extension()
-        .and_then(|e| e.to_str())?;
-    detect_language_from_extension(ext)
+        .and_then(|e| e.to_str());
+    if let Some(language) = extension.and_then(detect_language_from_extension) {
+        return Some(language);
+    }
+    let name = path.rsplit('/').next().unwrap_or(path);
+    Language::iter().find(|lang| lang.file_names().is_some_and(|f| f.matches(name)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn container_build_files_are_detected_by_name() {
+        for path in [
+            "Dockerfile",
+            "Containerfile",
+            "Dockerfile.dev",
+            "svc/Containerfile.prod",
+            "build/app.dockerfile",
+            "dockerfile",
+            "DOCKERFILE",
+            "app.Dockerfile",
+            "build.Containerfile",
+            "Dockerfile.mri.release",
+        ] {
+            assert_eq!(
+                detect_language_from_path(path),
+                Some(Language::Dockerfile),
+                "{path}"
+            );
+        }
+        for path in [
+            "MyDockerfile",
+            "Dockerfile.tt",
+            "Dockerfile.mri.erb",
+            "Containerfile.template",
+            "Dockerfile.wip.diff",
+        ] {
+            assert_eq!(detect_language_from_path(path), None, "{path}");
+        }
+        for path in ["docs/Dockerfile-notes.md", "Dockerfile.md"] {
+            assert_eq!(
+                detect_language_from_path(path),
+                Some(Language::Markdown),
+                "{path}"
+            );
+        }
+        assert_eq!(
+            detect_language_from_path("Dockerfile.py"),
+            Some(Language::Python)
+        );
+    }
 
     #[test]
     fn detect_all_extensions() {
@@ -84,7 +130,11 @@ mod tests {
             detect_language_from_extension("cts"),
             Some(Language::TypeScript)
         );
-        assert_eq!(detect_language_from_extension("md"), None);
+        assert_eq!(
+            detect_language_from_extension("md"),
+            Some(Language::Markdown)
+        );
+        assert_eq!(detect_language_from_extension("txt"), None);
     }
 
     #[test]
@@ -125,7 +175,10 @@ mod tests {
             detect_language_from_path("src/main.java"),
             Some(Language::Java)
         );
-        assert_eq!(detect_language_from_path("README.md"), None);
+        assert_eq!(
+            detect_language_from_path("README.md"),
+            Some(Language::Markdown)
+        );
         assert_eq!(detect_language_from_path("Makefile"), None);
         // Pure extension lookup: minified-bundle exclusion is the CodeFilter
         // denylist's job, not this mapping's.

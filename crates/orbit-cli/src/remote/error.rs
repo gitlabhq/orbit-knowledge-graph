@@ -72,9 +72,8 @@ pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
         429 => RemoteError::new(
             EXIT_RATE_LIMITED,
             "rate limited\n\n\
-             The Orbit API rejected the request with HTTP 429. Inspect the `Retry-After`\n\
-             response header and back off, or batch via aggregation if you are running\n\
-             many small queries.",
+             The Orbit API rejected the request with HTTP 429. Wait and try again, or\n\
+             batch via aggregation if you are running many small queries.",
         ),
         503 => RemoteError::new(
             EXIT_GENERIC,

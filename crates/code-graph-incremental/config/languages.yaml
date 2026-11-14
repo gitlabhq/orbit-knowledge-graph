@@ -29,6 +29,18 @@ languages:
     grammar: tree-sitter-c-sharp
     fqn_separator: "."
 
+  dockerfile:
+    extensions: [dockerfile, containerfile]
+    file_names:
+      exact: [dockerfile, containerfile]
+      prefixes: ["dockerfile.", "containerfile."]
+      suffixes: [".dockerfile", ".containerfile"]
+      ignored_extensions: [
+        tt, erb, template, tmpl, tpl, j2, jinja, jinja2, in, diff, patch, md, txt, bak, orig, dockerignore, yml, yaml, json, toml, lock,
+      ]
+    aliases: [docker, containerfile]
+    grammar: tree-sitter-containerfile
+
   elixir:
     extensions: [ex, exs]
     grammar: tree-sitter-elixir
@@ -72,6 +84,12 @@ languages:
   lua:
     extensions: [lua]
     grammar: tree-sitter-lua
+
+  markdown:
+    extensions: [md, markdown]
+    aliases: [md, markdown]
+    grammar: comrak
+    fqn_separator: "#"
 
   ocaml:
     extensions: [ml, mli]

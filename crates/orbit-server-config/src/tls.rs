@@ -98,16 +98,7 @@ mod tests {
     use crate::AppConfig;
 
     fn config_from(overlay: &str) -> AppConfig {
-        config::Config::builder()
-            .add_source(config::File::from_str(
-                crate::EMBEDDED_DEFAULTS,
-                config::FileFormat::Yaml,
-            ))
-            .add_source(config::File::from_str(overlay, config::FileFormat::Yaml))
-            .build()
-            .unwrap()
-            .try_deserialize()
-            .unwrap()
+        AppConfig::with_overlay(overlay).unwrap()
     }
 
     #[test]
@@ -188,15 +179,11 @@ mod tests {
             "tls:\n  internal:\n    enable: true\n",
             "tls:\n  internl:\n    enabled: true\n",
         ] {
-            let result: Result<AppConfig, _> = config::Config::builder()
-                .add_source(config::File::from_str(
-                    crate::EMBEDDED_DEFAULTS,
-                    config::FileFormat::Yaml,
-                ))
-                .add_source(config::File::from_str(overlay, config::FileFormat::Yaml))
-                .build()
-                .unwrap()
-                .try_deserialize();
+            let dir = tempfile::TempDir::new().unwrap();
+            let path = dir.path().join("overlay.yaml");
+            std::fs::write(&path, overlay).unwrap();
+
+            let result = AppConfig::load_from(Some(&path), dir.path());
 
             assert!(
                 result.is_err(),
