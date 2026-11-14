@@ -1,6 +1,6 @@
-# Planner optimization coverage
+# Compiler fixtures
 
-Run `mise test:plan-shape`. The runner discovers YAML files recursively under
+Run `mise test:compiler`. The runner discovers YAML files recursively under
 `fixtures/`. Each fixture runs the production compiler pipeline for each
 frontend and backend, and checks the state that named phases leave behind. Most
 fixtures run through both JSON and GQL.
@@ -29,7 +29,7 @@ physical:
 ```
 
 Common targets have aliases, declared in one table in
-`integration-testkit/src/plan_shape/aliases.rs`:
+`integration-testkit/src/compiler/aliases.rs`:
 
 | Alias | Target |
 |---|---|
@@ -56,7 +56,7 @@ contract:
 | `hydration_plan` | `none`, `static`, or `dynamic` |
 | `output` | `sql` text checks, and `indexes` that the layout declares and the final query scans |
 
-The plan-shape binary loads the embedded query config, so `settings` sees the
+The compiler fixtures binary loads the embedded query config, so `settings` sees the
 production settings, such as the query cache. The container suite runs EXPLAIN
 on the seeded ClickHouse for every fixture with `indexes`. It first adds an older
 decoy copy of each row in its own part, with string values that no fixture
@@ -145,12 +145,12 @@ not ignored tests or missing fixture migrations.
 | `lower::hydration::tests::large_dynamic_tp_sets_emit_array_exists` | Checks the number and length of bound array parameters, which explain does not expose |
 | `lower::hydration::tests::large_static_tp_sets_emit_or` | Pins 257 static predicates and rejects array mode; complements the dynamic YAML fixture |
 | `lower::hydration::tests::{dynamic,static}_tp_filter_precedes_id_filter` | Checks serialized predicate order; partial YAML item matching is unordered |
-| `plan_shape::hydration_planning_selects_paths_before_sql_rendering` | Exercises the 256/257 boundary and budget-driven mode selection together |
+| `compiler::hydration_planning_selects_paths_before_sql_rendering` | Exercises the 256/257 boundary and budget-driven mode selection together |
 | `compiler::ontology::hydration_widens_paths_to_segment_budget` | Checks bound path arrays, shared parameters, and ancestor coverage across generated paths |
-| Compiler scope, role, settings, virtual-property, and telemetry tests | Exercise phases or observable outputs outside plan-shape assertions |
+| Compiler scope, role, settings, virtual-property, and telemetry tests | Exercise phases or observable outputs outside compiler fixture assertions |
 | Compiler dialect and parameter-rendering tests | Check final backend SQL or parameter bindings, rather than the shared SQL AST |
 | Input deserialization, normalization, schema-limit, validation-error, GQL hashing, hydration-metadata, and DDL tests | Check contracts that a valid query through the harness does not reach |
 
 Keep a Rust test until a fixture checks every one of its assertions. For the
-plan-shape layer and its limits, see
-[Plan-shape fixtures](../../../../../docs/pages/engineering/testing/integration/compiler-and-code-graph.md#plan-tests).
+compiler fixture layer and its limits, see
+[Plan-shape fixtures](../../../../docs/pages/engineering/testing/integration/compiler-and-code-graph.md#plan-tests).
