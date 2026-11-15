@@ -1,4 +1,4 @@
-import { type ComponentProps, type ReactNode, useState } from "react";
+import { type ComponentProps, useState } from "react";
 import { AgentLogos, AgentPrompt, cn, Contrasts, CopyButton, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, TraceGraph, type UseCase, UseCases } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { USER_DOCS } from "../sections";
@@ -377,23 +377,34 @@ function QuickstartLink() {
 // The first screen, from the very top, behind the top bar, with the setup command
 // lower down.
 // Copy a setup prompt to paste into an agent. Picking an agent tailors the prompt to it and copies it right
-// away. The copy button, a frosted tile, copies the prompt for the picked agent, or for any agent. `action`,
-// such as a sales link, replaces Quickstart beside it.
-function SetupPicker({ className, action }: { className?: string; action?: ReactNode }) {
+// away. In the hero, the copy button is the white main action above the agents, next to Quickstart. With
+// `inline`, the agents and a frosted copy button share one row, and the logos fly in as the row scrolls in.
+function SetupPicker({ className, inline = false }: { className?: string; inline?: boolean }) {
   const [agent, setAgent] = useState<string | null>(null);
   const pick = (name: string) => {
     setAgent(name);
     void navigator.clipboard?.writeText(setupPrompt(name));
   };
+  const copy = (
+    <CopyButton text={setupPrompt(agent)} label={`Copy a setup prompt for ${agent ?? "your agent"}`} primary={!inline} tile={inline}>
+      Copy setup prompt
+    </CopyButton>
+  );
+  const logos = <AgentLogos label="Pick your agent" marksOnly reveal={inline} agents={AGENTS} selected={agent ?? undefined} onSelect={pick} />;
+  if (inline)
+    return (
+      <div className={cn("flex flex-wrap items-center gap-x-5 gap-y-4", className)}>
+        {logos}
+        {copy}
+      </div>
+    );
   return (
     <div className={cn("flex flex-col items-center gap-5", className)}>
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
-        <CopyButton text={setupPrompt(agent)} label={`Copy a setup prompt for ${agent ?? "your agent"}`} tile>
-          Copy setup prompt
-        </CopyButton>
-        {action ?? <QuickstartLink />}
+        {copy}
+        <QuickstartLink />
       </div>
-      <AgentLogos label="Pick your agent" marksOnly agents={AGENTS} selected={agent ?? undefined} onSelect={pick} />
+      {logos}
     </div>
   );
 }
@@ -526,14 +537,9 @@ function HomePage() {
       </Section>
 
       <Section id="connect" snug backdrop={<OrbitHalo />} backdropFade="band" eyebrow="Connect your agent" title={<>Works with <span className="orbit-fade">your agents</span></>} lede="Built into GitLab Duo. Connect your agent with the CLI or MCP.">
-        <div className="flex max-w-lg flex-col gap-6">
-          <AgentLogos
-            label="Agents that work with GitLab Orbit"
-            marksOnly
-            reveal
-            agents={AGENTS}
-          />
-          <Reveal from="right" delay={300}>
+        <div className="flex flex-col gap-6">
+          <SetupPicker inline />
+          <Reveal from="right" delay={300} className="max-w-xl">
             <Terminal title="GitLab Orbit CLI" code={SETUP} copy="glab orbit setup" />
           </Reveal>
         </div>
@@ -541,7 +547,10 @@ function HomePage() {
 
       <Section id="start" dark className="page-dark-bottom page-end" title={<>Your agent already has the code. <span className="orbit-fade">Give it the rest.</span></>} lede="Answers from your real GitLab data, not guesses or digging by hand.">
         <div className="flex flex-col items-center gap-4">
-          <SetupPicker action={<SalesLink label="Request a demo" />} />
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
+            <SalesLink label="Request a demo" />
+            <QuickstartLink />
+          </div>
         </div>
         <GravityGlobe globe={false} />
       </Section>
