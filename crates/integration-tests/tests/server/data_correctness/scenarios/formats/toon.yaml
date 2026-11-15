@@ -1,6 +1,6 @@
 config:
   unmerged_seed: true
-  security: { paths: ["5/"] }
+  security: { paths: ["1/500/"] }
   redaction:
     allow:
       user: [501, 502, 503]
@@ -13,19 +13,19 @@ config:
       - { id: 502, username: bob, name: 'Bob "the Builder"', state: active, user_type: human }
       - { id: 503, username: unicode, name: "Iñtërnâtiônàlizætiøn 🎉", state: active, user_type: human }
     gl_group:
-      - { id: 500, name: Public Group, visibility_level: public, traversal_path: "5/500/" }
+      - { id: 500, name: Public Group, visibility_level: public, traversal_path: "1/500/" }
     gl_merge_request:
-      - { id: 5000, iid: 501, title: Add a feature, state: opened, source_branch: feat-a, target_branch: main, traversal_path: "5/500/5000/" }
-      - { id: 5001, iid: 502, title: "Multi-line\ntitle\twith escapes", state: merged, source_branch: fix-b, target_branch: main, traversal_path: "5/500/5001/" }
+      - { id: 5000, iid: 501, title: Add a feature, state: opened, source_branch: feat-a, target_branch: main, traversal_path: "1/500/5000/" }
+      - { id: 5001, iid: 502, title: "Multi-line\ntitle\twith escapes", state: merged, source_branch: fix-b, target_branch: main, traversal_path: "1/500/5001/" }
     gl_note:
-      - { id: 5100, note: internal note, noteable_type: MergeRequest, noteable_id: 5000, traversal_path: "5/500/5000/", internal: true, confidential: true }
-      - { id: 5101, note: public note, noteable_type: MergeRequest, noteable_id: 5000, traversal_path: "5/500/5000/", internal: false, confidential: null }
+      - { id: 5100, note: internal note, noteable_type: MergeRequest, noteable_id: 5000, traversal_path: "1/500/5000/", internal: true, confidential: true }
+      - { id: 5101, note: public note, noteable_type: MergeRequest, noteable_id: 5000, traversal_path: "1/500/5000/", internal: false, confidential: null }
     gl_edge:
-      - { traversal_path: "5/500/", source_id: 501, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
-      - { traversal_path: "5/500/", source_id: 502, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
-      - { traversal_path: "5/500/", source_id: 503, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
-      - { traversal_path: "5/500/5000/", source_id: 501, source_kind: User, relationship_kind: AUTHORED, target_id: 5000, target_kind: MergeRequest, source_tags: [], target_tags: [] }
-      - { traversal_path: "5/500/5001/", source_id: 502, source_kind: User, relationship_kind: AUTHORED, target_id: 5001, target_kind: MergeRequest, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/500/", source_id: 501, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
+      - { traversal_path: "1/500/", source_id: 502, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
+      - { traversal_path: "1/500/", source_id: 503, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
+      - { traversal_path: "1/500/5000/", source_id: 501, source_kind: User, relationship_kind: AUTHORED, target_id: 5000, target_kind: MergeRequest, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/500/5001/", source_id: 502, source_kind: User, relationship_kind: AUTHORED, target_id: 5001, target_kind: MergeRequest, source_tags: [], target_tags: [] }
 
 cases:
   - name: traversal_groups_nodes_by_type_into_tables
