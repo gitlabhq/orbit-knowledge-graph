@@ -1,12 +1,52 @@
 description: Redaction on multi-hop traversals drops every row that holds a denied node, so only fully authorized paths keep their nodes and edges
 
+config:
+  security: { org_id: 5, paths: ["5/"] }
+  extra_seed:
+    gl_user:
+      - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 2, username: bob, name: Bob Builder, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 3, username: charlie, name: Charlie Private, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 4, username: diana, name: Diana Developer, state: active, user_type: project_bot, _version: "2099-01-01 00:00:00" }
+      - { id: 5, username: eve, name: Eve External, state: blocked, user_type: service_account, _version: "2099-01-01 00:00:00" }
+      - { id: 6, _version: "2099-01-01 00:00:00", _deleted: true }
+      - { id: 7, _version: "2099-01-01 00:00:00", _deleted: true }
+    gl_group:
+      - { id: 500, name: Public Group, visibility_level: public, traversal_path: "5/500/" }
+      - { id: 501, name: Private Group, visibility_level: private, traversal_path: "5/501/" }
+      - { id: 502, name: Internal Group, visibility_level: internal, traversal_path: "5/502/" }
+    gl_project:
+      - { id: 5000, name: Public Project, visibility_level: public, traversal_path: "5/500/5000/" }
+      - { id: 5001, name: Private Project, visibility_level: private, traversal_path: "5/501/5001/" }
+      - { id: 5002, name: Internal Project, visibility_level: internal, traversal_path: "5/500/5002/" }
+      - { id: 5003, name: Secret Project, visibility_level: private, traversal_path: "5/501/5003/" }
+      - { id: 5004, name: Shared Project, visibility_level: public, traversal_path: "5/502/5004/" }
+    gl_merge_request:
+      - { id: 5200, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, traversal_path: "5/500/5000/" }
+      - { id: 5201, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, traversal_path: "5/500/5000/" }
+      - { id: 5202, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, traversal_path: "5/501/5001/" }
+      - { id: 5203, title: Update D, state: closed, source_branch: update-d, target_branch: main, traversal_path: "5/502/5004/" }
+    gl_edge:
+      - { traversal_path: "5/500/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
+      - { traversal_path: "5/502/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
+      - { traversal_path: "5/500/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/502/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/500/5000/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5000, target_kind: Project }
+      - { traversal_path: "5/500/5002/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5002, target_kind: Project }
+      - { traversal_path: "5/501/5001/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5001, target_kind: Project }
+      - { traversal_path: "5/501/5003/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5003, target_kind: Project }
+      - { traversal_path: "5/502/5004/", source_id: 502, source_kind: Group, relationship_kind: CONTAINS, target_id: 5004, target_kind: Project }
+
 cases:
   - name: member_of_all_allowed
     config:
       redaction:
         allow:
           user: [1, 2, 3, 4, 5]
-          group: [100, 101, 102]
+          group: [500, 501, 502]
     query:
       json: |
         {
@@ -27,25 +67,25 @@ cases:
         User:
           ids: [1, 2, 3, 4, 5]
         Group:
-          ids: [100, 101, 102]
+          ids: [500, 501, 502]
       edges:
-        MEMBER_OF: [[1, 100], [1, 102], [2, 100], [3, 101], [4, 101], [4, 102], [5, 101]]
+        MEMBER_OF: [[1, 500], [1, 502], [2, 500], [3, 501], [4, 501], [4, 502], [5, 501]]
       edge_exists:
         MEMBER_OF:
-          - { from: User, from_id: 1, to: Group, to_id: 100 }
-          - { from: User, from_id: 1, to: Group, to_id: 102 }
-          - { from: User, from_id: 2, to: Group, to_id: 100 }
-          - { from: User, from_id: 3, to: Group, to_id: 101 }
-          - { from: User, from_id: 4, to: Group, to_id: 101 }
-          - { from: User, from_id: 4, to: Group, to_id: 102 }
-          - { from: User, from_id: 5, to: Group, to_id: 101 }
+          - { from: User, from_id: 1, to: Group, to_id: 500 }
+          - { from: User, from_id: 1, to: Group, to_id: 502 }
+          - { from: User, from_id: 2, to: Group, to_id: 500 }
+          - { from: User, from_id: 3, to: Group, to_id: 501 }
+          - { from: User, from_id: 4, to: Group, to_id: 501 }
+          - { from: User, from_id: 4, to: Group, to_id: 502 }
+          - { from: User, from_id: 5, to: Group, to_id: 501 }
 
   - name: single_hop_keeps_pairs_with_both_nodes_allowed
     config:
       redaction:
         allow:
           user: [1, 2]
-          group: [100]
+          group: [500]
     query:
       json: |
         {
@@ -67,19 +107,19 @@ cases:
           ids: [1, 2]
           absent: [3, 4, 5]
         Group:
-          ids: [100]
-          absent: [101, 102]
+          ids: [500]
+          absent: [501, 502]
       edges:
-        MEMBER_OF: [[1, 100], [2, 100]]
+        MEMBER_OF: [[1, 500], [2, 500]]
 
   - name: denied_groups_remove_every_pair_through_them
     config:
       redaction:
         allow:
           user: [1, 2, 3, 4, 5]
-          group: [100]
+          group: [500]
         deny:
-          group: [101, 102]
+          group: [501, 502]
     query:
       json: |
         {
@@ -99,17 +139,17 @@ cases:
         User:
           ids: [1, 2]
         Group:
-          ids: [100]
-          absent: [101, 102]
+          ids: [500]
+          absent: [501, 502]
       edges:
-        MEMBER_OF: [[1, 100], [2, 100]]
+        MEMBER_OF: [[1, 500], [2, 500]]
 
   - name: edge_endpoints_survive_redaction
     config:
       redaction:
         allow:
           user: [1]
-          group: [100]
+          group: [500]
     query:
       json: |
         {
@@ -131,97 +171,20 @@ cases:
           ids: [1]
           absent: [2, 3, 4, 5]
         Group:
-          ids: [100]
-          absent: [101, 102]
+          ids: [500]
+          absent: [501, 502]
       edges:
-        MEMBER_OF: [[1, 100]]
+        MEMBER_OF: [[1, 500]]
       edge_exists:
         MEMBER_OF:
-          - { from: User, from_id: 1, to: Group, to_id: 100 }
-
-  - name: id_collision_across_entities_all_allowed
-    config:
-      extra_seed:
-        gl_group:
-          - { id: 1, name: Collision Group, visibility_level: public, traversal_path: "1/1/" }
-        gl_edge:
-          - { traversal_path: "1/1/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 1, target_kind: Group }
-      redaction:
-        allow:
-          user: [1]
-          group: [1, 100, 102]
-    query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-            {"id": "g", "entity": "Group"}
-          ],
-          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-          "limit": 30
-        }
-      gql: |
-        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 30
-    expect:
-      node_count: 4
-      nodes:
-        User:
-          ids: [1]
-        Group:
-          ids: [1, 100, 102]
-      edges:
-        MEMBER_OF: [[1, 1], [1, 100], [1, 102]]
-      edge_exists:
-        MEMBER_OF:
-          - { from: User, from_id: 1, to: Group, to_id: 1 }
-
-  - name: id_collision_across_entities_denies_by_type
-    config:
-      extra_seed:
-        gl_group:
-          - { id: 1, name: Collision Group, visibility_level: public, traversal_path: "1/1/" }
-        gl_edge:
-          - { traversal_path: "1/1/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 1, target_kind: Group }
-      redaction:
-        allow:
-          user: [1]
-          group: [100, 102]
-        deny:
-          group: [1]
-    query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-            {"id": "g", "entity": "Group"}
-          ],
-          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-          "limit": 30
-        }
-      gql: |
-        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 30
-    expect:
-      node_count: 3
-      nodes:
-        User:
-          ids: [1]
-        Group:
-          ids: [100, 102]
-          absent: [1]
-      edges:
-        MEMBER_OF: [[1, 100], [1, 102]]
-      edge_absent:
-        MEMBER_OF:
-          - { from: User, from_id: 1, to: Group, to_id: 1 }
+          - { from: User, from_id: 1, to: Group, to_id: 500 }
 
   - name: contains_all_allowed
     config:
       redaction:
         allow:
-          group: [100, 101, 102]
-          project: [1000, 1001, 1002, 1003, 1004]
+          group: [500, 501, 502]
+          project: [5000, 5001, 5002, 5003, 5004]
     query:
       json: |
         {
@@ -240,28 +203,28 @@ cases:
       referential_integrity: true
       nodes:
         Group:
-          ids: [100, 101, 102]
+          ids: [500, 501, 502]
         Project:
-          ids: [1000, 1001, 1002, 1003, 1004]
+          ids: [5000, 5001, 5002, 5003, 5004]
       edges:
-        CONTAINS: [[100, 1000], [100, 1002], [101, 1001], [101, 1003], [102, 1004]]
+        CONTAINS: [[500, 5000], [500, 5002], [501, 5001], [501, 5003], [502, 5004]]
       edge_exists:
         CONTAINS:
-          - { from: Group, from_id: 100, to: Project, to_id: 1000 }
-          - { from: Group, from_id: 100, to: Project, to_id: 1002 }
-          - { from: Group, from_id: 101, to: Project, to_id: 1001 }
-          - { from: Group, from_id: 101, to: Project, to_id: 1003 }
-          - { from: Group, from_id: 102, to: Project, to_id: 1004 }
+          - { from: Group, from_id: 500, to: Project, to_id: 5000 }
+          - { from: Group, from_id: 500, to: Project, to_id: 5002 }
+          - { from: Group, from_id: 501, to: Project, to_id: 5001 }
+          - { from: Group, from_id: 501, to: Project, to_id: 5003 }
+          - { from: Group, from_id: 502, to: Project, to_id: 5004 }
 
   - name: group_project_pairs_with_denied_group_and_projects
     config:
       redaction:
         allow:
-          group: [100, 102]
-          project: [1000, 1002, 1004]
+          group: [500, 502]
+          project: [5000, 5002, 5004]
         deny:
-          group: [101]
-          project: [1001, 1003]
+          group: [501]
+          project: [5001, 5003]
     query:
       json: |
         {
@@ -279,23 +242,23 @@ cases:
       node_count: 5
       nodes:
         Group:
-          ids: [100, 102]
-          absent: [101]
+          ids: [500, 502]
+          absent: [501]
         Project:
-          ids: [1000, 1002, 1004]
-          absent: [1001, 1003]
+          ids: [5000, 5002, 5004]
+          absent: [5001, 5003]
       edges:
-        CONTAINS: [[100, 1000], [100, 1002], [102, 1004]]
+        CONTAINS: [[500, 5000], [500, 5002], [502, 5004]]
 
   - name: group_project_columns_survive_redaction
     config:
       redaction:
         allow:
-          group: [100]
-          project: [1000, 1002]
+          group: [500]
+          project: [5000, 5002]
         deny:
-          group: [101, 102]
-          project: [1001, 1003, 1004]
+          group: [501, 502]
+          project: [5001, 5003, 5004]
     query:
       json: |
         {
@@ -314,23 +277,23 @@ cases:
       referential_integrity: true
       nodes:
         Group:
-          ids: [100]
+          ids: [500]
         Project:
-          ids: [1000, 1002]
+          ids: [5000, 5002]
       edges:
-        CONTAINS: [[100, 1000], [100, 1002]]
+        CONTAINS: [[500, 5000], [500, 5002]]
       edge_exists:
         CONTAINS:
-          - { from: Group, from_id: 100, to: Project, to_id: 1000 }
-          - { from: Group, from_id: 100, to: Project, to_id: 1002 }
+          - { from: Group, from_id: 500, to: Project, to_id: 5000 }
+          - { from: Group, from_id: 500, to: Project, to_id: 5002 }
 
   - name: three_hop_all_allowed
     config:
       redaction:
         allow:
           user: [1, 2, 3, 4, 5]
-          group: [100, 101, 102]
-          project: [1000, 1001, 1002, 1003, 1004]
+          group: [500, 501, 502]
+          project: [5000, 5001, 5002, 5003, 5004]
     query:
       json: |
         {
@@ -355,27 +318,27 @@ cases:
         User:
           ids: [1, 2, 3, 4, 5]
         Group:
-          ids: [100, 101, 102]
+          ids: [500, 501, 502]
         Project:
-          ids: [1000, 1001, 1002, 1003, 1004]
+          ids: [5000, 5001, 5002, 5003, 5004]
       edges:
-        MEMBER_OF: [[1, 100], [1, 102], [2, 100], [3, 101], [4, 101], [4, 102], [5, 101]]
-        CONTAINS: [[100, 1000], [100, 1002], [101, 1001], [101, 1003], [102, 1004]]
+        MEMBER_OF: [[1, 500], [1, 502], [2, 500], [3, 501], [4, 501], [4, 502], [5, 501]]
+        CONTAINS: [[500, 5000], [500, 5002], [501, 5001], [501, 5003], [502, 5004]]
       edge_exists:
         MEMBER_OF:
-          - { from: User, from_id: 1, to: Group, to_id: 100 }
-          - { from: User, from_id: 5, to: Group, to_id: 101 }
+          - { from: User, from_id: 1, to: Group, to_id: 500 }
+          - { from: User, from_id: 5, to: Group, to_id: 501 }
         CONTAINS:
-          - { from: Group, from_id: 100, to: Project, to_id: 1000 }
-          - { from: Group, from_id: 102, to: Project, to_id: 1004 }
+          - { from: Group, from_id: 500, to: Project, to_id: 5000 }
+          - { from: Group, from_id: 502, to: Project, to_id: 5004 }
 
   - name: three_hop_keeps_fully_authorized_paths
     config:
       redaction:
         allow:
           user: [1, 2]
-          group: [100]
-          project: [1000]
+          group: [500]
+          project: [5000]
     query:
       json: |
         {
@@ -399,23 +362,23 @@ cases:
         User:
           ids: [1, 2]
         Group:
-          ids: [100]
+          ids: [500]
         Project:
-          ids: [1000]
-          absent: [1002]
+          ids: [5000]
+          absent: [5002]
       edges:
-        MEMBER_OF: [[1, 100], [2, 100]]
-        CONTAINS: [[100, 1000]]
+        MEMBER_OF: [[1, 500], [2, 500]]
+        CONTAINS: [[500, 5000]]
 
   - name: three_hop_denied_projects_remove_only_their_paths
     config:
       redaction:
         allow:
           user: [1, 2, 3, 4, 5]
-          group: [100, 101, 102]
-          project: [1000, 1002, 1004]
+          group: [500, 501, 502]
+          project: [5000, 5002, 5004]
         deny:
-          project: [1001, 1003]
+          project: [5001, 5003]
     query:
       json: |
         {
@@ -440,22 +403,22 @@ cases:
           ids: [1, 2, 4]
           absent: [3, 5]
         Group:
-          ids: [100, 102]
-          absent: [101]
+          ids: [500, 502]
+          absent: [501]
         Project:
-          ids: [1000, 1002, 1004]
-          absent: [1001, 1003]
+          ids: [5000, 5002, 5004]
+          absent: [5001, 5003]
       edges:
-        MEMBER_OF: [[1, 100], [1, 102], [2, 100], [4, 102]]
-        CONTAINS: [[100, 1000], [100, 1002], [102, 1004]]
+        MEMBER_OF: [[1, 500], [1, 502], [2, 500], [4, 502]]
+        CONTAINS: [[500, 5000], [500, 5002], [502, 5004]]
 
   - name: three_hop_single_path_keeps_ids_types_and_edges
     config:
       redaction:
         allow:
           user: [1]
-          group: [100]
-          project: [1000]
+          group: [500]
+          project: [5000]
     query:
       json: |
         {
@@ -480,14 +443,14 @@ cases:
         User:
           ids: [1]
         Group:
-          ids: [100]
+          ids: [500]
         Project:
-          ids: [1000]
+          ids: [5000]
       edges:
-        MEMBER_OF: [[1, 100]]
-        CONTAINS: [[100, 1000]]
+        MEMBER_OF: [[1, 500]]
+        CONTAINS: [[500, 5000]]
       edge_exists:
         MEMBER_OF:
-          - { from: User, from_id: 1, to: Group, to_id: 100 }
+          - { from: User, from_id: 1, to: Group, to_id: 500 }
         CONTAINS:
-          - { from: Group, from_id: 100, to: Project, to_id: 1000 }
+          - { from: Group, from_id: 500, to: Project, to_id: 5000 }

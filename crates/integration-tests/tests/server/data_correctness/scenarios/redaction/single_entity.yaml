@@ -1,11 +1,51 @@
 description: Redaction on single-entity traversals keeps only the allowed ids and their order
 
+config:
+  security: { org_id: 5, paths: ["5/"] }
+  extra_seed:
+    gl_user:
+      - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 2, username: bob, name: Bob Builder, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 3, username: charlie, name: Charlie Private, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 4, username: diana, name: Diana Developer, state: active, user_type: project_bot, _version: "2099-01-01 00:00:00" }
+      - { id: 5, username: eve, name: Eve External, state: blocked, user_type: service_account, _version: "2099-01-01 00:00:00" }
+      - { id: 6, _version: "2099-01-01 00:00:00", _deleted: true }
+      - { id: 7, _version: "2099-01-01 00:00:00", _deleted: true }
+    gl_group:
+      - { id: 500, name: Public Group, visibility_level: public, traversal_path: "5/500/" }
+      - { id: 501, name: Private Group, visibility_level: private, traversal_path: "5/501/" }
+      - { id: 502, name: Internal Group, visibility_level: internal, traversal_path: "5/502/" }
+    gl_project:
+      - { id: 5000, name: Public Project, visibility_level: public, traversal_path: "5/500/5000/" }
+      - { id: 5001, name: Private Project, visibility_level: private, traversal_path: "5/501/5001/" }
+      - { id: 5002, name: Internal Project, visibility_level: internal, traversal_path: "5/500/5002/" }
+      - { id: 5003, name: Secret Project, visibility_level: private, traversal_path: "5/501/5003/" }
+      - { id: 5004, name: Shared Project, visibility_level: public, traversal_path: "5/502/5004/" }
+    gl_merge_request:
+      - { id: 5200, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, traversal_path: "5/500/5000/" }
+      - { id: 5201, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, traversal_path: "5/500/5000/" }
+      - { id: 5202, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, traversal_path: "5/501/5001/" }
+      - { id: 5203, title: Update D, state: closed, source_branch: update-d, target_branch: main, traversal_path: "5/502/5004/" }
+    gl_edge:
+      - { traversal_path: "5/500/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
+      - { traversal_path: "5/502/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
+      - { traversal_path: "5/500/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/502/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/500/5000/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5000, target_kind: Project }
+      - { traversal_path: "5/500/5002/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5002, target_kind: Project }
+      - { traversal_path: "5/501/5001/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5001, target_kind: Project }
+      - { traversal_path: "5/501/5003/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5003, target_kind: Project }
+      - { traversal_path: "5/502/5004/", source_id: 502, source_kind: Group, relationship_kind: CONTAINS, target_id: 5004, target_kind: Project }
+
 cases:
   - name: projects_all_allowed
     config:
       redaction:
         allow:
-          project: [1000, 1001, 1002, 1003, 1004]
+          project: [5000, 5001, 5002, 5003, 5004]
     query:
       json: |
         {
@@ -19,13 +59,13 @@ cases:
       node_count: 5
       nodes:
         Project:
-          ids: [1000, 1001, 1002, 1003, 1004]
+          ids: [5000, 5001, 5002, 5003, 5004]
 
   - name: projects_partially_allowed
     config:
       redaction:
         allow:
-          project: [1000, 1004]
+          project: [5000, 5004]
     query:
       json: |
         {
@@ -39,14 +79,14 @@ cases:
       node_count: 2
       nodes:
         Project:
-          ids: [1000, 1004]
-          absent: [1001, 1002, 1003]
+          ids: [5000, 5004]
+          absent: [5001, 5002, 5003]
 
   - name: project_visibility_filter_all_allowed
     config:
       redaction:
         allow:
-          project: [1000, 1001, 1002, 1003, 1004]
+          project: [5000, 5001, 5002, 5003, 5004]
     query:
       json: |
         {
@@ -62,7 +102,7 @@ cases:
       node_count: 3
       nodes:
         Project:
-          order: [1000, 1002, 1004]
+          order: [5000, 5002, 5004]
           filters:
             visibility_level: { in: [public, internal] }
 
@@ -70,9 +110,9 @@ cases:
     config:
       redaction:
         allow:
-          project: [1000]
+          project: [5000]
         deny:
-          project: [1002, 1004]
+          project: [5002, 5004]
     query:
       json: |
         {
@@ -88,8 +128,8 @@ cases:
       node_count: 1
       nodes:
         Project:
-          order: [1000]
-          absent: [1002, 1004]
+          order: [5000]
+          absent: [5002, 5004]
           filters:
             visibility_level: { in: [public, internal] }
 
@@ -97,46 +137,50 @@ cases:
     config:
       redaction:
         allow:
-          group: [100, 101, 102]
+          group: [500, 501, 502]
     query:
       json: |
         {
           "query_type": "traversal",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [100, 101, 102]}],
+          "nodes": [{"id": "g", "entity": "Group", "node_ids": [500, 501, 502]}],
           "limit": 100
         }
       gql: |
-        MATCH (g:Group) WHERE g.id IN [100, 101, 102] RETURN g LIMIT 100
+        MATCH (g:Group) WHERE g.id IN [500, 501, 502] RETURN g LIMIT 100
     expect:
       node_count: 3
       nodes:
         Group:
-          ids: [100, 101, 102]
+          ids: [500, 501, 502]
 
   - name: group_node_ids_redacted
     config:
       redaction:
         allow:
-          group: [100, 102]
+          group: [500, 502]
         deny:
-          group: [101]
+          group: [501]
     query:
       json: |
         {
           "query_type": "traversal",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [100, 101, 102]}],
+          "nodes": [{"id": "g", "entity": "Group", "node_ids": [500, 501, 502]}],
           "limit": 100
         }
       gql: |
-        MATCH (g:Group) WHERE g.id IN [100, 101, 102] RETURN g LIMIT 100
+        MATCH (g:Group) WHERE g.id IN [500, 501, 502] RETURN g LIMIT 100
     expect:
       node_count: 2
       nodes:
         Group:
-          ids: [100, 102]
-          absent: [101]
+          ids: [500, 502]
+          absent: [501]
 
   - name: user_id_range_keeps_allowed_rows
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
     query:
       json: |
         {
@@ -153,43 +197,47 @@ cases:
           ids: [2, 3, 4]
 
   - name: project_node_ids_all_allowed
+    config:
+      redaction:
+        allow:
+          project: [5000, 5001, 5002, 5003, 5004]
     query:
       json: |
         {
           "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000, 1003]}],
+          "nodes": [{"id": "p", "entity": "Project", "node_ids": [5000, 5003]}],
           "limit": 10
         }
       gql: |
-        MATCH (p:Project) WHERE p.id IN [1000, 1003] RETURN p LIMIT 10
+        MATCH (p:Project) WHERE p.id IN [5000, 5003] RETURN p LIMIT 10
     expect:
       node_count: 2
       nodes:
         Project:
-          ids: [1000, 1003]
+          ids: [5000, 5003]
 
   - name: project_node_ids_redacted
     config:
       redaction:
         allow:
-          project: [1000]
+          project: [5000]
         deny:
-          project: [1003]
+          project: [5003]
     query:
       json: |
         {
           "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000, 1003]}],
+          "nodes": [{"id": "p", "entity": "Project", "node_ids": [5000, 5003]}],
           "limit": 10
         }
       gql: |
-        MATCH (p:Project) WHERE p.id IN [1000, 1003] RETURN p LIMIT 10
+        MATCH (p:Project) WHERE p.id IN [5000, 5003] RETURN p LIMIT 10
     expect:
       node_count: 1
       nodes:
         Project:
-          ids: [1000]
-          absent: [1003]
+          ids: [5000]
+          absent: [5003]
 
   - name: complex_filters_all_allowed
     config:
@@ -272,7 +320,7 @@ cases:
     config:
       redaction:
         allow:
-          merge_request: [2000, 2001, 2002, 2003]
+          merge_request: [5200, 5201, 5202, 5203]
     query:
       json: |
         {
@@ -286,15 +334,15 @@ cases:
       node_count: 4
       nodes:
         MergeRequest:
-          ids: [2000, 2001, 2002, 2003]
+          ids: [5200, 5201, 5202, 5203]
 
   - name: merge_requests_redacted
     config:
       redaction:
         allow:
-          merge_request: [2000, 2001]
+          merge_request: [5200, 5201]
         deny:
-          merge_request: [2002, 2003]
+          merge_request: [5202, 5203]
     query:
       json: |
         {
@@ -308,8 +356,8 @@ cases:
       node_count: 2
       nodes:
         MergeRequest:
-          ids: [2000, 2001]
-          absent: [2002, 2003]
+          ids: [5200, 5201]
+          absent: [5202, 5203]
 
   - name: row_order_all_allowed
     config:
@@ -405,11 +453,11 @@ cases:
     config:
       extra_seed:
         gl_agent_session:
-          - { id: 1, flow_type: developer, project_id: 1000, traversal_path: "1/100/1000/" }
-          - { id: 2, flow_type: chat, project_id: 1001, traversal_path: "1/101/1001/" }
+          - { id: 1, flow_type: developer, project_id: 5000, traversal_path: "5/500/5000/" }
+          - { id: 2, flow_type: chat, project_id: 5001, traversal_path: "5/501/5001/" }
       redaction:
         allow:
-          project: [1000, 1001]
+          project: [5000, 5001]
     query:
       json: |
         {
@@ -429,13 +477,13 @@ cases:
     config:
       extra_seed:
         gl_agent_session:
-          - { id: 1, flow_type: developer, project_id: 1000, traversal_path: "1/100/1000/" }
-          - { id: 2, flow_type: chat, project_id: 1001, traversal_path: "1/101/1001/" }
+          - { id: 1, flow_type: developer, project_id: 5000, traversal_path: "5/500/5000/" }
+          - { id: 2, flow_type: chat, project_id: 5001, traversal_path: "5/501/5001/" }
       redaction:
         allow:
-          project: [1000]
+          project: [5000]
         deny:
-          project: [1001]
+          project: [5001]
     query:
       json: |
         {

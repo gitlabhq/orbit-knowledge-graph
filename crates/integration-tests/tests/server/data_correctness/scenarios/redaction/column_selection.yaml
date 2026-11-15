@@ -1,5 +1,45 @@
 description: Redaction works the same whether a query selects specific columns, every column, or the default columns
 
+config:
+  security: { org_id: 5, paths: ["5/"] }
+  extra_seed:
+    gl_user:
+      - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 2, username: bob, name: Bob Builder, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 3, username: charlie, name: Charlie Private, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 4, username: diana, name: Diana Developer, state: active, user_type: project_bot, _version: "2099-01-01 00:00:00" }
+      - { id: 5, username: eve, name: Eve External, state: blocked, user_type: service_account, _version: "2099-01-01 00:00:00" }
+      - { id: 6, _version: "2099-01-01 00:00:00", _deleted: true }
+      - { id: 7, _version: "2099-01-01 00:00:00", _deleted: true }
+    gl_group:
+      - { id: 500, name: Public Group, visibility_level: public, traversal_path: "5/500/" }
+      - { id: 501, name: Private Group, visibility_level: private, traversal_path: "5/501/" }
+      - { id: 502, name: Internal Group, visibility_level: internal, traversal_path: "5/502/" }
+    gl_project:
+      - { id: 5000, name: Public Project, visibility_level: public, traversal_path: "5/500/5000/" }
+      - { id: 5001, name: Private Project, visibility_level: private, traversal_path: "5/501/5001/" }
+      - { id: 5002, name: Internal Project, visibility_level: internal, traversal_path: "5/500/5002/" }
+      - { id: 5003, name: Secret Project, visibility_level: private, traversal_path: "5/501/5003/" }
+      - { id: 5004, name: Shared Project, visibility_level: public, traversal_path: "5/502/5004/" }
+    gl_merge_request:
+      - { id: 5200, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, traversal_path: "5/500/5000/" }
+      - { id: 5201, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, traversal_path: "5/500/5000/" }
+      - { id: 5202, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, traversal_path: "5/501/5001/" }
+      - { id: 5203, title: Update D, state: closed, source_branch: update-d, target_branch: main, traversal_path: "5/502/5004/" }
+    gl_edge:
+      - { traversal_path: "5/500/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
+      - { traversal_path: "5/502/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
+      - { traversal_path: "5/500/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/502/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/500/5000/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5000, target_kind: Project }
+      - { traversal_path: "5/500/5002/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5002, target_kind: Project }
+      - { traversal_path: "5/501/5001/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5001, target_kind: Project }
+      - { traversal_path: "5/501/5003/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5003, target_kind: Project }
+      - { traversal_path: "5/502/5004/", source_id: 502, source_kind: Group, relationship_kind: CONTAINS, target_id: 5004, target_kind: Project }
+
 cases:
   - name: specific_columns_all_allowed
     config:
@@ -55,7 +95,7 @@ cases:
     config:
       redaction:
         allow:
-          group: [100, 101, 102]
+          group: [500, 501, 502]
     query:
       json: |
         {
@@ -70,7 +110,7 @@ cases:
       node_count: 3
       nodes:
         Group:
-          ids: [100, 101, 102]
+          ids: [500, 501, 502]
           prop_present: [name, visibility_level]
           prop_absent: [traversal_path]
 
@@ -78,9 +118,9 @@ cases:
     config:
       redaction:
         allow:
-          group: [100]
+          group: [500]
         deny:
-          group: [101, 102]
+          group: [501, 502]
     query:
       json: |
         {
@@ -95,11 +135,11 @@ cases:
       node_count: 1
       nodes:
         Group:
-          ids: [100]
-          absent: [101, 102]
+          ids: [500]
+          absent: [501, 502]
           prop_absent: [traversal_path]
           rows:
-            - { id: 100, name: Public Group, visibility_level: public }
+            - { id: 500, name: Public Group, visibility_level: public }
 
   - name: omitted_columns_redacted
     config:
@@ -129,12 +169,12 @@ cases:
       redaction:
         allow:
           user: [1]
-          group: [100]
-          project: [1000]
+          group: [500]
+          project: [5000]
         deny:
           user: [2, 3, 4, 5]
-          group: [101, 102]
-          project: [1001, 1002, 1003, 1004]
+          group: [501, 502]
+          project: [5001, 5002, 5003, 5004]
     query:
       json: |
         {
@@ -161,26 +201,26 @@ cases:
             - { id: 1, username: alice }
         Group:
           rows:
-            - { id: 100, name: Public Group }
+            - { id: 500, name: Public Group }
         Project:
           rows:
-            - { id: 1000, name: Public Project, visibility_level: public }
+            - { id: 5000, name: Public Project, visibility_level: public }
       edges:
-        MEMBER_OF: [[1, 100]]
-        CONTAINS: [[100, 1000]]
+        MEMBER_OF: [[1, 500]]
+        CONTAINS: [[500, 5000]]
       edge_exists:
         MEMBER_OF:
-          - { from: User, from_id: 1, to: Group, to_id: 100 }
+          - { from: User, from_id: 1, to: Group, to_id: 500 }
         CONTAINS:
-          - { from: Group, from_id: 100, to: Project, to_id: 1000 }
+          - { from: Group, from_id: 500, to: Project, to_id: 5000 }
 
   - name: multi_hop_columns_all_allowed
     config:
       redaction:
         allow:
           user: [1, 2, 3, 4, 5]
-          group: [100, 101, 102]
-          project: [1000, 1001, 1002, 1003, 1004]
+          group: [500, 501, 502]
+          project: [5000, 5001, 5002, 5003, 5004]
     query:
       json: |
         {
@@ -204,22 +244,22 @@ cases:
         User:
           ids: [1, 2, 3, 4, 5]
         Group:
-          ids: [100, 101, 102]
+          ids: [500, 501, 502]
         Project:
-          ids: [1000, 1001, 1002, 1003, 1004]
+          ids: [5000, 5001, 5002, 5003, 5004]
       edges:
-        MEMBER_OF: [[1, 100], [1, 102], [2, 100], [3, 101], [4, 101], [4, 102], [5, 101]]
-        CONTAINS: [[100, 1000], [100, 1002], [101, 1001], [101, 1003], [102, 1004]]
+        MEMBER_OF: [[1, 500], [1, 502], [2, 500], [3, 501], [4, 501], [4, 502], [5, 501]]
+        CONTAINS: [[500, 5000], [500, 5002], [501, 5001], [501, 5003], [502, 5004]]
 
   - name: specific_columns_on_single_hop_redacted
     config:
       redaction:
         allow:
           user: [1]
-          group: [100]
+          group: [500]
         deny:
           user: [2, 3, 4, 5]
-          group: [101, 102]
+          group: [501, 502]
     query:
       json: |
         {
@@ -241,23 +281,23 @@ cases:
           rows:
             - { id: 1, username: alice, state: active }
         Group:
-          ids: [100]
+          ids: [500]
           rows:
-            - { id: 100, name: Public Group }
+            - { id: 500, name: Public Group }
       edges:
-        MEMBER_OF: [[1, 100]]
+        MEMBER_OF: [[1, 500]]
       edge_exists:
         MEMBER_OF:
-          - { from: User, from_id: 1, to: Group, to_id: 100 }
+          - { from: User, from_id: 1, to: Group, to_id: 500 }
 
   - name: any_unauthorized_node_drops_the_row
     config:
       redaction:
         allow:
           user: [1, 2, 3, 4, 5]
-          group: [100, 101, 102]
+          group: [500, 501, 502]
         deny:
-          project: [1000, 1001, 1002, 1003, 1004]
+          project: [5000, 5001, 5002, 5003, 5004]
     query:
       json: |
         {
@@ -310,7 +350,7 @@ cases:
     config:
       redaction:
         allow:
-          project: [1000, 1001, 1002, 1003, 1004]
+          project: [5000, 5001, 5002, 5003, 5004]
     query:
       json: |
         {
@@ -325,15 +365,15 @@ cases:
       node_count: 5
       nodes:
         Project:
-          ids: [1000, 1001, 1002, 1003, 1004]
+          ids: [5000, 5001, 5002, 5003, 5004]
 
   - name: id_in_column_list_redacted
     config:
       redaction:
         allow:
-          project: [1000, 1004]
+          project: [5000, 5004]
         deny:
-          project: [1001, 1002, 1003]
+          project: [5001, 5002, 5003]
     query:
       json: |
         {
@@ -348,18 +388,18 @@ cases:
       node_count: 2
       nodes:
         Project:
-          ids: [1000, 1004]
-          absent: [1001, 1002, 1003]
+          ids: [5000, 5004]
+          absent: [5001, 5002, 5003]
           rows:
-            - { id: 1000, name: Public Project, visibility_level: public }
-            - { id: 1004, name: Shared Project, visibility_level: public }
+            - { id: 5000, name: Public Project, visibility_level: public }
+            - { id: 5004, name: Shared Project, visibility_level: public }
 
   - name: join_semantics_all_allowed
     config:
       redaction:
         allow:
-          group: [100, 101, 102]
-          project: [1000, 1001, 1002, 1003, 1004]
+          group: [500, 501, 502]
+          project: [5000, 5001, 5002, 5003, 5004]
     query:
       json: |
         {
@@ -376,14 +416,14 @@ cases:
     expect:
       node_count: 8
       edges:
-        CONTAINS: [[100, 1000], [100, 1002], [101, 1001], [101, 1003], [102, 1004]]
+        CONTAINS: [[500, 5000], [500, 5002], [501, 5001], [501, 5003], [502, 5004]]
 
   - name: join_semantics_redacted
     config:
       redaction:
         allow:
-          group: [100]
-          project: [1000, 1002]
+          group: [500]
+          project: [5000, 5002]
     query:
       json: |
         {
@@ -401,11 +441,11 @@ cases:
       node_count: 3
       nodes:
         Group:
-          ids: [100]
+          ids: [500]
         Project:
-          ids: [1000, 1002]
+          ids: [5000, 5002]
       edges:
-        CONTAINS: [[100, 1000], [100, 1002]]
+        CONTAINS: [[500, 5000], [500, 5002]]
 
   - name: filters_work_with_columns
     config:

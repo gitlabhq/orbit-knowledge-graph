@@ -1,15 +1,50 @@
 description: Aggregation redacts only the group-by node, because the counted target rows are collapsed and carry no redaction ids
 
 config:
+  security: { org_id: 5, paths: ["5/"] }
   extra_seed:
+    gl_user:
+      - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 2, username: bob, name: Bob Builder, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 3, username: charlie, name: Charlie Private, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 4, username: diana, name: Diana Developer, state: active, user_type: project_bot, _version: "2099-01-01 00:00:00" }
+      - { id: 5, username: eve, name: Eve External, state: blocked, user_type: service_account, _version: "2099-01-01 00:00:00" }
+      - { id: 6, _version: "2099-01-01 00:00:00", _deleted: true }
+      - { id: 7, _version: "2099-01-01 00:00:00", _deleted: true }
+    gl_group:
+      - { id: 500, name: Public Group, visibility_level: public, traversal_path: "5/500/" }
+      - { id: 501, name: Private Group, visibility_level: private, traversal_path: "5/501/" }
+      - { id: 502, name: Internal Group, visibility_level: internal, traversal_path: "5/502/" }
+    gl_project:
+      - { id: 5000, name: Public Project, visibility_level: public, traversal_path: "5/500/5000/" }
+      - { id: 5001, name: Private Project, visibility_level: private, traversal_path: "5/501/5001/" }
+      - { id: 5002, name: Internal Project, visibility_level: internal, traversal_path: "5/500/5002/" }
+      - { id: 5003, name: Secret Project, visibility_level: private, traversal_path: "5/501/5003/" }
+      - { id: 5004, name: Shared Project, visibility_level: public, traversal_path: "5/502/5004/" }
     gl_merge_request:
-      - { id: 10001, iid: 1, title: MR 1, state: merged, author_id: 1, traversal_path: "1/100/1000/" }
-      - { id: 10002, iid: 2, title: MR 2, state: merged, author_id: 1, traversal_path: "1/100/1000/" }
-      - { id: 10003, iid: 3, title: MR 3, state: open, author_id: 2, traversal_path: "1/100/1000/" }
+      - { id: 5200, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, traversal_path: "5/500/5000/" }
+      - { id: 5201, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, traversal_path: "5/500/5000/" }
+      - { id: 5202, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, traversal_path: "5/501/5001/" }
+      - { id: 5203, title: Update D, state: closed, source_branch: update-d, target_branch: main, traversal_path: "5/502/5004/" }
+      - { id: 10001, iid: 1, title: MR 1, state: merged, author_id: 1, traversal_path: "5/500/5000/" }
+      - { id: 10002, iid: 2, title: MR 2, state: merged, author_id: 1, traversal_path: "5/500/5000/" }
+      - { id: 10003, iid: 3, title: MR 3, state: open, author_id: 2, traversal_path: "5/500/5000/" }
     gl_edge:
-      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 10001, target_kind: MergeRequest }
-      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 10002, target_kind: MergeRequest }
-      - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 10003, target_kind: MergeRequest }
+      - { traversal_path: "5/500/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
+      - { traversal_path: "5/502/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
+      - { traversal_path: "5/500/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/502/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/500/5000/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5000, target_kind: Project }
+      - { traversal_path: "5/500/5002/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5002, target_kind: Project }
+      - { traversal_path: "5/501/5001/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5001, target_kind: Project }
+      - { traversal_path: "5/501/5003/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5003, target_kind: Project }
+      - { traversal_path: "5/502/5004/", source_id: 502, source_kind: Group, relationship_kind: CONTAINS, target_id: 5004, target_kind: Project }
+      - { traversal_path: "5/500/5000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 10001, target_kind: MergeRequest }
+      - { traversal_path: "5/500/5000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 10002, target_kind: MergeRequest }
+      - { traversal_path: "5/500/5000/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 10003, target_kind: MergeRequest }
 
 cases:
   - name: specific_columns_all_users_allowed
@@ -38,8 +73,8 @@ cases:
           entity: User
           ids: [1, 2]
           rows:
-            - { entity: User, id: 1, values: { mr_count: 4 }, properties: { username: alice } }
-            - { entity: User, id: 2, values: { mr_count: 2 }, properties: { username: bob } }
+            - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
+            - { entity: User, id: 2, values: { mr_count: 1 }, properties: { username: bob } }
 
   - name: specific_columns_redacts_group_by_node
     config:
@@ -69,7 +104,7 @@ cases:
           entity: User
           ids: [1]
           rows:
-            - { entity: User, id: 1, values: { mr_count: 4 }, properties: { username: alice } }
+            - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
           absent:
             - { entity: User, id: 2 }
 
@@ -99,8 +134,8 @@ cases:
           entity: User
           ids: [1, 2]
           rows:
-            - { entity: User, id: 1, values: { mr_count: 4 }, properties: { username: alice } }
-            - { entity: User, id: 2, values: { mr_count: 2 }, properties: { username: bob } }
+            - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
+            - { entity: User, id: 2, values: { mr_count: 1 }, properties: { username: bob } }
 
   - name: wildcard_columns_redacts_group_by_node
     config:
@@ -130,6 +165,6 @@ cases:
           entity: User
           ids: [1]
           rows:
-            - { entity: User, id: 1, values: { mr_count: 4 }, properties: { username: alice } }
+            - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
           absent:
             - { entity: User, id: 2 }

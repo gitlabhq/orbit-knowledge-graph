@@ -1,0 +1,111 @@
+description: Group 1 shares its numeric id with User 1, and redaction tells them apart by entity type
+
+config:
+  security: { org_id: 5, paths: ["5/"] }
+  extra_seed:
+    gl_user:
+      - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 2, username: bob, name: Bob Builder, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 3, username: charlie, name: Charlie Private, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 4, username: diana, name: Diana Developer, state: active, user_type: project_bot, _version: "2099-01-01 00:00:00" }
+      - { id: 5, username: eve, name: Eve External, state: blocked, user_type: service_account, _version: "2099-01-01 00:00:00" }
+      - { id: 6, _version: "2099-01-01 00:00:00", _deleted: true }
+      - { id: 7, _version: "2099-01-01 00:00:00", _deleted: true }
+    gl_group:
+      - { id: 500, name: Public Group, visibility_level: public, traversal_path: "5/500/" }
+      - { id: 501, name: Private Group, visibility_level: private, traversal_path: "5/501/" }
+      - { id: 502, name: Internal Group, visibility_level: internal, traversal_path: "5/502/" }
+      - { id: 1, name: Collision Group, visibility_level: public, traversal_path: "5/1/" }
+    gl_project:
+      - { id: 5000, name: Public Project, visibility_level: public, traversal_path: "5/500/5000/" }
+      - { id: 5001, name: Private Project, visibility_level: private, traversal_path: "5/501/5001/" }
+      - { id: 5002, name: Internal Project, visibility_level: internal, traversal_path: "5/500/5002/" }
+      - { id: 5003, name: Secret Project, visibility_level: private, traversal_path: "5/501/5003/" }
+      - { id: 5004, name: Shared Project, visibility_level: public, traversal_path: "5/502/5004/" }
+    gl_merge_request:
+      - { id: 5200, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, traversal_path: "5/500/5000/" }
+      - { id: 5201, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, traversal_path: "5/500/5000/" }
+      - { id: 5202, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, traversal_path: "5/501/5001/" }
+      - { id: 5203, title: Update D, state: closed, source_branch: update-d, target_branch: main, traversal_path: "5/502/5004/" }
+    gl_edge:
+      - { traversal_path: "5/500/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
+      - { traversal_path: "5/502/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
+      - { traversal_path: "5/500/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/502/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
+      - { traversal_path: "5/501/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
+      - { traversal_path: "5/500/5000/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5000, target_kind: Project }
+      - { traversal_path: "5/500/5002/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5002, target_kind: Project }
+      - { traversal_path: "5/501/5001/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5001, target_kind: Project }
+      - { traversal_path: "5/501/5003/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5003, target_kind: Project }
+      - { traversal_path: "5/502/5004/", source_id: 502, source_kind: Group, relationship_kind: CONTAINS, target_id: 5004, target_kind: Project }
+      - { traversal_path: "5/1/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 1, target_kind: Group }
+
+cases:
+  - name: group_with_colliding_id_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [1, 500, 501, 502]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 30
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 30
+    expect:
+      node_count: 9
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+        Group:
+          ids: [1, 500, 501, 502]
+      edges:
+        MEMBER_OF: [[1, 1], [1, 500], [1, 502], [2, 500], [3, 501], [4, 501], [4, 502], [5, 501]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 1 }
+
+  - name: group_with_colliding_id_denied_by_type
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [500, 502]
+        deny:
+          group: [1]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 30
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 30
+    expect:
+      node_count: 3
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [500, 502]
+          absent: [1]
+      edges:
+        MEMBER_OF: [[1, 500], [1, 502]]
+      edge_absent:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 1 }
