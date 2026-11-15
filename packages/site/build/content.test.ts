@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describeContent } from "@gitlab-org/orbit-site/testing";
-import { HOME } from "../src/sections";
-import { contentDir, repoBlob, siteLinks, siteMeta, sourceFiles, syncContent } from "./content";
+import { HOME, OFF_SITE, PAGES_DIR } from "../src/sections";
+import { contentDir, repoBlob, siteLinks, siteMeta, siteRoot, sourceFiles, syncContent } from "./content";
 
 syncContent();
 describeContent(contentDir, { routes: { "": HOME }, meta: siteMeta });
@@ -45,5 +47,12 @@ describe("site links", () => {
 
   test("rejects a link to a file that does not exist", () => {
     expect(() => siteLinks("[x](missing.md)", adr, routes)).toThrow(`${adr}: the link target missing.md does not exist`);
+  });
+});
+
+describe("off-site pages", () => {
+  test("every entry is a page in the repository, so a renamed page fails here instead of going public", () => {
+    const pages = join(siteRoot, "../..", PAGES_DIR);
+    expect(OFF_SITE.filter((path) => !existsSync(join(pages, path)))).toEqual([]);
   });
 });
