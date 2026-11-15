@@ -365,3 +365,64 @@ cases:
             - { id: 3002, internal: false }
       edges:
         HAS_NOTE: [[2000, 3002], [2000, 3003]]
+
+  - name: traversal_single_hop_exact
+    description: A single-hop traversal returns exact users, groups, and typed MEMBER_OF edges without path metadata
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 50
+        }
+    expect:
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+          rows:
+            - { id: 1, username: alice }
+            - { id: 2, username: bob }
+        Group:
+          ids: [100, 101, 102]
+          rows:
+            - { id: 100, name: Public Group }
+            - { id: 101, name: Private Group }
+            - { id: 102, name: Internal Group }
+      edges:
+        MEMBER_OF: [[1, 100], [1, 101], [2, 101], [3, 102], [4, 102], [5, 100]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 100 }
+          - { from: User, from_id: 1, to: Group, to_id: 101 }
+      edge_prop_absent: [path_id, step, depth]
+
+  - name: traversal_incoming_direction
+    description: An incoming MEMBER_OF traversal from groups returns their members without path metadata
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User", "columns": ["username"]}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "g", "to": "u", "direction": "incoming"}],
+          "limit": 50
+        }
+    expect:
+      nodes:
+        Group:
+          ids: [100, 101, 102]
+          rows:
+            - { id: 100, name: Public Group }
+        User:
+          ids: [1, 2, 3, 4, 5]
+          rows:
+            - { id: 1, username: alice }
+      edges:
+        MEMBER_OF: [[1, 100], [1, 101], [2, 101], [3, 102], [4, 102], [5, 100]]
+      edge_prop_absent: [path_id, step, depth]
