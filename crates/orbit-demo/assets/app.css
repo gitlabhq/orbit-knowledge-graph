@@ -80,6 +80,7 @@ svg#dag { display: block; width: 100%; height: auto; margin: 0 auto; font-family
 .arrow.pending path { opacity: 0.45; }
 .arrow.empty path { fill: var(--danger); }
 .edge-label { font-family: var(--mono); font-size: 11px; fill: var(--text-subtle); }
+.edge-tag .tag-back { fill: var(--bg-subtle); }
 .edge.pending .edge-label { opacity: 0.7; }
 .chip rect { stroke: none; }
 .chip text { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
