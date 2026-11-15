@@ -13,7 +13,7 @@ const PRINCIPLE_ICONS = ["code", "users", "tanuki-ai", "rocket"];
 // The whole card links to the profile. The username shows in a tag when you hover or focus the avatar.
 function MemberCard({ member }: { member: TeamMember }) {
   return (
-    <article className="card glass group relative flex h-full items-start gap-3.5 px-4 py-3.5">
+    <article className="card glass group relative flex h-full items-center gap-3.5 px-4 py-3.5">
       <SiteLink
         href={profileUrl(member.username)}
         aria-label={`@${member.username} on GitLab (opens in a new tab)`}
@@ -51,7 +51,7 @@ function TeamPage() {
     >
       <div className="flex flex-col gap-10">
         {people.length > 0 && (
-          <section aria-label="The team" className="page-glow">
+          <section aria-label="The team" className="page-glow page-glow-strong">
             <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
               {people.map((member) => (
                 <li key={member.username}>
