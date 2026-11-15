@@ -17,25 +17,86 @@
   --tone-trust: var(--gl-color-data-green-300);
 }
 
-/* Centers the switch on the chat's window bar: 0.625rem of padding around 0.625rem lights, inside a 1px border. */
 .hero-chat {
   position: relative;
   width: 100%;
   max-width: 44rem;
 }
 
-.hero-chat-switch {
+/* Level with the window lights: 0.625rem of padding around 0.625rem lights, inside a 1px border. */
+.hero-next-toggle {
   position: absolute;
   top: calc(1px + 0.9375rem);
-  left: 50%;
+  right: 0.875rem;
   z-index: 1;
   display: flex;
-  gap: 0.125rem;
-  transform: translate(-50%, -50%);
+  align-items: center;
+  gap: 0.5rem;
+  transform: translateY(-50%);
+  color: var(--gl-text-color-default);
+  font-size: 0.75rem;
+  cursor: pointer;
 }
 
-.hero-chat .hero-chat-option {
-  padding-block: 0.125rem;
+.hero-next-toggle .hero-next-badge {
+  padding-block: 0;
+  font-size: 0.6875rem;
+}
+
+/* Drawn after the GitLab toggle (GlToggle), with its tokens, at a size that fits the window bar. */
+.hero-next-switch {
+  display: inline-flex;
+  align-items: center;
+  width: 2rem;
+  height: 1.125rem;
+  padding: 0.125rem;
+  border-radius: 9999px;
+  background: var(--gl-toggle-switch-track-color-unchecked-default);
+  transition: background-color 0.15s ease-out;
+}
+
+.hero-next-knob {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 9999px;
+  background: var(--gl-toggle-switch-background-color-unchecked-default);
+  color: var(--gl-toggle-switch-icon-color-unchecked-default);
+  transition: transform 0.15s ease-out;
+}
+
+.hero-next-toggle[aria-checked="true"] .hero-next-switch {
+  background: var(--gl-toggle-switch-track-color-checked-default);
+}
+
+.hero-next-toggle[aria-checked="true"] .hero-next-knob {
+  transform: translateX(0.875rem);
+  background: var(--gl-toggle-switch-background-color-checked-default);
+  color: var(--gl-toggle-switch-icon-color-checked-default);
+}
+
+.hero-next-toggle:focus-visible {
+  outline: 2px solid var(--gl-focus-ring-outer-color, currentColor);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+.hero-next-features {
+  margin-top: 2.5rem;
+}
+
+.hero-next-features .card {
+  text-align: left;
+}
+
+.hero-next-eyebrow {
+  margin: 0 0 0.75rem;
+  color: var(--gl-text-color-subtle);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .agent-answer-text .hero-chat-preview {

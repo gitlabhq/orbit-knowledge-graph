@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { AgentPrompt, chip, cn, type PromptChip, type PromptExample } from "@gitlab-org/orbit-site";
+import { AgentPrompt, Badge, Feature, FeatureGrid, Icon, type PromptChip, type PromptExample } from "@gitlab-org/orbit-site";
 
 // Orbit Next has not shipped, so every answer is sample data and says so. The story follows the team's
 // third-party demo world (a pricing cache, epic ORB-1, incident INC-77), moved onto this page's made-up projects.
@@ -50,7 +50,7 @@ const NEXT: PromptExample[] = [
         <p>
           Start with <code>checkout-api/app/pricing.rb:57</code>. It runs on every checkout.
         </p>
-        <Preview>Orbit Next preview, with sample data.</Preview>
+        <Preview>Orbit Next is coming soon. This answer uses sample data.</Preview>
       </>
     ),
     stats: { apiCallsReplaced: 1400, nodes: 23, edges: 27 },
@@ -129,27 +129,48 @@ const NEXT: PromptExample[] = [
   },
 ];
 
-type Mode = "orbit" | "next";
+function NextFeatures() {
+  return (
+    <section className="hero-next-features" aria-label="Coming soon in Orbit Next">
+      <p className="hero-next-eyebrow">Coming soon in Orbit Next</p>
+      <FeatureGrid columns={2}>
+        <Feature title="Code search" icon="search">
+          Exact text, regex, and structural search across every repository you can see. A structural pattern such as <code>$X.unwrap()</code> matches the code, not only the text.
+        </Feature>
+        <Feature title="Every branch" icon="branch">
+          Search any branch or commit, not only the default branch. Results follow your GitLab permissions.
+        </Feature>
+        <Feature title="Every language, with file context" icon="code">
+          Search files in any language. Each match comes with its file: the lines around it, and every project and branch that has the same file.
+        </Feature>
+        <Feature title="Third-party data" icon="connected">
+          Jira, Slack, incident.io, and Grafana next to your code and GitLab data. Orbit checks your access in each tool before it answers.
+        </Feature>
+      </FeatureGrid>
+    </section>
+  );
+}
 
-// The kit hides the chat's window bar from screen readers, so the switch is a sibling laid over it, not a
+// The kit hides the chat's window bar from screen readers, so the toggle is a sibling laid over it, not a
 // child. The key remounts the chat so the input types the new examples from the start.
 export function HeroChat({ examples, graphNodes, fallback, cta }: { examples: PromptExample[]; graphNodes: number; fallback: ReactNode; cta: { label: string; href: string } }) {
-  const [mode, setMode] = useState<Mode>("orbit");
-  const next = mode === "next";
-  const option = (value: Mode, label: string) => (
-    <button type="button" aria-pressed={mode === value} onClick={() => setMode(value)} className={cn(chip(mode === value), "hero-chat-option")}>
-      {label}
-    </button>
-  );
+  const [next, setNext] = useState(false);
   return (
     <div className="hero-chat">
-      <div className="hero-chat-switch" role="group" aria-label="Version">
-        {option("orbit", "GitLab Orbit")}
-        {option("next", "Orbit Next")}
-      </div>
+      <button type="button" role="switch" aria-checked={next} onClick={() => setNext((on) => !on)} className="hero-next-toggle">
+        <span>Orbit Next</span>
+        <Badge tone="info" className="hero-next-badge">
+          Coming soon
+        </Badge>
+        <span className="hero-next-switch" aria-hidden="true">
+          <span className="hero-next-knob">
+            <Icon name={next ? "check" : "close"} size={10} />
+          </span>
+        </span>
+      </button>
       <AgentPrompt
-        key={mode}
-        label={next ? "Ask an agent with Orbit Next, a preview" : "Ask an agent with GitLab Orbit"}
+        key={next ? "next" : "orbit"}
+        label={next ? "Ask an agent with Orbit Next, coming soon" : "Ask an agent with GitLab Orbit"}
         examples={next ? NEXT : examples}
         chips={next ? NEXT_SOURCES : []}
         graphNodes={graphNodes}
@@ -157,13 +178,14 @@ export function HeroChat({ examples, graphNodes, fallback, cta }: { examples: Pr
         fallback={
           next ? (
             <>
-              Orbit Next is a preview. Pick an example below to see code search across all your repositories, and Jira, Slack, incident.io, and Grafana next to your GitLab data. These sources are coming soon.
+              Orbit Next is coming soon. Pick an example below to see code search across all your repositories, and Jira, Slack, incident.io, and Grafana next to your GitLab data.
             </>
           ) : (
             fallback
           )
         }
       />
+      {next && <NextFeatures />}
     </div>
   );
 }
