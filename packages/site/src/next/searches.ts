@@ -49,8 +49,6 @@ export type Search = {
   // More real matches, as file:line, that the map behind the hero marks next to the files shown.
   more?: string[];
   steps?: CrossStep[];
-  // The path traces the GitLab logo on the map, which then fills in.
-  logo?: boolean;
 };
 
 export const SEARCHES: Search[] = [
@@ -183,11 +181,11 @@ export const SEARCHES: Search[] = [
   {
     id: "branch",
     kind: "code",
-    label: "Check if other branches touch this code",
+    label: "Code that is only on a branch",
     pattern: "CursorPaginator",
     mode: "text",
     branches: "all",
-    summary: "Another branch is changing this code: an unmerged branch adds CursorPaginator to pipeline.rs, which main also has. Expect a conflict there.",
+    summary: "No matches on main. 14 on one unmerged branch, where the work is still in progress.",
     more: ["cursor_paginator.rs:47", "cursor_paginator.rs:266", "pipeline.rs:15", "pipeline.rs:287", "pipeline.rs:435"],
     files: [
       {
@@ -311,7 +309,7 @@ export const SEARCHES: Search[] = [
 
 // Questions that cross tools. Third-party sources have not shipped, so the steps are sample data from the
 // team's third-party demo world: a pricing cache, epic ORB-1, and incident INC-77, on made-up projects.
-const cross = (id: string, label: string, pattern: string, summary: string, steps: CrossStep[], logo = false): Search => ({ id, kind: "cross", label, pattern, mode: "text", branches: "default", summary, files: [], steps, logo });
+const cross = (id: string, label: string, pattern: string, summary: string, steps: CrossStep[]): Search => ({ id, kind: "cross", label, pattern, mode: "text", branches: "default", summary, files: [], steps });
 
 export const CROSS_SEARCHES: Search[] = [
   cross("incident", "Resolve an incident", "What caused INC-77, and which change fixed it?", "checkout-api!42 caused it. !43 fixed the cache stampede.", [
@@ -340,7 +338,7 @@ export const CROSS_SEARCHES: Search[] = [
     { tool: "GitLab", icon: "tanuki", finding: "checkout-api!43 set it.", name: "!43", links: ["checkout-api!43"] },
     { tool: "Jira", icon: "work-item-issue", finding: "!43 is part of ORB-12, after INC-77.", name: "ORB-12" },
     { tool: "Slack", icon: "comment", finding: "“Keep the TTL at 30 s. Any longer and flash-sale prices go stale.”", name: "the decision" },
-  ], true),
+  ]),
 ];
 
 // The size of the Orbit Next prototype's index of open source code, from its search page on Nov 15, 2026.

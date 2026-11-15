@@ -791,18 +791,11 @@
   color: var(--gl-text-color-default);
 }
 
-/* A fixed height, so the chat does not grow while an answer arrives and the map behind it stays put. The
-   thread scrolls, and the input stays at the bottom. */
+/* The chat looks like the front page chat. Once an answer shows, the thread keeps one height and scrolls,
+   so the chat does not jump from one example to the next. */
 .next-chat {
-  display: flex;
-  flex-direction: column;
   align-self: start;
   min-width: 0;
-  height: 30rem;
-}
-
-.next-chat-space {
-  flex: 1;
 }
 
 
@@ -824,8 +817,7 @@
 
 
 .next-chat .agent-thread {
-  flex: 1;
-  min-height: 0;
+  height: 20rem;
   overflow-y: auto;
 }
 
@@ -845,8 +837,12 @@
     grid-template-columns: minmax(14rem, 1fr) minmax(0, 40rem) minmax(14rem, 1fr);
   }
 
+  .next-demo {
+    column-gap: 3rem;
+  }
+
   .next-demo-examples {
-    justify-self: end;
+    justify-self: center;
     width: 15rem;
   }
 }
@@ -864,24 +860,4 @@
   color: var(--gl-text-color-default);
 }
 
-.next-chat .agent-prompt-box {
-  gap: 0.625rem;
-}
 
-.next-chat .agent-prompt-input {
-  min-height: 0;
-}
-
-/* A code pattern reads as code, in the input and in the sent message, with its mode above it. */
-.next-chat .next-input-code {
-  font-family: var(--font-mono);
-  font-size: var(--gl-font-size-300);
-}
-
-.next-message-meta {
-  display: block;
-  margin-bottom: 0.125rem;
-  color: var(--gl-text-color-subtle);
-  font-family: var(--font-sans);
-  font-size: 0.6875rem;
-}
