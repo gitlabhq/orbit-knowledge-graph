@@ -3543,6 +3543,7 @@ dependencies = [
  "tempfile",
  "testcontainers",
  "tokio",
+ "toon-format",
  "uuid",
 ]
 
@@ -3607,7 +3608,6 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tonic-prost",
- "toon-format",
  "uuid",
 ]
 
