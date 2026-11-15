@@ -79,6 +79,19 @@
             </div>
           </div>
           <div class="dag-canvas"><svg id="dag" role="img" aria-label="The stage DAG of the last query"></svg></div>
+          <div id="replay" class="replay" hidden>
+            <button id="replay-play" class="button button-sm" type="button">Replay</button>
+            <label class="visually-hidden" for="replay-time">Replay position</label>
+            <input id="replay-time" class="replay-time" type="range" min="0" max="1000" step="1" value="1000">
+            <label class="visually-hidden" for="replay-speed">Replay speed</label>
+            <select id="replay-speed" class="input replay-speed">
+              <option value="1">Real time</option>
+              <option value="0.1">1/10 speed</option>
+              <option value="0.02" selected>1/50 speed</option>
+            </select>
+            <span id="replay-clock" class="replay-clock"></span>
+            <span id="replay-flight" class="replay-flight"></span>
+          </div>
         </section>
         <section class="section">
           <div class="section-header">

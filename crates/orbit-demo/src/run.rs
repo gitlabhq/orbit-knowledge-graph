@@ -3,6 +3,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use std::collections::BTreeMap;
 
@@ -19,16 +20,34 @@ use crate::{Demo, plan_text};
 
 const ROWS: usize = 500;
 
-/// A run's events as JSON, in order, for any number of readers.
-#[derive(Default)]
+/// A run's events as JSON, in order, for any number of readers. Each event carries `at_ms`,
+/// the time since the run began, which the page replays the run from.
 pub struct RunLog {
     events: Mutex<Vec<String>>,
     done: AtomicBool,
     notify: Notify,
+    begun: Instant,
+}
+
+impl Default for RunLog {
+    fn default() -> Self {
+        Self {
+            events: Mutex::default(),
+            done: AtomicBool::default(),
+            notify: Notify::new(),
+            begun: Instant::now(),
+        }
+    }
 }
 
 impl RunLog {
-    pub fn push(&self, event: Value) {
+    pub fn push(&self, mut event: Value) {
+        if let Value::Object(fields) = &mut event {
+            fields.insert(
+                "at_ms".into(),
+                json!(self.begun.elapsed().as_secs_f64() * 1000.0),
+            );
+        }
         self.events
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

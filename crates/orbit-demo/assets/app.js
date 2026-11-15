@@ -7,7 +7,7 @@ let queue = [];
 let timer = null;
 
 function fresh() {
-  return { stages: [], edges: [], logical: [], grants: [], subplans: {}, rows: null, error: null, selected: null, tab: null, done: false, t0: performance.now() };
+  return { stages: [], edges: [], logical: [], grants: [], subplans: {}, rows: null, error: null, selected: null, tab: null, done: false, t0: performance.now(), events: [] };
 }
 
 function stage(id) {
@@ -71,8 +71,8 @@ function apply(event, t) {
       break;
     }
     case "failed": { const s = stage(event.stage); s.status = "failed"; s.error = event.error; break; }
-    case "done": run.rows = event.rows; run.done = true; status(Dag.plural(event.count, "row"), "success"); break;
-    case "error": run.error = event.error; run.done = true; status("Query failed", "danger"); break;
+    case "done": run.rows = event.rows; run.done = true; break;
+    case "error": run.error = event.error; run.done = true; break;
   }
 }
 
@@ -99,10 +99,95 @@ function animate() {
   frames = requestAnimationFrame(step);
 }
 
+// The run as it stood `t` ms after it began, rebuilt from its timed events.
+function modelAt(t) {
+  const final = run;
+  run = fresh();
+  run.selected = final.selected;
+  for (const event of final.events) {
+    if (event.at_ms > t) break;
+    apply(event, event.at_ms);
+  }
+  const model = run;
+  run = final;
+  for (const edge of model.edges) describe(edge);
+  return model;
+}
+
+let replay = null;
+
+function replayView() {
+  return { flow, now: replay.t, speed: replay.speed, wall: replay.wall };
+}
+
+function replayReady() {
+  const last = run.events[run.events.length - 1].at_ms;
+  replay = { t: last, last, playing: false, active: false, speed: Number($("replay-speed").value), wall: 0, shown: -1 };
+  replay.t = replayEnd();
+  $("replay").hidden = false;
+  replayControls();
+}
+
+function replayEnd() {
+  return replay.last + 700 * replay.speed;
+}
+
+function replayControls() {
+  const end = replayEnd();
+  $("replay-time").value = Math.round((replay.t / end) * 1000);
+  $("replay-clock").textContent = `${Math.min(replay.t, replay.last).toFixed(1)} of ${replay.last.toFixed(1)} ms`;
+  $("replay-play").textContent = replay.playing ? "Pause" : "Replay";
+}
+
+function drawReplay() {
+  const model = modelAt(replay.t);
+  const v = replayView();
+  Dag.draw($("dag"), model, run.selected, select, v);
+  const flight = model.edges.filter((e) => Dag.inFlight(model, e, v)).map((e) => {
+    const to = model.stages.find((s) => s.id === e.to);
+    const target = to && Dag.kind(to.backend) === "combine" ? "Combine" : `stage ${e.to}`;
+    return `${Dag.plural(e.count, e.kind === "keys" ? "key" : "row")} stage ${e.from} → ${target}`;
+  });
+  $("replay-flight").textContent = flight.length ? `In flight: ${flight.join(" · ")}` : "Nothing in flight";
+}
+
+function playReplay() {
+  if (replay.playing) { replay.playing = false; replayControls(); return; }
+  if (replay.t >= replayEnd()) replay.t = 0;
+  replay.playing = replay.active = true;
+  let before = performance.now();
+  const step = (now) => {
+    if (!replay || !replay.playing) return;
+    const dt = now - before;
+    before = now;
+    replay.wall += dt;
+    replay.t = Math.min(replayEnd(), replay.t + dt * replay.speed);
+    const shown = run.events.findIndex((e) => e.at_ms > replay.t);
+    if (shown !== replay.shown) { replay.shown = shown; drawReplay(); } else Dag.frame($("dag"), replayView());
+    if (replay.t >= replayEnd()) replay.playing = false;
+    replayControls();
+    if (replay.playing) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  replayControls();
+}
+
+function scrub() {
+  replay.playing = false;
+  replay.active = true;
+  replay.t = (Number($("replay-time").value) / 1000) * replayEnd();
+  replay.shown = -1;
+  drawReplay();
+  replayControls();
+}
+
+function select(id) { run.selected = id; run.tab = null; render(); }
+
 function render() {
   for (const edge of run.edges) describe(edge);
-  Dag.draw($("dag"), run, run.selected, (id) => { run.selected = id; run.tab = null; render(); }, view());
-  if (flow) animate();
+  if (replay && replay.active) drawReplay();
+  else Dag.draw($("dag"), run, run.selected, select, view());
+  if (flow && !(replay && replay.active)) animate();
   const done = run.stages.filter((s) => s.status === "done").length;
   $("dag-summary").textContent = run.stages.length ? `${done} of ${run.stages.length} stages finished` : "";
   Panels.render(run);
@@ -111,7 +196,11 @@ function render() {
 function pump() {
   if (!queue.length) { timer = null; return; }
   try {
-    apply(queue.shift(), performance.now() - run.t0);
+    const event = queue.shift();
+    run.events.push(event);
+    apply(event, performance.now() - run.t0);
+    if (event.event === "done") { status(Dag.plural(event.count, "row"), "success"); replayReady(); }
+    if (event.event === "error") status("Query failed", "danger");
     render();
   } catch (error) {
     status(`Page error: ${error.message}`, "danger");
@@ -135,7 +224,7 @@ async function post(path, body) {
 async function start() {
   if (timer) clearTimeout(timer);
   if (stream) stream.close();
-  queue = []; timer = null; run = fresh(); render();
+  queue = []; timer = null; run = fresh(); replay = null; $("replay").hidden = true; render();
   status("Running", "info");
   const started = ++generation;
   const { run: id } = await post("/api/runs", { query: $("query").value, caller: $("caller").value });
@@ -236,6 +325,9 @@ $("caller").addEventListener("change", hint);
 $("pace-step").addEventListener("click", () => pace(true));
 $("pace-instant").addEventListener("click", () => pace(false));
 $("view-flow").addEventListener("click", () => flowView(true));
+$("replay-play").addEventListener("click", playReplay);
+$("replay-time").addEventListener("input", scrub);
+$("replay-speed").addEventListener("change", () => { if (replay) { replay.speed = Number($("replay-speed").value); if (!replay.playing) replay.t = Math.min(replay.t, replayEnd()); replayControls(); } });
 $("view-static").addEventListener("click", () => flowView(false));
 $("theme").addEventListener("click", () => { Theme.toggle(); themeLabel(); render(); });
 $("reload").addEventListener("click", () => post("/api/reload", {})

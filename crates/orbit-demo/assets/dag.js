@@ -42,8 +42,8 @@
     };
   };
 
-  // Card and label sizes come from the rendered fonts, with room reserved for the counts and
-  // timings that arrive later, so the layout never moves during a run.
+  // Card and label sizes come from the rendered fonts, with room reserved for typical counts and
+  // timings, so the layout only moves when a run outgrows them.
   function measure(svg, model) {
     const probe = el("g", { class: "stage-card", visibility: "hidden" }, svg);
     const width = (value, cls, parent) => text(parent || probe, 0, 0, value, cls).getComputedTextLength();
@@ -51,21 +51,20 @@
     const cards = {};
     for (const stage of model.stages) {
       const line = lines(stage);
-      const stats = width(`${plural(Math.max(stage.rows ?? 0, 10000), "row")} · ${Math.max(stage.elapsed ?? 0, 9999.9).toFixed(1)} ms`, "stats");
+      const stats = width(`${plural(Math.max(stage.rows ?? 0, 99), "row")} · ${Math.max(stage.elapsed ?? 0, 99.9).toFixed(1)} ms`, "stats");
       cards[stage.id] = Math.ceil(26 + Math.max(width(line.kind, "kind"), width(line.title, "title"), width(line.meta, "meta"), pill + 16 + stats) + 16);
     }
     const edges = el("g", { class: "edge edge-keys" }, probe);
-    const count = width("0000", "", el("g", { class: "chip count" }, edges)) + 14;
+    const count = width("000", "", el("g", { class: "chip count" }, edges)) + 14;
     const labels = {};
     for (const e of model.edges) labels[e.id] = Math.ceil(count + 6 + width(e.label, "edge-label", edges) + 12);
     svg.removeChild(probe);
     return { cards, labels };
   }
 
-  function layout(svg, model) {
-    const size = measure(svg, model);
+  function layout(model, size) {
     const g = new dagre.graphlib.Graph({ multigraph: true });
-    g.setGraph({ rankdir: "LR", nodesep: 28, ranksep: 36, edgesep: 20, marginx: PAD, marginy: PAD });
+    g.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 24, edgesep: 18, marginx: PAD, marginy: PAD });
     g.setDefaultEdgeLabel(() => ({}));
     for (const s of model.stages) g.setNode(String(s.id), { width: size.cards[s.id], height: H });
     for (const e of model.edges) {
@@ -150,7 +149,7 @@
         const dots = el("g", { class: `particles particles-${e.kind}`, "data-length": path.getTotalLength() }, group);
         const n = Math.min(8, 1 + Math.round(Math.log2(e.count + 1) * 1.5));
         for (let i = 0; i < n; i++) {
-          el(e.kind === "keys" ? "circle" : "rect", e.kind === "keys" ? { r: 3.2 } : { width: 6, height: 6, rx: 1.5, x: -3, y: -3 }, dots);
+          el(e.kind === "keys" ? "circle" : "rect", e.kind === "keys" ? { r: 3.6 } : { width: 7, height: 7, rx: 1.5, x: -3.5, y: -3.5 }, dots);
         }
         dots.pathElement = path;
       }
@@ -205,8 +204,9 @@
   let cached = { key: "", laid: null };
 
   function laidOut(svg, model) {
-    const key = JSON.stringify([model.stages.map((s) => [s.id, s.backend, s.connection]), model.edges.map((e) => [e.id, e.label])]);
-    if (cached.key !== key) cached = { key, laid: layout(svg, model) };
+    const size = measure(svg, model);
+    const key = JSON.stringify([model.stages.map((s) => s.id), model.edges.map((e) => [e.id, e.from, e.to]), size]);
+    if (cached.key !== key) cached = { key, laid: layout(model, size) };
     return cached.laid;
   }
 
@@ -223,7 +223,7 @@
     const { nodes, routes, width, height } = laidOut(svg, model);
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.style.maxWidth = `${width}px`;
-    svg.style.minWidth = `${Math.round(width * 0.6)}px`;
+    svg.style.minWidth = `${Math.round(width * 0.7)}px`;
     markers(el("defs", {}, svg));
     const shown = model.edges.filter((e) => !view.flow || e.at <= view.now);
     const groups = shown.map((e) => [e, edge(svg, e, routes[e.id], edgeState(model, e), view, model)]);
@@ -269,5 +269,5 @@
     return moving;
   }
 
-  window.Dag = { draw, frame, kind, plural, NAMES, KINDS, STATES };
+  window.Dag = { draw, frame, inFlight, kind, plural, NAMES, KINDS, STATES };
 })();
