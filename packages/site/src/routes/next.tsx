@@ -64,7 +64,7 @@ function NextPage() {
         <Capabilities />
       </Section>
 
-      <Section id="scale" eyebrow="Scale" title={<>Built for <span className="orbit-fade">scale</span></>} lede="In our testing, we indexed 51,656 open source projects with their branches and history.">
+      <Section id="scale" eyebrow="Scale" title={<>Built for <span className="orbit-fade">scale</span></>} lede="In our testing, we indexed and searched 51,656 open source projects with their branches and history.">
         <dl className="next-stats not-prose">
           {CORPUS.map((stat) => (
             <div key={stat.label} className="next-stat">
