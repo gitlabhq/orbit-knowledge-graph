@@ -12,7 +12,7 @@ Logs block.
 
 This project is public. A public issue must not contain customer names,
 tenant names, credentials, or other sensitive data. To add them, mark the
-issue confidential first.
+issue confidential first, or use an internal note.
 -->
 
 ### Summary

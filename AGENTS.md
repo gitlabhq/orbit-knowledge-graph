@@ -4,7 +4,7 @@
 
 This repository is public. Do not put customer names, tenant names, incident
 details, credentials, or other sensitive data in code, commits, MRs, or public
-issues. Put them only in a confidential issue.
+issues. Put them only in a confidential issue or an internal note.
 
 ## Tooling
 
