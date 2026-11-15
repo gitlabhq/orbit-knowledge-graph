@@ -4,9 +4,9 @@ latest:
     description: Orbit is generally available for GitLab Premium and Ultimate.
     image: https://res.cloudinary.com/about-gitlab-com/image/upload/v1780996524/sd1vpl8empy26wizarqj.png
     meta: GitLab blog
-  - href: https://docs.gitlab.com/releases/patches/patch-release-gitlab-19-5-5-released/
-    title: "GitLab Patch Release: 19.5.5, 19.4.7"
-    description: The patch release that brings Orbit to GitLab Self-Managed on 19.4 and 19.5.
+  - href: https://docs.gitlab.com/releases/patches/patch-release-gitlab-19-5-5-released/?nav=19.5.5#gitlab-orbit-is-now-available-in-gitlab-194-and-195
+    title: GitLab Orbit is now available in GitLab 19.4 and 19.5
+    description: The 19.5.5 and 19.4.7 patch release brings Orbit to GitLab Self-Managed.
     meta: GitLab release
 videos:
   - provider: vimeo
