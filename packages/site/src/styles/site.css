@@ -958,3 +958,54 @@
   }
 }
 
+
+/* Slimmer card views: tighter rows, smaller chips, and a lower shared height. */
+.next-card {
+  padding: 1.25rem;
+}
+
+.next-card > :first-child {
+  min-height: 7.25rem;
+}
+
+.next-context figcaption {
+  padding: 0.25rem 0.625rem;
+}
+
+.next-context pre {
+  padding: 0.25rem 0 0.375rem;
+  line-height: 1.5;
+}
+
+.next-branch-rows {
+  padding: 0.125rem 0;
+}
+
+.next-branch-rows li {
+  padding: 0.1875rem 0.625rem;
+}
+
+.next-langs {
+  gap: 0.25rem;
+}
+
+.next-lang {
+  padding: 0.0625rem 0.375rem;
+  font-size: 0.6875rem;
+}
+
+.next-card h3 {
+  margin-top: 0.5rem;
+}
+
+/* Language chips center as a group, with their text centered in each chip. */
+.next-langs {
+  justify-content: center;
+}
+
+.next-lang {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.5;
+}
