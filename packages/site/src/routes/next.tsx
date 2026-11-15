@@ -74,7 +74,7 @@ function NextPage() {
     <PageFrame path="next" title={NEXT_PAGE.title} options={{ hideHeader: true, landing: true }}>
       <Hero />
 
-      <Section id="scale" eyebrow="Scale" title={<>Built for <span className="orbit-fade">scale</span></>} lede="The prototype already indexes 51,656 open source projects, every branch it keeps, and their history. A search reads only the few files that can match, so answers come back in about a tenth of a second.">
+      <Section id="scale" eyebrow="Scale" title={<>Built for <span className="orbit-fade">scale</span></>} lede="In our internal testing, Orbit Next indexes 51,656 open source projects, their branches, and their history. A search reads only the few files that can match, so answers come back in about a tenth of a second.">
         <dl className="next-stats not-prose">
           {CORPUS.map((stat) => (
             <div key={stat.label} className="next-stat">
@@ -97,7 +97,7 @@ function NextPage() {
             </li>
           ))}
         </ul>
-        <p className="next-stats-note">Index size from the Orbit Next prototype on Nov 15, 2026. Query times are warm.</p>
+        <p className="next-stats-note">From our internal testing, Nov 15, 2026. Query times are warm.</p>
       </Section>
 
       <Section id="search" eyebrow="Code search" title={<>Every branch, <span className="orbit-fade">every language</span></>} lede="The same search works on any repository you can see, in any file, on any branch.">
