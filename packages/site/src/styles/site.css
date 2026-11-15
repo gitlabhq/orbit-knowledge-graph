@@ -888,7 +888,7 @@
 /* The window bar's name sits in the exact middle of the bar, whatever the lights take up. */
 .next-chat .agent-chat-head {
   position: relative;
-  min-height: 2.125rem;
+  min-height: 2.625rem;
 }
 
 .next-chat .agent-chat-title {
@@ -898,4 +898,22 @@
   display: flex;
   margin: 0;
   transform: translate(-50%, -50%);
+}
+
+/* On wide screens the chat sits in the vertical middle of a fixed-height row, so an answer grows it up and
+   down by the same amount. The map behind it measures from the row, so it stays put. */
+@media (min-width: 1100px) {
+  .next-demo {
+    align-items: center;
+    min-height: 36rem;
+  }
+
+  .next-demo-examples,
+  .next-chat {
+    align-self: center;
+  }
+
+  .next-demo-viz {
+    align-self: stretch;
+  }
 }

@@ -10,7 +10,7 @@ import { CODE_MS, type Search, STEP_MS } from "./searches";
 const GAP = 18;
 const RING_MS = 1800;
 const BURST_MS = 900;
-// The height results spread over, from the chat's top edge. It is fixed, so nothing moves when the chat
+// The height results spread over, centered in the demo row. It is fixed, so nothing moves when the chat
 // grows as an answer arrives.
 const MAP_TALL = 380;
 const COLORS = {
@@ -106,13 +106,13 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       }
     };
 
-    // Where each result lands. Positions depend only on the chat's top edge and the window, so nothing
-    // moves while a search runs or when it ends.
-    const stopsOf = (search: Search, chat: DOMRect, area: DOMRect, own: DOMRect): Stop[] => {
+    // Where each result lands. Positions depend only on the demo row and the window, so nothing moves while
+    // a search runs or when it ends.
+    const stopsOf = (search: Search, area: DOMRect, own: DOMRect): Stop[] => {
       const snap = (value: number) => Math.round(value / GAP) * GAP;
       const left = area.left - own.left;
       const wide = Math.max(area.width, own.width - left - 60);
-      const top = chat.top - own.top + 30;
+      const top = area.top - own.top + (area.height - MAP_TALL) / 2;
       const tall = MAP_TALL;
       const random = seeded(search.id);
       if (search.steps) {
@@ -175,21 +175,21 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       const area = document.querySelector(region)?.getBoundingClientRect();
       const { search, since } = state.current;
       const age = still() ? 1e6 : now - since;
-      const stops = search && chat && area && area.width > 120 ? stopsOf(search, chat, area, own) : [];
+      const stops = search && chat && area && area.width > 120 ? stopsOf(search, area, own) : [];
       // A cross-tool path chains its stops with links. A code search uses only the ring.
       const legs = search?.steps ? stops.map((stop) => ({ stop, progress: Math.max(0, Math.min(1, (age - stop.from) / (stop.at - stop.from))) })) : [];
       const heads = legs.filter((leg) => leg.progress > 0 && leg.progress < 1).map(({ stop, progress }) => ({ x: stop.ox + (stop.px - stop.ox) * progress, y: stop.oy + (stop.py - stop.oy) * progress }));
 
       const code = search !== null && !search.steps;
       const cx = area ? (area.left - own.left + width) / 2 : width / 2;
-      const cy = chat ? chat.top - own.top + 30 + MAP_TALL / 2 : height / 2;
+      const cy = area ? area.top - own.top + area.height / 2 : height / 2;
       const reach = Math.hypot(Math.max(cx, width - cx), Math.max(cy, height - cy));
       const ring = code ? (age / RING_MS) * reach : -1e4;
       const fade = code ? Math.max(0, 1 - age / (RING_MS * 1.1)) : 0;
       // The tanuki fills once its route closes.
       const fillAge = search?.logo && stops.length ? age - stops.at(-1)!.at : -1;
       const fill = fillAge > 0 ? Math.min(1, fillAge / LOGO_FILL_MS) : 0;
-      const box = fill > 0 && chat && area ? logoBox(area.left - own.left, Math.max(area.width, own.width - (area.left - own.left) - 60), chat.top - own.top + 30, MAP_TALL) : null;
+      const box = fill > 0 && chat && area ? logoBox(area.left - own.left, Math.max(area.width, own.width - (area.left - own.left) - 60), area.top - own.top + (area.height - MAP_TALL) / 2, MAP_TALL) : null;
 
       for (let y = 0; y < height + GAP; y += GAP)
         for (let x = 0; x < width + GAP; x += GAP) {
