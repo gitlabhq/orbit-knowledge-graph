@@ -6,7 +6,7 @@ code into a property graph that you can query.
 Community members contribute through the
 [community fork](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph).
 GitLab team members contribute to this repository. To start, look at the
-[open issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues) with the `orbit::hackathon` label.
+[open issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues).
 
 This repository is public. Do not put customer names, tenant names, incident
 details, credentials, or other sensitive data in code, commits, MRs, or public

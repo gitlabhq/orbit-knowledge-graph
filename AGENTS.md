@@ -55,7 +55,7 @@ Read the owning guide before you act:
 - Copy one `type::` label, the `orbit::<area>` label, and the milestone from
   the linked issue.
 - Do not change docs in an MR that changes code. The exception is a docs change
-  that a CI or build check needs.
+  that a CI or build check needs. The `docs-in-code-mr-check` job enforces this.
 
 Agent-authored MRs follow these steps:
 
