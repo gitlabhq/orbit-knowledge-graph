@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { chip, cn, Icon } from "@gitlab-org/orbit-site";
+import { cn, Icon } from "@gitlab-org/orbit-site";
 import { CODE_MS, CROSS_SEARCHES, type FileHit, type Line, type Mode, MODES, type Search, SEARCHES, STEP_MS } from "./searches";
 
 const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -143,22 +143,21 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
           </span>
           <span className="agent-chat-title">Orbit Next</span>
         </div>
-        {run ? (
-          <Thread key={run.start} search={run.search} stage={stage} />
-        ) : (
-          <p className="next-chat-empty">Search code across every repository and branch, or ask a question that crosses your tools.</p>
-        )}
-        <form onSubmit={submit} className="next-chat-form" aria-label="Search">
-          <div role="group" aria-label="Search mode" className="next-modes">
+        {run ? <Thread key={run.start} search={run.search} stage={stage} /> : <div className="next-chat-space" />}
+        <form onSubmit={submit} className="agent-prompt-box" aria-label="Search">
+          <ul className="agent-prompt-chips" aria-label="Search mode">
             {MODES.map((item) => (
-              <button key={item.mode} type="button" aria-pressed={mode === item.mode} onClick={() => setMode(item.mode)} className={chip(mode === item.mode)}>
-                {item.mode}
-              </button>
+              <li key={item.mode}>
+                <button type="button" aria-pressed={mode === item.mode} onClick={() => setMode(item.mode)} className={cn("agent-prompt-chip", mode === item.mode && "next-chip-on")}>
+                  {item.mode}
+                </button>
+              </li>
             ))}
-          </div>
+          </ul>
           <div className="agent-prompt-row">
-            <input
+            <textarea
               aria-label="Pattern or question"
+              rows={1}
               value={pattern}
               placeholder={MODES.find((item) => item.mode === mode)!.placeholder}
               spellCheck={false}
@@ -166,7 +165,10 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
                 setPattern(event.target.value);
                 setUnknown(false);
               }}
-              className="agent-prompt-input next-chat-input"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) submit(event);
+              }}
+              className="agent-prompt-input"
             />
             <button type="submit" aria-label="Send" title="Send" className="agent-prompt-send">
               <Icon name="arrow-up" size={16} />

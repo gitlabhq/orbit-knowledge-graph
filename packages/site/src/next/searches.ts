@@ -46,7 +46,11 @@ export type Search = {
   summary: string;
   funnel?: Funnel;
   files: FileHit[];
+  // More real matches, as file:line, that the map behind the hero marks next to the files shown.
+  more?: string[];
   steps?: CrossStep[];
+  // The path traces the GitLab logo on the map, which then fills in.
+  logo?: boolean;
 };
 
 export const SEARCHES: Search[] = [
@@ -60,6 +64,7 @@ export const SEARCHES: Search[] = [
     branches: "default",
     summary: "In our internal testing: 100 matches in 111 ms. The pattern matches method calls, not comments or strings.",
     funnel: { files: 1_489_091, candidates: 4_156, scanned: 256, matches: 100, ms: 111 },
+    more: ["lib.rs:304", "filter.rs:107", "filter.rs:112", "mod.rs:255", "arrow_client.rs:913", "configuration.rs:73", "rules.rs:601", "file_tree.rs:546"],
     files: [
       {
         project: "gitlab-org/orbit/experiments/orbit-next",
@@ -102,6 +107,7 @@ export const SEARCHES: Search[] = [
     mode: "regex",
     branches: "default",
     summary: "The same flag, checked in a finder, a policy, the frontend flags, and a Vue component.",
+    more: ["groups_finder.rb:32", "groups_finder.rb:39", "group_type.rb:692", "orbit_helper.rb:70", "knowledge_graph.rb:17"],
     files: [
       {
         project: "gitlab-org/gitlab",
@@ -182,6 +188,7 @@ export const SEARCHES: Search[] = [
     mode: "text",
     branches: "all",
     summary: "No matches on main. 14 on one unmerged branch, where the work is still in progress.",
+    more: ["cursor_paginator.rs:47", "cursor_paginator.rs:266", "pipeline.rs:15", "pipeline.rs:287", "pipeline.rs:435"],
     files: [
       {
         project: "gitlab-org/orbit/knowledge-graph",
@@ -213,6 +220,7 @@ export const SEARCHES: Search[] = [
     mode: "text",
     branches: "default",
     summary: "The same name in a Rust server and a JavaScript adapter, in two projects.",
+    more: ["auth.rs:97", "auth.rs:110", "auth.rs:154", "from_haml.js:145", "risk.vue:13", "risk.vue:48"],
     files: [
       {
         project: "gitlab-org/orbit/experiments/orbit-next",
@@ -303,7 +311,7 @@ export const SEARCHES: Search[] = [
 
 // Questions that cross tools. Third-party sources have not shipped, so the steps are sample data from the
 // team's third-party demo world: a pricing cache, epic ORB-1, and incident INC-77, on made-up projects.
-const cross = (id: string, label: string, pattern: string, summary: string, steps: CrossStep[]): Search => ({ id, kind: "cross", label, pattern, mode: "text", branches: "default", summary, files: [], steps });
+const cross = (id: string, label: string, pattern: string, summary: string, steps: CrossStep[], logo = false): Search => ({ id, kind: "cross", label, pattern, mode: "text", branches: "default", summary, files: [], steps, logo });
 
 export const CROSS_SEARCHES: Search[] = [
   cross("incident", "Resolve an incident", "What caused INC-77, and which change fixed it?", "checkout-api!42 caused it. !43 fixed the cache stampede.", [
@@ -315,24 +323,24 @@ export const CROSS_SEARCHES: Search[] = [
     { tool: "GitLab", icon: "tanuki", finding: "!43 fixed the stampede. p95 is back to 420 ms.", name: "!43 fixed", links: ["checkout-api!43"], tone: "ok" },
   ]),
   cross("alert", "Find what changed before an alert", "What deployed right before the checkout alert?", "The v1.4.2 deploy, one hour before. It added a cache read with no timeout.", [
-    { tool: "Grafana", icon: "chart", finding: "Checkout p95 went above 800 ms at 15:04.", name: "p95 alert", tone: "risk" },
+    { tool: "Grafana", icon: "chart", finding: "Checkout p95 went above 800 ms at 15:04.", name: "p95 alert" },
     { tool: "GitLab", icon: "tanuki", finding: "v1.4.2 deployed to production at 14:02.", name: "v1.4.2 deploy" },
     { tool: "GitLab", icon: "tanuki", finding: "v1.4.2 shipped checkout-api!42, the pricing cache.", name: "!42", links: ["checkout-api!42"] },
-    { tool: "Code search", icon: "code", finding: "!42 added cache.get in pricing.rb:57, with no timeout.", name: "pricing.rb:57", tone: "ok" },
+    { tool: "Code search", icon: "code", finding: "!42 added cache.get in pricing.rb:57, with no timeout.", name: "pricing.rb:57" },
   ]),
   cross("epic", "Track a Jira epic", "Is Jira epic ORB-1 on track?", "On track for the 500 ms goal. ORB-13 has no code yet.", [
     { tool: "Jira", icon: "work-item-issue", finding: "ORB-1, checkout latency below 500 ms, has 3 stories.", name: "ORB-1" },
     { tool: "GitLab", icon: "tanuki", finding: "ORB-12 shipped in !42 and !43.", name: "ORB-12 shipped", links: ["checkout-api!42", "checkout-api!43"] },
     { tool: "GitLab", icon: "tanuki", finding: "ORB-14 is in review in !44. Its pipeline passed.", name: "ORB-14 in review", links: ["checkout-api!44"] },
-    { tool: "Jira", icon: "work-item-issue", finding: "ORB-13 has no merge request yet.", name: "ORB-13", tone: "risk" },
-    { tool: "Grafana", icon: "chart", finding: "Checkout p95 is at 420 ms, under the goal.", name: "p95 420 ms", tone: "ok" },
+    { tool: "Jira", icon: "work-item-issue", finding: "ORB-13 has no merge request yet.", name: "ORB-13" },
+    { tool: "Grafana", icon: "chart", finding: "Checkout p95 is at 420 ms, under the goal.", name: "p95 420 ms" },
   ]),
   cross("why", "Find why code is the way it is", "Why is the pricing cache TTL 30 seconds?", "The team chose 30 seconds after INC-77, to keep prices fresh during sales.", [
     { tool: "Code search", icon: "code", finding: "PRICE_TTL = 30.seconds in pricing.rb:12.", name: "pricing.rb:12" },
     { tool: "GitLab", icon: "tanuki", finding: "checkout-api!43 set it.", name: "!43", links: ["checkout-api!43"] },
     { tool: "Jira", icon: "work-item-issue", finding: "!43 is part of ORB-12, after INC-77.", name: "ORB-12" },
-    { tool: "Slack", icon: "comment", finding: "“Keep the TTL at 30 s. Any longer and flash-sale prices go stale.”", name: "the decision", tone: "ok" },
-  ]),
+    { tool: "Slack", icon: "comment", finding: "“Keep the TTL at 30 s. Any longer and flash-sale prices go stale.”", name: "the decision" },
+  ], true),
 ];
 
 // The size of the Orbit Next prototype's index of open source code, from its search page on Nov 15, 2026.

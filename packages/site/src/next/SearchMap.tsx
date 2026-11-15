@@ -9,6 +9,31 @@ import { CODE_MS, type Search, STEP_MS } from "./searches";
 
 const GAP = 18;
 const RING_MS = 1800;
+const LOGO_FILL_MS = 900;
+const ORANGE = "252 109 38";
+
+// The GitLab tanuki as an outline, from 0 to 1: chin, left cheek, left ear, the dip between the ears,
+// right ear, right cheek. The logo path stops at the cheeks and the ears.
+const LOGO: [number, number][] = [
+  [0.5, 0.98],
+  [0.03, 0.62],
+  [0.17, 0.06],
+  [0.31, 0.4],
+  [0.69, 0.4],
+  [0.83, 0.06],
+  [0.97, 0.62],
+];
+const LOGO_STOPS = [1, 2, 5, 6];
+
+const inside = (x: number, y: number, points: [number, number][]) => {
+  let hit = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = points[i]!;
+    const [xj, yj] = points[j]!;
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+};
 const COLORS = {
   light: { rest: "120 125 140", path: "110 126 224", risk: "214 64 64", ok: "40 160 90" },
   dark: { rest: "200 205 225", path: "160 182 255", risk: "240 110 110", ok: "110 205 140" },
@@ -57,24 +82,38 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       }
     };
 
-    // Where each result lands in the region, and when its link leaves the chat and arrives.
+    // Where each result lands, and when its link leaves and arrives. Positions depend only on the chat's
+    // place and the window, so nothing moves while a search runs.
     const stopsOf = (search: Search, chat: DOMRect, area: DOMRect, own: DOMRect): Stop[] => {
       const snap = (value: number) => Math.round(value / GAP) * GAP;
-      const names = search.steps ? search.steps.map((step) => step.name) : search.files.map((hit) => `${hit.path.split("/").at(-1)}:${hit.lines.find((line) => line.match)!.n}`);
-      const ox = chat.right - own.left;
-      const oy = chat.top - own.top + Math.min(chat.height / 2, 180);
-      // From the region's left edge to the window's right edge, and from the chat's top to below its bottom.
       const left = area.left - own.left;
       const wide = Math.max(area.width, own.width - left - 60);
       const top = chat.top - own.top + 30;
-      const span = search.steps ? Math.max(chat.height + 60, names.length * 70) : Math.max(120, chat.height - 120);
-      return names.map((name, index) => {
-        const px = snap(left + wide * (search.steps ? (index % 2 ? 0.7 : 0.25) : 0.25 + 0.5 * ((index * 0.37) % 1)));
-        const py = snap(top + (names.length === 1 ? span / 3 : (index * span) / (names.length - 1)));
-        if (!search.steps) return { name, tone: "ok" as const, from: index * 40, at: CODE_MS * 2 + index * 40, px, py, ox, oy };
-        const step = search.steps[index]!;
-        return { name, tone: step.tone ?? "path", from: index * STEP_MS, at: (index + 1) * STEP_MS, px, py, ox, oy };
-      });
+      const tall = chat.height - 60;
+      const ox = chat.right - own.left;
+      const oy = top + tall / 2;
+      if (search.steps) {
+        const steps = search.steps;
+        // The logo path visits the tanuki's cheeks and ears; any other path zigzags down the side.
+        const size = Math.min(wide * 0.8, tall);
+        const at = (index: number) =>
+          search.logo
+            ? { px: snap(left + (wide - size) / 2 + LOGO[LOGO_STOPS[index % LOGO_STOPS.length]!]![0] * size), py: snap(top + (tall - size * 0.9) / 2 + LOGO[LOGO_STOPS[index % LOGO_STOPS.length]!]![1] * size * 0.9) }
+            : { px: snap(left + wide * (index % 2 ? 0.7 : 0.25)), py: snap(top + (steps.length === 1 ? tall / 3 : (index * tall) / (steps.length - 1))) };
+        return steps.map((step, index) => ({ name: step.name, tone: step.tone ?? "path", from: index * STEP_MS, at: (index + 1) * STEP_MS, ...at(index), ox, oy }));
+      }
+      // Code findings sit on a loose grid of three columns, offset by column so labels never touch.
+      const names = [...search.files.map((hit) => `${hit.path.split("/").at(-1)}:${hit.lines.find((line) => line.match)!.n}`), ...(search.more ?? [])];
+      return names.map((name, index) => ({
+        name,
+        tone: "path" as const,
+        from: 0,
+        at: CODE_MS,
+        px: snap(left + wide * (0.14 + 0.36 * (index % 3))),
+        py: snap(top + (tall * (Math.floor(index / 3) + 0.3 + (index % 3) * 0.3)) / Math.ceil(names.length / 3)),
+        ox,
+        oy,
+      }));
     };
 
     const draw = (now: number) => {
@@ -95,6 +134,17 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       const heads = legs.filter((leg) => leg.progress > 0 && leg.progress < 1).map(({ stop, progress }) => ({ x: stop.ox + (stop.px - stop.ox) * progress, y: stop.oy + (stop.py - stop.oy) * progress }));
 
       const code = search !== null && !search.steps;
+      // The logo fills once the path reaches its last stop, scaled to the same box as its stops.
+      const logoAge = search?.logo && stops.length ? age - stops.at(-1)!.at : -1;
+      const logoFill = logoAge > 0 ? Math.min(1, logoAge / LOGO_FILL_MS) : 0;
+      const logoBox = search?.logo && chat && area ? (() => {
+        const left = area.left - own.left;
+        const wide = Math.max(area.width, own.width - left - 60);
+        const top = chat.top - own.top + 30;
+        const tall = chat.height - 60;
+        const size = Math.min(wide * 0.8, tall);
+        return { x: left + (wide - size) / 2, y: top + (tall - size * 0.9) / 2, w: size, h: size * 0.9 };
+      })() : null;
       const cx = area ? (area.left - own.left + width) / 2 : width / 2;
       const cy = chat ? chat.top - own.top + chat.height / 2 : height / 2;
       const reach = Math.hypot(Math.max(cx, width - cx), Math.max(cy, height - cy));
@@ -109,6 +159,10 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
             const { d, t } = toSegment(x, y, stop.ox, stop.oy, stop.px, stop.py);
             if (d < GAP * 0.6 && t <= progress) lit = Math.max(lit, 0.32);
           }
+          if (logoBox && logoFill > 0 && inside((x - logoBox.x) / logoBox.w, (y - logoBox.y) / logoBox.h, LOGO)) {
+            dot(x, y, 0.55 * logoFill, ORANGE);
+            continue;
+          }
           dot(x, y, lit, lit > 0.1 ? palette.path : palette.rest);
         }
 
@@ -117,8 +171,8 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       const shown = code ? stops.filter((stop) => Math.hypot(stop.px - cx, stop.py - cy) <= ring) : legs.filter((leg) => leg.progress >= 1).map((leg) => leg.stop);
       for (const stop of shown) {
         dot(stop.px, stop.py, 1, palette[stop.tone], 1.5);
-        ctx.fillStyle = style.color;
-        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = `rgb(${palette.rest})`;
+        ctx.globalAlpha = 0.7;
         ctx.fillText(stop.name, stop.px, stop.py + 22);
       }
     };

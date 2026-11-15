@@ -791,28 +791,22 @@
   color: var(--gl-text-color-default);
 }
 
+/* A fixed height, so the chat does not grow while an answer arrives and the map behind it stays put. The
+   thread scrolls, and the input stays at the bottom. */
 .next-chat {
-  min-width: 0;
-}
-
-.next-chat-empty {
-  margin: 0;
-  padding: 2.5rem 1.5rem 1rem;
-  color: var(--gl-text-color-subtle);
-  font-size: var(--gl-font-size-300);
-  text-align: center;
-}
-
-.next-chat-form {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
-  padding: 1rem 1.25rem;
+  align-self: start;
+  min-width: 0;
+  height: 30rem;
 }
 
-.next-chat .next-chat-input {
-  font-size: var(--gl-font-size-400);
+.next-chat-space {
+  flex: 1;
 }
+
+
+
 
 .next-message-code {
   font-family: var(--font-mono);
@@ -829,9 +823,9 @@
 }
 
 
-/* A long answer scrolls inside the chat, so the chat stays in the first screen. */
 .next-chat .agent-thread {
-  max-height: 24rem;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -857,12 +851,23 @@
   }
 }
 
-/* Clear glass: a light tint, a strong blur, and a bright top edge, so the map shows through the chat. */
-.orbit-hero .next-chat {
-  border-color: color-mix(in srgb, #fff 14%, transparent);
-  background: linear-gradient(180deg, color-mix(in srgb, #fff 6%, transparent), color-mix(in srgb, #fff 2%, transparent)), color-mix(in srgb, var(--color-page) 30%, transparent);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent),
-    0 24px 60px -24px rgb(0 0 0 / 55%);
-  backdrop-filter: blur(24px) saturate(160%);
+
+/* The mode chips are buttons in the home chat's chip style. The input starts at one line. */
+.next-chat .agent-prompt-chip {
+  border: 0;
+  cursor: pointer;
+}
+
+.next-chat .agent-prompt-chip:hover,
+.next-chat .next-chip-on {
+  background: color-mix(in srgb, var(--gl-text-color-default) 14%, transparent);
+  color: var(--gl-text-color-default);
+}
+
+.next-chat .agent-prompt-box {
+  gap: 0.625rem;
+}
+
+.next-chat .agent-prompt-input {
+  min-height: 0;
 }
