@@ -1,20 +1,31 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { cn, Icon } from "@gitlab-org/orbit-site";
-import { CODE_MS, CROSS_SEARCHES, type FileHit, type Line, type Mode, MODES, type Search, SEARCHES, STEP_MS } from "./searches";
+import { CODE_MS, CROSS_SEARCHES, type FileHit, type Line, type Search, SEARCHES, STEP_MS } from "./searches";
 
 const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+// What you say to the agent: a code example asks in words, and its tool line shows the search it runs.
+const textOf = (search: Search) => search.ask ?? (search.kind === "code" ? search.label : search.pattern);
 const TYPE_MS = 22;
 const SEND_PAUSE_MS = 250;
 const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
 const toolsOf = (search: Search) => [...new Set(search.steps!.map((step) => step.tool))];
 const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : search.branches === "all" ? "merge-request" : search.mode === "structural" ? "code" : "search");
 
-// One code search per mode, text, regex, then structural, where the text search also covers every branch, and questions that use third-party connectors.
+// One code search per mode, text, regex, then structural, and questions that use third-party connectors.
 const GROUPS = [
-  { label: "Code search", items: ["branch", "flag", "unwrap"].map((id) => SEARCHES.find((item) => item.id === id)!) },
+  { label: "Code search", items: ["error", "flag", "unwrap"].map((id) => SEARCHES.find((item) => item.id === id)!) },
   { label: "Third-party connectors", items: CROSS_SEARCHES.filter((item) => item.id !== "epic") },
 ];
 const ALL = [...SEARCHES, ...CROSS_SEARCHES];
+// What the agent can query, as chips on the input.
+const SOURCES = [
+  { label: "Code, every branch", icon: "code" },
+  { label: "GitLab", icon: "tanuki" },
+  { label: "Jira", icon: "work-item-issue" },
+  { label: "Slack", icon: "comment" },
+  { label: "incident.io", icon: "status-alert" },
+  { label: "Grafana", icon: "chart" },
+];
 
 function Code({ line }: { line: Line }) {
   const at = line.match ? line.text.indexOf(line.match) : -1;
@@ -28,17 +39,24 @@ function Code({ line }: { line: Line }) {
   );
 }
 
+// A file's header: the project's short name, the last two parts of the path, and the branch when it is
+// not the default one.
+const SHORT_PATH = (path: string) => path.split("/").slice(-2).join("/");
+const DEFAULT_BRANCHES = new Set(["main", "master"]);
+
 function File({ hit }: { hit: FileHit }) {
   return (
     <div className="next-file">
       <div className="next-file-head">
         <span className="next-file-path">
-          {hit.project.split("/").at(-1)} / {hit.path}
+          <span className="next-file-project">{hit.project.split("/").at(-1)}</span> {SHORT_PATH(hit.path)}
         </span>
-        <span className="next-branch">
-          <Icon name="branch" size={12} />
-          {hit.branch}
-        </span>
+        {!DEFAULT_BRANCHES.has(hit.branch) && (
+          <span className="next-branch">
+            <Icon name="branch" size={12} />
+            {hit.branch}
+          </span>
+        )}
       </div>
       <pre className="next-file-code">
         {hit.lines.map((line) => (
@@ -58,15 +76,37 @@ function Thread({ search, stage }: { search: Search; stage: number }) {
   const done = stage >= stepsOf(search);
   const tools = search.steps ? toolsOf(search) : [];
   const seen = search.steps ? [...new Set(search.steps.slice(0, Math.min(stage + 1, search.steps.length)).map((step) => step.tool))] : [];
-  const tool = search.steps ? (done ? `Explored ${tools.join(" → ")}` : `Exploring ${seen.join(" → ")}…`) : done ? `Searched code${search.funnel ? ` in ${search.funnel.ms} ms` : ""}` : "Searching code…";
+  const code = done ? `Searched code for ${search.mode === "regex" ? "a regex" : search.pattern}${search.branches === "all" ? " on all branches" : ""}${search.funnel ? ` in ${search.funnel.ms} ms` : ""}` : "Searching code…";
+  // Each tool a question reads shows as a chip with its own icon, so the path visibly leaves GitLab.
+  const iconOfTool = (name: string) => search.steps!.find((step) => step.tool === name)!.icon;
+  const chain = (names: string[]) =>
+    names.map((name, index) => (
+      <span key={name} className="next-tool-wrap">
+        {index > 0 && <span className="next-tool-arrow">→</span>}
+        <span className="next-tool">
+          <Icon name={iconOfTool(name)} size={11} />
+          {name}
+        </span>
+      </span>
+    ));
   return (
     <div className="agent-thread">
-      <p className={cn("agent-message", search.kind === "code" && "next-message-code")}>{search.pattern}</p>
+      <p className="agent-message">{textOf(search)}</p>
       <div className="agent-reply" aria-live="polite">
         <ul className="agent-calls">
           <li className={cn("agent-call", !done && "agent-call-running")}>
             <Icon name="orbit" size={12} className="agent-call-mark" />
-            <span className="agent-call-tool">{tool}</span>
+            <span className="agent-call-tool">
+              {search.steps ? (
+                <>
+                  {done ? "Explored " : "Exploring "}
+                  {chain(done ? tools : seen)}
+                  {done ? "" : "…"}
+                </>
+              ) : (
+                code
+              )}
+            </span>
           </li>
         </ul>
         {done && (
@@ -94,7 +134,6 @@ function Thread({ search, stage }: { search: Search; stage: number }) {
 // Any other pattern gets a note, because live search is not public yet.
 export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) => void }) {
   const [run, setRun] = useState<{ search: Search; start: number } | null>(null);
-  const [mode, setMode] = useState<Mode>("structural");
   const [pattern, setPattern] = useState("");
   const [stage, setStage] = useState(0);
   const [unknown, setUnknown] = useState(false);
@@ -104,7 +143,7 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
 
   useEffect(() => {
     if (!typing) return;
-    const total = typing.search.pattern.length;
+    const total = textOf(typing.search).length;
     if (typing.length >= total) {
       const timer = window.setTimeout(() => {
         setTyping(null);
@@ -127,14 +166,12 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
   const start = (search: Search) => {
     setRun({ search, start: performance.now() });
     onSearch?.(search);
-    if (search.kind === "code") setMode(search.mode);
     setPattern("");
     setUnknown(false);
     setStage(still() ? stepsOf(search) : 0);
   };
 
   const pick = (search: Search) => {
-    if (search.kind === "code") setMode(search.mode);
     setUnknown(false);
     if (still()) start(search);
     else setTyping({ search, since: performance.now(), length: 0 });
@@ -142,7 +179,7 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const known = ALL.find((item) => item.pattern === pattern.trim());
+    const known = ALL.find((item) => textOf(item) === pattern.trim() || item.pattern === pattern.trim());
     if (known) start(known);
     else if (pattern.trim()) setUnknown(true);
   };
@@ -178,12 +215,11 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
         </div>
         {run && <Thread key={run.start} search={run.search} stage={stage} />}
         <form onSubmit={submit} className="agent-prompt-box" aria-label="Search">
-          <ul className="agent-prompt-chips" aria-label="Search mode">
-            {MODES.map((item) => (
-              <li key={item.mode}>
-                <button type="button" aria-pressed={mode === item.mode} onClick={() => setMode(item.mode)} className={cn("agent-prompt-chip", mode === item.mode && "next-chip-on")}>
-                  {item.mode}
-                </button>
+          <ul className="agent-prompt-chips" aria-label="Sources">
+            {SOURCES.map((source) => (
+              <li key={source.label} className="agent-prompt-chip">
+                <Icon name={source.icon} size={12} />
+                {source.label}
               </li>
             ))}
           </ul>
@@ -191,8 +227,8 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
             <textarea
               aria-label="Pattern or question"
               rows={1}
-              value={typing ? typing.search.pattern.slice(0, typing.length) : pattern}
-              placeholder={MODES.find((item) => item.mode === mode)!.placeholder}
+              value={typing ? textOf(typing.search).slice(0, typing.length) : pattern}
+              placeholder="Ask about your code, its branches, and your tools"
               spellCheck={false}
               onChange={(event) => {
                 setPattern(event.target.value);

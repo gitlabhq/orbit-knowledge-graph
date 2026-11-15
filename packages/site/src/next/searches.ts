@@ -37,6 +37,8 @@ export type Search = {
   // A code search, or a question that crosses tools.
   kind: "code" | "cross";
   label: string;
+  // What you ask the agent, when it differs from the label.
+  ask?: string;
   pattern: string;
   // A shorter form of a long pattern, for the example cards.
   short?: string;
@@ -49,22 +51,56 @@ export type Search = {
   // More real matches, as file:line, that the map behind the hero marks next to the files shown.
   more?: string[];
   steps?: CrossStep[];
+  // Where each step sits on the map, as shares of its box, when the route is set rather than seeded.
+  points?: [number, number][];
   // The path traces the GitLab tanuki on the map, which then fills in.
   logo?: boolean;
 };
 
 export const SEARCHES: Search[] = [
   {
+    id: "error",
+    kind: "code",
+    label: "Find where an error comes from",
+    ask: "Where does “Something went wrong while turning on GitLab Orbit.” come from?",
+    pattern: "Something went wrong while turning on GitLab Orbit.",
+    mode: "text",
+    branches: "default",
+    summary: "It comes from duo_orbit_row.vue:87, when turning on Orbit fails. One test checks it, and 28 locale files translate it.",
+    more: ["gitlab.pot:31158", "de/gitlab.po:29916", "fr/gitlab.po:29916", "ja/gitlab.po:29636", "es/gitlab.po:29916", "pt_BR/gitlab.po:29916", "zh_CN/gitlab.po:29636", "ko/gitlab.po:29636"],
+    files: [
+      {
+        project: "gitlab-org/gitlab",
+        path: "ee/app/assets/javascripts/pages/projects/shared/permissions/components/duo_orbit_row.vue",
+        branch: "master",
+        lines: [
+          { n: 86, text: "        createAlert({" },
+          { n: 87, text: "          message: s__('DuoAgentPlatform|Something went wrong while turning on GitLab Orbit.'),", match: "Something went wrong while turning on GitLab Orbit." },
+          { n: 88, text: "          error," },
+        ],
+      },
+      {
+        project: "gitlab-org/gitlab",
+        path: "ee/spec/frontend/pages/projects/shared/permissions/components/duo_orbit_row_spec.js",
+        branch: "master",
+        lines: [
+          { n: 135, text: "        expect.objectContaining({" },
+          { n: 136, text: "          message: 'Something went wrong while turning on GitLab Orbit.',", match: "Something went wrong while turning on GitLab Orbit." },
+          { n: 137, text: "        })," },
+        ],
+      },
+    ],
+  },
+  {
     id: "unwrap",
     kind: "code",
-    label: "Every unwrap() in Rust",
+    label: "Every unwrap() in Rust, on every branch",
     pattern: "$X.unwrap()",
     mode: "structural",
     language: "rust",
-    branches: "default",
-    summary: "100 matches. Method calls only, not comments or strings.",
-    funnel: { files: 1_489_091, candidates: 4_156, scanned: 256, matches: 100, ms: 111 },
-    more: ["lib.rs:304", "filter.rs:107", "filter.rs:112", "mod.rs:255", "arrow_client.rs:913", "configuration.rs:73", "rules.rs:601", "file_tree.rs:546"],
+    branches: "all",
+    summary: "Matches on main and on an unmerged branch. Method calls only, not comments or strings.",
+    more: ["cursor_paginator.rs:316", "cursor_paginator.rs:369", "lib.rs:304", "filter.rs:107", "filter.rs:112", "mod.rs:255", "arrow_client.rs:913", "configuration.rs:73", "rules.rs:601", "file_tree.rs:546"],
     files: [
       {
         project: "gitlab-org/orbit/experiments/orbit-next",
@@ -94,6 +130,16 @@ export const SEARCHES: Search[] = [
           { n: 371, text: "        let path = credentials_path()?;" },
           { n: 372, text: "        std::fs::create_dir_all(path.parent().unwrap())?;", match: "path.parent().unwrap()" },
           { n: 373, text: "        let credentials = Credentials { refresh_token: refresh_token.to_string() };" },
+        ],
+      },
+      {
+        project: "gitlab-org/orbit/knowledge-graph",
+        path: "crates/indexer/src/modules/sdlc/cursor_paginator.rs",
+        branch: "cursor-base-pagination-draft",
+        lines: [
+          { n: 320, text: "" },
+          { n: 321, text: "        let values = paginator.advance(&batch).unwrap();", match: "paginator.advance(&batch).unwrap()" },
+          { n: 322, text: "        assert_eq!(values.len(), 2);" },
         ],
       },
     ],
@@ -184,8 +230,7 @@ export const SEARCHES: Search[] = [
     id: "branch",
     kind: "code",
     label: "Branches touching CursorPaginator",
-    // `branch:*` searches every branch, not only the default one.
-    pattern: "CursorPaginator branch:*",
+    pattern: "CursorPaginator",
     mode: "text",
     branches: "all",
     summary: "No matches on main. 14 on one unmerged branch, where the work is still in progress.",
@@ -315,14 +360,27 @@ export const SEARCHES: Search[] = [
 const cross = (id: string, label: string, pattern: string, summary: string, steps: CrossStep[], logo = false): Search => ({ id, kind: "cross", label, pattern, mode: "text", branches: "default", summary, files: [], steps, logo });
 
 export const CROSS_SEARCHES: Search[] = [
-  cross("incident", "Resolve an incident", "What caused INC-77, and which change fixed it?", "checkout-api!42 caused it. !43 fixed the cache stampede.", [
-    { tool: "incident.io", icon: "status-alert", finding: "INC-77: checkout p95 is at 2 s.", name: "INC-77", tone: "risk" },
-    { tool: "Grafana", icon: "chart", finding: "The p95 alert fired 1 hour after the v1.4.2 deploy.", name: "p95 alert" },
-    { tool: "GitLab", icon: "tanuki", finding: "v1.4.2 shipped the pricing cache.", name: "!42 deployed", links: ["checkout-api!42"] },
-    { tool: "Jira", icon: "work-item-issue", finding: "!42 built ORB-12, the pricing cache.", name: "ORB-12" },
-    { tool: "Slack", icon: "comment", finding: "The team rolled back !42 and named a cache stampede.", name: "rollback thread" },
-    { tool: "GitLab", icon: "tanuki", finding: "!43 fixed the stampede. p95 is back to 420 ms.", name: "!43 fixed", links: ["checkout-api!43"], tone: "ok" },
-  ]),
+  {
+    ...cross("incident", "Resolve an incident", "What caused INC-77, and which change fixed it?", "checkout-api!42 caused it. !43 fixed the cache stampede.", [
+      { tool: "incident.io", icon: "status-alert", finding: "INC-77: checkout p95 is at 2 s.", name: "INC-77", tone: "risk" },
+      { tool: "Grafana", icon: "chart", finding: "The p95 alert fired 1 hour after the v1.4.2 deploy.", name: "p95 alert" },
+      { tool: "GitLab", icon: "tanuki", finding: "v1.4.2 shipped the pricing cache.", name: "!42 deployed", links: ["checkout-api!42"] },
+      { tool: "Jira", icon: "work-item-issue", finding: "!42 built ORB-12, the pricing cache.", name: "ORB-12" },
+      { tool: "Slack", icon: "comment", finding: "The team rolled back !42 and named a cache stampede.", name: "rollback thread" },
+      { tool: "Code search", icon: "code", finding: "cache.get in pricing.rb:57 has no timeout.", name: "pricing.rb:57" },
+      { tool: "GitLab", icon: "tanuki", finding: "!43 fixed the stampede. p95 is back to 420 ms.", name: "!43 deployed", links: ["checkout-api!43"], tone: "ok" },
+    ]),
+    // The same route as the third-party section on this page, which draws its path from these points.
+    points: [
+      [0.1, 0.6],
+      [0.27, 0.24],
+      [0.46, 0.56],
+      [0.28, 0.86],
+      [0.64, 0.84],
+      [0.7, 0.22],
+      [0.92, 0.56],
+    ],
+  },
   cross("alert", "What changed before an alert", "What deployed right before the checkout alert?", "The v1.4.2 deploy, one hour before. It added a cache read with no timeout.", [
     { tool: "Grafana", icon: "chart", finding: "Checkout p95 went above 800 ms at 15:04.", name: "p95 alert" },
     { tool: "GitLab", icon: "tanuki", finding: "v1.4.2 deployed to production at 14:02.", name: "v1.4.2 deploy" },
@@ -336,11 +394,11 @@ export const CROSS_SEARCHES: Search[] = [
     { tool: "Jira", icon: "work-item-issue", finding: "ORB-13 has no merge request yet.", name: "ORB-13" },
     { tool: "Grafana", icon: "chart", finding: "Checkout p95 is at 420 ms, under the goal.", name: "p95 420 ms" },
   ]),
-  cross("why", "Why code is the way it is", "Why is the pricing cache TTL 30 seconds?", "The team chose 30 seconds after INC-77, to keep prices fresh during sales.", [
-    { tool: "Code search", icon: "code", finding: "PRICE_TTL = 30.seconds in pricing.rb:12.", name: "pricing.rb:12" },
-    { tool: "GitLab", icon: "tanuki", finding: "checkout-api!43 set it.", name: "!43", links: ["checkout-api!43"] },
-    { tool: "Jira", icon: "work-item-issue", finding: "!43 is part of ORB-12, after INC-77.", name: "ORB-12" },
-    { tool: "Slack", icon: "comment", finding: "“Keep the TTL at 30 s. Any longer and flash-sale prices go stale.”", name: "the decision" },
+  cross("why", "Explain why this code changed", "Explain every decision behind the pricing cache code.", "Three decisions: !42 added the cache for ORB-1's 500 ms goal, !43 added request coalescing after INC-77, and the team set the 30 s TTL in Slack.", [
+    { tool: "Code search", icon: "code", finding: "The pricing cache lives in pricing.rb, with PRICE_TTL = 30.seconds.", name: "pricing.rb" },
+    { tool: "GitLab", icon: "tanuki", finding: "!42 added the cache. !43 added request coalescing and set the TTL.", name: "!42, !43", links: ["checkout-api!42", "checkout-api!43"] },
+    { tool: "Jira", icon: "work-item-issue", finding: "ORB-12, under ORB-1: bring checkout p95 below 500 ms.", name: "ORB-1" },
+    { tool: "Slack", icon: "comment", finding: "“Keep the TTL at 30 s. Any longer and flash-sale prices go stale.”", name: "TTL decision" },
   ], true),
 ];
 

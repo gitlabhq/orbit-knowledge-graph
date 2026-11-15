@@ -136,8 +136,9 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
         // Any other path runs left to right and zigzags up and down, as in the third-party section below. The
         // heights are seeded, so each example takes its own route. The first stop has no link into it.
         const stops = steps.map((step, index) => {
-          const px = snap(left + wide * (0.1 + (0.8 * index) / Math.max(1, steps.length - 1)));
-          const py = snap(top + MAP_TALL * (index % 2 ? 0.1 + 0.3 * random() : 0.55 + 0.3 * random()));
+          const point = search.points?.[index];
+          const px = snap(left + wide * (point ? point[0] : 0.1 + (0.8 * index) / Math.max(1, steps.length - 1)));
+          const py = snap(top + MAP_TALL * (point ? point[1] : index % 2 ? 0.1 + 0.3 * random() : 0.55 + 0.3 * random()));
           return { name: step.name, tone: step.tone ?? ("path" as const), from: index * STEP_MS, at: (index + 1) * STEP_MS, px, py, ox: px, oy: py };
         });
         stops.forEach((stop, index) => index > 0 && Object.assign(stop, { ox: stops[index - 1]!.px, oy: stops[index - 1]!.py }));

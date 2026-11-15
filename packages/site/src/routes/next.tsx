@@ -5,7 +5,7 @@ import { Capabilities } from "../next/Capabilities";
 import { CodeSearch } from "../next/CodeSearch";
 import { type Hop, HopField } from "../next/HopField";
 import { SearchMap } from "../next/SearchMap";
-import { CORPUS, LATENCY, type Search } from "../next/searches";
+import { CORPUS, CROSS_SEARCHES, LATENCY, type Search } from "../next/searches";
 import { NEXT_PAGE } from "../sections";
 
 export const Route = createFileRoute("/next")({
@@ -16,15 +16,10 @@ export const Route = createFileRoute("/next")({
 // The incident from the team's third-party demo world, followed from tool to tool. The names are made up.
 // The field and the log share one loop.
 const LOOP = 12000;
-const HOPS: Hop[] = [
-  { tool: "incident.io", label: "INC-77", x: 0.1, y: 0.6, at: 0.03, tone: "risk" },
-  { tool: "Grafana", label: "p95 alert", x: 0.27, y: 0.24, at: 0.11 },
-  { tool: "GitLab", label: "!42 deployed", x: 0.46, y: 0.56, at: 0.19 },
-  { tool: "Jira", label: "ORB-12", x: 0.28, y: 0.86, at: 0.27 },
-  { tool: "Slack", label: "rollback thread", x: 0.64, y: 0.84, at: 0.35 },
-  { tool: "Code search", label: "pricing.rb:57", x: 0.7, y: 0.22, at: 0.43 },
-  { tool: "GitLab", label: "!43 deployed", x: 0.92, y: 0.56, at: 0.7, tone: "ok" },
-];
+const INCIDENT = CROSS_SEARCHES.find((search) => search.id === "incident")!;
+const AT = [0.03, 0.11, 0.19, 0.27, 0.35, 0.43, 0.7];
+// The same incident and route as the hero's "Resolve an incident" example.
+const HOPS: Hop[] = INCIDENT.steps!.map((step, index) => ({ tool: step.tool, label: step.name, x: INCIDENT.points![index]![0], y: INCIDENT.points![index]![1], at: AT[index]!, tone: step.tone }));
 // Each read is one tool call. What it finds shows on the map, so the log keeps only the calls and the fix.
 const LOG: RippleLogLine[] = [
   { at: 0.03, tool: true, text: "Explore incident.io" },
