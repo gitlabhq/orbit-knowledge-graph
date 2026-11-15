@@ -72,7 +72,7 @@ function File({ hit }: { hit: FileHit }) {
 // The thread for one example: the question, the Orbit tool lines as the search runs, and the answer. The path and the findings show on the map behind the chat.
 function Thread({ search, stage }: { search: Search; stage: number }) {
   const done = stage >= stepsOf(search);
-  const code = done ? `Searched code for ${search.mode === "regex" ? "a regex" : search.pattern}${search.branches === "all" ? " on all branches" : ""}${search.funnel ? ` in ${search.funnel.ms} ms` : ""}` : "Searching code…";
+  const code = done ? "Searched code" : "Searching code…";
   return (
     <div className="agent-thread">
       <p className="agent-message">{textOf(search)}</p>
