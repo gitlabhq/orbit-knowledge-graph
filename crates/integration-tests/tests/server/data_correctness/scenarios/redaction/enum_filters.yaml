@@ -1,0 +1,212 @@
+description: Int filter values on int-based enums become their labels, and string-based enums pass through, before redaction runs
+
+config:
+  security: { paths: ["1/700/"] }
+  extra_seed:
+    gl_user:
+      - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 2, username: bob, name: Bob Builder, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 3, username: charlie, name: Charlie Private, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
+      - { id: 4, username: diana, name: Diana Developer, state: active, user_type: project_bot, _version: "2099-01-01 00:00:00" }
+      - { id: 5, username: eve, name: Eve External, state: blocked, user_type: service_account, _version: "2099-01-01 00:00:00" }
+      - { id: 6, _version: "2099-01-01 00:00:00", _deleted: true }
+      - { id: 7, _version: "2099-01-01 00:00:00", _deleted: true }
+    gl_group:
+      - { id: 701, name: Public Group, visibility_level: public, traversal_path: "1/700/701/" }
+      - { id: 702, name: Private Group, visibility_level: private, traversal_path: "1/700/702/" }
+      - { id: 703, name: Internal Group, visibility_level: internal, traversal_path: "1/700/703/" }
+    gl_project:
+      - { id: 7100, name: Public Project, visibility_level: public, traversal_path: "1/700/701/7100/" }
+      - { id: 7101, name: Private Project, visibility_level: private, traversal_path: "1/700/702/7101/" }
+      - { id: 7102, name: Internal Project, visibility_level: internal, traversal_path: "1/700/701/7102/" }
+      - { id: 7103, name: Secret Project, visibility_level: private, traversal_path: "1/700/702/7103/" }
+      - { id: 7104, name: Shared Project, visibility_level: public, traversal_path: "1/700/703/7104/" }
+    gl_merge_request:
+      - { id: 7200, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, traversal_path: "1/700/701/7100/" }
+      - { id: 7201, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, traversal_path: "1/700/701/7100/" }
+      - { id: 7202, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, traversal_path: "1/700/702/7101/" }
+      - { id: 7203, title: Update D, state: closed, source_branch: update-d, target_branch: main, traversal_path: "1/700/703/7104/" }
+    gl_edge:
+      - { traversal_path: "1/700/701/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 701, target_kind: Group }
+      - { traversal_path: "1/700/703/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 703, target_kind: Group }
+      - { traversal_path: "1/700/701/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 701, target_kind: Group }
+      - { traversal_path: "1/700/702/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 702, target_kind: Group }
+      - { traversal_path: "1/700/702/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 702, target_kind: Group }
+      - { traversal_path: "1/700/703/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 703, target_kind: Group }
+      - { traversal_path: "1/700/702/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 702, target_kind: Group }
+      - { traversal_path: "1/700/701/7100/", source_id: 701, source_kind: Group, relationship_kind: CONTAINS, target_id: 7100, target_kind: Project }
+      - { traversal_path: "1/700/701/7102/", source_id: 701, source_kind: Group, relationship_kind: CONTAINS, target_id: 7102, target_kind: Project }
+      - { traversal_path: "1/700/702/7101/", source_id: 702, source_kind: Group, relationship_kind: CONTAINS, target_id: 7101, target_kind: Project }
+      - { traversal_path: "1/700/702/7103/", source_id: 702, source_kind: Group, relationship_kind: CONTAINS, target_id: 7103, target_kind: Project }
+      - { traversal_path: "1/700/703/7104/", source_id: 703, source_kind: Group, relationship_kind: CONTAINS, target_id: 7104, target_kind: Project }
+
+cases:
+  - name: int_user_type_coerced_to_label
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 0}}]
+        }
+    expect:
+      node_count: 3
+      nodes:
+        User:
+          ids: [1, 2, 3]
+          filters:
+            user_type: human
+          rows:
+            - { id: 1, user_type: human }
+            - { id: 2, user_type: human }
+            - { id: 3, user_type: human }
+
+  - name: int_user_type_project_bot
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 6}}]
+        }
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [4]
+          filters:
+            user_type: project_bot
+
+  - name: int_merge_request_state_opened
+    config:
+      redaction:
+        allow:
+          merge_request: [7200, 7201, 7202, 7203]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 1}}]
+        }
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequest:
+          ids: [7200, 7201]
+          filters:
+            state: opened
+          rows:
+            - { id: 7200, state: opened }
+            - { id: 7201, state: opened }
+
+  - name: int_merge_request_state_merged
+    config:
+      redaction:
+        allow:
+          merge_request: [7200, 7201, 7202, 7203]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 3}}]
+        }
+    expect:
+      node_count: 1
+      nodes:
+        MergeRequest:
+          ids: [7202]
+          filters:
+            state: merged
+
+  - name: int_merge_request_state_in
+    config:
+      redaction:
+        allow:
+          merge_request: [7200, 7201, 7202, 7203]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 2]}}}]
+        }
+    expect:
+      node_count: 3
+      nodes:
+        MergeRequest:
+          ids: [7200, 7201, 7203]
+          filters:
+            state: { in: [opened, closed] }
+
+  - name: string_user_state_active
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "columns": ["state"], "filters": {"state": "active"}}]
+        }
+      gql: |
+        MATCH (u:User) WHERE u.state = 'active' RETURN u.state
+    expect:
+      node_count: 4
+      nodes:
+        User:
+          ids: [1, 2, 3, 4]
+          filters:
+            state: active
+          rows:
+            - { id: 1, state: active }
+            - { id: 2, state: active }
+            - { id: 3, state: active }
+            - { id: 4, state: active }
+
+  - name: string_user_state_blocked
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "filters": {"state": "blocked"}}]
+        }
+      gql: |
+        MATCH (u:User) WHERE u.state = 'blocked' RETURN u
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [5]
+          filters:
+            state: blocked
+
+  - name: string_user_state_in
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "filters": {"state": {"in": ["active", "blocked"]}}}]
+        }
+      gql: |
+        MATCH (u:User) WHERE u.state IN ['active', 'blocked'] RETURN u
+    expect:
+      node_count: 5
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+          filters:
+            state: { in: [active, blocked] }

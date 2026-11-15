@@ -1,0 +1,151 @@
+cases:
+  - name: Multi-hop traversal emits the redaction id and type of every node
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}},{"id":"g","entity":"Group"},{"id":"p","entity":"Project","id_range":{"start":1,"end":10000}}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"},{"type":"CONTAINS","from":"g","to":"p"}],"limit":10}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:`CONTAINS`]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS _orbit_u_id
+            - AS _orbit_u_type
+            - AS _orbit_g_id
+            - AS _orbit_g_type
+            - AS _orbit_p_id
+            - AS _orbit_p_type
+            - _orbit_e0_kind
+            - _orbit_e0_src
+            - _orbit_e1_kind
+            - _orbit_e1_src
+
+  - name: Single-node search emits redaction columns without a join
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":{"eq":"active"},"username":{"in":["alice","bob","charlie","diana"]}}}],"order_by":"u.username","limit":100}
+      gql: |
+        MATCH (u:User) WHERE u.state = 'active' AND u.username IN ['alice', 'bob', 'charlie', 'diana'] RETURN u ORDER BY u.username LIMIT 100
+    physical:
+      clickhouse:
+        sql:
+          contains: [_orbit_u_id, _orbit_u_type]
+          not_contains: [JOIN]
+
+  - name: Specific columns keep the redaction columns
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username","state"]}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.state LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains: [_orbit_u_id, _orbit_u_type, u_username, u_state]
+
+  - name: Wildcard columns keep the redaction columns and leave out the traversal path
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","id_range":{"start":1,"end":10000},"columns":"*"}],"limit":10}
+      gql: |
+        MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN properties(g) LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains: [_orbit_g_id, _orbit_g_type, g_id, g_name, g_visibility_level]
+          not_contains: [g_traversal_path]
+
+  - name: Omitted columns keep the redaction columns
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains: [_orbit_u_id, _orbit_u_type]
+
+  - name: Id in the column list keeps the redaction columns
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","id_range":{"start":1,"end":10000},"columns":["id","name","visibility_level"]}],"limit":10}
+      gql: |
+        MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN p.id, p.name, p.visibility_level LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains: [_orbit_p_id, _orbit_p_type]
+
+  - name: Filters with specific columns keep the redaction columns
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"],"filters":{"state":"active"}}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.state = 'active' RETURN u.username LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains: [_orbit_u_id, _orbit_u_type, u_username, state]
+
+  - name: Aggregation emits redaction columns only for the group-by node
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"mr_count"}],"limit":10}
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(mr) AS mr_count LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains: [_orbit_u_id, _orbit_u_type, COUNT, GROUP BY, u_username]
+          not_contains: [_orbit_mr_id, _orbit_mr_type]
+
+  - name: Aggregation with wildcard columns emits the group-by node columns
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":"*"},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"mr_count"}],"limit":10}
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN properties(u), count(mr) AS mr_count LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains: [_orbit_u_id, _orbit_u_type, u_id, u_username, GROUP BY]
+
+  - name: Neighbors emit the center redaction columns and the neighbor columns
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing"}}
+      gql: |
+        MATCH (u:User {id: 1})-->(n) RETURN u, n
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - _orbit_u_id
+            - _orbit_u_type
+            - _orbit_neighbor_node
+            - _orbit_neighbor_kind
+            - _orbit_relationship_kind
+            - source_kind
+
+  - name: Single-hop traversal emits every edge column
+    security: { paths: [1/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":20}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 20
+    physical:
+      clickhouse:
+        sql:
+          contains: [_orbit_e0_kind, _orbit_e0_src, _orbit_e0_src_kind, _orbit_e0_dst, _orbit_e0_dst_kind]
