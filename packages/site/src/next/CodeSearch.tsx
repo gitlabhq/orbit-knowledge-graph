@@ -86,7 +86,7 @@ function Thread({ search, stage }: { search: Search; stage: number }) {
               return (
                 <li key={tool} className={cn("agent-call", running && "agent-call-running")}>
                   <Icon name="orbit" size={12} className="agent-call-mark" />
-                  <span className="agent-call-tool">{running ? `Exploring ${tool}…` : `Explored ${tool}`}</span>
+                  <span className="agent-call-tool">{tool === "Code search" ? (running ? "Searching code…" : "Searched code") : running ? `Exploring ${tool}…` : `Explored ${tool}`}</span>
                 </li>
               );
             })
