@@ -36,7 +36,15 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
             .initialize_schema(&generate_local_ddl(&ontology, ""))
             .unwrap_or_else(|e| panic!("{name}: local DDL: {e}"));
         let (config, steps) = scenario.into_steps();
-        seed_local(&database, [&base, &config.extra_seed], &name);
+        let preset = config
+            .seed
+            .as_ref()
+            .map(|preset| seed_preset(Path::new(presets), preset));
+        seed_local(
+            &database,
+            [preset.as_ref().unwrap_or(&base), &config.extra_seed],
+            &name,
+        );
         for (index, step) in steps.iter().enumerate() {
             seed_local(&database, [&step.seed], &name);
             run_step(
