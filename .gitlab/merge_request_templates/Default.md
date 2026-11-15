@@ -11,6 +11,9 @@ considered, full benchmark tables, raw logs, and agent reasoning.
 
 Agents: if you feel the urge to write a wall of text, write it inside the
 Agent context block. The top sections stay terse.
+
+This project is public. Do not put customer names, tenant names, incident
+details, credentials, or other sensitive data anywhere in this MR.
 -->
 
 ### What does this MR do and why?
@@ -90,7 +93,7 @@ inside a comment do not run):
 /label ~"type::maintenance"
 
 Also add the matching orbit::<area> label when the area is obvious. The 14
-areas are listed in .gitlab/issue_templates/Default.md. Add ~documentation
+areas are listed in the Default issue template. Add ~documentation
 on docs MRs. For example:
 /label ~"orbit::indexing"
 
