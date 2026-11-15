@@ -1,7 +1,5 @@
-import { Badge, Icon, NotFound, PageContent, pageHead, SiteLink, type Tone, useHeadingLinks } from "@gitlab-org/orbit-site";
+import { Badge, Icon, NotFound, PageContent, PageFrame, pageHead, SiteLink, type Tone } from "@gitlab-org/orbit-site";
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { useRef } from "react";
-import { Frame } from "../components/Frame";
 import { PageFooter } from "../components/PageFooter";
 import type { Health, Tracker } from "../../build/trackers";
 import { formatDate } from "../roadmap/calendar";
@@ -50,10 +48,9 @@ function TrackerStatus({ tracker, shipped }: { tracker: Tracker; shipped: boolea
 function ItemPage() {
   const { item, body } = Route.useLoaderData();
   const range = itemRange(item);
-  const content = useRef<HTMLDivElement>(null);
-  useHeadingLinks(content, item.page.path);
   return (
-    <Frame
+    <PageFrame
+      path={item.page.path}
       title={item.title}
       description={item.description}
       footer={<PageFooter page={item.page} />}
@@ -85,9 +82,7 @@ function ItemPage() {
         </div>
       }
     >
-      <div ref={content}>
-        <PageContent body={body} />
-      </div>
-    </Frame>
+      <PageContent body={body} />
+    </PageFrame>
   );
 }

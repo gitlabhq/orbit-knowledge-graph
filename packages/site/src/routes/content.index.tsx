@@ -1,6 +1,5 @@
-import { Embed, EmbedGrid, findPage, pageHeadOf, Video, VideoGrid } from "@gitlab-org/orbit-site";
+import { Embed, EmbedGrid, findPage, PageFrame, pageHeadOf, Video, VideoGrid } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
-import { Frame } from "../components/Frame";
 import { PageFooter } from "../components/PageFooter";
 import { links, videos } from "../content/demos";
 import { EmptyState } from "../roadmap/EmptyState";
@@ -13,7 +12,7 @@ export const Route = createFileRoute("/content/")({
 function ContentPage() {
   const page = findPage("content");
   return (
-    <Frame title={page?.meta.title ?? "Content"} description={page?.meta.description} footer={page && <PageFooter page={page} />}>
+    <PageFrame path="content" title={page?.meta.title ?? "Content"} description={page?.meta.description} footer={page && <PageFooter page={page} />}>
       {videos.length > 0 && (
         <section aria-labelledby="videos">
           <h2 id="videos" className="m-0 text-xl font-semibold text-default">
@@ -39,6 +38,6 @@ function ContentPage() {
         </section>
       )}
       {videos.length === 0 && links.length === 0 && <EmptyState message="No demos are available." reset={false} />}
-    </Frame>
+    </PageFrame>
   );
 }

@@ -1,6 +1,5 @@
-import { Avatar, cn, findPage, Icon, pageHeadOf, SiteLink, segment } from "@gitlab-org/orbit-site";
+import { Avatar, cn, findPage, Icon, PageFrame, pageHeadOf, segment, SiteLink } from "@gitlab-org/orbit-site";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Frame } from "../components/Frame";
 import { PageFooter } from "../components/PageFooter";
 import { mission, people, principles, profileUrl, type TeamMember } from "../team/team";
 
@@ -11,28 +10,34 @@ export const Route = createFileRoute("/team")({
 
 const PRINCIPLE_ICONS = ["code", "users", "tanuki-ai", "rocket"];
 
-function ProfileLink({ member }: { member: TeamMember }) {
-  return (
-    <SiteLink href={profileUrl(member.username)} className="inline-flex items-center gap-1 text-sm text-link no-underline hover:underline">
-      @{member.username}
-    </SiteLink>
-  );
-}
-
+// The whole card links to the profile. The username shows in a tag when you hover or focus the avatar.
 function MemberCard({ member }: { member: TeamMember }) {
   return (
-    <article className="card tile-quiet flex h-full flex-col px-5 pt-4 pb-5">
+    <article className="card tile-quiet group relative flex h-full flex-col px-5 pt-4 pb-5">
       <div className="flex items-center gap-4">
-        <Avatar name={member.name} src={member.avatar} size={48} />
+        <SiteLink
+          href={profileUrl(member.username)}
+          aria-label={`@${member.username} on GitLab (opens in a new tab)`}
+          className="group/avatar relative z-10 shrink-0 rounded-full no-underline"
+        >
+          <Avatar name={member.name} src={member.avatar} size={48} />
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-full left-1/2 z-10 mt-2 -translate-x-1/2 rounded-[var(--gl-nav-item-border-radius)] bg-[#28272d] px-2 py-1 text-xs whitespace-nowrap text-white opacity-0 transition-opacity group-hover/avatar:opacity-100 group-focus-visible/avatar:opacity-100 dark:bg-[#ececef] dark:text-[#18171d]"
+          >
+            @{member.username}
+          </span>
+        </SiteLink>
         <div className="min-w-0">
-          <h3 className="m-0 text-base font-semibold text-default">{member.name}</h3>
+          <h3 className="m-0 text-base font-semibold text-default">
+            <SiteLink href={profileUrl(member.username)} aria-label={`${member.name} on GitLab (opens in a new tab)`} className="text-default no-underline after:absolute after:inset-0 after:content-['']">
+              {member.name}
+            </SiteLink>
+          </h3>
           <p className="mt-0.5 mb-0 text-sm text-subtle">{member.title}</p>
         </div>
       </div>
-      <p className="mt-4 mb-0 text-sm leading-relaxed text-default">{member.bio}</p>
-      <div className="mt-auto pt-4">
-        <ProfileLink member={member} />
-      </div>
+      <p className="mt-3 mb-0 text-sm text-subtle">{member.bio}</p>
     </article>
   );
 }
@@ -40,9 +45,10 @@ function MemberCard({ member }: { member: TeamMember }) {
 function TeamPage() {
   const page = findPage("team");
   return (
-    <Frame
+    <PageFrame
+      path="team"
       title="Meet the team"
-      description={`We work like a startup inside GitLab.${mission ? ` Our mission: ${mission}` : ""}`}
+      description={mission}
       footer={page && <PageFooter page={page} />}
     >
       <div className="flex flex-col gap-12">
@@ -51,7 +57,7 @@ function TeamPage() {
             <h2 id="team" className="m-0 text-xl font-semibold text-default">
               The team
             </h2>
-            <p className="mt-1 mb-6 text-subtle">Engineering, product, and design work as one group.</p>
+            <p className="mt-1 mb-6 text-subtle">One group: engineering, product, and design.</p>
             <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
               {people.map((member) => (
                 <li key={member.username}>
@@ -80,7 +86,7 @@ function TeamPage() {
         <section className="card tile-quiet flex flex-col items-start justify-between gap-6 p-6 md:flex-row md:items-center">
           <div>
             <h2 className="m-0 text-xl font-semibold text-default">Build with us</h2>
-            <p className="mt-1 mb-0 max-w-xl text-subtle">The Orbit source code is public. You can read the code or open an issue.</p>
+            <p className="mt-1 mb-0 max-w-xl text-subtle">The code is public. Read it or open an issue.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <SiteLink
@@ -96,6 +102,6 @@ function TeamPage() {
           </div>
         </section>
       </div>
-    </Frame>
+    </PageFrame>
   );
 }

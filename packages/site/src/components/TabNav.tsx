@@ -15,7 +15,7 @@ export function TabNav({ className }: { className: string }) {
           </Link>
         ),
       )}
-      <SiteLink href={USER_DOCS.href} className="gl-nav-item">
+      <SiteLink href={USER_DOCS.href} aria-label={`${USER_DOCS.label} (opens in a new tab)`} className="gl-nav-item">
         {USER_DOCS.label}
         <Icon name="external-link" size={12} />
       </SiteLink>

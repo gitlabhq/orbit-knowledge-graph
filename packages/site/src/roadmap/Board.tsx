@@ -12,7 +12,7 @@ export function Board({ items, limit, compact = false, headingLevel = 2 }: { ite
         const all = items.filter((item) => horizon(item) === column.id);
         const shown = limit === undefined ? all : all.slice(0, limit);
         return (
-          <section key={column.id} aria-labelledby={`horizon-${column.id}`} className="board-surface flex flex-col rounded-[var(--radius-card)] bg-[var(--board-surface)] p-2">
+          <section key={column.id} aria-labelledby={`horizon-${column.id}`} className="board-surface glass-surface flex flex-col rounded-[var(--radius-card)] p-2">
             <header className="px-2 pb-2">
               <div className="flex items-center gap-2">
                 <Heading id={`horizon-${column.id}`} className="m-0 text-base font-semibold text-heading">
@@ -28,13 +28,13 @@ export function Board({ items, limit, compact = false, headingLevel = 2 }: { ite
             <ul className="m-0 flex list-none flex-col gap-2 p-0">
               {shown.map((item) => (
                 <li key={item.slug}>
-                  <ItemCard item={item} compact={compact} onBoard />
+                  <ItemCard item={item} compact={compact} />
                 </li>
               ))}
               {all.length === 0 && <li className="py-6 text-center text-sm text-subtle">Nothing here yet.</li>}
             </ul>
             {all.length > shown.length && (
-              <Link to="/roadmap" search={{ view: "board" }} className="gl-link mt-2 px-2 pb-1 text-sm">
+              <Link to="/roadmap" className="gl-link mt-2 px-2 pb-1 text-sm">
                 View all {all.length} items
               </Link>
             )}

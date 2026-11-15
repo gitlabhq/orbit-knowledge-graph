@@ -1,85 +1,51 @@
-import { cn, findPage, Icon, pageHeadOf } from "@gitlab-org/orbit-site";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { Frame } from "../components/Frame";
+import { findPage, Icon, PageFrame, pageHeadOf } from "@gitlab-org/orbit-site";
+import { createFileRoute } from "@tanstack/react-router";
 import { PageFooter } from "../components/PageFooter";
 import { Board } from "../roadmap/Board";
-import { formatDate, quarterIndex, quarterLabel, quarterMonths } from "../roadmap/calendar";
+import { quarterIndex } from "../roadmap/calendar";
 import { EmptyState } from "../roadmap/EmptyState";
 import { ItemCard } from "../roadmap/ItemCard";
-import { items, roadmapQuarter, roadmapUpdated, themeById, themes } from "../roadmap/model";
-import { EXACT, ThemeFilter } from "../roadmap/ThemeFilter";
-import { Timeline } from "../roadmap/Timeline";
+import { items, themeById, themes } from "../roadmap/model";
+import { ThemeFilter } from "../roadmap/ThemeFilter";
 
-type RoadmapSearch = { view?: "board"; theme?: string };
+type RoadmapSearch = { theme?: string };
 
 export const Route = createFileRoute("/roadmap/")({
   validateSearch: (search: Record<string, unknown>): RoadmapSearch => ({
-    view: search.view === "board" ? "board" : undefined,
     theme: themeById(typeof search.theme === "string" ? search.theme : undefined)?.id,
   }),
   head: () => pageHeadOf(findPage("roadmap")),
   component: RoadmapPage,
 });
 
-const VIEWS = [
-  { id: undefined, label: "Timeline", icon: "calendar" },
-  { id: "board" as const, label: "Board", icon: "overview" },
-];
-
-// One switcher, as in the Orbit Portal: a gray track with the open view raised on it.
-function ViewSwitch({ view }: { view?: "board" }) {
-  return (
-    <nav aria-label="Roadmap view" className="inline-flex items-center gap-0.5 rounded-[var(--gl-nav-item-border-radius)] bg-[var(--gl-background-color-strong)] p-0.5">
-      {VIEWS.map((option) => (
-        <Link
-          key={option.label}
-          to="."
-          search={(prev) => ({ ...prev, view: option.id })}
-          activeOptions={EXACT}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-[calc(var(--gl-nav-item-border-radius)-2px)] px-2.5 py-1 text-xs text-subtle no-underline transition-colors hover:text-default",
-            view === option.id && "bg-page text-default shadow-[0_1px_2px_rgb(0_0_0/0.08)]",
-          )}
-        >
-          <Icon name={option.icon} size={12} />
-          {option.label}
-        </Link>
-      ))}
-    </nav>
-  );
-}
-
 function RoadmapPage() {
-  const { view, theme } = Route.useSearch();
+  const { theme } = Route.useSearch();
   const page = findPage("roadmap");
   const filtered = theme ? items.filter((item) => item.theme.id === theme) : items;
   const open = filtered.filter((item) => item.status !== "shipped");
   const shipped = filtered.filter((item) => item.status === "shipped").sort((a, b) => quarterIndex(b.end) - quarterIndex(a.end));
   return (
-    <Frame
+    <PageFrame
+      path="roadmap"
       title={page?.meta.title ?? "Roadmap"}
       description={page?.meta.description}
-      header={
-        <p className="mt-3 mb-0 text-xs text-subtle">
-          Updated {formatDate(roadmapUpdated)}. This quarter is {quarterLabel(roadmapQuarter)} ({quarterMonths(roadmapQuarter)}). The GitLab fiscal year starts on February 1. Dates are targets, not commitments.
-        </p>
-      }
       footer={page && <PageFooter page={page} />}
     >
-      <div className="not-prose -mt-3 mb-6 flex flex-col items-start gap-2">
-        <ViewSwitch view={view} />
-        {themes.length > 0 && <ThemeFilter theme={theme} />}
-      </div>
-      <div className="page-bleed">
+      {themes.length > 0 && (
+        <div className="not-prose -mt-3 mb-6 flex flex-col items-start gap-2">
+          <ThemeFilter theme={theme} />
+        </div>
+      )}
+      <div className="page-bleed page-glow">
         {items.length === 0 ? (
           <EmptyState message="The roadmap has no items." reset={false} />
-        ) : view === "board" ? (
-          open.length > 0 ? <Board items={filtered} /> : <EmptyState message="This theme has no upcoming items." />
+        ) : open.length > 0 ? (
+          <Board items={filtered} />
         ) : (
-          <Timeline items={filtered} />
+          <EmptyState message="This theme has no upcoming items." />
         )}
       </div>
-      {view === "board" && shipped.length > 0 && (
+      {shipped.length > 0 && (
         <section aria-labelledby="shipped" className="mt-12">
           <h2 id="shipped" className="m-0 mb-1 flex items-center gap-2 text-xl font-semibold text-default">
             <Icon name="status-success" className="text-success" />
@@ -97,6 +63,6 @@ function RoadmapPage() {
           </div>
         </section>
       )}
-    </Frame>
+    </PageFrame>
   );
 }
