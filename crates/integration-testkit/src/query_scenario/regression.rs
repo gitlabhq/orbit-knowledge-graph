@@ -199,6 +199,50 @@ fn compile_errors_never_show_private_details() {
 }
 
 #[test]
+fn edge_prop_absent_checks_every_edge() {
+    let traversal =
+        json!({"gql": "MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN a, b"});
+    run_suite(
+        traversal.clone(),
+        "edges: {CALLS: [[1, 2]]}\nedge_prop_absent: [path_id, step, depth]",
+    );
+    rejects(
+        traversal,
+        "edges: {CALLS: [[1, 2]]}\nedge_prop_absent: [weight]",
+        "edge_prop_absent takes depth, path_id, or step, got weight",
+    );
+    rejects(
+        json!({"json": r#"{"query_type": "path_finding",
+            "nodes": [{"id": "a", "entity": "Definition", "node_ids": [1]}, {"id": "b", "entity": "Definition", "node_ids": [3]}],
+            "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3, "rel_types": ["CALLS"]}}"#}),
+        "path_count: 1\nedge_prop_absent: [path_id]",
+        "CALLS edge Definition 1 -> Definition 2 has path_id",
+    );
+}
+
+#[test]
+fn aggregation_columns_match_exactly_and_in_order() {
+    let query =
+        json!({"gql": "MATCH (d:Definition) WHERE d.id >= 1 AND d.id <= 4 RETURN count(d) AS n"});
+    let rows = "row_values: [{n: 4}]\n";
+    run_suite(
+        query.clone(),
+        &format!("{rows}aggregation_columns: [{{name: n, function: count, target: d}}]"),
+    );
+    for columns in [
+        "[{name: n, function: sum, target: d}]",
+        "[{name: n, function: count, target: d, property: id}]",
+        "[{name: n, function: count, target: d}, {name: m, function: count, target: d}]",
+    ] {
+        rejects(
+            query.clone(),
+            &format!("{rows}aggregation_columns: {columns}"),
+            "aggregation columns mismatch",
+        );
+    }
+}
+
+#[test]
 fn exact_null_and_string_properties_do_not_accept_missing_or_other_types() {
     let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
     rejects(
