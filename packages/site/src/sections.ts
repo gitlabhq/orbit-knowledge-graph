@@ -14,7 +14,6 @@ export const TABS: Tab[] = [
       { route: "engineering/architecture", label: "Architecture", description: "The design contracts of each component" },
       { route: "engineering/adr", label: "ADRs", description: "Architecture decision records" },
       { route: "engineering/testing", label: "Testing", description: "How Orbit is tested" },
-      { route: "engineering/runbooks", label: "Runbooks", description: "Operate Orbit and recover from failures" },
       { route: "team", label: "Team", description: "Who builds Orbit, and how we work" },
     ],
   },
@@ -32,7 +31,18 @@ export const SECTIONS = [
   { route: "engineering/architecture", label: "Architecture" },
   { route: "engineering/adr", label: "ADRs" },
   { route: "engineering/testing", label: "Testing" },
-  { route: "engineering/runbooks", label: "Runbooks" },
+];
+
+// Pages that stay in the repository but not on the public site: internal operations, billing controls, and
+// guides written for coding agents.
+export const OFF_SITE = [
+  "engineering/adr/006_dap_integration.md",
+  "engineering/adr/007_monetization_engineering.md",
+  "engineering/adr/020_billing_sox_scope.md",
+  "engineering/development/adding-data-to-the-knowledge-graph.md",
+  "engineering/development/agents-crate-map.md",
+  "engineering/development/agents-reference-index.md",
+  "engineering/development/sox-billing-boundary.md",
 ];
 
 export const ENGINEERING = SECTIONS.filter(({ route }) => route.startsWith("engineering/"));

@@ -11,7 +11,7 @@ tracking: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1311
 
 Orbit queries use GQL.
 Many agents and engineers already know this query style, so queries are easier to write and to read.
-GQL becomes the Orbit query language on every deployment type with GitLab 19.5.
+GQL is the Orbit query language on every deployment type, from GitLab 19.5.
 
 ## Example
 
