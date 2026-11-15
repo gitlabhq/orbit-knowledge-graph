@@ -354,7 +354,7 @@
   user-select: none;
 }
 
-.next-search mark,
+.next-demo mark,
 .next-context mark {
   border-radius: 0.1875rem;
   background: color-mix(in srgb, var(--trace-lit) 34%, transparent);
@@ -719,12 +719,41 @@
 
 @media (min-width: 900px) {
   .next-demo {
-    grid-template-columns: 15rem minmax(0, 1fr);
+    grid-template-columns: 14rem minmax(0, 1fr);
     align-items: start;
   }
 }
 
+/* Wide screens get a third column for the results on the map, as wide as the examples, so the chat sits in
+   the middle. The demo is wider than the text column and centers on the window. */
+.next-demo-viz {
+  display: none;
+}
+
+@media (min-width: 1100px) {
+  .next-demo {
+    grid-template-columns: 14rem minmax(0, 1fr) 14rem;
+    width: min(80rem, calc(100vw - 4rem));
+    max-width: none;
+    align-items: stretch;
+  }
+
+  .next-demo-examples {
+    align-self: start;
+  }
+
+  .next-demo-viz {
+    display: block;
+  }
+}
+
 .next-demo-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.next-demo-group {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -799,8 +828,41 @@
   border-radius: var(--radius-card);
 }
 
-.next-pathmap {
-  position: relative;
-  height: 9.5rem;
-  margin: 0.5rem 0 0.25rem;
+
+/* A long answer scrolls inside the chat, so the chat stays in the first screen. */
+.next-chat .agent-thread {
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+/* Declared after the base .next-demo rule so it wins: on wide screens the demo spans the window. */
+@media (min-width: 1100px) {
+  .next-demo {
+    flex-shrink: 0;
+    width: min(84rem, calc(100vw - 4rem));
+    max-width: none;
+  }
+}
+
+/* On wide screens the chat keeps a reading width in the middle. The examples sit against its left edge,
+   and the right column stays open for the results on the map. */
+@media (min-width: 1100px) {
+  .next-demo {
+    grid-template-columns: minmax(14rem, 1fr) minmax(0, 40rem) minmax(14rem, 1fr);
+  }
+
+  .next-demo-examples {
+    justify-self: end;
+    width: 15rem;
+  }
+}
+
+/* Clear glass: a light tint, a strong blur, and a bright top edge, so the map shows through the chat. */
+.orbit-hero .next-chat {
+  border-color: color-mix(in srgb, #fff 14%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, #fff 6%, transparent), color-mix(in srgb, #fff 2%, transparent)), color-mix(in srgb, var(--color-page) 30%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent),
+    0 24px 60px -24px rgb(0 0 0 / 55%);
+  backdrop-filter: blur(24px) saturate(160%);
 }

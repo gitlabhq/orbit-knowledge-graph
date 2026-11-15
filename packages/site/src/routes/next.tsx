@@ -46,7 +46,7 @@ function Hero() {
   return (
     <section className="orbit-hero orbit-hero-lg orbit-hero-center next-hero not-prose page-dark page-dark-top gl-dark gl-dark-scope -mt-10 flex flex-col">
       <div className="next-hero-map" aria-hidden="true">
-        <SearchMap search={search} anchor=".next-chat" />
+        <SearchMap search={search} anchor=".next-chat" region=".next-demo-viz" />
       </div>
       <p className="orbit-hero-eyebrow">Coming soon</p>
       <p className="orbit-hero-title next-hero-title">
