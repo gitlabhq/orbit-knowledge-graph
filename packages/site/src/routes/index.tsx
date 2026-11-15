@@ -417,7 +417,7 @@ function Hero() {
           }
         />
       </div>
-      <SetupPicker className="mt-12" />
+      <SetupPicker className="mt-16" />
     </OrbitHero>
   );
 }
