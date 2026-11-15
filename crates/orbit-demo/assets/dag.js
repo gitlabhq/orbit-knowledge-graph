@@ -69,34 +69,38 @@
     "elk.edgeRouting": "ORTHOGONAL",
     "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
     "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
-    "elk.spacing.nodeNode": "36",
-    "elk.layered.spacing.nodeNodeBetweenLayers": "64",
-    "elk.spacing.edgeEdge": "16",
-    "elk.spacing.edgeNode": "24",
-    "elk.layered.spacing.edgeEdgeBetweenLayers": "16",
-    "elk.layered.spacing.edgeNodeBetweenLayers": "24",
-    "elk.spacing.edgeLabel": "6",
+    "elk.spacing.nodeNode": "30",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "36",
+    "elk.spacing.edgeEdge": "10",
+    "elk.spacing.edgeNode": "12",
+    "elk.layered.spacing.edgeEdgeBetweenLayers": "10",
+    "elk.layered.spacing.edgeNodeBetweenLayers": "12",
+    "elk.spacing.edgeLabel": "2",
     "elk.edgeLabels.placement": "CENTER",
     "elk.padding": `[top=${PAD},left=${PAD},bottom=${PAD},right=${PAD}]`,
   };
 
-  // Key edges run right side to left side; row edges leave the bottom and enter Combine's top.
+  const isCombine = (stage) => kind(stage.backend) === "combine";
+
+  // ELK lays out the data stages and their key edges; Combine sits centred under them and each
+  // row edge drops to it on its own lane, so row edges stay short.
   function graph(model, size) {
-    const sides = { keys: ["EAST", "WEST"], rows: ["SOUTH", "NORTH"] };
-    const ports = Object.fromEntries(model.stages.map((s) => [s.id, []]));
-    for (const e of model.edges) {
-      ports[e.from].push({ id: `${e.id}-out`, layoutOptions: { "elk.port.side": sides[e.kind][0] } });
-      ports[e.to].push({ id: `${e.id}-in`, layoutOptions: { "elk.port.side": sides[e.kind][1] } });
+    const data = model.stages.filter((s) => !isCombine(s));
+    const keys = model.edges.filter((e) => e.kind === "keys");
+    const ports = Object.fromEntries(data.map((s) => [s.id, []]));
+    for (const e of keys) {
+      ports[e.from].push({ id: `${e.id}-out`, layoutOptions: { "elk.port.side": "EAST" } });
+      ports[e.to].push({ id: `${e.id}-in`, layoutOptions: { "elk.port.side": "WEST" } });
     }
     return {
       id: "plan",
       layoutOptions: OPTIONS,
-      children: model.stages.map((s) => ({ id: `s${s.id}`, width: size.cards[s.id], height: H, ports: ports[s.id], layoutOptions: { "elk.portConstraints": "FIXED_SIDE" } })),
-      edges: model.edges.map((e) => ({ id: e.id, sources: [`${e.id}-out`], targets: [`${e.id}-in`], layoutOptions: { "elk.edgeLabels.placement": "CENTER" }, labels: [{ id: `${e.id}-label`, text: e.label, width: size.labels[e.id], height: LABEL_H, layoutOptions: { "elk.edgeLabels.placement": "CENTER" } }] })),
+      children: data.map((s) => ({ id: `s${s.id}`, width: size.cards[s.id], height: H, ports: ports[s.id], layoutOptions: { "elk.portConstraints": "FIXED_SIDE" } })),
+      edges: keys.map((e) => ({ id: e.id, sources: [`${e.id}-out`], targets: [`${e.id}-in`], layoutOptions: { "elk.edgeLabels.placement": "CENTER" }, labels: [{ id: `${e.id}-label`, text: e.label, width: size.labels[e.id], height: LABEL_H, layoutOptions: { "elk.edgeLabels.placement": "CENTER" } }] })),
     };
   }
 
-  function laidFrom(model, result) {
+  function laidFrom(model, result, size) {
     const nodes = {};
     for (const child of result.children) nodes[Number(child.id.slice(1))] = { x: child.x, y: child.y, w: child.width };
     const routes = {};
@@ -104,7 +108,38 @@
       const section = e.sections[0], label = e.labels[0];
       routes[e.id] = { points: [section.startPoint, ...(section.bendPoints || []), section.endPoint], label: { x: label.x + label.width / 2, y: label.y + label.height / 2 } };
     }
-    return { nodes, routes, width: Math.ceil(result.width), height: Math.ceil(result.height) };
+    const data = Object.values(nodes);
+    const bottom = Math.max(PAD, ...data.map((n) => n.y + H), result.height - PAD);
+    let width = Math.ceil(result.width), height = Math.ceil(result.height);
+    for (const stage of model.stages.filter(isCombine)) {
+      const into = model.edges.filter((e) => e.kind === "rows" && e.to === stage.id).sort((x, y) => nodes[x.from].x - nodes[y.from].x);
+      const w = size.cards[stage.id], lanes = Math.max(1, into.length);
+      const combine = { x: Math.max(PAD, (width - w) / 2), y: bottom + 42 + lanes * 12, w };
+      nodes[stage.id] = combine;
+      const drops = into.map((e, slot) => {
+        const source = nodes[e.from], sx = source.x + source.w / 2;
+        return { e, source, sx, ex: combine.x + 24 + ((w - 48) * (slot + 0.5)) / into.length };
+      });
+      drops.sort((x, y) => Math.abs(x.sx - x.ex) - Math.abs(y.sx - y.ex));
+      drops.forEach(({ e, source, sx, ex }, rank) => {
+        const sy = source.y + H, lane = bottom + 30 + rank * 12, band = bottom + 12;
+        const below = data.filter((n) => n !== source && n.y > source.y && n.x < sx && sx < n.x + n.w);
+        let points, at;
+        if (below.length) {
+          const gx = Math.max(...data.filter((n) => n.x < source.x + source.w && source.x < n.x + n.w).map((n) => n.x + n.w)) + 14;
+          const stub = sy + 12;
+          points = [{ x: sx, y: sy }, { x: sx, y: stub }, { x: gx, y: stub }, { x: gx, y: lane }, { x: ex, y: lane }, { x: ex, y: combine.y }];
+          at = { x: gx + 6 + size.labels[e.id] / 2, y: band };
+        } else {
+          points = [{ x: sx, y: sy }, { x: sx, y: lane }, { x: ex, y: lane }, { x: ex, y: combine.y }];
+          at = { x: sx + 6 + size.labels[e.id] / 2, y: band };
+        }
+        routes[e.id] = { points: points.filter((p, i) => i === 0 || p.x !== points[i - 1].x || p.y !== points[i - 1].y), label: at };
+      });
+      width = Math.max(width, Math.ceil(combine.x + w + PAD));
+      height = Math.ceil(combine.y + H + PAD);
+    }
+    return { nodes, routes, width, height };
   }
 
   function orthogonal(points) {
@@ -227,7 +262,7 @@
       pending = key;
       elk.layout(graph(model, size)).then((result) => {
         if (pending !== key) return;
-        cached = { key, laid: laidFrom(model, result) };
+        cached = { key, laid: laidFrom(model, result, size) };
         document.dispatchEvent(new Event("orbit:render"));
       });
     }
