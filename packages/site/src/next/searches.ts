@@ -5,18 +5,12 @@
 
 export type Mode = "text" | "regex" | "structural";
 
-export type Source = "code" | "jira" | "slack" | "incident.io" | "grafana";
+// One search step's time, shared by the demo's passes and the map behind it, so both move together.
+export const STEP_MS = 650;
 
-export const SOURCES: { source: Source; label: string; icon: string }[] = [
-  { source: "code", label: "Code", icon: "code" },
-  { source: "jira", label: "Jira", icon: "work-item-issue" },
-  { source: "slack", label: "Slack", icon: "comment" },
-  { source: "incident.io", label: "incident.io", icon: "status-alert" },
-  { source: "grafana", label: "Grafana", icon: "chart" },
-];
-
-// One record from a third-party tool, with the GitLab work it links to.
-export type SourceRecord = { title: string; meta: string; text?: string; links: string[] };
+// One hop of a cross-tool example: the tool Orbit reads, what it finds there, a short name for the map,
+// and the GitLab work it links to. `tone` marks the problem it starts from or the fix it ends on.
+export type CrossStep = { tool: string; icon: string; finding: string; name: string; links?: string[]; tone?: "risk" | "ok" };
 
 export const MODES: { mode: Mode; blurb: string; placeholder: string }[] = [
   { mode: "text", blurb: "Exact text, in any file, on any branch.", placeholder: "Search for exact text" },
@@ -38,7 +32,8 @@ export type Funnel = { files: number; candidates: number; scanned: number; match
 
 export type Search = {
   id: string;
-  source: Source;
+  // A code search, or a question that crosses tools.
+  kind: "code" | "cross";
   label: string;
   pattern: string;
   // A shorter form of a long pattern, for the example cards.
@@ -49,13 +44,13 @@ export type Search = {
   summary: string;
   funnel?: Funnel;
   files: FileHit[];
-  records?: SourceRecord[];
+  steps?: CrossStep[];
 };
 
 export const SEARCHES: Search[] = [
   {
     id: "unwrap",
-    source: "code",
+    kind: "code",
     label: "Every unwrap() in Rust",
     pattern: "$X.unwrap()",
     mode: "structural",
@@ -98,7 +93,7 @@ export const SEARCHES: Search[] = [
   },
   {
     id: "flag",
-    source: "code",
+    kind: "code",
     label: "One feature flag, Ruby and Vue",
     pattern: "Feature\\.enabled\\?\\(:knowledge_graph\\b|feature_flag\\(:knowledge_graph\\b|glFeatures\\.knowledgeGraph\\b",
     short: "Feature\\.enabled\\?\\(:knowledge_graph|…",
@@ -140,7 +135,7 @@ export const SEARCHES: Search[] = [
   },
   {
     id: "react",
-    source: "code",
+    kind: "code",
     label: "React imports in TSX",
     pattern: 'import { $$$ } from "react"',
     mode: "structural",
@@ -179,7 +174,7 @@ export const SEARCHES: Search[] = [
   },
   {
     id: "branch",
-    source: "code",
+    kind: "code",
     label: "Code that is only on a branch",
     pattern: "CursorPaginator",
     mode: "text",
@@ -210,7 +205,7 @@ export const SEARCHES: Search[] = [
   },
   {
     id: "security-context",
-    source: "code",
+    kind: "code",
     label: "A type name, in Rust and JavaScript",
     pattern: "SecurityContext",
     mode: "text",
@@ -241,7 +236,7 @@ export const SEARCHES: Search[] = [
   },
   {
     id: "test-fns",
-    source: "code",
+    kind: "code",
     label: "Test functions by name",
     pattern: "fn\\s+\\w+_test",
     mode: "regex",
@@ -272,7 +267,7 @@ export const SEARCHES: Search[] = [
   },
   {
     id: "result-fns",
-    source: "code",
+    kind: "code",
     label: "Functions that return a Result",
     pattern: "fn $NAME($$$) -> Result<$T, $E>",
     mode: "structural",
@@ -304,70 +299,38 @@ export const SEARCHES: Search[] = [
   },
 ];
 
-// Third-party searches. These sources have not shipped, so the records are sample data from the team's
-// third-party demo world: a pricing cache, epic ORB-1, and incident INC-77, on made-up projects.
-export const SAMPLE_SEARCHES: Search[] = [
-  {
-    id: "jira-cache",
-    source: "jira",
-    label: "Issues about the pricing cache",
-    pattern: "pricing cache",
-    mode: "text",
-    branches: "default",
-    summary: "3 issues, each linked to the merge request that builds it.",
-    files: [],
-    records: [
-      { title: "ORB-12 Add a cache to the pricing API", meta: "Story · Done", links: ["checkout-api!42", "checkout-api!43"] },
-      { title: "ORB-20 Document the pricing cache", meta: "Task · Done", links: ["checkout-api!45"] },
-      { title: "ORB-1 Checkout latency below 500 ms", meta: "Epic · In progress", links: [] },
-    ],
-  },
-  {
-    id: "slack-inc",
-    source: "slack",
-    label: "Messages that cite an incident",
-    pattern: "INC-77",
-    mode: "text",
-    branches: "default",
-    summary: "3 messages in #checkout-incidents, from the alert to the fix.",
-    files: [],
-    records: [
-      { title: "#checkout-incidents", meta: "@ada", text: "INC-77 declared: checkout p95 is at 2 s since checkout-api!42 rolled out.", links: ["checkout-api!42"] },
-      { title: "#checkout-incidents", meta: "@bob", text: "Rolling back !42 now, see ORB-12.", links: ["checkout-api!42"] },
-      { title: "#checkout-incidents", meta: "@bob", text: "Fix is up: !43 (cache stampede).", links: ["checkout-api!43"] },
-    ],
-  },
-  {
-    id: "incident-checkout",
-    source: "incident.io",
-    label: "Incidents on checkout",
-    pattern: "checkout",
-    mode: "text",
-    branches: "default",
-    summary: "1 incident, with the updates that name a merge request.",
-    files: [],
-    records: [
-      { title: "INC-77 Checkout p95 latency spike", meta: "Major · Closed", text: "Checkout p95 rose to 2 s after the pricing cache rollout.", links: ["checkout-api!42"] },
-      { title: "Update", meta: "@bob", text: "Rolled back !42. Latency is recovering.", links: ["checkout-api!42"] },
-      { title: "Update", meta: "@ada", text: "Fix !43 deployed. p95 is back to 420 ms.", links: ["checkout-api!43"] },
-    ],
-  },
-  {
-    id: "grafana-deploys",
-    source: "grafana",
-    label: "Deploys and alerts on a dashboard",
-    pattern: "dashboard:checkout",
-    mode: "text",
-    branches: "default",
-    summary: "4 annotations: two deploys, and the alert that fired and cleared between them.",
-    files: [],
-    records: [
-      { title: "Deploy api v1.4.2", meta: "deploy", links: ["checkout-api!42"] },
-      { title: "Checkout p95 above 800 ms", meta: "alert · Alerting", links: [] },
-      { title: "Deploy api v1.4.3", meta: "deploy", links: ["checkout-api!43"] },
-      { title: "Checkout p95 above 800 ms", meta: "alert · Normal", links: [] },
-    ],
-  },
+// Questions that cross tools. Third-party sources have not shipped, so the steps are sample data from the
+// team's third-party demo world: a pricing cache, epic ORB-1, and incident INC-77, on made-up projects.
+const cross = (id: string, label: string, pattern: string, summary: string, steps: CrossStep[]): Search => ({ id, kind: "cross", label, pattern, mode: "text", branches: "default", summary, files: [], steps });
+
+export const CROSS_SEARCHES: Search[] = [
+  cross("incident", "Resolve an incident", "What caused INC-77, and which change fixed it?", "checkout-api!42 caused it. !43 fixed the cache stampede.", [
+    { tool: "incident.io", icon: "status-alert", finding: "INC-77: checkout p95 is at 2 s.", name: "INC-77", tone: "risk" },
+    { tool: "Grafana", icon: "chart", finding: "The p95 alert fired 1 hour after the v1.4.2 deploy.", name: "p95 alert" },
+    { tool: "GitLab", icon: "tanuki", finding: "v1.4.2 shipped the pricing cache.", name: "!42 deployed", links: ["checkout-api!42"] },
+    { tool: "Jira", icon: "work-item-issue", finding: "!42 built ORB-12, the pricing cache.", name: "ORB-12" },
+    { tool: "Slack", icon: "comment", finding: "The team rolled back !42 and named a cache stampede.", name: "rollback thread" },
+    { tool: "GitLab", icon: "tanuki", finding: "!43 fixed the stampede. p95 is back to 420 ms.", name: "!43 fixed", links: ["checkout-api!43"], tone: "ok" },
+  ]),
+  cross("alert", "Find what changed before an alert", "What deployed right before the checkout alert?", "The v1.4.2 deploy, one hour before. It added a cache read with no timeout.", [
+    { tool: "Grafana", icon: "chart", finding: "Checkout p95 went above 800 ms at 15:04.", name: "p95 alert", tone: "risk" },
+    { tool: "GitLab", icon: "tanuki", finding: "v1.4.2 deployed to production at 14:02.", name: "v1.4.2 deploy" },
+    { tool: "GitLab", icon: "tanuki", finding: "v1.4.2 shipped checkout-api!42, the pricing cache.", name: "!42", links: ["checkout-api!42"] },
+    { tool: "Code search", icon: "code", finding: "!42 added cache.get in pricing.rb:57, with no timeout.", name: "pricing.rb:57", tone: "ok" },
+  ]),
+  cross("epic", "Track a Jira epic", "Is Jira epic ORB-1 on track?", "On track for the 500 ms goal. ORB-13 has no code yet.", [
+    { tool: "Jira", icon: "work-item-issue", finding: "ORB-1, checkout latency below 500 ms, has 3 stories.", name: "ORB-1" },
+    { tool: "GitLab", icon: "tanuki", finding: "ORB-12 shipped in !42 and !43.", name: "ORB-12 shipped", links: ["checkout-api!42", "checkout-api!43"] },
+    { tool: "GitLab", icon: "tanuki", finding: "ORB-14 is in review in !44. Its pipeline passed.", name: "ORB-14 in review", links: ["checkout-api!44"] },
+    { tool: "Jira", icon: "work-item-issue", finding: "ORB-13 has no merge request yet.", name: "ORB-13", tone: "risk" },
+    { tool: "Grafana", icon: "chart", finding: "Checkout p95 is at 420 ms, under the goal.", name: "p95 420 ms", tone: "ok" },
+  ]),
+  cross("why", "Find why code is the way it is", "Why is the pricing cache TTL 30 seconds?", "The team chose 30 seconds after INC-77, to keep prices fresh during sales.", [
+    { tool: "Code search", icon: "code", finding: "PRICE_TTL = 30.seconds in pricing.rb:12.", name: "pricing.rb:12" },
+    { tool: "GitLab", icon: "tanuki", finding: "checkout-api!43 set it.", name: "!43", links: ["checkout-api!43"] },
+    { tool: "Jira", icon: "work-item-issue", finding: "!43 is part of ORB-12, after INC-77.", name: "ORB-12" },
+    { tool: "Slack", icon: "comment", finding: "“Keep the TTL at 30 s. Any longer and flash-sale prices go stale.”", name: "the decision", tone: "ok" },
+  ]),
 ];
 
 // The size of the Orbit Next prototype's index of open source code, from its search page on Nov 15, 2026.

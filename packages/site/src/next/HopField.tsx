@@ -101,17 +101,15 @@ export function HopField({ hops, anchor, loop = 12000, className }: { hops: Hop[
           dot(x, y, lit, lit > 0.1 ? color : palette.rest);
         }
 
+      // A stop shows only once the pulse reaches it, named below its dot.
       ctx.textAlign = "center";
+      ctx.font = `600 12px ${style.fontFamily}`;
       for (const stop of stops) {
-        const reached = f >= stop.at;
-        dot(stop.px, stop.py, reached ? 1 : 0.2, reached ? toneOf(stop) : palette.rest, 1.5);
+        if (f < stop.at) continue;
+        dot(stop.px, stop.py, 1, toneOf(stop), 1.5);
         ctx.fillStyle = style.color;
-        ctx.globalAlpha = reached ? 0.55 : 0.25;
-        ctx.font = `600 10px ${style.fontFamily}`;
-        ctx.fillText(stop.tool.toUpperCase(), stop.px, stop.py - 30);
-        ctx.globalAlpha = reached ? 0.95 : 0.35;
-        ctx.font = `600 12px ${style.fontFamily}`;
-        ctx.fillText(stop.label, stop.px, stop.py - 15);
+        ctx.globalAlpha = 0.9;
+        ctx.fillText(stop.label, stop.px, stop.py + 22);
       }
     };
 

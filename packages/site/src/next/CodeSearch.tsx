@@ -1,17 +1,11 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { chip, cn, Icon } from "@gitlab-org/orbit-site";
-import { type FileHit, type Line, type Mode, MODES, SAMPLE_SEARCHES, type Search, SEARCHES, type Source, SOURCES } from "./searches";
-
-const STAGE_MS = 650;
+import { CROSS_SEARCHES, type FileHit, type Line, type Mode, MODES, type Search, SEARCHES, STEP_MS } from "./searches";
 
 const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-const count = (n: number) => n.toLocaleString("en-US");
-const sourceOf = (source: Source) => SOURCES.find((item) => item.source === source)!;
-const stagesOf = (search: Search) => {
-  const tool = sourceOf(search.source).label;
-  return search.source === "code" ? ["Plan", "Your permissions", "Prefilter", "Scan"] : ["Plan", `Your access in ${tool}`, `Search ${tool}`, "Link to GitLab"];
-};
-const ALL = [...SEARCHES, ...SAMPLE_SEARCHES];
+export const stagesOf = (search: Search) => (search.steps ? search.steps.map((step) => `Explore ${step.tool}`) : ["Plan", "Your permissions", "Prefilter", "Scan"]);
+const ALL = [...SEARCHES, ...CROSS_SEARCHES];
+const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : search.branches === "all" ? "branch" : search.mode === "structural" ? "code" : "search");
 
 function Code({ line }: { line: Line }) {
   const at = line.match ? line.text.indexOf(line.match) : -1;
@@ -47,39 +41,38 @@ function File({ hit }: { hit: FileHit }) {
   );
 }
 
-// Matches grouped by project, then by file, as on the Orbit Next results page. A third-party search lists
-// its records instead, each with the GitLab work it links to.
+// Matches grouped by project, then by file, as on the Orbit Next results page. A cross-tool question
+// lists the path it took instead: one finding per tool, with the GitLab work each links to.
 function Results({ search }: { search: Search }) {
-  if (search.records) {
-    const source = sourceOf(search.source);
+  if (search.steps) {
     return (
       <div className="next-results">
         <section className="next-project">
           <header className="next-project-head">
-            <Icon name={source.icon} size={14} />
-            <span className="next-project-name">{source.label}</span>
-            <span className="next-count">{search.records.length}</span>
+            <span className="next-project-name">Path across {new Set(search.steps.map((step) => step.tool)).size} tools</span>
             <span className="next-sample-tag">Sample data</span>
           </header>
-          {search.records.map((record, index) => (
-            <div key={index} className="next-record">
-              <div className="next-record-head">
-                <span className="next-record-title">{record.title}</span>
-                <span className="next-record-meta">{record.meta}</span>
-              </div>
-              {record.text && <p className="next-record-text">{record.text}</p>}
-              {record.links.length > 0 && (
-                <div className="next-record-links">
-                  {record.links.map((link) => (
-                    <span key={link} className="next-branch">
-                      <Icon name="merge-request" size={12} />
-                      {link}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+          <ol className="next-path">
+            {search.steps.map((step, index) => (
+              <li key={index} className={cn("next-path-step", step.tone && `next-path-${step.tone}`)}>
+                <span className="next-path-tool">
+                  <Icon name={step.icon} size={12} />
+                  {step.tool}
+                </span>
+                <span className="next-path-finding">{step.finding}</span>
+                {step.links && (
+                  <span className="next-record-links">
+                    {step.links.map((link) => (
+                      <span key={link} className="next-branch">
+                        <Icon name="merge-request" size={12} />
+                        {link}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
         </section>
       </div>
     );
@@ -105,65 +98,13 @@ function Results({ search }: { search: Search }) {
   );
 }
 
-// The side panel: the query, its passes as they run, and, for the measured search, how far each pass cut
-// the files down.
-function Inspector({ search, stage }: { search: Search; stage: number }) {
-  const stages = stagesOf(search);
-  const f = search.funnel;
-  const rows = f && [
-    { label: "files in that index", value: f.files },
-    { label: "candidates", value: f.candidates },
-    { label: "scanned", value: f.scanned },
-    { label: "matches", value: f.matches },
-  ];
-  return (
-    <aside className="next-inspector" aria-label="Query details">
-      <dl className="next-inspector-query">
-        <dt>Source</dt>
-        <dd>{sourceOf(search.source).label}</dd>
-        {search.source === "code" && (
-          <>
-            <dt>Mode</dt>
-            <dd>{search.mode}</dd>
-            {search.language && (
-              <>
-                <dt>Language</dt>
-                <dd>{search.language}</dd>
-              </>
-            )}
-            <dt>Branches</dt>
-            <dd>{search.branches === "all" ? "all" : "default"}</dd>
-          </>
-        )}
-      </dl>
-      <ol className="next-stages" aria-label="Search passes">
-        {stages.map((name, index) => (
-          <li key={name} className={cn("next-stage", index < stage && "next-stage-done")}>
-            <Icon name={index < stage ? "check" : "dash"} size={12} />
-            {name}
-          </li>
-        ))}
-      </ol>
-      {rows && stage >= stages.length && (
-        <ol className="next-funnel" aria-label="How the search narrowed the files">
-          {rows.map((row) => (
-            <li key={row.label} className="next-funnel-row">
-              <span className="next-funnel-bar" style={{ width: `${Math.max(3, (Math.log10(row.value) / Math.log10(f!.files)) * 100)}%` }} />
-              <span className="next-funnel-value">{count(row.value)}</span>
-              <span className="next-funnel-label">{row.label}</span>
-            </li>
-          ))}
-        </ol>
-      )}
-    </aside>
-  );
-}
+// Three code searches and three questions across tools, in one row.
+const EXAMPLES = [...["unwrap", "branch", "flag"].map((id) => SEARCHES.find((item) => item.id === id)!), ...CROSS_SEARCHES.filter((item) => item.id !== "epic")];
 
-// The Orbit Next search page, rebuilt in this site's look: sources, a query bar, and example searches.
-// Picking an example runs its passes and shows its recorded results. Any other pattern gets a note,
-// because live search is not public yet.
+// The Orbit Next search page, rebuilt in this site's look: a query bar and example searches, for code and
+// for questions that cross tools. Picking an example runs its passes and shows its results. Any other
+// pattern gets a note, because live search is not public yet.
 export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) => void }) {
-  const [source, setSource] = useState<Source>("code");
   const [search, setSearch] = useState<Search | null>(null);
   const [mode, setMode] = useState<Mode>("structural");
   const [pattern, setPattern] = useState("");
@@ -172,15 +113,14 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
 
   useEffect(() => {
     if (!search || stage >= stagesOf(search).length) return;
-    const timer = window.setTimeout(() => setStage((n) => n + 1), STAGE_MS);
+    const timer = window.setTimeout(() => setStage((n) => n + 1), STEP_MS);
     return () => window.clearTimeout(timer);
   }, [search, stage]);
 
   const run = (next: Search) => {
     setSearch(next);
     onSearch?.(next);
-    setSource(next.source);
-    setMode(next.mode);
+    if (next.kind === "code") setMode(next.mode);
     setPattern(next.pattern);
     setUnknown(false);
     setStage(still() ? stagesOf(next).length : 0);
@@ -193,55 +133,37 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
     setUnknown(false);
   };
 
-  const pick = (next: Source) => {
-    setSource(next);
-    reset();
-  };
-
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const known = ALL.find((item) => item.source === source && item.pattern === pattern.trim());
+    const known = ALL.find((item) => item.pattern === pattern.trim());
     if (known) run(known);
     else if (pattern.trim()) setUnknown(true);
   };
 
-  const examples = ALL.filter((item) => item.source === source);
   const done = search !== null && stage >= stagesOf(search).length;
-  const placeholder = source === "code" ? MODES.find((item) => item.mode === mode)!.placeholder : `Search ${sourceOf(source).label}`;
+  const code = search?.kind !== "cross";
   return (
     <div className="next-search not-prose">
       <form onSubmit={submit} className="next-query" aria-label="Search">
-        <div className="next-query-controls">
-          <div role="group" aria-label="Source" className="next-modes">
-            {SOURCES.map((item) => (
-              <button key={item.source} type="button" aria-pressed={source === item.source} onClick={() => pick(item.source)} className={chip(source === item.source)}>
-                <Icon name={item.icon} size={12} className="mr-1 inline" />
-                {item.label}
-              </button>
-            ))}
-          </div>
-          {source === "code" && (
-            <div role="group" aria-label="Search mode" className="next-modes">
-              {MODES.map((item) => (
-                <button key={item.mode} type="button" aria-pressed={mode === item.mode} onClick={() => setMode(item.mode)} className={chip(mode === item.mode)}>
-                  {item.mode}
-                </button>
-              ))}
-            </div>
-          )}
+        <div role="group" aria-label="Search mode" className="next-modes">
+          {MODES.map((item) => (
+            <button key={item.mode} type="button" aria-pressed={code && mode === item.mode} onClick={() => setMode(item.mode)} className={chip(code && mode === item.mode)}>
+              {item.mode}
+            </button>
+          ))}
         </div>
         <div className="next-query-row">
           <Icon name="search" size={16} className="next-query-icon" />
           <input
             aria-label="Pattern"
             value={pattern}
-            placeholder={placeholder}
+            placeholder={MODES.find((item) => item.mode === mode)!.placeholder}
             spellCheck={false}
             onChange={(event) => {
               setPattern(event.target.value);
               setUnknown(false);
             }}
-            className={cn("next-query-input", pattern && "next-query-code")}
+            className={cn("next-query-input", pattern && code && "next-query-code")}
           />
           <button type="submit" aria-label="Search" title="Search" className="agent-prompt-send">
             <Icon name="arrow-right" size={16} />
@@ -249,17 +171,16 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
         </div>
       </form>
 
-      <div className="agent-prompt-presets" role="group" aria-label="Example searches">
-        {examples.map((item) => (
+      <div className="agent-prompt-presets" role="group" aria-label="Examples">
+        {EXAMPLES.map((item) => (
           <button key={item.id} type="button" onClick={() => run(item)} className={cn("agent-prompt-preset", item.id === search?.id && "next-preset-on")}>
-            <Icon name={item.source !== "code" ? sourceOf(item.source).icon : item.branches === "all" ? "branch" : item.mode === "structural" ? "code" : "search"} size={14} />
+            <Icon name={iconOf(item)} size={14} />
             {item.label}
           </button>
         ))}
       </div>
 
       {unknown && <p className="next-note">Live search is coming soon. Pick an example to see recorded results.</p>}
-      {!search && source !== "code" && <p className="next-note">{sourceOf(source).label} search is coming soon. The examples use sample data.</p>}
 
       {search && (
         <div className="next-panel" aria-live="polite">
@@ -267,12 +188,9 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
             <button type="button" onClick={reset} aria-label="Close results" className={chip(false)}>
               <Icon name="close" size={12} />
             </button>
-            <span className="next-panel-summary">{done ? search.summary : "Searching…"}</span>
+            <span className="next-panel-summary">{done ? search.summary : search.pattern}</span>
           </div>
-          <div className="next-panel-body">
-            <div className="min-w-0">{done && <Results search={search} />}</div>
-            <Inspector search={search} stage={stage} />
-          </div>
+          <div className="next-panel-body">{done ? <Results search={search} /> : <p className="next-progress">{stagesOf(search)[stage]}…</p>}</div>
         </div>
       )}
     </div>

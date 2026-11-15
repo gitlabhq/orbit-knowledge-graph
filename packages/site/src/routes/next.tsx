@@ -17,28 +17,23 @@ export const Route = createFileRoute("/next")({
 // The field and the log share one loop.
 const LOOP = 12000;
 const HOPS: Hop[] = [
-  { tool: "incident.io", label: "INC-77 latency spike", x: 0.1, y: 0.6, at: 0.03, tone: "risk" },
+  { tool: "incident.io", label: "INC-77", x: 0.1, y: 0.6, at: 0.03, tone: "risk" },
   { tool: "Grafana", label: "p95 alert", x: 0.27, y: 0.24, at: 0.11 },
   { tool: "GitLab", label: "!42 deployed", x: 0.46, y: 0.56, at: 0.19 },
-  { tool: "Jira", label: "ORB-12 pricing cache", x: 0.28, y: 0.92, at: 0.27 },
-  { tool: "Slack", label: "rollback thread", x: 0.64, y: 0.9, at: 0.35 },
-  { tool: "Code search", label: "pricing.rb:57", x: 0.7, y: 0.26, at: 0.43 },
-  { tool: "GitLab", label: "!43 deployed", x: 0.92, y: 0.58, at: 0.7, tone: "ok" },
+  { tool: "Jira", label: "ORB-12", x: 0.28, y: 0.86, at: 0.27 },
+  { tool: "Slack", label: "rollback thread", x: 0.64, y: 0.84, at: 0.35 },
+  { tool: "Code search", label: "pricing.rb:57", x: 0.7, y: 0.22, at: 0.43 },
+  { tool: "GitLab", label: "!43 deployed", x: 0.92, y: 0.56, at: 0.7, tone: "ok" },
 ];
-// Every read goes through Orbit, which finds the next hop in each tool, as the Orbit tools show in an agent.
-// The agent then ships the fix.
+// Each read is one tool call. What it finds shows on the map, so the log keeps only the calls and the fix.
 const LOG: RippleLogLine[] = [
-  { at: 0.03, tool: true, text: "Explored Orbit · incident.io" },
-  { at: 0.06, text: "INC-77: checkout p95 is at 2 s." },
-  { at: 0.11, tool: true, text: "Explored Orbit · Grafana" },
-  { at: 0.14, text: "The alert fired 1 hour after a deploy." },
-  { at: 0.19, tool: true, text: "Explored Orbit · GitLab" },
-  { at: 0.22, text: "That deploy shipped checkout-api!42." },
-  { at: 0.27, tool: true, text: "Explored Orbit · Jira and Slack" },
-  { at: 0.31, text: "!42 is ORB-12, the pricing cache. The team saw a cache stampede." },
-  { at: 0.43, tool: true, text: "Explored Orbit · code search" },
-  { at: 0.46, text: "cache.get in pricing.rb:57 has no timeout." },
-  { at: 0.52, text: "Adding a timeout and request coalescing." },
+  { at: 0.03, tool: true, text: "Explore incident.io" },
+  { at: 0.11, tool: true, text: "Explore Grafana" },
+  { at: 0.19, tool: true, text: "Explore GitLab" },
+  { at: 0.27, tool: true, text: "Explore Jira" },
+  { at: 0.35, tool: true, text: "Explore Slack" },
+  { at: 0.43, tool: true, text: "Explore code search" },
+  { at: 0.52, text: "Adding a timeout to cache.get." },
   { at: 0.6, tone: "ok", text: "checkout-api!43 opened, pipeline passed" },
   { at: 0.7, tone: "ok", text: "!43 deployed to production" },
   { at: 0.78, tone: "ok", text: "p95 is back to 420 ms. INC-77 resolved." },
@@ -54,15 +49,15 @@ function Hero() {
         <SearchMap search={search} anchor=".next-query" />
       </div>
       <p className="orbit-hero-eyebrow">Coming soon</p>
-      <p className="orbit-hero-title">
+      <p className="orbit-hero-title next-hero-title">
         Search all of your code,
         <br />
         <span className="orbit-fade">and every tool around it.</span>
       </p>
-      <p className="mx-auto mt-5 max-w-[40rem] text-base text-balance text-subtle">
+      <p className="mx-auto mt-3 max-w-[36rem] text-sm text-balance text-subtle">
         What we are building next for GitLab Orbit: code search across every repository and branch, and your Jira, Slack, incident.io, and Grafana data next to your code.
       </p>
-      <div className="mt-10 flex w-full justify-center">
+      <div className="mt-8 flex w-full justify-center">
         <CodeSearch onSearch={setSearch} />
       </div>
     </section>

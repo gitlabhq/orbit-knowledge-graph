@@ -75,6 +75,47 @@
   justify-content: center;
 }
 
+.next-path {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.next-path-step {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.next-path-step + .next-path-step {
+  border-top: 1px solid var(--terminal-edge);
+}
+
+.next-path-step .next-record-links {
+  grid-column: 2;
+}
+
+.next-path-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--gl-text-color-subtle);
+  font-size: 0.75rem;
+}
+
+.next-path-finding {
+  color: var(--gl-text-color-default);
+  font-size: var(--gl-font-size-300);
+}
+
+.next-progress {
+  margin: 0;
+  color: var(--gl-text-color-subtle);
+  font-size: var(--gl-font-size-300);
+  text-align: center;
+}
+
 .next-record {
   display: flex;
   flex-direction: column;
@@ -205,11 +246,7 @@
   padding: 1rem;
 }
 
-@media (min-width: 900px) {
-  .next-panel-body {
-    grid-template-columns: minmax(0, 1fr) 15rem;
-  }
-}
+
 
 .next-results {
   display: flex;
@@ -418,6 +455,14 @@
 
 .orbit-hero.next-hero {
   padding-top: 3rem;
+}
+
+.orbit-hero .next-hero-title {
+  font-size: clamp(1.75rem, 3.2vw, 2.5rem);
+}
+
+.next-hero .orbit-hero-eyebrow {
+  margin-bottom: 0.75rem;
 }
 
 .next-hero-map {
