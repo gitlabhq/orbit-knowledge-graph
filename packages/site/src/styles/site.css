@@ -870,26 +870,14 @@
   padding-block: 0.375rem;
 }
 
-/* "Orbit Next" in the window bar: a pill with the Orbit logo's blue to mint, on its border and its text. */
-.next-soon {
+/* The window bar names the product: the Orbit logo and "Orbit Next", as plain text. */
+.next-chat-name {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.125rem 0.625rem;
-  border: 1px solid transparent;
-  border-radius: 9999px;
-  background:
-    linear-gradient(color-mix(in srgb, var(--color-page) 92%, #6b82ec), color-mix(in srgb, var(--color-page) 92%, #6b82ec)) padding-box,
-    linear-gradient(90deg, #6b82ec, #9aecde) border-box;
-  color: #98a8f2;
+  color: var(--gl-text-color-default);
   font-size: 0.75rem;
   font-weight: 600;
-}
-
-.next-soon-text {
-  background: linear-gradient(90deg, #98a8f2, #9aecde);
-  background-clip: text;
-  color: transparent;
 }
 
 /* Long labels must not squeeze the example icons. */

@@ -170,9 +170,9 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
             <span />
           </span>
           <span className="agent-chat-title">
-            <span className="next-soon">
+            <span className="next-chat-name">
               <Icon name="orbit" size={12} />
-              <span className="next-soon-text">Orbit Next</span>
+              Orbit Next
             </span>
           </span>
         </div>
