@@ -62,7 +62,7 @@ export const SEARCHES: Search[] = [
     mode: "structural",
     language: "rust",
     branches: "default",
-    summary: "In our internal testing: 100 matches in 111 ms. The pattern matches method calls, not comments or strings.",
+    summary: "100 matches. Method calls only, not comments or strings.",
     funnel: { files: 1_489_091, candidates: 4_156, scanned: 256, matches: 100, ms: 111 },
     more: ["lib.rs:304", "filter.rs:107", "filter.rs:112", "mod.rs:255", "arrow_client.rs:913", "configuration.rs:73", "rules.rs:601", "file_tree.rs:546"],
     files: [
