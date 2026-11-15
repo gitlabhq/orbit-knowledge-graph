@@ -47,7 +47,7 @@ pub async fn run_index_explains(ctx: &TestContext, directory: &Path) {
             }
         }
     }
-    assert!(checked > 0, "no plan-shape fixture asserts indexes");
+    assert!(checked > 0, "no compiler fixture asserts indexes");
     assert!(
         failures.is_empty(),
         "{} index explain failure(s):\n\n{}",

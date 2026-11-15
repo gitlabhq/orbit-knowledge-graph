@@ -20,7 +20,7 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
   output.
 - **`query_scenario`**: Runs YAML query scenarios through the full query pipeline.
 - **`scenario`**: Runs YAML indexer scenarios: seeds source rows, runs handlers, and checks the graph.
-- **`plan_shape`**: Compiles plan-shape fixtures and checks the selected plan.
+- **`compiler`**: Compiles compiler fixtures and checks the state that pipeline phases leave behind.
 
 ## Prerequisites
 
