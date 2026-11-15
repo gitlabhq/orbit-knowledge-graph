@@ -398,7 +398,7 @@ function HomePage() {
     <PageFrame path="" title={site.name} options={{ hideHeader: true, landing: true }}>
       <Hero />
 
-      <Section id="why" eyebrow="Why a graph" title={<><span className="orbit-fade">Higher agent accuracy</span>, lower token cost</>} lede="An agent that reads one file at a time guesses at what connects. GitLab Orbit gives it the connections.">
+      <Section id="why" pin eyebrow="Why a graph" title={<><span className="orbit-fade">Higher agent accuracy</span>, lower token cost</>} lede="An agent that reads one file at a time guesses at what connects. GitLab Orbit gives it the connections.">
         <Contrasts
           items={[
             {
@@ -420,7 +420,7 @@ function HomePage() {
         />
       </Section>
 
-      <Section id="explore" dark glow="right" dots eyebrow="The graph" title={<>The context graph for your <span className="orbit-fade">software lifecycle</span></>} lede="Code, merge requests, pipelines, deployments, and vulnerabilities in one graph that stays up to date.">
+      <Section id="explore" dark over glow="right" dots eyebrow="The graph" title={<>The context graph for your <span className="orbit-fade">software lifecycle</span></>} lede="Code, merge requests, pipelines, deployments, and vulnerabilities in one graph that stays up to date.">
         <Clip src="home/graph-explorer.mp4" poster="home/graph-explorer.jpg" width={1440} height={850} label="The GitLab Orbit graph explorer with the projects and groups of a GitLab instance" />
       </Section>
 
@@ -440,7 +440,7 @@ function HomePage() {
       </Section>
 
       <Section
-        id="graph" dark glow="left" dots
+        id="graph" dark pin glow="left" dots
         eyebrow="Zero-day response"
         title={<>From a zero-day to a <span className="orbit-fade">fix in production</span></>}
         lede="Your agent finds the vulnerable code, traces it to production, and ships the fix."
@@ -450,7 +450,7 @@ function HomePage() {
         </div>
       </Section>
 
-      <FieldBand>
+      <FieldBand over>
         <Slideshow slides={SLIDES} label="What our users say" />
       </FieldBand>
 
@@ -483,6 +483,7 @@ function HomePage() {
           <AgentLogos
             label="Agents that work with GitLab Orbit"
             marksOnly
+          reveal
             agents={[
               { name: "GitLab Duo", mark: "gitlab" },
               { name: "Claude Code", mark: "claude" },
