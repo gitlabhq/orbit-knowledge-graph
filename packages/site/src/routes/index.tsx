@@ -381,13 +381,13 @@ function SetupPicker({ className }: { className?: string }) {
   const [agent, setAgent] = useState("Claude Code");
   return (
     <div className={cn("flex flex-col items-center gap-5", className)}>
-      <AgentLogos label="Pick your agent" marksOnly agents={AGENTS} selected={agent} onSelect={setAgent} />
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
         <CopyButton key={agent} text={setupPrompt(agent)} label={`Copy a setup prompt for ${agent}`} primary>
-          Copy setup prompt for {agent}
+          Copy setup prompt
         </CopyButton>
         <QuickstartLink />
       </div>
+      <AgentLogos label="Pick your agent" marksOnly agents={AGENTS} selected={agent} onSelect={setAgent} />
     </div>
   );
 }
@@ -417,7 +417,7 @@ function Hero() {
           }
         />
       </div>
-      <SetupPicker className="mt-14" />
+      <SetupPicker className="mt-12" />
     </OrbitHero>
   );
 }
