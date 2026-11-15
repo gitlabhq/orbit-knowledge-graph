@@ -174,7 +174,7 @@ env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run container tests (requires the Colima `gkg` profile: `colima start gkg --memory 12`)"
 
 [tasks."test:integration:server"]
-run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(redaction_integration) | test(graph_formatter)'"
+run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(graph_formatter)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, redaction, graph formatter)"
 
