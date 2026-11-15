@@ -119,6 +119,8 @@ pub struct QueryExpect {
     #[serde(default)]
     pub compile_error_not_contains: Vec<ErrorPattern>,
     #[serde(default)]
+    pub format: FormatExpect,
+    #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
     pub nodes: BTreeMap<String, NodeExpect>,
@@ -138,7 +140,6 @@ pub struct QueryExpect {
     /// Assert row count for ungrouped/property-grouped aggregation results.
     #[serde(default)]
     pub row_count: Option<usize>,
-    /// Assert values on rows by index: `[{index: 0, col: val}]`
     #[serde(default)]
     pub row_values: Vec<BTreeMap<String, serde_json::Value>>,
     /// Assert group column metadata: `{ v_severity: "v.severity" }` verifies
@@ -291,6 +292,7 @@ impl QueryExpect {
                 page.repeat_count.is_none()
                     && page.compile_error.is_none()
                     && page.compile_error_not_contains.is_empty()
+                    && page.format.toon.is_none()
                     && page.pages.is_empty()
                     && page.all_pages.is_none(),
                 "{scenario}: page {} supports only result assertions",
@@ -404,6 +406,23 @@ pub(crate) fn rejection_reason(name: &str) -> Result<RejectionReason, String> {
                 known.join(", ")
             )
         })
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FormatExpect {
+    pub toon: Option<ToonExpect>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToonExpect {
+    #[serde(default)]
+    pub contains: Vec<String>,
+    pub ends_with: Option<String>,
+    #[serde(default)]
+    pub absent: Vec<String>,
+    pub value: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]

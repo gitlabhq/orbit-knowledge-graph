@@ -25,5 +25,4 @@ mod server {
     pub mod status;
     pub mod telemetry;
     pub mod tls_fixtures;
-    pub mod toon_formatter;
 }

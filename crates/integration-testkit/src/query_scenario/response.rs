@@ -1,12 +1,16 @@
 use std::sync::{Arc, LazyLock};
 
 use query_engine::compiler::{CompiledQueryContext, Frontend, Input, QueryType};
-use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
+use query_engine::formatters::{
+    FormatName, GraphFormatter, GraphResponse, ResultFormatter, TOON_OUTPUT_FORMAT_VERSION,
+    ToonFormatter,
+};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
 use regex::Regex;
 use serde_json::Value;
 
+use super::format::ToonExpect;
 use super::{QueryExpect, assert_gql_table, assert_response};
 
 static RESPONSE_SCHEMA: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
@@ -145,8 +149,95 @@ pub(super) fn assert_output(
         assert_gql_table(output, expect, label);
     }
     let response = GraphFormatter.format(output);
+    if let Some(toon) = &expect.format.toon {
+        assert_toon(output, &response, toon, label);
+    }
     assert_response(&output.compiled.input, response.clone(), expect, label);
     response
+}
+
+fn assert_toon(output: &PipelineOutput, graph: &Value, expect: &ToonExpect, label: &str) {
+    let (formatted, version, name) = ToonFormatter.format_stamped(output);
+    assert_eq!(name, FormatName::Toon, "{label}: TOON format name");
+    assert_eq!(
+        version,
+        TOON_OUTPUT_FORMAT_VERSION.to_string(),
+        "{label}: TOON format version"
+    );
+    let Value::String(text) = formatted else {
+        panic!("{label}: TOON output must be a string, got {formatted}");
+    };
+    let value: Value = toon_format::decode_strict(&text)
+        .unwrap_or_else(|error| panic!("{label}: invalid TOON ({error}): {text}"));
+    assert_eq!(
+        text,
+        toon_format::encode_default(&value).unwrap() + "\n",
+        "{label}: TOON output is not the canonical encoding"
+    );
+    let toon_nodes: usize = value["nodes"].as_object().map_or(0, |tables| {
+        tables
+            .values()
+            .filter_map(Value::as_array)
+            .map(Vec::len)
+            .sum()
+    });
+    let count = |key: &str, value: &Value| value[key].as_array().map_or(0, Vec::len);
+    if value["query_type"] != "aggregation" {
+        assert_eq!(
+            (toon_nodes, count("edges", &value)),
+            (count("nodes", graph), count("edges", graph)),
+            "{label}: TOON and graph responses disagree on node and edge counts"
+        );
+    }
+    for fragment in &expect.contains {
+        assert!(
+            text.contains(fragment),
+            "{label}: TOON lacks {fragment:?}:\n{text}"
+        );
+    }
+    if let Some(suffix) = &expect.ends_with {
+        assert!(
+            text.ends_with(suffix),
+            "{label}: TOON does not end with {suffix:?}:\n{text}"
+        );
+    }
+    for key in &expect.absent {
+        assert!(value.get(key).is_none(), "{label}: TOON has {key}: {value}");
+    }
+    if let Some(expected) = &expect.value
+        && let Some(mismatch) = subset_mismatch("toon", expected, &value)
+    {
+        panic!("{label}: {mismatch}\n{value}");
+    }
+}
+
+fn subset_mismatch(path: &str, expected: &Value, actual: &Value) -> Option<String> {
+    match (expected, actual) {
+        (Value::Object(expected), Value::Object(actual)) => {
+            expected
+                .iter()
+                .find_map(|(key, value)| match actual.get(key) {
+                    Some(found) => subset_mismatch(&format!("{path}.{key}"), value, found),
+                    None => Some(format!("{path}.{key} is missing")),
+                })
+        }
+        (Value::Array(expected), Value::Array(actual)) if expected.len() == actual.len() => {
+            expected
+                .iter()
+                .zip(actual)
+                .enumerate()
+                .find_map(|(index, (value, found))| {
+                    subset_mismatch(&format!("{path}[{index}]"), value, found)
+                })
+        }
+        (Value::Array(expected), Value::Array(actual)) => Some(format!(
+            "{path} has {} items, expected {}",
+            actual.len(),
+            expected.len()
+        )),
+        _ if expected == actual => None,
+        _ => Some(format!("{path} is {actual}, expected {expected}")),
+    }
 }
 
 pub(super) fn assert_pagination(output: &PipelineOutput, label: &str) {

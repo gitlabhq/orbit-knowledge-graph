@@ -199,6 +199,39 @@ fn compile_errors_never_show_private_details() {
 }
 
 #[test]
+fn toon_expectations_check_text_value_and_absent_keys() {
+    let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  toon:\n";
+    run_suite(
+        query.clone(),
+        &format!(
+            "{base}    contains: [\"Definition[1]{{id,name}}:\"]\n    ends_with: \"truncated: false\\n\"\n    absent: [edges]\n    value: {{nodes: {{Definition: [{{id: 1, name: alpha}}]}}}}"
+        ),
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    value: {{nodes: {{Definition: [{{name: beta}}]}}}}"),
+        "toon.nodes.Definition[0].name is \"alpha\", expected \"beta\"",
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    value: {{nodes: {{Definition: [{{id: 1}}, {{id: 2}}]}}}}"),
+        "toon.nodes.Definition has 1 items, expected 2",
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    contains: [absent-fragment]"),
+        "TOON lacks \"absent-fragment\"",
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    absent: [nodes]"),
+        "TOON has nodes",
+    );
+    rejects(query, &format!("{base}    exact: true"), "unknown field");
+}
+
+#[test]
 fn exact_null_and_string_properties_do_not_accept_missing_or_other_types() {
     let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
     rejects(
@@ -334,6 +367,7 @@ fn page_expectations_reject_fields_that_are_not_executed() {
         "repeat_count: 2",
         "compile_error: parse",
         "compile_error_not_contains: [secret]",
+        "format: {toon: {absent: [edges]}}",
         "pages: [{}]",
         "all_pages: {page_count: 1}",
     ] {

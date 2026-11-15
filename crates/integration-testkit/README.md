@@ -342,6 +342,17 @@ only IDs and the relationship type.
 | `path_edges` | `[[{from, from_id, type, to, to_id, step}]]` | Per-path edge structure (all fields optional) |
 | `path_endpoint_absent` | [Entity] | Entities excluded from path edges |
 
+**Formats:**
+
+| Field | Type | Description |
+|---|---|---|
+| `format.toon.contains` | [string] | The TOON text contains every fragment |
+| `format.toon.ends_with` | string | The TOON text ends with this suffix |
+| `format.toon.absent` | [key] | The decoded TOON value has none of these top-level keys |
+| `format.toon.value` | object | A partial match on the decoded TOON value: objects may have extra keys, arrays match item by item |
+
+Every `format.toon` check also requires the canonical TOON encoding, the TOON format name and version, and, for queries other than aggregations, the same node and edge counts as the graph response.
+
 **Compilation:**
 
 | Field | Type | Description |
