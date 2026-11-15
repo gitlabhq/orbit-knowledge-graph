@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use query_engine::compiler::{QueryType, RejectionReason};
+use query_engine::formatters::ColumnDescriptor;
 use regex::Regex;
 use serde::Deserialize;
 use strum::IntoEnumIterator;
@@ -146,6 +147,10 @@ pub struct QueryExpect {
     /// node `v`, property `severity`.
     #[serde(default)]
     pub group_columns: BTreeMap<String, String>,
+    #[serde(default)]
+    pub aggregation_columns: Option<Vec<ColumnDescriptor>>,
+    #[serde(default)]
+    pub edge_prop_absent: Vec<String>,
     /// Assert total edge count across all types.
     #[serde(default)]
     pub total_edge_count: Option<usize>,
@@ -316,6 +321,7 @@ impl QueryExpect {
             || self.empty_aggregation
             || self.row_count.is_some()
             || !self.row_values.is_empty()
+            || self.aggregation_columns.is_some()
     }
 
     fn has_path_assertions(&self) -> bool {
