@@ -17,6 +17,33 @@
   --tone-trust: var(--gl-color-data-green-300);
 }
 
+/* Centers the switch on the chat's window bar: 0.625rem of padding around 0.625rem lights, inside a 1px border. */
+.hero-chat {
+  position: relative;
+  width: 100%;
+  max-width: 44rem;
+}
+
+.hero-chat-switch {
+  position: absolute;
+  top: calc(1px + 0.9375rem);
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  gap: 0.125rem;
+  transform: translate(-50%, -50%);
+}
+
+.hero-chat .hero-chat-option {
+  padding-block: 0.125rem;
+}
+
+.agent-answer-text .hero-chat-preview {
+  margin-top: 0.75rem;
+  color: var(--gl-text-color-subtle);
+  font-size: 0.75rem;
+}
+
 @layer components {
   .tone-platform { --tone: var(--tone-platform); }
   .tone-agents { --tone: var(--tone-agents); }
