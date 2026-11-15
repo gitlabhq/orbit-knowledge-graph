@@ -18,7 +18,6 @@ const GROUPS = [
 const ALL = [...SEARCHES, ...CROSS_SEARCHES];
 // What the agent can query, as chips on the input.
 const SOURCES = [
-  { label: "Code, every branch", icon: "code" },
   { label: "GitLab", icon: "tanuki" },
   { label: "Jira", icon: "work-item-issue" },
   { label: "Slack", icon: "comment" },
