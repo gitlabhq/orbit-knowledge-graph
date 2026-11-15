@@ -93,7 +93,7 @@ function TeamPage() {
               <Icon name="external-link" size={12} />
             </SiteLink>
             <Link to="/content" className={segment(false, true)}>
-              Read the content
+              See what's new
             </Link>
           </div>
         </section>

@@ -4,7 +4,7 @@ export type Tab = { route: string; label: string; menu?: { route: string; label:
 
 export const TABS: Tab[] = [
   { route: "roadmap", label: "Roadmap" },
-  { route: "content", label: "Content" },
+  { route: "content", label: "What's new" },
   {
     route: "engineering",
     label: "Developers",
@@ -25,7 +25,7 @@ export const PAGES_DIR = "docs/pages";
 
 export const SECTIONS = [
   { route: "roadmap", label: "Roadmap" },
-  { route: "content", label: "Content" },
+  { route: "content", label: "What's new" },
   { route: "team", label: "Team" },
   { route: "engineering/development", label: "Development" },
   { route: "engineering/architecture", label: "Architecture" },

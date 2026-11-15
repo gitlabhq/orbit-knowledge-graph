@@ -1,7 +1,7 @@
 import { Embed, EmbedGrid, findPage, PageFrame, pageHeadOf, Video, VideoGrid } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { PageFooter } from "../components/PageFooter";
-import { links, videos } from "../content/demos";
+import { latest, links, videos } from "../content/demos";
 import { EmptyState } from "../roadmap/EmptyState";
 
 export const Route = createFileRoute("/content/")({
@@ -12,9 +12,21 @@ export const Route = createFileRoute("/content/")({
 function ContentPage() {
   const page = findPage("content");
   return (
-    <PageFrame path="content" title={page?.meta.title ?? "Content"} description={page?.meta.description} footer={page && <PageFooter page={page} />}>
+    <PageFrame path="content" title={page?.meta.title ?? "What's new"} description={page?.meta.description} footer={page && <PageFooter page={page} />}>
+      {latest.length > 0 && (
+        <section aria-labelledby="latest">
+          <h2 id="latest" className="m-0 text-xl font-semibold text-default">
+            Latest
+          </h2>
+          <EmbedGrid>
+            {latest.map((link) => (
+              <Embed key={link.href} {...link} />
+            ))}
+          </EmbedGrid>
+        </section>
+      )}
       {videos.length > 0 && (
-        <section aria-labelledby="videos">
+        <section aria-labelledby="videos" className="mt-6">
           <h2 id="videos" className="m-0 text-xl font-semibold text-default">
             Videos
           </h2>
@@ -28,7 +40,7 @@ function ContentPage() {
       {links.length > 0 && (
         <section aria-labelledby="related" className="mt-6">
           <h2 id="related" className="m-0 text-xl font-semibold text-default">
-            Related links
+            Demos and articles
           </h2>
           <EmbedGrid>
             {links.map((link) => (
@@ -37,7 +49,7 @@ function ContentPage() {
           </EmbedGrid>
         </section>
       )}
-      {videos.length === 0 && links.length === 0 && <EmptyState message="No demos are available." reset={false} />}
+      {latest.length === 0 && videos.length === 0 && links.length === 0 && <EmptyState message="Nothing new yet." reset={false} />}
     </PageFrame>
   );
 }
