@@ -1,0 +1,367 @@
+config:
+  security: { org_id: 5, paths: ["5/"] }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5]
+      group: [100, 101, 102, 200, 300]
+      project: [1000, 1001, 1002]
+      merge_request: [2000, 2001, 2002]
+      note: [3000, 3001, 3002, 3003, 9000]
+  extra_seed:
+    gl_user:
+      - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, _version: "2030-01-01 00:00:00" }
+      - { id: 2, username: bob, name: Bob Builder, state: active, user_type: human, _version: "2030-01-01 00:00:00" }
+      - { id: 3, username: charlie, name: Charlie Private, state: active, user_type: human, _version: "2030-01-01 00:00:00" }
+      - { id: 4, username: diana, name: Diana Dev, state: blocked, user_type: project_bot, _version: "2030-01-01 00:00:00" }
+      - { id: 5, username: "用户_émoji_🎉", name: "Unicode Name ñ", state: active, user_type: human, _version: "2030-01-01 00:00:00" }
+    gl_group:
+      - { id: 100, name: Public Group, visibility_level: public, traversal_path: "5/100/" }
+      - { id: 101, name: Private Group, visibility_level: private, traversal_path: "5/101/" }
+      - { id: 102, name: Internal Group, visibility_level: internal, traversal_path: "5/102/" }
+      - { id: 200, name: Depth2 Group, visibility_level: public, traversal_path: "5/200/" }
+      - { id: 300, name: Depth3 Group, visibility_level: public, traversal_path: "5/300/" }
+    gl_project:
+      - { id: 1000, name: Public Project, visibility_level: public, traversal_path: "5/100/1000/" }
+      - { id: 1001, name: Private Project, visibility_level: private, traversal_path: "5/101/1001/" }
+      - { id: 1002, name: Internal Project, visibility_level: internal, traversal_path: "5/102/1002/" }
+    gl_merge_request:
+      - { id: 2000, iid: 1, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, author_id: 1, traversal_path: "5/100/1000/" }
+      - { id: 2001, iid: 2, title: Fix bug B, state: merged, source_branch: fix-b, target_branch: main, author_id: 2, traversal_path: "5/101/1001/" }
+      - { id: 2002, iid: 3, title: Update C, state: closed, source_branch: update-c, target_branch: main, author_id: 3, traversal_path: "5/102/1002/" }
+    gl_note:
+      - { id: 3000, note: Normal note, noteable_type: MergeRequest, noteable_id: 2000, author_id: 1, traversal_path: "5/100/1000/", internal: true, confidential: true }
+      - { id: 3001, note: { sql: "repeat('A', 10000)" }, noteable_type: MergeRequest, noteable_id: 2001, author_id: 2, traversal_path: "5/101/1001/", internal: false, confidential: null }
+      - { id: 3002, note: "SQL injection attempt: '; DROP TABLE gl_user; --", noteable_type: MergeRequest, noteable_id: 2000, author_id: 1, traversal_path: "5/100/1000/", internal: false, confidential: null }
+      - { id: 3003, note: "Backslash\\quote\"newline\n\ttab", noteable_type: MergeRequest, noteable_id: 2000, author_id: 1, traversal_path: "5/100/1000/", internal: false, confidential: null }
+    gl_edge:
+      - { traversal_path: "5/100/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
+      - { traversal_path: "5/101/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 101, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:private"] }
+      - { traversal_path: "5/101/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 101, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:private"] }
+      - { traversal_path: "5/102/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 102, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:internal"] }
+      - { traversal_path: "5/102/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 102, target_kind: Group, source_tags: ["state:blocked", "user_type:project_bot"], target_tags: ["visibility_level:internal"] }
+      - { traversal_path: "5/100/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:public"] }
+      - { traversal_path: "5/200/", source_id: 100, source_kind: Group, relationship_kind: MEMBER_OF, target_id: 200, target_kind: Group, source_tags: ["visibility_level:public"], target_tags: ["visibility_level:public"] }
+      - { traversal_path: "5/300/", source_id: 200, source_kind: Group, relationship_kind: MEMBER_OF, target_id: 300, target_kind: Group, source_tags: ["visibility_level:public"], target_tags: ["visibility_level:public"] }
+      - { traversal_path: "5/100/", source_id: 100, source_kind: Group, relationship_kind: CONTAINS, target_id: 1000, target_kind: Project, source_tags: [], target_tags: [] }
+      - { traversal_path: "5/101/", source_id: 101, source_kind: Group, relationship_kind: CONTAINS, target_id: 1001, target_kind: Project, source_tags: [], target_tags: [] }
+      - { traversal_path: "5/102/", source_id: 102, source_kind: Group, relationship_kind: CONTAINS, target_id: 1002, target_kind: Project, source_tags: [], target_tags: [] }
+      - { traversal_path: "5/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 2000, target_kind: MergeRequest, source_tags: [], target_tags: [] }
+      - { traversal_path: "5/101/1001/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 2001, target_kind: MergeRequest, source_tags: [], target_tags: [] }
+      - { traversal_path: "5/102/1002/", source_id: 3, source_kind: User, relationship_kind: AUTHORED, target_id: 2002, target_kind: MergeRequest, source_tags: [], target_tags: [] }
+      - { traversal_path: "5/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "5/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3002, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "5/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3003, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "5/101/1001/", source_id: 2001, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3001, target_kind: Note, source_tags: [], target_tags: [] }
+
+cases:
+  - name: traversal_redaction_removes_unauthorized_paths
+    description: Redacting groups 101 and 102 removes their nodes and every edge into them
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [100]
+          project: []
+          merge_request: []
+          note: []
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 50
+        }
+    expect:
+      nodes:
+        Group:
+          ids: [100]
+          absent: [101, 102]
+          rows:
+            - { id: 100, name: Public Group }
+        User:
+          ids: [1, 5]
+      edges:
+        MEMBER_OF: [[1, 100], [5, 100]]
+
+  - name: traversal_deduplicates_shared_nodes
+    description: Users and groups that appear on several rows are returned once
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 50
+        }
+    expect:
+      node_count: 8
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+        Group:
+          ids: [100, 101, 102]
+      edges:
+        MEMBER_OF: [[1, 100], [1, 101], [2, 101], [3, 102], [4, 102], [5, 100]]
+
+  - name: traversal_with_filter
+    description: A state filter keeps only the blocked user and its one membership
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username", "state"], "filters": {"state": "blocked"}},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 50
+        }
+    expect:
+      total_edge_count: 1
+      nodes:
+        User:
+          ids: [4]
+          filters: { state: blocked }
+          rows:
+            - { id: 4, username: diana, state: blocked }
+        Group:
+          ids: [102]
+          rows:
+            - { id: 102, name: Internal Group }
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 4, to: Group, to_id: 102 }
+
+  - name: traversal_variable_length_reaches_depth_2
+    description: hops 1..2 reaches group 200 through group 100 and keeps the depth-1 groups
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g", "hops": [1, 2]}],
+          "limit": 50
+        }
+    expect:
+      nodes:
+        Group:
+          ids: [100, 101, 102, 200]
+      edges:
+        MEMBER_OF: [[1, 100], [1, 101], [2, 101], [3, 102], [4, 102], [5, 100], [1, 200], [5, 200]]
+
+  - name: traversal_variable_length_floor_skips_shallow
+    description: A hop floor of 2 excludes the depth-1 groups
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g", "hops": [2, 3]}],
+          "limit": 50
+        }
+    expect:
+      nodes:
+        Group:
+          ids: [200, 300]
+          absent: [100, 101, 102]
+      edges:
+        MEMBER_OF: [[1, 200], [5, 200], [1, 300], [5, 300]]
+
+  - name: traversal_variable_length_with_redaction_at_depth
+    description: Redaction removes deep groups that are not allowed and keeps the allowed depth-1 groups
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [100, 101, 102]
+          project: []
+          merge_request: []
+          note: []
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g", "hops": [1, 3]}],
+          "limit": 50
+        }
+    expect:
+      nodes:
+        Group:
+          ids: [100, 101, 102]
+          absent: [200, 300]
+      edges:
+        MEMBER_OF: [[1, 100], [1, 101], [2, 101], [3, 102], [4, 102], [5, 100]]
+
+  - name: traversal_both_direction
+    description: A both-direction group hierarchy traversal returns the MEMBER_OF chain
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "g1", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "g2", "entity": "Group", "columns": ["name"]}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "g1", "to": "g2", "direction": "both"}],
+          "limit": 50
+        }
+    expect:
+      nodes:
+        Group:
+          ids: [100, 200, 300]
+      edges:
+        MEMBER_OF: [[100, 200], [200, 300]]
+
+  - name: traversal_chain_user_group_project
+    description: A User to Group to Project chain returns both hops
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]},
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
+          ],
+          "relationships": [
+            {"type": "MEMBER_OF", "from": "u", "to": "g"},
+            {"type": "CONTAINS", "from": "g", "to": "p"}
+          ],
+          "limit": 50
+        }
+    expect:
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+        Group:
+          ids: [100, 101, 102]
+        Project:
+          ids: [1000, 1001, 1002]
+      edges:
+        MEMBER_OF: [[1, 100], [1, 101], [2, 101], [3, 102], [4, 102], [5, 100]]
+        CONTAINS: [[100, 1000], [101, 1001], [102, 1002]]
+
+  - name: traversal_chain_user_mr_note
+    description: A User to MergeRequest to Note chain returns both hops
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]},
+            {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note"]}
+          ],
+          "relationships": [
+            {"type": "AUTHORED", "from": "u", "to": "mr"},
+            {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+          ],
+          "limit": 50
+        }
+    expect:
+      nodes:
+        User:
+          ids: [1, 2]
+        MergeRequest:
+          ids: [2000, 2001]
+        Note:
+          ids: [3000, 3001, 3002, 3003]
+      edges:
+        AUTHORED: [[1, 2000], [2, 2001]]
+        HAS_NOTE: [[2000, 3000], [2000, 3002], [2000, 3003], [2001, 3001]]
+
+  - name: traversal_shared_target_node
+    description: Two relationships that meet at one note return the note once with both edges
+    steps:
+      - seed:
+          gl_edge:
+            - { traversal_path: "5/100/1000/", source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 3000, target_kind: Note }
+        query:
+          json: |
+            {
+              "query_type": "traversal",
+              "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "n", "entity": "Note", "columns": ["note"]},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
+              ],
+              "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "n"},
+                {"type": "CONTAINS", "from": "p", "to": "n"}
+              ],
+              "limit": 50
+            }
+        expect:
+          nodes:
+            User:
+              ids: [1]
+            Note:
+              ids: [3000]
+            Project:
+              ids: [1000]
+          edges:
+            AUTHORED: [[1, 3000]]
+            CONTAINS: [[1000, 3000]]
+
+  - name: traversal_hydrated_boolean_columns
+    description: Hydrated boolean columns serialize as booleans
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "columns": ["title"]},
+            {"id": "n", "entity": "Note", "columns": ["note", "internal", "confidential"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+          "limit": 10
+        }
+    expect:
+      nodes:
+        Note:
+          ids: [3000, 3002, 3003]
+          rows:
+            - { id: 3000, internal: true, confidential: true }
+            - { id: 3002, internal: false }
+      edges:
+        HAS_NOTE: [[2000, 3000], [2000, 3002], [2000, 3003]]
+
+  - name: traversal_hydrated_null_boolean_absent
+    description: Hydration drops NULL values, so a NULL confidential flag is absent rather than null
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "columns": ["title"]},
+            {"id": "n", "entity": "Note", "node_ids": [3002, 3003], "columns": ["note", "internal", "confidential"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+          "limit": 10
+        }
+    expect:
+      nodes:
+        Note:
+          ids: [3002, 3003]
+          prop_absent: [confidential]
+          rows:
+            - { id: 3002, internal: false }
+      edges:
+        HAS_NOTE: [[2000, 3002], [2000, 3003]]
