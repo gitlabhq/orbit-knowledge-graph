@@ -8,7 +8,6 @@ const textOf = (search: Search) => search.ask ?? (search.kind === "code" ? searc
 const TYPE_MS = 22;
 const SEND_PAUSE_MS = 250;
 const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
-const toolsOf = (search: Search) => [...new Set(search.steps!.map((step) => step.tool))];
 const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : search.branches === "all" ? "merge-request" : search.mode === "structural" ? "code" : "search");
 
 // One code search per mode, text, regex, then structural, and questions that use third-party connectors.
@@ -70,44 +69,30 @@ function File({ hit }: { hit: FileHit }) {
   );
 }
 
-// The thread for one example: the question, one Orbit tool line that grows as the search runs, and the
-// answer. The path and the findings show on the map behind the chat.
+// The thread for one example: the question, the Orbit tool lines as the search runs, and the answer. The path and the findings show on the map behind the chat.
 function Thread({ search, stage }: { search: Search; stage: number }) {
   const done = stage >= stepsOf(search);
-  const tools = search.steps ? toolsOf(search) : [];
-  const seen = search.steps ? [...new Set(search.steps.slice(0, Math.min(stage + 1, search.steps.length)).map((step) => step.tool))] : [];
   const code = done ? `Searched code for ${search.mode === "regex" ? "a regex" : search.pattern}${search.branches === "all" ? " on all branches" : ""}${search.funnel ? ` in ${search.funnel.ms} ms` : ""}` : "Searching code…";
-  // Each tool a question reads shows as a chip with its own icon, so the path visibly leaves GitLab.
-  const iconOfTool = (name: string) => search.steps!.find((step) => step.tool === name)!.icon;
-  const chain = (names: string[]) =>
-    names.map((name, index) => (
-      <span key={name} className="next-tool-wrap">
-        {index > 0 && <span className="next-tool-arrow">→</span>}
-        <span className="next-tool">
-          <Icon name={iconOfTool(name)} size={11} />
-          {name}
-        </span>
-      </span>
-    ));
   return (
     <div className="agent-thread">
       <p className="agent-message">{textOf(search)}</p>
       <div className="agent-reply" aria-live="polite">
         <ul className="agent-calls">
-          <li className={cn("agent-call", !done && "agent-call-running")}>
-            <Icon name="orbit" size={12} className="agent-call-mark" />
-            <span className="agent-call-tool">
-              {search.steps ? (
-                <>
-                  {done ? "Explored " : "Exploring "}
-                  {chain(done ? tools : seen)}
-                  {done ? "" : "…"}
-                </>
-              ) : (
-                code
-              )}
-            </span>
-          </li>
+          {search.steps ? (
+            // One line per tool, in the order the path reaches it, as in the agent log of the third-party
+            // section on this page.
+            search.steps.slice(0, Math.min(stage + 1, search.steps.length)).map((step, index) => (
+              <li key={index} className={cn("agent-call", index === stage && !done && "agent-call-running")}>
+                <Icon name="orbit" size={12} className="agent-call-mark" />
+                <span className="agent-call-tool">{index === stage && !done ? `Exploring ${step.tool}…` : `Explored ${step.tool}`}</span>
+              </li>
+            ))
+          ) : (
+            <li className={cn("agent-call", !done && "agent-call-running")}>
+              <Icon name="orbit" size={12} className="agent-call-mark" />
+              <span className="agent-call-tool">{code}</span>
+            </li>
+          )}
         </ul>
         {done && (
           <div className="agent-answer">
