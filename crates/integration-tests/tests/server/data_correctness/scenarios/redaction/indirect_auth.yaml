@@ -196,3 +196,26 @@ cases:
     expect:
       node_count: 0
       path_count: 0
+
+  - name: file_with_null_project_id_is_denied
+    description: A NULL project_id is stored as 0, so the File's redaction id matches no allowed project and the row is denied
+    config:
+      extra_seed:
+        gl_file:
+          - { id: 3000, traversal_path: "1/700/701/7100/", project_id: 7100, branch: main, path: src/lib.rs, name: lib.rs, extension: rs, language: Rust }
+          - { id: 3003, traversal_path: "1/700/701/7100/", project_id: null, branch: main, path: src/orphan.rs, name: orphan.rs, extension: rs, language: Rust }
+      redaction:
+        allow:
+          project: [7100]
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [3000, 3003], "columns": ["name"]}], "limit": 10}
+      gql: |
+        MATCH (f:File) WHERE f.id IN [3000, 3003] RETURN f.name
+    expect:
+      nodes:
+        File:
+          ids: [3000]
+          absent: [3003]
+          rows:
+            - { id: 3000, name: lib.rs }
