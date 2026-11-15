@@ -3,6 +3,8 @@ import { cn, Icon } from "@gitlab-org/orbit-site";
 import { CODE_MS, CROSS_SEARCHES, type FileHit, type Line, type Mode, MODES, type Search, SEARCHES, STEP_MS } from "./searches";
 
 const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const TYPE_MS = 22;
+const SEND_PAUSE_MS = 250;
 const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
 const toolsOf = (search: Search) => [...new Set(search.steps!.map((step) => step.tool))];
 const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : search.branches === "all" ? "branch" : search.mode === "structural" ? "code" : "search");
@@ -96,6 +98,25 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
   const [pattern, setPattern] = useState("");
   const [stage, setStage] = useState(0);
   const [unknown, setUnknown] = useState(false);
+  // An example types itself into the input, then sends. The length comes from the time since it started,
+  // so a slow timer only skips ahead.
+  const [typing, setTyping] = useState<{ search: Search; since: number; length: number } | null>(null);
+
+  useEffect(() => {
+    if (!typing) return;
+    const total = typing.search.pattern.length;
+    if (typing.length >= total) {
+      const timer = window.setTimeout(() => {
+        setTyping(null);
+        start(typing.search);
+      }, SEND_PAUSE_MS);
+      return () => window.clearTimeout(timer);
+    }
+    // Long patterns type faster, so every example types in about a second at most.
+    const per = Math.min(TYPE_MS, 1000 / total);
+    const timer = window.setTimeout(() => setTyping({ ...typing, length: Math.min(total, Math.floor((performance.now() - typing.since) / per) + 1) }), per);
+    return () => window.clearTimeout(timer);
+  }, [typing]);
 
   useEffect(() => {
     if (!run || stage >= stepsOf(run.search)) return;
@@ -107,10 +128,16 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
     setRun({ search, start: performance.now() });
     onSearch?.(search);
     if (search.kind === "code") setMode(search.mode);
-    // The example's text stays in the input, as if you had typed it.
-    setPattern(search.pattern);
+    setPattern("");
     setUnknown(false);
     setStage(still() ? stepsOf(search) : 0);
+  };
+
+  const pick = (search: Search) => {
+    if (search.kind === "code") setMode(search.mode);
+    setUnknown(false);
+    if (still()) start(search);
+    else setTyping({ search, since: performance.now(), length: 0 });
   };
 
   const submit = (event: FormEvent) => {
@@ -127,7 +154,7 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
           <div key={group.label} role="group" aria-label={group.label} className="next-demo-group">
             <span className="next-demo-label">{group.label}</span>
             {group.items.map((item) => (
-              <button key={item.id} type="button" onClick={() => start(item)} className={cn("next-demo-example", item.id === run?.search.id && "next-demo-example-on")}>
+              <button key={item.id} type="button" onClick={() => pick(item)} className={cn("next-demo-example", item.id === run?.search.id && "next-demo-example-on")}>
                 <Icon name={iconOf(item)} size={14} />
                 <span>{item.label}</span>
               </button>
@@ -142,6 +169,7 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
             <span />
             <span />
           </span>
+          <span className="agent-chat-title">Coming soon</span>
         </div>
         {run && <Thread key={run.start} search={run.search} stage={stage} />}
         <form onSubmit={submit} className="agent-prompt-box" aria-label="Search">
@@ -158,7 +186,7 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
             <textarea
               aria-label="Pattern or question"
               rows={1}
-              value={pattern}
+              value={typing ? typing.search.pattern.slice(0, typing.length) : pattern}
               placeholder={MODES.find((item) => item.mode === mode)!.placeholder}
               spellCheck={false}
               onChange={(event) => {
@@ -176,15 +204,6 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
           </div>
           {unknown && <p className="next-note">Live search is coming soon. Pick an example to see what it does.</p>}
         </form>
-        {run && (
-          <div className="agent-status" aria-hidden="true">
-            <span>{stage < stepsOf(run.search) ? "Searching" : run.search.steps ? [...new Set(run.search.steps.map((step) => step.tool))].join(" · ") : `${run.search.files.length + (run.search.more?.length ?? 0)} findings`}</span>
-            {run.search.funnel && stage >= stepsOf(run.search) && <span>{run.search.funnel.ms} ms</span>}
-            <span className="agent-status-brand">
-              <Icon name="orbit" size={12} /> Orbit Next
-            </span>
-          </div>
-        )}
       </div>
       {/* The map behind the hero draws each search's findings and path in this column. */}
       <div className="next-demo-viz" aria-hidden="true" />
