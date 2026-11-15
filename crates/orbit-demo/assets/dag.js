@@ -3,7 +3,7 @@
 (function () {
   const NS = "http://www.w3.org/2000/svg";
   const H = 92, VGAP = 116, PAD = 18, LANE = 26, CHAR = 6.7;
-  let W = 264, GAP = 232;
+  let W = 0, GAP = 232;
   const NAMES = { clickhouse: "ClickHouse", duckdb: "DuckDB lake", orbit_code: "Orbit Next", live: "Live (Data Extraction)", combine: "Combine" };
   const KINDS = { relational: "Relational", remote: "Remote", combine: "In process" };
   const STATES = { waiting: "Waiting", running: "Running", done: "Finished", failed: "Failed" };
@@ -35,10 +35,34 @@
     return width;
   }
 
-  function layout(stages, edges) {
+  const lines = (stage) => {
+    const k = kind(stage.backend);
+    return {
+      kind: `Stage ${stage.id} · ${KINDS[k]}`,
+      title: NAMES[stage.backend] || stage.backend,
+      meta: k === "combine" ? "combines rows · policy · paging" : `connection ${stage.connection}`,
+    };
+  };
+
+  function cardWidth(svg, stages) {
+    const probe = el("g", { class: "stage-card", visibility: "hidden" }, svg);
+    const width = (value, cls) => text(probe, 0, 0, value, cls).getComputedTextLength();
+    const pill = text(el("g", { class: "chip pill" }, probe), 0, 0, STATES.done).getComputedTextLength() + 14;
+    let widest = 0;
+    for (const stage of stages) {
+      const line = lines(stage);
+      const stats = width(`${plural(Math.max(stage.rows ?? 0, 10000), "row")} · ${Math.max(stage.elapsed ?? 0, 9999.9).toFixed(1)} ms`, "stats");
+      widest = Math.max(widest, width(line.kind, "kind"), width(line.title, "title"), width(line.meta, "meta"), pill + 16 + stats);
+    }
+    svg.removeChild(probe);
+    return Math.ceil(26 + widest + 16);
+  }
+
+  function layout(svg, stages, edges) {
     const data = stages.filter((s) => kind(s.backend) !== "combine").sort((a, b) => a.id - b.id);
     const combines = stages.filter((s) => kind(s.backend) === "combine");
-    [W, GAP] = data.length > 5 ? [208, 140] : data.length > 3 ? [224, 164] : [264, 232];
+    GAP = data.length > 5 ? 140 : data.length > 3 ? 164 : 232;
+    W = cardWidth(svg, stages);
     const column = Object.fromEntries(data.map((s, i) => [s.id, i]));
     const skips = edges
       .filter((e) => e.kind === "keys" && column[e.to] - column[e.from] > 1)
@@ -119,9 +143,10 @@
     const group = el("g", { class: ["stage-card", k, stage.status, stage.id === selected ? "selected" : ""].join(" "), transform: `translate(${p.x} ${p.y})`, tabindex: 0, role: "button", "data-stage": stage.id }, svg);
     el("rect", { class: "card", width: W, height: H, rx: 12 }, group);
     el("rect", { class: "accent", x: 10, y: 12, width: 4, height: H - 24, rx: 2 }, group);
-    text(group, 26, 25, `Stage ${stage.id} · ${KINDS[k]}`, "kind");
-    text(group, 26, 44, NAMES[stage.backend] || stage.backend, "title");
-    text(group, 26, 60, k === "combine" ? "combines rows · policy · paging" : `connection ${stage.connection}`, "meta");
+    const line = lines(stage);
+    text(group, 26, 25, line.kind, "kind");
+    text(group, 26, 44, line.title, "title");
+    text(group, 26, 60, line.meta, "meta");
     badge(group, 26, 77, STATES[stage.status] || stage.status, "pill");
     if (stage.status === "done") text(group, W - 14, 81, `${plural(stage.rows ?? 0, "row")} · ${stage.elapsed.toFixed(1)} ms`, "stats", "end");
     group.addEventListener("click", () => onSelect(stage.id));
@@ -137,7 +162,7 @@
       text(svg, 600, 65, "Run a query to see its stages, the key sets between them and their rows.", "dag-empty", "middle");
       return;
     }
-    const { positions, lanes: skips, width, height } = layout(model.stages, model.edges);
+    const { positions, lanes: skips, width, height } = layout(svg, model.stages, model.edges);
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.style.maxWidth = `${Math.round(width * 1.12)}px`;
     svg.style.minWidth = `${Math.round(width * 0.62)}px`;
