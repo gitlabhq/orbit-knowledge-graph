@@ -4,7 +4,7 @@ import { dirname, join, posix } from "node:path";
 import { parseFrontmatter } from "@gitlab-org/orbit-markdown/author";
 import { parse as parseYaml } from "yaml";
 import { itemFields } from "../src/roadmap/schema";
-import { OFF_SITE, PAGES_DIR, SECTIONS } from "../src/sections";
+import { PAGES_DIR, SECTIONS } from "../src/sections";
 import { fetchTrackers, type Tracker } from "./trackers";
 
 export const siteRoot = join(import.meta.dirname, "..");
@@ -39,7 +39,7 @@ export function sourceFiles(): Map<string, string> {
     [ENGINEERING_HOME, "engineering"],
     ...SECTIONS.flatMap(({ route }) =>
       readdirSync(join(repoRoot, dirOf(route)), { recursive: true, encoding: "utf8" })
-        .filter((name) => name.endsWith(".md") && !OFF_SITE.includes(posix.join(route, name)))
+        .filter((name) => name.endsWith(".md"))
         .map((name): [string, string] => [posix.join(dirOf(route), name), routeOf(route, name)]),
     ),
   ]);
