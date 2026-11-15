@@ -2,6 +2,7 @@ import { cn, Icon, NavMenu, pageLink, SiteLink } from "@gitlab-org/orbit-site";
 import { Link } from "@tanstack/react-router";
 import { TABS, USER_DOCS } from "../sections";
 
+// No Home item: the GitLab Orbit logo links to the home page.
 export function TabNav({ className }: { className: string }) {
   return (
     <nav aria-label="Site" className={cn("items-center gap-1", className)}>
@@ -9,12 +10,12 @@ export function TabNav({ className }: { className: string }) {
         tab.menu ? (
           <NavMenu key={tab.route} label={tab.label} route={tab.route} items={tab.menu} />
         ) : (
-          <Link key={tab.route} {...pageLink(tab.route)} activeOptions={{ exact: tab.route === "" }} className="gl-nav-item">
+          <Link key={tab.route} {...pageLink(tab.route)} className="gl-nav-item">
             {tab.label}
           </Link>
         ),
       )}
-      <SiteLink href={USER_DOCS.href} className="gl-nav-item">
+      <SiteLink href={USER_DOCS.href} aria-label={`${USER_DOCS.label} (opens in a new tab)`} className="gl-nav-item">
         {USER_DOCS.label}
         <Icon name="external-link" size={12} />
       </SiteLink>

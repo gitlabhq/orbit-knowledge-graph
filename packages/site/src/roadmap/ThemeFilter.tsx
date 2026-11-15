@@ -1,28 +1,20 @@
-import { Icon } from "@gitlab-org/orbit-site";
+import { chip, Icon, SEGMENTS } from "@gitlab-org/orbit-site";
 import { Link } from "@tanstack/react-router";
 import { themes } from "./model";
 
-const CHIP = "gl-button btn-sm no-underline";
-const ACTIVE = { className: "selected" };
+// The router marks the chip that matches the whole URL, search included, with aria-current.
 export const EXACT = { exact: true, includeSearch: true };
 
-export function ThemeFilter() {
+export function ThemeFilter({ theme }: { theme?: string }) {
   return (
-    <div role="group" aria-label="Filter by theme" className="flex flex-wrap gap-2">
-      <Link to="." search={(prev) => ({ ...prev, theme: undefined })} activeOptions={EXACT} activeProps={ACTIVE} className={CHIP}>
+    <div role="group" aria-label="Filter by theme" className={SEGMENTS}>
+      <Link to="." search={(prev) => ({ ...prev, theme: undefined })} activeOptions={EXACT} className={chip(!theme)}>
         All themes
       </Link>
-      {themes.map((theme) => (
-        <Link
-          key={theme.id}
-          to="."
-          search={(prev) => ({ ...prev, theme: theme.id })}
-          activeOptions={EXACT}
-          activeProps={ACTIVE}
-          className={CHIP}
-        >
-          <Icon name={theme.icon} size={16} />
-          {theme.title}
+      {themes.map((item) => (
+        <Link key={item.id} to="." search={(prev) => ({ ...prev, theme: item.id })} activeOptions={EXACT} className={chip(theme === item.id)}>
+          <Icon name={item.icon} size={12} />
+          {item.title}
         </Link>
       ))}
     </div>

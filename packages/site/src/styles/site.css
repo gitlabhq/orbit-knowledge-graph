@@ -1,4 +1,5 @@
 @import "@gitlab-org/orbit-site/styles.css";
+@import "@gitlab-org/orbit-site/orbit.css";
 
 :root {
   --tone-platform: var(--gl-color-data-blue-500);
@@ -22,19 +23,4 @@
   .tone-code { --tone: var(--tone-code); }
   .tone-data { --tone: var(--tone-data); }
   .tone-trust { --tone: var(--tone-trust); }
-
-  .tone-bar {
-    background: color-mix(in srgb, var(--tone) 16%, var(--gl-background-color-default));
-    border: 1px solid color-mix(in srgb, var(--tone) 55%, transparent);
-  }
-
-  .tone-bar[data-status="exploring"] {
-    background: transparent;
-    border-style: dashed;
-  }
-
-  .tone-bar[data-status="shipped"] {
-    background: color-mix(in srgb, var(--tone) 8%, var(--gl-background-color-subtle));
-    border-color: var(--border-hairline-strong);
-  }
 }

@@ -1,8 +1,8 @@
 ---
-title: OpenCypher-like graph query language (GQL)
-description: Query the graph with GQL, a read-only query language that is similar to OpenCypher.
+title: Graph queries in GQL
+description: Query the graph with GQL, a read-only query language that is similar to openCypher.
 theme: agents
-status: in-progress
+status: shipped
 start: FY27 Q3
 end: FY27 Q3
 rank: 2
