@@ -384,19 +384,23 @@ function QuickstartLink() {
 
 // The first screen, from the very top, behind the top bar, with the setup command
 // lower down.
-// Copy a setup prompt to paste into an agent. Picking an agent tailors the prompt to it, and picking it
-// again goes back to the prompt for any agent.
+// Copy a setup prompt to paste into an agent. Picking an agent tailors the prompt to it and copies it right
+// away. The copy button copies the prompt for the picked agent, or for any agent.
 function SetupPicker({ className }: { className?: string }) {
   const [agent, setAgent] = useState<string | null>(null);
+  const pick = (name: string) => {
+    setAgent(name);
+    void navigator.clipboard?.writeText(setupPrompt(name));
+  };
   return (
     <div className={cn("flex flex-col items-center gap-5", className)}>
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
-        <CopyButton key={agent ?? ""} text={setupPrompt(agent)} label={`Copy a setup prompt for ${agent ?? "your agent"}`} primary>
+        <CopyButton text={setupPrompt(agent)} label={`Copy a setup prompt for ${agent ?? "your agent"}`} primary>
           Copy setup prompt
         </CopyButton>
         <QuickstartLink />
       </div>
-      <AgentLogos label="Pick your agent" marksOnly agents={AGENTS} selected={agent ?? undefined} onSelect={(name) => setAgent((current) => (current === name ? null : name))} />
+      <AgentLogos label="Pick your agent" marksOnly agents={AGENTS} selected={agent ?? undefined} onSelect={pick} />
     </div>
   );
 }
