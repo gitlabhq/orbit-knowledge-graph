@@ -7,7 +7,7 @@ const TYPE_MS = 22;
 const SEND_PAUSE_MS = 250;
 const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
 const toolsOf = (search: Search) => [...new Set(search.steps!.map((step) => step.tool))];
-const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : search.branches === "all" ? "branch" : search.mode === "structural" ? "code" : "search");
+const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : search.branches === "all" ? "merge-request" : search.mode === "structural" ? "code" : "search");
 
 // One code search per mode, text, regex, then structural, where the text search also covers every branch, and questions that use third-party connectors.
 const GROUPS = [
@@ -169,7 +169,12 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
             <span />
             <span />
           </span>
-          <span className="agent-chat-title">Coming soon</span>
+          <span className="agent-chat-title">
+            <span className="next-soon">
+              <Icon name="orbit" size={12} />
+              <span className="next-soon-text">Orbit Next</span>
+            </span>
+          </span>
         </div>
         {run && <Thread key={run.start} search={run.search} stage={stage} />}
         <form onSubmit={submit} className="agent-prompt-box" aria-label="Search">

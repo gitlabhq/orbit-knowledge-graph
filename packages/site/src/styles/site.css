@@ -768,8 +768,10 @@
   text-transform: uppercase;
 }
 
+/* Each example stays on one line. */
 .next-demo-example {
   display: flex;
+  white-space: nowrap;
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.625rem;
@@ -831,11 +833,11 @@
   }
 }
 
-/* On wide screens the chat keeps a reading width in the middle. The examples sit against its left edge,
+/* On wide screens the chat keeps the home page chat's width (44rem) in the middle. The examples sit against its left edge,
    and the right column stays open for the results on the map. */
 @media (min-width: 1100px) {
   .next-demo {
-    grid-template-columns: minmax(14rem, 1fr) minmax(0, 40rem) minmax(14rem, 1fr);
+    grid-template-columns: minmax(17rem, 1fr) minmax(0, 44rem) minmax(17rem, 1fr);
   }
 
   .next-demo {
@@ -844,7 +846,7 @@
 
   .next-demo-examples {
     justify-self: center;
-    width: 15rem;
+    width: 17rem;
   }
 }
 
@@ -866,4 +868,31 @@
 /* A slimmer window bar than the kit's, since it only carries the lights and "Coming soon". */
 .next-chat .agent-chat-head {
   padding-block: 0.375rem;
+}
+
+/* "Orbit Next" in the window bar: a pill with the Orbit logo's blue to mint, on its border and its text. */
+.next-soon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.625rem;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  background:
+    linear-gradient(color-mix(in srgb, var(--color-page) 92%, #6b82ec), color-mix(in srgb, var(--color-page) 92%, #6b82ec)) padding-box,
+    linear-gradient(90deg, #6b82ec, #9aecde) border-box;
+  color: #98a8f2;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.next-soon-text {
+  background: linear-gradient(90deg, #98a8f2, #9aecde);
+  background-clip: text;
+  color: transparent;
+}
+
+/* Long labels must not squeeze the example icons. */
+.next-demo-example svg {
+  flex-shrink: 0;
 }
