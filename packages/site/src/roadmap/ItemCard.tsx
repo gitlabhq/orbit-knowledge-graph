@@ -1,18 +1,18 @@
-import { Icon } from "@gitlab-org/orbit-site";
-import { Link } from "@tanstack/react-router";
-import { quarterRange } from "./calendar";
+import { cn, Icon, SiteLink } from "@gitlab-org/orbit-site";
 import type { RoadmapItem } from "./model";
 import { StatusBadge } from "./StatusBadge";
 
-export const itemRange = (item: RoadmapItem) => quarterRange(item.start, item.end);
-
-// Cards are frosted glass, on the board and elsewhere.
-
+// Cards are frosted glass, on the board and elsewhere. A card links to the item's docs, or to the work
+// item that tracks it, when it has one.
 export function ItemCard({ item }: { item: RoadmapItem }) {
-  return (
-    <Link to="/roadmap/$item" params={{ item: item.slug }} className="card glass flex h-full flex-col gap-2 px-4 pt-3.5 pb-3">
-      <span className="card-title line-clamp-2 text-[0.8125rem] font-semibold text-default">{item.title}</span>
-      <span className="line-clamp-2 text-[0.8125rem] text-subtle">{item.description}</span>
+  const href = item.link ?? item.tracking;
+  const body = (
+    <>
+      <span className="flex items-start justify-between gap-2">
+        <span className="card-title text-[0.8125rem] font-semibold text-default">{item.title}</span>
+        {href && <Icon name="external-link" size={12} className="mt-1 shrink-0 text-subtle" />}
+      </span>
+      <span className="text-[0.8125rem] text-subtle">{item.description}</span>
       <span className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle">
         <StatusBadge status={item.status} iconSize="sm" />
         <span className="inline-flex items-center gap-1">
@@ -20,6 +20,14 @@ export function ItemCard({ item }: { item: RoadmapItem }) {
           {item.theme.title}
         </span>
       </span>
-    </Link>
+    </>
+  );
+  const className = cn("card glass flex h-full flex-col gap-2 px-4 pt-3.5 pb-3", href && "no-underline");
+  return href ? (
+    <SiteLink href={href} className={className}>
+      {body}
+    </SiteLink>
+  ) : (
+    <div className={className}>{body}</div>
   );
 }

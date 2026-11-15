@@ -1,6 +1,6 @@
 ---
 title: Third-party data connectors
-description: Connect data from more than 20 other tools to the graph, such as planning, documentation, and chat.
+description: Connect planning, documentation, and service data from other tools to the graph.
 theme: data
 status: in-progress
 start: FY27 Q4
@@ -16,7 +16,5 @@ Orbit will check the permissions of the source before it returns a result.
 
 ## First sources
 
-- Jira
-- Confluence
-- Slack
-- ServiceNow
+- Jira and Confluence
+- ServiceNow, next

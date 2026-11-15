@@ -12,9 +12,9 @@ export function Board({ items }: { items: RoadmapItem[] }) {
           <section key={column.id} aria-labelledby={`horizon-${column.id}`} className="board-surface glass-surface flex flex-col rounded-[var(--radius-card)] p-2">
             <header className="px-2 pb-2">
               <div className="flex items-center gap-2">
-                <h2 id={`horizon-${column.id}`} className="m-0 text-base font-semibold text-heading">
+                <h3 id={`horizon-${column.id}`} className="m-0 text-base font-semibold text-heading">
                   {column.title}
-                </h2>
+                </h3>
                 <Badge tone="neutral">
                   {all.length}
                   <span className="sr-only">{all.length === 1 ? " item" : " items"}</span>

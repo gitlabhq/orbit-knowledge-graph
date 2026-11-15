@@ -1,6 +1,6 @@
 ---
 title: GitLab Orbit generally available
-description: Orbit moves from beta to general availability on every GitLab deployment type.
+description: Orbit is generally available for GitLab Premium and Ultimate.
 theme: platform
 status: shipped
 start: FY27 Q3
@@ -9,8 +9,8 @@ rank: 1
 link: https://docs.gitlab.com/orbit/
 ---
 
-GitLab will support Orbit for production use on GitLab.com.
-On GitLab Self-Managed and GitLab Dedicated, production support follows in early November 2026.
+GitLab supports Orbit for production use on GitLab.com.
+Support for GitLab Self-Managed and GitLab Dedicated follows.
 On GitLab Dedicated, GitLab runs Orbit for you, next to your instance.
 
 ## Included at general availability
