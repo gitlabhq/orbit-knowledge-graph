@@ -79,14 +79,17 @@ function Thread({ search, stage }: { search: Search; stage: number }) {
       <div className="agent-reply" aria-live="polite">
         <ul className="agent-calls">
           {search.steps ? (
-            // One line per tool, in the order the path reaches it, as in the agent log of the third-party
-            // section on this page.
-            search.steps.slice(0, Math.min(stage + 1, search.steps.length)).map((step, index) => (
-              <li key={index} className={cn("agent-call", index === stage && !done && "agent-call-running")}>
-                <Icon name="orbit" size={12} className="agent-call-mark" />
-                <span className="agent-call-tool">{index === stage && !done ? `Exploring ${step.tool}…` : `Explored ${step.tool}`}</span>
-              </li>
-            ))
+            // One line per tool, in the order the path first reaches it, as in the agent log of the
+            // third-party section on this page. A tool the path returns to spins on its existing line.
+            [...new Set(search.steps.slice(0, Math.min(stage + 1, search.steps.length)).map((step) => step.tool))].map((tool) => {
+              const running = !done && search.steps![stage]?.tool === tool;
+              return (
+                <li key={tool} className={cn("agent-call", running && "agent-call-running")}>
+                  <Icon name="orbit" size={12} className="agent-call-mark" />
+                  <span className="agent-call-tool">{running ? `Exploring ${tool}…` : `Explored ${tool}`}</span>
+                </li>
+              );
+            })
           ) : (
             <li className={cn("agent-call", !done && "agent-call-running")}>
               <Icon name="orbit" size={12} className="agent-call-mark" />
