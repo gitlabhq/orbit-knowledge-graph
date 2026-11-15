@@ -126,19 +126,43 @@
     return e.count === 0 ? "empty" : "flowing";
   }
 
-  function edge(svg, e, route, state) {
+  const since = (view, at) => (view.now - at) / view.speed;
+  const eased = (t) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
+
+  // An edge carries data from its event until the stage it feeds finishes.
+  function inFlight(model, e, view) {
+    const target = model.stages.find((s) => s.id === e.to);
+    return e.count > 0 && e.at <= view.now && !(target && target.finishedAt <= view.now);
+  }
+
+  function edge(svg, e, route, state, view, model) {
     const group = el("g", { class: `edge edge-${e.kind} ${state}`, "data-edge": e.id }, svg);
     el("title", {}, group).textContent = e.title;
     const tip = ARROW[e.kind] * HEAD[e.kind];
     const end = { x: route.end.x - tip, y: route.end.y };
-    el("path", { d: curve([route.start, ...route.via, end]), "marker-end": `url(#arrow-${e.kind}-${state})` }, group);
+    const path = el("path", { d: curve([route.start, ...route.via, end]), "marker-end": `url(#arrow-${e.kind}-${state})` }, group);
+    if (view.flow) {
+      const reveal = el("clipPath", { id: `reveal-${e.id}` }, group);
+      const xs = [route.start.x, route.end.x];
+      el("rect", { x: xs[0] - 4, y: -1e4, width: 0, height: 2e4, "data-reveal": xs[1] - xs[0] + 8, "data-at": e.at }, reveal);
+      group.setAttribute("clip-path", `url(#reveal-${e.id})`);
+      if (inFlight(model, e, view)) {
+        const dots = el("g", { class: `particles particles-${e.kind}`, "data-length": path.getTotalLength() }, group);
+        const n = Math.min(8, 1 + Math.round(Math.log2(e.count + 1) * 1.5));
+        for (let i = 0; i < n; i++) {
+          el(e.kind === "keys" ? "circle" : "rect", e.kind === "keys" ? { r: 3.2 } : { width: 6, height: 6, rx: 1.5, x: -3, y: -3 }, dots);
+        }
+        dots.pathElement = path;
+      }
+    }
     return group;
   }
 
-  function label(group, e, at) {
+  function label(group, e, at, view) {
     const holder = el("g", { class: "edge-tag" }, group);
     const back = el("rect", { class: "tag-back", y: at.y - LABEL_H / 2, height: LABEL_H, rx: LABEL_H / 2 }, holder);
     const used = e.count === undefined ? 0 : badge(holder, 0, at.y, String(e.count), "count") + 6;
+    if (view.flow && e.count !== undefined) ticker(holder.querySelector(".count text"), e.count, e.at, (n) => String(n));
     const words = text(holder, used, at.y + 4, e.label, "edge-label");
     const width = used + words.getComputedTextLength() + 12;
     const left = at.x - width / 2;
@@ -147,7 +171,13 @@
     back.setAttribute("width", width);
   }
 
-  function card(svg, stage, node, selected, onSelect) {
+  function ticker(node, count, at, format) {
+    node.setAttribute("data-tick", count);
+    node.setAttribute("data-at", at);
+    node.format = format;
+  }
+
+  function card(svg, stage, node, selected, onSelect, view) {
     const k = kind(stage.backend), w = node.w;
     const group = el("g", { class: ["stage-card", k, stage.status, stage.id === selected ? "selected" : ""].join(" "), transform: `translate(${node.x} ${node.y})`, tabindex: 0, role: "button", "data-stage": stage.id }, svg);
     el("rect", { class: "card", width: w, height: H, rx: 12 }, group);
@@ -157,13 +187,32 @@
     text(group, 26, 44, line.title, "title");
     text(group, 26, 60, line.meta, "meta");
     badge(group, 26, 77, STATES[stage.status] || stage.status, "pill");
-    if (stage.status === "done") text(group, w - 14, 81, `${plural(stage.rows ?? 0, "row")} · ${stage.elapsed.toFixed(1)} ms`, "stats", "end");
+    const timing = stage.status === "done" ? ` · ${stage.elapsed.toFixed(1)} ms` : "";
+    if (view.flow && stage.rows !== undefined) {
+      const stats = text(group, w - 14, 81, `${plural(stage.rows, "row")}${timing}`, "stats", "end");
+      ticker(stats, stage.rows, stage.rowsAt, (n) => `${plural(n, "row")}${timing}`);
+    } else if (stage.status === "done") {
+      text(group, w - 14, 81, `${plural(stage.rows ?? 0, "row")}${timing}`, "stats", "end");
+    }
+    if (view.flow && stage.status === "running") {
+      el("rect", { class: "progress-track", x: 12, y: H - 5, width: w - 24, height: 2, rx: 1 }, group);
+      el("rect", { class: "progress-bar", x: 12, y: H - 5, width: 0, height: 2, rx: 1, "data-track": w - 24, "data-full": stage.rowsAt !== undefined ? 1 : 0 }, group);
+    }
     group.addEventListener("click", () => onSelect(stage.id));
     group.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(stage.id); } });
   }
 
-  function draw(svg, model, selected, onSelect) {
+  let cached = { key: "", laid: null };
+
+  function laidOut(svg, model) {
+    const key = JSON.stringify([model.stages.map((s) => [s.id, s.backend, s.connection]), model.edges.map((e) => [e.id, e.label])]);
+    if (cached.key !== key) cached = { key, laid: layout(svg, model) };
+    return cached.laid;
+  }
+
+  function draw(svg, model, selected, onSelect, view) {
     while (svg.firstChild) svg.removeChild(svg.firstChild);
+    svg.classList.toggle("flow", view.flow);
     if (!model.stages.length) {
       svg.setAttribute("viewBox", "0 0 1200 120");
       svg.style.maxWidth = "";
@@ -171,15 +220,54 @@
       text(svg, 600, 65, "Run a query to see its stages, the key sets between them and their rows.", "dag-empty", "middle");
       return;
     }
-    const { nodes, routes, width, height } = layout(svg, model);
+    const { nodes, routes, width, height } = laidOut(svg, model);
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.style.maxWidth = `${width}px`;
     svg.style.minWidth = `${Math.round(width * 0.6)}px`;
     markers(el("defs", {}, svg));
-    const groups = model.edges.map((e) => [e, edge(svg, e, routes[e.id], edgeState(model, e))]);
-    for (const [e, group] of groups) label(group, e, routes[e.id].label);
-    for (const stage of model.stages) card(svg, stage, nodes[stage.id], selected, onSelect);
+    const shown = model.edges.filter((e) => !view.flow || e.at <= view.now);
+    const groups = shown.map((e) => [e, edge(svg, e, routes[e.id], edgeState(model, e), view, model)]);
+    for (const [e, group] of groups) label(group, e, routes[e.id].label, view);
+    for (const stage of model.stages) card(svg, stage, nodes[stage.id], selected, onSelect, view);
+    frame(svg, view);
   }
 
-  window.Dag = { draw, kind, plural, NAMES, KINDS, STATES };
+  const DRAW_MS = 450, TICK_MS = 650, SWEEP_MS = 1100;
+  const SPEED = { keys: 150, rows: 100 };
+
+  // Moves what Flow animates without rebuilding the canvas; returns whether anything still moves.
+  function frame(svg, view) {
+    let moving = false;
+    for (const rect of svg.querySelectorAll("[data-reveal]")) {
+      const p = eased(since(view, Number(rect.dataset.at)) / DRAW_MS);
+      rect.setAttribute("width", Number(rect.dataset.reveal) * p);
+      moving ||= p < 1;
+    }
+    for (const node of svg.querySelectorAll("[data-tick]")) {
+      const p = eased(since(view, Number(node.dataset.at)) / TICK_MS);
+      node.textContent = node.format(Math.round(Number(node.dataset.tick) * p));
+      moving ||= p < 1;
+    }
+    for (const bar of svg.querySelectorAll(".progress-bar")) {
+      const track = Number(bar.dataset.track);
+      if (bar.dataset.full === "1") { bar.setAttribute("x", 12); bar.setAttribute("width", track); continue; }
+      const phase = (view.wall % SWEEP_MS) / SWEEP_MS, span = track * 0.3;
+      bar.setAttribute("x", 12 + (track + span) * phase - span);
+      bar.setAttribute("width", span);
+      moving = true;
+    }
+    for (const dots of svg.querySelectorAll(".particles")) {
+      const length = Number(dots.dataset.length), kindOf = dots.classList.contains("particles-keys") ? "keys" : "rows";
+      const shapes = [...dots.children];
+      shapes.forEach((shape, i) => {
+        const at = dots.pathElement.getPointAtLength(((view.wall / 1000) * SPEED[kindOf] + (i * length) / shapes.length) % length);
+        if (shape.tagName === "circle") { shape.setAttribute("cx", at.x); shape.setAttribute("cy", at.y); }
+        else shape.setAttribute("transform", `translate(${at.x} ${at.y})`);
+      });
+      moving = true;
+    }
+    return moving;
+  }
+
+  window.Dag = { draw, frame, kind, plural, NAMES, KINDS, STATES };
 })();

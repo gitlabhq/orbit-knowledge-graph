@@ -90,6 +90,15 @@ svg#dag { display: block; width: 100%; height: auto; margin: 0 auto; font-family
 .edge-rows .count text { fill: var(--neutral-text); }
 .edge.empty .count rect { fill: var(--danger-bg); }
 .edge.empty .count text { fill: var(--danger-text); }
+.flow .edge.active path { animation: none; }
+.flow .edge-keys.active path { stroke-dasharray: none; }
+.particles-keys circle { fill: var(--info); }
+.particles-rows rect { fill: var(--text-subtle); }
+.progress-track { fill: var(--border-subtle); }
+.progress-bar { fill: var(--info); }
+@media (prefers-reduced-motion: reduce) {
+  .stage-card.running .card, .edge.active path { animation: none; }
+}
 .legend-edge { display: inline-flex; align-items: center; gap: 6px; font-size: var(--font-xs); color: var(--text-subtle); }
 .legend-edge::before { content: ""; width: 22px; height: 0; border-top: 2px solid var(--info); }
 .legend-rows::before { border-top: 1.5px dashed var(--text-subtle); }

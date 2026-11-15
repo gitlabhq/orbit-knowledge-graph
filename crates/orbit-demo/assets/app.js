@@ -7,7 +7,7 @@ let queue = [];
 let timer = null;
 
 function fresh() {
-  return { stages: [], edges: [], logical: [], grants: [], subplans: {}, rows: null, error: null, selected: null, tab: null, done: false };
+  return { stages: [], edges: [], logical: [], grants: [], subplans: {}, rows: null, error: null, selected: null, tab: null, done: false, t0: performance.now() };
 }
 
 function stage(id) {
@@ -28,7 +28,7 @@ function describe(edge) {
   }
 }
 
-function apply(event) {
+function apply(event, t) {
   switch (event.event) {
     case "caller": run.grants = event.grants; break;
     case "check": stage(run.current).checks.push(event); break;
@@ -48,25 +48,26 @@ function apply(event) {
         }
       }
       break;
-    case "started": run.current = event.stage; stage(event.stage).status = "running"; break;
+    case "started": run.current = event.stage; stage(event.stage).status = "running"; stage(event.stage).startedAt = t; break;
     case "planned": stage(event.stage).planned = event.plan; markRows(event.stage, event.plan); break;
     case "emitted": stage(event.stage).emitted = event.plan; break;
     case "rendered": stage(event.stage).rendered.push(...event.requests); break;
     case "keys": {
       stage(event.to).keys.push(event);
       const edge = run.edges.find((e) => e.from === event.from && e.to === event.to && e.kind === "keys");
-      if (edge) edge.count = event.count;
+      if (edge) { edge.count = event.count; edge.at = t; }
       break;
     }
     case "rows": {
       stage(event.stage).rows = event.count;
-      for (const edge of run.edges.filter((e) => e.from === event.stage && e.kind === "rows")) edge.count = event.count;
+      stage(event.stage).rowsAt = t;
+      for (const edge of run.edges.filter((e) => e.from === event.stage && e.kind === "rows")) { edge.count = event.count; edge.at = t; }
       break;
     }
     case "samples": stage(event.stage).samples = event.samples; break;
     case "finished": {
       const s = stage(event.stage);
-      s.status = "done"; s.elapsed = event.elapsed_ms;
+      s.status = "done"; s.elapsed = event.elapsed_ms; s.finishedAt = t;
       break;
     }
     case "failed": { const s = stage(event.stage); s.status = "failed"; s.error = event.error; break; }
@@ -84,9 +85,24 @@ function markRows(id, plan) {
   }
 }
 
+function view() {
+  return { flow, now: performance.now() - run.t0, speed: 1, wall: performance.now() };
+}
+
+let frames = null;
+
+function animate() {
+  if (frames) return;
+  const step = () => {
+    frames = Dag.frame($("dag"), view()) ? requestAnimationFrame(step) : null;
+  };
+  frames = requestAnimationFrame(step);
+}
+
 function render() {
   for (const edge of run.edges) describe(edge);
-  Dag.draw($("dag"), run, run.selected, (id) => { run.selected = id; run.tab = null; render(); });
+  Dag.draw($("dag"), run, run.selected, (id) => { run.selected = id; run.tab = null; render(); }, view());
+  if (flow) animate();
   const done = run.stages.filter((s) => s.status === "done").length;
   $("dag-summary").textContent = run.stages.length ? `${done} of ${run.stages.length} stages finished` : "";
   Panels.render(run);
@@ -95,7 +111,7 @@ function render() {
 function pump() {
   if (!queue.length) { timer = null; return; }
   try {
-    apply(queue.shift());
+    apply(queue.shift(), performance.now() - run.t0);
     render();
   } catch (error) {
     status(`Page error: ${error.message}`, "danger");
@@ -183,6 +199,13 @@ function pace(step) {
   $("pace-instant").classList.toggle("segmented-active", !step);
 }
 
+function flowView(on) {
+  flow = on;
+  $("view-flow").classList.toggle("segmented-active", on);
+  $("view-static").classList.toggle("segmented-active", !on);
+  render();
+}
+
 function themeLabel() { $("theme").textContent = Theme.current() === "dark" ? "Light" : "Dark"; }
 
 let stream = null;
@@ -190,6 +213,7 @@ let generation = 0;
 let callers = [];
 let examples = [];
 let stepping = true;
+let flow = !matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 async function boot() {
   run = fresh();
@@ -211,9 +235,13 @@ $("run").addEventListener("click", () => start().catch((e) => status(e.message, 
 $("caller").addEventListener("change", hint);
 $("pace-step").addEventListener("click", () => pace(true));
 $("pace-instant").addEventListener("click", () => pace(false));
+$("view-flow").addEventListener("click", () => flowView(true));
+$("view-static").addEventListener("click", () => flowView(false));
 $("theme").addEventListener("click", () => { Theme.toggle(); themeLabel(); render(); });
 $("reload").addEventListener("click", () => post("/api/reload", {})
   .then((r) => boot().then(() => status(`Reloaded ${r.rows} seed rows`, "success")))
   .catch((e) => status(e.message, "danger")));
 themeLabel();
+$("view-flow").classList.toggle("segmented-active", flow);
+$("view-static").classList.toggle("segmented-active", !flow);
 boot().catch((e) => status(e.message, "danger"));
