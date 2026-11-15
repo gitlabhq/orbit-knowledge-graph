@@ -10,7 +10,6 @@ export function parseQuarter(value: unknown): Quarter {
 
 export const quarterIndex = (q: Quarter) => q.fiscalYear * 4 + q.quarter - 1;
 
-export const quarterFromIndex = (index: number): Quarter => ({ fiscalYear: Math.floor(index / 4), quarter: (index % 4) + 1 });
 
 export const quarterLabel = (q: Quarter) => `FY${q.fiscalYear} Q${q.quarter}`;
 

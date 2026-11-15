@@ -6,17 +6,17 @@ import { StatusBadge } from "./StatusBadge";
 
 export const itemRange = (item: RoadmapItem) => quarterRange(item.start, item.end);
 
-export function ItemCard({ item, compact = false }: { item: RoadmapItem; compact?: boolean }) {
-  const range = itemRange(item);
+// Cards are frosted glass, on the board and elsewhere.
+
+export function ItemCard({ item }: { item: RoadmapItem }) {
   return (
-    <Link to="/roadmap/$item" params={{ item: item.slug }} className="card flex h-full flex-col gap-2 p-4">
-      <span className="card-title line-clamp-2 text-sm font-semibold text-default">{item.title}</span>
-      {!compact && <span className="line-clamp-2 text-sm text-subtle">{item.description}</span>}
-      <span className="mt-auto flex flex-wrap items-center gap-2 text-xs text-subtle">
+    <Link to="/roadmap/$item" params={{ item: item.slug }} className="card glass flex h-full flex-col gap-2 px-4 pt-3.5 pb-3">
+      <span className="card-title line-clamp-2 text-[0.8125rem] font-semibold text-default">{item.title}</span>
+      <span className="line-clamp-2 text-[0.8125rem] text-subtle">{item.description}</span>
+      <span className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle">
         <StatusBadge status={item.status} iconSize="sm" />
-        <span title={range.months}>{range.label}</span>
         <span className="inline-flex items-center gap-1">
-          <Icon name={item.theme.icon} size={16} />
+          <Icon name={item.theme.icon} size={12} className="tile-icon" />
           {item.theme.title}
         </span>
       </span>

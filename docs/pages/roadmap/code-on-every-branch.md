@@ -1,9 +1,9 @@
 ---
-title: Code search for branches, commits + all languages
+title: Code search
 description: Index code in all languages on active branches and recent commits, and search file content in queries.
 theme: code
-status: planned
-start: FY27 Q4
+status: in-progress
+start: FY27 Q3
 end: FY28 Q1
 rank: 1
 tracking: https://gitlab.com/groups/gitlab-org/orbit/-/work_items/16
