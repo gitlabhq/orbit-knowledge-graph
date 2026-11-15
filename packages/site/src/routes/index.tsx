@@ -395,7 +395,9 @@ function SetupPicker({ className, inline = false }: { className?: string; inline
     return (
       <div className={cn("flex flex-wrap items-center gap-x-5 gap-y-4", className)}>
         {logos}
-        {copy}
+        <Reveal from="right" delay={420}>
+          {copy}
+        </Reveal>
       </div>
     );
   return (
