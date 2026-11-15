@@ -52,7 +52,7 @@ function TeamPage() {
       <div className="flex flex-col gap-10">
         {people.length > 0 && (
           <section aria-label="The team" className="page-glow">
-            <ul className="glass-surface m-0 grid list-none gap-2 rounded-[var(--radius-card)] p-2 sm:grid-cols-2 lg:grid-cols-3">
+            <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
               {people.map((member) => (
                 <li key={member.username}>
                   <MemberCard member={member} />
