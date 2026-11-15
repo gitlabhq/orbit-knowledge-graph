@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { AgentLogos, AgentPrompt, Contrasts, CopyButton, CopyCommand, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, TraceGraph, type UseCase, UseCases } from "@gitlab-org/orbit-site";
+import { AgentLogos, AgentPrompt, Contrasts, CopyButton, CopyCommand, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, TraceGraph, type UseCase, UseCases } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { USER_DOCS } from "../sections";
 
@@ -493,7 +493,9 @@ function HomePage() {
               { name: "Gemini CLI", mark: "googlegemini" },
               ]}
           />
-          <Terminal title="GitLab Orbit CLI" code={SETUP} copy="glab orbit setup" />
+          <Reveal from="right" delay={300}>
+            <Terminal title="GitLab Orbit CLI" code={SETUP} copy="glab orbit setup" />
+          </Reveal>
         </div>
       </Section>
 
