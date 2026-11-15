@@ -1,6 +1,7 @@
 import { Avatar, cn, findPage, Icon, PageFrame, pageHeadOf, segment, SiteLink } from "@gitlab-org/orbit-site";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PageFooter } from "../components/PageFooter";
+import { Sidebar } from "../components/Sidebar";
 import { mission, people, principles, profileUrl, type TeamMember } from "../team/team";
 
 export const Route = createFileRoute("/team")({
@@ -45,6 +46,7 @@ function TeamPage() {
   return (
     <PageFrame
       path="team"
+      nav={<Sidebar />}
       title="Meet the team"
       description={mission}
       footer={page && <PageFooter page={page} />}
