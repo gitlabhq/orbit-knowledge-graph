@@ -525,21 +525,19 @@ function HomePage() {
           tokensPerRun={150_000}
           saving={[0.2, 0.35]}
           footer={
-            <>
-              <span>Want the numbers for your own teams and agents?</span>
-              <SiteLink href={DEMO} aria-label="Talk to sales (opens in a new tab)" className="pill-link">
-                Talk to sales
-                <Icon name="arrow-right" size={16} />
-              </SiteLink>
-            </>
+            <SiteLink href={DEMO} aria-label="Talk to sales (opens in a new tab)" className="pill-link">
+              Talk to sales
+              <Icon name="arrow-right" size={16} />
+            </SiteLink>
           }
         />
       </Section>
 
       <Section id="connect" snug backdrop={<OrbitHalo />} backdropFade="band" eyebrow="Connect your agent" title={<>Works with <span className="orbit-fade">your agents</span></>} lede="Built into GitLab Duo. Connect your agent with the CLI or MCP.">
-        <div className="flex flex-col gap-6">
+        {/* The terminal takes the width of the picker row above it, so their right edges line up. */}
+        <div className="inline-flex max-w-full flex-col gap-6">
           <SetupPicker inline />
-          <Reveal from="right" delay={300} className="max-w-xl">
+          <Reveal from="right" delay={300} className="w-0 min-w-full">
             <Terminal title="GitLab Orbit CLI" code={SETUP} copy="glab orbit setup" />
           </Reveal>
         </div>
