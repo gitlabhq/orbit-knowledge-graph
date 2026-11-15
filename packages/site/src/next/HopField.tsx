@@ -29,7 +29,9 @@ const toSegment = (x: number, y: number, ax: number, ay: number, bx: number, by:
 // to the fix. Each stop lights and rings when the pulse reaches it, and the path it took stays lit. It fills
 // its box, such as a Section backdrop, and places the stops inside the element that `anchor` selects. It
 // pauses off screen.
-export function HopField({ hops, anchor, loop = 12000, className }: { hops: Hop[]; anchor: string; loop?: number; className?: string }) {
+// With `start`, a performance.now() time, the path runs once from then and holds at the end, instead of
+// looping.
+export function HopField({ hops, anchor, loop = 12000, start, className }: { hops: Hop[]; anchor: string; loop?: number; start?: number; className?: string }) {
   const canvas = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -66,7 +68,7 @@ export function HopField({ hops, anchor, loop = 12000, className }: { hops: Hop[
       const box = document.querySelector(anchor)?.getBoundingClientRect() ?? own;
       const snap = (value: number) => Math.round(value / GAP) * GAP;
       const stops = hops.map((hop) => ({ ...hop, px: snap(box.left - own.left + hop.x * box.width), py: snap(box.top - own.top + hop.y * box.height) }));
-      const f = phaseAt(loop);
+      const f = start === undefined ? phaseAt(loop) : still() ? 1 : Math.min(1, (performance.now() - start) / loop);
       const toneOf = (hop: Hop) => (hop.tone ? palette[hop.tone] : palette.path);
 
       // The pulse: on the segment it is crossing, how far along it is.
@@ -140,7 +142,7 @@ export function HopField({ hops, anchor, loop = 12000, className }: { hops: Hop[
       sized.disconnect();
       seen.disconnect();
     };
-  }, [hops, anchor, loop]);
+  }, [hops, anchor, loop, start]);
 
   return <canvas ref={canvas} aria-hidden="true" className={cn("ripple-field", className)} />;
 }
