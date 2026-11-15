@@ -76,7 +76,7 @@ const CHAT: PromptExample[] = [
   {
     label: "Review a merge request",
     icon: "merge-request",
-    prompt: "What breaks if I merge storefront!412?",
+    prompt: "What breaks if I merge storefront!412? Answer with proof.",
     calls: [
       { tool: "Read Orbit guide", detail: "orbit" },
       { tool: "Explored Orbit", detail: "MergeRequest → DiffFile → Definition" },
