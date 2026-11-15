@@ -1,7 +1,7 @@
 description: File and Definition rows authorize through their owning Project, which is not itself a node in the query
 
 config:
-  security: { org_id: 5, paths: ["5/"] }
+  security: { paths: ["1/700/"] }
   extra_seed:
     gl_user:
       - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
@@ -12,47 +12,47 @@ config:
       - { id: 6, _version: "2099-01-01 00:00:00", _deleted: true }
       - { id: 7, _version: "2099-01-01 00:00:00", _deleted: true }
     gl_group:
-      - { id: 500, name: Public Group, visibility_level: public, traversal_path: "5/500/" }
-      - { id: 501, name: Private Group, visibility_level: private, traversal_path: "5/501/" }
-      - { id: 502, name: Internal Group, visibility_level: internal, traversal_path: "5/502/" }
+      - { id: 701, name: Public Group, visibility_level: public, traversal_path: "1/700/701/" }
+      - { id: 702, name: Private Group, visibility_level: private, traversal_path: "1/700/702/" }
+      - { id: 703, name: Internal Group, visibility_level: internal, traversal_path: "1/700/703/" }
     gl_project:
-      - { id: 5000, name: Public Project, visibility_level: public, traversal_path: "5/500/5000/" }
-      - { id: 5001, name: Private Project, visibility_level: private, traversal_path: "5/501/5001/" }
-      - { id: 5002, name: Internal Project, visibility_level: internal, traversal_path: "5/500/5002/" }
-      - { id: 5003, name: Secret Project, visibility_level: private, traversal_path: "5/501/5003/" }
-      - { id: 5004, name: Shared Project, visibility_level: public, traversal_path: "5/502/5004/" }
+      - { id: 7100, name: Public Project, visibility_level: public, traversal_path: "1/700/701/7100/" }
+      - { id: 7101, name: Private Project, visibility_level: private, traversal_path: "1/700/702/7101/" }
+      - { id: 7102, name: Internal Project, visibility_level: internal, traversal_path: "1/700/701/7102/" }
+      - { id: 7103, name: Secret Project, visibility_level: private, traversal_path: "1/700/702/7103/" }
+      - { id: 7104, name: Shared Project, visibility_level: public, traversal_path: "1/700/703/7104/" }
     gl_merge_request:
-      - { id: 5200, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, traversal_path: "5/500/5000/" }
-      - { id: 5201, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, traversal_path: "5/500/5000/" }
-      - { id: 5202, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, traversal_path: "5/501/5001/" }
-      - { id: 5203, title: Update D, state: closed, source_branch: update-d, target_branch: main, traversal_path: "5/502/5004/" }
+      - { id: 7200, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, traversal_path: "1/700/701/7100/" }
+      - { id: 7201, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, traversal_path: "1/700/701/7100/" }
+      - { id: 7202, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, traversal_path: "1/700/702/7101/" }
+      - { id: 7203, title: Update D, state: closed, source_branch: update-d, target_branch: main, traversal_path: "1/700/703/7104/" }
     gl_edge:
-      - { traversal_path: "5/500/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
-      - { traversal_path: "5/502/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
-      - { traversal_path: "5/500/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
-      - { traversal_path: "5/501/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
-      - { traversal_path: "5/501/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
-      - { traversal_path: "5/502/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
-      - { traversal_path: "5/501/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
-      - { traversal_path: "5/500/5000/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5000, target_kind: Project }
-      - { traversal_path: "5/500/5002/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5002, target_kind: Project }
-      - { traversal_path: "5/501/5001/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5001, target_kind: Project }
-      - { traversal_path: "5/501/5003/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5003, target_kind: Project }
-      - { traversal_path: "5/502/5004/", source_id: 502, source_kind: Group, relationship_kind: CONTAINS, target_id: 5004, target_kind: Project }
+      - { traversal_path: "1/700/701/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 701, target_kind: Group }
+      - { traversal_path: "1/700/703/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 703, target_kind: Group }
+      - { traversal_path: "1/700/701/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 701, target_kind: Group }
+      - { traversal_path: "1/700/702/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 702, target_kind: Group }
+      - { traversal_path: "1/700/702/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 702, target_kind: Group }
+      - { traversal_path: "1/700/703/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 703, target_kind: Group }
+      - { traversal_path: "1/700/702/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 702, target_kind: Group }
+      - { traversal_path: "1/700/701/7100/", source_id: 701, source_kind: Group, relationship_kind: CONTAINS, target_id: 7100, target_kind: Project }
+      - { traversal_path: "1/700/701/7102/", source_id: 701, source_kind: Group, relationship_kind: CONTAINS, target_id: 7102, target_kind: Project }
+      - { traversal_path: "1/700/702/7101/", source_id: 702, source_kind: Group, relationship_kind: CONTAINS, target_id: 7101, target_kind: Project }
+      - { traversal_path: "1/700/702/7103/", source_id: 702, source_kind: Group, relationship_kind: CONTAINS, target_id: 7103, target_kind: Project }
+      - { traversal_path: "1/700/703/7104/", source_id: 703, source_kind: Group, relationship_kind: CONTAINS, target_id: 7104, target_kind: Project }
     gl_file:
-      - { id: 3000, traversal_path: "5/500/5000/", project_id: 5000, branch: main, path: src/lib.rs, name: lib.rs, extension: rs, language: Rust }
-      - { id: 3001, traversal_path: "5/500/5000/", project_id: 5000, branch: main, path: src/main.rs, name: main.rs, extension: rs, language: Rust }
-      - { id: 3002, traversal_path: "5/501/5001/", project_id: 5001, branch: main, path: src/secret.rs, name: secret.rs, extension: rs, language: Rust }
+      - { id: 3000, traversal_path: "1/700/701/7100/", project_id: 7100, branch: main, path: src/lib.rs, name: lib.rs, extension: rs, language: Rust }
+      - { id: 3001, traversal_path: "1/700/701/7100/", project_id: 7100, branch: main, path: src/main.rs, name: main.rs, extension: rs, language: Rust }
+      - { id: 3002, traversal_path: "1/700/702/7101/", project_id: 7101, branch: main, path: src/secret.rs, name: secret.rs, extension: rs, language: Rust }
     gl_definition:
-      - { id: 5300, traversal_path: "5/500/5000/", project_id: 5000, branch: main, file_path: src/lib.rs, fqn: "crate::MyStruct", name: MyStruct, definition_type: class, start_line: 10, end_line: 50, start_byte: 100, end_byte: 500, start_char: 0, end_char: 0 }
-      - { id: 5301, traversal_path: "5/500/5000/", project_id: 5000, branch: main, file_path: src/lib.rs, fqn: "crate::my_func", name: my_func, definition_type: function, start_line: 60, end_line: 80, start_byte: 600, end_byte: 900, start_char: 0, end_char: 0 }
-      - { id: 5302, traversal_path: "5/500/5000/", project_id: 5000, branch: main, file_path: src/main.rs, fqn: "crate::main", name: main, definition_type: function, start_line: 1, end_line: 20, start_byte: 0, end_byte: 200, start_char: 0, end_char: 0 }
-      - { id: 5303, traversal_path: "5/501/5001/", project_id: 5001, branch: main, file_path: src/secret.rs, fqn: "crate::Secret", name: Secret, definition_type: class, start_line: 1, end_line: 30, start_byte: 0, end_byte: 300, start_char: 0, end_char: 0 }
+      - { id: 7300, traversal_path: "1/700/701/7100/", project_id: 7100, branch: main, file_path: src/lib.rs, fqn: "crate::MyStruct", name: MyStruct, definition_type: class, start_line: 10, end_line: 50, start_byte: 100, end_byte: 500, start_char: 0, end_char: 0 }
+      - { id: 7301, traversal_path: "1/700/701/7100/", project_id: 7100, branch: main, file_path: src/lib.rs, fqn: "crate::my_func", name: my_func, definition_type: function, start_line: 60, end_line: 80, start_byte: 600, end_byte: 900, start_char: 0, end_char: 0 }
+      - { id: 7302, traversal_path: "1/700/701/7100/", project_id: 7100, branch: main, file_path: src/main.rs, fqn: "crate::main", name: main, definition_type: function, start_line: 1, end_line: 20, start_byte: 0, end_byte: 200, start_char: 0, end_char: 0 }
+      - { id: 7303, traversal_path: "1/700/702/7101/", project_id: 7101, branch: main, file_path: src/secret.rs, fqn: "crate::Secret", name: Secret, definition_type: class, start_line: 1, end_line: 30, start_byte: 0, end_byte: 300, start_char: 0, end_char: 0 }
     gl_code_edge:
-      - { traversal_path: "5/500/5000/", source_id: 3000, source_kind: File, relationship_kind: DEFINES, target_id: 5300, target_kind: Definition }
-      - { traversal_path: "5/500/5000/", source_id: 3000, source_kind: File, relationship_kind: DEFINES, target_id: 5301, target_kind: Definition }
-      - { traversal_path: "5/500/5000/", source_id: 3001, source_kind: File, relationship_kind: DEFINES, target_id: 5302, target_kind: Definition }
-      - { traversal_path: "5/501/5001/", source_id: 3002, source_kind: File, relationship_kind: DEFINES, target_id: 5303, target_kind: Definition }
+      - { traversal_path: "1/700/701/7100/", source_id: 3000, source_kind: File, relationship_kind: DEFINES, target_id: 7300, target_kind: Definition }
+      - { traversal_path: "1/700/701/7100/", source_id: 3000, source_kind: File, relationship_kind: DEFINES, target_id: 7301, target_kind: Definition }
+      - { traversal_path: "1/700/701/7100/", source_id: 3001, source_kind: File, relationship_kind: DEFINES, target_id: 7302, target_kind: Definition }
+      - { traversal_path: "1/700/702/7101/", source_id: 3002, source_kind: File, relationship_kind: DEFINES, target_id: 7303, target_kind: Definition }
 
 query:
   json: |
@@ -69,7 +69,7 @@ cases:
     config:
       redaction:
         allow:
-          project: [5000]
+          project: [7100]
     expect:
       node_count: 3
       referential_integrity: true
@@ -77,19 +77,19 @@ cases:
         File:
           ids: [3000]
         Definition:
-          ids: [5300, 5301]
+          ids: [7300, 7301]
       edges:
-        DEFINES: [[3000, 5300], [3000, 5301]]
+        DEFINES: [[3000, 7300], [3000, 7301]]
       edge_exists:
         DEFINES:
-          - { from: File, from_id: 3000, to: Definition, to_id: 5300 }
-          - { from: File, from_id: 3000, to: Definition, to_id: 5301 }
+          - { from: File, from_id: 3000, to: Definition, to_id: 7300 }
+          - { from: File, from_id: 3000, to: Definition, to_id: 7301 }
 
   - name: neighbors_owner_project_denied
     config:
       redaction:
         deny:
-          project: [5000]
+          project: [7100]
     expect:
       node_count: 0
 
@@ -103,7 +103,7 @@ cases:
     config:
       redaction:
         allow:
-          project: [5000, 5001]
+          project: [7100, 7101]
     query:
       json: |
         {
@@ -119,17 +119,17 @@ cases:
         File:
           ids: [3000, 3002]
         Definition:
-          ids: [5300, 5301, 5303]
+          ids: [7300, 7301, 7303]
       edges:
-        DEFINES: [[3000, 5300], [3000, 5301], [3002, 5303]]
+        DEFINES: [[3000, 7300], [3000, 7301], [3002, 7303]]
 
   - name: neighbors_mixed_projects_keep_allowed_owner
     config:
       redaction:
         allow:
-          project: [5000]
+          project: [7100]
         deny:
-          project: [5001]
+          project: [7101]
     query:
       json: |
         {
@@ -146,53 +146,53 @@ cases:
           ids: [3000]
           absent: [3002]
         Definition:
-          ids: [5300, 5301]
-          absent: [5303]
+          ids: [7300, 7301]
+          absent: [7303]
       edges:
-        DEFINES: [[3000, 5300], [3000, 5301]]
+        DEFINES: [[3000, 7300], [3000, 7301]]
 
   - name: path_owner_not_in_path_allowed
     config:
       redaction:
         allow:
-          project: [5000]
+          project: [7100]
     query:
       json: |
         {
           "query_type": "path_finding",
           "nodes": [
             {"id": "start", "entity": "File", "node_ids": [3000]},
-            {"id": "end", "entity": "Definition", "node_ids": [5300, 5301]}
+            {"id": "end", "entity": "Definition", "node_ids": [7300, 7301]}
           ],
           "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["DEFINES"]}
         }
       gql: |
-        MATCH p = ANY SHORTEST (start:File {id: 3000})-[:DEFINES*1..2]->(`end`:Definition) WHERE `end`.id IN [5300, 5301] RETURN p
+        MATCH p = ANY SHORTEST (start:File {id: 3000})-[:DEFINES*1..2]->(`end`:Definition) WHERE `end`.id IN [7300, 7301] RETURN p
     expect:
       path_count: 2
       path_destinations:
-        Definition: [5300, 5301]
+        Definition: [7300, 7301]
       path_edges:
-        - [{ from: File, from_id: 3000, type: DEFINES, to: Definition, to_id: 5300, step: 0 }]
-        - [{ from: File, from_id: 3000, type: DEFINES, to: Definition, to_id: 5301, step: 0 }]
+        - [{ from: File, from_id: 3000, type: DEFINES, to: Definition, to_id: 7300, step: 0 }]
+        - [{ from: File, from_id: 3000, type: DEFINES, to: Definition, to_id: 7301, step: 0 }]
 
   - name: path_owner_not_in_path_denied
     config:
       redaction:
         deny:
-          project: [5000]
+          project: [7100]
     query:
       json: |
         {
           "query_type": "path_finding",
           "nodes": [
             {"id": "start", "entity": "File", "node_ids": [3000]},
-            {"id": "end", "entity": "Definition", "node_ids": [5300, 5301]}
+            {"id": "end", "entity": "Definition", "node_ids": [7300, 7301]}
           ],
           "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["DEFINES"]}
         }
       gql: |
-        MATCH p = ANY SHORTEST (start:File {id: 3000})-[:DEFINES*1..2]->(`end`:Definition) WHERE `end`.id IN [5300, 5301] RETURN p
+        MATCH p = ANY SHORTEST (start:File {id: 3000})-[:DEFINES*1..2]->(`end`:Definition) WHERE `end`.id IN [7300, 7301] RETURN p
     expect:
       node_count: 0
       path_count: 0

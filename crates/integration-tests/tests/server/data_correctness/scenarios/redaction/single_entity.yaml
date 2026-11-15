@@ -1,7 +1,7 @@
 description: Redaction on single-entity traversals keeps only the allowed ids and their order
 
 config:
-  security: { org_id: 5, paths: ["5/"] }
+  security: { paths: ["1/700/"] }
   extra_seed:
     gl_user:
       - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human, _version: "2099-01-01 00:00:00" }
@@ -12,40 +12,40 @@ config:
       - { id: 6, _version: "2099-01-01 00:00:00", _deleted: true }
       - { id: 7, _version: "2099-01-01 00:00:00", _deleted: true }
     gl_group:
-      - { id: 500, name: Public Group, visibility_level: public, traversal_path: "5/500/" }
-      - { id: 501, name: Private Group, visibility_level: private, traversal_path: "5/501/" }
-      - { id: 502, name: Internal Group, visibility_level: internal, traversal_path: "5/502/" }
+      - { id: 701, name: Public Group, visibility_level: public, traversal_path: "1/700/701/" }
+      - { id: 702, name: Private Group, visibility_level: private, traversal_path: "1/700/702/" }
+      - { id: 703, name: Internal Group, visibility_level: internal, traversal_path: "1/700/703/" }
     gl_project:
-      - { id: 5000, name: Public Project, visibility_level: public, traversal_path: "5/500/5000/" }
-      - { id: 5001, name: Private Project, visibility_level: private, traversal_path: "5/501/5001/" }
-      - { id: 5002, name: Internal Project, visibility_level: internal, traversal_path: "5/500/5002/" }
-      - { id: 5003, name: Secret Project, visibility_level: private, traversal_path: "5/501/5003/" }
-      - { id: 5004, name: Shared Project, visibility_level: public, traversal_path: "5/502/5004/" }
+      - { id: 7100, name: Public Project, visibility_level: public, traversal_path: "1/700/701/7100/" }
+      - { id: 7101, name: Private Project, visibility_level: private, traversal_path: "1/700/702/7101/" }
+      - { id: 7102, name: Internal Project, visibility_level: internal, traversal_path: "1/700/701/7102/" }
+      - { id: 7103, name: Secret Project, visibility_level: private, traversal_path: "1/700/702/7103/" }
+      - { id: 7104, name: Shared Project, visibility_level: public, traversal_path: "1/700/703/7104/" }
     gl_merge_request:
-      - { id: 5200, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, traversal_path: "5/500/5000/" }
-      - { id: 5201, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, traversal_path: "5/500/5000/" }
-      - { id: 5202, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, traversal_path: "5/501/5001/" }
-      - { id: 5203, title: Update D, state: closed, source_branch: update-d, target_branch: main, traversal_path: "5/502/5004/" }
+      - { id: 7200, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, traversal_path: "1/700/701/7100/" }
+      - { id: 7201, title: Fix bug B, state: opened, source_branch: fix-b, target_branch: main, traversal_path: "1/700/701/7100/" }
+      - { id: 7202, title: Refactor C, state: merged, source_branch: refactor-c, target_branch: main, traversal_path: "1/700/702/7101/" }
+      - { id: 7203, title: Update D, state: closed, source_branch: update-d, target_branch: main, traversal_path: "1/700/703/7104/" }
     gl_edge:
-      - { traversal_path: "5/500/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
-      - { traversal_path: "5/502/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
-      - { traversal_path: "5/500/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 500, target_kind: Group }
-      - { traversal_path: "5/501/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
-      - { traversal_path: "5/501/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
-      - { traversal_path: "5/502/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 502, target_kind: Group }
-      - { traversal_path: "5/501/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 501, target_kind: Group }
-      - { traversal_path: "5/500/5000/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5000, target_kind: Project }
-      - { traversal_path: "5/500/5002/", source_id: 500, source_kind: Group, relationship_kind: CONTAINS, target_id: 5002, target_kind: Project }
-      - { traversal_path: "5/501/5001/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5001, target_kind: Project }
-      - { traversal_path: "5/501/5003/", source_id: 501, source_kind: Group, relationship_kind: CONTAINS, target_id: 5003, target_kind: Project }
-      - { traversal_path: "5/502/5004/", source_id: 502, source_kind: Group, relationship_kind: CONTAINS, target_id: 5004, target_kind: Project }
+      - { traversal_path: "1/700/701/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 701, target_kind: Group }
+      - { traversal_path: "1/700/703/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 703, target_kind: Group }
+      - { traversal_path: "1/700/701/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 701, target_kind: Group }
+      - { traversal_path: "1/700/702/", source_id: 3, source_kind: User, relationship_kind: MEMBER_OF, target_id: 702, target_kind: Group }
+      - { traversal_path: "1/700/702/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 702, target_kind: Group }
+      - { traversal_path: "1/700/703/", source_id: 4, source_kind: User, relationship_kind: MEMBER_OF, target_id: 703, target_kind: Group }
+      - { traversal_path: "1/700/702/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 702, target_kind: Group }
+      - { traversal_path: "1/700/701/7100/", source_id: 701, source_kind: Group, relationship_kind: CONTAINS, target_id: 7100, target_kind: Project }
+      - { traversal_path: "1/700/701/7102/", source_id: 701, source_kind: Group, relationship_kind: CONTAINS, target_id: 7102, target_kind: Project }
+      - { traversal_path: "1/700/702/7101/", source_id: 702, source_kind: Group, relationship_kind: CONTAINS, target_id: 7101, target_kind: Project }
+      - { traversal_path: "1/700/702/7103/", source_id: 702, source_kind: Group, relationship_kind: CONTAINS, target_id: 7103, target_kind: Project }
+      - { traversal_path: "1/700/703/7104/", source_id: 703, source_kind: Group, relationship_kind: CONTAINS, target_id: 7104, target_kind: Project }
 
 cases:
   - name: projects_all_allowed
     config:
       redaction:
         allow:
-          project: [5000, 5001, 5002, 5003, 5004]
+          project: [7100, 7101, 7102, 7103, 7104]
     query:
       json: |
         {
@@ -59,13 +59,13 @@ cases:
       node_count: 5
       nodes:
         Project:
-          ids: [5000, 5001, 5002, 5003, 5004]
+          ids: [7100, 7101, 7102, 7103, 7104]
 
   - name: projects_partially_allowed
     config:
       redaction:
         allow:
-          project: [5000, 5004]
+          project: [7100, 7104]
     query:
       json: |
         {
@@ -79,14 +79,14 @@ cases:
       node_count: 2
       nodes:
         Project:
-          ids: [5000, 5004]
-          absent: [5001, 5002, 5003]
+          ids: [7100, 7104]
+          absent: [7101, 7102, 7103]
 
   - name: project_visibility_filter_all_allowed
     config:
       redaction:
         allow:
-          project: [5000, 5001, 5002, 5003, 5004]
+          project: [7100, 7101, 7102, 7103, 7104]
     query:
       json: |
         {
@@ -102,7 +102,7 @@ cases:
       node_count: 3
       nodes:
         Project:
-          order: [5000, 5002, 5004]
+          order: [7100, 7102, 7104]
           filters:
             visibility_level: { in: [public, internal] }
 
@@ -110,9 +110,9 @@ cases:
     config:
       redaction:
         allow:
-          project: [5000]
+          project: [7100]
         deny:
-          project: [5002, 5004]
+          project: [7102, 7104]
     query:
       json: |
         {
@@ -128,8 +128,8 @@ cases:
       node_count: 1
       nodes:
         Project:
-          order: [5000]
-          absent: [5002, 5004]
+          order: [7100]
+          absent: [7102, 7104]
           filters:
             visibility_level: { in: [public, internal] }
 
@@ -137,44 +137,44 @@ cases:
     config:
       redaction:
         allow:
-          group: [500, 501, 502]
+          group: [701, 702, 703]
     query:
       json: |
         {
           "query_type": "traversal",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [500, 501, 502]}],
+          "nodes": [{"id": "g", "entity": "Group", "node_ids": [701, 702, 703]}],
           "limit": 100
         }
       gql: |
-        MATCH (g:Group) WHERE g.id IN [500, 501, 502] RETURN g LIMIT 100
+        MATCH (g:Group) WHERE g.id IN [701, 702, 703] RETURN g LIMIT 100
     expect:
       node_count: 3
       nodes:
         Group:
-          ids: [500, 501, 502]
+          ids: [701, 702, 703]
 
   - name: group_node_ids_redacted
     config:
       redaction:
         allow:
-          group: [500, 502]
+          group: [701, 703]
         deny:
-          group: [501]
+          group: [702]
     query:
       json: |
         {
           "query_type": "traversal",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [500, 501, 502]}],
+          "nodes": [{"id": "g", "entity": "Group", "node_ids": [701, 702, 703]}],
           "limit": 100
         }
       gql: |
-        MATCH (g:Group) WHERE g.id IN [500, 501, 502] RETURN g LIMIT 100
+        MATCH (g:Group) WHERE g.id IN [701, 702, 703] RETURN g LIMIT 100
     expect:
       node_count: 2
       nodes:
         Group:
-          ids: [500, 502]
-          absent: [501]
+          ids: [701, 703]
+          absent: [702]
 
   - name: user_id_range_keeps_allowed_rows
     config:
@@ -200,44 +200,44 @@ cases:
     config:
       redaction:
         allow:
-          project: [5000, 5001, 5002, 5003, 5004]
+          project: [7100, 7101, 7102, 7103, 7104]
     query:
       json: |
         {
           "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "node_ids": [5000, 5003]}],
+          "nodes": [{"id": "p", "entity": "Project", "node_ids": [7100, 7103]}],
           "limit": 10
         }
       gql: |
-        MATCH (p:Project) WHERE p.id IN [5000, 5003] RETURN p LIMIT 10
+        MATCH (p:Project) WHERE p.id IN [7100, 7103] RETURN p LIMIT 10
     expect:
       node_count: 2
       nodes:
         Project:
-          ids: [5000, 5003]
+          ids: [7100, 7103]
 
   - name: project_node_ids_redacted
     config:
       redaction:
         allow:
-          project: [5000]
+          project: [7100]
         deny:
-          project: [5003]
+          project: [7103]
     query:
       json: |
         {
           "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "node_ids": [5000, 5003]}],
+          "nodes": [{"id": "p", "entity": "Project", "node_ids": [7100, 7103]}],
           "limit": 10
         }
       gql: |
-        MATCH (p:Project) WHERE p.id IN [5000, 5003] RETURN p LIMIT 10
+        MATCH (p:Project) WHERE p.id IN [7100, 7103] RETURN p LIMIT 10
     expect:
       node_count: 1
       nodes:
         Project:
-          ids: [5000]
-          absent: [5003]
+          ids: [7100]
+          absent: [7103]
 
   - name: complex_filters_all_allowed
     config:
@@ -320,7 +320,7 @@ cases:
     config:
       redaction:
         allow:
-          merge_request: [5200, 5201, 5202, 5203]
+          merge_request: [7200, 7201, 7202, 7203]
     query:
       json: |
         {
@@ -334,15 +334,15 @@ cases:
       node_count: 4
       nodes:
         MergeRequest:
-          ids: [5200, 5201, 5202, 5203]
+          ids: [7200, 7201, 7202, 7203]
 
   - name: merge_requests_redacted
     config:
       redaction:
         allow:
-          merge_request: [5200, 5201]
+          merge_request: [7200, 7201]
         deny:
-          merge_request: [5202, 5203]
+          merge_request: [7202, 7203]
     query:
       json: |
         {
@@ -356,8 +356,8 @@ cases:
       node_count: 2
       nodes:
         MergeRequest:
-          ids: [5200, 5201]
-          absent: [5202, 5203]
+          ids: [7200, 7201]
+          absent: [7202, 7203]
 
   - name: row_order_all_allowed
     config:
@@ -453,11 +453,11 @@ cases:
     config:
       extra_seed:
         gl_agent_session:
-          - { id: 1, flow_type: developer, project_id: 5000, traversal_path: "5/500/5000/" }
-          - { id: 2, flow_type: chat, project_id: 5001, traversal_path: "5/501/5001/" }
+          - { id: 1, flow_type: developer, project_id: 7100, traversal_path: "1/700/701/7100/" }
+          - { id: 2, flow_type: chat, project_id: 7101, traversal_path: "1/700/702/7101/" }
       redaction:
         allow:
-          project: [5000, 5001]
+          project: [7100, 7101]
     query:
       json: |
         {
@@ -477,13 +477,13 @@ cases:
     config:
       extra_seed:
         gl_agent_session:
-          - { id: 1, flow_type: developer, project_id: 5000, traversal_path: "5/500/5000/" }
-          - { id: 2, flow_type: chat, project_id: 5001, traversal_path: "5/501/5001/" }
+          - { id: 1, flow_type: developer, project_id: 7100, traversal_path: "1/700/701/7100/" }
+          - { id: 2, flow_type: chat, project_id: 7101, traversal_path: "1/700/702/7101/" }
       redaction:
         allow:
-          project: [5000]
+          project: [7100]
         deny:
-          project: [5001]
+          project: [7101]
     query:
       json: |
         {
