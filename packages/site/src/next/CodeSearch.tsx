@@ -7,9 +7,9 @@ const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
 const toolsOf = (search: Search) => [...new Set(search.steps!.map((step) => step.tool))];
 const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : search.branches === "all" ? "branch" : search.mode === "structural" ? "code" : "search");
 
-// Code searches from the simplest mode to the richest, and questions that use third-party connectors.
+// One code search per mode, text, regex, then structural, where the text search also covers every branch, and questions that use third-party connectors.
 const GROUPS = [
-  { label: "Code search", items: ["security-context", "branch", "flag", "unwrap"].map((id) => SEARCHES.find((item) => item.id === id)!) },
+  { label: "Code search", items: ["branch", "flag", "unwrap"].map((id) => SEARCHES.find((item) => item.id === id)!) },
   { label: "Third-party connectors", items: CROSS_SEARCHES.filter((item) => item.id !== "epic") },
 ];
 const ALL = [...SEARCHES, ...CROSS_SEARCHES];
@@ -107,7 +107,8 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
     setRun({ search, start: performance.now() });
     onSearch?.(search);
     if (search.kind === "code") setMode(search.mode);
-    setPattern("");
+    // The example's text stays in the input, as if you had typed it.
+    setPattern(search.pattern);
     setUnknown(false);
     setStage(still() ? stepsOf(search) : 0);
   };
@@ -175,10 +176,10 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
           </div>
           {unknown && <p className="next-note">Live search is coming soon. Pick an example to see what it does.</p>}
         </form>
-        {run && stage >= stepsOf(run.search) && (
+        {run && (
           <div className="agent-status" aria-hidden="true">
-            <span>{run.search.steps ? `${run.search.steps.length} tools` : `${run.search.files.length + (run.search.more?.length ?? 0)} findings`}</span>
-            {run.search.funnel && <span>{run.search.funnel.ms} ms</span>}
+            <span>{stage < stepsOf(run.search) ? "Searching" : run.search.steps ? [...new Set(run.search.steps.map((step) => step.tool))].join(" · ") : `${run.search.files.length + (run.search.more?.length ?? 0)} findings`}</span>
+            {run.search.funnel && stage >= stepsOf(run.search) && <span>{run.search.funnel.ms} ms</span>}
             <span className="agent-status-brand">
               <Icon name="orbit" size={12} /> Orbit Next
             </span>

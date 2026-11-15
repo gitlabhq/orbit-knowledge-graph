@@ -49,6 +49,8 @@ export type Search = {
   // More real matches, as file:line, that the map behind the hero marks next to the files shown.
   more?: string[];
   steps?: CrossStep[];
+  // The path traces the GitLab tanuki on the map, which then fills in.
+  logo?: boolean;
 };
 
 export const SEARCHES: Search[] = [
@@ -181,7 +183,7 @@ export const SEARCHES: Search[] = [
   {
     id: "branch",
     kind: "code",
-    label: "Code that is only on a branch",
+    label: "Find branches that touch CursorPaginator",
     pattern: "CursorPaginator",
     mode: "text",
     branches: "all",
@@ -309,7 +311,7 @@ export const SEARCHES: Search[] = [
 
 // Questions that cross tools. Third-party sources have not shipped, so the steps are sample data from the
 // team's third-party demo world: a pricing cache, epic ORB-1, and incident INC-77, on made-up projects.
-const cross = (id: string, label: string, pattern: string, summary: string, steps: CrossStep[]): Search => ({ id, kind: "cross", label, pattern, mode: "text", branches: "default", summary, files: [], steps });
+const cross = (id: string, label: string, pattern: string, summary: string, steps: CrossStep[], logo = false): Search => ({ id, kind: "cross", label, pattern, mode: "text", branches: "default", summary, files: [], steps, logo });
 
 export const CROSS_SEARCHES: Search[] = [
   cross("incident", "Resolve an incident", "What caused INC-77, and which change fixed it?", "checkout-api!42 caused it. !43 fixed the cache stampede.", [
@@ -338,7 +340,7 @@ export const CROSS_SEARCHES: Search[] = [
     { tool: "GitLab", icon: "tanuki", finding: "checkout-api!43 set it.", name: "!43", links: ["checkout-api!43"] },
     { tool: "Jira", icon: "work-item-issue", finding: "!43 is part of ORB-12, after INC-77.", name: "ORB-12" },
     { tool: "Slack", icon: "comment", finding: "“Keep the TTL at 30 s. Any longer and flash-sale prices go stale.”", name: "the decision" },
-  ]),
+  ], true),
 ];
 
 // The size of the Orbit Next prototype's index of open source code, from its search page on Nov 15, 2026.
