@@ -884,3 +884,18 @@
 .next-demo-example svg {
   flex-shrink: 0;
 }
+
+/* The window bar's name sits in the exact middle of the bar, whatever the lights take up. */
+.next-chat .agent-chat-head {
+  position: relative;
+  min-height: 2.125rem;
+}
+
+.next-chat .agent-chat-title {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  margin: 0;
+  transform: translate(-50%, -50%);
+}
