@@ -47,7 +47,11 @@
     const body = t.createTBody();
     for (const row of rows) {
       const tr = body.insertRow();
-      for (const c of columns) { const td = tr.insertCell(); td.textContent = cell(row[c]); if (c.startsWith("_orbit")) td.className = "hidden-column"; }
+      for (const c of columns) {
+        const td = tr.insertCell(), text = cell(row[c]);
+        td.textContent = text;
+        td.className = [c.startsWith("_orbit") && "hidden-column", text.includes(" ") ? text.length > 32 && "prose" : "word"].filter(Boolean).join(" ");
+      }
     }
     wrap.append(t);
     return wrap;
