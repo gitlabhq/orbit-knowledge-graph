@@ -68,7 +68,7 @@ pub(super) fn assert_repeated_response(
     );
 }
 
-static NEVER_IN_COMPILE_ERRORS: LazyLock<Vec<(&str, Regex)>> = LazyLock::new(|| {
+static NEVER_IN_COMPILE_ERRORS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
     [
         ("a traversal path", r"(^|[^/\w])(\d+/)+($|\W)"),
         ("an email address", r"[\w.+-]+@[\w-]+\.\w+"),
@@ -81,12 +81,16 @@ static NEVER_IN_COMPILE_ERRORS: LazyLock<Vec<(&str, Regex)>> = LazyLock::new(|| 
     .collect()
 });
 
+pub(crate) fn shown_private_detail(message: &str) -> Option<&'static str> {
+    NEVER_IN_COMPILE_ERRORS
+        .iter()
+        .find(|(_, pattern)| pattern.is_match(message))
+        .map(|(name, _)| *name)
+}
+
 pub(super) fn assert_no_private_details(message: &str, label: &str) {
-    for (name, pattern) in NEVER_IN_COMPILE_ERRORS.iter() {
-        assert!(
-            !pattern.is_match(message),
-            "{label}: compile error shows {name}: {message}"
-        );
+    if let Some(detail) = shown_private_detail(message) {
+        panic!("{label}: compile error shows {detail}: {message}");
     }
 }
 

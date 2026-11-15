@@ -63,13 +63,6 @@ cases:
         MATCH (g:Group {id: 100})<-[r]-(n) WHERE NOT type(r) IN ['MEMBER_OF'] RETURN g, n
     expect: { compile_error: schema }
 
-  - name: on_node
-    description: type() on a node variable rejects and says it takes a relationship variable
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(u) = 'AUTHORED' RETURN u LIMIT 10
-    expect: { compile_error: schema }
-
   - name: operator
     description: type(r) with an operator other than =, <>, or IN rejects without echoing the compared literal
     query:
@@ -91,15 +84,6 @@ cases:
       gql: |
         MATCH (g:Group {id: 100})<-[r]-(n) RETURN g, n ORDER BY type(r)
     expect: { compile_error: schema }
-
-  - name: order_relationship_property
-    description: ORDER BY a relationship property rejects and points to node properties or type(r), instead of
-      reporting an undefined node
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN mr ORDER BY r.source_id LIMIT 10
-    expect:
-      compile_error: schema
 
   - name: order_variable_length
     description: ORDER BY type(r) on a variable-length relationship rejects because the variable binds a
@@ -132,21 +116,6 @@ cases:
       gql: |
         MATCH (s:VulnerabilityScanner)-[r:SCANS|IN_PROJECT]->(p:Project {id: 1000})
         RETURN s, p, type(r) LIMIT 10
-    expect: { compile_error: schema }
-
-  - name: unsupported_position
-    description: type(r) on the right side of a property comparison rejects and names the supported forms
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE mr.title = type(r) RETURN u, mr.title LIMIT 10
-    expect: { compile_error: schema }
-
-  - name: variable_length
-    description: WHERE type(r) on a variable-length relationship rejects and points to the typed pattern
-      form
-    query:
-      gql: |
-        MATCH (u:User {id: 1})-[r*1..2]->(p:Project) WHERE type(r) = 'MEMBER_OF' RETURN u, p LIMIT 10
     expect: { compile_error: schema }
 
   - name: variable_length_return

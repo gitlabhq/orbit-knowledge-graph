@@ -1,0 +1,112 @@
+cases:
+  - name: IS TRUE is not supported, and the syntax error names NULL or NOT NULL instead of a grammar rule
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE wi.confidential IS TRUE RETURN wi.id
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - expected NULL or NOT NULL
+          not_contains:
+            - expected Not
+            - Rule
+
+  - name: GQL rejects the x NOT IN [...] spelling and names the supported form
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.state NOT IN ['closed']
+        RETURN wi.state LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - write NOT n.property IN [...] to exclude values
+          not_contains:
+            - closed
+
+  - name: NOT over a comparison of two literals is rejected. A comparison must start with a property of a pattern variable, and a JSON not key must be a property name.
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000}) WHERE NOT 'private-query-literal' = 'private-query-literal' RETURN wi.id
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{"1":"private-query-literal"}}],"limit":10}
+    physical:
+      clickhouse:
+        rejected:
+          phase:
+            json: json_dsl_parse
+            gql: gql_parse
+          reason: schema
+          contains:
+            json:
+              - does not match
+            gql:
+              - each comparison starts with a property such as n.name
+          not_contains:
+            - private-query-literal
+
+  - name: A NOT list on the neighbors endpoint gets the neighbors shape message
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(x)
+        WHERE NOT x.name IN ['private-query-literal']
+        RETURN x
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - neighbors requires one labeled center and an unfiltered, unlabeled endpoint at one hop
+          not_contains:
+            - undefined
+            - private-query-literal
+
+  - name: A NOT list on the shortest-path relationship gets the path shape message
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (u:User {id: 1})-[r]->(g:Group {id: 100})
+        WHERE NOT r.source_id IN [1, 2]
+        RETURN p
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - path finding supports outgoing paths starting at one hop, without relationship predicates
+          not_contains:
+            - undefined
+
+  - name: GQL rejects OR with a message that points to AND, NOT, and IN
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id = 4000 OR wi.id = 4001
+        RETURN wi.state LIMIT 10
+    missing_frontends:
+      json: The source scenario supplies only GQL.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - OR and XOR are not supported; combine conditions with AND and NOT, or use IN [...] to match one of several values
+          not_contains:
+            - Orbit query syntax
+            - "4001"

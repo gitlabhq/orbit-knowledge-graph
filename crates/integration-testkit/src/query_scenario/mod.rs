@@ -39,10 +39,12 @@ use crate::{
 };
 
 pub use duckdb::run_duckdb_dir;
+pub(crate) use format::rejection_reason;
 pub use format::{
     PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, QueryStep, RedactionConfig,
     ScenarioConfig, SecurityOverride,
 };
+pub(crate) use response::shown_private_detail;
 
 use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
 use orbit_server::redaction::QueryResult;

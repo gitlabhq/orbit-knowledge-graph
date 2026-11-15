@@ -394,7 +394,7 @@ impl TryFrom<RawCompileError> for CompileErrorExpect {
     }
 }
 
-fn rejection_reason(name: &str) -> Result<RejectionReason, String> {
+pub(crate) fn rejection_reason(name: &str) -> Result<RejectionReason, String> {
     RejectionReason::iter()
         .find(|reason| <&str>::from(*reason) == name)
         .ok_or_else(|| {
