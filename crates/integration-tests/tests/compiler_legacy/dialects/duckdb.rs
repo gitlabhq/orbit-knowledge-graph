@@ -1,7 +1,7 @@
 //! DuckDB dialect end-to-end tests.
 
-use crate::compiler::setup::test_ontology;
-use crate::compiler::utils::ParsedSql;
+use crate::compiler_legacy::setup::test_ontology;
+use crate::compiler_legacy::utils::ParsedSql;
 use compiler::{Frontend, compile_local};
 
 fn compile(json: &str) -> compiler::passes::codegen::CompiledQueryContext {
