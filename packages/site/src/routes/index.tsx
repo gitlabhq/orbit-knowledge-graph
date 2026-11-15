@@ -475,7 +475,7 @@ function HomePage() {
 
       <Section
         id="graph" dark pin
-        className="page-section-tail"
+        className="page-section-head page-section-tail"
         backdrop={<RippleField source={ZERO_DAY.source} nodes={ZERO_DAY.nodes} anchor="#graph .ripple-nodes" />}
         backdropFade="full"
         eyebrow="Zero-day response"
