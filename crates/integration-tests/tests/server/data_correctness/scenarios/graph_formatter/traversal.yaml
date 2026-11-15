@@ -1,5 +1,5 @@
 config:
-  security: { org_id: 1, paths: ["1/600/"] }
+  security: { paths: ["1/600/"] }
   redaction:
     allow:
       user: [1, 2, 3, 4, 5]

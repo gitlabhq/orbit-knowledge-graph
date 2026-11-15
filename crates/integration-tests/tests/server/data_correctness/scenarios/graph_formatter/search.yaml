@@ -1,5 +1,5 @@
 config:
-  security: { org_id: 1, paths: ["1/600/"] }
+  security: { paths: ["1/600/"] }
   redaction:
     allow:
       user: [1, 2, 3, 4, 5]
@@ -132,7 +132,7 @@ cases:
   - name: search_wildcard_columns
     description: Wildcard columns return public user properties and leave out admin-only email even for an admin
     config:
-      security: { org_id: 1, paths: ["1/600/"], admin: true, access_level: 50 }
+      security: { paths: ["1/600/"], admin: true, access_level: 50 }
     query:
       json: |
         {
