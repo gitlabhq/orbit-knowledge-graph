@@ -94,7 +94,7 @@ export const SEARCHES: Search[] = [
   {
     id: "unwrap",
     kind: "code",
-    label: "Every unwrap() in Rust, on every branch",
+    label: "unwrap() in Rust, on all branches",
     pattern: "$X.unwrap()",
     mode: "structural",
     language: "rust",
