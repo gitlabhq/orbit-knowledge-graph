@@ -178,10 +178,18 @@ const CHAT: PromptExample[] = [
 // The agents that `glab orbit setup` sets up. The others connect to the GitLab Orbit MCP endpoint.
 const CLI_AGENTS = new Set(["Claude Code", "Codex", "OpenCode", "Pi"]);
 
-// A setup prompt to paste into the agent, tailored to it.
-const setupPrompt = (agent: string) => {
+// A setup prompt to paste into the agent, tailored to it. Without an agent, it works for any agent.
+const setupPrompt = (agent: string | null) => {
   const check = `Do not say that the connection works until it is confirmed. Then ask me which project to use, and answer one question about it with graph evidence: the query you ran and the nodes it returned.`;
   const access = `GitLab Orbit needs GitLab Premium or Ultimate, and it must be turned on for my top-level group. If it is not, show me how: ${DOCS}/quickstart/.`;
+  if (!agent)
+    return `Help me connect GitLab Orbit to this agent, so you can answer questions with the graph of my code and my GitLab data.
+
+Read the setup guide at ${DOCS}/agents/ first. Install the GitLab Orbit CLI with glab (glab 1.126 or later), then run glab orbit setup for this agent. Keep any existing MCP servers and settings. If this agent cannot run shell commands, connect it to the GitLab Orbit MCP endpoint instead: ${DOCS}/agents/mcp/. Let me sign in and authorize myself.
+
+${access}
+
+${check}`;
   if (agent === "GitLab Duo")
     return `Help me use GitLab Orbit in GitLab Duo, so you can answer questions with the graph of my code and my GitLab data.
 
@@ -376,18 +384,19 @@ function QuickstartLink() {
 
 // The first screen, from the very top, behind the top bar, with the setup command
 // lower down.
-// Pick an agent, then copy a setup prompt for it to paste into the agent.
+// Copy a setup prompt to paste into an agent. Picking an agent tailors the prompt to it, and picking it
+// again goes back to the prompt for any agent.
 function SetupPicker({ className }: { className?: string }) {
-  const [agent, setAgent] = useState("Claude Code");
+  const [agent, setAgent] = useState<string | null>(null);
   return (
     <div className={cn("flex flex-col items-center gap-5", className)}>
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
-        <CopyButton key={agent} text={setupPrompt(agent)} label={`Copy a setup prompt for ${agent}`} primary>
+        <CopyButton key={agent ?? ""} text={setupPrompt(agent)} label={`Copy a setup prompt for ${agent ?? "your agent"}`} primary>
           Copy setup prompt
         </CopyButton>
         <QuickstartLink />
       </div>
-      <AgentLogos label="Pick your agent" marksOnly agents={AGENTS} selected={agent} onSelect={setAgent} />
+      <AgentLogos label="Pick your agent" marksOnly agents={AGENTS} selected={agent ?? undefined} onSelect={(name) => setAgent((current) => (current === name ? null : name))} />
     </div>
   );
 }
