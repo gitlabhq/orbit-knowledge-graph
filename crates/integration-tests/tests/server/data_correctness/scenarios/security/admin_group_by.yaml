@@ -22,5 +22,8 @@ cases:
       row_count: 1
       row_values:
         - { members: 9 }
-      gql_columns:
-        is_admin: ["FALSE"]
+      format:
+        gql:
+          value:
+            columns:
+              is_admin: ["FALSE"]

@@ -11,7 +11,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use super::format::{OutputExpect, OutputFormat};
-use super::{QueryExpect, assert_gql_table, assert_response};
+use super::{QueryExpect, assert_response};
 
 static RESPONSE_SCHEMA: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(include_str!(concat!(
@@ -145,11 +145,11 @@ pub(super) fn assert_output(
     label: &str,
 ) -> Value {
     assert_pagination(output, label);
-    if frontend == Frontend::Gql {
-        assert_gql_table(output, expect, label);
-    }
     let response = GraphFormatter.format(output);
     for (format, expected) in &expect.format {
+        if *format == OutputFormat::Gql && frontend != Frontend::Gql {
+            continue;
+        }
         assert_format(output, &response, *format, expected, label);
     }
     assert_response(&output.compiled.input, response.clone(), expect, label);
@@ -185,8 +185,16 @@ fn assert_format(
     let value = match name {
         FormatName::Toon => toon_value(&text, graph, label),
         _ => {
-            let (columns, rows) = GqlFormatter.table(output);
-            serde_json::json!({"columns": columns, "rows": rows})
+            let (header, rows) = GqlFormatter.table(output);
+            let columns: serde_json::Map<String, Value> = header
+                .iter()
+                .enumerate()
+                .map(|(index, name)| {
+                    let values = rows.iter().map(|row| Value::from(row[index].as_str()));
+                    (name.clone(), values.collect())
+                })
+                .collect();
+            serde_json::json!({"header": header, "rows": rows, "columns": columns})
         }
     };
     for fragment in &expect.contains {

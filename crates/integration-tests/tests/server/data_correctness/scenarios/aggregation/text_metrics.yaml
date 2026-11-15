@@ -47,8 +47,11 @@ cases:
       row_count: 1
       row_values:
         - { first_created: "2024-03-05T11:30:00Z", max_weight: 8 }
-      gql_columns:
-        any_confidential: ["TRUE"]
+      format:
+        gql:
+          value:
+            columns:
+              any_confidential: ["TRUE"]
 
   - name: enum_metrics_rejected
     description: MIN and MAX reject enums, whose values have no order

@@ -19,7 +19,7 @@ use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
     SecurityContext,
 };
-use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
+use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
 };
@@ -570,27 +570,6 @@ fn assert_response(input: &Input, response: serde_json::Value, expect: &QueryExp
     expect.validate_response_type(input.query_type, label);
     let response = validate_response(input, response, label);
     apply_expect(&ResponseView::for_query(input, response), expect, label);
-}
-
-fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) {
-    if expect.gql_columns.is_empty() && expect.gql_column_names.is_empty() {
-        return;
-    }
-    let (header, rows) = GqlFormatter.table(output);
-    if !expect.gql_column_names.is_empty() {
-        assert_eq!(
-            header, expect.gql_column_names,
-            "{label}: gql column names mismatch"
-        );
-    }
-    for (name, values) in &expect.gql_columns {
-        let index = header
-            .iter()
-            .position(|column| column == name)
-            .unwrap_or_else(|| panic!("{label}: gql table has no column {name}: {header:?}"));
-        let actual: Vec<&str> = rows.iter().map(|row| row[index].as_str()).collect();
-        assert_eq!(actual, *values, "{label}: gql column {name} mismatch");
-    }
 }
 
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {

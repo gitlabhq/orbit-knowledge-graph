@@ -169,10 +169,6 @@ pub struct QueryExpect {
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
-    #[serde(default)]
-    pub gql_columns: BTreeMap<String, Vec<String>>,
-    #[serde(default)]
-    pub gql_column_names: Vec<String>,
     /// Assertions across ALL pages combined. The runner collects node IDs
     /// and edge tuples from every page and asserts at the end.
     #[serde(default)]
@@ -339,8 +335,7 @@ impl QueryExpect {
             || self.has_path_assertions()
             || self.referential_integrity
             || self.has_more.is_some()
-            || !self.gql_columns.is_empty()
-            || !self.gql_column_names.is_empty()
+            || !self.format.is_empty()
     }
 
     /// Derive a total node count from per-entity specs when `node_count` is

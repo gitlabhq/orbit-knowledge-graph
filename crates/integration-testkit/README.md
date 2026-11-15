@@ -316,8 +316,6 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `edge_count` | {TYPE: N} | Per-type edge count |
 | `referential_integrity` | bool | All edge endpoints have nodes |
 | `has_more` | bool | Pagination flag |
-| `gql_columns` | {column: [cell]} | Exact cells of a `gql` format table column, in row order |
-| `gql_column_names` | [column] | Exact `gql` format table header, in order |
 
 Typed edge objects use `{from: User, from_id: 1, to: Group, to_id: 100}`.
 They check endpoint types as well as IDs. Pair arrays such as `[1, 100]` check
@@ -353,7 +351,7 @@ only IDs and the relationship type.
 | `absent` | [key] | The decoded value has none of these top-level keys |
 | `value` | object | A partial match on the decoded value: objects may have extra keys, arrays match item by item |
 
-Each format also checks its format name and version. TOON decodes to its JSON value, must be the canonical encoding, and, for queries other than aggregations, must have the same node and edge counts as the graph response. GQL decodes to `{columns, rows}` from its result table.
+Each format also checks its format name and version. TOON decodes to its JSON value, must be the canonical encoding, and, for queries other than aggregations, must have the same node and edge counts as the graph response. GQL decodes to `{header, rows, columns}` from its result table: `header` lists the column names, `rows` holds the cells by row, and `columns` maps each column name to its cells. GQL checks run only for the GQL query.
 
 **Compilation:**
 

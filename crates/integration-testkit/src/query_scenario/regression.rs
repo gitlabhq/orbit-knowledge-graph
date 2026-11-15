@@ -238,13 +238,13 @@ fn gql_format_expectations_check_text_and_table() {
     run_suite(
         query.clone(),
         &format!(
-            "{base}    contains: [\"(:Definition {{id: 1, name: \\\"alpha\\\"}})\"]\n    value: {{columns: [d]}}"
+            "{base}    contains: [\"(:Definition {{id: 1, name: \\\"alpha\\\"}})\"]\n    value: {{header: [d], rows: [[\"(:Definition {{id: 1, name: \\\"alpha\\\"}})\"]]}}"
         ),
     );
     rejects(
         query.clone(),
-        &format!("{base}    value: {{columns: [e]}}"),
-        "gql.columns[0] is \"d\", expected \"e\"",
+        &format!("{base}    value: {{header: [e]}}"),
+        "gql.header[0] is \"d\", expected \"e\"",
     );
     rejects(
         query,
