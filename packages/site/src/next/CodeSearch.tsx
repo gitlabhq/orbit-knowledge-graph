@@ -8,7 +8,9 @@ const textOf = (search: Search) => search.ask ?? (search.kind === "code" ? searc
 const TYPE_MS = 22;
 const SEND_PAUSE_MS = 250;
 const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
-const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : search.branches === "all" ? "merge-request" : search.mode === "structural" ? "code" : "search");
+// A code example shows its mode: text, regex, or structural. A question across tools shows its first tool.
+const MODE_ICONS = { text: "text-description", regex: "regular-expression", structural: "file-tree" } as const;
+const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : MODE_ICONS[search.mode]);
 
 // One code search per mode, text, regex, then structural, and questions that use third-party connectors.
 const GROUPS = [
