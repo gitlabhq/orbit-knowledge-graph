@@ -1,7 +1,6 @@
 import { type ComponentProps, useState } from "react";
-import { AgentLogos, cn, Contrasts, CopyButton, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, RippleField, RippleLog, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, type UseCase, UseCases } from "@gitlab-org/orbit-site";
+import { AgentLogos, AgentPrompt, cn, Contrasts, CopyButton, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, RippleField, RippleLog, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, type UseCase, UseCases } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
-import { HeroChat } from "../components/HeroChat";
 import { USER_DOCS } from "../sections";
 
 export const Route = createFileRoute("/")({
@@ -395,7 +394,8 @@ function Hero() {
         for all your agents.
       </p>
       <div className="mt-12 flex justify-center">
-        <HeroChat
+        <AgentPrompt
+          label="Ask an agent with GitLab Orbit"
           examples={CHAT}
           graphNodes={963_261_776}
           cta={{ label: "Request a demo", href: DEMO }}

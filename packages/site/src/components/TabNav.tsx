@@ -1,6 +1,6 @@
 import { cn, Icon, NavMenu, pageLink, SiteLink } from "@gitlab-org/orbit-site";
 import { Link } from "@tanstack/react-router";
-import { TABS, USER_DOCS } from "../sections";
+import { NEXT_TAB, TABS, USER_DOCS } from "../sections";
 
 // No Home item: the GitLab Orbit logo links to the home page.
 export function TabNav({ className }: { className: string }) {
@@ -19,6 +19,9 @@ export function TabNav({ className }: { className: string }) {
         {USER_DOCS.label}
         <Icon name="external-link" size={12} />
       </SiteLink>
+      <Link {...pageLink(NEXT_TAB.route)} className="gl-nav-item">
+        {NEXT_TAB.label}
+      </Link>
     </nav>
   );
 }

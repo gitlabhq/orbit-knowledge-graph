@@ -2,6 +2,11 @@ export const HOME = { title: "GitLab Orbit", description: "What GitLab Orbit is,
 
 export type Tab = { route: string; label: string; menu?: { route: string; label: string; description: string }[] };
 
+export const NEXT_PAGE = {
+  title: "Orbit Next",
+  description: "What GitLab Orbit is building next: code search across every repository and branch, and data from your other tools. Coming soon.",
+};
+
 export const TABS: Tab[] = [
   { route: "about", label: "About" },
   {
@@ -17,6 +22,9 @@ export const TABS: Tab[] = [
     ],
   },
 ];
+
+// Last in the top nav, after Docs.
+export const NEXT_TAB = { route: "next", label: "Orbit Next" };
 
 export const USER_DOCS = { label: "Docs", href: "https://docs.gitlab.com/orbit/" };
 

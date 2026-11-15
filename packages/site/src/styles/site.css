@@ -17,98 +17,648 @@
   --tone-trust: var(--gl-color-data-green-300);
 }
 
-.hero-chat {
-  position: relative;
-  width: 100%;
-  max-width: 44rem;
-}
-
-/* Level with the window lights: 0.625rem of padding around 0.625rem lights, inside a 1px border. */
-.hero-next-toggle {
-  position: absolute;
-  top: calc(1px + 0.9375rem);
-  right: 0.875rem;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  transform: translateY(-50%);
-  color: var(--gl-text-color-default);
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.hero-next-toggle .hero-next-badge {
-  padding-block: 0;
-  font-size: 0.6875rem;
-}
-
-/* Drawn after the GitLab toggle (GlToggle), with its tokens, at a size that fits the window bar. */
-.hero-next-switch {
-  display: inline-flex;
-  align-items: center;
-  width: 2rem;
-  height: 1.125rem;
-  padding: 0.125rem;
-  border-radius: 9999px;
-  background: var(--gl-toggle-switch-track-color-unchecked-default);
-  transition: background-color 0.15s ease-out;
-}
-
-.hero-next-knob {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 0.875rem;
-  height: 0.875rem;
-  border-radius: 9999px;
-  background: var(--gl-toggle-switch-background-color-unchecked-default);
-  color: var(--gl-toggle-switch-icon-color-unchecked-default);
-  transition: transform 0.15s ease-out;
-}
-
-.hero-next-toggle[aria-checked="true"] .hero-next-switch {
-  background: var(--gl-toggle-switch-track-color-checked-default);
-}
-
-.hero-next-toggle[aria-checked="true"] .hero-next-knob {
-  transform: translateX(0.875rem);
-  background: var(--gl-toggle-switch-background-color-checked-default);
-  color: var(--gl-toggle-switch-icon-color-checked-default);
-}
-
-.hero-next-toggle:focus-visible {
-  outline: 2px solid var(--gl-focus-ring-outer-color, currentColor);
-  outline-offset: 2px;
-  border-radius: 0.25rem;
-}
-
-.hero-next-features {
-  margin-top: 2.5rem;
-}
-
-.hero-next-features .card {
-  text-align: left;
-}
-
-.hero-next-eyebrow {
-  margin: 0 0 0.75rem;
-  color: var(--gl-text-color-subtle);
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.agent-answer-text .hero-chat-preview {
-  margin-top: 0.75rem;
-  color: var(--gl-text-color-subtle);
-  font-size: 0.75rem;
-}
-
 @layer components {
   .tone-platform { --tone: var(--tone-platform); }
   .tone-agents { --tone: var(--tone-agents); }
   .tone-code { --tone: var(--tone-code); }
   .tone-data { --tone: var(--tone-data); }
   .tone-trust { --tone: var(--tone-trust); }
+}
+
+/* Orbit Next: the code search demo, laid out like the Orbit Next search page, in this site's frosted look. */
+.next-search {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  max-width: 60rem;
+  text-align: left;
+}
+
+.next-query,
+.next-panel,
+.next-card {
+  border: 1px solid color-mix(in srgb, var(--gl-text-color-default) 10%, transparent);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--color-page) 55%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+.next-query {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.875rem 0.875rem 0.875rem 1.25rem;
+  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+.next-query:focus-within {
+  border-color: color-mix(in srgb, var(--trace-lit) 70%, var(--terminal-edge));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--trace-lit) 16%, transparent);
+}
+
+.next-query-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.next-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.125rem;
+}
+
+.next-search .agent-prompt-presets {
+  justify-content: center;
+}
+
+.next-record {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.625rem 0.75rem;
+}
+
+.next-record + .next-record {
+  border-top: 1px solid var(--terminal-edge);
+}
+
+.next-record-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+}
+
+.next-record-title {
+  color: var(--gl-text-color-default);
+  font-size: var(--gl-font-size-300);
+}
+
+.next-record-meta {
+  color: var(--gl-text-color-subtle);
+  font-size: 0.75rem;
+}
+
+.next-record-text {
+  margin: 0;
+  color: var(--gl-text-color-subtle);
+  font-size: var(--gl-font-size-300);
+}
+
+.next-record-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: 0.125rem;
+}
+
+.next-sample-tag {
+  margin-left: auto;
+  color: var(--gl-text-color-subtle);
+  font-size: 0.6875rem;
+}
+
+.next-lang-more {
+  border-style: dashed;
+  animation: none;
+}
+
+.next-query-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.next-query-icon {
+  flex-shrink: 0;
+  color: var(--gl-text-color-subtle);
+}
+
+.next-query-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--gl-text-color-default);
+  font-size: var(--gl-font-size-400);
+}
+
+.next-query-input.next-query-code {
+  font-family: var(--font-mono);
+}
+
+.next-query-input::placeholder {
+  color: var(--gl-text-color-subtle);
+}
+
+.next-note {
+  margin: 0;
+  color: var(--gl-text-color-subtle);
+  font-size: var(--gl-font-size-300);
+  text-align: center;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.next-panel {
+  overflow: hidden;
+  animation: agent-in 0.25s ease-out both;
+}
+
+.next-panel-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.625rem 0.875rem;
+  border-bottom: 1px solid var(--terminal-edge);
+}
+
+.next-panel-summary {
+  color: var(--gl-text-color-default);
+  font-size: var(--gl-font-size-300);
+}
+
+.next-panel-body {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+@media (min-width: 900px) {
+  .next-panel-body {
+    grid-template-columns: minmax(0, 1fr) 15rem;
+  }
+}
+
+.next-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  animation: agent-in 0.3s ease-out both;
+}
+
+.next-project {
+  overflow: hidden;
+  border: 1px solid var(--terminal-edge);
+  border-radius: var(--radius-card);
+}
+
+.next-project-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--terminal-edge);
+  background: color-mix(in srgb, var(--gl-text-color-default) 5%, transparent);
+}
+
+.next-project-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--gl-text-color-default);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.next-count {
+  padding: 0 0.4375rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--gl-text-color-default) 10%, transparent);
+  color: var(--gl-text-color-subtle);
+  font-size: 0.6875rem;
+}
+
+.next-file + .next-file {
+  border-top: 1px solid var(--terminal-edge);
+}
+
+.next-file-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding: 0.375rem 0.75rem 0;
+}
+
+.next-file-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--gl-text-color-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.next-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.375rem;
+  border: 1px solid var(--terminal-edge);
+  border-radius: 0.25rem;
+  color: var(--gl-text-color-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+.next-file-code,
+.next-context pre {
+  margin: 0;
+  padding: 0.375rem 0 0.5rem;
+  overflow-x: auto;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.next-file-line,
+.next-context pre > span {
+  display: block;
+  padding-right: 0.75rem;
+  white-space: pre;
+  color: var(--gl-text-color-subtle);
+}
+
+.next-file-line-hit,
+.next-context .next-context-hit {
+  color: var(--gl-text-color-default);
+}
+
+.next-file-n {
+  display: inline-block;
+  width: 3.25rem;
+  padding-right: 0.875rem;
+  text-align: right;
+  color: color-mix(in srgb, var(--gl-text-color-subtle) 65%, transparent);
+  user-select: none;
+}
+
+.next-search mark,
+.next-context mark {
+  border-radius: 0.1875rem;
+  background: color-mix(in srgb, var(--trace-lit) 34%, transparent);
+  color: inherit;
+}
+
+.next-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-size: 0.75rem;
+}
+
+.next-inspector-query {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+}
+
+.next-inspector-query dt {
+  color: var(--gl-text-color-subtle);
+}
+
+.next-inspector-query dd {
+  margin: 0;
+  color: var(--gl-text-color-default);
+  font-family: var(--font-mono);
+}
+
+.next-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.next-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--gl-text-color-subtle);
+  opacity: 0.5;
+  transition: opacity 0.2s ease-out;
+}
+
+.next-stage-done {
+  color: var(--gl-text-color-default);
+  opacity: 1;
+}
+
+.next-funnel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  animation: agent-in 0.3s ease-out both;
+}
+
+.next-funnel-row {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.next-funnel-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--trace-lit) 24%, transparent);
+}
+
+.next-funnel-value {
+  position: relative;
+  color: var(--gl-text-color-default);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.next-funnel-label {
+  position: relative;
+  color: var(--gl-text-color-subtle);
+}
+
+/* The hero's backdrop: the search map, faded into the page at the top and bottom. */
+/* No Orbit glow here: the map carries the hero. The copy sits higher than on the home page, so the
+   search bar shows in the first screen. */
+.next-hero::before,
+.next-hero::after {
+  content: none;
+}
+
+.orbit-hero.next-hero {
+  padding-top: 3rem;
+}
+
+.next-hero-map {
+  position: absolute;
+  inset: 0 calc(50% - 50vw);
+  z-index: -1;
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, transparent, #000 10%, #000 82%, transparent);
+}
+
+.next-map {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.next-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem 1.5rem;
+  margin: 0;
+}
+
+@media (min-width: 768px) {
+  .next-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.next-stat {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.25rem;
+}
+
+.next-stat dd {
+  margin: 0;
+  color: var(--gl-text-color-heading, var(--gl-text-color-default));
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.next-stat dt {
+  color: var(--gl-text-color-subtle);
+  font-size: var(--gl-font-size-300);
+}
+
+.next-latency {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 3rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.next-latency-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+@media (min-width: 768px) {
+  .next-latency-row {
+    grid-template-columns: 18rem minmax(0, 1fr) 5rem;
+  }
+}
+
+.next-latency-label {
+  display: flex;
+  flex-direction: column;
+  color: var(--gl-text-color-default);
+  font-size: var(--gl-font-size-300);
+}
+
+.next-latency-label span {
+  color: var(--gl-text-color-subtle);
+  font-size: 0.75rem;
+}
+
+.next-latency-track {
+  grid-column: 1 / -1;
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--gl-text-color-default) 8%, transparent);
+}
+
+@media (min-width: 768px) {
+  .next-latency-track {
+    grid-column: auto;
+  }
+}
+
+.next-latency-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6b82ec, #9aecde);
+}
+
+.next-latency-ms {
+  grid-row: 1;
+  grid-column: 2;
+  color: var(--gl-text-color-heading, var(--gl-text-color-default));
+  font-family: var(--font-mono);
+  font-size: var(--gl-font-size-300);
+  text-align: right;
+}
+
+@media (min-width: 768px) {
+  .next-latency-ms {
+    grid-column: 3;
+  }
+}
+
+.next-stats-note {
+  margin: 2rem 0 0;
+  color: var(--gl-text-color-subtle);
+  font-size: 0.75rem;
+}
+
+/* The capabilities under the demo: three cards, each with a small view of a search. */
+.next-bento {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 900px) {
+  .next-bento {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.next-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.5rem;
+}
+
+.next-card h3 {
+  margin: 0.75rem 0 0;
+  color: var(--gl-text-color-heading, var(--gl-text-color-default));
+  font-size: var(--gl-font-size-500, 1.125rem);
+  font-weight: 600;
+}
+
+.next-card p {
+  margin: 0;
+  color: var(--gl-text-color-subtle);
+  font-size: var(--gl-font-size-300);
+}
+
+.next-branch-rows {
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.next-branch-rows li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3125rem 0.75rem;
+  color: var(--gl-text-color-subtle);
+}
+
+.next-branch-rows li > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.next-branch-rows .next-context-hit > :last-child {
+  border-radius: 0.1875rem;
+  padding: 0 0.25rem;
+  background: color-mix(in srgb, var(--trace-lit) 34%, transparent);
+}
+
+.next-langs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.next-lang {
+  padding: 0.1875rem 0.5rem;
+  border: 1px solid var(--terminal-edge);
+  border-radius: 0.375rem;
+  color: var(--gl-text-color-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  animation: next-lang 4s ease-in-out infinite;
+  animation-delay: var(--lang-delay);
+}
+
+@keyframes next-lang {
+  0%,
+  70%,
+  100% {
+    border-color: var(--terminal-edge);
+    color: var(--gl-text-color-subtle);
+  }
+  80% {
+    border-color: color-mix(in srgb, var(--trace-lit) 70%, transparent);
+    color: var(--gl-text-color-default);
+  }
+}
+
+.next-context {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--terminal-edge);
+  border-radius: 0.5rem;
+}
+
+.next-context figcaption {
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--terminal-edge);
+  color: var(--gl-text-color-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
+}
+
+.next-context figcaption span {
+  color: var(--gl-text-color-default);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .next-lang {
+    animation: none;
+  }
 }
