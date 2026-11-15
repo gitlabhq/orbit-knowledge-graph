@@ -175,11 +175,12 @@ const CHAT: PromptExample[] = [
 ];
 
 // A prompt to paste into an agent, so the agent sets up GitLab Orbit for itself. CLI first, MCP second.
-// The agents that `glab orbit setup` sets up. The others use the CLI from the shell.
-const CLI_AGENTS = new Set(["Claude Code", "Codex", "OpenCode", "Pi"]);
+// The agents that `glab orbit setup` configures with the Orbit hooks and skill. The others run the same CLI,
+// and load the skill with `glab orbit skills get`.
+const SETUP_AGENTS = new Set(["Claude Code", "Codex", "OpenCode", "Pi"]);
 
 // A setup prompt to paste into the agent, tailored to it. Without an agent, it works for any agent. Every
-// prompt favors the GitLab Orbit CLI, and the MCP endpoint is only for an agent that cannot run commands.
+// prompt uses the GitLab Orbit CLI and ends with the orbit-start skill.
 const setupPrompt = (agent: string | null) => {
   const name = agent ?? "this agent";
   const access = `GitLab Orbit needs GitLab Premium or Ultimate, and it must be turned on for my top-level group. If it is not, show me how: ${DOCS}/quickstart/.`;
@@ -189,17 +190,19 @@ const setupPrompt = (agent: string | null) => {
 Read ${DOCS}/agents/duo/ first, and walk me through turning on GitLab Orbit for GitLab Duo. ${access}
 
 Do not say that it works until GitLab Duo answers a question with GitLab Orbit.`;
-  const setup =
-    agent && !CLI_AGENTS.has(agent)
-      ? `Install the GitLab Orbit CLI with glab (glab 1.126 or later), and use the glab orbit commands from the shell.`
-      : `Install the GitLab Orbit CLI with glab (glab 1.126 or later), then run glab orbit setup for ${name}.`;
+  const install = `Install the GitLab Orbit CLI with glab (glab 1.126 or later), and let me sign in and authorize myself.`;
+  const setup = !agent
+    ? `${install} Then run glab orbit setup for this agent. If glab orbit setup does not list this agent, run glab orbit skills get orbit and follow it instead. If this agent cannot run shell commands at all, connect it to the GitLab Orbit MCP endpoint: ${DOCS}/agents/mcp/.`
+    : SETUP_AGENTS.has(agent)
+      ? `${install} Then run glab orbit setup for ${agent}. Keep any existing settings.`
+      : `${install} ${agent} uses the same CLI from the shell: run glab orbit skills get orbit and follow it, so you know the glab orbit commands.`;
   return `Help me connect GitLab Orbit to ${name}, so you can answer questions with the graph of my code and my GitLab data.
 
-Read the setup guide at ${DOCS}/agents/ first. ${setup} Keep any existing MCP servers and settings. Let me sign in and authorize myself. Only if ${name} cannot run shell commands, connect it to the GitLab Orbit MCP endpoint instead: ${DOCS}/agents/mcp/.
+Read the setup guide at ${DOCS}/agents/ first. ${setup}
 
 ${access}
 
-Do not say that the connection works until glab orbit status confirms it. Then run /orbit-start.`;
+Do not say that the connection works until glab orbit status confirms it. Then run /orbit-start. If /orbit-start is not available, run glab orbit skills get orbit-start and follow it.`;
 };
 
 
