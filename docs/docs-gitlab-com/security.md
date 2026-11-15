@@ -57,6 +57,9 @@ GitLab Orbit enforces access in two layers:
 The graph is read-only.
 It reads changes from GitLab and never writes back.
 
+GitLab Orbit does not run a language model or send your data to a model provider.
+When an agent sends a query, the results reach a model only if the agent adds them to its context.
+
 ### Access through shared groups
 
 Only direct members of an invited group get access to the shared group, in GitLab and in GitLab Orbit.
