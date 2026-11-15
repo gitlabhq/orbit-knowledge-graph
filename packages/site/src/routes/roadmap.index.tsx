@@ -1,4 +1,4 @@
-import { findPage, Icon, PageFrame, pageHeadOf } from "@gitlab-org/orbit-site";
+import { Badge, findPage, PageFrame, pageHeadOf } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { PageFooter } from "../components/PageFooter";
 import { Board } from "../roadmap/Board";
@@ -29,6 +29,7 @@ function RoadmapPage() {
       path="roadmap"
       title={page?.meta.title ?? "Roadmap"}
       description={page?.meta.description}
+      options={{ hideDescription: true }}
       footer={page && <PageFooter page={page} />}
     >
       {themes.length > 0 && (
@@ -46,22 +47,26 @@ function RoadmapPage() {
         )}
       </div>
       {shipped.length > 0 && (
-        <section aria-labelledby="shipped" className="mt-12">
-          <h2 id="shipped" className="m-0 mb-1 flex items-center gap-2 text-xl font-semibold text-default">
-            <Icon name="status-success" className="text-success" />
-            Recently shipped
-          </h2>
-          <p className="mt-0 mb-4 text-sm text-subtle">Work that is available today, newest first.</p>
-          <div className="page-bleed">
-            <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="page-bleed mt-8">
+          <section aria-labelledby="shipped" className="board-surface glass-surface rounded-[var(--radius-card)] p-2">
+            <header className="flex items-center gap-2 px-2 pb-2">
+              <h2 id="shipped" className="m-0 text-base font-semibold text-heading">
+                Recently shipped
+              </h2>
+              <Badge tone="neutral">
+                {shipped.length}
+                <span className="sr-only">{shipped.length === 1 ? " item" : " items"}</span>
+              </Badge>
+            </header>
+            <ul className="m-0 grid list-none gap-2 p-0 md:grid-cols-3">
               {shipped.map((item) => (
                 <li key={item.slug}>
                   <ItemCard item={item} />
                 </li>
               ))}
             </ul>
-          </div>
-        </section>
+          </section>
+        </div>
       )}
     </PageFrame>
   );

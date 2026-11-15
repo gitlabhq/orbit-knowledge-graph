@@ -13,31 +13,29 @@ const PRINCIPLE_ICONS = ["code", "users", "tanuki-ai", "rocket"];
 // The whole card links to the profile. The username shows in a tag when you hover or focus the avatar.
 function MemberCard({ member }: { member: TeamMember }) {
   return (
-    <article className="card tile-quiet group relative flex h-full flex-col px-5 pt-4 pb-5">
-      <div className="flex items-center gap-4">
-        <SiteLink
-          href={profileUrl(member.username)}
-          aria-label={`@${member.username} on GitLab (opens in a new tab)`}
-          className="group/avatar relative z-10 shrink-0 rounded-full no-underline"
+    <article className="card glass group relative flex h-full items-start gap-3.5 px-4 py-3.5">
+      <SiteLink
+        href={profileUrl(member.username)}
+        aria-label={`@${member.username} on GitLab (opens in a new tab)`}
+        className="group/avatar relative z-10 shrink-0 rounded-full no-underline"
+      >
+        <Avatar name={member.name} src={member.avatar} size={44} />
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute top-full left-1/2 z-10 mt-2 -translate-x-1/2 rounded-[var(--gl-nav-item-border-radius)] bg-[#28272d] px-2 py-1 text-xs whitespace-nowrap text-white opacity-0 transition-opacity group-hover/avatar:opacity-100 group-focus-visible/avatar:opacity-100 dark:bg-[#ececef] dark:text-[#18171d]"
         >
-          <Avatar name={member.name} src={member.avatar} size={48} />
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute top-full left-1/2 z-10 mt-2 -translate-x-1/2 rounded-[var(--gl-nav-item-border-radius)] bg-[#28272d] px-2 py-1 text-xs whitespace-nowrap text-white opacity-0 transition-opacity group-hover/avatar:opacity-100 group-focus-visible/avatar:opacity-100 dark:bg-[#ececef] dark:text-[#18171d]"
-          >
-            @{member.username}
-          </span>
-        </SiteLink>
-        <div className="min-w-0">
-          <h3 className="m-0 text-base font-semibold text-default">
-            <SiteLink href={profileUrl(member.username)} aria-label={`${member.name} on GitLab (opens in a new tab)`} className="text-default no-underline after:absolute after:inset-0 after:content-['']">
-              {member.name}
-            </SiteLink>
-          </h3>
-          <p className="mt-0.5 mb-0 text-sm text-subtle">{member.title}</p>
-        </div>
+          @{member.username}
+        </span>
+      </SiteLink>
+      <div className="min-w-0">
+        <h3 className="m-0 text-[0.9375rem] font-semibold text-default">
+          <SiteLink href={profileUrl(member.username)} aria-label={`${member.name} on GitLab (opens in a new tab)`} className="text-default no-underline after:absolute after:inset-0 after:content-['']">
+            {member.name}
+          </SiteLink>
+        </h3>
+        <p className="m-0 text-[0.8125rem] text-default">{member.title}</p>
+        <p className="mt-1 mb-0 text-[0.8125rem] leading-snug text-subtle">{member.bio}</p>
       </div>
-      <p className="mt-3 mb-0 text-sm text-subtle">{member.bio}</p>
     </article>
   );
 }
@@ -51,14 +49,10 @@ function TeamPage() {
       description={mission}
       footer={page && <PageFooter page={page} />}
     >
-      <div className="flex flex-col gap-12">
+      <div className="flex flex-col gap-10">
         {people.length > 0 && (
-          <section aria-labelledby="team">
-            <h2 id="team" className="m-0 text-xl font-semibold text-default">
-              The team
-            </h2>
-            <p className="mt-1 mb-6 text-subtle">One group: engineering, product, and design.</p>
-            <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
+          <section aria-label="The team" className="page-glow">
+            <ul className="glass-surface m-0 grid list-none gap-2 rounded-[var(--radius-card)] p-2 sm:grid-cols-2 lg:grid-cols-3">
               {people.map((member) => (
                 <li key={member.username}>
                   <MemberCard member={member} />
@@ -69,24 +63,26 @@ function TeamPage() {
         )}
         {principles.length > 0 && (
           <section aria-labelledby="how-we-work">
-            <h2 id="how-we-work" className="m-0 text-xl font-semibold text-default">
+            <h2 id="how-we-work" className="m-0 mb-4 text-xl font-semibold text-default">
               How we work
             </h2>
-            <ul className="m-0 mt-4 grid list-none gap-3 p-0 sm:grid-cols-2">
+            <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-4">
               {principles.map((principle, index) => (
-                <li key={principle.title} className="card tile-quiet px-5 pt-4 pb-5">
-                  <Icon name={PRINCIPLE_ICONS[index % PRINCIPLE_ICONS.length]} size={16} className="tile-icon" />
-                  <h3 className="mt-3 mb-0 text-base font-semibold text-default">{principle.title}</h3>
-                  <p className="mt-1 mb-0 text-sm text-subtle">{principle.text}</p>
+                <li key={principle.title} className="card glass px-4 py-3.5">
+                  <span className="flex items-center gap-2">
+                    <Icon name={PRINCIPLE_ICONS[index % PRINCIPLE_ICONS.length]} size={16} className="tile-icon shrink-0" />
+                    <h3 className="m-0 text-[0.9375rem] font-semibold text-default">{principle.title}</h3>
+                  </span>
+                  <p className="mt-1.5 mb-0 text-[0.8125rem] leading-snug text-subtle">{principle.text}</p>
                 </li>
               ))}
             </ul>
           </section>
         )}
-        <section className="card tile-quiet flex flex-col items-start justify-between gap-6 p-6 md:flex-row md:items-center">
+        <section className="card glass flex flex-col items-start justify-between gap-5 px-6 py-5 md:flex-row md:items-center">
           <div>
-            <h2 className="m-0 text-xl font-semibold text-default">Build with us</h2>
-            <p className="mt-1 mb-0 max-w-xl text-subtle">The code is public. Read it or open an issue.</p>
+            <h2 className="m-0 text-lg font-semibold text-default">Build with us</h2>
+            <p className="mt-1 mb-0 text-sm text-subtle">The code is public. Read it or open an issue.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <SiteLink
