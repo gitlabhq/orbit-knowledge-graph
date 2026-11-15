@@ -10,28 +10,15 @@ Resource            gitlab.resource
 
 *** Variables ***
 ${INDEXING_BUDGET_MULTIPLIER}       %{INDEXING_BUDGET_MULTIPLIER=1}
-${E2E_GITLAB_LANE}                  %{E2E_GITLAB_LANE=}
 
 
 *** Keywords ***
 Orbit Status Is Healthy
-    [Documentation]    Query.orbit.serviceStatus over GraphQL. GitLab images that predate the field
-    ...                still serve GET /orbit/status, so the keyword reads that route on them.
     ${data}=    Orbit GraphQL Data    { orbit { serviceStatus { state } } }
-    IF    $data is None
-        ${status}=    Orbit Legacy Route Serves    status
-        Should Be Equal    ${status["system"]["status"]}    healthy
-    ELSE
-        Should Be Equal    ${data["orbit"]["serviceStatus"]["state"]}    HEALTHY
-    END
+    Should Be Equal    ${data["orbit"]["serviceStatus"]["state"]}    HEALTHY
 
 Orbit GraphQL Data
     [Documentation]    POST ${query} to /api/graphql with the bot PAT and return the data object.
-    ...                A pinned stable lane (E2E_GITLAB_LANE) can predate a field in the query. The
-    ...                keyword then returns None, keyed on the validation codes the orbit CLI treats
-    ...                as a missing schema before it falls back to the REST routes
-    ...                (crates/orbit-cli/src/remote/api.rs). The default lane tracks master, so a
-    ...                missing field fails there. Any other error fails.
     [Arguments]    ${query}    ${variables}=${None}
     ${headers}=    GitLab Auth Headers
     ${body}=    Create Dictionary    query=${query}
@@ -40,34 +27,9 @@ Orbit GraphQL Data
     END
     ${resp}=    POST    ${GITLAB_URL}/api/graphql    headers=${headers}    json=${body}    expected_status=200
     ${payload}=    Set Variable    ${resp.json()}
-    ${codes}=    Evaluate
-    ...    {(e.get("extensions") or {}).get("code") for e in $payload.get("errors") or []}
-    ${missing}=    Evaluate
-    ...    bool($codes & {"undefinedField", "undefinedType", "argumentNotAccepted", "undefinedDirective"})
-    IF    $missing and $E2E_GITLAB_LANE
-        Log    GraphQL fields absent in the ${E2E_GITLAB_LANE} lane: ${payload["errors"]}
-        RETURN    ${None}
-    END
     Should Be True    not $payload.get("errors")    GraphQL error: ${payload}
+    Should Not Be Equal    ${payload["data"]}    ${None}    GraphQL returned no data: ${payload}
     RETURN    ${payload["data"]}
-
-Orbit GET
-    [Arguments]    ${path}    ${params}=${None}    ${expected_status}=any
-    ${headers}=    GitLab Auth Headers
-    ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/${path}
-    ...    headers=${headers}    params=${params}    expected_status=${expected_status}
-    RETURN    ${resp}
-
-Orbit Legacy Route Serves
-    [Documentation]    GET /api/v4/orbit/${path}: the REST route a GraphQL field replaced. Called only
-    ...                when the pinned GitLab image lacks the field, so the route must still answer
-    ...                200, with ${needle} in the body when given. Returns the parsed body.
-    [Arguments]    ${path}    ${params}=${None}    ${needle}=${None}
-    ${resp}=    Orbit GET    ${path}    ${params}    200
-    IF    $needle is not None
-        Should Contain    ${resp.text}    ${needle}    /orbit/${path} body missing '${needle}'
-    END
-    RETURN    ${resp.json()}
 
 Orbit Query POST
     [Documentation]    POST /orbit/query expecting ${expected_status}, retrying once on 502: the
@@ -188,20 +150,6 @@ Orbit Query Is Rejected
     ${body}=    Create Dictionary    query=${query}
     ${resp}=    Orbit Query POST    ${headers}    ${body}    expected_status=400
     Should Contain    ${resp.json()["message"]}    ${message}
-
-Orbit Endpoint Smoke
-    [Documentation]    GET /api/v4/orbit/${path} with the bot PAT. A 404 is tolerated: the e2e
-    ...                stack pins a gitlab-org/gitlab image (versions.yaml) that can predate newer
-    ...                Orbit endpoints, and those routes are owned upstream, not by this repo. A 5xx
-    ...                or any other status still fails, so a real GKG-side regression is caught.
-    [Arguments]    ${path}
-    ${resp}=    Orbit GET    ${path}
-    IF    ${resp.status_code} == 404
-        Log    /orbit/${path} absent in the pinned GitLab image.    level=WARN
-        RETURN
-    END
-    Should Be Equal As Integers    ${resp.status_code}    200
-    ...    /orbit/${path} returned ${resp.status_code}: ${resp.text}
 
 Orbit Query LLM
     [Documentation]    POST /orbit/query with response_format=llm. Returns the raw response so the

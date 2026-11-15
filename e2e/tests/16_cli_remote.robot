@@ -1,9 +1,7 @@
 *** Settings ***
 Documentation       The orbit CLI against the e2e GitLab: the service status, the scoped status of
-...                 the shared group, and the schema. The CLI reads each from GraphQL first and
-...                 falls back to the REST routes on a GitLab image that predates the fields, so
-...                 the pinned lanes prove both paths. The robot pod gets the CLI from the
-...                 orbit-cli-e2e image (ORBIT_CLI_DIR); without it the suite skips.
+...                 the shared group, and the schema, all read over GraphQL. The robot pod gets the
+...                 CLI from the orbit-cli-e2e image (ORBIT_CLI_DIR); without it the suite skips.
 
 Library             Process
 Resource            gitlab.resource
@@ -21,37 +19,27 @@ ${ORBIT_CLI_DIR}    %{ORBIT_CLI_DIR=}
 *** Test Cases ***
 CLI Reports Service Health
     [Tags]    cli
-    ${status}=    Orbit CLI JSON    status
-    ${healthy}=    Set Variable    ${{ $status.get("state") == "HEALTHY" }}
-    ${legacy_healthy}=    Set Variable    ${{ $status.get("status") == "healthy" }}
-    CLI Answer Came From GraphQL Or Legacy    ${healthy}    ${legacy_healthy}    ${status}
+    Wait Until Keyword Succeeds    60s    10s    CLI Answer Holds
+    ...    $answer.get("state") == "HEALTHY"    status
 
 CLI Reports The Shared Group Status
     [Tags]    cli
-    ${status}=    Orbit CLI JSON    status    --full-path    ${SHARED_NAMESPACE_NAME}
-    ${graphql}=    Set Variable    ${{ bool($status.get("itemCounts", {}).get("domains")) }}
-    ${legacy}=    Set Variable    ${{ bool($status.get("domains")) }}
-    CLI Answer Came From GraphQL Or Legacy    ${graphql}    ${legacy}    ${status}
+    Wait Until Keyword Succeeds    60s    10s    CLI Answer Holds
+    ...    bool(($answer.get("itemCounts") or {}).get("domains"))
+    ...    status    --full-path    ${SHARED_NAMESPACE_NAME}
 
 CLI Lists The Schema
     [Tags]    cli
-    ${schema}=    Orbit CLI JSON    schema    Project
-    ${graphql}=    Set Variable    ${{ "Project" in [n["name"] for n in $schema.get("nodes") or []] }}
-    ${legacy}=    Set Variable    ${{ "Project" in [n["name"] for d in $schema.get("domains") or [] for n in d["nodes"]] }}
-    CLI Answer Came From GraphQL Or Legacy    ${graphql}    ${legacy}    ${schema}
+    Wait Until Keyword Succeeds    60s    10s    CLI Answer Holds
+    ...    "Project" in [n["name"] for n in $answer.get("nodes") or []]    schema    Project
 
 
 *** Keywords ***
-CLI Answer Came From GraphQL Or Legacy
-    [Documentation]    The default lane tracks master, so the CLI must answer from GraphQL there. A
-    ...                pinned stable lane (E2E_GITLAB_LANE) may predate the fields, so the legacy
-    ...                REST shape passes too.
-    [Arguments]    ${graphql}    ${legacy}    ${answer}
-    IF    $E2E_GITLAB_LANE
-        Should Be True    $graphql or $legacy    ${answer}
-    ELSE
-        Should Be True    $graphql    The CLI did not answer from GraphQL: ${answer}
-    END
+CLI Answer Holds
+    [Arguments]    ${condition}    @{args}
+    ${answer}=    Orbit CLI JSON    @{args}
+    Should Be True    ${condition}    orbit ${args}: ${answer}
+
 Orbit CLI JSON
     [Arguments]    @{args}
     ${out}=    Orbit CLI    @{args}
@@ -59,12 +47,6 @@ Orbit CLI JSON
     RETURN    ${value}
 
 Orbit CLI
-    [Documentation]    Run the orbit CLI with the bot PAT against the e2e GitLab and return stdout.
-    [Arguments]    @{args}
-    ${out}=    Wait Until Keyword Succeeds    30s    5s    Run Orbit CLI    @{args}
-    RETURN    ${out}
-
-Run Orbit CLI
     [Arguments]    @{args}
     ${result}=    Run Process    ${ORBIT_CLI_DIR}/orbit    @{args}    timeout=120s
     ...    env:GITLAB_URL=${GITLAB_URL}    env:GITLAB_TOKEN=${GITLAB_PAT}
