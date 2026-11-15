@@ -2,6 +2,7 @@ videos:
   - provider: vimeo
     id: "1218094760"
     title: GitLab Orbit explainer
+    featured: true
     description: What Orbit is and how agents use it, in a few minutes.
     thumbnail: https://i.vimeocdn.com/video/2189929998-46e3c4b40213c14d2124a20732ae73b9f629cbc52b91d304ac9f9cc1b923e16d-d_1280?region=us
   - provider: youtube

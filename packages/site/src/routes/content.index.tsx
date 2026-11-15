@@ -1,7 +1,7 @@
 import { Embed, EmbedGrid, findPage, PageFrame, pageHeadOf, Video, VideoGrid } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { PageFooter } from "../components/PageFooter";
-import { links, videos } from "../content/demos";
+import { type DemoVideo, featured, links, videos } from "../content/demos";
 import { EmptyState } from "../roadmap/EmptyState";
 
 export const Route = createFileRoute("/content/")({
@@ -9,12 +9,15 @@ export const Route = createFileRoute("/content/")({
   component: ContentPage,
 });
 
+const without = ({ featured: _, ...video }: DemoVideo) => video;
+
 function ContentPage() {
   const page = findPage("content");
   return (
     <PageFrame path="content" title={page?.meta.title ?? "What's new"} description={page?.meta.description} footer={page && <PageFooter page={page} />}>
+      {featured && <Video {...without(featured)} />}
       {links.length > 0 && (
-        <section aria-labelledby="related">
+        <section aria-labelledby="related" className="mt-6">
           <h2 id="related" className="m-0 text-xl font-semibold text-default">
             Articles and demos
           </h2>
@@ -32,12 +35,12 @@ function ContentPage() {
           </h2>
           <VideoGrid>
             {videos.map((video) => (
-              <Video key={video.id} {...video} />
+              <Video key={video.id} {...without(video)} />
             ))}
           </VideoGrid>
         </section>
       )}
-      {videos.length === 0 && links.length === 0 && <EmptyState message="Nothing new yet." reset={false} />}
+      {!featured && videos.length === 0 && links.length === 0 && <EmptyState message="Nothing new yet." reset={false} />}
     </PageFrame>
   );
 }
