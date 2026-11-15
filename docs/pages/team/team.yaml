@@ -23,7 +23,7 @@ people:
   - username: jgdoyon1
     name: Jean-Gabriel Doyon
     title: Senior Backend Engineer
-    bio: Query engine, graph storage, and indexing.
+    bio: Distributed system architecture and indexing.
     avatar: https://gitlab.com/uploads/-/system/user/avatar/20627644/avatar.png
   - username: michaelusa
     name: Michael Usachenko
