@@ -1,7 +1,7 @@
 ---
 title: "ADR 007: Orbit monetization engineering"
 creation-date: "2026-03-26"
-last-updated: "2026-06-26"
+last-updated: "2026-11-15"
 authors: [ "@michaelangeloio", "@snachnolkar" ]
 toc_hide: true
 ---
@@ -9,6 +9,9 @@ toc_hide: true
 ## Status
 
 Draft
+
+Amended at general availability: DAP queries are not zero-rated. Orbit queries through DAP use [GitLab Credits](https://docs.gitlab.com/subscriptions/gitlab_credits/), like MCP and CLI queries.
+The sections on zero-rating record the plan before general availability.
 
 ## Date
 
@@ -25,12 +28,12 @@ External callers use the Model Context Protocol (MCP) endpoint, the GitLab comma
 
 | Channel | Request path | Authentication | GitLab.com and GitLab-hosted Dedicated | Customer-hosted GitLab Dedicated | GitLab Self-Managed |
 |---|---|---|---|---|---|
-| DAP | User to Rails to DWS to Rails to Orbit | OAuth token with the workflow scope, plus a signed service token from Phase 3 | Zero-rated, bundled with the Duo seat | Included, seat-based | Included, GB-based fee |
+| DAP | User to Rails to DWS to Rails to Orbit | OAuth token with the workflow scope, plus a signed service token from Phase 3 | Metered per query with credits | Included, seat-based | Included, GB-based fee |
 | Frontend | User to Rails to Orbit | User JSON Web Token (JWT) | Included in the license | Included in the license | Included in the license |
 | Core | Rails service to Orbit | System JWT | Not applicable, infrastructure | Not applicable, infrastructure | Not applicable, infrastructure |
 | External | Agent to Rails OAuth to Orbit | OAuth and user JWT | Metered per query with credits | Metered per query with credits | Included, GB-based fee |
 
-On GitLab.com and GitLab-hosted Dedicated, DAP usage is zero-rated and MCP and CLI usage is charged.
+Before general availability, the plan for GitLab.com and GitLab-hosted Dedicated was to zero-rate DAP usage and charge MCP and CLI usage.
 So a user must not be able to make a query look like DAP traffic to get it free.
 GitLab Self-Managed and customer-hosted GitLab Dedicated have no per-query billing today, so the channel is for analytics only.
 Their pricing model can change, so instrumentation covers every deployment and the billing pipeline can extend to them later.
@@ -237,6 +240,8 @@ The Orbit feature flag stays as a kill switch next to the tier gate.
 
 ### Zero-rate enforcement
 
+This section records the plan before general availability, when DAP queries were to be zero-rated.
+
 Zero-rate enforcement applies only to GitLab.com and GitLab-hosted Dedicated, where per-query credit billing is active.
 
 Workhorse stamps a short-lived signed token on DWS calls to Orbit, and Rails classifies a request as DWS only when the token is valid.
@@ -252,6 +257,8 @@ The secret already exists in every deployment that runs Workhorse, so Phase 3 ad
 
 ### CustomersDot pricing
 
+This section records the plan before general availability. At general availability, a DWS event is charged like an MCP event.
+
 Orbit follows the flat-rate pricing pattern of the static application security testing (SAST) flows.
 CustomersDot applies a multiplier to each event by source type:
 
@@ -264,7 +271,7 @@ The query type is for analytics only.
 The credits dashboard shows Orbit as its own line item.
 The line item shows the total queries in the billing period, the split by channel, and the credit spend.
 
-**A DAP workflow that calls Orbit is zero-rated by the multiplier, and no event is suppressed or annotated.**
+**Before general availability, a DAP workflow that called Orbit was to be zero-rated by the multiplier, with no event suppressed or annotated.**
 
 The DAP completion event stays the billable event for DAP usage itself.
 Each event stands alone with its own source type, which sets its multiplier.
@@ -367,7 +374,6 @@ Every Orbit query covers all top-level namespaces of the user by design, so a re
 - [Validate the Workhorse JWT to classify DWS Orbit requests](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/242242)
 - [Implement flat-rate pricing for SAST false positive detection](https://gitlab.com/gitlab-org/gitlab/-/issues/592304)
 - [Add flat-rate multiplier pricing for Orbit billable events](https://gitlab.com/gitlab-org/gitlab/-/issues/593193)
-- [Update the credits dashboard to display Orbit billable events](https://gitlab.com/gitlab-org/gitlab/-/issues/593194)
 - [Cloud Connector architecture](https://docs.gitlab.com/ee/development/cloud_connector/architecture.html)
 - [SOX ITGC controls spreadsheet](https://docs.google.com/spreadsheets/d/1BGTZAriUYIubEJcVHoYqmXm7FLoqQcNiPJkylZidkeY/edit?gid=121873557#gid=121873557)
 - [Determine SOX compliance scope and controls for Orbit billing event emission](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/507)
