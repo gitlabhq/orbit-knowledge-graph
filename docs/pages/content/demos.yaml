@@ -1,13 +1,3 @@
-latest:
-  - href: https://about.gitlab.com/blog/gitlab-orbit-ga/
-    title: "GitLab Orbit is GA: Higher agent accuracy, lower token cost"
-    description: Orbit is generally available for GitLab Premium and Ultimate.
-    image: https://res.cloudinary.com/about-gitlab-com/image/upload/v1780996524/sd1vpl8empy26wizarqj.png
-    meta: GitLab blog
-  - href: https://docs.gitlab.com/releases/patches/patch-release-gitlab-19-5-5-released/?nav=19.5.5#gitlab-orbit-is-now-available-in-gitlab-194-and-195
-    title: GitLab Orbit is now available in GitLab 19.4 and 19.5
-    description: The 19.5.5 and 19.4.7 patch release brings Orbit to GitLab Self-Managed.
-    meta: GitLab release
 videos:
   - provider: vimeo
     id: "1218094760"
@@ -34,6 +24,11 @@ videos:
     description: How Orbit builds the graph from your GitLab data, in four minutes.
     thumbnail: https://i.vimeocdn.com/video/2166895892-9d10bf43d09836de76a4b4c13cb1beb31d1df850ac62e4202ef7850de251226b-d_1280?region=us
 links:
+  - href: https://about.gitlab.com/blog/gitlab-orbit-ga/
+    title: "GitLab Orbit is GA: Higher agent accuracy, lower token cost"
+    description: Orbit is generally available for GitLab Premium and Ultimate.
+    image: https://res.cloudinary.com/about-gitlab-com/image/upload/v1780996524/sd1vpl8empy26wizarqj.png
+    meta: GitLab blog
   - href: https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/
     title: Orbit click-through demo
     description: Try Orbit in your browser, with no setup.
@@ -47,7 +42,3 @@ links:
     title: "GitLab Transcend Hackathon: What developers built on GitLab Orbit"
     description: What more than 1,500 developers built on Orbit during the hackathon.
     meta: GitLab blog
-  - href: https://about.gitlab.com/gitlab-orbit/
-    title: GitLab Orbit product page
-    description: The context layer for agents.
-    meta: about.gitlab.com

@@ -1,6 +1,6 @@
 ---
 title: What's new
-description: The latest GitLab Orbit releases, with videos and demos.
+description: GitLab Orbit releases, articles, and videos.
 ---
 
-The latest GitLab Orbit releases, with videos and demos.
+GitLab Orbit releases, articles, and videos.
