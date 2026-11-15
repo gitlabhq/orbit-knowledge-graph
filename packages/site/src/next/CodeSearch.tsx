@@ -3,8 +3,8 @@ import { cn, Icon } from "@gitlab-org/orbit-site";
 import { CODE_MS, CROSS_SEARCHES, type FileHit, type Line, type Mode, MODES, type Search, SEARCHES, STEP_MS } from "./searches";
 
 const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const TYPE_MS = 18;
 const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
-const toolsOf = (search: Search) => [...new Set(search.steps!.map((step) => step.tool))];
 const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : search.branches === "all" ? "branch" : search.mode === "structural" ? "code" : "search");
 
 // Code searches from the simplest mode to the richest, and questions that use third-party connectors.
@@ -52,20 +52,44 @@ function File({ hit }: { hit: FileHit }) {
 
 // The thread for one example: the question, one Orbit tool line that grows as the search runs, and the
 // answer. The path and the findings show on the map behind the chat.
+// The tool lines for a question across tools: tools read in a row share one "Explore" line, as the Orbit
+// plugin shows them, and each code search gets its own line.
+const segmentsOf = (search: Search) =>
+  search.steps!.reduce<{ code: boolean; tools: string[]; first: number; last: number }[]>((list, step, index) => {
+    const code = step.tool === "Code search";
+    const last = list.at(-1);
+    if (last && !last.code && !code) {
+      if (!last.tools.includes(step.tool)) last.tools.push(step.tool);
+      last.last = index;
+    } else list.push({ code, tools: [step.tool], first: index, last: index });
+    return list;
+  }, []);
+
 function Thread({ search, stage }: { search: Search; stage: number }) {
   const done = stage >= stepsOf(search);
-  const tools = search.steps ? toolsOf(search) : [];
-  const seen = search.steps ? [...new Set(search.steps.slice(0, Math.min(stage + 1, search.steps.length)).map((step) => step.tool))] : [];
-  const tool = search.steps ? (done ? `Explored ${tools.join(" → ")}` : `Exploring ${seen.join(" → ")}…`) : done ? `Searched code${search.funnel ? ` in ${search.funnel.ms} ms` : ""}` : "Searching code…";
+  const lines = search.steps
+    ? segmentsOf(search)
+        .filter((segment) => segment.first <= stage)
+        .map((segment) => {
+          const running = stage <= segment.last && !done;
+          const seen = segment.code ? segment.tools : [...new Set(search.steps!.slice(segment.first, Math.min(stage, segment.last) + 1).map((step) => step.tool))];
+          return { running, text: segment.code ? (running ? "Searching code…" : "Searched code") : running ? `Exploring ${seen.join(" → ")}…` : `Explored ${segment.tools.join(" → ")}` };
+        })
+    : [{ running: !done, text: done ? `Searched code${search.funnel ? ` in ${search.funnel.ms} ms` : ""}` : "Searching code…" }];
   return (
     <div className="agent-thread">
-      <p className={cn("agent-message", search.kind === "code" && "next-message-code")}>{search.pattern}</p>
+      <p className={cn("agent-message", search.kind === "code" && "next-message-code")}>
+        {search.kind === "code" && <span className="next-message-meta">{[search.mode, search.language, search.branches === "all" ? "all branches" : null].filter(Boolean).join(" · ")}</span>}
+        {search.pattern}
+      </p>
       <div className="agent-reply" aria-live="polite">
         <ul className="agent-calls">
-          <li className={cn("agent-call", !done && "agent-call-running")}>
-            <Icon name="orbit" size={12} className="agent-call-mark" />
-            <span className="agent-call-tool">{tool}</span>
-          </li>
+          {lines.map((line, index) => (
+            <li key={index} className={cn("agent-call", line.running && "agent-call-running")}>
+              <Icon name="orbit" size={12} className="agent-call-mark" />
+              <span className="agent-call-tool">{line.text}</span>
+            </li>
+          ))}
         </ul>
         {done && (
           <div className="agent-answer">
@@ -96,12 +120,31 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
   const [pattern, setPattern] = useState("");
   const [stage, setStage] = useState(0);
   const [unknown, setUnknown] = useState(false);
-
   useEffect(() => {
     if (!run || stage >= stepsOf(run.search)) return;
     const timer = window.setTimeout(() => setStage((n) => n + 1), run.search.steps ? STEP_MS : CODE_MS);
     return () => window.clearTimeout(timer);
   }, [run, stage]);
+
+  // An example types itself into the input, then sends. The length comes from the time since it started,
+  // so a slow timer only skips ahead.
+  const [typing, setTyping] = useState<{ search: Search; since: number; length: number } | null>(null);
+
+  useEffect(() => {
+    if (!typing) return;
+    const total = typing.search.pattern.length;
+    if (typing.length >= total) {
+      const timer = window.setTimeout(() => {
+        setTyping(null);
+        start(typing.search);
+      }, 220);
+      return () => window.clearTimeout(timer);
+    }
+    // Long patterns type faster, so every example types in about a second at most.
+    const per = Math.min(TYPE_MS, 1000 / total);
+    const timer = window.setTimeout(() => setTyping({ ...typing, length: Math.min(total, Math.floor((performance.now() - typing.since) / per) + 1) }), per);
+    return () => window.clearTimeout(timer);
+  }, [typing]);
 
   const start = (search: Search) => {
     setRun({ search, start: performance.now() });
@@ -110,6 +153,13 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
     setPattern("");
     setUnknown(false);
     setStage(still() ? stepsOf(search) : 0);
+  };
+
+  const pick = (search: Search) => {
+    if (search.kind === "code") setMode(search.mode);
+    setUnknown(false);
+    if (still()) start(search);
+    else setTyping({ search, since: performance.now(), length: 0 });
   };
 
   const submit = (event: FormEvent) => {
@@ -126,7 +176,7 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
           <div key={group.label} role="group" aria-label={group.label} className="next-demo-group">
             <span className="next-demo-label">{group.label}</span>
             {group.items.map((item) => (
-              <button key={item.id} type="button" onClick={() => start(item)} className={cn("next-demo-example", item.id === run?.search.id && "next-demo-example-on")}>
+              <button key={item.id} type="button" onClick={() => pick(item)} className={cn("next-demo-example", item.id === run?.search.id && "next-demo-example-on")}>
                 <Icon name={iconOf(item)} size={14} />
                 <span>{item.label}</span>
               </button>
@@ -158,7 +208,7 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
             <textarea
               aria-label="Pattern or question"
               rows={1}
-              value={pattern}
+              value={typing ? typing.search.pattern.slice(0, typing.length) : pattern}
               placeholder={MODES.find((item) => item.mode === mode)!.placeholder}
               spellCheck={false}
               onChange={(event) => {
@@ -168,7 +218,7 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) submit(event);
               }}
-              className="agent-prompt-input"
+              className={cn("agent-prompt-input", (typing ? typing.search.kind : "code") === "code" && (typing || pattern) && "next-input-code")}
             />
             <button type="submit" aria-label="Send" title="Send" className="agent-prompt-send">
               <Icon name="arrow-up" size={16} />

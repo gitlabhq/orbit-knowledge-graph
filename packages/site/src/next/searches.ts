@@ -183,11 +183,11 @@ export const SEARCHES: Search[] = [
   {
     id: "branch",
     kind: "code",
-    label: "Code that is only on a branch",
+    label: "Check if other branches touch this code",
     pattern: "CursorPaginator",
     mode: "text",
     branches: "all",
-    summary: "No matches on main. 14 on one unmerged branch, where the work is still in progress.",
+    summary: "Another branch is changing this code: an unmerged branch adds CursorPaginator to pipeline.rs, which main also has. Expect a conflict there.",
     more: ["cursor_paginator.rs:47", "cursor_paginator.rs:266", "pipeline.rs:15", "pipeline.rs:287", "pipeline.rs:435"],
     files: [
       {

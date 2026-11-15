@@ -871,3 +871,17 @@
 .next-chat .agent-prompt-input {
   min-height: 0;
 }
+
+/* A code pattern reads as code, in the input and in the sent message, with its mode above it. */
+.next-chat .next-input-code {
+  font-family: var(--font-mono);
+  font-size: var(--gl-font-size-300);
+}
+
+.next-message-meta {
+  display: block;
+  margin-bottom: 0.125rem;
+  color: var(--gl-text-color-subtle);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+}

@@ -54,9 +54,6 @@ function Hero() {
         <br />
         <span className="orbit-fade">and every tool around it.</span>
       </p>
-      <p className="mx-auto mt-3 max-w-[36rem] text-sm text-balance text-subtle">
-        What we are building next for GitLab Orbit: code search across every repository and branch, and your Jira, Slack, incident.io, and Grafana data next to your code.
-      </p>
       <div className="mt-8 flex w-full justify-center">
         <CodeSearch onSearch={setSearch} />
       </div>
