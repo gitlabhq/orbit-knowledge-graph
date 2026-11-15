@@ -1,10 +1,9 @@
-export const HOME = { title: "GitLab Orbit", description: "The roadmap, content, team, and developer docs of GitLab Orbit." };
+export const HOME = { title: "GitLab Orbit", description: "What GitLab Orbit is, its roadmap, and its developer docs." };
 
 export type Tab = { route: string; label: string; menu?: { route: string; label: string; description: string }[] };
 
 export const TABS: Tab[] = [
-  { route: "roadmap", label: "Roadmap" },
-  { route: "content", label: "What's new" },
+  { route: "about", label: "About" },
   {
     route: "engineering",
     label: "Developers",
@@ -24,8 +23,8 @@ export const USER_DOCS = { label: "Docs", href: "https://docs.gitlab.com/orbit/"
 export const PAGES_DIR = "docs/pages";
 
 export const SECTIONS = [
+  { route: "about", label: "About" },
   { route: "roadmap", label: "Roadmap" },
-  { route: "content", label: "What's new" },
   { route: "team", label: "Team" },
   { route: "engineering/development", label: "Development" },
   { route: "engineering/architecture", label: "Architecture" },

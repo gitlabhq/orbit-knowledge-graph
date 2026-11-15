@@ -92,7 +92,7 @@ function TeamPage() {
               View the source
               <Icon name="external-link" size={12} />
             </SiteLink>
-            <Link to="/content" className={segment(false, true)}>
+            <Link to="/about" className={segment(false, true)}>
               See what's new
             </Link>
           </div>

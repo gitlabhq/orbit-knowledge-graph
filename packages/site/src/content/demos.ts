@@ -1,4 +1,4 @@
-import data from "@data/content/demos.yaml";
+import data from "@data/about/demos.yaml";
 import type { VideoSource } from "@gitlab-org/orbit-site";
 
 export type DemoVideo = VideoSource & { description?: string; featured?: boolean };
