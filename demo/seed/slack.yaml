@@ -1,44 +1,167 @@
 workspaces:
-  T01:
+  T0RB1T:
     search.messages:
-      - id: m1
-        issue_id: "20012"
-        workspace: T01
-        channel: gateway
-        author: daniel
-        text: "!412 is ready for review. Admin routes now need admin:write, everything else is unchanged."
-        sent_at: "2026-11-02T16:40:00Z"
-        visible_to: [priya, ines]
-      - id: m2
-        issue_id: "20012"
-        workspace: T01
-        channel: gateway-incidents
-        author: priya
-        text: "Context for !412: last week's incident was a read-only token calling DELETE /admin/routes. Keep this thread private until the postmortem is out."
-        sent_at: "2026-11-02T17:05:00Z"
-        visible_to: [priya]
-      - id: m3
-        issue_id: "20031"
-        workspace: T01
-        channel: console
-        author: tomas
-        text: "Dark theme screenshots for !88 are in the thread. Sidebar contrast still needs a pass."
-        sent_at: "2026-11-03T09:15:00Z"
-        visible_to: [priya, tomas]
-      - id: m4
-        workspace: T01
-        channel: random
-        author: daniel
-        text: "Who has the spare USB-C to HDMI adapter from the third floor room?"
-        sent_at: "2026-11-03T12:02:00Z"
-        visible_to: [priya, tomas, ines]
-  T02:
+      - id: m01
+        issue_id: "20212"
+        workspace: T0RB1T
+        channel: g_orbit
+        author: michaelusa
+        text: "!412 reads Slack messages from the lake in the DAG runner. GKG-212 is ready for review."
+        sent_at: "2026-11-02T15:10:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1]
+      - id: m02
+        issue_id: "20219"
+        workspace: T0RB1T
+        channel: orbit-query-engine
+        author: dgruzd
+        text: "!418 decodes zone-less lake timestamps as UTC. GKG-219 has the details."
+        sent_at: "2026-11-03T09:30:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1]
+      - id: m03
+        issue_id: "20224"
+        workspace: T0RB1T
+        channel: orbit-query-engine
+        author: michaelangeloio
+        text: "Cursor paging for Combine is up as !421. GKG-224 tracks the remaining edge cases."
+        sent_at: "2026-11-04T14:05:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1]
+      - id: m04
+        issue_id: "20131"
+        workspace: T0RB1T
+        channel: orbit-infra
+        author: bohdanpk
+        text: "!77 adds RustFS to the dev values. HELM-31 has the setup notes."
+        sent_at: "2026-11-04T16:20:00Z"
+        visible_to: [bohdanpk, gabrielengel_gl, dgruzd]
+      - id: m06
+        issue_id: "20134"
+        workspace: T0RB1T
+        channel: orbit-infra
+        author: gabrielengel_gl
+        text: "!80 pins the ClickHouse image by digest. HELM-34 is still in progress."
+        sent_at: "2026-11-05T11:45:00Z"
+        visible_to: [bohdanpk, gabrielengel_gl, dgruzd]
+      - id: m08
+        issue_id: "20212"
+        workspace: T0RB1T
+        channel: g_orbit
+        author: dgruzd
+        text: "I tested the GKG-212 branch locally and the Slack rows come through the DAG runner."
+        sent_at: "2026-11-06T17:00:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1]
+      - id: m09
+        workspace: T0RB1T
+        channel: orbit-query-engine
+        author: michaelusa
+        text: "Rebased !412 on main. The runner now takes the workspace id from the handle."
+        sent_at: "2026-11-09T10:40:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1]
+      - id: m10
+        workspace: T0RB1T
+        channel: g_orbit
+        author: michaelangeloio
+        text: "Standup notes are in the doc. Demo dry run is on Thursday."
+        sent_at: "2026-11-09T15:30:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1]
+      - id: m12
+        workspace: T0RB1T
+        channel: g_orbit
+        author: michaelusa
+        text: "Does anyone have a good example query that crosses GitLab, Jira, and Slack?"
+        sent_at: "2026-11-10T12:00:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1]
+      - id: m13
+        issue_id: "20224"
+        workspace: T0RB1T
+        channel: orbit-query-engine
+        author: dgruzd
+        text: "Tested !421 with a partial last page and it works. Approving after the cursor test lands."
+        sent_at: "2026-11-11T11:10:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1]
+      - id: m15
+        workspace: T0RB1T
+        channel: orbit-query-engine
+        author: michaelangeloio
+        text: "Added a test for offsets in !418. Values with an explicit offset keep their zone."
+        sent_at: "2026-11-12T09:15:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1]
+  T0DES1:
     search.messages:
-      - id: m5
-        issue_id: "20057"
-        workspace: T02
-        channel: payments
-        author: ines
-        text: "Finance confirmed the CSV must round per line, not per invoice total. Updating !57."
-        sent_at: "2026-11-04T10:20:00Z"
-        visible_to: [ines]
+      - id: m05
+        issue_id: "20309"
+        workspace: T0DES1
+        channel: des-poc
+        author: jgdoyon1
+        text: "!23 serves Slack message text from the live store. DES-9 is in review."
+        sent_at: "2026-11-05T10:00:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1, aalgutifan]
+      - id: m07
+        issue_id: "20311"
+        workspace: T0DES1
+        channel: des-poc
+        author: aalgutifan
+        text: "!26 adds Jira descriptions to the live store. DES-11 is ready for a look."
+        sent_at: "2026-11-06T13:15:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1, aalgutifan]
+      - id: m11
+        issue_id: "20311"
+        workspace: T0DES1
+        channel: des-poc
+        author: jgdoyon1
+        text: "Left a question on !26 about truncating long Jira descriptions. See DES-11."
+        sent_at: "2026-11-10T14:20:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1, aalgutifan]
+      - id: m14
+        issue_id: "20309"
+        workspace: T0DES1
+        channel: des-poc
+        author: aalgutifan
+        text: "DES-9 works end to end against my dev instance."
+        sent_at: "2026-11-11T16:45:00Z"
+        visible_to: [dgruzd, michaelusa, michaelangeloio, jgdoyon1, aalgutifan]
+  "10001":
+    search.issues:
+      - id: "20212"
+        key: GKG-212
+        summary: "Read Slack messages from the lake in the DAG runner"
+        description: "The DAG runner should read Slack messages from the lake tables. This replaces the fixture used in early demos."
+        visible_to: [michaelusa, michaelangeloio, dgruzd, jgdoyon1, bohdanpk, gabrielengel_gl]
+      - id: "20219"
+        key: GKG-219
+        summary: "Decode zone-less lake timestamps as UTC"
+        description: "Lake timestamps have no zone and were decoded in local time. Decode them as UTC so results are stable."
+        visible_to: [michaelusa, michaelangeloio, dgruzd, jgdoyon1, bohdanpk, gabrielengel_gl]
+      - id: "20224"
+        key: GKG-224
+        summary: "Page Combine results with a cursor"
+        description: "Offset paging skips rows when data changes between pages. Use a cursor over the sort key."
+        visible_to: [michaelusa, michaelangeloio, dgruzd, jgdoyon1, bohdanpk, gabrielengel_gl]
+      - id: "20230"
+        key: GKG-230
+        summary: "Explain plans in the demo"
+        description: "Show the compiled plan next to each demo query so viewers can see what the engine did."
+        visible_to: [michaelusa, michaelangeloio, dgruzd, jgdoyon1, bohdanpk, gabrielengel_gl]
+  "10002":
+    search.issues:
+      - id: "20131"
+        key: HELM-31
+        summary: "Add RustFS to the dev values"
+        description: "Dev installs need a local object store. Deploy RustFS from the chart in the dev values."
+        visible_to: [michaelusa, michaelangeloio, dgruzd, jgdoyon1, aalgutifan, bohdanpk, gabrielengel_gl]
+      - id: "20134"
+        key: HELM-34
+        summary: "Pin the ClickHouse image by digest"
+        description: "Tags can move. Pin the ClickHouse image by digest in the chart values."
+        visible_to: [michaelusa, michaelangeloio, dgruzd, jgdoyon1, aalgutifan, bohdanpk, gabrielengel_gl]
+  "10003":
+    search.issues:
+      - id: "20309"
+        key: DES-9
+        summary: "Serve Slack message text from the live store"
+        description: "Message text stays in Slack. The live store should fetch it on demand for visible rows."
+        visible_to: [michaelusa, michaelangeloio, dgruzd, jgdoyon1, aalgutifan, bohdanpk, gabrielengel_gl]
+      - id: "20311"
+        key: DES-11
+        summary: "Add Jira issue descriptions to the live store"
+        description: "Issue descriptions should be fetched on demand from Jira and never copied to the lake."
+        visible_to: [michaelusa, michaelangeloio, dgruzd, jgdoyon1, aalgutifan, bohdanpk, gabrielengel_gl]

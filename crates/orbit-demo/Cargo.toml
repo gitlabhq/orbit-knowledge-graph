@@ -16,6 +16,7 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
+duckdb = { workspace = true }
 duckdb-client = { path = "../duckdb-client" }
 futures = { workspace = true }
 integration-testkit = { path = "../integration-testkit" }

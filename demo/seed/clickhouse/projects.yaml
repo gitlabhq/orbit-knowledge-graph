@@ -1,5 +1,5 @@
 table: gl_project
 rows:
-  - {id: 1000, name: gateway, full_path: kestrel/platform/gateway, description: The edge API gateway, auth and rate limiting, visibility_level: private, traversal_path: 1/100/1000/}
-  - {id: 1001, name: console, full_path: kestrel/platform/console, description: The operator console, visibility_level: private, traversal_path: 1/100/1001/}
-  - {id: 2000, name: ledger, full_path: kestrel/payments/ledger, description: Double-entry ledger and invoice exports, visibility_level: private, traversal_path: 1/200/2000/}
+  - {id: 1000, name: knowledge-graph, full_path: gitlab-org/orbit/knowledge-graph, description: The Orbit knowledge graph and query engine, visibility_level: public, traversal_path: 1/100/1000/}
+  - {id: 1001, name: orbit-helm-charts, full_path: gitlab-org/orbit/orbit-helm-charts, description: Helm charts that deploy Orbit, visibility_level: public, traversal_path: 1/100/1001/}
+  - {id: 1002, name: data-extraction-service-poc, full_path: gitlab-org/orbit/experiments/data-extraction-service-poc, description: Proof of concept for live data extraction, visibility_level: public, traversal_path: 1/100/101/1002/}

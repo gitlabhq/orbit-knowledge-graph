@@ -58,13 +58,25 @@ done
 out=$("${DOCKER[@]}" exec "$CLICKHOUSE" getent hosts example.com 2>&1 && echo RESOLVED || true)
 if grep -q RESOLVED <<<"$out"; then fail "internal DNS: example.com resolves" "$out"; else pass "internal DNS: example.com does not resolve from ClickHouse"; fi
 
-before=$(counter DOCKER-USER "$EDGE_BRIDGE")
-if "${DOCKER[@]}" exec "$RELAY" socat -u OPEN:/dev/null TCP:1.1.1.1:443,connect-timeout=5 2>/dev/null; then
-  fail "DOCKER-USER: relay reached 1.1.1.1:443" "connected"
-else
-  after=$(counter DOCKER-USER "$EDGE_BRIDGE")
-  if ((after > before)); then pass "DOCKER-USER: the relay's outbound connect timed out ($((after - before)) packets dropped)"; else fail "DOCKER-USER" "connect failed but the rule dropped nothing"; fi
-fi
+out=$("${DOCKER[@]}" exec "$RUSTFS" getent hosts example.com 2>&1 && echo RESOLVED || true)
+if grep -q RESOLVED <<<"$out"; then fail "internal DNS: example.com resolves from RustFS" "$out"; else pass "internal DNS: example.com does not resolve from RustFS"; fi
+
+for relay in "$RELAY" "$S3_RELAY"; do
+  before=$(counter DOCKER-USER "$EDGE_BRIDGE")
+  if "${DOCKER[@]}" exec "$relay" socat -u OPEN:/dev/null TCP:1.1.1.1:443,connect-timeout=5 2>/dev/null; then
+    fail "DOCKER-USER: $relay reached 1.1.1.1:443" "connected"
+  else
+    after=$(counter DOCKER-USER "$EDGE_BRIDGE")
+    if ((after > before)); then pass "DOCKER-USER: $relay's outbound connect timed out ($((after - before)) packets dropped)"; else fail "DOCKER-USER: $relay" "connect failed but the rule dropped nothing"; fi
+  fi
+done
+
+anonymous=$(curl -s -m 5 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$S3_PORT/$S3_BUCKET")
+[[ "$anonymous" == 403 ]] && pass "RustFS refuses an unsigned request to the lake bucket" || fail "RustFS anonymous access" "answered $anonymous"
+hardening=$("${DOCKER[@]}" inspect "$RUSTFS" --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}} {{.HostConfig.SecurityOpt}} {{.Config.User}} {{len .NetworkSettings.Networks}} {{.HostConfig.PortBindings}}')
+[[ "$hardening" == "true [ALL] [no-new-privileges] 10001:10001 1 map[]" ]] &&
+  pass "RustFS runs read-only, non-root, without capabilities, on the internal network only, publishing nothing" ||
+  fail "RustFS hardening" "$hardening"
 
 before=$(counter ORBIT-DEMO-OUT DROP)
 if vm curl -s -m 5 -o /dev/null https://example.com 2>/dev/null; then fail "VM OUTPUT: curl example.com" "succeeded"; else pass "VM OUTPUT: curl -m 5 https://example.com fails"; fi
@@ -78,7 +90,7 @@ masked=$( (vm systemctl is-enabled apt-daily.timer apt-daily-upgrade.timer motd-
 
 [[ "$(curl -s -m 5 "http://127.0.0.1:$RELAY_PORT/ping")" == "Ok." ]] &&
   pass "port forward works with the rules in place" || fail "port forward" "no answer"
-for port in "$RELAY_PORT" "$@"; do
+for port in "$RELAY_PORT" "$S3_PORT" "$@"; do
   if out=$(assert_loopback_listener "$port" 2>&1); then pass "lsof: $out"; else fail "lsof" "$out"; fi
 done
 

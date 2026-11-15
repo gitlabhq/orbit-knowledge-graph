@@ -1,4 +1,4 @@
 table: slack_workspace
 rows:
-  - {id: T01, name: kestrel-eng, namespace_id: 100, traversal_path: 1/100/}
-  - {id: T02, name: kestrel-payments, namespace_id: 200, traversal_path: 1/200/}
+  - {id: T0RB1T, name: gitlab-orbit, namespace_id: 100, traversal_path: 1/100/}
+  - {id: T0DES1, name: des-poc, namespace_id: 101, traversal_path: 1/100/101/1002/}

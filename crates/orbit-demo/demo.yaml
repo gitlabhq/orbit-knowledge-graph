@@ -7,4 +7,11 @@ clickhouse:
 providers:
   orbit_next: http://127.0.0.1:18201
   slack: http://127.0.0.1:18202
+lake:
+  endpoint: 127.0.0.1:19000
+  region: us-east-1
+  bucket: orbit-lake
+  access_key: orbit-demo-lake
+  secret_key: orbit-demo-lake-secret
+  extension_directory: ../../target/duckdb-extensions
 seed: ../../demo/seed

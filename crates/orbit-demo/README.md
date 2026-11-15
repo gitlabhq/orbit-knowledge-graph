@@ -1,15 +1,17 @@
 # Orbit query engine demo
 
 An interactive page that runs GQL through the real DAG runner on seeded local data and draws each
-stage as it runs. ClickHouse holds the graph. Loopback fakes stand in for Orbit Next and Slack.
+stage as it runs. ClickHouse holds the graph. DuckDB reads the Slack and Jira lakes as Parquet
+from RustFS. Loopback fakes stand in for Orbit Next and the live store that serves Slack and Jira.
+The seed is Orbit's own projects and team. Every name, message and issue in it is invented.
 Nothing in the demo listens beyond 127.0.0.1 or reaches past the machine.
 `orbit-server` never depends on this crate.
 
 ## Run it
 
 ```shell
-mise run demo:setup   # once: restarts the orbit-demo colima VM and pulls images by digest
-mise run demo         # starts ClickHouse behind its relay, then the demo
+mise run demo:setup   # once: restarts the orbit-demo colima VM, pulls images by digest, installs DuckDB httpfs
+mise run demo         # starts ClickHouse and RustFS behind their relays, then the demo
 ```
 
 Open <http://localhost:8484/>. Pick a caller and an example, or write any GQL the packages allow.
@@ -23,15 +25,15 @@ network block on its own.
 ## Edit the seed
 
 The seed lives in `demo/seed/` at the repository root. Click **Reload seed** after editing it,
-or `POST /api/reload` with a JSON body. The reload truncates every ClickHouse table and reloads
-the fakes and the callers.
+or `POST /api/reload` with a JSON body. The reload truncates every ClickHouse table, rewrites
+every lake table's Parquet file in the `orbit-lake` bucket, and reloads the fakes and the callers.
 
 | File | Holds |
 | --- | --- |
 | `clickhouse/*.yaml` | `table:` and `rows:` for one ClickHouse table. Columns you omit take their defaults. A row with `_deleted: true` and a later `_version` is a tombstone. |
 | `orbit_next.yaml` | Repositories, with the files at the head of each branch. The fake matches the search pattern against file contents line by line. |
-| `lake/*.yaml` | `table:` and `rows:` for one table of a DuckDB lake: Slack's `slack_lake` and Jira's `jira_lake`, each an in-memory database the demo creates from the packages. |
-| `slack.yaml` | The live Slack messages, with the `text` the lake does not store, per workspace and operation. `visible_to` lists the Slack handles that can read each message. |
+| `lake/*.yaml` | `table:` and `rows:` for one table of a lake: Slack's `slack_lake` (`slack_workspace`, `slack_message`) and Jira's `jira_lake` (`jira_project`, `jira_issue`, `jira_user`). The demo writes each table to `s3://orbit-lake/lake/<lake>/<table>/` and DuckDB reads it from there. |
+| `slack.yaml` | The live store's rows per workspace and operation: Slack message `text` (`search.messages`) and Jira issue descriptions (`search.issues`, keyed by Jira project id), which the lakes do not store. `visible_to` lists the handles that can read each row. |
 | `callers.yaml` | The GitLab and Zanzibar-style deployments, and the callers the page offers. |
 | `examples.yaml` | The starter queries. |
 
@@ -47,7 +49,8 @@ the fakes and the callers.
 | Config | `Config::check` accepts only IP literals and `localhost` that resolve to 127.0.0.0/8 or ::1, and rejects 0.0.0.0 and ::. | `tests/lockdown.rs` |
 | Client | `client::post` connects only to a loopback `SocketAddr` and resolves no name. | |
 | ClickHouse | `remote_url_allow_hosts` allows nothing. The query user is read-only, with SELECT on the demo databases only. The seed user can only create, truncate and insert. | `lockdown-tests.sh` |
-| Containers | ClickHouse sits on `orbit-internal` (`--internal`) with no published port. A socat relay on `orbit-internal` and `orbit-edge` publishes 127.0.0.1:18123 only. Both run with `--cap-drop ALL`, `no-new-privileges`, a non-root user and a read-only root filesystem. | `lockdown-tests.sh` |
+| RustFS | The lake bucket refuses anonymous reads. The console is off. Only the demo's key can read or write. | `lockdown-tests.sh` |
+| Containers | ClickHouse and RustFS sit on `orbit-internal` (`--internal`) with no published port. Two socat relays on `orbit-internal` and `orbit-edge` publish 127.0.0.1:18123 and 127.0.0.1:19000 only. All run with `--cap-drop ALL`, `no-new-privileges`, a non-root user and a read-only root filesystem. | `lockdown-tests.sh` |
 | VM egress | A DOCKER-USER rule drops new flows out of both bridges. A VM `OUTPUT` chain drops new outbound connections, and the VM's update and time services are masked. | `lockdown-tests.sh` |
 
 The VM is the `orbit-demo` colima profile, started with every flag pinned in `scripts/env.sh` and
@@ -61,4 +64,4 @@ From another device on the same network, scan the laptop:
 nmap -p- <laptop-lan-ip>
 ```
 
-Ports 8484, 18123, 18201 and 18202 must not appear.
+Ports 8484, 18123, 18201, 18202 and 19000 must not appear.

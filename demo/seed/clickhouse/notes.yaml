@@ -1,6 +1,12 @@
 table: gl_note
 rows:
-  - {id: 5000, note: "Should a missing scope return 403 or 404? A 404 hides which admin routes exist.", noteable_type: MergeRequest, noteable_id: 3000, project_id: 1000, author_id: 4, internal: false, traversal_path: 1/100/1000/}
-  - {id: 5001, note: "Can we keep the default at 20 and add a per-route override? The load test only covered the default.", noteable_type: MergeRequest, noteable_id: 3001, project_id: 1000, author_id: 1, internal: false, traversal_path: 1/100/1000/}
-  - {id: 5002, note: "The sidebar text fails contrast in dark mode. I measured 3.9:1.", noteable_type: MergeRequest, noteable_id: 3002, project_id: 1001, author_id: 1, internal: false, traversal_path: 1/100/1001/}
-  - {id: 5003, note: "Closing this in favour of !88, which replaces the switcher.", noteable_type: MergeRequest, noteable_id: 3004, project_id: 1001, author_id: 1, internal: false, traversal_path: 1/100/1001/}
+  - {id: 6001, note: "Should the runner fail when a channel has no messages, or return an empty page?", noteable_type: MergeRequest, noteable_id: 5001, project_id: 1000, author_id: 3, internal: false, traversal_path: 1/100/1000/}
+  - {id: 6002, note: "The lake read looks right. Can the workspace id come from the handle instead of a literal?", noteable_type: MergeRequest, noteable_id: 5001, project_id: 1000, author_id: 2, internal: false, traversal_path: 1/100/1000/}
+  - {id: 6003, note: "Does the decoder still accept values that already carry an offset?", noteable_type: MergeRequest, noteable_id: 5002, project_id: 1000, author_id: 1, internal: false, traversal_path: 1/100/1000/}
+  - {id: 6004, note: "The cursor should encode the sort key so a changed page size does not skip rows.", noteable_type: MergeRequest, noteable_id: 5003, project_id: 1000, author_id: 1, internal: false, traversal_path: 1/100/1000/}
+  - {id: 6005, note: "Can we add a test that pages through the last partial page?", noteable_type: MergeRequest, noteable_id: 5003, project_id: 1000, author_id: 4, internal: false, traversal_path: 1/100/1000/}
+  - {id: 6006, note: "Do we need a persistent volume for RustFS in dev, or is emptyDir enough?", noteable_type: MergeRequest, noteable_id: 5004, project_id: 1001, author_id: 3, internal: false, traversal_path: 1/100/1001/}
+  - {id: 6007, note: "This returns text only for rows the caller can already see. Nice.", noteable_type: MergeRequest, noteable_id: 5005, project_id: 1002, author_id: 1, internal: false, traversal_path: 1/100/101/1002/}
+  - {id: 6008, note: "Pinning by digest means we need a script to bump it. Is that in scope?", noteable_type: MergeRequest, noteable_id: 5008, project_id: 1001, author_id: 6, internal: false, traversal_path: 1/100/1001/}
+  - {id: 6009, note: "Descriptions can be long. Should the live store truncate them?", noteable_type: MergeRequest, noteable_id: 5009, project_id: 1002, author_id: 4, internal: false, traversal_path: 1/100/101/1002/}
+  - {id: 6010, note: "Please keep the old heuristics behind a flag for one release.", noteable_type: MergeRequest, noteable_id: 5007, project_id: 1000, author_id: 3, internal: false, traversal_path: 1/100/1000/}

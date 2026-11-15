@@ -71,7 +71,7 @@ pub async fn start(checked: Checked) -> anyhow::Result<Arc<Demo>> {
     let seed = Seed::read(&checked.config.seed)?;
     let model = integration_testkit::dag_fakes::dag_model();
     let (catalog, connections) = integration_testkit::dag_fakes::dag_connections(&model);
-    let lakes = Lakes::open(&connections)?;
+    let lakes = Lakes::new(&connections, &checked.config.lake);
     lakes.reload(&seed.lake)?;
     let store = Store::new(&checked);
     store

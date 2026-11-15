@@ -4,11 +4,13 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use arrow::array::Array;
+use arrow::array::{Array, ArrayRef, AsArray};
+use arrow::datatypes::{DataType, TimeUnit, TimestampMicrosecondType};
 use arrow::record_batch::RecordBatch;
 use arrow::util::display::array_value_to_string;
 use async_trait::async_trait;
-use compiler::dag::{Contract, Request};
+use compiler::dag::{Contract, Handle, Output, Request};
+use query_data_model::Model;
 use query_data_model::catalog::Row;
 use query_data_model::implementations::orbit_code::RequestField;
 use query_engine::shared::dag::{Executed, Executor, ExecutorError, from_rows};
@@ -126,6 +128,7 @@ pub type Samples = Arc<Mutex<Vec<Sample>>>;
 pub struct Sampled {
     pub inner: Arc<dyn Executor>,
     pub samples: Samples,
+    pub model: Arc<Model>,
 }
 
 #[async_trait]
@@ -139,7 +142,7 @@ impl Executor for Sampled {
         let sample = Sample {
             request: kind(request),
             count: executed.batches.iter().map(RecordBatch::num_rows).sum(),
-            rows: json_rows(&executed.batches, SAMPLE),
+            rows: named(json_rows(&executed.batches, SAMPLE), contract, &self.model),
         };
         self.samples
             .lock()
@@ -147,6 +150,68 @@ impl Executor for Sampled {
             .push(sample);
         Ok(executed)
     }
+}
+
+/// A stage's rows come back named by contract position; these name each column after the
+/// binding, property, edge field or match part it holds.
+fn named(rows: Vec<Row>, contract: Option<&Contract>, model: &Model) -> Vec<Row> {
+    let Some(contract) = contract else {
+        return rows;
+    };
+    let names: Vec<String> = contract
+        .columns
+        .iter()
+        .map(|column| match &column.output {
+            Output::Node {
+                binding,
+                handle: Handle::Property(property),
+            } => {
+                format!("{binding}.{}", model.graph().property(*property).name)
+            }
+            Output::Node {
+                binding,
+                handle: Handle::Identity(0),
+            } => format!("{binding}.id"),
+            Output::Node {
+                binding,
+                handle: Handle::Identity(part),
+            } => format!("{binding}.id.{part}"),
+            Output::Edge { step, field } => {
+                format!("edge{step}.{}", format!("{field:?}").to_lowercase())
+            }
+            Output::Path { step } => format!("path{step}"),
+            Output::Line => "match.line".into(),
+            Output::Capture(name) => format!("match.{name}"),
+        })
+        .collect();
+    rows.into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|(position, value)| {
+                    let name = position
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|at| names.get(at))
+                        .cloned();
+                    (name.unwrap_or(position), value)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+// Arrow names the contract's UTC zone, which it can only display with chrono-tz, so a UTC
+// timestamp displays zone-less with a Z.
+fn display(column: &ArrayRef, index: usize) -> Value {
+    if let DataType::Timestamp(TimeUnit::Microsecond, Some(_)) = column.data_type() {
+        let utc = column
+            .as_primitive::<TimestampMicrosecondType>()
+            .clone()
+            .with_timezone_opt(None::<String>);
+        return array_value_to_string(&utc, index)
+            .map_or(Value::Null, |text| Value::from(text + "Z"));
+    }
+    array_value_to_string(column, index).map_or(Value::Null, Value::from)
 }
 
 /// Up to `limit` rows of Arrow batches as JSON, each value as Arrow displays it.
@@ -161,9 +226,7 @@ pub fn json_rows(batches: &[RecordBatch], limit: usize) -> Vec<Row> {
             for (field, column) in batch.schema().fields().iter().zip(batch.columns()) {
                 let value = match column.is_null(index) {
                     true => Value::Null,
-                    false => array_value_to_string(column, index)
-                        .map(Value::from)
-                        .unwrap_or_default(),
+                    false => display(column, index),
                 };
                 row.insert(field.name().clone(), value);
             }

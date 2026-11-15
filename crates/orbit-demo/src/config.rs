@@ -14,6 +14,7 @@ pub struct Config {
     pub page_port: u16,
     pub clickhouse: ClickHouse,
     pub providers: Providers,
+    pub lake: Lake,
     /// The seed directory, relative to the config file.
     pub seed: PathBuf,
 }
@@ -41,6 +42,20 @@ pub struct Providers {
     pub slack: String,
 }
 
+/// The S3 server the lakes land on and are read from.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Lake {
+    /// `host:port`, without a scheme, as DuckDB names an S3 endpoint.
+    pub endpoint: String,
+    pub region: String,
+    pub bucket: String,
+    pub access_key: String,
+    pub secret_key: String,
+    /// The `httpfs` extension files, relative to the config file.
+    pub extension_directory: PathBuf,
+}
+
 /// A config whose every endpoint passed the loopback check, with the address each connects to.
 #[derive(Debug, Clone)]
 pub struct Checked {
@@ -58,6 +73,7 @@ impl Config {
             .with_context(|| format!("parsing {}", path.display()))?;
         let base = path.parent().unwrap_or(Path::new("."));
         config.seed = base.join(&config.seed);
+        config.lake.extension_directory = base.join(&config.lake.extension_directory);
         Ok(config)
     }
 
@@ -79,6 +95,7 @@ impl Config {
         let clickhouse = check(&self.clickhouse.url, false);
         let orbit_next = check(&self.providers.orbit_next, true);
         let slack = check(&self.providers.slack, true);
+        check(&self.lake.endpoint, false);
         match (clickhouse, orbit_next, slack) {
             (Some(clickhouse), Some(orbit_next), Some(slack)) if errors.is_empty() => Ok(Checked {
                 config: self,

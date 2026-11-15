@@ -1,9 +1,14 @@
 table: gl_branch
 rows:
-  - {id: 9000, project_id: 1000, name: main, is_default: true, traversal_path: 1/100/1000/}
-  - {id: 9001, project_id: 1000, name: scoped-admin-tokens, is_default: false, traversal_path: 1/100/1000/}
-  - {id: 9002, project_id: 1000, name: limiter-burst-config, is_default: false, traversal_path: 1/100/1000/}
-  - {id: 9003, project_id: 1001, name: main, is_default: true, traversal_path: 1/100/1001/}
-  - {id: 9004, project_id: 1001, name: console-dark-theme, is_default: false, traversal_path: 1/100/1001/}
-  - {id: 9005, project_id: 2000, name: main, is_default: true, traversal_path: 1/200/2000/}
-  - {id: 9006, project_id: 2000, name: invoice-csv-export, is_default: false, traversal_path: 1/200/2000/}
+  - {id: 7001, project_id: 1000, name: main, is_default: true, traversal_path: 1/100/1000/}
+  - {id: 7002, project_id: 1000, name: dag-slack-lake, is_default: false, traversal_path: 1/100/1000/}
+  - {id: 7003, project_id: 1000, name: lake-timestamp-utc, is_default: false, traversal_path: 1/100/1000/}
+  - {id: 7004, project_id: 1000, name: combine-cursor-paging, is_default: false, traversal_path: 1/100/1000/}
+  - {id: 7005, project_id: 1000, name: sealed-model-handles, is_default: false, traversal_path: 1/100/1000/}
+  - {id: 7006, project_id: 1000, name: retire-placement-heuristics, is_default: false, traversal_path: 1/100/1000/}
+  - {id: 7007, project_id: 1001, name: main, is_default: true, traversal_path: 1/100/1001/}
+  - {id: 7008, project_id: 1001, name: rustfs-dev-values, is_default: false, traversal_path: 1/100/1001/}
+  - {id: 7009, project_id: 1001, name: pin-clickhouse-digest, is_default: false, traversal_path: 1/100/1001/}
+  - {id: 7010, project_id: 1002, name: main, is_default: true, traversal_path: 1/100/101/1002/}
+  - {id: 7011, project_id: 1002, name: live-slack-text, is_default: false, traversal_path: 1/100/101/1002/}
+  - {id: 7012, project_id: 1002, name: live-jira-descriptions, is_default: false, traversal_path: 1/100/101/1002/}

@@ -2,102 +2,146 @@ repositories:
   1000:
     branches:
       main:
-        - path: src/server.rs
+        - path: crates/query-engine/shared/src/dag/runner.rs
           content: |
-            use std::net::SocketAddr;
+            use crate::dag::{Plan, Stage};
+            use crate::lake::LakeReader;
 
-            use crate::config::Config;
-            use crate::router::Router;
-
-            pub async fn serve(config: Config, router: Router) -> anyhow::Result<()> {
-                let listener = tokio::net::TcpListener::bind(config.listen).await?;
-                tracing::info!(addr = %config.listen, "gateway listening");
-                let shutdown = async { todo!("drain connections on SIGTERM") };
-                axum::serve(listener, router.into_service()).with_graceful_shutdown(shutdown).await?;
-                Ok(())
+            pub struct Runner {
+                reader: LakeReader,
             }
-        - path: src/auth.rs
-          content: |
-            use crate::token::{Claims, TokenError};
 
-            pub fn verify(header: Option<&str>, keys: &KeySet) -> Result<Claims, TokenError> {
-                let token = header
-                    .and_then(|value| value.strip_prefix("Bearer "))
-                    .ok_or(TokenError::Missing)?;
-                keys.decode(token)
-            }
-      scoped-admin-tokens:
-        - path: src/auth/scopes.rs
-          content: |
-            use crate::token::Claims;
-
-            pub const ADMIN_WRITE: &str = "admin:write";
-
-            pub fn require(claims: &Claims, scope: &str) -> Result<(), ScopeError> {
-                if claims.scopes.iter().any(|held| held == scope) {
-                    return Ok(());
+            impl Runner {
+                pub fn run(&self, plan: &Plan) -> anyhow::Result<Vec<Stage>> {
+                    todo!("schedule stages by dependency order")
                 }
-                todo!("reject tokens without the admin:write scope")
             }
-      limiter-burst-config:
-        - path: src/limiter.rs
+        - path: crates/query-data-model/src/lake.rs
           content: |
-            use std::time::{Duration, Instant};
+            use duckdb::Connection;
 
-            pub struct TokenBucket {
-                tokens: f64,
-                refilled: Instant,
-                rate: f64,
+            pub struct LakeReader {
+                conn: Connection,
             }
 
-            impl TokenBucket {
-                pub fn new(config: &LimiterConfig) -> Self {
-                    let burst = todo!("read the burst size from LimiterConfig");
-                    Self { tokens: burst, refilled: Instant::now(), rate: config.per_second }
+            impl LakeReader {
+                pub fn table(&self, name: &str) -> String {
+                    format!("SELECT * FROM {name}")
+                }
+            }
+      dag-slack-lake:
+        - path: crates/query-engine/shared/src/dag/slack.rs
+          content: |
+            use crate::lake::LakeReader;
+
+            pub fn read_messages(reader: &LakeReader, workspace: &str) -> anyhow::Result<Vec<Message>> {
+                let sql = reader.table("slack_message");
+                todo!("filter slack_message rows by workspace and channel")
+            }
+      lake-timestamp-utc:
+        - path: crates/query-data-model/src/timestamp.rs
+          content: |
+            use chrono::{DateTime, NaiveDateTime, Utc};
+
+            pub fn decode(raw: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
+                let naive = NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S")?;
+                todo!("attach UTC to the naive timestamp")
+            }
+      combine-cursor-paging:
+        - path: crates/query-engine/shared/src/combine/cursor.rs
+          content: |
+            pub struct Cursor {
+                pub sort_key: String,
+                pub last_id: i64,
+            }
+
+            impl Cursor {
+                pub fn encode(&self) -> String {
+                    todo!("encode the sort key and last id as an opaque token")
                 }
             }
   1001:
     branches:
       main:
-        - path: src/theme.rs
+        - path: charts/orbit/values.yaml
           content: |
-            pub struct Palette {
-                pub background: u32,
-                pub text: u32,
-            }
-
-            pub const LIGHT: Palette = Palette { background: 0xffffff, text: 0x1f1e24 };
-        - path: src/sidebar.rs
+            replicaCount: 1
+            clickhouse:
+              image:
+                repository: clickhouse/clickhouse-server
+                tag: "26.3"
+            objectStore:
+              enabled: false
+        - path: charts/orbit/templates/deployment.yaml
           content: |
-            use crate::layout::Viewport;
-
-            pub fn collapsed(viewport: Viewport) -> bool {
-                todo!("collapse the sidebar below 960px")
-            }
-      console-dark-theme:
-        - path: src/theme.rs
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: {{ .Release.Name }}-orbit
+            spec:
+              replicas: {{ .Values.replicaCount }}
+      rustfs-dev-values:
+        - path: charts/orbit/values-dev.yaml
           content: |
-            pub const DARK: Palette = Palette { background: 0x18171d, text: 0xececef };
-
-            pub fn contrast(palette: &Palette) -> f64 {
-                todo!("pick contrast ratios that pass WCAG AA")
-            }
-  2000:
+            objectStore:
+              enabled: true
+              kind: rustfs
+              endpoint: http://rustfs:9000
+              bucket: orbit-dev
+      pin-clickhouse-digest:
+        - path: charts/orbit/values.yaml
+          content: |
+            clickhouse:
+              image:
+                repository: clickhouse/clickhouse-server
+                digest: sha256:4f7c1d2e9a0b53c6d8e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7
+  1002:
     branches:
       main:
-        - path: src/totals.rs
+        - path: cmd/store/main.go
           content: |
-            use crate::money::Cents;
+            package main
 
-            pub fn total(lines: &[Cents]) -> Cents {
-                todo!("sum with checked_add and report overflow")
+            import "net/http"
+
+            func main() {
+                http.HandleFunc("/healthz", health)
+                panic("serve the live store on the configured address")
             }
-      invoice-csv-export:
-        - path: src/export/csv.rs
+        - path: bridge/src/rows.rs
           content: |
-            use crate::invoice::Invoice;
+            use serde_json::Value;
 
-            pub fn write(invoices: &[Invoice], out: &mut impl std::io::Write) -> std::io::Result<()> {
-                writeln!(out, "invoice,customer,settled_at,total")?;
-                todo!("round each line to cents before summing")
+            pub fn rows(body: &str) -> Vec<Value> {
+                todo!("decode the live store's JSON rows")
+            }
+      live-slack-text:
+        - path: internal/slack/text.go
+          content: |
+            package slack
+
+            func MessageText(workspace, id string) (string, error) {
+                panic("fetch the message text from the Slack API")
+            }
+        - path: bridge/src/lib.rs
+          content: |
+            use std::collections::HashMap;
+
+            pub fn text_by_id(ids: &[String]) -> HashMap<String, String> {
+                todo!("batch the text lookups per workspace")
+            }
+      live-jira-descriptions:
+        - path: internal/jira/description.go
+          content: |
+            package jira
+
+            func IssueDescription(cloudID, key string) (string, error) {
+                panic("fetch the issue description from the Jira API")
+            }
+        - path: bridge/src/lib.rs
+          content: |
+            use std::collections::HashMap;
+
+            pub fn description_by_key(keys: &[String]) -> HashMap<String, String> {
+                todo!("batch the description lookups per Jira project")
             }

@@ -1,6 +1,9 @@
 table: gl_user
 rows:
-  - {id: 1, username: praman, name: Priya Raman, first_name: Priya, last_name: Raman, state: active, user_type: human}
-  - {id: 2, username: tferreira, name: Tomás Ferreira, first_name: Tomás, last_name: Ferreira, state: active, user_type: human}
-  - {id: 3, username: iokafor, name: Ines Okafor, first_name: Ines, last_name: Okafor, state: active, user_type: human}
-  - {id: 4, username: dbrandt, name: Daniel Brandt, first_name: Daniel, last_name: Brandt, state: active, user_type: human}
+  - {id: 1, username: michaelusa, name: Michael Usachenko, first_name: Michael, last_name: Usachenko, state: active, user_type: human}
+  - {id: 2, username: michaelangeloio, name: Michael Angelo Rivera, first_name: Michael Angelo, last_name: Rivera, state: active, user_type: human}
+  - {id: 3, username: dgruzd, name: Dmitry Gruzd, first_name: Dmitry, last_name: Gruzd, state: active, user_type: human}
+  - {id: 4, username: jgdoyon1, name: Jean-Gabriel Doyon, first_name: Jean-Gabriel, last_name: Doyon, state: active, user_type: human}
+  - {id: 5, username: aalgutifan, name: Aaron Algutifan, first_name: Aaron, last_name: Algutifan, state: active, user_type: human}
+  - {id: 6, username: bohdanpk, name: Bohdan Parkhomchuk, first_name: Bohdan, last_name: Parkhomchuk, state: active, user_type: human}
+  - {id: 7, username: gabrielengel_gl, name: Gabriel Engel, first_name: Gabriel, last_name: Engel, state: active, user_type: human}

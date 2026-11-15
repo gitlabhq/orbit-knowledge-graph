@@ -116,6 +116,7 @@ async fn execute(
         Arc::new(Sampled {
             inner,
             samples: Arc::clone(&samples),
+            model: Arc::clone(&demo.model),
         })
     };
     let connection = demo.catalog.connection();

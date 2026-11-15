@@ -1,0 +1,9 @@
+table: jira_user
+rows:
+  - {account_id: acc-michaelusa, display_name: Michael Usachenko, traversal_path: 1/100/}
+  - {account_id: acc-michaelangeloio, display_name: Michael Angelo Rivera, traversal_path: 1/100/}
+  - {account_id: acc-dgruzd, display_name: Dmitry Gruzd, traversal_path: 1/100/}
+  - {account_id: acc-jgdoyon1, display_name: Jean-Gabriel Doyon, traversal_path: 1/100/}
+  - {account_id: acc-aalgutifan, display_name: Aaron Algutifan, traversal_path: 1/100/}
+  - {account_id: acc-bohdanpk, display_name: Bohdan Parkhomchuk, traversal_path: 1/100/}
+  - {account_id: acc-gabrielengel_gl, display_name: Gabriel Engel, traversal_path: 1/100/}

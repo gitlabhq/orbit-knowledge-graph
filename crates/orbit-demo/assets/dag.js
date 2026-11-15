@@ -2,7 +2,8 @@
 
 (function () {
   const NS = "http://www.w3.org/2000/svg";
-  const W = 264, H = 92, GAP = 232, VGAP = 116, PAD = 18, ABOVE = 44, CHAR = 6.7;
+  const H = 92, VGAP = 116, PAD = 18, LANE = 26, CHAR = 6.7;
+  let W = 264, GAP = 232;
   const NAMES = { clickhouse: "ClickHouse", duckdb: "DuckDB lake", orbit_code: "Orbit Next", live: "Live (Data Extraction)", combine: "Combine" };
   const KINDS = { relational: "Relational", remote: "Remote", combine: "In process" };
   const STATES = { waiting: "Waiting", running: "Running", done: "Finished", failed: "Failed" };
@@ -37,15 +38,19 @@
   function layout(stages, edges) {
     const data = stages.filter((s) => kind(s.backend) !== "combine").sort((a, b) => a.id - b.id);
     const combines = stages.filter((s) => kind(s.backend) === "combine");
+    [W, GAP] = data.length > 5 ? [208, 140] : data.length > 3 ? [224, 164] : [264, 232];
     const column = Object.fromEntries(data.map((s, i) => [s.id, i]));
-    const above = edges.some((e) => e.kind === "keys" && column[e.to] - column[e.from] > 1);
-    const top = PAD + (above ? ABOVE : 0);
+    const skips = edges
+      .filter((e) => e.kind === "keys" && column[e.to] - column[e.from] > 1)
+      .sort((x, y) => column[x.to] - column[x.from] - (column[y.to] - column[y.from]));
+    const lanes = new Map(skips.map((e, lane) => [e, lane]));
+    const top = PAD + (skips.length ? 18 + skips.length * LANE : 0);
     const row = Math.max(1, data.length) * W + Math.max(0, data.length - 1) * GAP;
     const positions = {};
     data.forEach((s, i) => { positions[s.id] = { x: PAD + i * (W + GAP), y: top }; });
     combines.forEach((s, i) => { positions[s.id] = { x: PAD + (row - W) / 2 + i * (W + GAP), y: top + H + VGAP }; });
     const width = 2 * PAD + Math.max(row, combines.length * W + Math.max(0, combines.length - 1) * GAP);
-    return { positions, width, height: top + H + (combines.length ? VGAP + H : 0) + PAD };
+    return { positions, lanes, width, height: top + H + (combines.length ? VGAP + H : 0) + PAD };
   }
 
   function markers(defs) {
@@ -62,13 +67,13 @@
     return e.count === 0 ? "empty" : "flowing";
   }
 
-  function keyEdge(svg, p, e, state) {
+  function keyEdge(svg, p, e, state, lane) {
     const a = p[e.from], b = p[e.to], tip = ARROW.keys * HEAD.keys;
     const group = el("g", { class: `edge edge-keys ${state}` }, svg);
     el("title", {}, group).textContent = e.title;
     let d, lx, ly, room;
-    if (b.x - a.x > W + GAP) {
-      const x1 = a.x + W / 2, x2 = b.x + W / 2, y = a.y - ABOVE + 14;
+    if (lane !== undefined) {
+      const shift = Math.min(lane * LANE, W / 2 - 18), x1 = a.x + W / 2 - shift, x2 = b.x + W / 2 + shift, y = a.y - 16 - lane * LANE;
       d = `M ${x1} ${a.y} V ${y + 10} Q ${x1} ${y} ${x1 + 10} ${y} H ${x2 - 10} Q ${x2} ${y} ${x2} ${y + 10} V ${b.y - tip}`;
       lx = x1 + 16; ly = y - 10; room = x2 - x1 - 40;
     } else {
@@ -81,12 +86,26 @@
     text(group, lx + used, ly + 4, fit(e.label, room - used), "edge-label");
   }
 
-  function rowEdge(svg, p, e, state, slot, slots) {
-    const a = p[e.from], b = p[e.to], tip = ARROW.rows * HEAD.rows, r = 10;
+  // Each row edge enters the Combine card at its own point and turns on its own lane; the edge
+  // farther from its entry takes the lower lane, so no two horizontal runs meet or cross.
+  function routes(rows, p) {
+    const out = new Map();
+    for (const target of new Set(rows.map((e) => e.to))) {
+      const into = rows.filter((e) => e.to === target).sort((x, y) => p[x.from].x - p[y.from].x);
+      const b = p[target];
+      const entries = into.map((e, slot) => ({ e, sx: p[e.from].x + W / 2, ex: b.x + 28 + ((W - 56) * (slot + 0.5)) / into.length }));
+      entries.sort((x, y) => Math.abs(x.sx - x.ex) - Math.abs(y.sx - y.ex));
+      entries.forEach((entry, rank) => out.set(entry.e, { ex: entry.ex, lane: 38 + rank * ((VGAP - 58) / Math.max(1, entries.length - 1)) }));
+    }
+    return out;
+  }
+
+  function rowEdge(svg, p, e, state, route) {
+    const a = p[e.from], b = p[e.to], tip = ARROW.rows * HEAD.rows, r = 8;
     const group = el("g", { class: `edge edge-rows ${state}` }, svg);
     el("title", {}, group).textContent = e.title;
-    const sx = a.x + W / 2, sy = a.y + H, ex = b.x + 28 + ((W - 56) * (slot + 0.5)) / slots, ey = b.y - tip;
-    const mid = sy + VGAP / 2, dir = Math.sign(ex - sx);
+    const sx = a.x + W / 2, sy = a.y + H, ex = route.ex, ey = b.y - tip;
+    const mid = sy + route.lane, dir = Math.sign(ex - sx);
     const d = Math.abs(ex - sx) < 2 * r
       ? `M ${sx} ${sy} C ${sx} ${mid}, ${ex} ${mid}, ${ex} ${ey}`
       : `M ${sx} ${sy} V ${mid - r} Q ${sx} ${mid} ${sx + dir * r} ${mid} H ${ex - dir * r} Q ${ex} ${mid} ${ex} ${mid + r} V ${ey}`;
@@ -114,19 +133,19 @@
     if (!model.stages.length) {
       svg.setAttribute("viewBox", "0 0 1200 120");
       svg.style.maxWidth = "";
+      svg.style.minWidth = "";
       text(svg, 600, 65, "Run a query to see its stages, the key sets between them and their rows.", "dag-empty", "middle");
       return;
     }
-    const { positions, width, height } = layout(model.stages, model.edges);
+    const { positions, lanes: skips, width, height } = layout(model.stages, model.edges);
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.style.maxWidth = `${Math.round(width * 1.12)}px`;
+    svg.style.minWidth = `${Math.round(width * 0.62)}px`;
     markers(el("defs", {}, svg));
     const rows = model.edges.filter((e) => e.kind === "rows");
-    for (const e of model.edges.filter((e) => e.kind === "keys")) keyEdge(svg, positions, e, edgeState(model, e));
-    for (const e of rows) {
-      const into = rows.filter((x) => x.to === e.to).sort((x, y) => positions[x.from].x - positions[y.from].x);
-      rowEdge(svg, positions, e, edgeState(model, e), into.indexOf(e), into.length);
-    }
+    for (const e of model.edges.filter((e) => e.kind === "keys")) keyEdge(svg, positions, e, edgeState(model, e), skips.get(e));
+    const lanes = routes(rows, positions);
+    for (const e of rows) rowEdge(svg, positions, e, edgeState(model, e), lanes.get(e));
     for (const stage of model.stages) card(svg, stage, positions[stage.id], selected, onSelect);
   }
 

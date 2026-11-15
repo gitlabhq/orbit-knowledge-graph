@@ -1,4 +1,4 @@
-//! The demo end to end on the demo ClickHouse (`scripts/clickhouse.sh`): query 4 through the
+//! The demo end to end on the demo services (`scripts/services.sh`): query 4 through the
 //! API, its event stream and rows per caller, the page's guard, and the seed reload.
 
 mod support;
@@ -9,9 +9,9 @@ use orbit_demo::lockdown::CSP;
 use serde_json::{Value, json};
 use support::{checked, exchange, get, post};
 
-const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, mr.title, m.channel, m.author ORDER BY mr.iid LIMIT 10";
+const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, m.author, m.sent_at ORDER BY mr.iid LIMIT 20";
 
-const MENTIONED: &str = "MATCH (mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue)<-[:MENTIONS_ISSUE]-(m:SlackMessage) WHERE i.status = 'In Review' RETURN i.key, i.summary, mr.iid, m.author, m.text LIMIT 20";
+const DEEP: &str = "MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE i.status = 'In Review' AND f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN i.key, m.author, m.text, mr.iid, f.path, match.MSG LIMIT 20";
 
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
@@ -72,7 +72,7 @@ fn column(events: &[Value], name: &str) -> Vec<String> {
 async fn the_demo_runs_query_4_and_guards_its_page() {
     let demo = orbit_demo::start(checked())
         .await
-        .expect("run scripts/clickhouse.sh first");
+        .expect("run scripts/services.sh first");
     let page = demo.addresses.page;
 
     let ran = events(page, "maintainer", QUERY_4).await;
@@ -122,9 +122,13 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     assert_eq!(
         heads["sample"],
         json!([
-            [1000, "limiter-burst-config"],
-            [1000, "scoped-admin-tokens"],
-            [1001, "console-dark-theme"]
+            [1000, "combine-cursor-paging"],
+            [1000, "dag-slack-lake"],
+            [1000, "lake-timestamp-utc"],
+            [1001, "pin-clickhouse-digest"],
+            [1001, "rustfs-dev-values"],
+            [1002, "live-jira-descriptions"],
+            [1002, "live-slack-text"]
         ])
     );
     let code = ran
@@ -133,7 +137,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
         .flat_map(|event| event["requests"].as_array().unwrap().clone())
         .find(|request| request["kind"] == "code")
         .unwrap();
-    assert_eq!(code["repositories"], json!([1000, 1001]));
+    assert_eq!(code["repositories"], json!([1000, 1001, 1002]));
     assert_eq!(code["pattern"], "todo!($$$MSG)");
     let samples = ran
         .iter()
@@ -148,14 +152,18 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     assert_eq!(requests, ["structural search"]);
     assert_eq!(
         paths(&ran),
-        ["src/auth/scopes.rs", "src/limiter.rs", "src/theme.rs"]
+        [
+            "bridge/src/lib.rs",
+            "bridge/src/lib.rs",
+            "crates/query-data-model/src/timestamp.rs",
+            "crates/query-engine/shared/src/combine/cursor.rs",
+            "crates/query-engine/shared/src/dag/slack.rs"
+        ]
     );
-    assert_eq!(
-        paths(&events(page, "guest", QUERY_4).await),
-        ["src/theme.rs"]
-    );
+    let des_poc = ["bridge/src/lib.rs", "bridge/src/lib.rs"];
+    assert_eq!(paths(&events(page, "guest", QUERY_4).await), des_poc);
     let zanzibar = events(page, "zanzibar", QUERY_4).await;
-    assert_eq!(paths(&zanzibar), ["src/auth/scopes.rs", "src/limiter.rs"]);
+    assert_eq!(paths(&zanzibar), des_poc);
     let denied = zanzibar
         .iter()
         .find(|event| event["event"] == "check" && event["resource"] == "project")
@@ -166,7 +174,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     );
     assert_eq!(
         (&denied["asked"], &denied["allowed"]),
-        (&json!([1000, 2000]), &json!([1000]))
+        (&json!([1000, 1002]), &json!([1002]))
     );
 
     let plans = ran.iter().find(|event| event["event"] == "plans").unwrap();
@@ -194,16 +202,58 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     );
 
     let discussed = events(page, "maintainer", DISCUSSED).await;
-    assert_eq!(column(&discussed, "m_author").len(), 3, "{discussed:?}");
-    let guest = events(page, "guest", DISCUSSED).await;
-    assert_eq!(column(&guest, "m_author"), Vec::<String>::new());
-    let mentioned = events(page, "maintainer", MENTIONED).await;
-    let mut texts = column(&mentioned, "m_text");
-    texts.sort();
-    assert_eq!(texts.len(), 2, "{mentioned:?}");
+    assert_eq!(column(&discussed, "m_author").len(), 11, "{discussed:?}");
+    let sent = column(&events(page, "guest", DISCUSSED).await, "m_sent_at");
+    assert_eq!(
+        sent,
+        [
+            "2026-11-05T10:00:00Z",
+            "2026-11-06T13:15:00Z",
+            "2026-11-10T14:20:00Z"
+        ]
+    );
+
+    let deep = events(page, "maintainer", DEEP).await;
+    let backends: Vec<&str> =
+        deep.iter().find(|event| event["event"] == "split").unwrap()["stages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|stage| stage["backend"].as_str().unwrap())
+            .collect();
+    assert_eq!(
+        backends,
+        [
+            "duckdb",
+            "clickhouse",
+            "duckdb",
+            "live",
+            "clickhouse",
+            "orbit_code",
+            "combine"
+        ]
+    );
+    assert_eq!(
+        column(&deep, "i_key"),
+        [
+            "DES-11", "DES-11", "DES-9", "DES-9", "GKG-212", "GKG-212", "GKG-219"
+        ]
+    );
+    let texts = column(&deep, "m_text");
     assert!(
-        texts[0].starts_with("!412 is ready for review"),
+        texts
+            .iter()
+            .any(|text| text.starts_with("!412 reads Slack messages from the lake")),
         "{texts:?}"
+    );
+    let des_issues = ["DES-11", "DES-11", "DES-9", "DES-9"];
+    assert_eq!(
+        column(&events(page, "guest", DEEP).await, "i_key"),
+        des_issues
+    );
+    assert_eq!(
+        column(&events(page, "zanzibar", DEEP).await, "i_key"),
+        des_issues
     );
 
     let host = format!("127.0.0.1:{}", page.port());

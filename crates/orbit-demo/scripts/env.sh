@@ -25,6 +25,16 @@ CLICKHOUSE_DATA_VOLUME=orbit-demo-clickhouse-data
 RELAY=orbit-demo-relay
 RELAY_PORT=18123
 
+RUSTFS_IMAGE=rustfs/rustfs@sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2
+RUSTFS=orbit-demo-rustfs
+RUSTFS_DATA_VOLUME=orbit-demo-rustfs-data
+S3_RELAY=orbit-demo-relay-s3
+S3_PORT=19000
+S3_KEY=orbit-demo-lake
+S3_SECRET=orbit-demo-lake-secret
+S3_REGION=us-east-1
+S3_BUCKET=orbit-lake
+
 colima_start() {
   colima start "$PROFILE" \
     --runtime docker --vm-type vz --arch aarch64 \

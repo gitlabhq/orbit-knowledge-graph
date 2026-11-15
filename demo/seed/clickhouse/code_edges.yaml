@@ -1,9 +1,14 @@
 table: gl_code_edge
 rows:
-  - {traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 9000, target_kind: Branch, source_tags: [], target_tags: []}
-  - {traversal_path: 1/100/1000/, project_id: 1000, branch: feature-auth, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 9001, target_kind: Branch, source_tags: [], target_tags: []}
-  - {traversal_path: 1/100/1000/, project_id: 1000, branch: fix-rate, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 9002, target_kind: Branch, source_tags: [], target_tags: []}
-  - {traversal_path: 1/100/1001/, project_id: 1001, branch: main, source_id: 1001, source_kind: Project, relationship_kind: CONTAINS, target_id: 9003, target_kind: Branch, source_tags: [], target_tags: []}
-  - {traversal_path: 1/100/1001/, project_id: 1001, branch: dark-mode, source_id: 1001, source_kind: Project, relationship_kind: CONTAINS, target_id: 9004, target_kind: Branch, source_tags: [], target_tags: []}
-  - {traversal_path: 1/200/2000/, project_id: 2000, branch: main, source_id: 2000, source_kind: Project, relationship_kind: CONTAINS, target_id: 9005, target_kind: Branch, source_tags: [], target_tags: []}
-  - {traversal_path: 1/200/2000/, project_id: 2000, branch: invoice-export, source_id: 2000, source_kind: Project, relationship_kind: CONTAINS, target_id: 9006, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 7001, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1000/, project_id: 1000, branch: dag-slack-lake, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 7002, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1000/, project_id: 1000, branch: lake-timestamp-utc, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 7003, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1000/, project_id: 1000, branch: combine-cursor-paging, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 7004, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1000/, project_id: 1000, branch: sealed-model-handles, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 7005, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1000/, project_id: 1000, branch: retire-placement-heuristics, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 7006, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1001/, project_id: 1001, branch: main, source_id: 1001, source_kind: Project, relationship_kind: CONTAINS, target_id: 7007, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1001/, project_id: 1001, branch: rustfs-dev-values, source_id: 1001, source_kind: Project, relationship_kind: CONTAINS, target_id: 7008, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/1001/, project_id: 1001, branch: pin-clickhouse-digest, source_id: 1001, source_kind: Project, relationship_kind: CONTAINS, target_id: 7009, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/101/1002/, project_id: 1002, branch: main, source_id: 1002, source_kind: Project, relationship_kind: CONTAINS, target_id: 7010, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/101/1002/, project_id: 1002, branch: live-slack-text, source_id: 1002, source_kind: Project, relationship_kind: CONTAINS, target_id: 7011, target_kind: Branch, source_tags: [], target_tags: []}
+  - {traversal_path: 1/100/101/1002/, project_id: 1002, branch: live-jira-descriptions, source_id: 1002, source_kind: Project, relationship_kind: CONTAINS, target_id: 7012, target_kind: Branch, source_tags: [], target_tags: []}
