@@ -77,6 +77,36 @@
     return tokens;
   }
 
+  const PLAN_WORDS = new Set("asc desc matches and or not in is null true false".split(" "));
+  const planRules = [
+    ["reltype", /<?-\[[A-Za-z_]*\]->?/y],
+    ["string", /'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?/y],
+    ["number", /\d+(?:\.\d+)?/y],
+    ["space", /\s+/y],
+    ["word", /[A-Za-z_][A-Za-z0-9_]*/y],
+    ["op", /<-|->/y],
+    ["compare", /<>|!=|<=|>=|[=<>]/y],
+    ["punct", /[()[\]{},.:;|$!*+\/%-]/y],
+  ];
+
+  function plan(text) {
+    let depth = 0;
+    return scan(text, planRules, ([cls, value], tokens, all, at) => {
+      if (cls === "punct" && value === "{") depth++;
+      if (cls === "punct" && value === "}") depth--;
+      if (cls !== "word") return [cls, value];
+      const prev = significant(tokens);
+      const next = all.slice(at + value.length).match(/^\s*(.)/)?.[1];
+      if (!prev) return ["keyword", value];
+      if (PLAN_WORDS.has(value)) return ["keyword", value];
+      if (prev[1] === ".") return ["property", value];
+      if (/^[A-Z]/.test(value)) return ["label", value];
+      if (depth > 0) return ["property", value];
+      if (next === "(") return ["function", value];
+      return ["variable", value];
+    });
+  }
+
   function significant(tokens) {
     for (let i = tokens.length - 1; i >= 0; i--) if (tokens[i][0] !== "space") return tokens[i];
     return null;
@@ -98,5 +128,5 @@
     target.replaceChildren(...nodes);
   }
 
-  window.Highlight = { gql, sql, render };
+  window.Highlight = { gql, sql, plan, render };
 })();

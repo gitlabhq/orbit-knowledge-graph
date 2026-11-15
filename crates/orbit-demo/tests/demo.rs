@@ -161,7 +161,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
         ]
     );
     let des_poc = ["bridge/src/lib.rs", "bridge/src/lib.rs"];
-    assert_eq!(paths(&events(page, "guest", QUERY_4).await), des_poc);
+    assert_eq!(paths(&events(page, "reporter", QUERY_4).await), des_poc);
     let zanzibar = events(page, "zanzibar", QUERY_4).await;
     assert_eq!(paths(&zanzibar), des_poc);
     let denied = zanzibar
@@ -203,7 +203,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
 
     let discussed = events(page, "maintainer", DISCUSSED).await;
     assert_eq!(column(&discussed, "m_author").len(), 11, "{discussed:?}");
-    let sent = column(&events(page, "guest", DISCUSSED).await, "m_sent_at");
+    let sent = column(&events(page, "reporter", DISCUSSED).await, "m_sent_at");
     assert_eq!(
         sent,
         [
@@ -248,7 +248,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     );
     let des_issues = ["DES-11", "DES-11", "DES-9", "DES-9"];
     assert_eq!(
-        column(&events(page, "guest", DEEP).await, "i_key"),
+        column(&events(page, "reporter", DEEP).await, "i_key"),
         des_issues
     );
     assert_eq!(

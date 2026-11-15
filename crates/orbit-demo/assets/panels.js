@@ -32,6 +32,17 @@
     return block;
   }
 
+  function plan(lines, added) {
+    const block = node("pre", undefined, "code code-plan");
+    if (!lines || !lines.length) { block.textContent = "(none)"; return block; }
+    for (const line of lines) {
+      const span = node("span", undefined, added && added.has(line) ? "added" : "line");
+      Highlight.render(span, Highlight.plan(line));
+      block.append(span);
+    }
+    return block;
+  }
+
   function cell(value) {
     if (value === null || value === undefined) return "";
     return typeof value === "object" ? JSON.stringify(value) : String(value);
@@ -79,7 +90,7 @@
     const sub = run.subplans[s.id] || {};
     switch (tab) {
       case "Plans":
-        return [heading("Logical sub-plan"), code(sub.plan), heading("Planned"), code(s.planned), heading("Emitted, with what the security and policy passes added"), code(s.emitted, added(s))];
+        return [heading("Logical sub-plan"), plan(sub.plan), heading("Planned"), plan(s.planned), heading("Emitted, with what the security and policy passes added"), plan(s.emitted, added(s))];
       case "Request":
         return s.rendered.length ? s.rendered.flatMap((r) => request(r, s)) : [empty("No request", "This stage rendered no request.")];
       case "Security": {
@@ -150,7 +161,7 @@
       title.textContent = "Logical plan";
       meta.replaceChildren(run.stages.length ? node("span", "Select a stage for its plans, request, security and rows.", "inline-status") : "");
       document.getElementById("tabs").replaceChildren();
-      detail.replaceChildren(run.logical.length ? code(run.logical) : empty("No plan yet", "The logical plan appears when a query runs."));
+      detail.replaceChildren(run.logical.length ? plan(run.logical) : empty("No plan yet", "The logical plan appears when a query runs."));
       return;
     }
     run.tab = run.tab || TABS[0];

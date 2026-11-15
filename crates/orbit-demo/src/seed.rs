@@ -26,6 +26,7 @@ pub struct Seed {
 #[serde(deny_unknown_fields)]
 pub struct Example {
     pub title: String,
+    pub subtitle: String,
     pub caller: String,
     pub query: String,
 }

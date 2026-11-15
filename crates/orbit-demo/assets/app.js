@@ -156,6 +156,10 @@ function choose(index) {
   paint();
   $("caller").value = example.caller;
   $("example-title").textContent = example.title;
+  const caller = callers.find((c) => c.name === example.caller);
+  const subtitle = `As ${caller ? caller.label : example.caller} · ${example.subtitle}`;
+  $("example-subtitle").textContent = subtitle;
+  $("example-subtitle").title = subtitle;
   for (const [i, item] of [...$("examples").children].entries()) item.firstElementChild.classList.toggle("example-active", i === index);
   hint();
 }
@@ -167,10 +171,6 @@ function examplesList() {
     button.type = "button";
     button.className = "example";
     button.textContent = example.title;
-    const who = document.createElement("span");
-    who.className = "example-caller";
-    who.textContent = `as ${example.caller}`;
-    button.appendChild(who);
     button.addEventListener("click", () => { choose(index); start().catch((e) => status(e.message, "danger")); });
     item.appendChild(button);
     return item;

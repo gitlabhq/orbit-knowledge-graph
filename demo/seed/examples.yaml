@@ -1,59 +1,70 @@
-- title: A Slack thread in the lake, the merge request it discusses, that MR's Jira issue, and the TODOs on its branch head
+- title: Slack thread to code TODOs
+  subtitle: Walks a Slack thread to its merge request, that MR's Jira issue, and the TODOs on its branch head.
   caller: maintainer
   query: >-
     MATCH (m:SlackMessage)-[:DISCUSSES]->(mr:MergeRequest)<-[:DEVELOPED_IN]-(i:JiraIssue),
     (mr)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
     WHERE m.channel = 'orbit-query-engine' AND f.content MATCHES ast('todo!($$$MSG)', 'rust')
     RETURN m.author, m.sent_at, mr.iid, i.key, f.path, match.MSG LIMIT 20
-- title: A structural code search, the projects of the files it finds, their merge requests, the authors, and the Slack threads on those MRs
+- title: Code search to Slack threads
+  subtitle: Runs a structural code search, then follows the found projects to their MRs, authors, and Slack threads.
   caller: maintainer
   query: >-
     MATCH (f:File)-[:IN_PROJECT]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User),
     (m:SlackMessage)-[:DISCUSSES]->(mr)
     WHERE f.project_id IN [1000, 1001, 1002] AND f.content MATCHES ast('todo!($$$MSG)', 'rust')
     RETURN f.path, p.name, mr.iid, u.username, m.channel LIMIT 20
-- title: A Jira issue from the lake, its merge requests, their branch heads in Orbit Next, and the TODOs in them
+- title: Jira issue to branch TODOs
+  subtitle: Walks a Jira issue from the lake to its MRs, their branch heads in Orbit Next, and the TODOs in them.
   caller: maintainer
   query: >-
     MATCH (i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
     WHERE i.key = 'GKG-212' AND f.content MATCHES ast('todo!($$$MSG)', 'rust')
     RETURN i.key, i.summary, mr.iid, h.branch, f.path, match.MSG LIMIT 20
-- title: "The deep chain as Dmitry (maintainer): Slack text from live, the Jira issues it mentions from the lake, their MRs, and the TODOs on their heads"
+- title: Deep chain across seven stages
+  subtitle: Follows Slack text from live to the Jira issues it mentions in the lake, their MRs, and the TODOs on their heads.
   caller: maintainer
   query: >-
     MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
     WHERE i.status = 'In Review' AND f.content MATCHES ast('todo!($$$MSG)', 'rust')
     RETURN i.key, m.author, m.text, mr.iid, f.path, match.MSG LIMIT 20
-- title: "The same chain as Jean-Gabriel (Zanzibar): read_code on knowledge-graph is denied, so only the data-extraction-service-poc code hop survives"
+- title: Deep chain without knowledge-graph code
+  subtitle: "read_code on knowledge-graph is denied, so only data-extraction-service-poc code survives."
   caller: zanzibar
   query: >-
     MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
     WHERE i.status = 'In Review' AND f.content MATCHES ast('todo!($$$MSG)', 'rust')
     RETURN i.key, m.author, m.text, mr.iid, f.path, match.MSG LIMIT 20
-- title: "The same chain as Aaron (guest): he reads only data-extraction-service-poc and its Slack channel, so every knowledge-graph hop drops"
-  caller: guest
+- title: Deep chain on one project
+  subtitle: "Only data-extraction-service-poc and its Slack workspace are readable, so every knowledge-graph hop drops."
+  caller: reporter
   query: >-
     MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
     WHERE i.status = 'In Review' AND f.content MATCHES ast('todo!($$$MSG)', 'rust')
     RETURN i.key, m.author, m.text, mr.iid, f.path, match.MSG LIMIT 20
-- title: "Branch heads have a composite identity: each head is [project, branch]"
+- title: Branch heads by composite identity
+  subtitle: "Each branch head is identified by the pair [project, branch], shown here with the TODO files on open MRs."
   caller: maintainer
   query: >-
     MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
     WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust')
     RETURN mr.iid, h, f.path LIMIT 20
-- title: Merge requests and the Slack messages in the lake that discuss them, with when they were sent
+- title: Slack messages with send times
+  subtitle: Lists open merge requests with the lake Slack messages that discuss them and when each was sent.
   caller: maintainer
   query: >-
     MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage)
     RETURN mr.iid, mr.title, m.channel, m.author, m.sent_at ORDER BY mr.iid LIMIT 20
-- title: Jira issue descriptions from the live store, signed in with the caller's own Jira credentials
+- title: Jira descriptions from the live store
+  subtitle: Reads Jira issue descriptions live, signed in with the caller's own Jira credentials.
   caller: maintainer
   query: >-
     MATCH (i:JiraIssue) WHERE i.key IN ['GKG-212', 'GKG-219', 'DES-9'] RETURN i.key, i.summary, i.description LIMIT 10
-- title: Neighbors of a tombstoned merge request whose edges are still live
+- title: Neighbors of a tombstoned MR
+  subtitle: Shows the neighbors of a tombstoned merge request, whose edges are still live.
   caller: maintainer
   query: MATCH (mr:MergeRequest)--(n) WHERE mr.id = 5007 RETURN mr, n LIMIT 50
-- title: Neighbors of a live merge request, for contrast
+- title: Neighbors of a live MR
+  subtitle: Shows the neighbors of a live merge request, for contrast with the tombstoned one.
   caller: maintainer
   query: MATCH (mr:MergeRequest)--(n) WHERE mr.id = 5001 RETURN mr, n LIMIT 50

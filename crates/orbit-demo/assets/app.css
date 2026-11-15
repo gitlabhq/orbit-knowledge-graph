@@ -13,7 +13,8 @@
 .example { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-lg); background: none; text-align: left; cursor: pointer; color: var(--text-default); line-height: 1.35; }
 .example:hover { background: var(--bg-strong); color: var(--text-heading); }
 .example-active, .example-active:hover { background: var(--bg-nav-active); color: var(--text-heading); font-weight: 600; }
-.example-caller { font-size: var(--font-xs); font-weight: 400; color: var(--text-subtle); }
+.example-heading { flex: 1 1 0; min-width: 0; }
+.example-subtitle { margin: 2px 0 0; overflow: hidden; font-size: var(--font-xs); color: var(--text-subtle); white-space: nowrap; text-overflow: ellipsis; }
 
 .editor { position: relative; }
 .editor-layer { margin: 0; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); font: var(--font-sm)/1.65 var(--mono); letter-spacing: 0; tab-size: 2; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-gutter: stable; }
@@ -30,6 +31,7 @@
 .tok-number { color: var(--danger-text); }
 .tok-function { color: var(--info-text); font-style: italic; }
 .tok-param { color: var(--warning-text); }
+.tok-compare { color: var(--review-text); }
 .tok-op, .tok-punct { color: var(--text-subtle); }
 .tok-comment { color: var(--text-subtle); font-style: italic; }
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
