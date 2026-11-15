@@ -8,7 +8,7 @@ export type Mode = "text" | "regex" | "structural";
 // How long the demo takes: slow enough to follow, fast enough to feel like search. A question across tools
 // takes one step per tool.
 export const CODE_MS = 900;
-export const STEP_MS = 520;
+export const STEP_MS = 800;
 
 // One hop of a cross-tool example: the tool Orbit reads, what it finds there, a short name for the map,
 // and the GitLab work it links to. `tone` marks the problem it starts from or the fix it ends on.
