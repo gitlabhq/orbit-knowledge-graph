@@ -60,6 +60,10 @@ function NextPage() {
     <PageFrame path="next" title={NEXT_PAGE.title} options={{ hideHeader: true, landing: true }}>
       <Hero />
 
+      <Section id="search" eyebrow="Code search" title={<>Every branch, <span className="orbit-fade">every language</span></>} lede="The same search works on any repository you can see, in any file, on any branch.">
+        <Capabilities />
+      </Section>
+
       <Section id="scale" eyebrow="Scale" title={<>Built for <span className="orbit-fade">scale</span></>} lede="In our testing, we indexed 51,656 open source projects with their branches and history. Searches came back in about a tenth of a second.">
         <dl className="next-stats not-prose">
           {CORPUS.map((stat) => (
@@ -80,10 +84,6 @@ function NextPage() {
             </li>
           ))}
         </ul>
-      </Section>
-
-      <Section id="search" eyebrow="Code search" title={<>Every branch, <span className="orbit-fade">every language</span></>} lede="The same search works on any repository you can see, in any file, on any branch.">
-        <Capabilities />
       </Section>
 
       <Section
