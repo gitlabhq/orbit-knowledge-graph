@@ -344,14 +344,16 @@ only IDs and the relationship type.
 
 **Formats:**
 
+`format` maps an output format, `toon` or `gql`, to checks on that encoding of the result:
+
 | Field | Type | Description |
 |---|---|---|
-| `format.toon.contains` | [string] | The TOON text contains every fragment |
-| `format.toon.ends_with` | string | The TOON text ends with this suffix |
-| `format.toon.absent` | [key] | The decoded TOON value has none of these top-level keys |
-| `format.toon.value` | object | A partial match on the decoded TOON value: objects may have extra keys, arrays match item by item |
+| `contains` | [string] | The encoded text contains every fragment |
+| `ends_with` | string | The encoded text ends with this suffix |
+| `absent` | [key] | The decoded value has none of these top-level keys |
+| `value` | object | A partial match on the decoded value: objects may have extra keys, arrays match item by item |
 
-Every `format.toon` check also requires the canonical TOON encoding, the TOON format name and version, and, for queries other than aggregations, the same node and edge counts as the graph response.
+Each format also checks its format name and version. TOON decodes to its JSON value, must be the canonical encoding, and, for queries other than aggregations, must have the same node and edge counts as the graph response. GQL decodes to `{columns, rows}` from its result table.
 
 **Compilation:**
 

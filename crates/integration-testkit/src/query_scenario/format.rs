@@ -119,7 +119,7 @@ pub struct QueryExpect {
     #[serde(default)]
     pub compile_error_not_contains: Vec<ErrorPattern>,
     #[serde(default)]
-    pub format: FormatExpect,
+    pub format: BTreeMap<OutputFormat, OutputExpect>,
     #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
@@ -292,7 +292,7 @@ impl QueryExpect {
                 page.repeat_count.is_none()
                     && page.compile_error.is_none()
                     && page.compile_error_not_contains.is_empty()
-                    && page.format.toon.is_none()
+                    && page.format.is_empty()
                     && page.pages.is_empty()
                     && page.all_pages.is_none(),
                 "{scenario}: page {} supports only result assertions",
@@ -408,15 +408,17 @@ pub(crate) fn rejection_reason(name: &str) -> Result<RejectionReason, String> {
         })
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FormatExpect {
-    pub toon: Option<ToonExpect>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, strum::IntoStaticStr)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum OutputFormat {
+    Toon,
+    Gql,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ToonExpect {
+pub struct OutputExpect {
     #[serde(default)]
     pub contains: Vec<String>,
     pub ends_with: Option<String>,

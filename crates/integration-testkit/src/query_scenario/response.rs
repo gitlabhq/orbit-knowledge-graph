@@ -2,15 +2,15 @@ use std::sync::{Arc, LazyLock};
 
 use query_engine::compiler::{CompiledQueryContext, Frontend, Input, QueryType};
 use query_engine::formatters::{
-    FormatName, GraphFormatter, GraphResponse, ResultFormatter, TOON_OUTPUT_FORMAT_VERSION,
-    ToonFormatter,
+    FormatName, GQL_OUTPUT_FORMAT_VERSION, GqlFormatter, GraphFormatter, GraphResponse,
+    ResultFormatter, TOON_OUTPUT_FORMAT_VERSION, ToonFormatter,
 };
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
 use regex::Regex;
 use serde_json::Value;
 
-use super::format::ToonExpect;
+use super::format::{OutputExpect, OutputFormat};
 use super::{QueryExpect, assert_gql_table, assert_response};
 
 static RESPONSE_SCHEMA: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
@@ -149,25 +149,73 @@ pub(super) fn assert_output(
         assert_gql_table(output, expect, label);
     }
     let response = GraphFormatter.format(output);
-    if let Some(toon) = &expect.format.toon {
-        assert_toon(output, &response, toon, label);
+    for (format, expected) in &expect.format {
+        assert_format(output, &response, *format, expected, label);
     }
     assert_response(&output.compiled.input, response.clone(), expect, label);
     response
 }
 
-fn assert_toon(output: &PipelineOutput, graph: &Value, expect: &ToonExpect, label: &str) {
-    let (formatted, version, name) = ToonFormatter.format_stamped(output);
-    assert_eq!(name, FormatName::Toon, "{label}: TOON format name");
+fn assert_format(
+    output: &PipelineOutput,
+    graph: &Value,
+    format: OutputFormat,
+    expect: &OutputExpect,
+    label: &str,
+) {
+    let (formatter, name, version): (&dyn ResultFormatter, _, _) = match format {
+        OutputFormat::Toon => (
+            &ToonFormatter,
+            FormatName::Toon,
+            &*TOON_OUTPUT_FORMAT_VERSION,
+        ),
+        OutputFormat::Gql => (&GqlFormatter, FormatName::Gql, &*GQL_OUTPUT_FORMAT_VERSION),
+    };
+    let format: &str = format.into();
+    let (formatted, stamped_version, stamped_name) = formatter.format_stamped(output);
+    assert_eq!(stamped_name, name, "{label}: {format} format name");
     assert_eq!(
-        version,
-        TOON_OUTPUT_FORMAT_VERSION.to_string(),
-        "{label}: TOON format version"
+        stamped_version,
+        version.to_string(),
+        "{label}: {format} format version"
     );
     let Value::String(text) = formatted else {
-        panic!("{label}: TOON output must be a string, got {formatted}");
+        panic!("{label}: {format} output must be a string, got {formatted}");
     };
-    let value: Value = toon_format::decode_strict(&text)
+    let value = match name {
+        FormatName::Toon => toon_value(&text, graph, label),
+        _ => {
+            let (columns, rows) = GqlFormatter.table(output);
+            serde_json::json!({"columns": columns, "rows": rows})
+        }
+    };
+    for fragment in &expect.contains {
+        assert!(
+            text.contains(fragment),
+            "{label}: {format} output lacks {fragment:?}:\n{text}"
+        );
+    }
+    if let Some(suffix) = &expect.ends_with {
+        assert!(
+            text.ends_with(suffix),
+            "{label}: {format} output does not end with {suffix:?}:\n{text}"
+        );
+    }
+    for key in &expect.absent {
+        assert!(
+            value.get(key).is_none(),
+            "{label}: {format} output has {key}: {value}"
+        );
+    }
+    if let Some(expected) = &expect.value
+        && let Some(mismatch) = subset_mismatch(format, expected, &value)
+    {
+        panic!("{label}: {mismatch}\n{value}");
+    }
+}
+
+fn toon_value(text: &str, graph: &Value, label: &str) -> Value {
+    let value: Value = toon_format::decode_strict(text)
         .unwrap_or_else(|error| panic!("{label}: invalid TOON ({error}): {text}"));
     assert_eq!(
         text,
@@ -189,26 +237,7 @@ fn assert_toon(output: &PipelineOutput, graph: &Value, expect: &ToonExpect, labe
             "{label}: TOON and graph responses disagree on node and edge counts"
         );
     }
-    for fragment in &expect.contains {
-        assert!(
-            text.contains(fragment),
-            "{label}: TOON lacks {fragment:?}:\n{text}"
-        );
-    }
-    if let Some(suffix) = &expect.ends_with {
-        assert!(
-            text.ends_with(suffix),
-            "{label}: TOON does not end with {suffix:?}:\n{text}"
-        );
-    }
-    for key in &expect.absent {
-        assert!(value.get(key).is_none(), "{label}: TOON has {key}: {value}");
-    }
-    if let Some(expected) = &expect.value
-        && let Some(mismatch) = subset_mismatch("toon", expected, &value)
-    {
-        panic!("{label}: {mismatch}\n{value}");
-    }
+    value
 }
 
 fn subset_mismatch(path: &str, expected: &Value, actual: &Value) -> Option<String> {

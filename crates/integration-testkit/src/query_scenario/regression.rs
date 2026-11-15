@@ -221,14 +221,36 @@ fn toon_expectations_check_text_value_and_absent_keys() {
     rejects(
         query.clone(),
         &format!("{base}    contains: [absent-fragment]"),
-        "TOON lacks \"absent-fragment\"",
+        "toon output lacks \"absent-fragment\"",
     );
     rejects(
         query.clone(),
         &format!("{base}    absent: [nodes]"),
-        "TOON has nodes",
+        "toon output has nodes",
     );
     rejects(query, &format!("{base}    exact: true"), "unknown field");
+}
+
+#[test]
+fn gql_format_expectations_check_text_and_table() {
+    let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  gql:\n";
+    run_suite(
+        query.clone(),
+        &format!(
+            "{base}    contains: [\"(:Definition {{id: 1, name: \\\"alpha\\\"}})\"]\n    value: {{columns: [d]}}"
+        ),
+    );
+    rejects(
+        query.clone(),
+        &format!("{base}    value: {{columns: [e]}}"),
+        "gql.columns[0] is \"d\", expected \"e\"",
+    );
+    rejects(
+        query,
+        "nodes: {Definition: {ids: [1]}}\nformat: {csv: {}}",
+        "unknown variant `csv`",
+    );
 }
 
 #[test]
