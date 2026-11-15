@@ -1,7 +1,7 @@
 *** Settings ***
 Documentation       Smoke the read-only Orbit API surface beyond /query (covered by 01): the
 ...                 schema and the scoped status over GraphQL, and CALL db.schema(). MCP needs an
-...                 OAuth token with the mcp scope, which a PAT cannot carry (#792).
+...                 OAuth token with the mcp scope, which a PAT cannot carry.
 
 Resource            gitlab.resource
 Resource            orbit.resource
