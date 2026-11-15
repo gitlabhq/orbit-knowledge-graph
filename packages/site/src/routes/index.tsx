@@ -27,7 +27,7 @@ const TRACE = {
     { id: "f1", kind: "file", label: "app/actions.ts", x: 440, y: 80, tone: "risk" as const },
     { id: "f2", kind: "file", label: "ui-kit/server.tsx", x: 450, y: 260, tone: "risk" as const },
     { id: "f3", kind: "file", label: "lib/rsc.ts", x: 440, y: 440, tone: "risk" as const },
-    { id: "p1", kind: "project", label: "storefront", x: 690, y: 60 },
+    { id: "p1", kind: "project", label: "web-app", x: 690, y: 60 },
     { id: "p2", kind: "project", label: "admin-console", x: 700, y: 190 },
     { id: "p3", kind: "project", label: "checkout-api", x: 700, y: 330 },
     { id: "p4", kind: "project", label: "mobile-bff", x: 690, y: 460 },
@@ -64,7 +64,7 @@ const TRACE = {
     { step: 4, text: "3 of 4 projects run it in production." },
     { step: 4, text: "Bumping to 19.2.1, production first." },
     { step: 5, tone: "ok" as const, text: "ui-kit!57 merged, released 4.2.1" },
-    { step: 5, tone: "ok" as const, text: "storefront!412 deployed to production" },
+    { step: 5, tone: "ok" as const, text: "web-app!412 deployed to production" },
     { step: 5, tone: "ok" as const, text: "checkout-api!88 deployed to production" },
     { step: 5, tone: "ok" as const, text: "mobile-bff!31 deployed to production" },
   ],
@@ -74,9 +74,9 @@ const TRACE = {
 // show what an answer looks like.
 const CHAT: PromptExample[] = [
   {
-    label: "Review a merge request",
+    label: "Review a merge request with proof",
     icon: "merge-request",
-    prompt: "What breaks if I merge storefront!412? Answer with proof.",
+    prompt: "What breaks if I merge web-app!412? Answer with proof.",
     calls: [
       { tool: "Read Orbit guide", detail: "orbit" },
       { tool: "Explored Orbit", detail: "MergeRequest → DiffFile → Definition" },
@@ -90,7 +90,7 @@ const CHAT: PromptExample[] = [
         </p>
         <ul>
           <li>
-            <code>storefront</code>
+            <code>web-app</code>
             <span>6 callers</span>
           </li>
           <li>
@@ -123,7 +123,7 @@ const CHAT: PromptExample[] = [
         <p>3 services have it. One is fixed, one has a fix in review, and one needs a fix:</p>
         <ul>
           <li>
-            <code>storefront</code>
+            <code>web-app</code>
             <span>high · fix in !418</span>
           </li>
           <li>
@@ -159,7 +159,7 @@ const CHAT: PromptExample[] = [
             <span>41 files</span>
           </li>
           <li>
-            <code>storefront</code>
+            <code>web-app</code>
             <span>18 files</span>
           </li>
           <li>
