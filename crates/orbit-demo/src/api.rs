@@ -20,7 +20,7 @@ use crate::run::{RunLog, run};
 
 const KEPT_RUNS: u64 = 64;
 
-const ASSETS: [(&str, &str, &[u8]); 17] = [
+const ASSETS: [(&str, &str, &[u8]); 16] = [
     (
         "/",
         "text/html; charset=utf-8",
@@ -67,19 +67,14 @@ const ASSETS: [(&str, &str, &[u8]); 17] = [
         include_bytes!("../assets/panels.js"),
     ),
     (
-        "/assets/vendor/dagre/dagre.min.js",
+        "/assets/vendor/elk/elk.bundled.js",
         "text/javascript; charset=utf-8",
-        include_bytes!("../assets/vendor/dagre/dagre.min.js"),
+        include_bytes!("../assets/vendor/elk/elk.bundled.js"),
     ),
     (
-        "/assets/vendor/dagre/LICENSE.txt",
-        "text/plain; charset=utf-8",
-        include_bytes!("../assets/vendor/dagre/LICENSE.txt"),
-    ),
-    (
-        "/assets/vendor/dagre/dagre.min.js.LEGAL.txt",
-        "text/plain; charset=utf-8",
-        include_bytes!("../assets/vendor/dagre/dagre.min.js.LEGAL.txt"),
+        "/assets/vendor/elk/LICENSE.md",
+        "text/markdown; charset=utf-8",
+        include_bytes!("../assets/vendor/elk/LICENSE.md"),
     ),
     (
         "/assets/tanuki.svg",

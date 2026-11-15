@@ -62,53 +62,66 @@
     return { cards, labels };
   }
 
-  function layout(model, size) {
-    const g = new dagre.graphlib.Graph({ multigraph: true });
-    g.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 24, edgesep: 18, marginx: PAD, marginy: PAD });
-    g.setDefaultEdgeLabel(() => ({}));
-    for (const s of model.stages) g.setNode(String(s.id), { width: size.cards[s.id], height: H });
-    for (const e of model.edges) {
-      g.setEdge(String(e.from), String(e.to), { width: size.labels[e.id], height: LABEL_H, labelpos: "c", weight: e.kind === "keys" ? 2 : 1 }, e.id);
-    }
-    dagre.layout(g);
-    const nodes = {};
-    for (const s of model.stages) {
-      const n = g.node(String(s.id));
-      nodes[s.id] = { x: n.x - n.width / 2, y: n.y - H / 2, w: n.width };
-    }
-    const routes = {};
-    for (const e of model.edges) {
-      const laid = g.edge(String(e.from), String(e.to), e.id);
-      routes[e.id] = { via: laid.points.slice(1, -1), label: { x: laid.x, y: laid.y } };
-    }
-    ports(model.edges, nodes, routes);
-    return { nodes, routes, width: Math.ceil(g.graph().width), height: Math.ceil(g.graph().height) };
-  }
+  const elk = new ELK();
+  const OPTIONS = {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.edgeRouting": "ORTHOGONAL",
+    "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+    "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+    "elk.spacing.nodeNode": "36",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "64",
+    "elk.spacing.edgeEdge": "16",
+    "elk.spacing.edgeNode": "24",
+    "elk.layered.spacing.edgeEdgeBetweenLayers": "16",
+    "elk.layered.spacing.edgeNodeBetweenLayers": "24",
+    "elk.spacing.edgeLabel": "6",
+    "elk.edgeLabels.placement": "CENTER",
+    "elk.padding": `[top=${PAD},left=${PAD},bottom=${PAD},right=${PAD}]`,
+  };
 
-  // Each edge gets its own point on the source's right side and the target's left side, ordered
-  // by where the edge goes, so edges sharing a card fan out instead of crossing at it.
-  function ports(edges, nodes, routes) {
-    const spread = (list, node, side, ys) => {
-      list.sort((x, y) => ys(x) - ys(y));
-      list.forEach((e, i) => {
-        const y = nodes[node].y + H / 2 + (i - (list.length - 1) / 2) * PORT;
-        routes[e.id][side] = { x: side === "start" ? nodes[node].x + nodes[node].w : nodes[node].x, y };
-      });
+  // Key edges run right side to left side; row edges leave the bottom and enter Combine's top.
+  function graph(model, size) {
+    const sides = { keys: ["EAST", "WEST"], rows: ["SOUTH", "NORTH"] };
+    const ports = Object.fromEntries(model.stages.map((s) => [s.id, []]));
+    for (const e of model.edges) {
+      ports[e.from].push({ id: `${e.id}-out`, layoutOptions: { "elk.port.side": sides[e.kind][0] } });
+      ports[e.to].push({ id: `${e.id}-in`, layoutOptions: { "elk.port.side": sides[e.kind][1] } });
+    }
+    return {
+      id: "plan",
+      layoutOptions: OPTIONS,
+      children: model.stages.map((s) => ({ id: `s${s.id}`, width: size.cards[s.id], height: H, ports: ports[s.id], layoutOptions: { "elk.portConstraints": "FIXED_SIDE" } })),
+      edges: model.edges.map((e) => ({ id: e.id, sources: [`${e.id}-out`], targets: [`${e.id}-in`], layoutOptions: { "elk.edgeLabels.placement": "CENTER" }, labels: [{ id: `${e.id}-label`, text: e.label, width: size.labels[e.id], height: LABEL_H, layoutOptions: { "elk.edgeLabels.placement": "CENTER" } }] })),
     };
-    const near = (e, end) => { const via = routes[e.id].via; return via.length ? via[end ? via.length - 1 : 0].y : null; };
-    for (const id of Object.keys(nodes).map(Number)) {
-      spread(edges.filter((e) => e.from === id), id, "start", (e) => near(e, false) ?? nodes[e.to].y);
-      spread(edges.filter((e) => e.to === id), id, "end", (e) => near(e, true) ?? nodes[e.from].y);
-    }
   }
 
-  function curve(points) {
-    let d = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 1; i < points.length; i++) {
-      const p = points[i - 1], q = points[i], mid = (p.x + q.x) / 2;
-      d += ` C ${mid} ${p.y}, ${mid} ${q.y}, ${q.x} ${q.y}`;
+  function laidFrom(model, result) {
+    const nodes = {};
+    for (const child of result.children) nodes[Number(child.id.slice(1))] = { x: child.x, y: child.y, w: child.width };
+    const routes = {};
+    for (const e of result.edges) {
+      const section = e.sections[0], label = e.labels[0];
+      routes[e.id] = { points: [section.startPoint, ...(section.bendPoints || []), section.endPoint], label: { x: label.x + label.width / 2, y: label.y + label.height / 2 } };
     }
-    return d;
+    return { nodes, routes, width: Math.ceil(result.width), height: Math.ceil(result.height) };
+  }
+
+  function orthogonal(points) {
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length - 1; i++) {
+      const p = points[i - 1], q = points[i], n = points[i + 1];
+      const r = Math.min(8, Math.hypot(q.x - p.x, q.y - p.y) / 2, Math.hypot(n.x - q.x, n.y - q.y) / 2);
+      const a = toward(q, p, r), b = toward(q, n, r);
+      d += ` L ${a.x} ${a.y} Q ${q.x} ${q.y} ${b.x} ${b.y}`;
+    }
+    const last = points[points.length - 1];
+    return `${d} L ${last.x} ${last.y}`;
+  }
+
+  function toward(from, to, distance) {
+    const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+    return { x: from.x + ((to.x - from.x) * distance) / length, y: from.y + ((to.y - from.y) * distance) / length };
   }
 
   function markers(defs) {
@@ -138,12 +151,14 @@
     const group = el("g", { class: `edge edge-${e.kind} ${state}`, "data-edge": e.id }, svg);
     el("title", {}, group).textContent = e.title;
     const tip = ARROW[e.kind] * HEAD[e.kind];
-    const end = { x: route.end.x - tip, y: route.end.y };
-    const path = el("path", { d: curve([route.start, ...route.via, end]), "marker-end": `url(#arrow-${e.kind}-${state})` }, group);
+    const points = route.points.slice();
+    const last = points.length - 1;
+    points[last] = toward(points[last], points[last - 1], tip);
+    const path = el("path", { d: orthogonal(points), "marker-end": `url(#arrow-${e.kind}-${state})` }, group);
     if (view.flow) {
       const reveal = el("clipPath", { id: `reveal-${e.id}` }, group);
-      const xs = [route.start.x, route.end.x];
-      el("rect", { x: xs[0] - 4, y: -1e4, width: 0, height: 2e4, "data-reveal": xs[1] - xs[0] + 8, "data-at": e.at }, reveal);
+      const xs = route.points.map((p) => p.x), left = Math.min(...xs);
+      el("rect", { x: left - 6, y: -1e4, width: 0, height: 2e4, "data-reveal": Math.max(...xs) - left + 12, "data-at": e.at }, reveal);
       group.setAttribute("clip-path", `url(#reveal-${e.id})`);
       if (inFlight(model, e, view)) {
         const dots = el("g", { class: `particles particles-${e.kind}`, "data-length": path.getTotalLength() }, group);
@@ -194,20 +209,29 @@
       text(group, w - 14, 81, `${plural(stage.rows ?? 0, "row")}${timing}`, "stats", "end");
     }
     if (view.flow && stage.status === "running") {
-      el("rect", { class: "progress-track", x: 12, y: H - 5, width: w - 24, height: 2, rx: 1 }, group);
-      el("rect", { class: "progress-bar", x: 12, y: H - 5, width: 0, height: 2, rx: 1, "data-track": w - 24, "data-full": stage.rowsAt !== undefined ? 1 : 0 }, group);
+      el("rect", { class: "progress-track", x: 16, y: H - 7, width: w - 32, height: 2, rx: 1 }, group);
+      el("rect", { class: "progress-bar", x: 16, y: H - 7, width: 0, height: 2, rx: 1, "data-track": w - 32, "data-full": stage.rowsAt !== undefined ? 1 : 0 }, group);
     }
     group.addEventListener("click", () => onSelect(stage.id));
     group.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(stage.id); } });
   }
 
-  let cached = { key: "", laid: null };
+  let cached = { key: "", laid: null }, pending = "";
 
+  // ELK lays out asynchronously, so a new plan redraws once its layout lands.
   function laidOut(svg, model) {
     const size = measure(svg, model);
     const key = JSON.stringify([model.stages.map((s) => s.id), model.edges.map((e) => [e.id, e.from, e.to]), size]);
-    if (cached.key !== key) cached = { key, laid: layout(model, size) };
-    return cached.laid;
+    if (cached.key === key) return cached.laid;
+    if (pending !== key) {
+      pending = key;
+      elk.layout(graph(model, size)).then((result) => {
+        if (pending !== key) return;
+        cached = { key, laid: laidFrom(model, result) };
+        document.dispatchEvent(new Event("orbit:render"));
+      });
+    }
+    return null;
   }
 
   function draw(svg, model, selected, onSelect, view) {
@@ -220,10 +244,12 @@
       text(svg, 600, 65, "Run a query to see its stages, the key sets between them and their rows.", "dag-empty", "middle");
       return;
     }
-    const { nodes, routes, width, height } = laidOut(svg, model);
+    const laid = laidOut(svg, model);
+    if (!laid) return;
+    const { nodes, routes, width, height } = laid;
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.style.maxWidth = `${width}px`;
-    svg.style.minWidth = `${Math.round(width * 0.7)}px`;
+    svg.style.minWidth = `${Math.round(width * 0.64)}px`;
     markers(el("defs", {}, svg));
     const shown = model.edges.filter((e) => !view.flow || e.at <= view.now);
     const groups = shown.map((e) => [e, edge(svg, e, routes[e.id], edgeState(model, e), view, model)]);
@@ -250,10 +276,11 @@
     }
     for (const bar of svg.querySelectorAll(".progress-bar")) {
       const track = Number(bar.dataset.track);
-      if (bar.dataset.full === "1") { bar.setAttribute("x", 12); bar.setAttribute("width", track); continue; }
-      const phase = (view.wall % SWEEP_MS) / SWEEP_MS, span = track * 0.3;
-      bar.setAttribute("x", 12 + (track + span) * phase - span);
-      bar.setAttribute("width", span);
+      if (bar.dataset.full === "1") { bar.setAttribute("x", 16); bar.setAttribute("width", track); continue; }
+      const phase = (view.wall % SWEEP_MS) / SWEEP_MS, span = track * 0.3, head = (track + span) * phase;
+      const from = Math.max(0, head - span), to = Math.min(track, head);
+      bar.setAttribute("x", 16 + from);
+      bar.setAttribute("width", Math.max(0, to - from));
       moving = true;
     }
     for (const dots of svg.querySelectorAll(".particles")) {
