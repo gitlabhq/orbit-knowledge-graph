@@ -32,7 +32,7 @@ For test layers and CI jobs, see [Testing](docs/pages/engineering/testing/README
 
 ## Code
 
-- Comments explain why. Do not narrate what the code shows.
+- Default to no code comments. Write a comment only for a business requirement that the code cannot make clear.
 - Reuse infrastructure before you add new infrastructure.
 - Before you change an area, read its design document and the crate `AGENTS.md`, if present.
 - The ontology is the single source of truth for graph-shape facts.
