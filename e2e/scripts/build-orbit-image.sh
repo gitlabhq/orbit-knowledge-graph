@@ -44,6 +44,6 @@ E2E_CLI_PID=""
 if docker manifest inspect "$E2E_CLI_IMAGE" >/dev/null 2>&1; then
   echo "Reusing existing image ${E2E_CLI_IMAGE}"
 else
-  bash e2e/scripts/fetch-orbit-cli.sh "$E2E_CLI_IMAGE" > e2e-cli-image.log 2>&1 &
+  bash scripts/ci/fetch-orbit-cli.sh "$E2E_CLI_IMAGE" > e2e-cli-image.log 2>&1 &
   E2E_CLI_PID=$!
 fi

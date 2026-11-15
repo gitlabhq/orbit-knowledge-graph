@@ -994,7 +994,7 @@ cli-integration-test:
   needs: []
   script:
     - cargo build -p orbit-cli
-    - bash e2e/scripts/stage-orbit-cli.sh orbit-cli-e2e
+    - bash scripts/ci/stage-orbit-cli.sh orbit-cli-e2e
     - cargo nextest run --profile ci --test cli --test outside_repository --no-fail-fast
     - mv target/nextest/ci/junit.xml target/nextest/ci/junit-cli.xml
     - cargo nextest run --profile ci -p orbit-cli --test remote_cli --test no_index --no-fail-fast
