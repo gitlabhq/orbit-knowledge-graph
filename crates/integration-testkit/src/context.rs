@@ -173,8 +173,7 @@ impl TestContext {
     }
 
     pub async fn create_table(&self, table: &str) {
-        let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
-        let statement = schema_statements(&self.config.database, &schema_refs)
+        let statement = schema_statements(&self.config.database, &self.schema_refs())
             .into_iter()
             .find(|statement| creates_table(statement, table))
             .unwrap_or_else(|| panic!("no CREATE TABLE statement for {table} in the schema SQL"));
@@ -183,19 +182,33 @@ impl TestContext {
 
     pub async fn fork(&self, name: &str) -> Self {
         let database = self.fork_database_name(name);
-        let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
         Self::clone_database(
             &self.config.url,
             &self.config.database,
             &database,
-            &schema_refs,
+            &self.schema_refs(),
         )
         .await;
+        self.with_database(database)
+    }
+
+    pub async fn empty_fork(&self, name: &str) -> Self {
+        let database = self.fork_database_name(name);
+        Self::create_database(&self.config.url, &database).await;
+        Self::run_schema_in(&self.config.url, &database, &self.schema_refs()).await;
+        self.with_database(database)
+    }
+
+    fn schema_refs(&self) -> Vec<&str> {
+        self.schema_sqls.iter().map(String::as_str).collect()
+    }
+
+    fn with_database(&self, database: String) -> Self {
         Self::from_database(
             self._container.clone(),
             self.config.url.clone(),
             database,
-            &schema_refs,
+            &self.schema_refs(),
         )
     }
 

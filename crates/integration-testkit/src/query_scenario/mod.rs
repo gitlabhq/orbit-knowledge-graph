@@ -2,6 +2,7 @@
 //! tests but exercises the full query path: compile, execute, redact,
 //! hydrate, paginate, format, assert.
 
+mod datasets;
 mod duckdb;
 mod format;
 mod pagination;
@@ -13,6 +14,7 @@ use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
 
+use datasets::{Database, Datasets};
 use futures::FutureExt;
 use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use query_engine::compiler::{
@@ -152,18 +154,31 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
         .unwrap_or(8);
     let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let ctx = Arc::new(ctx.clone());
+    let scenarios: Vec<_> = scenarios
+        .into_iter()
+        .map(|(name, scenario)| {
+            let (config, steps) = scenario.into_steps();
+            let database = Database::for_scenario(&config, &steps, &name);
+            (name, config, steps, database)
+        })
+        .collect();
+    let datasets = Arc::new(Datasets::new(
+        scenarios.iter().map(|(.., database)| database),
+    ));
 
     let mut handles = Vec::new();
-    for (name, scenario) in scenarios {
+    for (name, config, steps, database) in scenarios {
         let semaphore = Arc::clone(&semaphore);
         let ctx = Arc::clone(&ctx);
         let presets = Arc::clone(&presets);
+        let datasets = Arc::clone(&datasets);
         let task_name = name.clone();
         let handle = tokio::task::spawn(async move {
             let _permit = semaphore.acquire_owned().await.unwrap();
             let started = std::time::Instant::now();
             eprintln!("--- {task_name}");
-            run_scenario(&ctx, scenario, &task_name, &presets).await;
+            let scenario = (config, steps, database);
+            run_scenario(&ctx, &datasets, scenario, &task_name, &presets).await;
             eprintln!("    {task_name} {:.2?}", started.elapsed());
         });
         handles.push((name, handle));
@@ -172,28 +187,38 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     collect_subtest_results(handles).await;
 }
 
-async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, presets: &Path) {
-    let (config, steps) = scenario.into_steps();
-    let database = (!config.extra_seed.is_empty()
-        || config.ontology_overlay.is_some()
-        || steps.iter().any(|step| !step.seed.is_empty()))
-    .then(|| scenario::database_name(name));
-    let outcome = AssertUnwindSafe(run_case(
-        ctx,
-        &config,
-        &steps,
-        name,
-        presets,
-        database.as_deref(),
-    ))
+async fn run_scenario(
+    ctx: &TestContext,
+    datasets: &Datasets,
+    (config, steps, database): (ScenarioConfig, Vec<QueryStep>, Database),
+    name: &str,
+    presets: &Path,
+) {
+    let outcome = AssertUnwindSafe(async {
+        let ctx = match &database {
+            Database::Base => ctx.clone(),
+            Database::Shared(dataset) => {
+                datasets
+                    .acquire(
+                        dataset,
+                        datasets::prepare(ctx, &config, dataset, presets, name),
+                    )
+                    .await
+            }
+            Database::Private(fork) => datasets::prepare(ctx, &config, fork, presets, name).await,
+        };
+        run_case(&ctx, &config, &steps, name, presets).await;
+    })
     .catch_unwind()
     .await;
-    let cleanup = if let Some(database) = database {
-        AssertUnwindSafe(ctx.drop_fork(&database))
-            .catch_unwind()
-            .await
-    } else {
-        Ok(())
+    let cleanup = match &database {
+        Database::Base => Ok(()),
+        Database::Shared(dataset) => {
+            AssertUnwindSafe(datasets.release(ctx, dataset))
+                .catch_unwind()
+                .await
+        }
+        Database::Private(fork) => AssertUnwindSafe(ctx.drop_fork(fork)).catch_unwind().await,
     };
     if let Err(failure) = outcome.and(cleanup) {
         resume_unwind(failure);
@@ -206,61 +231,7 @@ async fn run_case(
     steps: &[QueryStep],
     name: &str,
     presets: &Path,
-    database: Option<&str>,
 ) {
-    let ctx = if let Some(database) = database {
-        let forked = ctx.fork(database).await;
-        if let Some(overlay) = &cfg.ontology_overlay {
-            let ontology = crate::load_ontology_overlay(overlay);
-            let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
-            let credentials = orbit_migrations::schema::DictionaryCredentials {
-                database: forked.config.database.clone(),
-                user: forked.config.username.clone(),
-                password: forked.config.password.clone(),
-            };
-            orbit_migrations::execute::create_all_versioned_tables(
-                &forked.create_client(),
-                &schema,
-                &credentials,
-                &crate::TABLE_PREFIX,
-            )
-            .await
-            .unwrap();
-        }
-        let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
-        let mut settings = Default::default();
-        if cfg.unmerged_seed {
-            for table in cfg.extra_seed.keys() {
-                let table = crate::scenario::seed::prefix_graph_table(table);
-                assert!(
-                    columns.contains_key(&table),
-                    "{name}: unknown table '{table}'"
-                );
-                forked.execute(&format!("SYSTEM STOP MERGES {table}")).await;
-            }
-            settings = std::collections::BTreeMap::from([(
-                "optimize_on_insert".to_string(),
-                serde_json::json!(0),
-            )]);
-        }
-        if cfg.unmerged_seed {
-            for (table, rows) in &cfg.extra_seed {
-                for row in rows {
-                    let seed = Seed::from([(table.clone(), vec![row.clone()])]);
-                    crate::scenario::seed::apply_seed(&forked, &seed, &settings, &columns, name)
-                        .await;
-                }
-            }
-        } else {
-            crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
-                .await;
-            forked.optimize_if_needed().await;
-        }
-        forked
-    } else {
-        ctx.clone()
-    };
-
     let security_override = resolve_preset("security", &cfg.security, presets, name);
     let redaction_with_default = cfg
         .redaction
@@ -282,15 +253,9 @@ async fn run_case(
 
     for (index, step) in steps.iter().enumerate() {
         if !step.seed.is_empty() {
-            let columns = crate::scenario::seed::fetch_table_columns(&ctx).await;
-            crate::scenario::seed::apply_seed(
-                &ctx,
-                &step.seed,
-                &Default::default(),
-                &columns,
-                name,
-            )
-            .await;
+            let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
+            crate::scenario::seed::apply_seed(ctx, &step.seed, &Default::default(), &columns, name)
+                .await;
             ctx.optimize_if_needed().await;
         }
         let name = &step_label(name, index, steps.len());
@@ -299,7 +264,7 @@ async fn run_case(
                 .parse::<Frontend>()
                 .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));
             run_frontend(
-                (&ctx, &data_model, &ontology),
+                (ctx, &data_model, &ontology),
                 (frontend, frontend_key),
                 query_str,
                 &security,

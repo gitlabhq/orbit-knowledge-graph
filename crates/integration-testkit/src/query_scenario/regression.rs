@@ -4,6 +4,10 @@ use serde_json::{Value, json};
 use super::run_duckdb_dir;
 
 fn run_suite(query: Value, expect: &str) {
+    run_suite_with(json!({"duckdb": true}), query, expect);
+}
+
+fn run_suite_with(config: Value, query: Value, expect: &str) {
     let suite = tempfile::tempdir().unwrap();
     let presets = tempfile::tempdir().unwrap();
     let definitions: Vec<_> = ["alpha", "beta", "gamma", "delta"].iter().enumerate().map(|(index, name)| json!({
@@ -23,9 +27,15 @@ fn run_suite(query: Value, expect: &str) {
         .collect();
     std::fs::write(
         presets.path().join("seed.yaml"),
-        json!({"local": {
-            "gl_definition": definitions, "gl_edge": edges,
-        }})
+        json!({
+            "local": {"gl_definition": definitions, "gl_edge": edges},
+            "solo": {"gl_definition": [{
+                "id": 9, "project_id": 1000, "traversal_path": "1/100/1000/", "branch": "main",
+                "commit_sha": "abc123", "file_path": "src/solo.rs", "fqn": "solo", "name": "solo",
+                "definition_type": "Function", "start_line": 1, "end_line": 2, "start_byte": 0,
+                "end_byte": 10, "start_char": 0, "end_char": 5,
+            }]},
+        })
         .to_string(),
     )
     .unwrap();
@@ -33,7 +43,7 @@ fn run_suite(query: Value, expect: &str) {
     std::fs::write(
         suite.path().join("contract.yaml"),
         json!({
-            "config": {"duckdb": true}, "query": query, "expect": expect,
+            "config": config, "query": query, "expect": expect,
         })
         .to_string(),
     )
@@ -240,6 +250,17 @@ fn aggregation_columns_match_exactly_and_in_order() {
             "aggregation columns mismatch",
         );
     }
+}
+
+#[test]
+fn seed_presets_replace_the_base_dataset() {
+    let query = json!({"gql": "MATCH (d:Definition) WHERE d.id >= 1 AND d.id <= 10 RETURN d.name"});
+    run_suite_with(
+        json!({"duckdb": true, "seed": "solo"}),
+        query.clone(),
+        "nodes: {Definition: {ids: [9]}}",
+    );
+    run_suite(query, "nodes: {Definition: {ids: [1, 2, 3, 4]}}");
 }
 
 #[test]

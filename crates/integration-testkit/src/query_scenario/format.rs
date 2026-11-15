@@ -57,6 +57,8 @@ impl QueryScenario {
 pub struct ScenarioConfig {
     pub ontology_overlay: Option<String>,
     #[serde(default)]
+    pub seed: Option<String>,
+    #[serde(default)]
     pub extra_seed: Seed,
     #[serde(default)]
     pub unmerged_seed: bool,
