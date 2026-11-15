@@ -1,5 +1,5 @@
-import type { ComponentProps } from "react";
-import { AgentLogos, AgentPrompt, Contrasts, CopyButton, CopyCommand, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, TraceGraph, type UseCase, UseCases } from "@gitlab-org/orbit-site";
+import { type ComponentProps, useState } from "react";
+import { AgentLogos, AgentPrompt, cn, Contrasts, CopyButton, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, TraceGraph, type UseCase, UseCases } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { USER_DOCS } from "../sections";
 
@@ -175,15 +175,36 @@ const CHAT: PromptExample[] = [
 ];
 
 // A prompt to paste into an agent, so the agent sets up GitLab Orbit for itself. CLI first, MCP second.
-const SETUP_PROMPT = `Help me connect GitLab Orbit to this agent, so you can answer questions with the graph of my code and my GitLab data.
+// The agents that `glab orbit setup` sets up. The others connect to the GitLab Orbit MCP endpoint.
+const CLI_AGENTS = new Set(["Claude Code", "Codex", "OpenCode", "Pi"]);
 
-Read the setup guide at ${DOCS}/agents/ first. Install the GitLab Orbit CLI with glab (glab 1.126 or later), then run glab orbit setup for this agent. Keep any existing MCP servers and settings.
+// A setup prompt to paste into the agent, tailored to it.
+const setupPrompt = (agent: string) => {
+  const check = `Do not say that the connection works until it is confirmed. Then ask me which project to use, and answer one question about it with graph evidence: the query you ran and the nodes it returned.`;
+  const access = `GitLab Orbit needs GitLab Premium or Ultimate, and it must be turned on for my top-level group. If it is not, show me how: ${DOCS}/quickstart/.`;
+  if (agent === "GitLab Duo")
+    return `Help me use GitLab Orbit in GitLab Duo, so you can answer questions with the graph of my code and my GitLab data.
 
-If this agent cannot run shell commands, connect it to the GitLab Orbit MCP endpoint instead: ${DOCS}/agents/mcp/.
+Read ${DOCS}/agents/duo/ first, and walk me through turning on GitLab Orbit for GitLab Duo. ${access}
 
-GitLab Orbit needs GitLab Premium or Ultimate, and it must be turned on for my top-level group. If it is not, show me how: ${DOCS}/quickstart/. Let me sign in and authorize myself.
+${check}`;
+  if (CLI_AGENTS.has(agent))
+    return `Help me connect GitLab Orbit to ${agent}, so you can answer questions with the graph of my code and my GitLab data.
 
-Do not say that the connection works until glab orbit status confirms it. Then ask me which project to use, and answer one question about it with graph evidence: the query you ran and the nodes it returned.`;
+Read the setup guide at ${DOCS}/agents/ first. Install the GitLab Orbit CLI with glab (glab 1.126 or later), then run glab orbit setup for ${agent}. Keep any existing MCP servers and settings. Let me sign in and authorize myself.
+
+${access}
+
+${check.replace("until it is confirmed", "until glab orbit status confirms it")}`;
+  return `Help me connect GitLab Orbit to ${agent}, so you can answer questions with the graph of my code and my GitLab data.
+
+Read ${DOCS}/agents/mcp/ first, then add the GitLab Orbit MCP server to ${agent}. Keep any existing MCP servers and settings. Let me sign in and authorize myself.
+
+${access}
+
+${check}`;
+};
+
 
 // The command part of a panel: the lines from the first prompt to the first blank line, without the prompt.
 const commandOf = (code: string) => code.trim().split(/\n\s*\n/)[0]!.replace(/^\$ /, "");
@@ -355,6 +376,22 @@ function QuickstartLink() {
 
 // The first screen, from the very top, behind the top bar, with the setup command
 // lower down.
+// Pick an agent, then copy a setup prompt for it to paste into the agent.
+function SetupPicker({ className }: { className?: string }) {
+  const [agent, setAgent] = useState("Claude Code");
+  return (
+    <div className={cn("flex flex-col items-center gap-5", className)}>
+      <AgentLogos label="Pick your agent" marksOnly agents={AGENTS} selected={agent} onSelect={setAgent} />
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
+        <CopyButton key={agent} text={setupPrompt(agent)} label={`Copy a setup prompt for ${agent}`} primary>
+          Copy setup prompt for {agent}
+        </CopyButton>
+        <QuickstartLink />
+      </div>
+    </div>
+  );
+}
+
 function Hero() {
   return (
     <OrbitHero size="lg" align="center" pinned className="page-dark page-dark-top gl-dark gl-dark-scope -mt-10 flex flex-col">
@@ -380,16 +417,7 @@ function Hero() {
           }
         />
       </div>
-      <div className="mt-16 flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
-        <CopyCommand command="glab orbit setup" />
-        <CopyButton text={SETUP_PROMPT} label="Copy a setup prompt for your agent">
-          Copy setup prompt
-        </CopyButton>
-        <QuickstartLink />
-      </div>
-      <div className="mt-10">
-        <AgentLogos label="Agents that work with GitLab Orbit" marksOnly agents={AGENTS} />
-      </div>
+      <SetupPicker className="mt-14" />
     </OrbitHero>
   );
 }
@@ -507,14 +535,8 @@ function HomePage() {
 
       <Section id="start" dark className="page-dark-bottom page-end" title={<>Your agent already has the code. <span className="orbit-fade">Give it the rest.</span></>} lede="Answers from your real GitLab data, not guesses or digging by hand.">
         <div className="flex flex-col items-center gap-4">
-          <CopyCommand command="glab orbit setup" />
-          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm">
-            <CopyButton text={SETUP_PROMPT} label="Copy a setup prompt for your agent">
-              Copy setup prompt
-            </CopyButton>
-            <QuickstartLink />
-            <SalesLink label="Request a demo" />
-          </div>
+          <SetupPicker />
+          <SalesLink label="Request a demo" />
         </div>
         <GravityGlobe globe={false} />
       </Section>
