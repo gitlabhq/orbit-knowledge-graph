@@ -1,5 +1,5 @@
 import { type ComponentProps, useState } from "react";
-import { AgentLogos, AgentPrompt, cn, Contrasts, CopyButton, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, TraceGraph, type UseCase, UseCases } from "@gitlab-org/orbit-site";
+import { AgentLogos, AgentPrompt, cn, Contrasts, CopyButton, CostCalculator, DotWave, FieldBand, Flow, GravityGlobe, Icon, OrbitHalo, OrbitHero, PageFrame, pageHead, type PromptExample, Reveal, RippleField, RippleLog, Section, segment, site, SiteLink, type Slide, Slideshow, Terminal, Testimonial, type UseCase, UseCases } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { USER_DOCS } from "../sections";
 
@@ -18,55 +18,29 @@ $ glab orbit status --full-path my-group/my-project
 $ glab orbit query "CALL db.schema('MergeRequest')"`;
 
 // A zero-day, such as React2Shell, has no scanner finding yet. The graph already knows which files import
-// the package, which projects use them, and which of those run in production. A shared component fans
-// out to several projects. The names are made up.
-const TRACE = {
-  height: 520,
+// the package, which projects use them, and which of those run in production. The names are made up. The
+// field and the log share one loop.
+const ZERO_DAY = {
+  source: { label: "react-server-dom-webpack", x: 0.12, y: 0.5 },
   nodes: [
-    { id: "pkg", kind: "zero-day", label: "react-server-dom-webpack", x: 210, y: 260, tone: "risk" as const, below: true },
-    { id: "f1", kind: "file", label: "app/actions.ts", x: 440, y: 80, tone: "risk" as const },
-    { id: "f2", kind: "file", label: "ui-kit/server.tsx", x: 450, y: 260, tone: "risk" as const },
-    { id: "f3", kind: "file", label: "lib/rsc.ts", x: 440, y: 440, tone: "risk" as const },
-    { id: "p1", kind: "project", label: "web-app", x: 690, y: 60 },
-    { id: "p2", kind: "project", label: "admin-console", x: 700, y: 190 },
-    { id: "p3", kind: "project", label: "checkout-api", x: 700, y: 330 },
-    { id: "p4", kind: "project", label: "mobile-bff", x: 690, y: 460 },
-    { id: "e1", kind: "env", label: "production", x: 910, y: 60 },
-    { id: "e2", kind: "env", label: "staging", x: 920, y: 190 },
-    { id: "e3", kind: "env", label: "production", x: 910, y: 330 },
-    { id: "e4", kind: "env", label: "production", x: 910, y: 460 },
-  ],
-  edges: [
-    { id: "i1", from: "pkg", to: "f1" },
-    { id: "i2", from: "pkg", to: "f2" },
-    { id: "i3", from: "pkg", to: "f3" },
-    { id: "j1", from: "f1", to: "p1" },
-    { id: "j2", from: "f2", to: "p1" },
-    { id: "j3", from: "f2", to: "p2" },
-    { id: "j4", from: "f2", to: "p3" },
-    { id: "j5", from: "f3", to: "p4" },
-    { id: "k1", from: "p1", to: "e1" },
-    { id: "k2", from: "p2", to: "e2" },
-    { id: "k3", from: "p3", to: "e3" },
-    { id: "k4", from: "p4", to: "e4" },
-  ],
-  steps: [
-    { edges: [], nodes: ["pkg"] },
-    { edges: ["i1", "i2", "i3"], nodes: ["f1", "f2", "f3"] },
-    { edges: ["j1", "j2", "j3", "j4", "j5"], nodes: ["p1", "p2", "p3", "p4"] },
-    { edges: ["k1", "k3", "k4"], nodes: ["e1", "e3", "e4"] },
-    { edges: [], nodes: [], fixed: ["f1", "f2", "f3", "p1", "p3", "p4", "e1", "e3", "e4"] },
+    { label: "app/actions.ts", x: 0.38, y: 0.22, quiet: true },
+    { label: "ui-kit/server.tsx", x: 0.46, y: 0.42, quiet: true },
+    { label: "lib/rsc.ts", x: 0.35, y: 0.82, quiet: true },
+    { label: "web-app", x: 0.78, y: 0.15 },
+    { label: "admin-console", x: 0.83, y: 0.42, staging: true },
+    { label: "checkout-api", x: 0.88, y: 0.66 },
+    { label: "mobile-bff", x: 0.75, y: 0.9 },
   ],
   log: [
-    { step: 1, tool: "Explored Orbit", text: "" },
-    { step: 2, text: "3 files import it. ui-kit is shared by 3 projects." },
-    { step: 3, tool: "Explored Orbit", text: "" },
-    { step: 4, text: "3 of 4 projects run it in production." },
-    { step: 4, text: "Bumping to 19.2.1, production first." },
-    { step: 5, tone: "ok" as const, text: "ui-kit!57 merged, released 4.2.1" },
-    { step: 5, tone: "ok" as const, text: "web-app!412 deployed to production" },
-    { step: 5, tone: "ok" as const, text: "checkout-api!88 deployed to production" },
-    { step: 5, tone: "ok" as const, text: "mobile-bff!31 deployed to production" },
+    { at: 0.05, tool: true, text: "Explored Orbit" },
+    { at: 0.22, text: "3 files import it. ui-kit is shared by 3 projects." },
+    { at: 0.3, tool: true, text: "Explored Orbit" },
+    { at: 0.45, text: "3 of 4 projects run it in production." },
+    { at: 0.5, text: "Bumping to 19.2.1, production first." },
+    { at: 0.66, tone: "ok" as const, text: "ui-kit!57 merged, released 4.2.1" },
+    { at: 0.74, tone: "ok" as const, text: "web-app!412 deployed to production" },
+    { at: 0.8, tone: "ok" as const, text: "checkout-api!88 deployed to production" },
+    { at: 0.86, tone: "ok" as const, text: "mobile-bff!31 deployed to production" },
   ],
 };
 
@@ -500,13 +474,17 @@ function HomePage() {
       </Section>
 
       <Section
-        id="graph" dark pin glow="left" dots
+        id="graph" dark pin
+        className="page-section-tail"
+        backdrop={<RippleField source={ZERO_DAY.source} nodes={ZERO_DAY.nodes} anchor="#graph .ripple-nodes" />}
+        backdropFade="full"
         eyebrow="Zero-day response"
         title={<>From a zero-day to a <span className="orbit-fade">fix in production</span></>}
         lede="Your agent finds the vulnerable code, traces it to production, and ships the fix."
       >
-        <div>
-          <TraceGraph {...TRACE} showStatus={false} showKinds={false} logTitle="Your agent" label="Your agent starts at a zero-day package, finds the three files that import it, follows a shared component to the three projects that use it, keeps the projects that run in production, and ships a fix to each." result="3 projects on an affected version, before any scanner reports it." />
+        <div className="ripple-stage">
+          <div className="ripple-nodes" aria-label="Your agent starts at a zero-day package, finds the three files that import it, follows them to the four projects that use them, and ships a fix to the three that run in production. A staging project is not fixed." role="img" />
+          <RippleLog lines={ZERO_DAY.log} />
         </div>
       </Section>
 
