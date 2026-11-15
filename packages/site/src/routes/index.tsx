@@ -377,8 +377,8 @@ function QuickstartLink() {
 // The first screen, from the very top, behind the top bar, with the setup command
 // lower down.
 // Copy a setup prompt to paste into an agent. Picking an agent tailors the prompt to it and copies it right
-// away. The copy button copies the prompt for the picked agent, or for any agent. With `action`, such as a
-// sales link, that is the main action, the copy button is a quieter tile, and the action replaces Quickstart.
+// away. The copy button, a frosted tile, copies the prompt for the picked agent, or for any agent. `action`,
+// such as a sales link, replaces Quickstart beside it.
 function SetupPicker({ className, action }: { className?: string; action?: ReactNode }) {
   const [agent, setAgent] = useState<string | null>(null);
   const pick = (name: string) => {
@@ -388,7 +388,7 @@ function SetupPicker({ className, action }: { className?: string; action?: React
   return (
     <div className={cn("flex flex-col items-center gap-5", className)}>
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
-        <CopyButton text={setupPrompt(agent)} label={`Copy a setup prompt for ${agent ?? "your agent"}`} primary={!action} tile={Boolean(action)}>
+        <CopyButton text={setupPrompt(agent)} label={`Copy a setup prompt for ${agent ?? "your agent"}`} tile>
           Copy setup prompt
         </CopyButton>
         {action ?? <QuickstartLink />}
