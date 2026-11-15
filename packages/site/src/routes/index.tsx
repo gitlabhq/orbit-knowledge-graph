@@ -322,6 +322,16 @@ const SLIDES: Slide[] = [
   { id: "platform", label: "Healthcare diagnostics company", content: <Testimonial {...QUOTES.platform!} /> },
 ];
 
+// The agents with a GitLab Orbit setup, for the logo rows.
+const AGENTS = [
+  { name: "GitLab Duo", mark: "gitlab" },
+  { name: "Claude Code", mark: "claude" },
+  { name: "Codex", mark: "openai" },
+  { name: "Cursor", mark: "cursor" },
+  { name: "GitHub Copilot", mark: "githubcopilot" },
+  { name: "Gemini CLI", mark: "googlegemini" },
+];
+
 const DEMO = "https://about.gitlab.com/sales/?contact-topic=request-demo";
 
 // A link to the GitLab sales team, such as "Request a demo" or "Talk to sales".
@@ -376,6 +386,9 @@ function Hero() {
           Copy setup prompt
         </CopyButton>
         <QuickstartLink />
+      </div>
+      <div className="mt-10">
+        <AgentLogos label="Agents that work with GitLab Orbit" marksOnly agents={AGENTS} />
       </div>
     </OrbitHero>
   );
@@ -483,15 +496,8 @@ function HomePage() {
           <AgentLogos
             label="Agents that work with GitLab Orbit"
             marksOnly
-          reveal
-            agents={[
-              { name: "GitLab Duo", mark: "gitlab" },
-              { name: "Claude Code", mark: "claude" },
-              { name: "Codex", mark: "openai" },
-              { name: "Cursor", mark: "cursor" },
-              { name: "GitHub Copilot", mark: "githubcopilot" },
-              { name: "Gemini CLI", mark: "googlegemini" },
-              ]}
+            reveal
+            agents={AGENTS}
           />
           <Reveal from="right" delay={300}>
             <Terminal title="GitLab Orbit CLI" code={SETUP} copy="glab orbit setup" />
