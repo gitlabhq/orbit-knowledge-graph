@@ -42,14 +42,10 @@ Read the owning guide before you act:
 - Read `CONTRIBUTING.md` for engineering, documentation, issue, and MR
   conventions.
 - Read `CONTEXT.md` for domain terms.
-
-## SOX billing surface
-
-The SOX billing ADR defines the scope for billing emission. Read it before you
-change the billing crate or a billing hook point. Files that control billing
-emission, delivery, payloads, or quota checks are in scope, also outside the
-billing crate. If you add or move such a file, add it to the SOX-scoped rules
-in `CODEOWNERS`.
+- Before you change billing, read the SOX billing ADR. Every file that controls
+  billing emission, delivery, payloads, or quota checks is in SOX scope, even
+  outside the billing crate. If you add or move such a file, add it to the
+  SOX-scoped rules in `CODEOWNERS`.
 
 ## Issues and MRs
 
@@ -58,13 +54,16 @@ in `CODEOWNERS`.
   including the Agent context block.
 - Copy one `type::` label, the `orbit::<area>` label, and the milestone from
   the linked issue.
-- Do not change docs in an MR that changes code. Change them only when a CI or
-  build check fails without the change.
-- Open agent-authored Draft MRs with `[skip ci]` at the end of the
-  Conventional Commits title. Keep it there through review.
-- When the MR is ready for CI, remove `[skip ci]` from the title, then start a
-  pipeline. A title edit alone starts no pipeline.
-- When the MR is ready for review, add the `~workflow::ready for review` label.
+- Do not change docs in an MR that changes code. The exception is a docs change
+  that a CI or build check needs.
+
+Agent-authored MRs follow these steps:
+
+1. Open a Draft MR with `[skip ci]` at the end of the Conventional Commits
+   title. Keep it there through review.
+2. When the MR is ready for CI, remove `[skip ci]` from the title. Then start a
+   pipeline. A title edit does not start one.
+3. When the MR is ready for review, add the `~workflow::ready for review` label.
 
 ## Skills and docs
 
