@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { PageFrame, pageHead, RippleLog, type RippleLogLine, Section } from "@gitlab-org/orbit-site";
+import { Icon, PageFrame, pageHead, RippleLog, type RippleLogLine, Section } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { Capabilities } from "../next/Capabilities";
-import { CodeSearch } from "../next/CodeSearch";
+import { CodeSearch, SOURCES } from "../next/CodeSearch";
 import { type Hop, HopField } from "../next/HopField";
 import { SearchMap } from "../next/SearchMap";
 import { CORPUS, CROSS_SEARCHES, LATENCY, type Search } from "../next/searches";
@@ -99,6 +99,14 @@ function NextPage() {
         title={<>Your other tools, <span className="orbit-fade">next to your code</span></>}
         lede="Orbit finds the path from tool to tool, checks your access in each one, and your agent ships the fix."
       >
+        <ul className="agent-prompt-chips next-section-tools" aria-label="Tools">
+          {SOURCES.map((source) => (
+            <li key={source.label} className="agent-prompt-chip">
+              <Icon name={source.icon} size={12} />
+              {source.label}
+            </li>
+          ))}
+        </ul>
         <div className="ripple-stage">
           <div className="ripple-nodes hop-nodes" role="img" aria-label="Your agent starts at an incident in incident.io, follows the alert in Grafana to a deploy in GitLab, reads the Jira story and the Slack thread behind it, finds the line of code with code search, and ships the merge request that fixes it." />
           <RippleLog lines={LOG} loop={LOOP} />

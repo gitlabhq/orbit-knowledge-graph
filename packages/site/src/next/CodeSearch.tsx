@@ -18,8 +18,8 @@ const GROUPS = [
   { label: "Third-party connectors", items: CROSS_SEARCHES.filter((item) => item.id !== "epic") },
 ];
 const ALL = [...SEARCHES, ...CROSS_SEARCHES];
-// What the agent can query, as chips on the input.
-const SOURCES = [
+// What the agent can query, as chips on the input and in the third-party section.
+export const SOURCES = [
   { label: "GitLab", icon: "tanuki" },
   { label: "Jira", icon: "work-item-issue" },
   { label: "Slack", icon: "comment" },

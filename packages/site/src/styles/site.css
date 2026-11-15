@@ -445,7 +445,7 @@
   color: var(--gl-text-color-subtle);
 }
 
-/* The hero's backdrop: the search map, faded into the page at the top and bottom. */
+/* The hero's backdrop: the search map, faded in at the top and running to the hero's bottom edge. */
 /* No Orbit glow here: the map carries the hero. The copy sits higher than on the home page, so the
    search bar shows in the first screen. */
 .next-hero::before,
@@ -470,7 +470,7 @@
   inset: 0 calc(50% - 50vw);
   z-index: -1;
   pointer-events: none;
-  mask-image: linear-gradient(to bottom, transparent, #000 10%, #000 82%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 10%);
 }
 
 .next-map {
@@ -717,12 +717,6 @@
   text-align: left;
 }
 
-@media (min-width: 900px) {
-  .next-demo {
-    grid-template-columns: 14rem minmax(0, 1fr);
-    align-items: start;
-  }
-}
 
 /* Wide screens get a third column for the results on the map, as wide as the examples, so the chat sits in
    the middle. The demo is wider than the text column and centers on the window. */
@@ -905,7 +899,7 @@
 @media (min-width: 1100px) {
   .next-demo {
     align-items: center;
-    min-height: 36rem;
+    min-height: 28rem;
   }
 
   .next-demo-examples,
@@ -917,3 +911,50 @@
     align-self: stretch;
   }
 }
+
+/* Match counts stay on one line. */
+.next-branch-rows li > :last-child {
+  white-space: nowrap;
+}
+
+/* Each card's small view takes the same height, so the three titles line up. */
+.next-card > :first-child {
+  min-height: 8.5rem;
+}
+
+/* The tools the third-party section connects, as the chat's chips, above the path. */
+.next-section-tools {
+  margin-bottom: 1.5rem;
+}
+
+/* Below the wide layout, the examples sit in centered rows above the chat, so the chat stays centered.
+   Declared last, so it wins over the base example styles. */
+@media (max-width: 1099px) {
+  .next-demo {
+    justify-items: center;
+  }
+
+  .next-demo-examples {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem 1.5rem;
+  }
+
+  .next-demo-group {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .next-demo-label {
+    margin: 0 0.25rem 0 0;
+  }
+
+  .next-chat {
+    width: 100%;
+    max-width: 44rem;
+  }
+}
+
