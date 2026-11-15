@@ -1599,8 +1599,6 @@ e2e:
       optional: true
     - job: e2e-robot-image
       optional: true
-    - job: cli-integration-test
-      optional: true
   rules:
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
@@ -1637,6 +1635,12 @@ e2e:
           exit 1
         fi
         tail -3 e2e-image-build.log
+      fi
+    - |
+      if [ -n "${E2E_CLI_PID:-}" ] && ! wait "$E2E_CLI_PID"; then
+        tail -20 e2e-cli-image.log
+        echo "No orbit CLI image; the CLI suite skips"
+        unset E2E_CLI_IMAGE
       fi
     - bash e2e/scripts/test.sh
   after_script:
