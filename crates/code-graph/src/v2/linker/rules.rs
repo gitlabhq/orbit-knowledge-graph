@@ -15,7 +15,7 @@ pub trait HasRules {
 /// No-resolution wrapper. Wraps a DSL spec with empty resolution stages.
 /// Use for languages that have parsing but no cross-reference resolution yet.
 ///
-/// ```ignore
+/// ```text
 /// // In register_v2_pipelines!:
 /// CSharp => [GenericPipeline<CSharpDsl, NoRules<CSharpDsl>>],
 /// ```
