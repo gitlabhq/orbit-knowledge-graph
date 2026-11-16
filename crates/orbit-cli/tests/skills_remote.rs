@@ -927,7 +927,7 @@ fn hook_instructions(base_url: Option<&str>, args: &[&str]) -> (Output, String) 
 fn assert_local_only(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
     assert!(
-        instructions.contains("grep` is one search across every connected provider"),
+        instructions.contains("grep 'words'` searches your code"),
         "{instructions}"
     );
     assert!(
@@ -1103,7 +1103,7 @@ fn setup_instructions_list_the_servers_entities_and_cache_them() {
         );
         assert!(!instructions.contains("MANDATORY"), "{instructions}");
         assert!(
-            instructions.contains("one search across every connected provider"),
+            instructions.contains("every provider listed at the end"),
             "{instructions}"
         );
     }
