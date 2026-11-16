@@ -18,7 +18,7 @@ const DEEP: &str = "MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DE
 
 const NOTES: &str = "MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File), (a:AgentMemory)-[:ABOUT]->(mr) WHERE m.channel = 'orbit-query-engine' AND i.status = 'In Review' AND f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN i.key, m.text, mr.iid, f.path, a.note LIMIT 20";
 
-const MEMORIES: &str = "MATCH (a:AgentMemory)-[:ABOUT]->(mr:MergeRequest) WHERE a.agent = 'orbit-agent' RETURN mr.iid, a.note";
+const MEMORIES: &str = "MATCH (a:AgentMemory)-[:ABOUT]->(mr:MergeRequest) WHERE a.agent = 'orbit-agent' RETURN mr.iid, mr.title, a.agent, a.note";
 
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 

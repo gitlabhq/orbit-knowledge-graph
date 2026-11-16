@@ -6,6 +6,12 @@
     (a:AgentMemory)-[:ABOUT]->(mr)
     WHERE m.channel = 'orbit-query-engine' AND i.status = 'In Review' AND f.content MATCHES ast('todo!($$$MSG)', 'rust')
     RETURN i.key, m.text, mr.iid, f.path, a.note LIMIT 20
+- title: Agent notes by project
+  subtitle: Reads the agent's notes from the memory lake. A reporter on data-extraction-service-poc sees only the notes on its MRs.
+  caller: reporter
+  query: >-
+    MATCH (a:AgentMemory)-[:ABOUT]->(mr:MergeRequest) WHERE a.agent = 'orbit-agent'
+    RETURN mr.iid, mr.title, a.agent, a.note
 - title: Code search to Slack threads
   subtitle: Runs a structural code search, then follows the found projects to their MRs, authors, and Slack threads.
   caller: maintainer
