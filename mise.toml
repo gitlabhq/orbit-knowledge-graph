@@ -437,6 +437,14 @@ description = "Regenerate rust-toolchain.toml from mise.toml"
 run = "bash ./scripts/checks/check-rust-toolchain.sh --check"
 description = "Fail if rust-toolchain.toml is out of sync with mise.toml"
 
+[tasks."spec:engine"]
+run = "bash ./scripts/dev/check-engine-spec.sh pass"
+description = "Model-check the indexing engine lease and dedupe spec with TLC (needs Java 11+)"
+
+[tasks."spec:engine:counterexample"]
+run = "bash ./scripts/dev/check-engine-spec.sh counterexample"
+description = "Show the TLC counterexamples against the indexing engine rules as ADR 023 writes them"
+
 [tasks."schema:bump"]
 run = "cargo xtask migration-ledger bump"
 description = "Bump the schema pin in config/versions.yaml, append a migration ledger entry, and re-snapshot fingerprints"
