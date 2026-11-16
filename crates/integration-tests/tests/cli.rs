@@ -385,6 +385,199 @@ fn a_refresh_matches_a_full_index_when_files_come_and_go() {
 }
 
 #[test]
+fn indexes_and_refreshes_files_git_tracks_under_ignored_directories() {
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(
+        repo,
+        &[
+            (".gitignore", ".claude/\n"),
+            ("app.py", "def app():\n    pass\n"),
+        ],
+    );
+    write_file(repo, ".claude/skills/demo/SKILL.md", "# Demo\n\n## Usage\n");
+    write_file(repo, ".claude/tool.py", "def tool():\n    pass\n");
+    git(
+        repo,
+        &[
+            "add",
+            "--force",
+            ".claude/skills/demo/SKILL.md",
+            ".claude/tool.py",
+        ],
+    );
+    git(repo, &["commit", "-qm", "track ignored files"]);
+    write_file(repo, ".claude/local.py", "def local():\n    pass\n");
+    let names = |sql: &str| -> Vec<String> {
+        rows(&orbit_sql(sql, data.path()))
+            .iter()
+            .map(|row| row["n"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let files = "SELECT path AS n FROM gl_file ORDER BY path";
+    let definitions = "SELECT fqn AS n FROM gl_definition ORDER BY fqn";
+
+    assert!(orbit_index(repo, data.path()));
+    assert_eq!(
+        names(files),
+        [
+            ".claude/skills/demo/SKILL.md",
+            ".claude/tool.py",
+            ".gitignore",
+            "app.py"
+        ]
+    );
+    assert_eq!(
+        names(definitions),
+        [
+            ".claude.tool.tool",
+            "SKILL#Demo",
+            "SKILL#Demo#Usage",
+            "app.app"
+        ]
+    );
+
+    write_file(
+        repo,
+        ".claude/tool.py",
+        "def tool():\n    pass\n\ndef added():\n    pass\n",
+    );
+    assert!(orbit_index(repo, data.path()));
+    assert_eq!(graph_tables(data.path()), full_index_tables(repo));
+
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    write_file(
+        repo,
+        ".claude/tool.py",
+        "def tool():\n    pass\n\ndef refreshed():\n    pass\n",
+    );
+    let refreshed = orbit_cmd()
+        .args(["refresh", repo.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data.path())
+        .output()
+        .unwrap();
+    assert!(
+        refreshed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&refreshed.stderr)
+    );
+    assert_eq!(graph_tables(data.path()), full_index_tables(repo));
+    assert!(names(definitions).contains(&".claude.tool.refreshed".to_string()));
+}
+
+#[test]
+#[cfg(unix)]
+fn a_full_index_skips_tracked_ignored_files_whose_directory_was_replaced() {
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(
+        repo,
+        &[
+            (".gitignore", ".claude/\nbuild/\n"),
+            ("app.py", "def app():\n    pass\n"),
+        ],
+    );
+    write_file(repo, ".claude/tool.py", "def tool():\n    pass\n");
+    write_file(repo, "build/out.py", "def out():\n    pass\n");
+    git(repo, &["add", "--force", ".claude/tool.py", "build/out.py"]);
+    git(repo, &["commit", "-qm", "track ignored files"]);
+    assert!(orbit_index(repo, data.path()));
+
+    std::fs::remove_dir_all(repo.join("build")).unwrap();
+    std::fs::write(repo.join("build"), "not a directory\n").unwrap();
+    std::fs::remove_dir_all(repo.join(".claude")).unwrap();
+    write_file(repo, "shared/tool.py", "def tool():\n    pass\n");
+    std::os::unix::fs::symlink("shared", repo.join(".claude")).unwrap();
+
+    assert!(orbit_index(repo, data.path()));
+    assert_eq!(graph_tables(data.path()), full_index_tables(repo));
+}
+
+#[test]
+#[cfg(unix)]
+fn a_full_index_skips_replaced_tracked_ignored_directories_git_status_hides() {
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(
+        repo,
+        &[
+            (".gitignore", ".claude/\nbuild/\n"),
+            ("src/app.py", "def app():\n    pass\n"),
+        ],
+    );
+    write_file(repo, ".claude/tool.py", "def tool():\n    pass\n");
+    write_file(repo, "build/out.py", "def out():\n    pass\n");
+    git(repo, &["add", "--force", ".claude/tool.py", "build/out.py"]);
+    git(repo, &["commit", "-qm", "track ignored files"]);
+
+    git(
+        repo,
+        &["sparse-checkout", "set", "--cone", "src", ".claude"],
+    );
+    std::fs::write(repo.join("build"), "not a directory\n").unwrap();
+    git(
+        repo,
+        &["update-index", "--assume-unchanged", ".claude/tool.py"],
+    );
+    std::fs::remove_dir_all(repo.join(".claude")).unwrap();
+    write_file(repo, "shared/tool.py", "def tool():\n    pass\n");
+    std::os::unix::fs::symlink("shared", repo.join(".claude")).unwrap();
+
+    assert!(orbit_index(repo, data.path()));
+    let files: Vec<_> = rows(&orbit_sql(
+        "SELECT path FROM gl_file ORDER BY path",
+        data.path(),
+    ))
+    .iter()
+    .map(|row| row["path"].as_str().unwrap().to_string())
+    .collect();
+    assert_eq!(
+        files,
+        [
+            ".claude",
+            ".gitignore",
+            "build",
+            "shared/tool.py",
+            "src/app.py"
+        ]
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_tracked_ignored_file_with_a_non_utf8_name_is_skipped() {
+    use std::os::unix::ffi::OsStrExt;
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(
+        repo,
+        &[
+            (".gitignore", ".claude/\n"),
+            ("app.py", "def app():\n    pass\n"),
+        ],
+    );
+    write_file(repo, ".claude/tool.py", "def tool():\n    pass\n");
+    let name = std::ffi::OsStr::from_bytes(b"\xff.py");
+    std::fs::write(repo.join(".claude").join(name), "def bad():\n    pass\n").unwrap();
+    git(repo, &["add", "--force", ".claude"]);
+    git(repo, &["commit", "-qm", "track ignored files"]);
+
+    assert!(orbit_index(repo, data.path()));
+    let files: Vec<_> = rows(&orbit_sql(
+        "SELECT path FROM gl_file ORDER BY path",
+        data.path(),
+    ))
+    .iter()
+    .map(|row| row["path"].as_str().unwrap().to_string())
+    .collect();
+    assert_eq!(files, [".claude/tool.py", ".gitignore", "app.py"]);
+}
+
+#[test]
 fn index_db_flag_writes_to_custom_path() {
     let tmp = tempfile::TempDir::new().unwrap();
     let db_path = tmp.path().join("custom.duckdb");
