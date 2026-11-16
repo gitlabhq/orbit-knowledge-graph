@@ -10,6 +10,7 @@ use ontology::Ontology;
 use orbit_log_fields::warn;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::SecurityContext;
+use tokio::sync::OnceCell;
 use tonic::Status;
 
 use self::counts::ScopeCounts;
@@ -23,11 +24,15 @@ pub struct ScopeItemCounts {
 
 pub struct ItemCountService {
     client: Arc<ArrowClickHouseClient>,
+    parallel_replicas: OnceCell<bool>,
 }
 
 impl ItemCountService {
     pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { client }
+        Self {
+            client,
+            parallel_replicas: OnceCell::new(),
+        }
     }
 
     pub async fn count_items(
@@ -64,8 +69,22 @@ impl ItemCountService {
         if plan.visibility.entities.is_empty() {
             return ScopeCounts::new();
         }
-        let counts =
-            counts::count_visible_entities(&self.client, &plan.scopes, &plan.visibility).await;
+        let counts = match self.parallel_replicas().await {
+            Ok(parallel_replicas) => {
+                counts::count_visible_entities(
+                    &self.client,
+                    &plan.scopes,
+                    &plan.visibility,
+                    parallel_replicas,
+                )
+                .await
+            }
+            Err(error) => plan
+                .scopes
+                .iter()
+                .map(|scope| (scope.as_str().to_string(), Err(error.clone())))
+                .collect(),
+        };
         for error in counts.values().filter_map(|counts| counts.as_ref().err()) {
             warn!(
                 safe(ERROR_TYPE) = "clickhouse_query",
@@ -74,6 +93,13 @@ impl ItemCountService {
             );
         }
         counts
+    }
+
+    async fn parallel_replicas(&self) -> Result<bool, Status> {
+        self.parallel_replicas
+            .get_or_try_init(|| counts::has_parallel_replica_cluster(&self.client))
+            .await
+            .copied()
     }
 }
 

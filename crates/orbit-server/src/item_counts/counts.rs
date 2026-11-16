@@ -14,26 +14,51 @@ use crate::status_query::{
 
 const COUNT_CACHE_TTL_SECONDS: u32 = 5;
 const MAX_CONCURRENT_COUNT_QUERIES: usize = 8;
-const PARALLEL_REPLICA_SETTINGS: [(&str, &str); 3] = [
+const PARALLEL_REPLICA_SETTINGS: [(&str, &str); 2] = [
     ("enable_parallel_replicas", "1"),
     (
         "parallel_replicas_min_number_of_rows_per_replica",
         "50000000",
     ),
-    ("cancel_http_readonly_queries_on_client_close", "1"),
 ];
+const PARALLEL_REPLICA_CLUSTER_SQL: &str =
+    "SELECT toString(getSetting('cluster_for_parallel_replicas')) AS cluster";
 
 pub type ScopeCounts = HashMap<String, Result<HashMap<String, i64>, Status>>;
+
+pub async fn has_parallel_replica_cluster(client: &ArrowClickHouseClient) -> Result<bool, Status> {
+    let batches = fetch_status_query_batches(
+        client,
+        PARALLEL_REPLICA_CLUSTER_SQL,
+        "parallel replica cluster",
+        &QueryConfig {
+            use_query_cache: Some(false),
+            ..orbit_server_config::query::default_config()
+        },
+        |query| query,
+    )
+    .await?;
+    let clusters = String::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
+    Ok(clusters.iter().any(|cluster| !cluster.is_empty()))
+}
 
 pub async fn count_visible_entities(
     client: &ArrowClickHouseClient,
     scopes: &[&TraversalPath],
     visibility: &Visibility,
+    parallel_replicas: bool,
 ) -> ScopeCounts {
     let queries: Vec<_> = scopes
         .iter()
         .enumerate()
-        .map(|(index, scope)| count_scope(client, scope, visibility.entities_in_scope(index)))
+        .map(|(index, scope)| {
+            count_scope(
+                client,
+                scope,
+                visibility.entities_in_scope(index),
+                parallel_replicas,
+            )
+        })
         .collect();
     futures::stream::iter(queries)
         .buffer_unordered(MAX_CONCURRENT_COUNT_QUERIES)
@@ -45,10 +70,11 @@ async fn count_scope(
     client: &ArrowClickHouseClient,
     scope: &TraversalPath,
     entities: Vec<&VisibleEntity>,
+    parallel_replicas: bool,
 ) -> (String, Result<HashMap<String, i64>, Status>) {
     (
         scope.as_str().to_string(),
-        read_scope_counts(client, scope, entities).await,
+        read_scope_counts(client, scope, entities, parallel_replicas).await,
     )
 }
 
@@ -56,6 +82,7 @@ async fn read_scope_counts(
     client: &ArrowClickHouseClient,
     scope: &TraversalPath,
     entities: Vec<&VisibleEntity>,
+    parallel_replicas: bool,
 ) -> Result<HashMap<String, i64>, Status> {
     if entities.is_empty() {
         return Ok(HashMap::new());
@@ -75,8 +102,10 @@ async fn read_scope_counts(
             let query = (0..entities.len()).fold(query, |query, index| {
                 bind_prefix_parameters(query, &build_scope_parameter_name(index), &[scope])
             });
+            let query = query.with_setting("cancel_http_readonly_queries_on_client_close", "1");
             PARALLEL_REPLICA_SETTINGS
                 .into_iter()
+                .filter(|_| parallel_replicas)
                 .fold(query, |query, (name, value)| {
                     query.with_setting(name, value)
                 })
