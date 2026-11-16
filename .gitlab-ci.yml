@@ -1,5 +1,8 @@
 variables:
   ORBIT_TELEMETRY_ENABLED: "false"
+  FF_USE_FASTZIP: "true"
+  CACHE_COMPRESSION_LEVEL: fastest
+  ARTIFACT_COMPRESSION_LEVEL: fastest
   CANONICAL_PROJECT_ID: "77960826"
   SECURITY_PROJECT_ID: "80999258"
   CLICKHOUSE_VERSION: "26.6"
@@ -1013,8 +1016,24 @@ integration-test:
         test(=server::performance::performance_queries)
       )
 
+# For lanes that need only the shared ClickHouse; run-container-tests.sh skips its own container.
+.clickhouse-service:
+  services:
+    - name: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
+      alias: clickhouse
+      variables:
+        CLICKHOUSE_USER: default
+        CLICKHOUSE_PASSWORD: testpass # gitleaks:allow
+        CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+  variables:
+    GKG_TEST_CLICKHOUSE_URL: http://clickhouse:8123
+  before_script:
+    - !reference [.sccache-template, before_script]
+
 integration-test-data-correctness:
-  extends: .integration-test-template
+  extends:
+    - .integration-test-template
+    - .clickhouse-service
   variables:
     SUBTEST_CONCURRENCY: "16"
     NEXTEST_FILTER: >-
@@ -1023,34 +1042,17 @@ integration-test-data-correctness:
       test(=server::data_correctness::data_correctness) |
       test(=server::performance::performance_queries)
 
-experiment:container-tests-xlarge:
-  extends: .integration-test-template
-  tags:
-    - saas-linux-xlarge-amd64
-  allow_failure: true
-  variables:
-    SUBTEST_CONCURRENCY: "16"
-    NEXTEST_FILTER: not test(corpus_smoke)
-
 corpus-smoke-test:
   stage: test
+  tags:
+    - ${RUNNER_LARGE}
   extends:
     - .test-template
     - .docs-mr-and-main-rules
-  tags:
-    - ${RUNNER_LARGE}
-  services:
-    - name: docker:dind
-      alias: docker
+    - .clickhouse-service
   variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    TESTCONTAINERS_HOST_OVERRIDE: docker
     NEXTEST_FILTER: test(corpus_smoke)
   needs: []
-  before_script:
-    - !reference [.sccache-template, before_script]
-    - docker pull clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
     # against a real ClickHouse schema (no correctness assertions).
