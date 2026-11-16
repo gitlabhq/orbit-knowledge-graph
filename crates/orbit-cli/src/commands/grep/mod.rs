@@ -8,7 +8,7 @@ mod render;
 mod scan;
 mod term;
 
-pub(crate) use qualifier::gitlab_prefixes;
+pub(crate) use qualifier::{CODE, gitlab_prefixes};
 pub(crate) use rank::is_test;
 
 use std::io::Write;

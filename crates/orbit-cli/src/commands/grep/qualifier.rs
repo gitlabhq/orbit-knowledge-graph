@@ -61,6 +61,8 @@ static ALIASES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
     aliases
 });
 
+pub(crate) const CODE: &str = "code";
+
 fn snake(name: &str) -> String {
     let mut out = String::new();
     for (index, c) in name.chars().enumerate() {
@@ -169,6 +171,26 @@ pub(super) fn parse(query: &str, providers: bool) -> Option<Parsed> {
             sections.last_mut().expect("a section").1.push(token);
             continue;
         }
+        if name.eq_ignore_ascii_case(CODE) && !value.is_empty() {
+            match value.split_once(':') {
+                Some(("file" | "path", glob)) if !glob.is_empty() => {
+                    parsed.globs.extend(globs_for(glob));
+                }
+                Some((kind, words)) if kind_for(kind).is_some() => {
+                    let kind = kind_for(kind).expect("checked");
+                    sections.push((
+                        Some(kind),
+                        (!words.is_empty())
+                            .then(|| words.to_string())
+                            .into_iter()
+                            .collect(),
+                    ));
+                }
+                _ => sections.push((Some(CODE.to_string()), vec![value.to_string()])),
+            }
+            any = true;
+            continue;
+        }
         if let Some((kind, words)) = provider_qualifier(name, value).filter(|_| providers) {
             sections.push((Some(kind), words.into_iter().collect()));
             any = true;
@@ -228,7 +250,7 @@ pub(super) fn parse(query: &str, providers: bool) -> Option<Parsed> {
 fn is_qualifier(word: &str) -> bool {
     word.split_once(':')
         .is_some_and(|(name, value)| match name.to_ascii_lowercase().as_str() {
-            "file" | "path" | "repo" => !value.is_empty(),
+            "file" | "path" | "repo" | CODE => !value.is_empty(),
             _ if provider_qualifier(name, value).is_some() => true,
             _ => !value.starts_with([':', '/']) && kind_for(name).is_some(),
         })
@@ -324,6 +346,28 @@ mod tests {
             assert_eq!(parse(literal, true), None, "{literal}");
         }
         assert_eq!(parse("gitlab:pipeline:x", false), None);
+    }
+
+    #[test]
+    fn code_is_the_local_provider() {
+        assert_eq!(
+            sections("code:rate_limit"),
+            vec![(strings(&["code"]), "rate_limit".into())]
+        );
+        assert_eq!(
+            sections("code:def:throttle"),
+            vec![(strings(&["Definition"]), "throttle".into())]
+        );
+        let scoped = parse("throttle code:file:limits.rs", true).unwrap();
+        assert_eq!(scoped.globs, strings(&["*limits.rs*", "**/*limits.rs*/**"]));
+        assert_eq!(
+            sections("code:a mr:b"),
+            vec![
+                (strings(&["code"]), "a".into()),
+                (strings(&["MergeRequest"]), "b".into())
+            ]
+        );
+        assert_eq!(parse("code: x", true), None);
     }
 
     #[test]

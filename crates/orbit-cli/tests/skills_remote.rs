@@ -927,11 +927,11 @@ fn hook_instructions(base_url: Option<&str>, args: &[&str]) -> (Output, String) 
 fn assert_local_only(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
     assert!(
-        instructions.contains("grep 'words'` searches your code"),
+        instructions.contains("grep 'words'` searches every provider below"),
         "{instructions}"
     );
     assert!(
-        !instructions.contains("query` for counts"),
+        !instructions.contains("query` for counts") && !instructions.contains("- gitlab:"),
         "{instructions}"
     );
     assert!(!instructions.contains("Schema for"), "{instructions}");
@@ -940,10 +940,7 @@ fn assert_local_only(output: &Output, instructions: &str) {
 
 fn assert_remote_without_schema(output: &Output, instructions: &str) {
     assert!(output.status.success(), "{}", stderr(output));
-    assert!(
-        instructions.contains("query` for counts"),
-        "{instructions}"
-    );
+    assert!(instructions.contains("query` for counts"), "{instructions}");
     assert!(!instructions.contains("Schema for"), "{instructions}");
     assert!(!instructions.contains("{{"), "{instructions}");
 }
@@ -1103,7 +1100,7 @@ fn setup_instructions_list_the_servers_entities_and_cache_them() {
         );
         assert!(!instructions.contains("MANDATORY"), "{instructions}");
         assert!(
-            instructions.contains("every provider listed at the end"),
+            instructions.contains("every provider below"),
             "{instructions}"
         );
     }
