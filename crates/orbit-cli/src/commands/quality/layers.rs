@@ -11,6 +11,104 @@ pub(crate) const CONFIG_PATH: &str = ".gitlab/orbit-quality.yml";
 struct ConfigFile {
     #[serde(default)]
     layers: Vec<RuleSpec>,
+    #[serde(default)]
+    forbid: Vec<ForbidSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ForbidSpec {
+    name: String,
+    symbols: Vec<String>,
+    #[serde(default)]
+    only_in: Vec<String>,
+    #[serde(default)]
+    paths: Vec<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct Forbid {
+    pub name: String,
+    symbols: Vec<regex::Regex>,
+    only_in: Vec<GlobMatcher>,
+    paths: Vec<GlobMatcher>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct Config {
+    pub layers: Vec<Rule>,
+    pub forbid: Vec<Forbid>,
+}
+
+impl Config {
+    pub(crate) fn rule_count(&self) -> usize {
+        self.layers.len() + self.forbid.len()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SymbolUse {
+    pub rule: String,
+    pub file: String,
+    pub symbol: String,
+    pub line: i64,
+}
+
+fn symbol_pattern(rule: &str, pattern: &str) -> Result<regex::Regex> {
+    let body = regex::escape(pattern.trim_start_matches("::")).replace(r"\*", r"[A-Za-z0-9_:.]*");
+    regex::Regex::new(&format!(r"^(::)?{body}((::|\.).*)?$"))
+        .with_context(|| format!("forbid `{rule}`: invalid symbol `{pattern}`"))
+}
+
+impl Forbid {
+    fn from_spec(spec: ForbidSpec) -> Result<Self> {
+        anyhow::ensure!(
+            !spec.symbols.is_empty(),
+            "forbid `{}`: `symbols` needs at least one entry",
+            spec.name
+        );
+        Ok(Self {
+            symbols: spec
+                .symbols
+                .iter()
+                .map(|symbol| symbol_pattern(&spec.name, symbol))
+                .collect::<Result<_>>()?,
+            only_in: matchers("only_in", &spec.name, &spec.only_in)?,
+            paths: matchers("paths", &spec.name, &spec.paths)?,
+            name: spec.name,
+        })
+    }
+
+    pub(crate) fn forbids(&self, file: &str, symbol: &str) -> bool {
+        (self.paths.is_empty() || any(&self.paths, file))
+            && !any(&self.only_in, file)
+            && self.symbols.iter().any(|pattern| pattern.is_match(symbol))
+    }
+}
+
+pub(crate) fn check_symbols<'a>(
+    rules: &[Forbid],
+    uses: impl IntoIterator<Item = (&'a str, &'a str, i64)>,
+) -> Vec<SymbolUse> {
+    let mut out: Vec<SymbolUse> = Vec::new();
+    for (file, symbol, line) in uses {
+        for rule in rules.iter().filter(|rule| rule.forbids(file, symbol)) {
+            out.push(SymbolUse {
+                rule: rule.name.clone(),
+                file: file.to_string(),
+                symbol: symbol.trim_start_matches("::").to_string(),
+                line,
+            });
+        }
+    }
+    out.sort_by(|a, b| {
+        a.rule
+            .cmp(&b.rule)
+            .then(a.file.cmp(&b.file))
+            .then(a.line.cmp(&b.line))
+    });
+    out.dedup_by(|a, b| a.rule == b.rule && a.file == b.file);
+    out
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,16 +192,32 @@ impl Rule {
     }
 }
 
-pub(crate) fn parse(yaml: &str) -> Result<Vec<Rule>> {
+pub(crate) fn parse_config(yaml: &str) -> Result<Config> {
     let config: ConfigFile = orbit_utils::yaml::from_str(yaml)
         .map_err(|e| anyhow::anyhow!("{CONFIG_PATH} is invalid: {e}"))?;
-    config.layers.into_iter().map(Rule::from_spec).collect()
+    Ok(Config {
+        layers: config
+            .layers
+            .into_iter()
+            .map(Rule::from_spec)
+            .collect::<Result<_>>()?,
+        forbid: config
+            .forbid
+            .into_iter()
+            .map(Forbid::from_spec)
+            .collect::<Result<_>>()?,
+    })
 }
 
-pub(crate) fn load(repo: &Path) -> Result<Option<Vec<Rule>>> {
+#[cfg(test)]
+pub(crate) fn parse(yaml: &str) -> Result<Vec<Rule>> {
+    Ok(parse_config(yaml)?.layers)
+}
+
+pub(crate) fn load(repo: &Path) -> Result<Option<Config>> {
     let path = repo.join(CONFIG_PATH);
     match std::fs::read_to_string(&path) {
-        Ok(yaml) => parse(&yaml).map(Some),
+        Ok(yaml) => parse_config(&yaml).map(Some),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e).with_context(|| format!("failed to read {}", path.display())),
     }
@@ -153,6 +267,62 @@ layers:
         pairs: &[(&'static str, &'static str)],
     ) -> Vec<(&'static str, &'static str, usize, &'static str)> {
         pairs.iter().map(|(a, b)| (*a, *b, 1, "")).collect()
+    }
+
+    const FORBID: &str = r#"
+forbid:
+  - name: outbound HTTP goes through Gitlab::HTTP
+    symbols: ["Net::HTTP", "Faraday", "HTTParty"]
+    only_in: ["lib/gitlab/http*.rb", "gems/gitlab-http/**"]
+    paths: ["app/**", "lib/**", "ee/**"]
+  - name: no Marshal
+    symbols: ["Marshal"]
+"#;
+
+    #[test]
+    fn forbid_matches_symbols_and_their_children_but_not_prefixes() {
+        let config = parse_config(FORBID).unwrap();
+        let found = check_symbols(
+            &config.forbid,
+            [
+                ("app/models/a.rb", "Net::HTTP::Post", 3),
+                ("app/models/a.rb", "::Net::HTTP", 4),
+                ("app/models/b.rb", "Net::HTTPS", 1),
+                ("app/models/c.rb", "FaradayMiddleware", 1),
+                ("lib/gitlab/http.rb", "Net::HTTP", 9),
+                ("spec/a_spec.rb", "Net::HTTP", 1),
+                ("spec/a_spec.rb", "Marshal", 2),
+            ],
+        );
+        let got: Vec<(&str, &str)> = found
+            .iter()
+            .map(|u| (u.rule.as_str(), u.file.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("no Marshal", "spec/a_spec.rb"),
+                ("outbound HTTP goes through Gitlab::HTTP", "app/models/a.rb"),
+            ]
+        );
+        assert_eq!(found[1].symbol, "Net::HTTP::Post");
+    }
+
+    #[test]
+    fn forbid_supports_wildcards() {
+        let config = parse_config(
+            "forbid:\n  - name: raw sql\n    symbols: [\"ActiveRecord::Base.connection*\"]\n",
+        )
+        .unwrap();
+        let found = check_symbols(
+            &config.forbid,
+            [
+                ("a.rb", "ActiveRecord::Base.connection.execute", 1),
+                ("b.rb", "ActiveRecord::Base", 1),
+            ],
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].file, "a.rb");
     }
 
     #[test]

@@ -95,14 +95,28 @@ pub(crate) fn run(options: Options) -> Result<()> {
         layers::CONFIG_PATH,
         spec::launcher()
     );
-    let wants_deps = rules.contains(&Rule::Cycles) || options.gate || layer_rules.is_some();
+    let has_layers = layer_rules.as_ref().is_some_and(|c| !c.layers.is_empty());
+    let wants_deps = rules.contains(&Rule::Cycles) || options.gate || has_layers;
     let deps = match wants_deps {
         true => Some(dependencies(&graph, options.depth)?),
         false => None,
     };
     let layer_violations = match (&layer_rules, &deps) {
-        (Some(layer_rules), Some(deps)) if rules.contains(&Rule::Layers) || options.gate => {
-            Some(layers::check(layer_rules, file_edges(&deps.files)))
+        (Some(config), Some(deps)) if rules.contains(&Rule::Layers) || options.gate => {
+            Some(layers::check(&config.layers, file_edges(&deps.files)))
+        }
+        _ => None,
+    };
+    let symbol_uses = match &layer_rules {
+        Some(config)
+            if !config.forbid.is_empty() && (rules.contains(&Rule::Layers) || options.gate) =>
+        {
+            Some(layers::check_symbols(
+                &config.forbid,
+                used_symbols(&graph)?
+                    .iter()
+                    .map(|(f, s, l)| (f.as_str(), s.as_str(), *l)),
+            ))
         }
         _ => None,
     };
@@ -125,9 +139,21 @@ pub(crate) fn run(options: Options) -> Result<()> {
             };
             let renames = Renames::between(&git.repo_path, &base.commit_sha, &git.commit_sha)?;
             let base_deps = dependencies(&base_graph, options.depth)?;
+            let base_symbol_uses: HashSet<(String, String, String)> = match &layer_rules {
+                Some(config) if !config.forbid.is_empty() => layers::check_symbols(
+                    &config.forbid,
+                    used_symbols(&base_graph)?
+                        .iter()
+                        .map(|(f, s, l)| (f.as_str(), s.as_str(), *l)),
+                )
+                .into_iter()
+                .map(|u| (u.rule, renames.file(&u.file), u.symbol))
+                .collect(),
+                _ => HashSet::new(),
+            };
             let base_layer_pairs: HashSet<(String, String, String)> = layer_rules
                 .as_ref()
-                .map(|rules| layers::check(rules, file_edges(&base_deps.files)))
+                .map(|config| layers::check(&config.layers, file_edges(&base_deps.files)))
                 .unwrap_or_default()
                 .into_iter()
                 .map(|v| (v.rule, renames.file(&v.from), renames.file(&v.to)))
@@ -152,6 +178,25 @@ pub(crate) fn run(options: Options) -> Result<()> {
                 layer_violations.as_deref().unwrap_or_default(),
                 &base_layer_pairs,
             ));
+            found.extend(
+                symbol_uses
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter(|u| {
+                        !base_symbol_uses.contains(&(
+                            u.rule.clone(),
+                            u.file.clone(),
+                            u.symbol.clone(),
+                        ))
+                    })
+                    .map(|u| {
+                        format!(
+                            "the change uses {} in {}:{}, which breaks `{}`",
+                            u.symbol, u.file, u.line, u.rule
+                        )
+                    }),
+            );
             found
         }
         None => Vec::new(),
@@ -163,7 +208,8 @@ pub(crate) fn run(options: Options) -> Result<()> {
         limit: options.limit,
         cycles: cycles.filter(|_| rules.contains(&Rule::Cycles)),
         layers: layer_violations.filter(|_| rules.contains(&Rule::Layers)),
-        layers_configured: layer_rules.as_ref().map(Vec::len),
+        layers_configured: layer_rules.as_ref().map(layers::Config::rule_count),
+        symbol_uses: symbol_uses.filter(|_| rules.contains(&Rule::Layers)),
         hotspots,
         dead: dead.filter(|_| rules.contains(&Rule::Dead)),
         violations: options.gate.then_some(violations),
@@ -964,6 +1010,21 @@ impl Renames {
     }
 }
 
+fn used_symbols(graph: &Graph) -> Result<Vec<(String, String, i64)>> {
+    let sql = "SELECT i.file_path AS file, i.import_path AS symbol, CAST(min(i.start_line) AS BIGINT) AS line
+FROM gl_imported_symbol i
+WHERE i.project_id = ?1 AND i.commit_sha = ?2 AND i.import_path <> ''
+GROUP BY i.file_path, i.import_path
+ORDER BY i.file_path, line";
+    let batches = graph.query(sql)?;
+    let files = string_column(&batches, "file");
+    let symbols = string_column(&batches, "symbol");
+    let lines = i64_column(&batches, "line");
+    Ok((0..files.len())
+        .map(|i| (files[i].clone(), symbols[i].clone(), lines[i]))
+        .collect())
+}
+
 fn file_edges(
     files: &BTreeMap<(String, String), FileEdge>,
 ) -> impl Iterator<Item = (&str, &str, usize, &str)> {
@@ -1030,6 +1091,7 @@ struct Report {
     cycles: Option<Vec<Cycle>>,
     layers: Option<Vec<layers::Violation>>,
     layers_configured: Option<usize>,
+    symbol_uses: Option<Vec<layers::SymbolUse>>,
     hotspots: Option<Vec<Hotspot>>,
     dead: Option<Vec<Dead>>,
     violations: Option<Vec<String>>,
@@ -1104,6 +1166,22 @@ impl Report {
                 }
             }
         }
+        if let Some(found) = &self.symbol_uses {
+            let _ = writeln!(out, "\nForbidden symbols: {}", found.len());
+            let mut by_rule: BTreeMap<&str, Vec<&layers::SymbolUse>> = BTreeMap::new();
+            for u in found {
+                by_rule.entry(u.rule.as_str()).or_default().push(u);
+            }
+            for (rule, list) in by_rule {
+                let _ = writeln!(out, "  {rule}: {} files", list.len());
+                for u in list.iter().take(self.limit) {
+                    let _ = writeln!(out, "     {}:{}  {}", u.file, u.line, u.symbol);
+                }
+                if list.len() > self.limit {
+                    let _ = writeln!(out, "     … {} more", list.len() - self.limit);
+                }
+            }
+        }
         if let Some(hotspots) = &self.hotspots {
             let churn = hotspots.iter().any(|spot| spot.churn.is_some());
             let _ = writeln!(out, "\nCoupling hotspots (most callers from other files):");
@@ -1172,6 +1250,9 @@ impl Report {
             })).collect::<Vec<_>>()),
             "layers": self.layers.as_ref().map(|found| found.iter().map(|v| json!({
                 "rule": v.rule, "from": v.from, "to": v.to, "refs": v.refs, "example": v.example,
+            })).collect::<Vec<_>>()),
+            "forbidden_symbols": self.symbol_uses.as_ref().map(|found| found.iter().map(|u| json!({
+                "rule": u.rule, "file": u.file, "line": u.line, "symbol": u.symbol,
             })).collect::<Vec<_>>()),
             "hotspots": self.hotspots.as_ref().map(|spots| spots.iter().map(|spot| json!({
                 "fqn": spot.fqn, "kind": spot.kind, "location": spot.loc,
