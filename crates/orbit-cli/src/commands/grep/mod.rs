@@ -141,10 +141,15 @@ async fn search(
         eprintln!("orbit: {reason}");
     }
     let label = query.clone().unwrap_or_default();
+    let started = std::time::Instant::now();
     let pending: Vec<_> = route
         .remote
         .into_iter()
-        .map(|request| tokio::spawn(crate::remote::grep::search(request, label.clone())))
+        .map(|request| {
+            let implicit = request.implicit;
+            let task = tokio::spawn(crate::remote::grep::search(request, label.clone()));
+            (implicit, task)
+        })
         .collect();
     if !pending.is_empty() {
         filter
@@ -173,11 +178,28 @@ async fn search(
         )?;
         printed = true;
     }
-    for task in pending {
-        match task
-            .await
-            .unwrap_or_else(|error| Outcome::Failed(error.to_string()))
-        {
+    for (implicit, task) in pending {
+        let outcome = match implicit {
+            true => {
+                let left = provider_deadline().saturating_sub(started.elapsed());
+                match tokio::time::timeout(left, task).await {
+                    Ok(joined) => joined.unwrap_or_else(|error| Outcome::Failed(error.to_string())),
+                    Err(_) => {
+                        eprintln!(
+                            "orbit: GitLab took over {}ms, so only code is shown; name a kind such as `mr:words` to wait for it",
+                            provider_deadline().as_millis()
+                        );
+                        continue;
+                    }
+                }
+            }
+            false => task
+                .await
+                .unwrap_or_else(|error| Outcome::Failed(error.to_string())),
+        };
+        match outcome {
+            Outcome::NoMatches(_) | Outcome::Skipped(_) | Outcome::Failed(_) | Outcome::Empty
+                if implicit => {}
             Outcome::Found(text) => {
                 let mut out = std::io::stdout().lock();
                 if printed {
@@ -414,6 +436,14 @@ fn local(
 }
 
 const NOTE: &str = "» ";
+
+fn provider_deadline() -> std::time::Duration {
+    let millis = std::env::var("ORBIT_PROVIDER_DEADLINE_MS")
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(3000);
+    std::time::Duration::from_millis(millis)
+}
 
 const FALLBACK_LINES: usize = 4;
 const FALLBACK_FILES: usize = 5;

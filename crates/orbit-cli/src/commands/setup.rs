@@ -2507,7 +2507,7 @@ mod tests {
 
         let plugin =
             std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();
-        assert!(plugin.contains("run orbit grep"));
+        assert!(plugin.contains("Search with orbit grep"));
         assert!(!plugin.contains("{{"));
     }
 }

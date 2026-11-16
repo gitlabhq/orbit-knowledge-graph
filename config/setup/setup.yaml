@@ -2,18 +2,20 @@
 instructions: |
   ## Orbit
 
-  - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR; narrow with paths, `def:words`, or `file:x`.{{remote_grep}}
-  - MANDATORY: `{{orbit}} context` must be used for reading code instead of reading files. Batch all reads and searches you can name, code with tests: `{{orbit}} context a.rs:10-40 a_test.rs:5-60 Name; {{orbit}} grep 'x'`. Names show connections. Edit straight from its output; no separate read is needed.{{remote_gitlab}}{{remote_query}}{{server_entities}}
+  - `{{orbit}} grep` is one search across every connected provider: your code{{remote_providers}}. Run it on a task's key words before you start, to find the code{{remote_finds}} involved. Like rg; ignores case, `_`, `-`; `a|b` OR; narrow to code with paths, `def:words`, or `file:x`.{{remote_grep}}
+  - `{{orbit}} context` reads what grep found, with connections: `{{orbit}} context a.rs:10-40 a_test.rs:5-60 Name; {{orbit}} grep 'x'`. Batch the reads and searches you can name.{{remote_gitlab}}{{remote_query}}{{server_entities}}
 
 remote:
-  remote_grep: " Prefix a GitLab kind to search GitLab: {{gitlab_kinds}}."
-  remote_gitlab: "\n- MANDATORY: `{{orbit}}` must be used for reading GitLab instead of glab and glab api; writes stay with glab. `{{orbit}} context mr:42 job:9` reads GitLab; bare `{{orbit}} context` reads the branch's MR and CI failures, and `repo:group/project symbol:Name` a sibling project."
-  remote_query: "\n- MANDATORY: `{{orbit}} query` must be used for counts, rankings, and relationships across GitLab. {{query_syntax}}"
+  remote_providers: " and GitLab"
+  remote_finds: ", MRs, issues, and discussions"
+  remote_grep: " A kind prefix searches only GitLab: {{gitlab_kinds}}."
+  remote_gitlab: "\n- Read GitLab with `{{orbit}}` rather than glab and glab api; writes stay with glab. `{{orbit}} context mr:42 job:9` reads GitLab; bare `{{orbit}} context` reads the branch's MR and CI failures, and `repo:group/project symbol:Name` a sibling project."
+  remote_query: "\n- Use `{{orbit}} query` for counts, rankings, and relationships across GitLab. {{query_syntax}}"
 server_entities: "\n\nConnected providers and their entities, for `{{orbit}} query` and `{{orbit}} grep gitlab:type:words`:\n{{entities}}"
 
 nudge_gitlab: |
-  MANDATORY: `{{orbit}}` must be used for reading GitLab instead of glab; writes stay with glab. `{{orbit}} grep` is local-only; GitLab entities: {{gitlab_kinds}}. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI; `{{orbit}} context repo:group/project symbol:Name file:path` reads a sibling project's code.
+  `{{orbit}}` reads GitLab; writes stay with glab. `{{orbit}} grep 'words'` searches code and GitLab together, or one GitLab kind with {{gitlab_kinds}}. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI; `{{orbit}} context repo:group/project symbol:Name file:path` reads a sibling project's code.
 nudge_search: |
-  MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `def:words`/`file:x`.
+  `{{orbit}} grep 'words'` searches code and every connected provider at once, with the enclosing definitions. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `def:words`/`file:x`.
 template_vars:
-  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. rg output plus enclosing definitions."
+  reminder: "[orbit] Search with {{orbit}} grep 'words': code and connected providers at once, with enclosing definitions."

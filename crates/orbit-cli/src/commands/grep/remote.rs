@@ -88,6 +88,7 @@ pub(super) fn route(
     let searchable = searchable(query, kinds, options);
     let remote_only = searchable.is_some() && !kinds.is_empty() && every_kind_hosted(kinds);
     let explicit = !targets.is_empty();
+    let implicit = !explicit && local_paths.is_empty() && kinds.is_empty() && !keeps_local();
     if targets.is_empty() && local_paths.is_empty() && !searched_kinds(kinds).is_empty() {
         targets.push(Target::Origin(
             repo.map_or_else(|| PathBuf::from("."), Path::to_path_buf),
@@ -122,6 +123,11 @@ pub(super) fn route(
         }
         return Ok(route);
     };
+    if implicit {
+        targets.push(Target::Origin(
+            repo.map_or_else(|| PathBuf::from("."), Path::to_path_buf),
+        ));
+    }
     for target in targets.drain(..) {
         route.remote.push(Request {
             target,
@@ -129,9 +135,19 @@ pub(super) fn route(
             kinds: searched_kinds(kinds),
             graph: None,
             budget: budget.clone(),
+            implicit,
         });
     }
     Ok(route)
+}
+
+fn keeps_local() -> bool {
+    std::env::var("ORBIT_NO_GITLAB").is_ok_and(|value| {
+        !matches!(
+            value.trim().to_lowercase().as_str(),
+            "" | "0" | "false" | "off" | "no"
+        )
+    })
 }
 
 fn graph_route(
@@ -174,6 +190,7 @@ fn graph_route(
             kinds: Vec::new(),
             graph: Some(kind.to_string()),
             budget: budget.clone(),
+            implicit: false,
         })
         .collect();
     Ok(Route {
