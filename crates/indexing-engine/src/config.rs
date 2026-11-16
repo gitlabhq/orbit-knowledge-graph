@@ -1,0 +1,102 @@
+use std::collections::BTreeMap;
+use std::time::Duration;
+
+use serde::{Deserialize, Deserializer};
+
+const DEFAULT_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineConfig {
+    #[serde(default)]
+    pub lanes: BTreeMap<String, LaneConfig>,
+    #[serde(default)]
+    pub pools: BTreeMap<String, PoolConfig>,
+    #[serde(default)]
+    pub planner: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaneConfig {
+    pub slots: u32,
+    #[serde(deserialize_with = "parse_duration")]
+    pub timeout: Duration,
+    #[serde(default = "default_max_age", deserialize_with = "parse_duration")]
+    pub max_age: Duration,
+    #[serde(default)]
+    pub on_timeout: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum PoolConfig {
+    Pod(u32),
+    Cluster(ClusterPoolConfig),
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClusterPoolConfig {
+    pub cluster: bool,
+    pub per_key: u32,
+    pub unknown_key: u32,
+    #[serde(deserialize_with = "parse_duration")]
+    pub max_wait: Duration,
+}
+
+impl EngineConfig {
+    pub fn with_lane(mut self, lane: impl Into<String>, config: LaneConfig) -> Self {
+        self.lanes.insert(lane.into(), config);
+        self
+    }
+
+    pub fn with_pool(mut self, pool: impl Into<String>, config: PoolConfig) -> Self {
+        self.pools.insert(pool.into(), config);
+        self
+    }
+}
+
+impl LaneConfig {
+    pub fn new(slots: u32, timeout: Duration) -> Self {
+        Self {
+            slots,
+            timeout,
+            max_age: DEFAULT_MAX_AGE,
+            on_timeout: None,
+        }
+    }
+
+    pub fn on_timeout(mut self, lane: impl Into<String>) -> Self {
+        self.on_timeout = Some(lane.into());
+        self
+    }
+}
+
+fn default_max_age() -> Duration {
+    DEFAULT_MAX_AGE
+}
+
+fn parse_duration<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> {
+    let text = String::deserialize(deserializer)?;
+    let unit_start = text
+        .find(|c: char| !c.is_ascii_digit())
+        .ok_or_else(|| serde::de::Error::custom(format!("duration {text:?} has no unit")))?;
+    let (amount, unit) = text.split_at(unit_start);
+    let amount: u64 = amount
+        .parse()
+        .map_err(|_| serde::de::Error::custom(format!("duration {text:?} has no amount")))?;
+    let seconds = match unit {
+        "ms" => return Ok(Duration::from_millis(amount)),
+        "s" => amount,
+        "m" => amount * 60,
+        "h" => amount * 60 * 60,
+        "d" => amount * 24 * 60 * 60,
+        _ => {
+            return Err(serde::de::Error::custom(format!(
+                "duration {text:?} must end in ms, s, m, h or d"
+            )));
+        }
+    };
+    Ok(Duration::from_secs(seconds))
+}
