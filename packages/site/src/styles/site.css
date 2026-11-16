@@ -1075,7 +1075,16 @@
   }
 }
 
-/* Typed text keeps the placeholder's size, before and after an answer. */
+/* The input and its placeholder use the chat's text size, before and after an answer. */
 .next-chat.agent-chat .agent-prompt-input {
-  font-size: var(--gl-font-size-400);
+  font-size: var(--gl-font-size-300);
+}
+
+/* Each example is only as wide as its label, so a selected one's fill hugs the text. */
+.next-demo-group {
+  align-items: flex-start;
+}
+
+.next-demo-example {
+  width: fit-content;
 }
