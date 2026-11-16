@@ -191,10 +191,23 @@ mod tests {
         );
         assert_eq!(shared(&first), shared(&same));
         assert_ne!(shared(&first), shared(&other));
-        let preset = database(&format!(
-            "config: {{seed: other}}\n{QUERY}expect: {{node_count: 1}}"
-        ));
-        assert_ne!(shared(&preset), shared(&first));
+        let configured = |config: &str| {
+            database(&format!(
+                "config: {{{config}}}\n{QUERY}expect: {{node_count: 1}}"
+            ))
+        };
+        let variants = [
+            configured("seed: other"),
+            configured("seed: other, extra_seed: {gl_user: [{id: 1}]}"),
+            configured("extra_seed: {gl_user: [{id: 1}]}, unmerged_seed: true"),
+            configured("ontology_overlay: denorm_approved"),
+            configured("extra_seed: {gl_user: [{id: 1}]}, ontology_overlay: denorm_approved"),
+        ];
+        let mut names: Vec<&str> = variants.iter().map(shared).collect();
+        names.push(shared(&first));
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), variants.len() + 1);
 
         let datasets = Datasets::new([&first, &same, &other].into_iter());
         let users =
