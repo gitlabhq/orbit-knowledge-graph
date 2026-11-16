@@ -7,7 +7,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::payload::{Key, Payload};
-use crate::resources::FromResources;
 
 pub use error::TaskError;
 pub use outcome::Outcome;
@@ -18,7 +17,7 @@ pub(crate) use outcome::{Completion, EncodedOutcome};
 pub(crate) use pool::Pools;
 
 #[async_trait]
-pub trait Worker: FromResources + Send + Sync + 'static {
+pub trait Worker: Send + Sync + 'static {
     const NAME: &'static str;
     const EXCLUSIVE: bool = false;
     type Input: Payload;

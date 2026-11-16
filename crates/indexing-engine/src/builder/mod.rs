@@ -6,7 +6,6 @@ use std::sync::Arc;
 use crate::config::EngineConfig;
 use crate::planner::Planner;
 use crate::reconciler::Reconciler;
-use crate::resources::Resources;
 use crate::worker::Worker;
 
 pub use validate::BuildError;
@@ -23,7 +22,6 @@ pub struct Engine {
 #[derive(Clone, Default)]
 pub struct EngineBuilder {
     config: EngineConfig,
-    resources: Resources,
     workers: Vec<WorkerEntry>,
     planners: Vec<PlannerEntry>,
     reconcilers: Vec<ReconcilerEntry>,
@@ -42,28 +40,23 @@ impl EngineBuilder {
         self
     }
 
-    pub fn resources(mut self, resources: Resources) -> Self {
-        self.resources = resources;
-        self
-    }
-
     pub fn module(mut self, register: impl FnOnce(&mut EngineBuilder)) -> Self {
         register(&mut self);
         self
     }
 
-    pub fn worker<W: Worker>(&mut self) -> &mut Self {
-        self.workers.push(WorkerEntry::of::<W>());
+    pub fn worker<W: Worker>(&mut self, worker: W) -> &mut Self {
+        self.workers.push(WorkerEntry::of(worker));
         self
     }
 
-    pub fn planner<P: Planner>(&mut self) -> &mut Self {
-        self.planners.push(PlannerEntry::of::<P>());
+    pub fn planner<P: Planner>(&mut self, planner: P) -> &mut Self {
+        self.planners.push(PlannerEntry::of(planner));
         self
     }
 
-    pub fn reconciler<R: Reconciler>(&mut self) -> &mut Self {
-        self.reconcilers.push(ReconcilerEntry::of::<R>());
+    pub fn reconciler<R: Reconciler>(&mut self, reconciler: R) -> &mut Self {
+        self.reconcilers.push(ReconcilerEntry::of(reconciler));
         self
     }
 
@@ -78,13 +71,12 @@ impl EngineBuilder {
         validate::reject_unregistered_pools(&self)?;
         validate::reject_done_triggers_on_unknown_workers(&self)?;
         validate::reject_tables_with_two_writers(&self)?;
-        let registry = Registry::instantiate(
+        let registry = Registry::from_entries(
             &self.workers,
             &self.planners,
             &self.reconcilers,
             &self.pools,
-            &self.resources,
-        )?;
+        );
         Ok(Engine {
             registry: Arc::new(registry),
             config: self.config,

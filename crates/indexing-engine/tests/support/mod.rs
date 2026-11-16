@@ -5,12 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use indexing_engine::prelude::*;
 use indexing_engine::testkit::Testkit;
-use indexing_engine::{
-    EngineBuilder, Fired, FromResources, Key, Lane, MissingResource, Outcome, PlanContext,
-    PlanError, Planner, ReconcileContext, ReconcileError, Reconciler, Resources, TaskContext,
-    TaskError, Tenant, Trigger, Worker,
-};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
@@ -81,7 +77,13 @@ pub struct SummaryPlanner;
 
 pub struct DocStatus {
     library: Arc<Library>,
-    board: Arc<StatusBoard>,
+    board: StatusBoard,
+}
+
+pub struct Fixtures {
+    pub script: Arc<Script>,
+    pub library: Arc<Library>,
+    pub board: StatusBoard,
 }
 
 pub fn tenant() -> Tenant {
@@ -97,18 +99,23 @@ pub fn doc(id: u64, size: u64) -> Doc {
 }
 
 pub fn changed(docs: &[Doc]) -> Fired {
-    match indexing_engine::EventBatch::encode("docs.changed", docs) {
+    match EventBatch::encode("docs.changed", docs) {
         Ok(batch) => Fired::Events(batch),
         Err(error) => panic!("test docs must encode: {error}"),
     }
 }
 
 pub fn kit(script: Script, docs: Vec<Doc>, board: StatusBoard) -> Testkit {
-    Testkit::new()
-        .provide(script)
-        .provide(Library { docs })
-        .provide(board)
-        .module(register)
+    let fixtures = fixtures(script, docs, board);
+    Testkit::new().module(|engine| register(engine, &fixtures))
+}
+
+pub fn fixtures(script: Script, docs: Vec<Doc>, board: StatusBoard) -> Fixtures {
+    Fixtures {
+        script: Arc::new(script),
+        library: Arc::new(Library { docs }),
+        board,
+    }
 }
 
 pub fn script(steps: impl IntoIterator<Item = Step>) -> Script {
@@ -117,15 +124,22 @@ pub fn script(steps: impl IntoIterator<Item = Step>) -> Script {
     }
 }
 
-pub fn register(engine: &mut EngineBuilder) {
+pub fn register(engine: &mut EngineBuilder, fixtures: &Fixtures) {
     engine
-        .worker::<DocIndex>()
-        .worker::<ShelfSplit>()
-        .worker::<SummaryBuild>()
-        .planner::<DocPlanner>()
-        .planner::<ShelfPlanner>()
-        .planner::<SummaryPlanner>()
-        .reconciler::<DocStatus>()
+        .worker(DocIndex {
+            script: Arc::clone(&fixtures.script),
+        })
+        .worker(ShelfSplit)
+        .worker(SummaryBuild)
+        .planner(DocPlanner {
+            library: Arc::clone(&fixtures.library),
+        })
+        .planner(ShelfPlanner)
+        .planner(SummaryPlanner)
+        .reconciler(DocStatus {
+            library: Arc::clone(&fixtures.library),
+            board: fixtures.board.clone(),
+        })
         .pool("parse");
 }
 
@@ -141,14 +155,6 @@ impl Script {
             .lock()
             .pop_front()
             .unwrap_or(Step::Done { rows: 1 })
-    }
-}
-
-impl FromResources for DocIndex {
-    fn from_resources(resources: &Resources) -> Result<Self, MissingResource> {
-        Ok(Self {
-            script: resources.get()?,
-        })
     }
 }
 
@@ -183,12 +189,6 @@ impl Worker for DocIndex {
     }
 }
 
-impl FromResources for ShelfSplit {
-    fn from_resources(_: &Resources) -> Result<Self, MissingResource> {
-        Ok(Self)
-    }
-}
-
 #[async_trait]
 impl Worker for ShelfSplit {
     const NAME: &'static str = "shelf.split";
@@ -204,12 +204,6 @@ impl Worker for ShelfSplit {
     }
 }
 
-impl FromResources for SummaryBuild {
-    fn from_resources(_: &Resources) -> Result<Self, MissingResource> {
-        Ok(Self)
-    }
-}
-
 #[async_trait]
 impl Worker for SummaryBuild {
     const NAME: &'static str = "summary.build";
@@ -222,14 +216,6 @@ impl Worker for SummaryBuild {
 
     async fn run(&self, _: &TaskContext, _: Doc) -> Result<Outcome<()>, TaskError> {
         Ok(Outcome::done(()))
-    }
-}
-
-impl FromResources for DocPlanner {
-    fn from_resources(resources: &Resources) -> Result<Self, MissingResource> {
-        Ok(Self {
-            library: resources.get()?,
-        })
     }
 }
 
@@ -275,12 +261,6 @@ impl Planner for DocPlanner {
     }
 }
 
-impl FromResources for ShelfPlanner {
-    fn from_resources(_: &Resources) -> Result<Self, MissingResource> {
-        Ok(Self)
-    }
-}
-
 #[async_trait]
 impl Planner for ShelfPlanner {
     const NAME: &'static str = "shelf.planner";
@@ -306,12 +286,6 @@ impl Planner for ShelfPlanner {
     }
 }
 
-impl FromResources for SummaryPlanner {
-    fn from_resources(_: &Resources) -> Result<Self, MissingResource> {
-        Ok(Self)
-    }
-}
-
 #[async_trait]
 impl Planner for SummaryPlanner {
     const NAME: &'static str = "summary.planner";
@@ -330,15 +304,6 @@ impl Planner for SummaryPlanner {
             Fired::Manual { .. } | Fired::Sweep { .. } | Fired::Cron => {}
         }
         Ok(())
-    }
-}
-
-impl FromResources for DocStatus {
-    fn from_resources(resources: &Resources) -> Result<Self, MissingResource> {
-        Ok(Self {
-            library: resources.get()?,
-            board: resources.get()?,
-        })
     }
 }
 

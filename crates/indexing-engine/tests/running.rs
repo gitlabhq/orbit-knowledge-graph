@@ -2,11 +2,11 @@ mod support;
 
 use std::time::Duration;
 
-use indexing_engine::testkit::Testkit;
-use indexing_engine::{EngineConfig, EventBatch, Fired, Key, Lane, LaneConfig, PoolConfig, Worker};
+use indexing_engine::prelude::*;
+use indexing_engine::{EngineConfig, LaneConfig, PoolConfig};
 use support::{
-    BIG, DocIndex, DocPlanner, Library, Shelf, ShelfPlanner, ShelfSplit, StatusBoard, Step,
-    SummaryBuild, changed, doc, kit, register, script, tenant,
+    BIG, DocIndex, DocPlanner, Shelf, ShelfPlanner, ShelfSplit, StatusBoard, Step, SummaryBuild,
+    changed, doc, kit, script, tenant,
 };
 
 fn doc_key(id: u64) -> Key {
@@ -228,12 +228,12 @@ async fn a_pool_that_no_module_registered_is_a_permanent_error() {
 #[tokio::test(start_paused = true)]
 async fn a_sized_pool_gives_a_permit() {
     let config = EngineConfig::default().with_pool("parse", PoolConfig::Pod(2));
-    let kit = Testkit::new()
-        .provide(script([Step::Pool("parse")]))
-        .provide(Library::default())
-        .provide(StatusBoard::default())
-        .config(config)
-        .module(register);
+    let kit = kit(
+        script([Step::Pool("parse")]),
+        vec![],
+        StatusBoard::default(),
+    )
+    .config(config);
 
     kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10)]))
         .await

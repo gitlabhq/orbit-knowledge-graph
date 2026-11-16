@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::builder::EngineBuilder;
 use crate::lane::Lane;
-use crate::resources::MissingResource;
 use crate::trigger::Trigger;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -32,8 +31,6 @@ pub enum BuildError {
         first: &'static str,
         second: &'static str,
     },
-    #[error(transparent)]
-    MissingResource(#[from] MissingResource),
 }
 
 pub(super) fn reject_invalid_or_duplicate_names(builder: &EngineBuilder) -> Result<(), BuildError> {
@@ -83,7 +80,7 @@ pub(super) fn reject_done_triggers_on_unknown_workers(
 ) -> Result<(), BuildError> {
     let workers: BTreeSet<&str> = builder.workers.iter().map(|entry| entry.name).collect();
     for planner in &builder.planners {
-        for trigger in (planner.triggers)() {
+        for trigger in &planner.triggers {
             if let Trigger::Done(done) = trigger
                 && !workers.contains(done.worker())
             {

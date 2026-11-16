@@ -10,7 +10,6 @@ use crate::ledger::JobSummary;
 use crate::payload::{Key, Tenant};
 use crate::planner::{Plan, PlanError, Planner};
 use crate::reconciler::{ReconcileContext, ReconcileError, Reconciler};
-use crate::resources::Resources;
 use crate::trigger::Fired;
 use crate::worker::Worker;
 
@@ -21,7 +20,6 @@ use runtime::KitRuntime;
 #[derive(Default)]
 pub struct Testkit {
     builder: EngineBuilder,
-    resources: Resources,
     runtime: OnceLock<Arc<KitRuntime>>,
 }
 
@@ -32,11 +30,6 @@ pub struct PlannedTasks {
 impl Testkit {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn provide<T: Send + Sync + 'static>(mut self, value: T) -> Self {
-        self.resources = self.resources.provide(value);
-        self
     }
 
     pub fn config(mut self, config: EngineConfig) -> Self {
@@ -86,11 +79,7 @@ impl Testkit {
 
     fn get_or_build_runtime(&self) -> &Arc<KitRuntime> {
         self.runtime.get_or_init(|| {
-            let built = self
-                .builder
-                .clone()
-                .resources(self.resources.clone())
-                .build();
+            let built = self.builder.clone().build();
             match built {
                 Ok(engine) => Arc::new(KitRuntime::new(engine)),
                 Err(error) => panic!("the testkit engine failed to build: {error}"),

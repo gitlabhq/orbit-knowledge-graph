@@ -4,12 +4,11 @@ use async_trait::async_trait;
 
 use crate::lane::Lane;
 use crate::payload::{TaskInput, Tenant};
-use crate::resources::FromResources;
 use crate::trigger::{Fired, Trigger};
 use crate::worker::Worker;
 
 #[async_trait]
-pub trait Planner: FromResources + Send + Sync + 'static {
+pub trait Planner: Send + Sync + 'static {
     const NAME: &'static str;
 
     fn triggers() -> Vec<Trigger>;

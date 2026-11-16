@@ -1,6 +1,6 @@
 mod support;
 
-use indexing_engine::{Fired, Lane};
+use indexing_engine::prelude::*;
 use support::{BIG, Doc, DocIndex, DocPlanner, StatusBoard, changed, doc, kit, script};
 
 #[tokio::test]

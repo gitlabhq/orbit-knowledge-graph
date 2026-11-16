@@ -5,7 +5,6 @@ use async_trait::async_trait;
 
 use crate::planner::{Plan, PlanContext, PlanError, Planner};
 use crate::reconciler::{ReconcileContext, ReconcileError, Reconciler};
-use crate::resources::{MissingResource, Resources};
 use crate::trigger::{Fired, Trigger};
 use crate::worker::{EncodedOutcome, TaskContext, TaskError, Worker};
 
@@ -34,21 +33,21 @@ pub(crate) trait ErasedReconciler: Send + Sync {
 #[derive(Clone)]
 pub(crate) struct WorkerEntry {
     pub(crate) name: &'static str,
-    make: fn(&Resources) -> Result<Arc<dyn ErasedWorker>, MissingResource>,
+    worker: Arc<dyn ErasedWorker>,
 }
 
 #[derive(Clone)]
 pub(crate) struct PlannerEntry {
     pub(crate) name: &'static str,
-    pub(crate) triggers: fn() -> Vec<Trigger>,
-    make: fn(&Resources) -> Result<Arc<dyn ErasedPlanner>, MissingResource>,
+    pub(crate) triggers: Vec<Trigger>,
+    planner: Arc<dyn ErasedPlanner>,
 }
 
 #[derive(Clone)]
 pub(crate) struct ReconcilerEntry {
     pub(crate) name: &'static str,
     pub(crate) writes: &'static [&'static str],
-    make: fn(&Resources) -> Result<Arc<dyn ErasedReconciler>, MissingResource>,
+    reconciler: Arc<dyn ErasedReconciler>,
 }
 
 struct RegisteredPlanner {
@@ -61,37 +60,31 @@ struct PlannerAdapter<P>(P);
 struct ReconcilerAdapter<R>(R);
 
 impl Registry {
-    pub(crate) fn instantiate(
+    pub(crate) fn from_entries(
         workers: &[WorkerEntry],
         planners: &[PlannerEntry],
         reconcilers: &[ReconcilerEntry],
         pools: &[&'static str],
-        resources: &Resources,
-    ) -> Result<Self, MissingResource> {
-        let mut registry = Self {
-            workers: BTreeMap::new(),
-            planners: BTreeMap::new(),
-            reconcilers: BTreeMap::new(),
-            pools: pools.iter().copied().collect(),
-        };
-        for entry in workers {
-            registry
-                .workers
-                .insert(entry.name, (entry.make)(resources)?);
-        }
-        for entry in planners {
-            let planner = RegisteredPlanner {
-                planner: (entry.make)(resources)?,
-                triggers: (entry.triggers)(),
+    ) -> Self {
+        let planners = planners.iter().map(|entry| {
+            let registered = RegisteredPlanner {
+                planner: Arc::clone(&entry.planner),
+                triggers: entry.triggers.clone(),
             };
-            registry.planners.insert(entry.name, planner);
+            (entry.name, registered)
+        });
+        Self {
+            workers: workers
+                .iter()
+                .map(|entry| (entry.name, Arc::clone(&entry.worker)))
+                .collect(),
+            planners: planners.collect(),
+            reconcilers: reconcilers
+                .iter()
+                .map(|entry| (entry.name, Arc::clone(&entry.reconciler)))
+                .collect(),
+            pools: pools.iter().copied().collect(),
         }
-        for entry in reconcilers {
-            registry
-                .reconcilers
-                .insert(entry.name, (entry.make)(resources)?);
-        }
-        Ok(registry)
     }
 
     pub(crate) fn find_worker(&self, name: &str) -> Option<&Arc<dyn ErasedWorker>> {
@@ -126,30 +119,30 @@ impl Registry {
 }
 
 impl WorkerEntry {
-    pub(crate) fn of<W: Worker>() -> Self {
+    pub(crate) fn of<W: Worker>(worker: W) -> Self {
         Self {
             name: W::NAME,
-            make: |resources| Ok(Arc::new(WorkerAdapter(W::from_resources(resources)?))),
+            worker: Arc::new(WorkerAdapter(worker)),
         }
     }
 }
 
 impl PlannerEntry {
-    pub(crate) fn of<P: Planner>() -> Self {
+    pub(crate) fn of<P: Planner>(planner: P) -> Self {
         Self {
             name: P::NAME,
-            triggers: P::triggers,
-            make: |resources| Ok(Arc::new(PlannerAdapter(P::from_resources(resources)?))),
+            triggers: P::triggers(),
+            planner: Arc::new(PlannerAdapter(planner)),
         }
     }
 }
 
 impl ReconcilerEntry {
-    pub(crate) fn of<R: Reconciler>() -> Self {
+    pub(crate) fn of<R: Reconciler>(reconciler: R) -> Self {
         Self {
             name: R::NAME,
             writes: R::WRITES,
-            make: |resources| Ok(Arc::new(ReconcilerAdapter(R::from_resources(resources)?))),
+            reconciler: Arc::new(ReconcilerAdapter(reconciler)),
         }
     }
 }

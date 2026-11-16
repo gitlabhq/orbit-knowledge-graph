@@ -3,19 +3,11 @@ mod support;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use indexing_engine::{
-    BuildError, Engine, EngineConfig, FromResources, LaneConfig, MissingResource, PoolConfig,
-    ReconcileContext, ReconcileError, Reconciler, Resources,
-};
-use support::{DocIndex, Library, Script, StatusBoard, SummaryPlanner, register};
+use indexing_engine::prelude::*;
+use indexing_engine::{BuildError, Engine, EngineConfig, LaneConfig, PoolConfig};
+use support::{Script, StatusBoard, SummaryPlanner, fixtures, register};
 
 struct SecondDocStatus;
-
-impl FromResources for SecondDocStatus {
-    fn from_resources(_: &Resources) -> Result<Self, MissingResource> {
-        Ok(Self)
-    }
-}
 
 #[async_trait]
 impl Reconciler for SecondDocStatus {
@@ -28,18 +20,17 @@ impl Reconciler for SecondDocStatus {
     }
 }
 
-fn resources() -> Resources {
-    Resources::new()
-        .provide(Script::default())
-        .provide(Library::default())
-        .provide(StatusBoard::default())
+fn register_docs(engine: &mut EngineBuilder) {
+    register(
+        engine,
+        &fixtures(Script::default(), vec![], StatusBoard::default()),
+    );
 }
 
 fn build_with(config: EngineConfig) -> Result<Engine, BuildError> {
     Engine::builder()
         .config(config)
-        .resources(resources())
-        .module(register)
+        .module(register_docs)
         .build()
 }
 
@@ -59,24 +50,14 @@ fn builds_a_valid_engine() {
 #[test]
 fn rejects_two_workers_with_one_name() {
     let built = Engine::builder()
-        .resources(resources())
-        .module(register)
-        .module(|engine| {
-            engine.worker::<DocIndex>();
-        })
+        .module(register_docs)
+        .module(register_docs)
         .build();
 
     assert!(matches!(
         built,
         Err(BuildError::DuplicateName { kind: "worker", .. })
     ));
-}
-
-#[test]
-fn rejects_a_missing_resource() {
-    let built = Engine::builder().module(register).build();
-
-    assert!(matches!(built, Err(BuildError::MissingResource(_))));
 }
 
 #[test]
@@ -95,10 +76,8 @@ fn rejects_a_config_lane_without_a_worker() {
 
 #[test]
 fn rejects_an_on_timeout_lane_of_another_worker() {
-    let built = build_with(
-        EngineConfig::default()
-            .with_lane("doc.index/default", lane().on_timeout("summary.build/big")),
-    );
+    let lane = lane().on_timeout("summary.build/big");
+    let built = build_with(EngineConfig::default().with_lane("doc.index/default", lane));
 
     assert!(matches!(built, Err(BuildError::UnknownTimeoutLane { .. })));
 }
@@ -116,9 +95,8 @@ fn rejects_a_config_pool_that_no_module_registered() {
 #[test]
 fn rejects_a_done_trigger_on_a_worker_that_no_module_registered() {
     let built = Engine::builder()
-        .resources(resources())
         .module(|engine| {
-            engine.planner::<SummaryPlanner>();
+            engine.planner(SummaryPlanner);
         })
         .build();
 
@@ -131,10 +109,9 @@ fn rejects_a_done_trigger_on_a_worker_that_no_module_registered() {
 #[test]
 fn rejects_two_reconcilers_that_write_one_table() {
     let built = Engine::builder()
-        .resources(resources())
-        .module(register)
+        .module(register_docs)
         .module(|engine| {
-            engine.reconciler::<SecondDocStatus>();
+            engine.reconciler(SecondDocStatus);
         })
         .build();
 

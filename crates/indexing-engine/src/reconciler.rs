@@ -7,11 +7,10 @@ use async_trait::async_trait;
 use crate::ledger::JobSummary;
 use crate::payload::{Key, Tenant};
 use crate::planner::Planner;
-use crate::resources::FromResources;
 use crate::worker::Worker;
 
 #[async_trait]
-pub trait Reconciler: FromResources + Send + Sync + 'static {
+pub trait Reconciler: Send + Sync + 'static {
     const NAME: &'static str;
     const WRITES: &'static [&'static str];
     const EVERY: Duration;
