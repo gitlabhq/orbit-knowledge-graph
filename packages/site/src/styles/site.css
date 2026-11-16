@@ -1055,7 +1055,7 @@
   right: var(--main-scrollbar, 0px);
 }
 
-/* The scale band has no wave of dots; the code search section above carries a faint one below its cards. */
+/* The scale band has no wave of dots. */
 .next-scale .field-band-field {
   display: none;
 }
@@ -1066,10 +1066,6 @@
   font-size: clamp(2.25rem, 4vw, 3.25rem);
 }
 
-/* The faint wave of dots under the code search cards, like the field at the end of the home page. */
-.next-faint-wave {
-  opacity: 0.45;
-}
 
 /* The demo starts close under the headline. */
 .next-hero .next-hero-demo {
