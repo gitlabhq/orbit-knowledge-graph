@@ -958,6 +958,8 @@ integration-tests-codegraph:
     - .test-template
     - .mr-and-main-rules
   needs: []
+  tags:
+    - ${RUNNER_LARGE}
   script:
     - cargo nextest run --profile ci -p integration-tests-codegraph --no-fail-fast
     - sccache --show-stats || true
