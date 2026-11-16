@@ -22,11 +22,11 @@ const AT = [0.03, 0.11, 0.19, 0.3, 0.41, 0.7];
 const HOPS: Hop[] = INCIDENT.steps!.map((step, index) => ({ tool: step.tool, label: step.name, x: INCIDENT.points![index]![0], y: INCIDENT.points![index]![1], at: AT[index]!, tone: step.tone }));
 // Each read is one tool call. What it finds shows on the map, so the log keeps only the calls and the fix.
 const LOG: RippleLogLine[] = [
-  { at: 0.03, tool: true, text: "Explore incident.io" },
-  { at: 0.11, tool: true, text: "Explore Grafana" },
-  { at: 0.19, tool: true, text: "Explore GitLab" },
-  { at: 0.3, tool: true, text: "Explore Slack" },
-  { at: 0.41, tool: true, text: "Explore code search" },
+  { at: 0.03, tool: true, text: "Read the incident" },
+  { at: 0.11, tool: true, text: "Checked Grafana alerts" },
+  { at: 0.19, tool: true, text: "Traced GitLab deploys" },
+  { at: 0.3, tool: true, text: "Searched Slack" },
+  { at: 0.41, tool: true, text: "Searched code" },
   { at: 0.52, text: "Adding a timeout to cache.get." },
   { at: 0.6, tone: "ok", text: "checkout-api!43 opened, pipeline passed" },
   { at: 0.7, tone: "ok", text: "!43 deployed to production" },

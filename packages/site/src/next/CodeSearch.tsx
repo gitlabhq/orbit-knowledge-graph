@@ -8,6 +8,16 @@ const textOf = (search: Search) => search.ask ?? (search.kind === "code" ? searc
 const TYPE_MS = 22;
 // A chat in use fits the window with this much room below it.
 const BOTTOM_ROOM_PX = 48;
+// What the agent does in each tool, while it runs and once it is done.
+const VERBS: Record<string, [string, string]> = {
+  "incident.io": ["Reading the incident…", "Read the incident"],
+  Grafana: ["Checking Grafana alerts…", "Checked Grafana alerts"],
+  GitLab: ["Tracing GitLab deploys…", "Traced GitLab deploys"],
+  Jira: ["Reading Jira issues…", "Read Jira issues"],
+  Slack: ["Searching Slack…", "Searched Slack"],
+  "Code search": ["Searching code…", "Searched code"],
+};
+const MAX_CHAT_PX = 420;
 const SEND_PAUSE_MS = 250;
 const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
 // A code example shows its mode: text, regex, or structural. A question across tools shows its first tool.
@@ -89,7 +99,7 @@ function Thread({ search, stage }: { search: Search; stage: number }) {
               return (
                 <li key={tool} className={cn("agent-call", running && "agent-call-running")}>
                   <Icon name="orbit" size={12} className="agent-call-mark" />
-                  <span className="agent-call-tool">{tool === "Code search" ? (running ? "Searching code…" : "Searched code") : running ? `Exploring ${tool}…` : `Explored ${tool}`}</span>
+                  <span className="agent-call-tool">{(VERBS[tool] ?? [`Exploring ${tool}…`, `Explored ${tool}`])[running ? 0 : 1]}</span>
                 </li>
               );
             })
@@ -160,8 +170,10 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
       if (!thread) return;
       const top = element.getBoundingClientRect().top + (main?.scrollTop ?? 0);
       const rest = element.offsetHeight - thread.offsetHeight;
-      const room = window.innerHeight - BOTTOM_ROOM_PX - top - rest;
-      element.style.setProperty("--thread-h", `${Math.max(160, Math.min(320, room))}px`);
+      // The whole chat keeps one height across examples, whether or not it shows tool chips, and fits the
+      // window with room below it.
+      const total = Math.min(MAX_CHAT_PX, window.innerHeight - BOTTOM_ROOM_PX - top);
+      element.style.setProperty("--thread-h", `${Math.max(140, total - rest)}px`);
     };
     fit();
     window.addEventListener("resize", fit);
@@ -202,7 +214,7 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
           <div key={group.label} role="group" aria-label={group.label} className="next-demo-group">
             <span className="next-demo-label">{group.label}</span>
             {group.items.map((item) => (
-              <button key={item.id} type="button" onClick={() => pick(item)} className={cn("next-demo-example", item.id === run?.search.id && "next-demo-example-on")}>
+              <button key={item.id} type="button" onClick={() => pick(item)} aria-current={item.id === run?.search.id ? "true" : undefined} className="next-demo-example">
                 <Icon name={iconOf(item)} size={14} />
                 <span>{item.label}</span>
               </button>
@@ -226,11 +238,10 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
         </div>
         {run && <Thread key={run.start} search={run.search} stage={stage} />}
         <form onSubmit={submit} className="agent-prompt-box" aria-label="Search">
-          {run && (
-            // The tools an example reads, as chips above the input: code search for a code example, and each
-            // tool for a third-party one. Every example shows a row, so the chat keeps one height.
+          {run?.search.steps && (
+            // A third-party example shows the tools it reads, as chips above the input.
             <ul className="agent-prompt-chips" aria-label="Tools">
-              {[...new Map((run.search.steps ?? [{ tool: "Code search", icon: "code" }]).map((step) => [step.tool, step.icon])).entries()].map(([tool, icon]) => (
+              {[...new Map(run.search.steps.map((step) => [step.tool, step.icon])).entries()].map(([tool, icon]) => (
                 <li key={tool} className="agent-prompt-chip">
                   <Icon name={icon} size={12} />
                   {tool}

@@ -13,9 +13,9 @@ const BURST_MS = 900;
 // The height results spread over, centered in the demo row. It is fixed, so nothing moves when the chat
 // grows as an answer arrives.
 const MAP_TALL = 380;
-// Where the results start, from the top of the demo row, so they sit around the middle of the screen beside
-// the chat.
-const MAP_LIFT = -40;
+// Where the results start, from the top of the demo row, so they center on the chat beside them while it
+// runs.
+const MAP_LIFT = 20;
 const COLORS = {
   light: { rest: "120 125 140", path: "110 126 224", risk: "214 64 64", ok: "40 160 90" },
   dark: { rest: "200 205 225", path: "160 182 255", risk: "240 110 110", ok: "110 205 140" },

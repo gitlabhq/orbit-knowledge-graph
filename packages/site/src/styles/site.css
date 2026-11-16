@@ -776,9 +776,27 @@
   color: var(--gl-text-color-default);
 }
 
-.next-demo-example-on {
-  background: color-mix(in srgb, var(--gl-text-color-default) 10%, transparent);
+/* The selected example takes the portal's section nav marker: a short bar in the Orbit fade at its left. */
+.next-demo-example {
+  position: relative;
+}
+
+.next-demo-example[aria-current="true"] {
+  background: transparent;
   color: var(--gl-text-color-default);
+  font-weight: var(--gl-font-weight-semibold);
+}
+
+.next-demo-example[aria-current="true"]::before {
+  position: absolute;
+  top: 50%;
+  left: -0.375rem;
+  width: 0.1875rem;
+  height: 1.25rem;
+  border-radius: var(--gl-border-radius-default);
+  background-image: var(--orbit-fade-y);
+  content: "";
+  translate: 0 -50%;
 }
 
 /* The chat looks like the front page chat. Once an answer shows, the thread keeps one height and scrolls,
@@ -1087,4 +1105,9 @@
 
 .next-demo-example {
   width: fit-content;
+}
+
+/* Tighter space between the tool chips and the input. */
+.next-chat .agent-prompt-box {
+  gap: 0.5rem;
 }
