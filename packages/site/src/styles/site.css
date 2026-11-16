@@ -1005,17 +1005,29 @@
 }
 
 
-/* The scale band: its title and intro center like the home page quotes, and its numbers and bars keep the
-   page's reading width. */
+/* The scale band slides over like the home page quotes, but its text reads like the other sections: left
+   aligned, at the page's width. */
 .next-scale .field-band-body {
-  text-align: center;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  max-width: 64rem;
+  margin-inline: auto;
+  padding: 8rem 0 8rem;
+  text-align: left;
+}
+
+.next-scale .section-title {
+  margin-top: 0;
+}
+
+.next-scale .section-lede {
+  margin-top: 1.5rem;
 }
 
 .next-scale .next-stats,
 .next-scale .next-latency {
   width: 100%;
-  max-width: 64rem;
-  text-align: left;
 }
 
 .next-scale .next-stats {
@@ -1032,6 +1044,3 @@
   display: none;
 }
 
-.next-scale .field-band-body {
-  padding-bottom: 8rem;
-}
