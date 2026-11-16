@@ -9,7 +9,6 @@ use orbit_utils::vfs::{
     sources::{Diff, Directory},
 };
 use orbit_utils::vfs_policies::CodePolicy;
-use rustc_hash::FxHashSet;
 
 use crate::workspace;
 
@@ -18,17 +17,25 @@ const MEMORY_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(super) type Repository = Arc<Vfs<()>>;
 
-/// `removed` holds the paths git reports gone from the working tree. That
-/// includes paths whose parent directory a file or symlink replaced, which a
-/// per-path load fails to open.
-pub(super) fn directory(root: &Path, removed: &[String]) -> Result<Repository> {
-    let removed: FxHashSet<&str> = removed.iter().map(String::as_str).collect();
+pub(super) fn directory(root: &Path) -> Result<Repository> {
     let mut tracked_ignored = workspace::git_tracked_ignored(root)?;
-    tracked_ignored.retain(|path| !removed.contains(path.as_str()));
+    tracked_ignored.retain(|path| under_real_directories(root, path));
     load(WorkingTree {
         root,
         tracked_ignored,
     })
+}
+
+/// The per-path load opens a file's parent without following symlinks, so it
+/// fails when a file or symlink replaced a directory above a tracked path. Git
+/// does not always report such a path as removed (sparse checkout,
+/// skip-worktree, assume-unchanged), so it counts as absent here.
+fn under_real_directories(root: &Path, path: &str) -> bool {
+    Path::new(path)
+        .ancestors()
+        .skip(1)
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .all(|parent| std::fs::symlink_metadata(root.join(parent)).is_ok_and(|meta| meta.is_dir()))
 }
 
 /// The walk skips ignored directories whole, so the files git tracks under them
