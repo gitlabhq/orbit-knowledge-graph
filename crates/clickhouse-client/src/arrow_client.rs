@@ -61,7 +61,46 @@ fn quorum_backoff(attempt: u32) -> Duration {
     Duration::from_millis(base + rand::random_range(0..=base / 4))
 }
 
-async fn retry_quorum_conflicts<T, F, Fut>(enabled: bool, mut op: F) -> Result<T, ClickHouseError>
+async fn retry_quorum_conflicts<T, F, Fut>(enabled: bool, op: F) -> Result<T, ClickHouseError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, ClickHouseError>>,
+{
+    let attempts = if enabled { QUORUM_RETRY_ATTEMPTS } else { 0 };
+    retry_transient(attempts, quorum_backoff, is_replication_transient, op).await
+}
+
+/// About two minutes in total, so a webserver that starts before ClickHouse waits for it.
+const STARTUP_READ_ATTEMPTS: u32 = 30;
+
+fn startup_backoff(attempt: u32) -> Duration {
+    Duration::from_millis((500 * u64::from(attempt)).min(5000))
+}
+
+fn is_startup_transient(error: &ClickHouseError) -> bool {
+    is_replication_transient(error) || matches!(error, ClickHouseError::CircuitOpen { .. })
+}
+
+async fn retry_startup_read<T, F, Fut>(op: F) -> Result<T, ClickHouseError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, ClickHouseError>>,
+{
+    retry_transient(
+        STARTUP_READ_ATTEMPTS,
+        startup_backoff,
+        is_startup_transient,
+        op,
+    )
+    .await
+}
+
+async fn retry_transient<T, F, Fut>(
+    attempts: u32,
+    backoff: fn(u32) -> Duration,
+    is_transient: fn(&ClickHouseError) -> bool,
+    mut op: F,
+) -> Result<T, ClickHouseError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, ClickHouseError>>,
@@ -69,13 +108,9 @@ where
     let mut attempt = 0;
     loop {
         match op().await {
-            Err(error)
-                if enabled
-                    && attempt < QUORUM_RETRY_ATTEMPTS
-                    && is_replication_transient(&error) =>
-            {
+            Err(error) if attempt < attempts && is_transient(&error) => {
                 attempt += 1;
-                tokio::time::sleep(quorum_backoff(attempt)).await;
+                tokio::time::sleep(backoff(attempt)).await;
             }
             result => return result,
         }
@@ -157,11 +192,12 @@ impl ArrowClickHouseClient {
     }
 
     pub async fn with_detected_parallel_replica_cluster(mut self) -> Result<Self, ClickHouseError> {
-        let batches = self
-            .query(PARALLEL_REPLICA_CLUSTER_SQL)
-            .with_setting("use_query_cache", "0")
-            .fetch_arrow()
-            .await?;
+        let batches = retry_startup_read(|| {
+            self.query(PARALLEL_REPLICA_CLUSTER_SQL)
+                .with_setting("use_query_cache", "0")
+                .fetch_arrow()
+        })
+        .await?;
         self.parallel_replica_cluster = String::extract_column(&batches, 0)?
             .iter()
             .any(|cluster| !cluster.is_empty());
@@ -907,6 +943,53 @@ mod tests {
         })
         .await;
         assert!(is_replication_transient(&result.unwrap_err()));
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn startup_reads_wait_for_clickhouse_to_answer() {
+        let attempts = std::sync::atomic::AtomicU32::new(0);
+        let result = retry_startup_read(|| async {
+            match attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
+                0 => Err(ClickHouseError::CircuitOpen { service: "test" }),
+                n if n < 20 => Err(ClickHouseError::Query(clickhouse::error::Error::Network(
+                    Box::new(std::io::Error::other("refused")),
+                ))),
+                n => Ok(n),
+            }
+        })
+        .await;
+        assert_eq!(result.unwrap(), 20);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn startup_reads_give_up_after_the_window() {
+        let attempts = std::sync::atomic::AtomicU32::new(0);
+        let started = tokio::time::Instant::now();
+        let result: Result<(), _> = retry_startup_read(|| async {
+            attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(bad_response("503 Service Unavailable"))
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(
+            attempts.load(std::sync::atomic::Ordering::SeqCst),
+            STARTUP_READ_ATTEMPTS + 1
+        );
+        assert_eq!(started.elapsed(), Duration::from_millis(127_500));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn startup_reads_fail_at_once_on_a_rejected_query() {
+        let attempts = std::sync::atomic::AtomicU32::new(0);
+        let result: Result<(), _> = retry_startup_read(|| async {
+            attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(bad_response(
+                "Code: 516. DB::Exception: default: Authentication failed. (AUTHENTICATION_FAILED)",
+            ))
+        })
+        .await;
+        assert!(result.is_err());
         assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
