@@ -10,15 +10,16 @@ pub(crate) enum Found {
 }
 
 pub(crate) fn current_branch(dir: &Path) -> Result<String, RemoteError> {
+    let no_branch = |reason: String| {
+        RemoteError::new(
+            EXIT_GENERIC,
+            format!("no current branch ({reason}); pass a branch:<name> target"),
+        )
+    };
     crate::workspace::repository_at(dir)
         .current_branch_name()
-        .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("could not run git: {e}")))?
-        .ok_or_else(|| {
-            RemoteError::new(
-                EXIT_GENERIC,
-                "no current branch; pass a branch:<name> target",
-            )
-        })
+        .map_err(|e| no_branch(e.to_string()))?
+        .ok_or_else(|| no_branch("detached HEAD".to_string()))
 }
 
 /// Reads a branch from the context endpoint. A branch with a merge request returns the merge
@@ -87,7 +88,9 @@ mod tests {
     #[test]
     fn current_branch_fails_on_a_detached_head_and_outside_a_repository() {
         let repo = tempfile::TempDir::new().unwrap();
-        assert!(current_branch(repo.path()).is_err());
+        let outside = current_branch(repo.path()).unwrap_err().to_string();
+        assert!(outside.contains("no current branch"), "{outside}");
+        assert!(outside.contains("pass a branch:<name> target"), "{outside}");
 
         git(repo.path(), &["init", "-b", "main"]);
         git(
