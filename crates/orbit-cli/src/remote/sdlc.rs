@@ -14,7 +14,6 @@ pub(crate) fn current_branch(dir: &Path) -> Result<String, RemoteError> {
         .current_branch_name()
         .ok()
         .flatten()
-        .filter(|name| !name.is_empty())
         .ok_or_else(|| {
             RemoteError::new(
                 EXIT_GENERIC,
@@ -61,6 +60,7 @@ fn merge_request(branch: &str, link: &serde_json::Value) -> Option<Found> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::git;
     use serde_json::json;
 
     #[test]
@@ -75,15 +75,6 @@ mod tests {
             })
         );
         assert_eq!(merge_request("feature", &serde_json::Value::Null), None);
-    }
-
-    fn git(dir: &Path, args: &[&str]) {
-        let status = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?}");
     }
 
     #[test]

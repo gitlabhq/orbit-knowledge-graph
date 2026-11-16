@@ -389,7 +389,7 @@ pub(crate) fn repository_at(path: &Path) -> CoreGitaliskRepository {
     CoreGitaliskRepository::new(path.clone(), path)
 }
 
-/// `None` for a path outside `root` or one that is not UTF-8, which the graph cannot hold.
+/// The graph cannot hold a path that is not UTF-8, so such paths give `None`.
 fn repo_relative(root: &Path, path: &Path) -> Option<String> {
     path.strip_prefix(root).ok()?.to_str().map(str::to_string)
 }
@@ -414,14 +414,7 @@ impl GitChanges {
                 .as_deref()
                 .and_then(|original| repo_relative(root, original));
             let status = info.status;
-            let moved = info.original_path.is_some();
-            let gone = match moved {
-                true => {
-                    matches!(status.index, StatusCode::Renamed | StatusCode::Copied)
-                        && status.worktree == StatusCode::Deleted
-                }
-                false => [status.index, status.worktree].contains(&StatusCode::Deleted),
-            };
+            let gone = [status.index, status.worktree].contains(&StatusCode::Deleted);
             changes.removed.extend(original);
             match gone {
                 true => changes.removed.extend(path),
@@ -535,6 +528,7 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::git;
 
     fn init_repo(path: &Path) {
         std::fs::create_dir_all(path).unwrap();
@@ -708,16 +702,6 @@ mod tests {
         assert_eq!(top, dunce::canonicalize(&repo).unwrap());
     }
 
-    fn git(dir: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?}");
-    }
-
     fn commit_all(dir: &Path, message: &str) -> String {
         git(dir, &["add", "-A"]);
         git(dir, &["commit", "-m", message]);
@@ -780,7 +764,7 @@ mod tests {
         assert_eq!(changes.removed, ["move_me.rs"]);
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn git_working_changes_skips_names_that_are_not_utf8() {
         use std::os::unix::ffi::OsStrExt;
@@ -816,11 +800,14 @@ mod tests {
     #[test]
     fn edited_since_index_treats_pathspecs_literally() {
         let (_temp, repo, _base) = committed_repo();
-        std::fs::write(repo.join("edit.rs"), "fn edit() { 1 }\n").unwrap();
+        std::fs::write(repo.join(":odd.rs"), "fn odd() {}\n").unwrap();
+        std::fs::write(repo.join("odd.rs"), "fn odd() {}\n").unwrap();
+        commit_all(&repo, "odd");
+        std::fs::write(repo.join("odd.rs"), "fn odd() { 1 }\n").unwrap();
 
-        let edited = edited_since_index(&repo, &["*.rs", "keep.rs"]);
+        let edited = edited_since_index(&repo, &[":odd.rs"]);
 
-        assert_eq!(edited.into_iter().collect::<Vec<_>>(), ["*.rs"]);
+        assert!(edited.is_empty(), "{edited:?}");
     }
 
     #[test]

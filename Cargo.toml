@@ -119,7 +119,7 @@ clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
 duckdb = { version = "1.20000.0", features = ["vtab-arrow", "appender-arrow"] }
 libduckdb-sys = { version = "1.20000.0", default-features = false }
-gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", rev = "4d7696fadb874b4b7bd5fa143a3c7e445bfc5db4" }
+gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", rev = "632f2b6623b11930fd835c4265bafdb3baeb6225" }
 siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
