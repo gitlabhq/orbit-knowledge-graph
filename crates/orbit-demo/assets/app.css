@@ -33,6 +33,8 @@
 .tok-compare { color: var(--review-text); }
 .tok-op, .tok-punct { color: var(--text-subtle); }
 .tok-comment { color: var(--text-subtle); font-style: italic; }
+.section-header { flex-wrap: wrap; }
+.section-header > h2 { flex: 1 0 auto; white-space: nowrap; }
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 
 .dag-canvas { overflow-x: auto; padding: var(--space-3); background-color: var(--bg-subtle); background-image: radial-gradient(var(--border-default) 1px, transparent 1px); background-size: 18px 18px; }
