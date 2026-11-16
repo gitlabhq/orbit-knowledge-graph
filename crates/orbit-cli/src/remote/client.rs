@@ -806,18 +806,16 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let _queued = std::net::TcpStream::connect(address).unwrap();
         let connect_timeout = Duration::from_millis(300);
-        let client = OrbitClient {
-            endpoint: ResolvedEndpoint {
-                base_url: format!("http://{address}"),
-                header_name: "Private-Token".into(),
-                header_value: "t".into(),
-            },
-            http: reqwest::Client::builder()
-                .connect_timeout(connect_timeout)
-                .build()
-                .unwrap(),
-            retries_enabled: true,
-        };
+        let mut client = OrbitClient::new(ResolvedEndpoint {
+            base_url: format!("http://{address}"),
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap();
+        client.http = reqwest::Client::builder()
+            .connect_timeout(connect_timeout)
+            .build()
+            .unwrap();
 
         let started = std::time::Instant::now();
         let first = client.get_grep(&[]).await.unwrap_err();
