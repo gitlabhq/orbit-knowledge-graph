@@ -18,6 +18,8 @@ const DEEP: &str = "MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DE
 
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
+const DIFF: &str = "MATCH (mr:MergeRequest) WHERE mr.id = 5001 RETURN mr.iid, mr.diff";
+
 async fn run(page: SocketAddr, caller: &str, query: &str) -> (u64, Vec<Value>) {
     let host = format!("localhost:{}", page.port());
     let body = json!({"query": query, "caller": caller}).to_string();
@@ -282,6 +284,14 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     assert_eq!(graph(&raw), (5, 3));
     assert_eq!(result(page, 0, "llm").await.status, 400);
     assert_eq!(result(page, u64::MAX, "toon").await.status, 404);
+    let (diff, _) = run(page, "maintainer", DIFF).await;
+    let unresolved = result(page, diff, "toon").await;
+    assert_eq!(unresolved.status, 422);
+    assert!(
+        unresolved.body.contains("no ColumnResolverRegistry"),
+        "{}",
+        unresolved.body
+    );
 
     let deep = events(page, "maintainer", DEEP).await;
     let backends: Vec<&str> =

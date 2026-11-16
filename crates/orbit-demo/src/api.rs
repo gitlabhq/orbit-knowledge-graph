@@ -220,7 +220,7 @@ async fn result(
     };
     match log.response() {
         Some(Ok(output)) => Json(formatter.format(output)).into_response(),
-        Some(Err(error)) => failure(StatusCode::INTERNAL_SERVER_ERROR, error),
+        Some(Err(error)) => failure(StatusCode::UNPROCESSABLE_ENTITY, error),
         None => failure(StatusCode::CONFLICT, format!("run {id} has no response")),
     }
 }
