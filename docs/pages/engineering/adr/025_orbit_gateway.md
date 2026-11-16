@@ -76,16 +76,27 @@ The Gateway ends TLS with a certificate that chains to a CA in the Rails CA bund
 
 ### Every deployment
 
-The Gateway is part of the Orbit Helm chart, so GitLab.com, GitLab Self-Managed, and GitLab Dedicated run the same topology.
+The Gateway is part of the Orbit Helm chart, so GitLab.com, GitLab Self-Managed, and GitLab Dedicated run the same topology by default.
 
-| Chart version | Gateway | Release type |
-| ------------- | ------- | ------------ |
-| 7.x | Optional, off by default | Minor |
-| 8.x | Always on, no setting to turn it off | Major |
+The Gateway arrives in two chart releases:
 
-GitLab.com turns the Gateway on in 7.x first.
-The 8.x upgrade notes ask administrators to turn it on in 7.x and upgrade once it runs cleanly.
-Rolling back from 8.x means returning to 7.x.
+| Chart release | Gateway |
+| ------------- | ------- |
+| A minor release | Optional, off by default |
+| The next major release | A proxy is always in front of the web servers: the Gateway by default, or a proxy the administrator brings |
+
+GitLab.com turns the Gateway on in the minor release first.
+The major release's upgrade notes ask administrators to turn it on in the minor release and upgrade once it runs cleanly.
+Rolling back from the major release means returning to the minor release.
+Which releases these are is decided when the work lands.
+
+An administrator who already runs a proxy, or does not want Envoy, can turn off the chart's Gateway and put their own proxy in front of the web servers.
+That proxy must meet the [requirements](#requirements) below, because the web server relies on it to balance requests.
+Features that build on the Gateway, such as cache and version affinity, need the chart's Gateway.
+With their own proxy, administrators do not get them, unless their proxy implements the same routing.
+
+Shipping the Gateway is an Orbit team decision.
+We tell the GitLab Dedicated team before the major release.
 
 ### The proxy
 
@@ -104,6 +115,7 @@ The Gateway must:
 - Support two-way streaming, the client keepalive (every 60 seconds, also without calls), and the 120 second maximum query time.
 - Accept and forward HTTP/2 header lists of at least 64 KiB.
   Tokens with many group traversal IDs exceed 16 KiB, and many proxies cap headers lower by default.
+  Envoy's default request header limit is 60 KiB, so the chart sets the limit explicitly, and a test sends a token larger than 16 KiB through the Gateway.
 - Run at least two replicas, with a PodDisruptionBudget or `maxUnavailable: 0`.
 - Drain before a pod stops: send GOAWAY, and set the termination grace period above the 120 second maximum query time.
   Replicas alone do not protect in-flight streams.
@@ -144,8 +156,10 @@ Each use is delivered by its own ADR or issue:
 
 - Orbit owns the routing point, so later traffic changes are Orbit configuration with Orbit review, not monolith changes.
 - Load spreads per request, so the web server no longer needs forced connection closes.
-- One topology for GitLab.com, GitLab Self-Managed, and GitLab Dedicated.
+- One default topology for GitLab.com, GitLab Self-Managed, and GitLab Dedicated, with room for administrators who bring their own proxy.
 - Canary pools, cache affinity, and direct client access share one component instead of three.
+- TLS can end at the Gateway, so the web server no longer has to handle TLS itself.
+  Request observability, such as access logs and per-request metrics, can move to the Gateway in the same way.
 
 ## Consequences
 
@@ -154,14 +168,15 @@ Each use is delivered by its own ADR or issue:
 - The Gateway is a new component on the request path.
   When it is down, Orbit is down.
   It needs its own metrics, alerts, and capacity planning.
-- TLS ends at the Gateway and again at the web server.
-  The [service boundary](../architecture/security/README.md#service-boundary) section must describe two TLS hops.
+- At first, TLS ends at the Gateway and again at the web server.
+  Ending TLS only at the Gateway leaves the hop to the web server unencrypted inside the cluster, so that step needs a security review.
+  The [service boundary](../architecture/security/README.md#service-boundary) section must describe the TLS setup either way.
   The Gateway is inside the Orbit boundary, so the rule that no caller connects to Orbit directly still holds.
 - Every deployment runs one more component, and administrators get a chart major release.
 - The web server closes connections at a maximum age to rebalance them behind the load balancer.
   Behind the Gateway, the Gateway keeps connections to every web server pod and picks a pod for each request, so closing a connection rebalances nothing and can end a running query.
   Where the Gateway runs, the maximum age is turned off.
-  Chart 8.x makes the Gateway required, and the setting is removed.
+  Once the chart requires a proxy in front of the web servers, the setting is removed.
 - The internal load balancer balances Rails connections across Gateway replicas per connection.
   The Gateway recycles its connections to Rails only so that replicas can join and leave: at a long interval, with GOAWAY and a drain longer than the maximum query time.
 
@@ -192,11 +207,6 @@ It also routes on paths and headers, not on token claims, so canary routing woul
 
 Each feature would add its own proxy, or wait for another feature to add one.
 Forwarding first lets us measure the extra hop and run the Gateway in production before any routing depends on it.
-
-## Open questions
-
-- When the Dedicated team reviews the Gateway: before 7.x, or before 8.x.
-- How the Cells HTTP Router path rule in [#1498](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1498) reaches the Gateway alongside the PSC path from Rails.
 
 ## Related issues
 
