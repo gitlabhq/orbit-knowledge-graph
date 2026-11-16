@@ -97,24 +97,28 @@
   }
 
   const ENTITIES = /Entities (\w+): (\w+)/g;
-  const TRAVERSALS = /\b(?:Follow|Neighbors|Shortest) (\w+) (<?)-\[([A-Z0-9_|]+)\]-(>?) (\w+)/g;
+  const TRAVERSALS = /\b(?:Follow|Neighbors|Shortest) (\w+) (<?)-\[([A-Z0-9_|]+)\]-(>?) (\w+)(?:: (\w+))?/g;
 
-  const variant = (source, target) => new RegExp(`\\b${source} -> ${target}\\b`);
+  const entities = (text) => Object.fromEntries([
+    ...[...text.matchAll(ENTITIES)].map(([, binding, entity]) => [binding, entity]),
+    ...[...text.matchAll(TRAVERSALS)].filter((step) => step[6]).map((step) => [step[5], step[6]]),
+  ]);
+
+  const variant = (source, target) => new RegExp(`\\b${source || "\\w+"} -> ${target || "\\w+"}\\b`);
 
   function marks(plans, query) {
-    const text = plans.join("\n"), found = new Set(), bound = {}, variants = new Map();
-    for (const [, binding, entity] of text.matchAll(ENTITIES)) { bound[binding] = entity; found.add(entity); }
+    const text = plans.join("\n"), found = new Set(), bound = entities(text), variants = new Map();
+    for (const entity of Object.values(bound)) found.add(entity);
     const read = (binding, property) => { if (bound[binding]) found.add(`${bound[binding]}.${property}`); };
     for (const [, binding, property] of text.matchAll(/\b(\w+)\.(\w+)/g)) read(binding, property);
     for (const [, binding, list] of text.matchAll(/\b(\w+)\{([\w, ]+)\}/g)) for (const property of list.split(", ")) read(binding, property);
     const own = [...text.matchAll(TRAVERSALS)].flatMap(([, from, , , , to]) => [from, to]);
     const reads = new Set([...Object.keys(bound), ...Object.values(bound), ...own]);
-    const all = query.join("\n");
-    const entity = Object.fromEntries([...all.matchAll(ENTITIES)].map(([, binding, name]) => [binding, name]));
+    const all = query.join("\n"), entity = entities(all);
     for (const [, from, incoming, rels, outgoing, to] of all.matchAll(TRAVERSALS)) {
       const [a, b] = [entity[from], entity[to]];
       if (![from, to, a, b].some((name) => reads.has(name))) continue;
-      const ends = !a || !b ? [] : incoming ? [variant(b, a)] : outgoing ? [variant(a, b)] : [variant(a, b), variant(b, a)];
+      const ends = incoming ? [variant(b, a)] : outgoing ? [variant(a, b)] : [variant(a, b), variant(b, a)];
       for (const rel of rels.split("|")) { found.add(rel); variants.set(rel, [...(variants.get(rel) || []), ...ends]); }
     }
     return { found, variants };

@@ -229,8 +229,8 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     for line in [
         "Limit 20",
         "Filter mr.state = 'opened'",
-        "Follow mr -[SOURCE_HEAD]-> h",
-        "Follow h -[HEAD_FILE]-> f",
+        "Follow mr -[SOURCE_HEAD]-> h: Head",
+        "Follow h -[HEAD_FILE]-> f: File",
         "Entities mr: MergeRequest",
     ] {
         assert!(logical.contains(&line), "{line} in {logical:#?}");
