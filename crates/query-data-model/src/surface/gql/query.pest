@@ -29,9 +29,9 @@ PathSearch = { ^"ANY" ~ SP ~ ^"SHORTEST" | ^"SHORTEST" ~ SP ~ PathCount }
 // Parse the legacy spelling so syntax.rs can return the supported ISO GQL replacement.
 LegacyShortestPath = { ^"shortestPath" ~ SP? ~ "(" ~ SP? ~ PatternElement ~ SP? ~ ")" }
 
-// Five relationship segments already include an overflow path because an acyclic chain then has six nodes.
-// Lowering rejects the sixth node against the five-node cap before shared relationship validation runs.
-PatternElement = { NodePattern ~ (SP? ~ PatternElementChain){0,5} }
+// Six relationship segments already include an overflow path because an acyclic chain then has seven nodes.
+// Lowering rejects the seventh node against the six-node cap before shared relationship validation runs.
+PatternElement = { NodePattern ~ (SP? ~ PatternElementChain){0,6} }
 
 // Every node needs a variable. Lowering permits one unlabeled far endpoint only for neighbors.
 NodePattern = { "(" ~ SP? ~ Variable ~ SP? ~ (NodeLabel ~ SP?)? ~ (NodeMapLiteral ~ SP?)? ~ ")" }

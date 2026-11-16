@@ -203,7 +203,7 @@ grpc:
 
 query:
   limits:
-    nodes: 5
+    nodes: 6
     hops: 3
     path_depth: 3
     relationship_types: 10

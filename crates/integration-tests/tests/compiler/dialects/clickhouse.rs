@@ -1038,11 +1038,11 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
 
 #[test]
 fn orbit_query_caps_the_nodes_a_pattern_binds() {
-    let chain: Vec<String> = (0..6).map(|i| format!("(g{i}:Group)")).collect();
+    let chain: Vec<String> = (0..7).map(|i| format!("(g{i}:Group)")).collect();
     let query = format!("MATCH {} RETURN g0", chain.join("-[:CONTAINS]->"));
     let error = gql_statement(&query).unwrap_err();
     assert!(
-        matches!(&error, QueryError::Validation(m) if m == "nodes is 6; the maximum is 5"),
+        matches!(&error, QueryError::Validation(m) if m == "nodes is 7; the maximum is 6"),
         "{error:?}"
     );
 }

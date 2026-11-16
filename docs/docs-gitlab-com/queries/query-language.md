@@ -327,7 +327,7 @@ the later pages move by one row, so a row can repeat or be missing.
 ## Limits
 
 - Each relationship spans at most three hops. `-[:CONTAINS*1..3]->` is a bounded variable-length hop.
-- A query has at most five nodes. The pattern is a tree, so it has at most four relationships.
+- A query has at most six nodes. The pattern is a tree, so it has at most five relationships.
 - A relationship names at most 10 types.
 - A query has at most 16 conditions. Inline properties, such as `{project_id: 278964}`, count as conditions.
 - Each node filters on at most 10 properties, and each relationship on at most 5.
