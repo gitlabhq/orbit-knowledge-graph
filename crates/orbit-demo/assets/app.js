@@ -309,7 +309,7 @@ let examples = [];
 let names = { entities: new Set(), relationships: new Set() };
 let stepping = true;
 let format = "table";
-let flow =!matchMedia("(prefers-reduced-motion: reduce)").matches;
+let flow = !matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 async function boot() {
   run = fresh();
