@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Icon, PageFrame, pageHead, RippleLog, type RippleLogLine, Section } from "@gitlab-org/orbit-site";
+import { FieldBand, Icon, PageFrame, pageHead, RippleLog, type RippleLogLine, Section } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { Capabilities } from "../next/Capabilities";
 import { CodeSearch, SOURCES } from "../next/CodeSearch";
@@ -43,12 +43,12 @@ function Hero() {
       <div className="next-hero-map" aria-hidden="true">
         <SearchMap search={search} anchor=".next-chat" region=".next-demo-viz" />
       </div>
-      <p className="orbit-hero-title next-hero-title">
+      <p className="orbit-hero-title">
         Search all of your code,
         <br />
         <span className="orbit-fade">and every tool around it.</span>
       </p>
-      <div className="mt-14 flex w-full justify-center">
+      <div className="mt-12 flex w-full justify-center">
         <CodeSearch onSearch={setSearch} />
       </div>
     </section>
@@ -64,7 +64,12 @@ function NextPage() {
         <Capabilities />
       </Section>
 
-      <Section id="scale" over className="next-scale-card" eyebrow="Scale" title={<>Built for <span className="orbit-fade">scale</span></>} lede="In our testing, we indexed and searched 51,656 open source projects with their branches and history.">
+      {/* Scale slides up over the pinned code search section, in the same band as the home page quotes. */}
+      <FieldBand over eyebrow="Scale" className="next-scale">
+        <h2 className="section-title">
+          Built for <span className="orbit-fade">scale</span>
+        </h2>
+        <p className="section-lede">In our testing, we indexed and searched 51,656 open source projects with their branches and history.</p>
         <dl className="next-stats not-prose">
           {CORPUS.map((stat) => (
             <div key={stat.label} className="next-stat">
@@ -84,7 +89,7 @@ function NextPage() {
             </li>
           ))}
         </ul>
-      </Section>
+      </FieldBand>
 
       <Section
         id="sources" dark

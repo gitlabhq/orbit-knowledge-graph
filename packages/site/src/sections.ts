@@ -9,6 +9,7 @@ export const NEXT_PAGE = {
 
 export const TABS: Tab[] = [
   { route: "about", label: "About" },
+  { route: "next", label: "Coming soon" },
   {
     route: "engineering",
     label: "Developers",
@@ -22,9 +23,6 @@ export const TABS: Tab[] = [
     ],
   },
 ];
-
-// Last in the top nav, after Docs.
-export const NEXT_TAB = { route: "next", label: "Coming soon" };
 
 export const USER_DOCS = { label: "Docs", href: "https://docs.gitlab.com/orbit/" };
 
