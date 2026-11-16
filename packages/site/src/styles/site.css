@@ -1072,3 +1072,15 @@
   margin-top: calc(3rem + 2.0625rem);
 }
 
+
+/* The examples start a little above the chat, beside the headline's last line. */
+@media (min-width: 1100px) {
+  .next-demo-examples {
+    margin-top: -3rem;
+  }
+}
+
+/* The Orbit Next headline sits higher than the home page's, with the demo just below it. */
+.orbit-hero.orbit-hero-lg.next-hero {
+  padding-top: 8rem;
+}
