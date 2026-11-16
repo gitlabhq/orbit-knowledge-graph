@@ -23,7 +23,6 @@
     paths: *cargo-home-paths
     policy: $CARGO_HOME_CACHE_POLICY
 
-# Extend after `.job-template`; for jobs that resolve no dependencies and the release CLI builds.
 .no-cargo-home-cache:
   variables:
     SKIP_CARGO_HOME_CACHE: "1"
@@ -48,7 +47,6 @@
     CARGO_INCREMENTAL: "0"
     SCCACHE_GCS_BUCKET: "gl-knowledgegraph-sccache"
     SCCACHE_GCS_KEY_PATH: "${SCCACHE_GCS_KEY}"
-    # Only protected refs write the shared cache; MR pipelines read it.
     SCCACHE_GCS_RW_MODE: "READ_ONLY"
     DUCKDB_DOWNLOAD_LIB: "1"
   before_script:

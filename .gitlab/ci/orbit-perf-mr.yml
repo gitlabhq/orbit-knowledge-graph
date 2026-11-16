@@ -1,4 +1,3 @@
-# orbit-perf:mr passes the MR IID; the image tag and the MR comment need it.
 include:
   - local: .gitlab/ci/rust-job-templates.yml
   - local: .gitlab/ci/orbit-perf-base.yml
@@ -24,7 +23,6 @@ orbit-perf:mr:
   extends:
     - .orbit-perf-base
     - .child-rules
-  # orbit-perf.sh waits for the docker-build-mr image in the background.
   needs: []
   interruptible: true
   resource_group: orbit-perf-mr-$ORBIT_PERF_MR_IID

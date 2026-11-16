@@ -390,7 +390,6 @@ xtask-build:
       - target/debug/xtask
     expire_in: 1 day
 
-# The xtask binary needs glibc 2.39 or later; the build image is Debian trixie too.
 .xtask-check:
   stage: lint
   image: buildpack-deps:trixie-scm
@@ -604,7 +603,6 @@ script-tests:
   script:
     - mise run test:scripts
 
-# Runs on main too, so its sccache entries have a writer.
 lint-check:
   stage: lint
   extends:
