@@ -20,7 +20,15 @@ if ! grep -q '^type Query ' "$download"; then
     exit 1
 fi
 
+commit=$(curl -sf --retry 4 --retry-all-errors "https://gitlab.com/gitlab-org/gitlab/-/jobs/$job_id.json" | jq -er .pipeline.commit.id)
+gitlab_version=$(curl -sf --retry 4 --retry-all-errors "https://gitlab.com/gitlab-org/gitlab/-/raw/$commit/VERSION")
+if [[ ! "$gitlab_version" =~ ^[0-9]+\.[0-9]+\. ]]; then
+    echo "ERROR: commit $commit of job $job_id has no GitLab VERSION" >&2
+    exit 1
+fi
+
 mkdir -p "$VENDOR_DIR"
 mv "$download" "$VENDOR_DIR/gitlab.graphql"
+echo "$gitlab_version" > "$VENDOR_DIR/GITLAB_VERSION"
 JOB_ID="$job_id" perl -0pi -e 's/(\n  \Q$ENV{VENDOR_NAME}\E:\n(?:    .*\n)*?    version: )"[^"]*"/$1"$ENV{JOB_ID}"/' "$VERSIONS_FILE"
 echo "Vendored the GitLab GraphQL schema from job $job_id."
