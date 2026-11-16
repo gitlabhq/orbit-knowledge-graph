@@ -624,12 +624,37 @@ fips-check:
   stage: security
   extends:
     - .job-template
-    - .sccache-template
     - .mr-and-main-rules
   needs: []
   script:
     - ./scripts/checks/fips/aws-lc/check-graph.sh
     - mise run fips:duckdb:check
+
+# Linked symbols change only with dependencies, features, or build settings.
+fips-binary-check:
+  stage: security
+  extends:
+    - .job-template
+    - .sccache-template
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - !reference [.skip-on-docs-only, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
+      changes:
+        - Cargo.lock
+        - "**/Cargo.toml"
+        - "**/build.rs"
+        - .cargo/config.toml
+        - rust-toolchain.toml
+        - mise.toml
+        - Dockerfile
+        - scripts/checks/fips/**/*
+        - .gitlab-ci.yml
+        - .gitlab/ci/rust-job-templates.yml
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  needs: []
+  script:
     - cargo build -p orbit-server --locked --features libduckdb-sys/bundled
     - ./scripts/checks/fips/aws-lc/check-binary.sh target/debug/gkg-server
     - sccache --show-stats || true
