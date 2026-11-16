@@ -20,8 +20,8 @@ description: >-
   nodes or short names: `def:`, `class:`, `method:`, `dir:`, and on GitLab `mr:`,
   `issue:`, `branch:`, `commit:`, `comment:`. A trailing `def:` applies to the
   words before it. `file:x` keeps paths containing x, and alone lists them.
-  `code:` is the local provider: `code:words` searches only local code, and
-  `code:def:words` or `code:file:x` narrow it as `def:` and `file:` do.
+  `code:` is the local provider: `code:def:words`, `code:class:words`, or
+  `code:file:x` narrow it as `def:`, `class:`, and `file:` do.
   `repo:group/project` searches that GitLab project. `-F` reads the query literally.
   A plain search with no paths or filters also searches every connected provider, such as
   the GitLab group behind `origin`, alongside local code: code prints first, and a

@@ -106,6 +106,19 @@ fn provider_qualifier(name: &str, value: &str) -> Option<(String, Option<String>
     Some((kind, (!words.is_empty()).then(|| words.to_string())))
 }
 
+fn code_qualifier(name: &str, value: &str) -> Option<(Option<String>, String)> {
+    if !name.eq_ignore_ascii_case(CODE) {
+        return None;
+    }
+    let (kind, words) = value.split_once(':')?;
+    match kind.to_ascii_lowercase().as_str() {
+        "file" | "path" if !words.is_empty() => Some((None, words.to_string())),
+        _ => kind_for(kind)
+            .filter(|kind| crate::remote::grep::searched_kind(kind).is_none())
+            .map(|kind| (Some(kind), words.to_string())),
+    }
+}
+
 fn kind_for(name: &str) -> Option<String> {
     let lower = name.to_ascii_lowercase();
     [
@@ -171,22 +184,13 @@ pub(super) fn parse(query: &str, providers: bool) -> Option<Parsed> {
             sections.last_mut().expect("a section").1.push(token);
             continue;
         }
-        if name.eq_ignore_ascii_case(CODE) && !value.is_empty() {
-            match value.split_once(':') {
-                Some(("file" | "path", glob)) if !glob.is_empty() => {
-                    parsed.globs.extend(globs_for(glob));
-                }
-                Some((kind, words)) if kind_for(kind).is_some() => {
-                    let kind = kind_for(kind).expect("checked");
-                    sections.push((
-                        Some(kind),
-                        (!words.is_empty())
-                            .then(|| words.to_string())
-                            .into_iter()
-                            .collect(),
-                    ));
-                }
-                _ => sections.push((Some(CODE.to_string()), vec![value.to_string()])),
+        if let Some((kind, words)) = code_qualifier(name, value) {
+            match kind {
+                None => parsed.globs.extend(globs_for(&words)),
+                Some(kind) => sections.push((
+                    Some(kind),
+                    (!words.is_empty()).then_some(words).into_iter().collect(),
+                )),
             }
             any = true;
             continue;
@@ -250,7 +254,8 @@ pub(super) fn parse(query: &str, providers: bool) -> Option<Parsed> {
 fn is_qualifier(word: &str) -> bool {
     word.split_once(':')
         .is_some_and(|(name, value)| match name.to_ascii_lowercase().as_str() {
-            "file" | "path" | "repo" | CODE => !value.is_empty(),
+            "file" | "path" | "repo" => !value.is_empty(),
+            _ if code_qualifier(name, value).is_some() => true,
             _ if provider_qualifier(name, value).is_some() => true,
             _ => !value.starts_with([':', '/']) && kind_for(name).is_some(),
         })
@@ -351,23 +356,27 @@ mod tests {
     #[test]
     fn code_is_the_local_provider() {
         assert_eq!(
-            sections("code:rate_limit"),
-            vec![(strings(&["code"]), "rate_limit".into())]
-        );
-        assert_eq!(
             sections("code:def:throttle"),
             vec![(strings(&["Definition"]), "throttle".into())]
         );
         let scoped = parse("throttle code:file:limits.rs", true).unwrap();
         assert_eq!(scoped.globs, strings(&["*limits.rs*", "**/*limits.rs*/**"]));
         assert_eq!(
-            sections("code:a mr:b"),
+            sections("code:class:a gitlab:mr:b"),
             vec![
-                (strings(&["code"]), "a".into()),
+                (strings(&["class"]), "a".into()),
                 (strings(&["MergeRequest"]), "b".into())
             ]
         );
-        assert_eq!(parse("code: x", true), None);
+        for literal in [
+            "status code:404",
+            "code: x",
+            "exit code:1",
+            "code:mr:x",
+            "code:http:200",
+        ] {
+            assert_eq!(parse(literal, true), None, "{literal}");
+        }
     }
 
     #[test]
