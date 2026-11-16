@@ -1113,7 +1113,7 @@
 /* The notice for upcoming features, small, quiet, and centered at the bottom of the page. */
 .next-notice {
   max-width: 48rem;
-  margin: 16rem auto 0;
+  margin: 9rem auto 0;
   text-align: center;
   color: var(--gl-text-color-subtle);
   font-size: 0.75rem;
@@ -1128,4 +1128,17 @@
 
 .next-sources ~ * {
   display: none;
+}
+
+/* The Orbit Next page ends on a dark section: it does not bounce past its end, and the space past it is dark
+   too, so no light page shows below it. */
+.page-panel:has(.next-sources),
+html:has(.next-sources) {
+  overscroll-behavior-y: none;
+}
+
+.page-panel:has(.next-sources),
+html:has(.next-sources),
+body:has(.next-sources) {
+  background-color: var(--band-dark, #131217);
 }
