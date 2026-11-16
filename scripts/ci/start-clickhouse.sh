@@ -9,13 +9,17 @@ if [ "${1:-}" = wait ]; then
     curl -sf -u "default:$password" --data 'SELECT 1' http://127.0.0.1:8123/ >/dev/null && exit 0
     sleep 0.1
   done
-  cat "$dir/server.log" >&2
+  cat "$dir/start.log" "$dir/server.log" >&2
   exit 1
 fi
+
+mkdir -p "$dir"
+exec > "$dir/start.log" 2>&1
 
 export MISE_DISABLE_TOOLS="$(printf %s "${MISE_DISABLE_TOOLS:-}" | tr , "\n" | grep -vx clickhouse | paste -sd , -)"
 mise install clickhouse
 clickhouse="$(mise which clickhouse)"
+"$clickhouse" --version | grep -q " ${CLICKHOUSE_VERSION:?}\." || { echo "mise clickhouse is not ${CLICKHOUSE_VERSION}"; "$clickhouse" --version; exit 1; }
 mkdir -p "$dir/config.d" "$dir/data"
 cat > "$dir/config.d/ci.xml" <<XML
 <clickhouse>

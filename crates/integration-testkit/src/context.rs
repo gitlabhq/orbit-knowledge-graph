@@ -423,7 +423,7 @@ fn test_client(url: &str, database: &str) -> ArrowClickHouseClient {
                 "graph",
             )
         })
-        .with_database(database)
+        .with_database(database, "graph")
 }
 
 fn test_configuration(url: &str, database: &str) -> ClickHouseConfiguration {

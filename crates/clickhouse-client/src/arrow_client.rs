@@ -154,10 +154,15 @@ impl ArrowClickHouseClient {
         self
     }
 
-    pub fn with_database(&self, database: &str) -> Self {
+    pub fn with_database(&self, database: &str, service: &'static str) -> Self {
         let mut client = self.clone();
         client.client = client.client.with_database(database);
         client.database = database.to_string();
+        client.circuit_breaker = CircuitBreaker::new(
+            service,
+            CircuitConfig::default(),
+            Arc::new(MetricsObserver::new()),
+        );
         client
     }
 

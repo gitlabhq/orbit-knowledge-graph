@@ -630,7 +630,7 @@ fips-check:
     - ./scripts/checks/fips/aws-lc/check-graph.sh
     - mise run fips:duckdb:check
 
-# Linked symbols change only with dependencies, features, or build settings.
+# Main builds it on every commit; MRs build it when dependencies, features, or build settings change.
 fips-binary-check:
   stage: security
   extends:
@@ -1051,7 +1051,7 @@ integration-test:
     GKG_TEST_CLICKHOUSE_WAIT: ./scripts/ci/start-clickhouse.sh wait
   before_script:
     - !reference [.sccache-template, before_script]
-    - setsid ./scripts/ci/start-clickhouse.sh > /tmp/start-clickhouse.log 2>&1 &
+    - setsid ./scripts/ci/start-clickhouse.sh &
 
 integration-test-data-correctness:
   extends:
