@@ -129,6 +129,14 @@ pub async fn run_query(
 }
 
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
+    run_scenarios(ctx, root, presets, false).await;
+}
+
+pub async fn run_querying_dir(ctx: &TestContext, root: &str, presets: &str) {
+    run_scenarios(ctx, root, presets, true).await;
+}
+
+async fn run_scenarios(ctx: &TestContext, root: &str, presets: &str, skip_compile_only: bool) {
     let root = Path::new(root);
     let presets: Arc<Path> = Arc::from(Path::new(presets));
     let mut scenarios = scenarios_under(root);
@@ -165,8 +173,13 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
             let database = Database::for_scenario(&config, &steps, &name);
             (name, config, steps, database)
         })
-        .filter(|(_, _, steps, _)| !compiles_only(steps))
+        .filter(|(_, _, steps, _)| !(skip_compile_only && compiles_only(steps)))
         .collect();
+    assert!(
+        !scenarios.is_empty(),
+        "every matching scenario under {} only compiles; run them with `cargo test --test local -E 'test(compile_only_scenarios)'`",
+        root.display()
+    );
     let datasets = Arc::new(Datasets::new(
         scenarios.iter().map(|(.., database)| database),
     ));
@@ -321,6 +334,7 @@ pub async fn run_compile_only_dir(root: &str, presets: &str) {
                     compile_context(&config, &presets, &task_name);
                 for (index, step) in steps.iter().enumerate() {
                     let step_name = step_label(&task_name, index, steps.len());
+                    step.expect.validate_pages_exclusive(&step_name);
                     for (frontend_key, query) in &step.query {
                         let frontend = frontend_key.parse::<Frontend>().unwrap_or_else(|_| {
                             panic!("{step_name}: unknown query language '{frontend_key}'")

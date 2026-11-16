@@ -31,7 +31,7 @@ async fn data_correctness() {
 #[tokio::test]
 async fn data_correctness_scenarios() {
     let ctx = data_correctness_context().await;
-    query_scenario::run_dir(&ctx, SCENARIOS, PRESETS).await;
+    query_scenario::run_querying_dir(&ctx, SCENARIOS, PRESETS).await;
 }
 
 #[tokio::test]
