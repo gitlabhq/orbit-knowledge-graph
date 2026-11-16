@@ -13,7 +13,8 @@
 #     client talks to staging.
 #   - Activation code lives in the `gitlab-license-code` secret in the
 #     `gitlab-agent-e2e-harness` namespace (synced from GCP Secret Manager via
-#     ExternalSecret), key `code`.
+#     ExternalSecret), key `code`. Its staging subscription carries the
+#     orbit_promo add-on, which activation provisions.
 #
 # Idempotent: re-activation is skipped when License.current is a non-expired
 # cloud license; PAT creation uses find_or_create_by and rotates when the
@@ -83,29 +84,14 @@ current = ::License.current
 if current && current.cloud_license? && !current.expired?
   warn "license already active: plan=#{current.plan} expires=#{current.expires_at}"
 else
-  # Runs the seat link sync it queues before the add-on step, since that sync re-provisions add-ons.
-  require 'sidekiq/testing'
-  Sidekiq::Testing.disable!
-  result = Sidekiq::Testing.inline! { ::GitlabSubscriptions::ActivateService.new.execute(code) }
+  result = ::GitlabSubscriptions::ActivateService.new.execute(code)
   abort "activation failed: #{result[:errors].inspect}" unless result[:success]
   l = ::License.current
   warn "license activated: plan=#{l.plan} expires=#{l.expires_at} cloud=#{l.cloud_license?}"
 end
 
-# The staging subscription has no Orbit add-on, so provision the one its license would carry.
-orbit_promo = ::GitlabSubscriptions::AddOnPurchases::SelfManaged::ProvisionServices::OrbitPromo.new
-orbit_promo.define_singleton_method(:license_restrictions) do
-  { add_on_products: { orbit_promo: [{ quantity: 1, started_on: Date.current.to_s,
-    expires_on: 1.year.from_now.to_date.to_s, purchase_xid: 'e2e', trial: false }] } }
-end
-provisioned = orbit_promo.execute
-abort "orbit_promo provision failed: #{provisioned.message}" unless provisioned.success?
-account = ::Analytics::Orbit::Billing::InstanceAccount.new
-abort 'Orbit is not entitled after provisioning orbit_promo' unless account.entitled?
-warn 'orbit_promo add-on provisioned'
-# The daily seat link cron re-provisions add-ons from the license and would expire orbit_promo.
-seat_link_cron = Sidekiq::Cron::Job.find('sync_seat_link_worker') or abort 'no sync_seat_link_worker cron job'
-seat_link_cron.disable!
+abort 'Orbit is not entitled: the license has no orbit_promo add-on' unless ::Analytics::Orbit::Billing::InstanceAccount.new.entitled?
+warn 'orbit_promo add-on active'
 
 user = User.find_by(username: 'root') or abort 'no root user'
 token = user.personal_access_tokens.find_or_create_by!(name: 'e2e-bootstrap') do |t|
