@@ -6,9 +6,7 @@ const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matche
 // What you say to the agent: a code example asks in words, and its tool line shows the search it runs.
 const textOf = (search: Search) => search.ask ?? (search.kind === "code" ? search.label : search.pattern);
 const TYPE_MS = 22;
-// When a chat is in use, it rises into the space under the headline and fits the window with this much room
-// below it.
-const RISE_PX = 56;
+// A chat in use fits the window with this much room below it.
 const BOTTOM_ROOM_PX = 48;
 const SEND_PAUSE_MS = 250;
 const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
@@ -160,9 +158,9 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
       const thread = element.querySelector<HTMLElement>(".agent-thread");
       const main = document.getElementById("main");
       if (!thread) return;
-      const top = element.getBoundingClientRect().top + (main?.scrollTop ?? 0) - (element.classList.contains("next-chat-active") ? -RISE_PX : 0);
+      const top = element.getBoundingClientRect().top + (main?.scrollTop ?? 0);
       const rest = element.offsetHeight - thread.offsetHeight;
-      const room = window.innerHeight - BOTTOM_ROOM_PX - (top - RISE_PX) - rest;
+      const room = window.innerHeight - BOTTOM_ROOM_PX - top - rest;
       element.style.setProperty("--thread-h", `${Math.max(160, Math.min(320, room))}px`);
     };
     fit();
@@ -212,7 +210,7 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
           </div>
         ))}
       </div>
-      <div ref={chat} className={cn("agent-chat next-chat", run && "next-chat-active")}>
+      <div ref={chat} className="agent-chat next-chat">
         <div className="agent-chat-head" aria-hidden="true">
           <span className="terminal-lights">
             <span />

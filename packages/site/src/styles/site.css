@@ -811,20 +811,7 @@
   overflow-y: auto;
 }
 
-/* In use, the chat rises into the space under the headline, so it fits the window. */
-.next-chat {
-  transition: transform 0.4s ease-out;
-}
 
-.next-chat.next-chat-active {
-  transform: translateY(-56px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .next-chat {
-    transition: none;
-  }
-}
 
 /* Declared after the base .next-demo rule so it wins: on wide screens the demo spans the window. */
 @media (min-width: 1100px) {

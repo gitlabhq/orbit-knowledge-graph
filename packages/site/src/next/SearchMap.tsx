@@ -13,6 +13,9 @@ const BURST_MS = 900;
 // The height results spread over, centered in the demo row. It is fixed, so nothing moves when the chat
 // grows as an answer arrives.
 const MAP_TALL = 380;
+// Where the results start, from the top of the demo row, so they sit around the middle of the screen beside
+// the chat.
+const MAP_LIFT = -40;
 const COLORS = {
   light: { rest: "120 125 140", path: "110 126 224", risk: "214 64 64", ok: "40 160 90" },
   dark: { rest: "200 205 225", path: "160 182 255", risk: "240 110 110", ok: "110 205 140" },
@@ -112,7 +115,7 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       const snap = (value: number) => Math.round(value / GAP) * GAP;
       const left = area.left - own.left;
       const wide = Math.max(area.width, own.width - left - 60);
-      const top = area.top - own.top + (area.height - MAP_TALL) / 2;
+      const top = area.top - own.top + MAP_LIFT;
       const tall = MAP_TALL;
       const random = seeded(search.id);
       if (search.steps) {
@@ -182,14 +185,14 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
 
       const code = search !== null && !search.steps;
       const cx = area ? (area.left - own.left + width) / 2 : width / 2;
-      const cy = area ? area.top - own.top + area.height / 2 : height / 2;
+      const cy = area ? area.top - own.top + MAP_LIFT + MAP_TALL / 2 : height / 2;
       const reach = Math.hypot(Math.max(cx, width - cx), Math.max(cy, height - cy));
       const ring = code ? (age / RING_MS) * reach : -1e4;
       const fade = code ? Math.max(0, 1 - age / (RING_MS * 1.1)) : 0;
       // The tanuki fills once its route closes.
       const fillAge = search?.logo && stops.length ? age - stops.at(-1)!.at : -1;
       const fill = fillAge > 0 ? Math.min(1, fillAge / LOGO_FILL_MS) : 0;
-      const box = fill > 0 && chat && area ? logoBox(area.left - own.left, Math.max(area.width, own.width - (area.left - own.left) - 60), area.top - own.top + (area.height - MAP_TALL) / 2, MAP_TALL) : null;
+      const box = fill > 0 && chat && area ? logoBox(area.left - own.left, Math.max(area.width, own.width - (area.left - own.left) - 60), area.top - own.top + MAP_LIFT, MAP_TALL) : null;
 
       for (let y = 0; y < height + GAP; y += GAP)
         for (let x = 0; x < width + GAP; x += GAP) {
