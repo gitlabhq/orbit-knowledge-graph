@@ -1,6 +1,11 @@
-export const HOME = { title: "GitLab Orbit", description: "What GitLab Orbit is, its roadmap, and its developer docs." };
+export const HOME = { title: "GitLab Orbit", description: "What GitLab Orbit is, and its developer docs." };
 
 export type Tab = { route: string; label: string; menu?: { route: string; label: string; description: string; icon?: string }[] };
+
+export const NEXT_PAGE = {
+  title: "Orbit Next",
+  description: "What GitLab Orbit is building next: code search across every repository and branch, and data from your other tools. Coming soon.",
+};
 
 export const TABS: Tab[] = [
   { route: "about", label: "About" },
@@ -17,6 +22,7 @@ export const TABS: Tab[] = [
       { route: "team", label: "Team", description: "Who builds Orbit, and how we work", icon: "users" },
     ],
   },
+  { route: "next", label: "Coming soon" },
 ];
 
 export const GUIDES = TABS.flatMap((tab) => tab.menu ?? []).filter(({ route }) => route !== "engineering");
@@ -27,13 +33,21 @@ export const PAGES_DIR = "docs/pages";
 
 export const SECTIONS = [
   { route: "about", label: "About" },
-  { route: "roadmap", label: "Roadmap" },
   { route: "team", label: "Team" },
   { route: "engineering/development", label: "Development" },
   { route: "engineering/architecture", label: "Architecture" },
   { route: "engineering/adr", label: "ADRs" },
   { route: "engineering/testing", label: "Testing" },
-  { route: "engineering/runbooks", label: "Runbooks" },
+];
+
+export const OFF_SITE = [
+  "engineering/adr/006_dap_integration.md",
+  "engineering/adr/007_monetization_engineering.md",
+  "engineering/adr/020_billing_sox_scope.md",
+  "engineering/development/adding-data-to-the-knowledge-graph.md",
+  "engineering/development/agents-crate-map.md",
+  "engineering/development/agents-reference-index.md",
+  "engineering/development/sox-billing-boundary.md",
 ];
 
 export const ENGINEERING = SECTIONS.filter(({ route }) => route.startsWith("engineering/"));
