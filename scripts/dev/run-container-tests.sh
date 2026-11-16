@@ -6,10 +6,6 @@ if [[ -z "${DOCKER_HOST:-}" && "$(uname -s)" == Darwin ]]; then
 fi
 
 if [[ -n "${GKG_TEST_CLICKHOUSE_URL:-}" ]]; then
-  if [[ -n "${GKG_TEST_CLICKHOUSE_WAIT:-}" ]]; then
-    cargo nextest run --no-run "$@"
-    $GKG_TEST_CLICKHOUSE_WAIT
-  fi
   exec cargo nextest run "$@"
 fi
 

@@ -34,7 +34,6 @@
     - saas-linux-medium-amd64
   image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph-lean:test-26ba65e6@sha256:3d43484a514e98ba6a0833a9d70ef518a8a2a76c43f93f941923fb10841816c6
   variables:
-    # The image leaves out clickhouse; the ClickHouse lanes install it in the background.
     MISE_DISABLE_TOOLS: lefthook,clickhouse
     # Fail closed: an empty policy would let the runner upload.
     CARGO_HOME_CACHE_POLICY: pull
