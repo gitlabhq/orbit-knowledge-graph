@@ -23,9 +23,9 @@ impl Database {
             return Self::Private(scenario::database_name(name));
         }
         if super::compiles_only(steps)
-            || config.seed.is_none()
+            || (config.seed.is_none()
                 && config.extra_seed.is_empty()
-                && config.ontology_overlay.is_none()
+                && config.ontology_overlay.is_none())
         {
             return Self::Base;
         }
