@@ -1,7 +1,7 @@
 export type Token =
   | { kind: 'word'; text: string }
   | { kind: 'separator'; pipe: boolean }
-  | { kind: 'redirect'; operator: '<' | '>' }
+  | { kind: 'redirect'; operator: '<' | '>'; hereString?: boolean }
   | { kind: 'substitution' }
   | HeredocToken
 
@@ -276,12 +276,13 @@ class Lexer {
 
   private redirectOperator(): void {
     const operator = this.src[this.pos] === '<' ? '<' : '>'
-    this.pos += operator === '<' && this.src.startsWith('<<<', this.pos) ? 3 : 1
+    const hereString = operator === '<' && this.src.startsWith('<<<', this.pos)
+    this.pos += hereString ? 3 : 1
     if (operator === '>') {
       if (this.src[this.pos] === '>') this.pos++
       if (this.src[this.pos] === '|' || this.src[this.pos] === '&') this.pos++
     }
-    this.tokens.push({ kind: 'redirect', operator })
+    this.tokens.push(hereString ? { kind: 'redirect', operator, hereString } : { kind: 'redirect', operator })
   }
 
   private heredocOperator(): void {
