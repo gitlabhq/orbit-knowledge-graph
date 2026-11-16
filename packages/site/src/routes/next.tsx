@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FieldBand, Icon, PageFrame, pageHead, RippleLog, type RippleLogLine, Section } from "@gitlab-org/orbit-site";
+import { DotWave, FieldBand, Icon, PageFrame, pageHead, RippleLog, type RippleLogLine, Section } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { Capabilities } from "../next/Capabilities";
 import { CodeSearch, SOURCES } from "../next/CodeSearch";
@@ -48,7 +48,7 @@ function Hero() {
         <br />
         <span className="orbit-fade">and every tool around it.</span>
       </p>
-      <div className="mt-6 flex w-full justify-center">
+      <div className="next-hero-demo flex w-full justify-center">
         <CodeSearch onSearch={setSearch} />
       </div>
     </section>
@@ -60,7 +60,7 @@ function NextPage() {
     <PageFrame path="next" title={NEXT_PAGE.title} options={{ hideHeader: true, landing: true }}>
       <Hero />
 
-      <Section id="search" pin className="page-section-tail" eyebrow="Code search" title={<>Every branch, <span className="orbit-fade">every language</span></>} lede="The same search works on any repository you can see, in any file, on any branch.">
+      <Section id="search" pin className="page-section-tail" backdrop={<DotWave className="next-faint-wave" drift={3} speed={1.4} reach={1} scroll />} backdropFade="floor" eyebrow="Code search" title={<>Every branch, <span className="orbit-fade">every language</span></>} lede="The same search works on any repository you can see, in any file, on any branch.">
         <Capabilities />
       </Section>
 

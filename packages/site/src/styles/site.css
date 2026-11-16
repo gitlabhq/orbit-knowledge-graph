@@ -852,10 +852,7 @@
 
 
 
-/* A slimmer window bar than the kit's, since it only carries the lights and "Coming soon". */
-.next-chat .agent-chat-head {
-  padding-block: 0.375rem;
-}
+
 
 /* The window bar names the product: the Orbit logo and "Orbit Next", as plain text. */
 .next-chat-name {
@@ -875,7 +872,6 @@
 /* The window bar's name sits in the exact middle of the bar, whatever the lights take up. */
 .next-chat .agent-chat-head {
   position: relative;
-  min-height: 2.625rem;
 }
 
 .next-chat .agent-chat-title {
@@ -887,18 +883,17 @@
   transform: translate(-50%, -50%);
 }
 
-/* On wide screens the chat sits in the middle of a row tall enough for a full answer, with open space above
-   and below, so an answer grows it up and down evenly while the page stays still. The map behind it
-   measures from the row, so it stays put too. */
+/* On wide screens the chat starts where the home page chat does, in a row tall enough for a full answer.
+   The map behind it measures from the row, so it stays put while the chat grows. */
 @media (min-width: 1100px) {
   .next-demo {
-    align-items: center;
+    align-items: start;
     min-height: 34rem;
   }
 
   .next-demo-examples,
   .next-chat {
-    align-self: center;
+    align-self: start;
   }
 
   .next-demo-viz {
@@ -1014,7 +1009,7 @@
   width: 100%;
   max-width: 64rem;
   margin-inline: auto;
-  padding: 13rem 0 8rem;
+  padding: 8rem 0 8rem;
   text-align: left;
 }
 
@@ -1040,19 +1035,25 @@
   right: var(--main-scrollbar, 0px);
 }
 
-/* The scale band's wave of dots is faint, like the field at the end of the home page, and sits above the
-   title, clear of the dark section below. */
+/* The scale band has no wave of dots; the code search section above carries a faint one below its cards. */
 .next-scale .field-band-field {
-  top: 0;
-  bottom: auto;
-  height: 14rem;
-  opacity: 0.45;
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 40%, #000 60%, transparent 100%);
+  display: none;
 }
-
 
 
 /* A smaller headline than the home page's, so the chat has room to grow. */
 .orbit-hero .next-hero-title {
   font-size: clamp(2.25rem, 4vw, 3.25rem);
 }
+
+/* The faint wave of dots under the code search cards, like the field at the end of the home page. */
+.next-faint-wave {
+  opacity: 0.45;
+}
+
+/* The headline is 2.0625rem shorter than the home page's, so the demo starts that much further below it and
+   the chat lands where the home page chat does. */
+.next-hero .next-hero-demo {
+  margin-top: calc(3rem + 2.0625rem);
+}
+

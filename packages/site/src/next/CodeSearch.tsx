@@ -204,14 +204,17 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
         </div>
         {run && <Thread key={run.start} search={run.search} stage={stage} />}
         <form onSubmit={submit} className="agent-prompt-box" aria-label="Search">
-          <ul className="agent-prompt-chips" aria-label="Sources">
-            {SOURCES.map((source) => (
-              <li key={source.label} className="agent-prompt-chip">
-                <Icon name={source.icon} size={12} />
-                {source.label}
-              </li>
-            ))}
-          </ul>
+          {run?.search.steps && (
+            // A third-party example shows the tools it reads, as chips above the input.
+            <ul className="agent-prompt-chips" aria-label="Tools">
+              {[...new Map(run.search.steps.map((step) => [step.tool, step.icon])).entries()].map(([tool, icon]) => (
+                <li key={tool} className="agent-prompt-chip">
+                  <Icon name={icon} size={12} />
+                  {tool}
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="agent-prompt-row">
             <textarea
               aria-label="Pattern or question"
