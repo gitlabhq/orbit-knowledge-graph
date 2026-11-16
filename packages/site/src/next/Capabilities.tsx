@@ -28,7 +28,8 @@ function Branches() {
 
 // Text and regex search read any file, so the wall ends in "any text file". The first ones are among the
 // 20 languages that structural search also parses.
-const SHOWN = ["ruby", "go", "rust", "typescript", "python", "java", "kotlin", "vue", "terraform", "yaml", "php", "swift", "scala"];
+// Ordered so each of the three rows fills by the chips' own widths.
+const SHOWN = ["typescript", "python", "ruby", "go", "vue", "terraform", "kotlin", "java", "rust", "scala", "swift", "yaml", "php"];
 
 function LanguageWall() {
   return (
@@ -80,17 +81,17 @@ export function Capabilities() {
       <article className="next-card">
         <Branches />
         <h3>Every branch and commit</h3>
-        <p>Search any branch or commit, not only the default branch. Find work that has not merged yet, or a bug that is fixed on main but still lives on a release branch.</p>
+        <p>Search every branch and commit, including work that has not merged.</p>
       </article>
       <article className="next-card">
         <LanguageWall />
         <h3>Every language</h3>
-        <p>Text and regex search read every file, in any language. Structural search also parses 20 languages, so a pattern matches code, not comments or strings.</p>
+        <p>Text and regex read any file. Structural search parses 20 languages.</p>
       </article>
       <article className="next-card">
         <Context />
         <h3>With file context</h3>
-        <p>Each match comes with the lines around it, the branch it is on, and every project that has the same file.</p>
+        <p>Each match shows the lines around it, its branch, and its project.</p>
       </article>
     </div>
   );

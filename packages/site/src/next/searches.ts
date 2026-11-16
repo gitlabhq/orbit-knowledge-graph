@@ -100,7 +100,7 @@ export const SEARCHES: Search[] = [
     language: "rust",
     branches: "all",
     summary: "Matches on main and on an unmerged branch. Method calls only, not comments or strings.",
-    more: ["cursor_paginator.rs:316", "cursor_paginator.rs:369", "lib.rs:304", "filter.rs:107", "filter.rs:112", "mod.rs:255", "arrow_client.rs:913", "configuration.rs:73", "rules.rs:601", "file_tree.rs:546"],
+    more: ["cursor_paginator.rs:369", "lib.rs:304", "arrow_client.rs:913", "rules.rs:601"],
     files: [
       {
         project: "gitlab-org/orbit/experiments/orbit-next",
@@ -163,6 +163,7 @@ export const SEARCHES: Search[] = [
           { n: 946, text: "      condition(:knowledge_graph_enabled) do" },
           { n: 947, text: "        ::Feature.enabled?(:knowledge_graph, @user)", match: "Feature.enabled?(:knowledge_graph" },
           { n: 948, text: "      end" },
+          { n: 949, text: "" },
         ],
       },
       {
