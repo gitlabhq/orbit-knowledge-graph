@@ -5205,6 +5205,7 @@ dependencies = [
  "lz4_flex 0.11.6",
  "memchr",
  "orbit-log-fields",
+ "percent-encoding",
  "rayon",
  "regex",
  "rustc-hash 2.1.3",

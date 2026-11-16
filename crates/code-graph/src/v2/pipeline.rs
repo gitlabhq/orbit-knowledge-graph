@@ -73,6 +73,7 @@ fn build_file_inventory_graph(
     inventory: &[FileInventoryEntry],
     parsed_file_languages: &FxHashMap<String, Language>,
     reasons: &FxHashMap<&str, FileReason>,
+    file_links: Vec<crate::v2::linker::graph::PendingFileLink>,
 ) -> CodeGraph {
     let mut graph = CodeGraph::new_with_root(root.to_string_lossy().to_string());
     for entry in inventory {
@@ -83,6 +84,7 @@ fn build_file_inventory_graph(
             .unwrap_or_default();
         graph.add_unparsed_file(&entry.path, language, entry.size, reason);
     }
+    graph.link_files(file_links);
     graph.drop_construction_indexes();
     graph
 }
@@ -268,6 +270,9 @@ pub struct PipelineContext {
     pub faults: std::sync::Mutex<Vec<crate::v2::error::FaultedFile>>,
     pub file_timings: std::sync::Mutex<Vec<FileTimingEntry>>,
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
+    /// File-to-file links from parsed files, resolved against the full
+    /// repository inventory in the structural graph.
+    pub file_links: std::sync::Mutex<Vec<crate::v2::linker::graph::PendingFileLink>>,
 }
 
 impl PipelineContext {
@@ -793,6 +798,7 @@ impl Pipeline {
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
+            file_links: std::sync::Mutex::new(Vec::new()),
         });
 
         // 2. Process languages with bounded concurrency. At most
@@ -1033,8 +1039,18 @@ impl Pipeline {
             for f in &faults {
                 reasons.insert(f.path.as_str(), FileReason::Fault(f.kind));
             }
-            let structural_graph =
-                build_file_inventory_graph(root, &file_inventory, &parsed_file_languages, &reasons);
+            let file_links = ctx
+                .file_links
+                .lock()
+                .map(|mut links| std::mem::take(&mut *links))
+                .unwrap_or_default();
+            let structural_graph = build_file_inventory_graph(
+                root,
+                &file_inventory,
+                &parsed_file_languages,
+                &reasons,
+                file_links,
+            );
             write_graph_direct(
                 structural_graph,
                 converter.as_ref(),
@@ -1419,7 +1435,10 @@ impl FamilyPipeline {
             });
         graph.reserve_for(parsed_files, parsed_defs, parsed_imports);
 
-        for parsed_file in parsed.into_iter().flatten() {
+        let mut link_anchors: FxHashMap<String, FxHashMap<String, NodeIndex>> =
+            FxHashMap::default();
+        let mut link_sources = Vec::new();
+        for mut parsed_file in parsed.into_iter().flatten() {
             let path = &files[parsed_file.path_idx].path;
             total_defs += parsed_file.result.definitions.len();
             total_imports += parsed_file.result.imports.len();
@@ -1432,6 +1451,19 @@ impl FamilyPipeline {
                 &parsed_file.result.definitions,
                 &parsed_file.result.imports,
             );
+
+            let links = std::mem::take(&mut parsed_file.result.links);
+            if !links.anchors.is_empty() {
+                let by_anchor = link_anchors.entry(path.clone()).or_default();
+                for (index, anchor) in links.anchors {
+                    if let Some(&definition) = def_nodes.get(index) {
+                        by_anchor.entry(anchor).or_insert(definition);
+                    }
+                }
+            }
+            if !links.targets.is_empty() {
+                link_sources.push((file_node, links.targets));
+            }
 
             files_with_refs[parsed_file.path_idx] = Some(FileWithRefs {
                 info: FileInfo {
@@ -1729,6 +1761,13 @@ impl FamilyPipeline {
 
         graph.indexes.definition_ranges.clear();
         graph.indexes.definition_ranges.shrink_to_fit();
+
+        let file_links = graph.link_anchors(link_sources, &link_anchors);
+        if !file_links.is_empty()
+            && let Ok(mut pending) = ctx.file_links.lock()
+        {
+            pending.extend(file_links);
+        }
 
         if let Some((handle, join)) = sentinel {
             handle.shutdown();
@@ -2328,6 +2367,7 @@ namespace MyApp {
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
+            file_links: std::sync::Mutex::new(Vec::new()),
         });
         ctx.record_skip(
             "src/slow.rs",

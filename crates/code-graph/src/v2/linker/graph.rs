@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::trace_event;
 use crate::v2::config::Language;
 use crate::v2::types::{
-    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
-    Range, Relationship, containment_relationship,
+    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, LinkTarget,
+    NodeKind, Range, Relationship, containment_relationship,
 };
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
 use orbit_utils::markdown::FRONT_MATTER_FIELDS;
@@ -16,7 +16,7 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
 }
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Bfs, EdgeFiltered, VisitMap, Visitable};
-use rustc_hash::{FxHashMap, FxHasher};
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
 
@@ -467,6 +467,75 @@ impl CodeGraph {
 
     pub fn drop_construction_indexes(&mut self) {
         self.indexes.drop_construction_indexes();
+    }
+
+    /// Add a `File -IMPORTS-> Definition` edge for each link whose anchor
+    /// names a definition in `anchors` (`path -> anchor -> definition`).
+    /// Return every other link as a file-to-file link, to resolve against
+    /// the full repository inventory.
+    pub fn link_anchors(
+        &mut self,
+        sources: Vec<(NodeIndex, Vec<LinkTarget>)>,
+        anchors: &FxHashMap<String, FxHashMap<String, NodeIndex>>,
+    ) -> Vec<PendingFileLink> {
+        let mut seen = FxHashSet::default();
+        let mut file_links = Vec::new();
+        for (file_node, targets) in sources {
+            for target in targets {
+                let definition = target.anchor.as_ref().and_then(|anchor| {
+                    anchors
+                        .get(&target.path)
+                        .and_then(|by_anchor| by_anchor.get(anchor))
+                });
+                match definition {
+                    Some(&definition) => {
+                        if seen.insert((file_node, definition)) {
+                            self.graph.add_edge(
+                                file_node,
+                                definition,
+                                GraphEdge::structural(
+                                    EdgeKind::Imports,
+                                    NodeKind::File,
+                                    NodeKind::Definition,
+                                ),
+                            );
+                        }
+                    }
+                    None => file_links.push(PendingFileLink {
+                        source: self.graph[file_node].path().to_string(),
+                        target: target.path,
+                    }),
+                }
+            }
+        }
+        file_links
+    }
+
+    /// Add a `File -IMPORTS-> File` edge for each link between two files in
+    /// this graph. Call before [`Self::drop_construction_indexes`].
+    pub fn link_files(&mut self, mut links: Vec<PendingFileLink>) {
+        let Some(file_index) = self.indexes.file_index.as_ref() else {
+            return;
+        };
+        links.sort_unstable();
+        links.dedup();
+        let edges: Vec<(NodeIndex, NodeIndex)> = links
+            .iter()
+            .filter(|link| link.source != link.target)
+            .filter_map(|link| {
+                Some((
+                    *file_index.get(&link.source)?,
+                    *file_index.get(&link.target)?,
+                ))
+            })
+            .collect();
+        for (source, target) in edges {
+            self.graph.add_edge(
+                source,
+                target,
+                GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::File),
+            );
+        }
     }
 
     /// Build extends edges and ancestor chains. Must be called after all
@@ -1358,6 +1427,13 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
         write_range(b, &self.import.range)?;
         Ok(())
     }
+}
+
+/// A link from one repository file to another, by relative path.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PendingFileLink {
+    pub source: String,
+    pub target: String,
 }
 
 pub struct EdgeRow<'a> {

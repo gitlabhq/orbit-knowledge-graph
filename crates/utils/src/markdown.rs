@@ -1,8 +1,10 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+use comrak::html::collect_text;
 use comrak::nodes::{AstNode, LineColumn, NodeValue};
-use comrak::{Arena, Options, parse_document};
+use comrak::{Anchorizer, Arena, Options, parse_document};
+use percent_encoding::percent_decode_str;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde_saphyr::granit_parser::{Event, Parser, ScalarStyle};
 
@@ -12,6 +14,8 @@ use serde_saphyr::granit_parser::{Event, Parser, ScalarStyle};
 pub const FQN_SEPARATOR: &str = "#";
 
 pub const MAX_SECTIONS_PER_FILE: usize = 10_000;
+
+pub const MAX_LINKS_PER_FILE: usize = 10_000;
 
 pub const FRONT_MATTER_NAME: &str = "front_matter";
 
@@ -54,6 +58,7 @@ pub type FrontMatterValues = [String; FRONT_MATTER_FIELDS.len()];
 pub struct Document {
     pub front_matter: Option<FrontMatter>,
     pub sections: Vec<Section>,
+    pub links: Vec<Link>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +75,10 @@ pub struct Section {
     /// The section's FQN segment: the escaped name, suffixed `-N` when a
     /// sibling already uses it.
     pub segment: String,
+    /// The URL fragment GitLab renders for the heading. Headings in block
+    /// quotes and list items are not sections but still take part in the
+    /// duplicate suffixes, so anchors are unique across the whole document.
+    pub anchor: String,
     pub parent: Option<usize>,
     pub start: usize,
     /// Byte offset of the line after the heading (setext underline included).
@@ -87,6 +96,8 @@ pub fn parse(source: &str) -> Document {
     let lines = LineIndex::new(source);
 
     let mut front_matter = None;
+    let (top_level_anchors, links) = anchors_and_links(root);
+    let mut top_level_anchors = top_level_anchors.into_iter();
     let mut sections: Vec<Section> = Vec::new();
     let mut open: Vec<(u8, usize)> = Vec::new();
 
@@ -100,6 +111,7 @@ pub fn parse(source: &str) -> Document {
             }
             _ => continue,
         };
+        let anchor = top_level_anchors.next().unwrap_or_default();
         let name = inline_text(node);
         if name.is_empty() {
             continue;
@@ -119,6 +131,7 @@ pub fn parse(source: &str) -> Document {
         sections.push(Section {
             segment: escape_segment(&name),
             name,
+            anchor,
             parent,
             start,
             heading_end: lines.next_line_start(data.sourcepos.end.line),
@@ -130,6 +143,7 @@ pub fn parse(source: &str) -> Document {
     Document {
         front_matter,
         sections,
+        links,
     }
 }
 
@@ -281,6 +295,152 @@ impl<'a> YamlEvents<'a> {
 
 fn is_null(text: &str, style: ScalarStyle) -> bool {
     style == ScalarStyle::Plain && matches!(text, "" | "~" | "null" | "Null" | "NULL")
+}
+
+/// Every heading's anchor, in document order, as GitLab's renderer (comrak's
+/// header IDs) assigns them; returns those of top-level headings, plus the
+/// document's links and images.
+fn anchors_and_links<'a>(root: &'a AstNode<'a>) -> (Vec<String>, Vec<Link>) {
+    let mut anchorizer = UniqueAnchors::default();
+    let mut top_level_anchors = Vec::new();
+    let mut links = Vec::new();
+    for node in root.descendants() {
+        let link = match &node.data.borrow().value {
+            NodeValue::Heading(_) => {
+                let anchor = anchorizer.anchorize(&collect_text(node));
+                if node
+                    .parent()
+                    .is_some_and(|parent| std::ptr::eq(parent, root))
+                {
+                    top_level_anchors.push(anchor);
+                }
+                continue;
+            }
+            NodeValue::Link(link) => Link {
+                url: link.url.clone(),
+                image: false,
+            },
+            NodeValue::Image(link) => Link {
+                url: link.url.clone(),
+                image: true,
+            },
+            _ => continue,
+        };
+        if links.len() < MAX_LINKS_PER_FILE {
+            links.push(link);
+        }
+    }
+    (top_level_anchors, links)
+}
+
+/// Same anchors as comrak's `Anchorizer`, which probes `id`, `id-1`, `id-2`, ...
+/// from zero on every call and so is quadratic in repeated headings. Taken
+/// anchors are never released, so each base resumes after its last suffix.
+#[derive(Default)]
+struct UniqueAnchors {
+    taken: FxHashSet<String>,
+    next_suffix: FxHashMap<String, usize>,
+}
+
+impl UniqueAnchors {
+    fn anchorize(&mut self, heading: &str) -> String {
+        let base = Anchorizer::new().anchorize(heading);
+        let suffix = self.next_suffix.entry(base.clone()).or_insert(0);
+        let anchor = loop {
+            let candidate = match *suffix {
+                0 => base.clone(),
+                n => format!("{base}-{n}"),
+            };
+            *suffix += 1;
+            if !self.taken.contains(&candidate) {
+                break candidate;
+            }
+        };
+        self.taken.insert(anchor.clone());
+        anchor
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    /// The destination as written, Markdown escapes resolved.
+    pub url: String,
+    pub image: bool,
+}
+
+/// A repository file a link points to, and the heading anchor it names.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LinkTarget {
+    pub path: String,
+    pub anchor: Option<String>,
+}
+
+impl Link {
+    /// Where the link points from the file at `source_path`, resolved
+    /// lexically: relative to the file's directory, or to the repository
+    /// root when it starts with `/`. `None` for an external, protocol-relative
+    /// or same-document link, or one that climbs above the root. An image
+    /// targets the file only, never a heading.
+    pub fn target(&self, source_path: &str) -> Option<LinkTarget> {
+        let url = self.url.trim();
+        if url.starts_with("//") || has_scheme(url) {
+            return None;
+        }
+        let (path, fragment) = url
+            .split_once('#')
+            .map_or((url, None), |(path, fragment)| (path, Some(fragment)));
+        let path = path.split_once('?').map_or(path, |(path, _)| path);
+        if path.is_empty() {
+            return None;
+        }
+        let path = percent_decode(path)?;
+        let directory = match path.starts_with('/') {
+            true => "",
+            false => source_path
+                .rsplit_once('/')
+                .map_or("", |(directory, _)| directory),
+        };
+        let path = normalize_path(directory, &path)?;
+        if path == source_path {
+            return None;
+        }
+        let anchor = match fragment.filter(|fragment| !self.image && !fragment.is_empty()) {
+            Some(fragment) => Some(percent_decode(fragment)?),
+            None => None,
+        };
+        Some(LinkTarget { path, anchor })
+    }
+}
+
+/// RFC 3986: a scheme is a letter, then letters, digits, `+`, `-` or `.`, then `:`.
+fn has_scheme(url: &str) -> bool {
+    let Some((scheme, _)) = url.split_once(':') else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
+
+fn percent_decode(text: &str) -> Option<String> {
+    percent_decode_str(text)
+        .decode_utf8()
+        .ok()
+        .map(|decoded| decoded.into_owned())
+}
+
+fn normalize_path(directory: &str, path: &str) -> Option<String> {
+    let mut segments: Vec<&str> = directory.split('/').filter(|s| !s.is_empty()).collect();
+    for segment in path.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                segments.pop()?;
+            }
+            segment => segments.push(segment),
+        }
+    }
+    (!segments.is_empty()).then(|| segments.join("/"))
 }
 
 pub fn segment_path(sections: &[Section], index: usize) -> Vec<&str> {
@@ -522,6 +682,141 @@ mod tests {
         let parsed = sections(source);
         assert_eq!(parsed[0].start, source.find("# One").unwrap());
         assert_eq!(parsed[1].start, source.find("## Two").unwrap());
+    }
+
+    fn anchors(source: &str) -> Vec<String> {
+        sections(source).into_iter().map(|s| s.anchor).collect()
+    }
+
+    /// Expected anchors are what GitLab's renderer (`POST /api/v4/markdown`,
+    /// GitLab 19.6) returned for the same document.
+    #[test]
+    fn anchors_match_gitlab_including_quoted_and_listed_headings() {
+        let source = "# Edge cases\n\n> ## Install\n\n- ## Install\n\n## Install\n\n\
+            ## Caf\u{e9} \u{fc}ber\n\n## *Emph* and `code`\n\n## What's new?\n\n## A -- B\n\n\
+            ## 123\n\n## Install 1\n\n## Install\n\nSetext Heading\n--------------\n\n\
+            ## C++ & C#\n\n## <kbd>Ctrl</kbd> key\n\n## :smile: Emoji\n\n## Trailing -\n\n\
+            ## Link [text](x.md)\n";
+        assert_eq!(
+            anchors(source),
+            vec![
+                "edge-cases",
+                "install-2",
+                "caf\u{e9}-\u{fc}ber",
+                "emph-and-code",
+                "whats-new",
+                "a----b",
+                "123",
+                "install-1-1",
+                "install-3",
+                "setext-heading",
+                "c--c",
+                "ctrl-key",
+                "smile-emoji",
+                "trailing--",
+                "link-text",
+            ]
+        );
+    }
+
+    #[test]
+    fn many_repeated_headings_keep_gitlab_numbering() {
+        let quoted = 100_000;
+        let source = format!("## X-1\n{}## X\n## X\n", "> ## X\n".repeat(quoted));
+        let anchors = anchors(&source);
+        assert_eq!(anchors[0], "x-1");
+        assert_eq!(anchors[1], format!("x-{}", quoted + 1));
+        assert_eq!(anchors[2], format!("x-{}", quoted + 2));
+    }
+
+    #[test]
+    fn empty_headings_still_take_an_anchor() {
+        assert_eq!(anchors("##\n\n## ?\n\n## !\n"), vec!["-1", "-2"]);
+    }
+
+    fn target(url: &str) -> Option<(String, Option<String>)> {
+        let link = Link {
+            url: url.to_string(),
+            image: false,
+        };
+        link.target("doc/user/guide.md")
+            .map(|target| (target.path, target.anchor))
+    }
+
+    fn some(path: &str, anchor: Option<&str>) -> Option<(String, Option<String>)> {
+        Some((path.to_string(), anchor.map(str::to_string)))
+    }
+
+    #[test]
+    fn links_resolve_against_the_file_directory_or_the_repository_root() {
+        assert_eq!(target("install.md"), some("doc/user/install.md", None));
+        assert_eq!(target("./a/b.md#c"), some("doc/user/a/b.md", Some("c")));
+        assert_eq!(target("../../README.md"), some("README.md", None));
+        assert_eq!(target("/src/main.rs"), some("src/main.rs", None));
+        assert_eq!(
+            target("../api//x.md?plain=1#top"),
+            some("doc/api/x.md", Some("top"))
+        );
+        assert_eq!(target("../../../outside.md"), None);
+    }
+
+    #[test]
+    fn external_protocol_relative_and_same_document_links_have_no_target() {
+        for url in [
+            "https://example.com/a.md",
+            "mailto:someone@example.com",
+            "//cdn.example.com/a.png",
+            "#section",
+            "guide.md#section",
+            "",
+        ] {
+            assert_eq!(target(url), None, "{url}");
+        }
+        assert_eq!(target("dir/a:b.md"), some("doc/user/dir/a:b.md", None));
+    }
+
+    #[test]
+    fn link_paths_and_fragments_are_percent_decoded() {
+        assert_eq!(
+            target("my%20page.md#caf%C3%A9"),
+            some("doc/user/my page.md", Some("caf\u{e9}"))
+        );
+        assert_eq!(target("bad%FF.md"), None);
+    }
+
+    #[test]
+    fn images_target_the_file_and_never_a_heading() {
+        let image = Link {
+            url: "img/shot.png#frag".to_string(),
+            image: true,
+        };
+        assert_eq!(
+            image.target("doc/guide.md"),
+            Some(LinkTarget {
+                path: "doc/img/shot.png".to_string(),
+                anchor: None,
+            })
+        );
+    }
+
+    #[test]
+    fn links_and_images_are_collected_from_the_whole_document() {
+        let source = "# A [one](one.md)\n\n> [two](two.md)\n\n- ![three](three.png)\n\n\
+            [four][ref]\n\n```\n[not](code.md)\n```\n\n[ref]: <four four.md>\n";
+        let links: Vec<(String, bool)> = parse(source)
+            .links
+            .into_iter()
+            .map(|link| (link.url, link.image))
+            .collect();
+        assert_eq!(
+            links,
+            vec![
+                ("one.md".to_string(), false),
+                ("two.md".to_string(), false),
+                ("three.png".to_string(), true),
+                ("four four.md".to_string(), false),
+            ]
+        );
     }
 
     #[test]

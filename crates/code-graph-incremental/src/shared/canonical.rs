@@ -220,6 +220,12 @@ pub enum Canonical {
     FrontMatterCategory,
     #[strum(serialize = "__side_effect")]
     SideEffect,
+    /// A documentation link's target path; an `Anchor` child names the heading.
+    #[strum(serialize = "__link")]
+    Link,
+    /// The anchor a heading section is linked by, or a link names.
+    #[strum(serialize = "__anchor")]
+    Anchor,
 }
 
 impl From<Canonical> for u16 {
