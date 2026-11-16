@@ -94,8 +94,6 @@ impl PipelineStage for DagStage {
 }
 
 impl DagStage {
-    /// Hands a DAG run to the stages after it: its compiled context and execution log go to
-    /// `ctx`, and its rows come back with their result context.
     pub fn hand_off(ctx: &mut QueryPipelineContext, outcome: Outcome) -> ExecutionOutput {
         let Outcome { compiled, executed } = outcome;
         let result_context = compiled.base.result_context.clone();

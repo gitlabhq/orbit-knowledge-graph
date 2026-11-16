@@ -215,8 +215,6 @@ impl QueryPipelineService {
     }
 }
 
-/// Turns the rows of a DAG run into the response: read into a result, checked, redacted,
-/// hydrated and paged.
 pub async fn respond(
     ran: PipelineRunner<'_, ExecutionOutput>,
 ) -> Result<PipelineRunner<'_, PipelineOutput>, PipelineError> {

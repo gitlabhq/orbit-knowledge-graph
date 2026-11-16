@@ -208,7 +208,6 @@ async fn execute(
     Ok(rows)
 }
 
-/// The response the server builds from the run's outcome, through its own stages after the DAG.
 async fn respond(
     demo: &Demo,
     query: &str,

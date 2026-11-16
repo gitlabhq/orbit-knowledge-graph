@@ -204,7 +204,6 @@ struct Format {
     format: String,
 }
 
-/// The run's response as the server's formatter for `format` renders it.
 async fn result(
     State(demo): State<Arc<Demo>>,
     Path(id): Path<u64>,

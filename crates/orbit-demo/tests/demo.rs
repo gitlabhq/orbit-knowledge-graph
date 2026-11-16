@@ -51,8 +51,6 @@ async fn result(page: SocketAddr, id: u64, format: &str) -> Response {
     exchange(page, &get(&path, &host, "")).await
 }
 
-/// A run's TOON, GQL and Raw formats as the page reads them, each checked against what the
-/// engine's formatter renders from the run's own response.
 async fn formats(demo: &Demo, caller: &str, query: &str) -> [Value; 3] {
     let page = demo.addresses.page;
     let (id, _) = run(page, caller, query).await;
