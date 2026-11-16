@@ -1,7 +1,7 @@
 "use strict";
 
 (function () {
-  const TABS = ["Plans", "Request", "Security", "Keys and timing", "Rows"];
+  const TABS = ["Plans", "Request", "Security", "Keys and timing", "Rows", "Package YAML"];
   const TONES = { waiting: "neutral", running: "info", done: "success", failed: "danger" };
   const KIND_TONES = { relational: "info", remote: "review", combine: "warning" };
 
@@ -12,9 +12,19 @@
     return el;
   }
 
+  const rerender = () => document.dispatchEvent(new Event("orbit:render"));
+  let names;
   const heading = (text) => node("h3", text);
   const badge = (text, tone) => { const b = node("span", undefined, `badge badge-${tone}`); b.append(node("span", undefined, "badge-dot"), text); return b; };
   const empty = (title, body) => { const box = node("div", undefined, "empty-state"); box.append(node("p", title, "empty-state-title")); if (body) box.append(node("p", body, "empty-state-body")); return box; };
+  const isCombine = (s) => Dag.kind(s.backend) === "combine";
+
+  function button(text, cls, onClick) {
+    const b = node("button", text, cls);
+    b.type = "button";
+    b.addEventListener("click", () => { onClick(); rerender(); });
+    return b;
+  }
 
   // Rewrites renumber plan ids, so lines compare with their ids masked.
   const shape = (line) => line.replace(/PlanId\(\d+\)/g, "PlanId");
@@ -25,23 +35,21 @@
     return block;
   }
 
-  function code(lines, added) {
-    const block = node("pre", undefined, "code");
-    if (!lines || !lines.length) { block.textContent = "(none)"; return block; }
-    for (const line of lines) block.append(node("span", line, added && added.has(line) ? "added" : "line"));
-    return block;
-  }
-
-  function plan(lines, added) {
-    const block = node("pre", undefined, "code code-plan");
-    if (!lines || !lines.length) { block.textContent = "(none)"; return block; }
-    for (const line of lines) {
-      const span = node("span", undefined, added && added.has(line) ? "added" : "line");
-      Highlight.render(span, Highlight.plan(line));
+  function lines(cls, rows, paint) {
+    const block = node("pre", undefined, `code ${cls}`);
+    if (!rows.length) { block.textContent = "(none)"; return block; }
+    for (const [row, mark] of rows) {
+      const span = node("span", undefined, mark || "line");
+      paint(span, row);
       block.append(span);
     }
     return block;
   }
+
+  const plan = (rows, added) => lines("code-plan", (rows || []).map((row) => [row, added && added.has(row) && "added"]),
+    (span, row) => Highlight.render(span, Highlight.plan(row)));
+
+  const yaml = (text, marks) => lines("code-yaml", numbered(text, marks || new Set()), (span, tokens) => Highlight.render(span, tokens));
 
   function cell(value) {
     if (value === null || value === undefined) return "";
@@ -70,9 +78,9 @@
 
   function request(r, s) {
     if (r.kind === "sql") return [heading(`${Dag.NAMES[s.backend] || s.backend} SQL`), sql(r.sql), heading("Parameters"), table(r.params.map(([name, value]) => ({ name, value })))];
-    if (r.kind === "combine") return [heading("Combine plan: combine the stages' rows, apply the response policy, page the result"), code(r.plan)];
+    if (r.kind === "combine") return [heading("Combine plan: combine the stages' rows, apply the response policy, page the result"), plan(r.plan)];
     const { kind, ...body } = r;
-    return [heading(kind === "code" ? "Orbit Next structural search request" : "Slack extraction request"), code(JSON.stringify(body, null, 2).split("\n"))];
+    return [heading(kind === "code" ? "Orbit Next structural search request" : "Slack extraction request"), yaml(JSON.stringify(body, null, 2))];
   }
 
   function added(s) {
@@ -86,31 +94,97 @@
     return box;
   }
 
+  function marks(plans) {
+    const text = plans.join("\n"), found = new Set(), bound = {};
+    for (const [, binding, entity] of text.matchAll(/Entities (\w+): (\w+)/g)) { bound[binding] = entity; found.add(entity); }
+    for (const [, names] of text.matchAll(/\[([A-Z0-9_|]+)\]/g)) for (const name of names.split("|")) found.add(name);
+    const read = (binding, property) => { if (bound[binding]) found.add(`${bound[binding]}.${property}`); };
+    for (const [, binding, property] of text.matchAll(/\b(\w+)\.(\w+)/g)) read(binding, property);
+    for (const [, binding, list] of text.matchAll(/\b(\w+)\{([\w, ]+)\}/g)) for (const property of list.split(", ")) read(binding, property);
+    return found;
+  }
+
+  const KEY = /^(\s*)(?:-\s+)?([^\s:#'"{}[\],][^:#]*?)\s*:(?:\s|$)/;
+
+  function numbered(text, found) {
+    const stack = [];
+    const raw = text.replace(/\n$/, "").split("\n");
+    return Highlight.yaml(raw.join("\n"), names).map((tokens, i) => {
+      const m = tokens.length === 1 && tokens[0][0] === "string" ? null : KEY.exec(raw[i]);
+      if (!m) return [tokens];
+      const [, indent, key] = m;
+      while (stack.length && stack[stack.length - 1].indent >= indent.length) stack.pop();
+      const parent = stack[stack.length - 1]?.key;
+      const entity = stack.findLast((outer) => found.has(outer.key))?.key;
+      stack.push({ indent: indent.length, key });
+      const named = found.has(key) || (key.includes("->") && found.has(parent)) || found.has(`${entity}.${key}`);
+      return [tokens, named && "line named"];
+    });
+  }
+
+  const files = new Map();
+
+  function packageFiles(name) {
+    if (!files.has(name)) {
+      files.set(name, null);
+      fetch(`/api/packages/${encodeURIComponent(name)}`)
+        .then((response) => (response.ok ? response.json() : []))
+        .catch(() => [])
+        .then((list) => { files.set(name, list); rerender(); });
+    }
+    return files.get(name);
+  }
+
+  function packages(run, s) {
+    const names = (run.subplans[s.id] || {}).packages || [];
+    if (!names.length) return [empty("No packages", "This stage reads nothing a package declares.")];
+    const view = s.yaml ||= { package: names[0], path: null };
+    const picker = node("div", undefined, "segmented");
+    picker.setAttribute("role", "group");
+    picker.setAttribute("aria-label", "Package");
+    picker.append(...names.map((name) => button(name, `segmented-item${name === view.package ? " segmented-active" : ""}`, () => { view.package = name; view.path = null; })));
+    const parts = [heading(isCombine(s) ? "Packages of every stage Combine reads" : "Packages that declare what this stage reads"), picker];
+    const list = packageFiles(view.package);
+    if (!list) return [...parts, empty("Loading the package", view.package)];
+    if (!list.length) return [...parts, empty("No package files", `The server holds no YAML for ${view.package}.`)];
+    const shown = list.find((f) => f.path === view.path) || list.find((f) => f.path === `storage/${s.backend}.yaml`) || list.find((f) => f.path === "graph.yaml") || list[0];
+    const nav = node("nav", undefined, "tabs");
+    nav.setAttribute("aria-label", "Package file");
+    nav.append(...list.map((f) => button(f.path, `tab${f === shown ? " tab-active" : ""}`, () => { view.path = f.path; })));
+    const plans = isCombine(s) ? Object.values(run.subplans).map((sub) => sub.plan || []).flat() : run.subplans[s.id].plan || [];
+    return [...parts, nav, yaml(shown.text, marks(plans))];
+  }
+
   function body(run, s, tab) {
     const sub = run.subplans[s.id] || {};
     switch (tab) {
-      case "Plans":
-        return [heading("Logical sub-plan"), plan(sub.plan), heading("Planned"), plan(s.planned), heading("Emitted, with what the security and policy passes added"), plan(s.emitted, added(s))];
+      case "Plans": {
+        const parts = sub.plan ? [heading("Logical sub-plan"), plan(sub.plan)] : [];
+        return [...parts, heading("Planned"), plan(s.planned), heading("Emitted, with what the security and policy passes added"), plan(s.emitted, added(s))];
+      }
       case "Request":
         return s.rendered.length ? s.rendered.flatMap((r) => request(r, s)) : [empty("No request", "This stage rendered no request.")];
       case "Security": {
         const checks = s.checks.map((c) => ({ provider: c.provider, permission: c.permission, resource: c.resource, asked: c.asked, allowed: c.allowed }));
-        const parts = [heading("Operations the emitted plan adds"), code([...added(s)])];
-        parts.push(heading("Row checks the stage's remote rows went through"), checks.length ? table(checks) : empty("No row checks", "No provider was asked about this stage's rows."));
-        return parts;
+        return [heading("Operations the emitted plan adds"), plan([...added(s)]),
+          heading("Row checks the stage's remote rows went through"), checks.length ? table(checks) : empty("No row checks", "No provider was asked about this stage's rows.")];
       }
       case "Keys and timing": {
         const facts = node("div", undefined, "facts");
         facts.append(fact("Status", Dag.STATES[s.status] || s.status), fact("Rows", String(s.rows ?? "–")), fact("Elapsed", s.elapsed === undefined ? "–" : `${s.elapsed.toFixed(2)} ms`));
         const parts = [facts];
-        if (s.error) { const alert = node("div", s.error, "alert alert-danger"); parts.push(alert); }
-        const keys = s.keys.map((k) => ({ from: `stage ${k.from}`, binding: k.binding, count: k.count, sample: k.sample }));
-        parts.push(heading("Key sets this stage read"), keys.length ? table(keys) : empty("No key sets", "This stage reads no keys from earlier stages."));
+        if (s.error) parts.push(node("div", s.error, "alert alert-danger"));
+        if (!isCombine(s)) {
+          const keys = s.keys.map((k) => ({ from: `stage ${k.from}`, binding: k.binding, count: k.count, sample: k.sample }));
+          parts.push(heading("Key sets this stage read"), keys.length ? table(keys) : empty("No key sets", "This stage reads no keys from earlier stages."));
+        }
         const flows = run.edges.filter((e) => e.kind === "rows" && (e.from === s.id || e.to === s.id))
           .map((e) => ({ from: `stage ${e.from}`, to: `stage ${e.to}`, rows: e.count ?? "", columns: (e.columns || []).join(", ") }));
-        if (flows.length) parts.push(heading(Dag.kind(s.backend) === "combine" ? "Rows Combine reads" : "Rows this stage hands to Combine"), table(flows));
+        if (flows.length) parts.push(heading(isCombine(s) ? "Rows Combine reads" : "Rows this stage hands to Combine"), table(flows));
         return parts;
       }
+      case "Package YAML":
+        return packages(run, s);
       default:
         if (s.samples.length) return s.samples.flatMap((x) => [heading(`${x.request}: ${x.count} rows before the stage's checks`), table(x.rows)]);
         return s.id === run.stages[run.stages.length - 1]?.id ? [heading("Combine output"), table(run.rows)] : [empty("No executor call", "This stage read nothing.")];
@@ -134,20 +208,16 @@
   function tabs(run, s) {
     const nav = document.getElementById("tabs");
     nav.replaceChildren(...TABS.map((t) => {
-      const b = node("button", t, `tab${t === run.tab ? " tab-active" : ""}`);
-      b.type = "button";
+      const b = button(t, `tab${t === run.tab ? " tab-active" : ""}`, () => { run.tab = t; });
       const count = t === "Rows" ? s.rows : t === "Security" ? s.checks.length || undefined : undefined;
       if (count !== undefined) b.append(node("span", String(count), "tab-count"));
-      b.addEventListener("click", () => { run.tab = t; document.dispatchEvent(new Event("orbit:render")); });
       return b;
     }));
-    const back = node("button", "Back to the logical plan", "button button-sm button-tertiary tabs-trailing");
-    back.type = "button";
-    back.addEventListener("click", () => { run.selected = null; document.dispatchEvent(new Event("orbit:render")); });
-    nav.append(back);
+    nav.append(button("Back to the logical plan", "button button-sm button-tertiary tabs-trailing", () => { run.selected = null; }));
   }
 
-  function render(run) {
+  function render(run, model) {
+    names = model;
     grants(run);
     const rows = document.getElementById("rows");
     if (run.error) rows.replaceChildren(node("div", run.error, "alert alert-danger"));
@@ -159,7 +229,7 @@
     const s = run.stages.find((x) => x.id === run.selected);
     if (!s) {
       title.textContent = "Logical plan";
-      meta.replaceChildren(run.stages.length ? node("span", "Select a stage for its plans, request, security and rows.", "inline-status") : "");
+      meta.replaceChildren(run.stages.length ? node("span", "Select a stage for its plans, request, security, rows and package YAML.") : "");
       document.getElementById("tabs").replaceChildren();
       detail.replaceChildren(run.logical.length ? plan(run.logical) : empty("No plan yet", "The logical plan appears when a query runs."));
       return;

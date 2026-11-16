@@ -1,4 +1,5 @@
-//! The page and its API: start a run, stream its events over Server-Sent Events, reload the seed.
+//! The page and its API: start a run, stream its events over Server-Sent Events, reload the seed,
+//! and read the package YAML the model loaded.
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -114,7 +115,8 @@ pub fn router(demo: Arc<Demo>) -> Router {
         .route("/api/meta", get(meta))
         .route("/api/runs", post(start))
         .route("/api/runs/{id}/events", get(events))
-        .route("/api/reload", post(reload));
+        .route("/api/reload", post(reload))
+        .route("/api/packages/{name}", get(package));
     for (path, content_type, body) in ASSETS {
         router = router.route(
             path,
@@ -133,10 +135,21 @@ async fn meta(State(demo): State<Arc<Demo>>) -> Json<Value> {
     let callers: Vec<Value> = callers
         .callers
         .iter()
-        .map(|(name, declared)| json!({"name": name, "label": declared.label(), "declared": declared}))
+        .map(|(name, declared)| json!({"name": name, "declared": declared}))
         .collect();
     let examples = crate::fakes::current(&demo.examples);
-    Json(json!({"callers": callers, "examples": *examples}))
+    let graph = demo.model.graph();
+    let entities: Vec<&str> = graph
+        .entities()
+        .map(|entity| entity.name.as_str())
+        .collect();
+    let relationships: Vec<&str> = graph.relationships().map(|r| r.name.as_str()).collect();
+    Json(json!({
+        "callers": callers,
+        "examples": *examples,
+        "entities": entities,
+        "relationships": relationships,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -183,6 +196,36 @@ fn stream(log: Arc<RunLog>) -> impl Stream<Item = Result<SseEvent, Infallible>> 
         let event = log.next(index).await?;
         Some((Ok(SseEvent::default().data(event)), (log, index + 1)))
     })
+}
+
+/// A package's files in the order a reader meets them: the package, its graph, its storage,
+/// its authorization, then its sources.
+async fn package(State(demo): State<Arc<Demo>>, Path(name): Path<String>) -> Response {
+    const ORDER: [&str; 5] = [
+        "package.yaml",
+        "graph.yaml",
+        "storage/",
+        "authorization.yaml",
+        "sources/",
+    ];
+    let prefix = format!("{name}/");
+    let mut files: Vec<(&str, &str)> = demo
+        .packages
+        .iter()
+        .filter_map(|(path, text)| Some((path.strip_prefix(&prefix)?, text.as_str())))
+        .collect();
+    if files.is_empty() {
+        return failure(StatusCode::NOT_FOUND, format!("no package {name}"));
+    }
+    files.sort_by_key(|(path, _)| {
+        let rank = ORDER.iter().position(|lead| path.starts_with(lead));
+        (rank.unwrap_or(ORDER.len()), *path)
+    });
+    let files: Vec<Value> = files
+        .into_iter()
+        .map(|(path, text)| json!({"path": path, "text": text}))
+        .collect();
+    Json(files).into_response()
 }
 
 async fn reload(State(demo): State<Arc<Demo>>, Json(_): Json<Value>) -> Response {

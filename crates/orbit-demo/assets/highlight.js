@@ -107,6 +107,48 @@
     });
   }
 
+  function scalar(value, key, names) {
+    if (names.entities.has(value)) return "label";
+    if (names.relationships.has(value)) return "reltype";
+    if (/^-?\d+(?:\.\d+)?$/.test(value)) return "number";
+    if (key) return "property";
+    return /^(?:true|false|null|~)$/.test(value) ? "keyword" : "string";
+  }
+
+  // Flow collections and `|` or `>` block scalars span lines, so their state carries over.
+  function yaml(text, names) {
+    let depth = 0, block = -1;
+    return text.split("\n").map((line) => {
+      const indent = line.search(/\S|$/);
+      if (block >= 0 && (indent > block || indent === line.length)) return [["string", line]];
+      block = -1;
+      const tokens = [];
+      let at = 0;
+      while (at < line.length) {
+        const rest = line.slice(at);
+        const keyed = (end) => /^\s*:(\s|$)/.test(line.slice(end));
+        let m;
+        if ((m = /^\s+/.exec(rest))) tokens.push(["space", m[0]]);
+        else if (rest[0] === "#" && (at === 0 || /\s/.test(line[at - 1]))) tokens.push(["comment", rest]);
+        else if ((m = /^'(?:[^']|'')*'?|^"(?:[^"\\]|\\.)*"?/.exec(rest))) tokens.push([keyed(at + m[0].length) ? "property" : "string", m[0]]);
+        else if ((m = /^[{[]/.exec(rest))) { depth++; tokens.push(["punct", m[0]]); }
+        else if ((m = /^[}\]]/.exec(rest))) { depth = Math.max(0, depth - 1); tokens.push(["punct", m[0]]); }
+        else if ((m = /^(?:->|<-)/.exec(rest))) tokens.push(["op", m[0]]);
+        else if ((m = /^(?::(?=\s|$)|-(?=\s|$)|,)/.exec(rest))) tokens.push(["punct", m[0]]);
+        else if ((m = /^[|>][-+]?\s*$/.exec(rest))) { block = indent; tokens.push(["punct", m[0]]); }
+        else {
+          let end = at;
+          while (end < line.length && !/^(?::(\s|$)|\s+(#|->|<-))/.test(line.slice(end)) && !(depth && /[,{}[\]]/.test(line[end]))) end++;
+          const value = line.slice(at, end).trimEnd() || line[at];
+          m = [value];
+          tokens.push([scalar(value, keyed(at + value.length), names), value]);
+        }
+        at += m[0].length;
+      }
+      return tokens;
+    });
+  }
+
   function significant(tokens) {
     for (let i = tokens.length - 1; i >= 0; i--) if (tokens[i][0] !== "space") return tokens[i];
     return null;
@@ -128,5 +170,5 @@
     target.replaceChildren(...nodes);
   }
 
-  window.Highlight = { gql, sql, plan, render };
+  window.Highlight = { gql, sql, plan, yaml, render };
 })();

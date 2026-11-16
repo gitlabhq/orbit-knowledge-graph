@@ -14,6 +14,7 @@ pub mod run;
 pub mod seed;
 pub mod store;
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,6 +48,8 @@ pub struct Demo {
     pub callers: Shared<Callers>,
     pub examples: Shared<Vec<seed::Example>>,
     pub seed_dir: PathBuf,
+    /// The YAML of every package the model loaded, by path under the packages' root.
+    pub packages: BTreeMap<String, String>,
     pub addresses: Addresses,
     pub runs: api::Runs,
 }
@@ -69,7 +72,8 @@ impl Demo {
 pub async fn start(checked: Checked) -> anyhow::Result<Arc<Demo>> {
     orbit_server_config::query::init_embedded_defaults();
     let seed = Seed::read(&checked.config.seed)?;
-    let model = integration_testkit::dag_fakes::dag_model();
+    let packages = integration_testkit::dag_fakes::dag_packages();
+    let model = packages.deployment("demo")?;
     let (catalog, connections) = integration_testkit::dag_fakes::dag_connections(&model);
     let lakes = Lakes::new(&connections, &checked.config.lake);
     lakes.reload(&seed.lake)?;
@@ -104,6 +108,12 @@ pub async fn start(checked: Checked) -> anyhow::Result<Arc<Demo>> {
         callers: shared(seed.callers),
         examples: shared(seed.examples),
         seed_dir: checked.config.seed.clone(),
+        packages: packages
+            .sources()
+            .iter()
+            .filter(|(path, _)| path.ends_with(".yaml"))
+            .map(|(path, text)| (path.clone(), text.clone()))
+            .collect(),
         addresses,
         runs: api::Runs::default(),
     });

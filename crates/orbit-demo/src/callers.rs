@@ -35,11 +35,13 @@ pub struct Callers {
 pub enum Declared {
     Gitlab {
         label: String,
+        role: String,
         user_id: i64,
         paths: Vec<Membership>,
     },
     Zanzibar {
         label: String,
+        role: String,
         subject: String,
     },
 }
@@ -49,14 +51,6 @@ pub enum Declared {
 pub struct Membership {
     pub path: String,
     pub access_level: u32,
-}
-
-impl Declared {
-    pub fn label(&self) -> &str {
-        match self {
-            Self::Gitlab { label, .. } | Self::Zanzibar { label, .. } => label,
-        }
-    }
 }
 
 /// A signed-in caller: the grants its queries compile with, and the deployment that checks its

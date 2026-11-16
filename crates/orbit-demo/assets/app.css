@@ -1,6 +1,5 @@
-.shell-panel { min-height: calc(100vh - 2 * var(--space-2)); }
 .page { max-width: 1320px; padding: var(--space-5) var(--space-6) var(--space-7); gap: var(--space-5); }
-.brand img { width: 36px; height: 36px; }
+.field-hint { font-size: var(--font-xs); color: var(--text-subtle); }
 
 .grants { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) var(--space-3); }
 .grant { display: flex; flex-direction: column; gap: 2px; }
@@ -111,6 +110,7 @@ svg#dag { display: block; width: 100%; height: auto; margin: 0 auto; font-family
 
 .detail-body { gap: var(--space-4); }
 .tabs:empty { display: none; }
+.tabs-trailing { align-self: center; }
 .detail { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
 .detail h3 { font-size: var(--font-sm); font-weight: 600; color: var(--text-heading); margin-top: var(--space-2); }
 .detail h3:first-child { margin-top: 0; }
@@ -118,6 +118,11 @@ svg#dag { display: block; width: 100%; height: auto; margin: 0 auto; font-family
 .code { margin: 0; max-height: 420px; overflow: auto; padding: var(--space-3) var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-subtle); font-family: var(--mono); font-size: var(--font-xs); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-default); }
 .code .added { display: block; margin: 0 calc(-1 * var(--space-4)); padding: 0 var(--space-4); background: var(--diff-added-bg); color: var(--success-text); }
 .code .line { display: block; }
+.code-yaml { counter-reset: line; max-height: 560px; }
+.code-yaml .line { padding-left: 5ch; text-indent: -5ch; }
+.code-yaml .line::before { counter-increment: line; content: counter(line); display: inline-block; width: 4ch; margin-right: 1ch; text-align: right; text-indent: 0; color: var(--text-subtle); }
+.code-yaml .named { margin: 0 calc(-1 * var(--space-4)); padding: 0 var(--space-4) 0 calc(var(--space-4) + 5ch); background: color-mix(in srgb, var(--diff-target) 12%, transparent); }
+.detail .segmented { align-self: flex-start; flex-wrap: wrap; }
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); }
 .fact { display: flex; flex-direction: column; gap: 2px; padding: var(--space-3) var(--space-4); border: 1px solid var(--border-default); border-radius: var(--radius-lg); }
 .fact-label { font-size: var(--font-xs); color: var(--text-subtle); }
@@ -129,4 +134,3 @@ svg#dag { display: block; width: 100%; height: auto; margin: 0 auto; font-family
 .table .hidden-column { color: var(--text-subtle); }
 .empty-state { border: 1px dashed var(--border-default); border-radius: var(--radius-lg); }
 .empty-state-body { font-size: var(--font-sm); }
-#status { font-size: var(--font-sm); }

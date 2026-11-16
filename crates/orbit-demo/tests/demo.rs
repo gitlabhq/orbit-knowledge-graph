@@ -1,5 +1,6 @@
 //! The demo end to end on the demo services (`scripts/services.sh`): query 4 through the
-//! API, its event stream and rows per caller, the page's guard, and the seed reload.
+//! API, its event stream and rows per caller, the package YAML it serves, the page's guard, and
+//! the seed reload.
 
 mod support;
 
@@ -193,12 +194,26 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     ] {
         assert!(logical.contains(&line), "{line} in {logical:#?}");
     }
-    let code_stage = plans["stages"]["2"].as_array().unwrap();
+    let code_stage = plans["stages"]["2"]["plan"].as_array().unwrap();
     assert!(
         code_stage
             .iter()
             .any(|line| line.as_str().unwrap().trim() == "Entities h: Head"),
         "{code_stage:?}"
+    );
+    assert_eq!(
+        plans["stages"]["2"]["packages"],
+        json!(["gitlab.source_code", "orbit_next.heads"])
+    );
+    assert_eq!(plans["stages"]["3"]["plan"], Value::Null);
+    assert_eq!(
+        plans["stages"]["3"]["packages"],
+        json!([
+            "gitlab.code_review",
+            "gitlab.core",
+            "gitlab.source_code",
+            "orbit_next.heads"
+        ])
     );
 
     let discussed = events(page, "maintainer", DISCUSSED).await;
@@ -271,6 +286,33 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     )
     .await;
     assert_eq!(rebound.status, 403);
+
+    let slack = exchange(page, &get("/api/packages/integration.slack", &host, "")).await;
+    assert_eq!(slack.status, 200, "{}", slack.body);
+    let files: Vec<Value> = serde_json::from_str(&slack.body).unwrap();
+    let paths: Vec<&str> = files
+        .iter()
+        .map(|file| file["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "package.yaml",
+            "graph.yaml",
+            "storage/duckdb.yaml",
+            "storage/live.yaml",
+            "authorization.yaml",
+            "sources/des.yaml"
+        ]
+    );
+    let on_disk = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/demo/integration.slack/graph.yaml"
+    ))
+    .unwrap();
+    assert_eq!(files[1]["text"], on_disk);
+    let missing = exchange(page, &get("/api/packages/integration.none", &host, "")).await;
+    assert_eq!(missing.status, 404);
 
     let refused = exchange(page, &post("/api/reload", &host, "text/plain", "", "{}")).await;
     assert_eq!(refused.status, 403);

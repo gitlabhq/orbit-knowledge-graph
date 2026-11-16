@@ -5,10 +5,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use compiler::dag::{Backend, Env, Source, StageQuery, split_query};
+use compiler::dag::{Backend, Env, Runs, Source, StageQuery, split_query};
 use compiler::surface;
+use query_data_model::Model;
 use query_data_model::catalog::Row;
 use query_data_model::surface::Statement;
 use query_engine::shared::dag::{Event, Executor, Executors, Observer, Runner};
@@ -188,25 +189,55 @@ async fn execute(
     Ok(json_rows(&outcome.executed.batches, ROWS))
 }
 
-/// The query's logical plan and each stage's sub-plan as readable trees. The runner reports its
-/// plans as Debug text, so the demo splits a second parse of the same query to print them.
+/// The query's logical plan, and each stage's sub-plan as a readable tree with the packages that
+/// declare what it reads. The runner reports its plans as Debug text, so the demo splits a second
+/// parse of the same query to print them. Combine reads every stage's rows, so it shows every
+/// stage's packages.
 fn plans(demo: &Demo, statement: Statement, env: &Env<'_>) -> Value {
     let logical = plan_text::tree(&statement.plan, &demo.model);
-    let stages: BTreeMap<String, Vec<String>> = match split_query(Source::Parsed(statement), env) {
-        Ok(dag) => dag
-            .stages
-            .iter()
-            .filter_map(|stage| match &stage.query {
-                StageQuery::Gql(statement) => Some((
-                    stage.id.to_string(),
-                    plan_text::tree(&statement.plan, &demo.model),
-                )),
-                _ => None,
-            })
-            .collect(),
-        Err(_) => BTreeMap::new(),
+    let Ok(dag) = split_query(Source::Parsed(statement), env) else {
+        return json!({"event": "plans", "logical": logical, "stages": {}});
     };
+    let every: BTreeSet<String> = dag
+        .stages
+        .iter()
+        .flat_map(|stage| packages(&demo.model, &stage.runs))
+        .collect();
+    let stages: BTreeMap<String, Value> = dag
+        .stages
+        .iter()
+        .map(|stage| {
+            let (plan, packages) = match &stage.query {
+                StageQuery::Gql(statement) => (
+                    Some(plan_text::tree(&statement.plan, &demo.model)),
+                    packages(&demo.model, &stage.runs),
+                ),
+                _ => (None, every.clone()),
+            };
+            let info = json!({"plan": plan, "packages": packages});
+            (stage.id.to_string(), info)
+        })
+        .collect();
     json!({"event": "plans", "logical": logical, "stages": stages})
+}
+
+/// The packages that declare the entities a stage reads and the stores it reads them from.
+fn packages(model: &Model, runs: &Runs) -> BTreeSet<String> {
+    let Runs::On { stores, .. } = runs else {
+        return BTreeSet::new();
+    };
+    stores
+        .iter()
+        .flat_map(|(entity, store)| {
+            let stored = model.store(*store).source(*entity);
+            [
+                Some(&model.graph().entity(*entity).package),
+                stored.map(|source| &source.package),
+            ]
+        })
+        .flatten()
+        .cloned()
+        .collect()
 }
 
 /// The caller's scope answer for every scope and permission the packages read with.

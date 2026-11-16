@@ -43,15 +43,18 @@ zanzibar:
 callers:
   maintainer:
     deployment: gitlab
-    label: Dmitry Gruzd, Maintainer of Orbit
+    label: Dmitry Gruzd
+    role: Maintainer of Orbit
     user_id: 3
     paths: [{path: 1/100/, access_level: 40}]
   reporter:
     deployment: gitlab
-    label: Aaron Algutifan, Reporter on data-extraction-service-poc
+    label: Aaron Algutifan
+    role: Reporter on data-extraction-service-poc
     user_id: 5
     paths: [{path: 1/100/101/1002/, access_level: 20}]
   zanzibar:
     deployment: zanzibar
-    label: Jean-Gabriel Doyon, Zanzibar caller without knowledge-graph code
+    label: Jean-Gabriel Doyon
+    role: No read_code on knowledge-graph
     subject: jgdoyon1

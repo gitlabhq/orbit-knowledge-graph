@@ -32,10 +32,7 @@ function apply(event, t) {
   switch (event.event) {
     case "caller": run.grants = event.grants; break;
     case "check": stage(run.current).checks.push(event); break;
-    case "plans":
-      run.logical = event.logical;
-      for (const [id, plan] of Object.entries(event.stages)) run.subplans[id] = { plan };
-      break;
+    case "plans": run.logical = event.logical; run.subplans = event.stages; break;
     case "split":
       for (const info of event.stages) {
         run.stages.push({ ...info, status: "waiting", rendered: [], samples: [], keys: [], checks: [] });
@@ -76,12 +73,14 @@ function apply(event, t) {
   }
 }
 
+// Combine reads its inputs by position, so the names come from each input stage's last output.
 function markRows(id, plan) {
   for (const line of plan) {
-    const match = /^Rows \{ stage: (\d+) \} -> \[(.*)\]$/.exec(line);
-    if (!match) continue;
-    const edge = run.edges.find((e) => e.from === Number(match[1]) && e.to === id && e.kind === "rows");
-    if (edge) edge.columns = match[2].split(", ").map((c) => c.replace(/^\d+\./, "")).filter((c) => !c.startsWith("_orbit"));
+    const match = /^Rows \{ stage: (\d+), columns: \[([\d, ]*)\] \}/.exec(line);
+    const edge = match && run.edges.find((e) => e.from === Number(match[1]) && e.to === id && e.kind === "rows");
+    if (!edge) continue;
+    const outputs = /-> \[(.*)\]$/.exec(stage(edge.from).emitted?.at(-1) || "")?.[1].split(", ") || [];
+    edge.columns = match[2].split(", ").map((i) => outputs[Number(i)]).filter((c) => c && !c.startsWith("_orbit"));
   }
 }
 
@@ -190,7 +189,7 @@ function render() {
   if (flow && !(replay && replay.active)) animate();
   const done = run.stages.filter((s) => s.status === "done").length;
   $("dag-summary").textContent = run.stages.length ? `${done} of ${run.stages.length} stages finished` : "";
-  Panels.render(run);
+  Panels.render(run, names);
 }
 
 function pump() {
@@ -242,7 +241,8 @@ async function start() {
 
 function hint() {
   const caller = callers.find((c) => c.name === $("caller").value);
-  $("caller-hint").textContent = caller ? (caller.declared.deployment === "zanzibar" ? "Zanzibar-style provider" : "GitLab session") : "";
+  const session = caller && (caller.declared.deployment === "zanzibar" ? "Zanzibar-style provider" : "GitLab session");
+  $("caller-hint").textContent = caller ? `${caller.declared.role} · ${session}` : "";
 }
 
 function paint() {
@@ -261,10 +261,8 @@ function choose(index) {
   paint();
   $("caller").value = example.caller;
   $("example-title").textContent = example.title;
-  const caller = callers.find((c) => c.name === example.caller);
-  const subtitle = `As ${caller ? caller.label : example.caller} · ${example.subtitle}`;
-  $("example-subtitle").textContent = subtitle;
-  $("example-subtitle").title = subtitle;
+  $("example-subtitle").textContent = example.subtitle;
+  $("example-subtitle").title = example.subtitle;
   for (const [i, item] of [...$("examples").children].entries()) item.firstElementChild.classList.toggle("example-active", i === index);
   hint();
 }
@@ -301,6 +299,7 @@ let stream = null;
 let generation = 0;
 let callers = [];
 let examples = [];
+let names = { entities: new Set(), relationships: new Set() };
 let stepping = true;
 let flow = !matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -309,7 +308,8 @@ async function boot() {
   const meta = await (await fetch("/api/meta")).json();
   callers = meta.callers;
   examples = meta.examples;
-  $("caller").replaceChildren(...callers.map((c) => new Option(c.label, c.name)));
+  names = { entities: new Set(meta.entities), relationships: new Set(meta.relationships) };
+  $("caller").replaceChildren(...callers.map((c) => new Option(c.declared.label, c.name)));
   $("examples").replaceChildren(...examplesList());
   if (examples.length) choose(0);
   status("Ready");
