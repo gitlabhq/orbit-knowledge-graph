@@ -37,16 +37,18 @@ pub struct QueryStep {
 }
 
 impl QueryScenario {
-    pub fn into_steps(self) -> (ScenarioConfig, Vec<QueryStep>) {
+    pub fn into_steps(self, name: &str) -> (ScenarioConfig, Vec<QueryStep>) {
         let steps = match (self.query.is_empty(), self.steps.is_empty()) {
             (false, true) => vec![QueryStep {
                 seed: Seed::default(),
                 query: self.query,
-                expect: self.expect.expect("scenario declares query without expect"),
+                expect: self
+                    .expect
+                    .unwrap_or_else(|| panic!("{name}: scenario declares query without expect")),
             }],
             (true, false) => self.steps,
-            (false, false) => panic!("scenario declares both query/expect and steps:"),
-            (true, true) => panic!("scenario declares neither query nor steps:"),
+            (false, false) => panic!("{name}: scenario declares both query/expect and steps"),
+            (true, true) => panic!("{name}: scenario declares neither query nor steps"),
         };
         (self.config, steps)
     }

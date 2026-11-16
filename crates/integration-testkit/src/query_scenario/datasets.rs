@@ -166,7 +166,7 @@ mod tests {
 
     fn database(yaml: &str) -> Database {
         let scenario: QueryScenario = orbit_utils::yaml::from_str(yaml).unwrap();
-        let (config, steps) = scenario.into_steps();
+        let (config, steps) = scenario.into_steps("case");
         Database::for_scenario(&config, &steps, "case")
     }
 
