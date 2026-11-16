@@ -10,12 +10,20 @@ stages:
 variables:
   CI_MERGE_REQUEST_IID: $ORBIT_PERF_MR_IID
 
+.child-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
+
 docker-build-mr:
-  extends: .docker-build-mr
+  extends:
+    - .docker-build-mr
+    - .child-rules
   interruptible: true
 
 orbit-perf:mr:
-  extends: .orbit-perf-base
+  extends:
+    - .orbit-perf-base
+    - .child-rules
   # orbit-perf.sh waits for the docker-build-mr image in the background.
   needs: []
   interruptible: true
