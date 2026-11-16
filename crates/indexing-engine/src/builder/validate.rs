@@ -36,17 +36,17 @@ pub enum BuildError {
     MissingResource(#[from] MissingResource),
 }
 
-pub(super) fn check_names(builder: &EngineBuilder) -> Result<(), BuildError> {
-    check_unique_names("worker", builder.workers.iter().map(|entry| entry.name))?;
-    check_unique_names("planner", builder.planners.iter().map(|entry| entry.name))?;
-    check_unique_names(
+pub(super) fn reject_invalid_or_duplicate_names(builder: &EngineBuilder) -> Result<(), BuildError> {
+    reject_invalid_or_duplicate("worker", builder.workers.iter().map(|entry| entry.name))?;
+    reject_invalid_or_duplicate("planner", builder.planners.iter().map(|entry| entry.name))?;
+    reject_invalid_or_duplicate(
         "reconciler",
         builder.reconcilers.iter().map(|entry| entry.name),
     )?;
-    check_unique_names("pool", builder.pools.iter().copied())
+    reject_invalid_or_duplicate("pool", builder.pools.iter().copied())
 }
 
-pub(super) fn check_config(builder: &EngineBuilder) -> Result<(), BuildError> {
+pub(super) fn reject_unknown_lanes(builder: &EngineBuilder) -> Result<(), BuildError> {
     let workers: BTreeSet<&str> = builder.workers.iter().map(|entry| entry.name).collect();
     for (lane, config) in &builder.config.lanes {
         let Some((worker, _)) = Lane::parse_id(lane) else {
@@ -66,6 +66,10 @@ pub(super) fn check_config(builder: &EngineBuilder) -> Result<(), BuildError> {
             }
         }
     }
+    Ok(())
+}
+
+pub(super) fn reject_unregistered_pools(builder: &EngineBuilder) -> Result<(), BuildError> {
     for pool in builder.config.pools.keys() {
         if !builder.pools.contains(&pool.as_str()) {
             return Err(BuildError::UnregisteredPool { pool: pool.clone() });
@@ -74,7 +78,9 @@ pub(super) fn check_config(builder: &EngineBuilder) -> Result<(), BuildError> {
     Ok(())
 }
 
-pub(super) fn check_done_triggers(builder: &EngineBuilder) -> Result<(), BuildError> {
+pub(super) fn reject_done_triggers_on_unknown_workers(
+    builder: &EngineBuilder,
+) -> Result<(), BuildError> {
     let workers: BTreeSet<&str> = builder.workers.iter().map(|entry| entry.name).collect();
     for planner in &builder.planners {
         for trigger in (planner.triggers)() {
@@ -91,7 +97,7 @@ pub(super) fn check_done_triggers(builder: &EngineBuilder) -> Result<(), BuildEr
     Ok(())
 }
 
-pub(super) fn check_reconciler_writes(builder: &EngineBuilder) -> Result<(), BuildError> {
+pub(super) fn reject_tables_with_two_writers(builder: &EngineBuilder) -> Result<(), BuildError> {
     let mut writers: BTreeMap<&'static str, &'static str> = BTreeMap::new();
     for reconciler in &builder.reconcilers {
         for table in reconciler.writes {
@@ -107,7 +113,7 @@ pub(super) fn check_reconciler_writes(builder: &EngineBuilder) -> Result<(), Bui
     Ok(())
 }
 
-fn check_unique_names(
+fn reject_invalid_or_duplicate(
     kind: &'static str,
     names: impl Iterator<Item = &'static str>,
 ) -> Result<(), BuildError> {

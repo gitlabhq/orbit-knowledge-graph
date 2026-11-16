@@ -73,10 +73,11 @@ impl EngineBuilder {
     }
 
     pub fn build(self) -> Result<Engine, BuildError> {
-        validate::check_names(&self)?;
-        validate::check_config(&self)?;
-        validate::check_done_triggers(&self)?;
-        validate::check_reconciler_writes(&self)?;
+        validate::reject_invalid_or_duplicate_names(&self)?;
+        validate::reject_unknown_lanes(&self)?;
+        validate::reject_unregistered_pools(&self)?;
+        validate::reject_done_triggers_on_unknown_workers(&self)?;
+        validate::reject_tables_with_two_writers(&self)?;
         let registry = Registry::instantiate(
             &self.workers,
             &self.planners,

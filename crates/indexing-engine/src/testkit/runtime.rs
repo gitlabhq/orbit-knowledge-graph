@@ -127,7 +127,7 @@ impl KitRuntime {
 
     async fn run(&self, task: QueuedTask, first_started: Instant) {
         let lane = self.find_lane_config(&task);
-        let attempt = self.attempt(&task, &lane).await;
+        let attempt = self.run_attempt(&task, &lane).await;
         match Disposition::of(attempt, task.attempts_used, first_started.elapsed(), &lane) {
             Disposition::Finish(outcome) => self.finish(task, outcome).await,
             Disposition::Retry { after } => self.state.lock().requeue(task.use_attempt(), after),
@@ -147,7 +147,7 @@ impl KitRuntime {
         }
     }
 
-    async fn attempt(&self, task: &QueuedTask, lane: &LaneConfig) -> Attempt {
+    async fn run_attempt(&self, task: &QueuedTask, lane: &LaneConfig) -> Attempt {
         let Some(worker) = self.engine.registry.find_worker(task.input.worker).cloned() else {
             let error = anyhow!("no module registered the worker {}", task.input.worker);
             return Attempt::Failed(TaskError::permanent(error));

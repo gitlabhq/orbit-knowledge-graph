@@ -57,7 +57,7 @@ impl Disposition {
             };
         }
         match failure {
-            None => Self::after_timeout(attempts_used, lane),
+            None => Self::decide_after_timeout(attempts_used, lane),
             Some(TaskErrorKind::Failed(error)) => {
                 Self::retry_or_dead_letter(attempts_used, format!("{error:#}"))
             }
@@ -73,7 +73,7 @@ impl Disposition {
         }
     }
 
-    fn after_timeout(attempts_used: u16, lane: &LaneConfig) -> Self {
+    fn decide_after_timeout(attempts_used: u16, lane: &LaneConfig) -> Self {
         let message = format!(
             "the task ran longer than the lane timeout of {:?}",
             lane.timeout
