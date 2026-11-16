@@ -15,11 +15,8 @@ remote:
   examples: ", `gitlab:mr:words`,"
   query_for: " and `{{orbit}} query`"
 providers:
-  code:
-    description: local code
-    entities: [Definition, File, Directory]
-  gitlab:
-    description: origin's group
+  code: {description: local code}
+  gitlab: {description: origin's group}
 
 nudge_gitlab: |
   `{{orbit}}` reads GitLab; writes stay with glab. `{{orbit}} grep 'words'` searches code and every connected provider together, or one with `gitlab:mr:words`. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI; `{{orbit}} context repo:group/project symbol:Name file:path` reads a sibling project's code.

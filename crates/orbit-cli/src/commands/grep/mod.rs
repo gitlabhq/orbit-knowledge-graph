@@ -8,6 +8,7 @@ mod render;
 mod scan;
 mod term;
 
+pub(crate) use kind::code_entities;
 pub(crate) use qualifier::{CODE, gitlab_prefixes};
 pub(crate) use rank::is_test;
 

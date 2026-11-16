@@ -354,6 +354,16 @@ mod tests {
     }
 
     #[test]
+    fn every_listed_code_entity_is_a_code_qualifier() {
+        let entities = crate::commands::grep::code_entities();
+        assert_eq!(entities, strings(&["Definition", "Directory", "File"]));
+        for entity in entities {
+            let query = format!("code:{entity}:x");
+            assert!(parse(&query, true).is_some(), "{query}");
+        }
+    }
+
+    #[test]
     fn code_is_the_local_provider() {
         assert_eq!(
             sections("code:def:throttle"),
