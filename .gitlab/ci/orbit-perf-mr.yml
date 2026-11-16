@@ -9,6 +9,7 @@ stages:
 
 variables:
   CI_MERGE_REQUEST_IID: $ORBIT_PERF_MR_IID
+  TARGET_CACHE_POLICY: pull
 
 .child-rules:
   rules:

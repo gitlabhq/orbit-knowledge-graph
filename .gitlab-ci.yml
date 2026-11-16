@@ -3,6 +3,7 @@ variables:
   FF_USE_FASTZIP: "true"
   CACHE_COMPRESSION_LEVEL: fastest
   ARTIFACT_COMPRESSION_LEVEL: fastest
+  TARGET_CACHE_POLICY: pull-push
   CANONICAL_PROJECT_ID: "77960826"
   SECURITY_PROJECT_ID: "80999258"
   CLICKHOUSE_VERSION: "26.6"
@@ -71,6 +72,8 @@ workflow:
         SECRET_DETECTION_DISABLED: "true"
         DEPENDENCY_SCANNING_DISABLED: "true"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        TARGET_CACHE_POLICY: pull-push
     - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS == null
       changes:
         compare_to: refs/heads/main
@@ -1004,7 +1007,7 @@ cli-integration-test:
       docker pull nats:2.15.0-alpine &
       wait
   script:
-    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --test indexer_containers -E "$NEXTEST_FILTER"
+    - ./scripts/dev/run-container-tests.sh --profile ci -p integration-tests --test server_containers --test indexer_containers -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
 integration-test:
@@ -1054,7 +1057,7 @@ corpus-smoke-test:
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
     # against a real ClickHouse schema (no correctness assertions).
-    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --no-capture -E "$NEXTEST_FILTER"
+    - ./scripts/dev/run-container-tests.sh --profile ci -p integration-tests --test server_containers --no-capture -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
 .fuzz-corpus:
