@@ -1026,3 +1026,12 @@
 .site-shell-autohide > header {
   right: var(--main-scrollbar, 0px);
 }
+
+/* The scale band keeps the slide-over but drops the wave of dots under it. */
+.next-scale .field-band-field {
+  display: none;
+}
+
+.next-scale .field-band-body {
+  padding-bottom: 8rem;
+}
