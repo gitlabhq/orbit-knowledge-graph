@@ -104,7 +104,15 @@
           </div>
         </section>
         <section class="section">
-          <div class="section-header"><h2>Results <span id="count" class="section-count"></span></h2></div>
+          <div class="section-header">
+            <h2>Results <span id="count" class="section-count"></span></h2>
+            <div id="formats" class="segmented" role="group" aria-label="Result format">
+              <button class="segmented-item segmented-active" type="button" data-format="table">Table</button>
+              <button class="segmented-item" type="button" data-format="toon">TOON</button>
+              <button class="segmented-item" type="button" data-format="gql">GQL</button>
+              <button class="segmented-item" type="button" data-format="raw">Raw</button>
+            </div>
+          </div>
           <div id="rows" class="section-body"></div>
         </section>
       </div>

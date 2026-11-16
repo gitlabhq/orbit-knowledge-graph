@@ -7,7 +7,7 @@ let queue = [];
 let timer = null;
 
 function fresh() {
-  return { stages: [], edges: [], logical: [], grants: [], subplans: {}, rows: null, error: null, selected: null, tab: null, done: false, t0: performance.now(), events: [] };
+  return { id: null, stages: [], edges: [], logical: [], grants: [], subplans: {}, rows: null, formats: {}, error: null, selected: null, tab: null, done: false, t0: performance.now(), events: [] };
 }
 
 function stage(id) {
@@ -189,7 +189,7 @@ function render() {
   if (flow && !(replay && replay.active)) animate();
   const done = run.stages.filter((s) => s.status === "done").length;
   $("dag-summary").textContent = run.stages.length ? `${done} of ${run.stages.length} stages finished` : "";
-  Panels.render(run, names);
+  Panels.render(run, names, format);
 }
 
 function pump() {
@@ -228,6 +228,7 @@ async function start() {
   const started = ++generation;
   const { run: id } = await post("/api/runs", { query: $("query").value, caller: $("caller").value });
   if (started !== generation) return;
+  run.id = id;
   const events = new EventSource(`/api/runs/${id}/events`);
   stream = events;
   events.onmessage = (message) => {
@@ -293,6 +294,12 @@ function flowView(on) {
   render();
 }
 
+function formatView(name) {
+  format = name;
+  for (const item of $("formats").children) item.classList.toggle("segmented-active", item.dataset.format === name);
+  render();
+}
+
 function themeLabel() { $("theme").textContent = Theme.current() === "dark" ? "Light" : "Dark"; }
 
 let stream = null;
@@ -301,7 +308,8 @@ let callers = [];
 let examples = [];
 let names = { entities: new Set(), relationships: new Set() };
 let stepping = true;
-let flow = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+let format = "table";
+let flow =!matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 async function boot() {
   run = fresh();
@@ -329,6 +337,7 @@ $("replay-play").addEventListener("click", playReplay);
 $("replay-time").addEventListener("input", scrub);
 $("replay-speed").addEventListener("change", () => { if (replay) { replay.speed = Number($("replay-speed").value); if (!replay.playing) replay.t = Math.min(replay.t, replayEnd()); replayControls(); } });
 $("view-static").addEventListener("click", () => flowView(false));
+for (const item of $("formats").children) item.addEventListener("click", () => formatView(item.dataset.format));
 $("theme").addEventListener("click", () => { Theme.toggle(); themeLabel(); render(); });
 $("reload").addEventListener("click", () => post("/api/reload", {})
   .then((r) => boot().then(() => status(`Reloaded ${r.rows} seed rows`, "success")))

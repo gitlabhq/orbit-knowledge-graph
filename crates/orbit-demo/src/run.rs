@@ -1,8 +1,9 @@
 //! One query run: the caller signs in, the real DAG runner runs the query over the demo's
-//! executors, and every runner event goes to the run's log as it happens.
+//! executors, and every runner event goes to the run's log as it happens. The server's own
+//! stages after the DAG then build the run's response, which its formatters render.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -12,22 +13,29 @@ use compiler::surface;
 use query_data_model::Model;
 use query_data_model::catalog::Row;
 use query_data_model::surface::Statement;
-use query_engine::shared::dag::{Event, Executor, Executors, Observer, Runner};
+use query_engine::pipeline::{
+    NoOpObserver, PipelineError, PipelineRunner, QueryPipelineContext, TypeMap,
+};
+use query_engine::shared::dag::{Event, Executor, Executors, Observer, Outcome, Runner};
+use query_engine::shared::{DagStage, PipelineOutput};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 
+use crate::callers::Session;
 use crate::executors::{CodeHttp, LiveHttp, Sampled, Samples, json_rows};
 use crate::{Demo, plan_text};
 
 const ROWS: usize = 500;
 
-/// A run's events as JSON, in order, for any number of readers. Each event carries `at_ms`,
-/// the time since the run began, which the page replays the run from.
+/// A run's events as JSON, in order, for any number of readers, and the response the server
+/// built from it. Each event carries `at_ms`, the time since the run began, which the page
+/// replays the run from.
 pub struct RunLog {
     events: Mutex<Vec<String>>,
     done: AtomicBool,
     notify: Notify,
     begun: Instant,
+    response: OnceLock<Result<PipelineOutput, String>>,
 }
 
 impl Default for RunLog {
@@ -37,11 +45,17 @@ impl Default for RunLog {
             done: AtomicBool::default(),
             notify: Notify::new(),
             begun: Instant::now(),
+            response: OnceLock::new(),
         }
     }
 }
 
 impl RunLog {
+    /// The response of a run whose DAG finished, set before its `done` event.
+    pub fn response(&self) -> Option<&Result<PipelineOutput, String>> {
+        self.response.get()
+    }
+
     pub fn push(&self, mut event: Value) {
         if let Value::Object(fields) = &mut event {
             fields.insert(
@@ -186,7 +200,41 @@ async fn execute(
     let outcome = Runner::new(env, &executors, &checks, &mut observer)
         .run(Source::Parsed(parse()?))
         .await?;
-    Ok(json_rows(&outcome.executed.batches, ROWS))
+    let rows = json_rows(&outcome.executed.batches, ROWS);
+    let response = respond(demo, query, session, outcome)
+        .await
+        .map_err(|error| error.to_string());
+    let _ = log.response.set(response);
+    Ok(rows)
+}
+
+/// The response the server builds from the run's outcome, through its own stages after the DAG.
+async fn respond(
+    demo: &Demo,
+    query: &str,
+    session: Session,
+    outcome: Outcome,
+) -> Result<PipelineOutput, PipelineError> {
+    let mut server_extensions = TypeMap::default();
+    server_extensions.insert(Arc::clone(&demo.store.reader));
+    server_extensions.insert(Arc::clone(&demo.catalog));
+    server_extensions.insert(*query_data_model::testkit::limits());
+    server_extensions.insert(session.deployment);
+    server_extensions.insert(session.caller);
+    let mut ctx = QueryPipelineContext {
+        query_json: query.to_string(),
+        compiled: None,
+        security_context: None,
+        grants: Some(session.grants),
+        server_extensions,
+        phases: TypeMap::default(),
+    };
+    let ran = DagStage::hand_off(&mut ctx, outcome);
+    let mut silent = NoOpObserver;
+    orbit_server::pipeline::respond(PipelineRunner::resume(&mut ctx, &mut silent, ran))
+        .await?
+        .finish()
+        .ok_or_else(|| PipelineError::custom("the output stage built no response"))
 }
 
 /// The query's logical plan, and each stage's sub-plan as a readable tree with the packages that

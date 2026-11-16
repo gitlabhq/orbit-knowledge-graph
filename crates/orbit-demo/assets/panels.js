@@ -29,11 +29,13 @@
   // Rewrites renumber plan ids, so lines compare with their ids masked.
   const shape = (line) => line.replace(/PlanId\(\d+\)/g, "PlanId");
 
-  function sql(text) {
-    const block = node("pre", undefined, "code code-sql");
-    Highlight.render(block, Highlight.sql(text));
+  function highlighted(cls, tokens) {
+    const block = node("pre", undefined, `code ${cls}`);
+    Highlight.render(block, tokens);
     return block;
   }
+
+  const sql = (text) => highlighted("code-sql", Highlight.sql(text));
 
   function lines(cls, rows, paint) {
     const block = node("pre", undefined, `code ${cls}`);
@@ -216,13 +218,32 @@
     nav.append(button("Back to the logical plan", "button button-sm button-tertiary tabs-trailing", () => { run.selected = null; }));
   }
 
-  function render(run, model) {
+  function formatted(run, format) {
+    if (!(format in run.formats)) {
+      run.formats[format] = null;
+      fetch(`/api/runs/${run.id}/result?format=${format}`)
+        .then(async (response) => {
+          const body = await response.json();
+          return response.ok ? { body } : { error: body.error || response.statusText };
+        })
+        .catch((error) => ({ error: error.message }))
+        .then((result) => { run.formats[format] = result; rerender(); });
+    }
+    const result = run.formats[format];
+    if (!result) return empty("Formatting the response", "The server's formatter renders this run's response.");
+    if (result.error) return node("div", result.error, "alert alert-danger");
+    if (format === "gql") return highlighted("code-table", Highlight.gql(result.body));
+    return yaml(typeof result.body === "string" ? result.body : JSON.stringify(result.body, null, 2));
+  }
+
+  function render(run, model, format) {
     names = model;
     grants(run);
     const rows = document.getElementById("rows");
     if (run.error) rows.replaceChildren(node("div", run.error, "alert alert-danger"));
-    else if (run.rows) rows.replaceChildren(table(run.rows, "No rows for this caller"));
-    else rows.replaceChildren(empty("No results yet", "Pick an example or write a query, then run it."));
+    else if (!run.rows) rows.replaceChildren(empty("No results yet", "Pick an example or write a query, then run it."));
+    else if (format === "table") rows.replaceChildren(table(run.rows, "No rows for this caller"));
+    else rows.replaceChildren(formatted(run, format));
     document.getElementById("count").textContent = run.rows ? String(run.rows.length) : "";
     const title = document.getElementById("title"), meta = document.getElementById("stage-meta");
     const detail = document.getElementById("detail");

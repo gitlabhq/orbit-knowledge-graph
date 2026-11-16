@@ -1,18 +1,19 @@
-//! The page and its API: start a run, stream its events over Server-Sent Events, reload the seed,
-//! and read the package YAML the model loaded.
+//! The page and its API: start a run, stream its events over Server-Sent Events, render its
+//! response in the server's formats, reload the seed, and read the package YAML the model loaded.
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::Stream;
+use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter, ToonFormatter};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -20,6 +21,8 @@ use crate::Demo;
 use crate::run::{RunLog, run};
 
 const KEPT_RUNS: u64 = 64;
+
+const FORMATTERS: [&dyn ResultFormatter; 3] = [&ToonFormatter, &GqlFormatter, &GraphFormatter];
 
 const ASSETS: [(&str, &str, &[u8]); 16] = [
     (
@@ -110,11 +113,22 @@ pub struct Runs {
     logs: Mutex<BTreeMap<u64, Arc<RunLog>>>,
 }
 
+impl Runs {
+    fn get(&self, id: u64) -> Option<Arc<RunLog>> {
+        self.logs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&id)
+            .cloned()
+    }
+}
+
 pub fn router(demo: Arc<Demo>) -> Router {
     let mut router = Router::new()
         .route("/api/meta", get(meta))
         .route("/api/runs", post(start))
         .route("/api/runs/{id}/events", get(events))
+        .route("/api/runs/{id}/result", get(result))
         .route("/api/reload", post(reload))
         .route("/api/packages/{name}", get(package));
     for (path, content_type, body) in ASSETS {
@@ -176,18 +190,39 @@ async fn start(State(demo): State<Arc<Demo>>, Json(request): Json<Start>) -> Jso
 }
 
 async fn events(State(demo): State<Arc<Demo>>, Path(id): Path<u64>) -> Response {
-    let log = demo
-        .runs
-        .logs
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(&id)
-        .cloned();
-    match log {
+    match demo.runs.get(id) {
         Some(log) => Sse::new(stream(log))
             .keep_alive(KeepAlive::default())
             .into_response(),
         None => failure(StatusCode::NOT_FOUND, format!("no run {id}")),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Format {
+    format: String,
+}
+
+/// The run's response as the server's formatter for `format` renders it.
+async fn result(
+    State(demo): State<Arc<Demo>>,
+    Path(id): Path<u64>,
+    Query(Format { format }): Query<Format>,
+) -> Response {
+    let Some(formatter) = FORMATTERS
+        .into_iter()
+        .find(|formatter| formatter.format_name().as_ref() == format)
+    else {
+        return failure(StatusCode::BAD_REQUEST, format!("no format {format}"));
+    };
+    let Some(log) = demo.runs.get(id) else {
+        return failure(StatusCode::NOT_FOUND, format!("no run {id}"));
+    };
+    match log.response() {
+        Some(Ok(output)) => Json(formatter.format(output)).into_response(),
+        Some(Err(error)) => failure(StatusCode::INTERNAL_SERVER_ERROR, error),
+        None => failure(StatusCode::CONFLICT, format!("run {id} has no response")),
     }
 }
 
