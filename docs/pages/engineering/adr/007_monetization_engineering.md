@@ -10,9 +10,6 @@ toc_hide: true
 
 Draft
 
-Amended at general availability: DAP queries are not zero-rated. Orbit queries through DAP use [GitLab Credits](https://docs.gitlab.com/subscriptions/gitlab_credits/), like MCP and CLI queries.
-The sections on zero-rating record the plan before general availability.
-
 ## Date
 
 2026-03-26
@@ -33,8 +30,6 @@ External callers use the Model Context Protocol (MCP) endpoint, the GitLab comma
 | Core | Rails service to Orbit | System JWT | Not applicable, infrastructure | Not applicable, infrastructure | Not applicable, infrastructure |
 | External | Agent to Rails OAuth to Orbit | OAuth and user JWT | Metered per query with credits | Metered per query with credits | Included, GB-based fee |
 
-Before general availability, the plan for GitLab.com and GitLab-hosted Dedicated was to zero-rate DAP usage and charge MCP and CLI usage.
-So a user must not be able to make a query look like DAP traffic to get it free.
 GitLab Self-Managed and customer-hosted GitLab Dedicated have no per-query billing today, so the channel is for analytics only.
 Their pricing model can change, so instrumentation covers every deployment and the billing pipeline can extend to them later.
 
@@ -50,7 +45,7 @@ We split the work into four phases:
 
 1. Instrumentation, in April: Rails sends the source type, and Orbit emits billable events and checks quota before each metered query.
 1. Tier enforcement, in April and in parallel: every Orbit endpoint requires GitLab Premium or GitLab Ultimate.
-1. Zero-rate enforcement, in May, after Phase 1: a signed service token proves that a request came from DWS.
+1. DWS channel verification, in May, after Phase 1: a signed service token proves that a request came from DWS.
 1. CustomersDot billing pipeline, from May to June: flat-rate multiplier pricing in CustomersDot, plus a credits dashboard.
 
 Phase 1 needs no AI Gateway work.
@@ -59,7 +54,7 @@ Phase 4 depends on Phase 1 for the events and on Phase 3 for a trusted channel.
 
 The phases apply to each deployment type as follows:
 
-| Deployment | Instrumentation | Tier gate | Zero-rate enforcement | CustomersDot billing |
+| Deployment | Instrumentation | Tier gate | DWS channel verification | CustomersDot billing |
 |---|---|---|---|---|
 | GitLab.com | Yes | Yes | Yes | Yes, credits |
 | GitLab-hosted Dedicated | Yes | Yes | Yes, with the tenant secret | Yes, credits |
@@ -196,8 +191,8 @@ Orbit caches the instance token in memory and refreshes it on the send path:
 
 Before it runs a query on a metered channel, Orbit asks CustomersDot whether the namespace has credits, and it fails closed.
 
-The check runs before the query pipeline, and only for MCP and REST, because they are the charged channels.
-The other channels are zero-rated or included, so they skip the check.
+The check runs before the query pipeline, and only for the charged channels.
+The frontend and core channels are included, so they skip the check.
 
 On GitLab.com, Orbit authenticates to CustomersDot with admin credentials.
 GitLab Self-Managed and Dedicated cannot hold those credentials.
@@ -238,11 +233,9 @@ On GitLab.com, Rails checks the license of each top-level namespace.
 On GitLab Self-Managed, Rails checks the instance license, and no per-query billing applies.
 The Orbit feature flag stays as a kill switch next to the tier gate.
 
-### Zero-rate enforcement
+### DWS channel verification
 
-This section records the plan before general availability, when DAP queries were to be zero-rated.
-
-Zero-rate enforcement applies only to GitLab.com and GitLab-hosted Dedicated, where per-query credit billing is active.
+DWS channel verification applies only to GitLab.com and GitLab-hosted Dedicated, where per-query credit billing is active.
 
 Workhorse stamps a short-lived signed token on DWS calls to Orbit, and Rails classifies a request as DWS only when the token is valid.
 
@@ -257,21 +250,16 @@ The secret already exists in every deployment that runs Workhorse, so Phase 3 ad
 
 ### CustomersDot pricing
 
-This section records the plan before general availability. At general availability, a DWS event is charged like an MCP event.
-
 Orbit follows the flat-rate pricing pattern of the static application security testing (SAST) flows.
 CustomersDot applies a multiplier to each event by source type:
 
-- An MCP event is charged with a flat credit multiplier, such as one credit for each query.
-- A DWS event has a zero multiplier.
+- An MCP or DWS event is charged with a flat credit multiplier, such as one credit for each query.
 - A frontend or core event is not billed.
 
 Attribution uses the root namespace on GitLab.com and the instance ID on Dedicated.
 The query type is for analytics only.
 The credits dashboard shows Orbit as its own line item.
 The line item shows the total queries in the billing period, the split by channel, and the credit spend.
-
-**Before general availability, a DAP workflow that called Orbit was to be zero-rated by the multiplier, with no event suppressed or annotated.**
 
 The DAP completion event stays the billable event for DAP usage itself.
 Each event stands alone with its own source type, which sets its multiplier.
@@ -313,22 +301,15 @@ Code owner rules require approval from the billing owners for the module and the
 Rails is only a proxy, and Orbit has execution data that Rails does not see: latency, result count before redaction, and cache hits.
 Emission from Orbit also matches the billing service connection pattern for other Rust and Go services.
 
-### Suppress events for zero-rated channels
+### Suppress events for unbilled channels
 
-Fulfillment requires an event for every access, as agreed at the zero-rating meeting.
-Zero-rating is a multiplier in CustomersDot, and it does not suppress events.
+Fulfillment requires an event for every access.
+CustomersDot prices each event by its source type, so an unbilled channel needs no suppression.
 
-### Use only the workflow scope for zero-rating
+### Use only the workflow scope to identify DWS traffic
 
 A user can copy the token from the browser developer tools and call the API directly.
 The scope is enough for Phase 1 analytics, but billing needs the signed service token.
-
-### Link DAP and Orbit events with correlation IDs
-
-CustomersDot would suppress the Orbit charge when it saw a matching DAP event.
-At the zero-rating meeting, Fulfillment confirmed that CustomersDot does not support this.
-CustomersDot uses correlation IDs only for logs and traces.
-Each billing event must carry its own source type to set its multiplier.
 
 ### Check quota in Rails
 
@@ -362,14 +343,13 @@ Every Orbit query covers all top-level namespaces of the user by design, so a re
 - [Add the Orbit and Duo Agent Platform integration ADR](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/709)
 - [ADR 006: Orbit and DAP integration](006_dap_integration.md)
 - [ADR 020: SOX scoping for billing event emission](020_billing_sox_scope.md)
-- [Zero-rating meeting notes, 2026-03-11](https://docs.google.com/document/d/1JbzhTtlF4rDMhmIjNkmDwLQyLovRmDlaGprw5yc-rOw)
 - [GA launch super document](https://docs.google.com/document/d/1UD5E_53bMfX6IYRVu41KGZ7NGh-wObXrOA0EizI_d0U)
 - [Connect the billing service with Orbit with OIDC tokens for LabKit](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307)
 - [Add JWT-based authentication for incoming platform requests](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/98#note_3108588468)
 - [Add an OIDC-based authentication stack for incoming platform requests](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/merge_requests/106)
 - [Decide the default enabled namespace for Orbit usage billing](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/471)
 - [Rails monolith tier gating](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/221)
-- [Tamper-proof DWS channel detection for zero-rated Orbit billing](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/501)
+- [Tamper-proof DWS channel detection](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/501)
 - [Stamp a Workhorse-signed JWT on DuoWorkflow Orbit calls](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/242241)
 - [Validate the Workhorse JWT to classify DWS Orbit requests](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/242242)
 - [Implement flat-rate pricing for SAST false positive detection](https://gitlab.com/gitlab-org/gitlab/-/issues/592304)

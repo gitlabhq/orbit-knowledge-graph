@@ -12,8 +12,6 @@ Accepted
 
 Amended by [ADR 022](022_queries_in_rails.md): Rails now runs the query stream, and Workhorse only proxies the request.
 
-Amended at general availability: DAP queries are not zero-rated. Orbit queries through DAP use [GitLab Credits](https://docs.gitlab.com/subscriptions/gitlab_credits/), like MCP and CLI queries.
-
 ## Date
 
 2026-03-26
