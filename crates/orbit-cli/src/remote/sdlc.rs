@@ -10,20 +10,17 @@ pub(crate) enum Found {
 }
 
 pub(crate) fn current_branch(dir: &Path) -> Result<String, RemoteError> {
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(["symbolic-ref", "--short", "-q", "HEAD"])
-        .output()
-        .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("could not run git: {e}")))?;
-    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    match output.status.success() && !name.is_empty() {
-        true => Ok(name),
-        false => Err(RemoteError::new(
-            EXIT_GENERIC,
-            "no current branch; pass a branch:<name> target",
-        )),
-    }
+    crate::workspace::repository_at(dir)
+        .current_branch_name()
+        .ok()
+        .flatten()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            RemoteError::new(
+                EXIT_GENERIC,
+                "no current branch; pass a branch:<name> target",
+            )
+        })
 }
 
 /// Reads a branch from the context endpoint. A branch with a merge request returns the merge
@@ -78,5 +75,47 @@ mod tests {
             })
         );
         assert_eq!(merge_request("feature", &serde_json::Value::Null), None);
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn current_branch_names_the_checked_out_branch() {
+        let repo = tempfile::TempDir::new().unwrap();
+        git(repo.path(), &["init", "-b", "feature/x"]);
+
+        assert_eq!(current_branch(repo.path()).unwrap(), "feature/x");
+    }
+
+    #[test]
+    fn current_branch_fails_on_a_detached_head_and_outside_a_repository() {
+        let repo = tempfile::TempDir::new().unwrap();
+        assert!(current_branch(repo.path()).is_err());
+
+        git(repo.path(), &["init", "-b", "main"]);
+        git(
+            repo.path(),
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "init",
+            ],
+        );
+        git(repo.path(), &["checkout", "--detach"]);
+
+        let error = current_branch(repo.path()).unwrap_err();
+        assert!(error.to_string().contains("branch:<name>"), "{error}");
     }
 }

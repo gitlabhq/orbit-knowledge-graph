@@ -2775,7 +2775,7 @@ dependencies = [
 [[package]]
 name = "gitalisk-core"
 version = "0.8.1"
-source = "git+https://gitlab.com/gitlab-org/rust/gitalisk.git?tag=v0.8.1#9e483ad15ffad8541a325aedc8d8247a2ee9fd85"
+source = "git+https://gitlab.com/gitlab-org/rust/gitalisk.git?rev=4d7696fadb874b4b7bd5fa143a3c7e445bfc5db4#4d7696fadb874b4b7bd5fa143a3c7e445bfc5db4"
 dependencies = [
  "dunce",
  "ignore",
