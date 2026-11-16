@@ -33,6 +33,27 @@ const DEFINITIONS: &[&str] = &[
     "symbols",
 ];
 const VALUE_KINDS: &[&str] = &["Variable", "Var", "Constant", "Const", "Static", "Local"];
+pub(crate) fn code_entities() -> Vec<String> {
+    let searchable = |name: &str| {
+        let lower = name.to_lowercase();
+        [FILES, DIRECTORIES, DEFINITIONS]
+            .iter()
+            .any(|list| list.contains(&lower.as_str()))
+    };
+    let mut names: Vec<String> = Ontology::load_embedded()
+        .map(|ontology| {
+            ontology
+                .local_entity_names()
+                .into_iter()
+                .filter(|name| searchable(name))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
 pub(super) fn languages(requested: &mut Vec<String>) -> Vec<String> {
     use code_graph_incremental::treesitter::{SupportLang, all_languages};
     let mut builder = ignore::types::TypesBuilder::new();

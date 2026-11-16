@@ -100,6 +100,7 @@ struct SetupTexts {
     instructions: String,
     #[serde(default)]
     remote: BTreeMap<String, String>,
+    #[serde(default)]
     providers: BTreeMap<String, ProviderText>,
     nudge_search: String,
     nudge_gitlab: String,
@@ -110,17 +111,14 @@ struct SetupTexts {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProviderText {
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    entities: Vec<String>,
+    description: String,
 }
 
 fn provider_line(name: &str, entities: &[String]) -> String {
     match TEXTS
         .providers
         .get(name)
-        .and_then(|text| text.description.as_deref())
+        .map(|text| text.description.as_str())
     {
         Some(description) => format!("- {name} ({description}): {}", entities.join(", ")),
         None => format!("- {name}: {}", entities.join(", ")),
@@ -162,14 +160,7 @@ fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> S
     }
     let code = crate::commands::grep::CODE;
     let gitlab = crate::remote::server_schema::PROVIDER;
-    let declared = |name: &str| {
-        TEXTS
-            .providers
-            .get(name)
-            .map(|text| text.entities.clone())
-            .unwrap_or_default()
-    };
-    let mut listed = vec![provider_line(code, &declared(code))];
+    let mut listed = vec![provider_line(code, &crate::commands::grep::code_entities())];
     if remote
         && !providers
             .get(gitlab)
@@ -714,7 +705,7 @@ mod tests {
                 for phrase in [
                     &format!("`{launcher} grep 'words'` searches every provider below"),
                     "`code:def:words`",
-                    "\n- code (local code): Definition, File, Directory",
+                    "\n- code (local code): Definition, Directory, File",
                     "Run it first, on a task's key words",
                     "Ignores case, `_`, `-`",
                     "`a|b` OR",
@@ -768,7 +759,7 @@ mod tests {
         assert!(
             rendered.ends_with(
                 "for `glab orbit grep provider:type:words` and `glab orbit query`:\n\
-                 - code (local code): Definition, File, Directory\n\
+                 - code (local code): Definition, Directory, File\n\
                  - gitlab (origin's group): Widget\n- slack: SlackMessage"
             ),
             "{rendered}"
@@ -777,7 +768,7 @@ mod tests {
         assert!(
             local.ends_with(
                 "for `glab orbit grep provider:type:words`:\n\
-                 - code (local code): Definition, File, Directory\n- slack: SlackMessage"
+                 - code (local code): Definition, Directory, File\n- slack: SlackMessage"
             ),
             "{local}"
         );
