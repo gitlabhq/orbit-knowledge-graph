@@ -259,8 +259,6 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             continue;
         }
         let writer = GraphWriter::open_waiting(&db_path, &git, wait)?;
-        // Opening the writer can rebuild the database for a new schema, so a
-        // snapshot only counts against a database that still holds a complete index.
         let snapshot = options.db.is_none()
             && writer.has_complete_index()?
             && manifest::load_incremental_state(&manifest_path, git.project_id)?.is_some();

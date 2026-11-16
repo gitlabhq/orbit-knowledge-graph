@@ -20,8 +20,6 @@ fn run(repo: &Path, data: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-/// Makes the stored fingerprint differ from the binary's, as an `orbit`
-/// upgrade that changes the local schema or the code index revision does.
 fn age_stored_fingerprint(database: &Path, key: &str) {
     let graph = duckdb_client::DuckDbClient::open(database).unwrap();
     graph
