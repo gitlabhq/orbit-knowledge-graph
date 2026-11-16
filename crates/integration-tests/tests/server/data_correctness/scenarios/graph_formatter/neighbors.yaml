@@ -155,7 +155,7 @@ cases:
       edge_prop_absent: [path_id, step, depth]
 
   - name: neighbors_both_exact
-    description: Both-direction neighbors of group 100 include its members, parent group, and project
+    description: Both-direction neighbors of group 100 are its members and project; the parent group is not returned because its edge is stored outside the center's subtree
     query:
       json: |
         {

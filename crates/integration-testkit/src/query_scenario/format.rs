@@ -344,6 +344,7 @@ impl QueryExpect {
             || self.total_edge_count.is_some()
             || self.has_path_assertions()
             || self.referential_integrity
+            || !self.edge_prop_absent.is_empty()
             || self.has_more.is_some()
             || !self.format.is_empty()
     }

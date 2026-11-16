@@ -448,6 +448,21 @@ fn repeated_nodes_preserve_order_within_each_entity_type() {
 }
 
 #[test]
+fn top_level_result_fields_are_rejected_next_to_pages() {
+    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
+    for field in [
+        "edge_prop_absent: [path_id]",
+        "aggregation_columns: [{name: n, function: count, target: d}]",
+    ] {
+        rejects(
+            query.clone(),
+            &format!("{field}\npages: [{{}}]"),
+            "pages is set alongside top-level result assertions",
+        );
+    }
+}
+
+#[test]
 fn page_expectations_reject_fields_that_are_not_executed() {
     let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
     for field in [
