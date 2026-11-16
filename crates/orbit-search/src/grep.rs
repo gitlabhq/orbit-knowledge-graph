@@ -25,27 +25,53 @@ pub fn query_alternatives(query: &str) -> Result<Vec<String>, String> {
 }
 
 fn split_top_level(query: &str) -> Vec<String> {
+    let chars: Vec<char> = query.chars().collect();
+    let paired = paired_brackets(&chars);
     let (mut parts, mut current, mut depth) = (Vec::new(), String::new(), 0i32);
-    let mut chars = query.chars();
-    while let Some(c) = chars.next() {
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
         match c {
             '\\' => {
                 current.push(c);
-                current.extend(chars.next());
+                current.extend(chars.get(i + 1));
+                i += 2;
                 continue;
             }
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth -= 1,
+            '(' | '[' if paired.contains(&i) => depth += 1,
+            ')' | ']' if paired.contains(&i) => depth -= 1,
             '|' if depth <= 0 => {
                 parts.push(std::mem::take(&mut current));
+                i += 1;
                 continue;
             }
             _ => {}
         }
         current.push(c);
+        i += 1;
     }
     parts.push(current);
     parts
+}
+
+fn paired_brackets(chars: &[char]) -> HashSet<usize> {
+    let (mut open, mut paired) = (Vec::new(), HashSet::new());
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => i += 1,
+            '(' | '[' => open.push(i),
+            ')' | ']' => {
+                if let Some(start) = open.pop() {
+                    paired.insert(start);
+                    paired.insert(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    paired
 }
 
 #[cfg(test)]
@@ -58,6 +84,19 @@ mod tests {
             query_alternatives(" markInSync | MARKINSYNC | prepare_multipart | who calls clone ")
                 .unwrap(),
             ["markInSync", "prepare_multipart", "who calls clone"]
+        );
+    }
+
+    #[test]
+    fn unbalanced_brackets_still_split_on_every_bar() {
+        assert_eq!(
+            query_alternatives(r"\.route(|Router::new").unwrap(),
+            [r"\.route(", "Router::new"]
+        );
+        assert_eq!(query_alternatives("(a|b)|c").unwrap(), ["(a|b)", "c"]);
+        assert_eq!(
+            query_alternatives(r"(Router|App)::new|\.route(").unwrap(),
+            ["(Router|App)::new", r"\.route("]
         );
     }
 
