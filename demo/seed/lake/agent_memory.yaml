@@ -1,0 +1,8 @@
+table: agent_memory
+rows:
+  - {id: mem-01, note: Retry the flaky ClickHouse test with a pinned seed before merging., agent: orbit-agent, merge_request_id: 5001, created_at: "2026-11-09 11:05:00", traversal_path: 1/100/1000/}
+  - {id: mem-02, note: Filter Slack rows by channel in the lake read so the DAG fans out on fewer keys., agent: orbit-agent, merge_request_id: 5001, created_at: "2026-11-10 09:20:00", traversal_path: 1/100/1000/}
+  - {id: mem-03, note: Check that the Jira and Slack lakes both decode zone-less timestamps as UTC., agent: orbit-agent, merge_request_id: 5002, created_at: "2026-11-12 10:00:00", traversal_path: 1/100/1000/}
+  - {id: mem-04, note: Keep the cursor token opaque so the sort key can change without breaking clients., agent: orbit-agent, merge_request_id: 5003, created_at: "2026-11-11 14:30:00", traversal_path: 1/100/1000/}
+  - {id: mem-05, note: Add one live Slack text row per workspace to the fixture before the next review., agent: orbit-agent, merge_request_id: 5005, created_at: "2026-11-06 16:10:00", traversal_path: 1/100/101/1002/}
+  - {id: mem-06, note: Batch description lookups per Jira project to stay under the live store's rate limit., agent: orbit-agent, merge_request_id: 5009, created_at: "2026-11-10 15:40:00", traversal_path: 1/100/101/1002/}

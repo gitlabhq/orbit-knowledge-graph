@@ -1,8 +1,8 @@
 # Orbit query engine demo
 
 An interactive page that runs GQL through the real DAG runner on seeded local data and draws each
-stage as it runs. ClickHouse holds the graph. DuckDB reads the Slack and Jira lakes as Parquet
-from RustFS. Loopback fakes stand in for Orbit Next and the live store that serves Slack and Jira.
+stage as it runs. ClickHouse holds the graph. DuckDB reads the Slack, Jira and agent memory lakes
+as Parquet from RustFS. Loopback fakes stand in for Orbit Next and the live store that serves Slack and Jira.
 The seed is Orbit's own projects and team. Every name, message and issue in it is invented.
 Nothing in the demo listens beyond 127.0.0.1 or reaches past the machine.
 `orbit-server` never depends on this crate.
@@ -34,7 +34,7 @@ every lake table's Parquet file in the `orbit-lake` bucket, and reloads the fake
 | --- | --- |
 | `clickhouse/*.yaml` | `table:` and `rows:` for one ClickHouse table. Columns you omit take their defaults. A row with `_deleted: true` and a later `_version` is a tombstone. |
 | `orbit_next.yaml` | Repositories, with the files at the head of each branch. The fake matches the search pattern against file contents line by line. |
-| `lake/*.yaml` | `table:` and `rows:` for one table of a lake: Slack's `slack_lake` (`slack_workspace`, `slack_message`) and Jira's `jira_lake` (`jira_project`, `jira_issue`, `jira_user`). The demo writes each table to `s3://orbit-lake/lake/<lake>/<table>/` and DuckDB reads it from there. |
+| `lake/*.yaml` | `table:` and `rows:` for one table of a lake: Slack's `slack_lake` (`slack_workspace`, `slack_message`) Jira's `jira_lake` (`jira_project`, `jira_issue`, `jira_user`), and the `custom.agent_memory` package's `memory_lake` (`agent_memory`). The demo writes each table to `s3://orbit-lake/lake/<lake>/<table>/` and DuckDB reads it from there. |
 | `slack.yaml` | The live store's rows per workspace and operation: Slack message `text` (`search.messages`) and Jira issue descriptions (`search.issues`, keyed by Jira project id), which the lakes do not store. `visible_to` lists the handles that can read each row. |
 | `callers.yaml` | The GitLab and Zanzibar-style deployments, and the callers the page offers. |
 | `examples.yaml` | The starter queries. |

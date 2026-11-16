@@ -1,0 +1,17 @@
+kind: graph
+package: custom.agent_memory
+entities:
+  AgentMemory:
+    description: A note an agent saved about a merge request.
+    identity: id
+    label: note
+    default_columns: [id, agent, note, created_at]
+    properties:
+      id: {type: string}
+      note: {type: string}
+      agent: {type: string, description: The name of the agent that saved the note.}
+      merge_request_id: {type: int64, description: The merge request the note is about.}
+      created_at: {type: timestamp}
+      traversal_path: {type: string}
+relationships:
+  ABOUT: {variants: {AgentMemory -> MergeRequest: {cardinality: many_to_one}}}
