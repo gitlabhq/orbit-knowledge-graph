@@ -1,11 +1,11 @@
 - title: Slack thread to code TODOs
-  subtitle: Walks a Slack thread to its merge request, the agent's notes about that MR, and the TODOs on its branch head.
+  subtitle: Reads Slack text live, then walks the Jira issues it mentions to their MRs, the agent's notes on them, and the TODOs on their heads.
   caller: maintainer
   query: >-
-    MATCH (m:SlackMessage)-[:DISCUSSES]->(mr:MergeRequest)<-[:ABOUT]-(a:AgentMemory),
-    (mr)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File)
-    WHERE m.channel = 'orbit-query-engine' AND f.content MATCHES ast('todo!($$$MSG)', 'rust')
-    RETURN m.author, m.sent_at, mr.iid, f.path, match.MSG, a.agent, a.note LIMIT 20
+    MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File),
+    (a:AgentMemory)-[:ABOUT]->(mr)
+    WHERE m.channel = 'orbit-query-engine' AND i.status = 'In Review' AND f.content MATCHES ast('todo!($$$MSG)', 'rust')
+    RETURN i.key, m.text, mr.iid, f.path, a.note LIMIT 20
 - title: Code search to Slack threads
   subtitle: Runs a structural code search, then follows the found projects to their MRs, authors, and Slack threads.
   caller: maintainer

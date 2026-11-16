@@ -16,7 +16,7 @@ const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]
 
 const DEEP: &str = "MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE i.status = 'In Review' AND f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN i.key, m.author, m.text, mr.iid, f.path, match.MSG LIMIT 20";
 
-const NOTES: &str = "MATCH (m:SlackMessage)-[:DISCUSSES]->(mr:MergeRequest)<-[:ABOUT]-(a:AgentMemory), (mr)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE m.channel = 'orbit-query-engine' AND f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN m.author, m.sent_at, mr.iid, f.path, match.MSG, a.agent, a.note LIMIT 20";
+const NOTES: &str = "MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File), (a:AgentMemory)-[:ABOUT]->(mr) WHERE m.channel = 'orbit-query-engine' AND i.status = 'In Review' AND f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN i.key, m.text, mr.iid, f.path, a.note LIMIT 20";
 
 const MEMORIES: &str = "MATCH (a:AgentMemory)-[:ABOUT]->(mr:MergeRequest) WHERE a.agent = 'orbit-agent' RETURN mr.iid, a.note";
 
@@ -359,28 +359,47 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
         .iter()
         .find(|event| event["event"] == "split")
         .unwrap();
-    let memory = split["stages"]
+    let stages: Vec<Value> = split["stages"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|stage| stage["connection"] == "memory_lake")
-        .expect("a stage reads the memory lake");
-    assert_eq!(memory["backend"], "duckdb");
+        .map(|stage| json!([stage["backend"], stage["connection"]]))
+        .collect();
+    assert_eq!(
+        Value::Array(stages),
+        json!([
+            ["duckdb", "jira_lake"],
+            ["duckdb", "slack_lake"],
+            ["live", "data_extraction"],
+            ["clickhouse", "main"],
+            ["duckdb", "memory_lake"],
+            ["clickhouse", "main"],
+            ["orbit_code", "code_indexing"],
+            ["combine", null]
+        ])
+    );
     let plans = notes
         .iter()
         .find(|event| event["event"] == "plans")
         .unwrap();
+    let reads = |stage: &str, entities: &str| {
+        plans["stages"][stage]["plan"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line.as_str().unwrap().trim() == format!("Entities {entities}"))
+    };
+    assert!(reads("1", "scope: SlackWorkspace"));
+    assert!(reads("2", "m: SlackMessage"), "Slack text is read live");
     assert_eq!(
-        plans["stages"][memory["id"].to_string()]["packages"],
+        plans["stages"]["4"]["packages"],
         json!(["custom.agent_memory"])
     );
+    assert_eq!(column(&notes, "i_key"), ["GKG-219"]);
+    assert!(column(&notes, "m_text")[0].starts_with("!418 decodes zone-less lake timestamps"));
     assert_eq!(
-        column(&notes, "mr_iid"),
-        ["412", "412", "418", "418", "421", "421"]
-    );
-    assert!(
-        column(&notes, "a_note")
-            .contains(&"Retry the flaky ClickHouse test with a pinned seed before merging.".into())
+        column(&notes, "a_note"),
+        ["Check that the Jira and Slack lakes both decode zone-less timestamps as UTC."]
     );
     assert_eq!(
         column(&events(page, "maintainer", MEMORIES).await, "mr_iid"),
