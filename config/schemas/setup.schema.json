@@ -6,7 +6,7 @@
   "type": "object",
   "required": [
     "instructions",
-    "code_entities",
+    "providers",
     "nudge_search",
     "nudge_gitlab"
   ],
@@ -42,10 +42,31 @@
       "minLength": 1,
       "description": "PreToolUse nudge for glab calls when Orbit reaches GitLab; `{{orbit}}` is the launcher."
     },
-    "code_entities": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Entities the local `code` provider lists in the provider block, for `orbit grep code:type:words`. GitLab and other providers follow with the entities the server or their definitions list."
+    "providers": {
+      "type": "object",
+      "description": "Per-provider text for the provider block at the end of the instructions, keyed by provider name such as `code` or `gitlab`. A provider not named here is listed with the entities it reports and no description.",
+      "required": [
+        "code"
+      ],
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Shown in parentheses after the provider's name, such as `code (local code)`."
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Entities listed for a provider no server reports, such as the local `code` provider."
+          }
+        }
+      }
     }
   }
 }

@@ -1095,7 +1095,7 @@ fn setup_instructions_list_the_servers_entities_and_cache_them() {
         assert!(
             instructions
                 .trim_end()
-                .ends_with("- gitlab: Project, Widget"),
+                .ends_with("- gitlab (origin's group): Project, Widget"),
             "{instructions}"
         );
         assert!(!instructions.contains("MANDATORY"), "{instructions}");

@@ -100,11 +100,31 @@ struct SetupTexts {
     instructions: String,
     #[serde(default)]
     remote: BTreeMap<String, String>,
-    code_entities: String,
+    providers: BTreeMap<String, ProviderText>,
     nudge_search: String,
     nudge_gitlab: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProviderText {
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    entities: Vec<String>,
+}
+
+fn provider_line(name: &str, entities: &[String]) -> String {
+    match TEXTS
+        .providers
+        .get(name)
+        .and_then(|text| text.description.as_deref())
+    {
+        Some(description) => format!("- {name} ({description}): {}", entities.join(", ")),
+        None => format!("- {name}: {}", entities.join(", ")),
+    }
 }
 
 static TEXTS: LazyLock<SetupTexts> = LazyLock::new(|| {
@@ -140,27 +160,32 @@ fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> S
         let value = if remote { value.as_str() } else { "" };
         text = text.replace(&format!("{{{{{name}}}}}"), value);
     }
-    let mut listed = vec![format!(
-        "- {}: {}",
-        crate::commands::grep::CODE,
-        TEXTS.code_entities.trim()
-    )];
+    let code = crate::commands::grep::CODE;
     let gitlab = crate::remote::server_schema::PROVIDER;
+    let declared = |name: &str| {
+        TEXTS
+            .providers
+            .get(name)
+            .map(|text| text.entities.clone())
+            .unwrap_or_default()
+    };
+    let mut listed = vec![provider_line(code, &declared(code))];
     if remote
         && !providers
             .get(gitlab)
             .is_some_and(|entities| !entities.is_empty())
     {
-        listed.push(format!(
-            "- {gitlab}: {}",
-            crate::remote::grep::searched_kinds().join(", ")
-        ));
+        let searched: Vec<String> = crate::remote::grep::searched_kinds()
+            .iter()
+            .map(|kind| kind.to_string())
+            .collect();
+        listed.push(provider_line(gitlab, &searched));
     }
     listed.extend(
         providers
             .iter()
             .filter(|(name, entities)| !entities.is_empty() && (remote || name.as_str() != gitlab))
-            .map(|(name, entities)| format!("- {name}: {}", entities.join(", "))),
+            .map(|(name, entities)| provider_line(name, entities)),
     );
     listed.sort();
     let text = text
@@ -689,9 +714,9 @@ mod tests {
                 for phrase in [
                     &format!("`{launcher} grep 'words'` searches every provider below"),
                     "`code:def:words`",
-                    "\n- code: Definition, File, Directory",
+                    "\n- code (local code): Definition, File, Directory",
                     "Run it first, on a task's key words",
-                    "ignores case, `_`, `-`",
+                    "Ignores case, `_`, `-`",
                     "`a|b` OR",
                     "Batch the reads and searches you can name",
                 ] {
@@ -708,7 +733,7 @@ mod tests {
                 );
                 assert_eq!(rendered.contains("`gitlab:mr:words`"), remote, "{launcher}");
                 assert_eq!(
-                    rendered.contains("\n- gitlab: WorkItem, MergeRequest"),
+                    rendered.contains("\n- gitlab (origin's group): WorkItem, MergeRequest"),
                     remote,
                     "{launcher}"
                 );
@@ -743,7 +768,8 @@ mod tests {
         assert!(
             rendered.ends_with(
                 "for `glab orbit grep provider:type:words` and `glab orbit query`:\n\
-                 - code: Definition, File, Directory\n- gitlab: Widget\n- slack: SlackMessage"
+                 - code (local code): Definition, File, Directory\n\
+                 - gitlab (origin's group): Widget\n- slack: SlackMessage"
             ),
             "{rendered}"
         );
@@ -751,7 +777,7 @@ mod tests {
         assert!(
             local.ends_with(
                 "for `glab orbit grep provider:type:words`:\n\
-                 - code: Definition, File, Directory\n- slack: SlackMessage"
+                 - code (local code): Definition, File, Directory\n- slack: SlackMessage"
             ),
             "{local}"
         );
