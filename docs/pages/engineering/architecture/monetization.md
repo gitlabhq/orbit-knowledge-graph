@@ -14,6 +14,12 @@ Orbit reports each billable query.
 Orbit also checks quota before it runs a query.
 Both parts live in the Orbit server, because the server executes the work.
 Rails only proxies the request and does not emit billing events.
+
+Orbit does not calculate prices and holds no monetization business logic.
+Orbit reports the events that downstream services use as monetization inputs.
+CustomersDot, the GitLab billing system, decides what usage costs and whether a caller has quota left.
+Orbit enforces the quota answer that CustomersDot gives.
+
 The sections below cover the design as built.
 
 ## How the parts fit together
@@ -141,7 +147,7 @@ Orbit also records each quota decision and the latency of the CustomersDot call.
 - **Accurate.** Usage events match billable activity.
 - **Auditable.** Billing code stays small and separate, so reviewers can see all of it.
 - **Not caller-controlled.** Billing attribution comes from the signed token that GitLab sends. It does not come from a field that the caller sets.
-- **Priced elsewhere.** Orbit reports what happened: one request, with the attribution that billing needs. CustomersDot, the GitLab billing system, decides what that usage costs. Orbit holds no pricing, so pricing can change without a change to Orbit.
+- **Priced elsewhere.** Orbit reports what happened: one request, with the attribution that billing needs. Orbit holds no pricing and no monetization business logic, so pricing can change without a change to Orbit.
 
 This repository does not decide pricing or credit rates, so this page does not describe them.
 
