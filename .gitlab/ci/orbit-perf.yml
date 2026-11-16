@@ -2,35 +2,6 @@
 # stack and replays the query corpus over gRPC (scripts/ci/orbit-perf.sh).
 # Main: every commit, serialized. MRs: orbit-perf:mr, automatic when the query
 # path changes, manual otherwise; it posts the report as an MR comment.
-.orbit-perf-base:
-  extends:
-    - .job-template
-    - .sccache-template
-  stage: benchmark
-  timeout: 2h
-  tags: [saas-linux-large-amd64]
-  services:
-    - docker:dind
-  variables:
-    # docker:dind, mirrors caproni .integration-base
-    DOCKER_HOST: tcp://docker:2376
-    DOCKER_TLS_CERTDIR: "/certs"
-    DOCKER_TLS_VERIFY: 1
-    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
-    FF_NETWORK_PER_BUILD: 1
-    SYNTH_CONFIG: crates/xtask/simulator_medium.yaml  # ~12M nodes / ~59M edges
-    ROUNDS: "10"
-    CONCURRENCY: "20"
-    WARMUP_ROUNDS: "1"
-    SEED: "42"
-    GKG_IMAGE: ${CI_REGISTRY_IMAGE}/gkg
-  script:
-    - bash scripts/ci/orbit-perf.sh
-  artifacts:
-    when: always
-    paths:
-      - loadtest-results.md
-
 orbit-perf:
   extends: .orbit-perf-base
   # No needs on docker-build-amd64: the script waits for this commit's image.
@@ -65,8 +36,13 @@ orbit-perf:
     - scripts/ci/orbit-perf.sh
     - scripts/ci/orbit-perf/**/*
     - .gitlab/ci/orbit-perf.yml
+    - .gitlab/ci/orbit-perf-base.yml
+    - .gitlab/ci/orbit-perf-mr.yml
 
-.orbit-perf-mr-rules:
+# No strategy: depend, so the merge does not wait for the perf run.
+orbit-perf:mr:
+  stage: benchmark
+  needs: []
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
@@ -76,31 +52,9 @@ orbit-perf:
       when: manual
       allow_failure: true
     - changes: !reference [.orbit-perf-query-path-changes, changes]
-      allow_failure: true
     - when: manual
       allow_failure: true
-
-orbit-perf:mr:
-  extends: .orbit-perf-base
-  # No needs on docker-build-mr: the script waits for its image in the
-  # background so the build overlaps compile and data generation.
-  needs: []
-  interruptible: true
-  # One run per MR at a time; never queues behind main or other MRs.
-  resource_group: orbit-perf-mr-$CI_MERGE_REQUEST_IID
-  timeout: 45m
   variables:
-    GKG_IMAGE_TAG: develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64
-  rules: !reference [.orbit-perf-mr-rules, rules]
-  after_script:
-    - |
-      if [ ! -s loadtest-results.md ]; then
-        echo "Skipping MR comment: no loadtest-results.md."
-      elif [ -z "${BENCHMARK_GITLAB_TOKEN:-}" ]; then
-        echo "Skipping MR comment: BENCHMARK_GITLAB_TOKEN unavailable."
-      else
-        mise exec -- gitlab-xtasks comment post --type add-or-edit \
-          --unique-id orbit-perf-loadtest-comment \
-          --token "$BENCHMARK_GITLAB_TOKEN" \
-          --file-path loadtest-results.md || echo "MR comment post failed (non-fatal)."
-      fi
+    ORBIT_PERF_MR_IID: $CI_MERGE_REQUEST_IID
+  trigger:
+    include: .gitlab/ci/orbit-perf-mr.yml
