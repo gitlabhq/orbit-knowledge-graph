@@ -1,0 +1,51 @@
+# Child pipelines get no merge request variables; orbit-perf:mr passes the IID.
+include:
+  - local: .gitlab/ci/rust-job-templates.yml
+  - local: .gitlab/ci/orbit-perf-base.yml
+
+stages:
+  - build
+  - benchmark
+
+variables:
+  CI_MERGE_REQUEST_IID: $ORBIT_PERF_MR_IID
+
+docker-build-mr:
+  stage: build
+  image: docker:29
+  tags:
+    - ${RUNNER_LARGE}
+  needs: []
+  interruptible: true
+  services:
+    - name: docker:29-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    IMAGE_NAME: gkg
+  script:
+    - ./scripts/release/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${ORBIT_PERF_MR_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
+
+orbit-perf:mr:
+  extends: .orbit-perf-base
+  # orbit-perf.sh waits for the docker-build-mr image in the background.
+  needs: []
+  interruptible: true
+  resource_group: orbit-perf-mr-$ORBIT_PERF_MR_IID
+  timeout: 45m
+  allow_failure: true
+  variables:
+    GKG_IMAGE_TAG: develop-mr-${ORBIT_PERF_MR_IID}-${CI_COMMIT_SHORT_SHA}-amd64
+  after_script:
+    - |
+      if [ ! -s loadtest-results.md ]; then
+        echo "Skipping MR comment: no loadtest-results.md."
+      elif [ -z "${BENCHMARK_GITLAB_TOKEN:-}" ]; then
+        echo "Skipping MR comment: BENCHMARK_GITLAB_TOKEN unavailable."
+      else
+        mise exec -- gitlab-xtasks comment post --type add-or-edit \
+          --unique-id orbit-perf-loadtest-comment \
+          --token "$BENCHMARK_GITLAB_TOKEN" \
+          --file-path loadtest-results.md || echo "MR comment post failed (non-fatal)."
+      fi
