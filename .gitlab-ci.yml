@@ -112,6 +112,7 @@ include:
       variant: "high"
 
 stages:
+  - application-security-testing
   - lint
   - docs
   - security
@@ -634,8 +635,17 @@ cargo-audit:
   stage: security
   extends:
     - .job-template
-    - .mr-and-main-rules
     - .no-cargo-home-cache
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - !reference [.skip-on-docs-only, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
+      changes:
+        - Cargo.lock
+        - deny.toml
+        - .cargo/audit.toml
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   needs: []
   script:
     - cargo audit
@@ -688,6 +698,7 @@ semgrep-sast:
     - !reference [.skip-on-docs-only, rules]
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
       exists:
         - "**/*.rs"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -699,6 +710,9 @@ gitlab-advanced-sast:
   needs: []
   rules: !reference [.mr-and-main-rules, rules]
 
+gitlab-advanced-sast-ext:
+  needs: []
+
 # Override the default secret_detection rules so the job runs on MR pipelines.
 # The Jobs/Secret-Detection.gitlab-ci.yml template defaults to branch pipelines
 # only, which conflicts with this project's workflow (MR + main branch only).
@@ -708,6 +722,7 @@ secret_detection:
   rules:
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 # Docs stage
@@ -1007,6 +1022,15 @@ integration-test-data-correctness:
       test(=server::data_correctness::data_correctness_scenarios) |
       test(=server::data_correctness::data_correctness) |
       test(=server::performance::performance_queries)
+
+experiment:container-tests-xlarge:
+  extends: .integration-test-template
+  tags:
+    - saas-linux-xlarge-amd64
+  allow_failure: true
+  variables:
+    SUBTEST_CONCURRENCY: "16"
+    NEXTEST_FILTER: not test(corpus_smoke)
 
 corpus-smoke-test:
   stage: test
