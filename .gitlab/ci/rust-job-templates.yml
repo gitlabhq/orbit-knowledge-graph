@@ -44,22 +44,7 @@
   cache:
     - !reference [.cargo-home-cache, pull]
 
-# Only main writes it (TARGET_CACHE_POLICY in the workflow rules); MR pipelines read it.
-.target-cache:
-  cache:
-    key:
-      prefix: target-$CI_JOB_NAME_SLUG
-      files:
-        - Cargo.lock
-        - rust-toolchain.toml
-    paths:
-      - target/
-    policy: $TARGET_CACHE_POLICY
-
 .sccache-template:
-  cache:
-    - !reference [.cargo-home-cache, pull]
-    - !reference [.target-cache, cache]
   variables:
     CARGO_INCREMENTAL: "0"
     SCCACHE_GCS_BUCKET: "gl-knowledgegraph-sccache"
