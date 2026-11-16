@@ -43,12 +43,12 @@ function Hero() {
       <div className="next-hero-map" aria-hidden="true">
         <SearchMap search={search} anchor=".next-chat" region=".next-demo-viz" />
       </div>
-      <p className="orbit-hero-title">
+      <p className="orbit-hero-title next-hero-title">
         Search all of your code,
         <br />
         <span className="orbit-fade">and every tool around it.</span>
       </p>
-      <div className="mt-12 flex w-full justify-center">
+      <div className="mt-6 flex w-full justify-center">
         <CodeSearch onSearch={setSearch} />
       </div>
     </section>
