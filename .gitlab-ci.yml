@@ -386,15 +386,23 @@ xtask-build:
       - target/debug/xtask
     expire_in: 1 day
 
+# The xtask binary needs glibc 2.39 or later; the build image is Debian trixie too.
 .xtask-check:
   stage: lint
+  image: buildpack-deps:trixie-scm
+  tags:
+    - saas-linux-small-amd64
   extends:
-    - .job-template
     - .mr-and-main-rules
   needs:
     - xtask-build
   variables:
     XTASK: target/debug/xtask
+
+.xtask-check-with-tools:
+  extends:
+    - .xtask-check
+    - .job-template
 
 generate-config-schema:
   extends: .xtask-check
@@ -407,7 +415,7 @@ generate-config-schema:
     expire_in: 24 hours
 
 generate-config-proto:
-  extends: .xtask-check
+  extends: .xtask-check-with-tools
   script:
     - $XTASK proto-config
     - git diff --exit-code crates/orbit-server-config/src/proto || (echo "crates/orbit-server-config/src/proto is out of date. Run 'mise proto:config' and commit." && exit 1)
@@ -439,7 +447,7 @@ metrics-catalog-check:
     - $XTASK metrics-catalog --check
 
 dashboards-check:
-  extends: .xtask-check
+  extends: .xtask-check-with-tools
   script:
     - $XTASK dashboards --check
 
@@ -454,11 +462,14 @@ ddl-freshness-check:
     - bash ./scripts/checks/check-ddl-freshness.sh "$XTASK"
 
 integration-test-lane-coverage-check:
+  stage: lint
   extends:
-    - .xtask-check
+    - .job-template
     - .sccache-template
+    - .mr-and-main-rules
+  needs: []
   script:
-    - $XTASK integration-lanes --check
+    - mise run lint:integration-test-lanes
     - sccache --show-stats || true
 
 migration-ledger-check:
@@ -1039,23 +1050,33 @@ fuzz-smoke:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       interruptible: true
       changes:
-        - crates/fuzz/**/*
+        - crates/circuit-breaker/**/*
+        - crates/clickhouse-client/**/*
         - crates/code-graph/**/*
         - crates/code-graph-incremental/**/*
+        - crates/code-graph/treesitter-visit/**/*
+        - crates/fuzz/**/*
         - crates/gitaly-protos/**/*
+        - crates/gitlab-client/**/*
         - crates/indexer/**/*
         - crates/nats-client/**/*
         - crates/ontology/**/*
         - crates/orbit-analytics/**/*
+        - crates/orbit-log-fields/**/*
         - crates/orbit-migrations/**/*
+        - crates/orbit-observability/**/*
         - crates/orbit-server-config/**/*
         - crates/orbit-versions/**/*
         - crates/query-data-model/**/*
         - crates/query-engine/compiler/**/*
         - crates/query-engine/compiler-pipeline-macros/**/*
         - crates/utils/**/*
+        - crates/utils/arrow/**/*
         - config/**/*
         - scripts/fuzz/**/*
+        - .gitlab-ci.yml
+        - .gitlab/ci/rust-job-templates.yml
+        - mise.toml
         - Cargo.lock
         - Cargo.toml
         - rust-toolchain.toml

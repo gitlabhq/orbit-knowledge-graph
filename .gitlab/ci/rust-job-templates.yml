@@ -33,7 +33,6 @@
   tags:
     - saas-linux-medium-amd64
   image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
-  timeout: 30m
   variables:
     MISE_DISABLE_TOOLS: lefthook
     # Fail closed: an empty policy would let the runner upload.

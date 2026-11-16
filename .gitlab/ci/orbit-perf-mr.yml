@@ -1,4 +1,4 @@
-# Child pipelines get no merge request variables; orbit-perf:mr passes the IID.
+# orbit-perf:mr passes the MR IID; the image tag and the MR comment need it.
 include:
   - local: .gitlab/ci/rust-job-templates.yml
   - local: .gitlab/ci/orbit-perf-base.yml
