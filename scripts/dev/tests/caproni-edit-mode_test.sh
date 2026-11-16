@@ -15,7 +15,7 @@ check() { # name, expected, actual
 
 # A fake target/debug tree with a stand-in binary and two fips artifact directories.
 FAKE_TARGET="$TMP/target/debug"
-mkdir -p "$FAKE_TARGET/build/aws-lc-fips-sys-aaaa/out/build/artifacts" "$FAKE_TARGET/build/aws-lc-fips-sys-bbbb/out/build/artifacts"
+mkdir -p "$FAKE_TARGET/build/aws-lc-fips-sys/aaaa/out/build/artifacts" "$FAKE_TARGET/build/aws-lc-fips-sys/bbbb/out/build/artifacts"
 FAKE_BINARY="$FAKE_TARGET/gkg-server"
 printf 'not a real binary\n' >"$FAKE_BINARY"
 chmod +x "$FAKE_BINARY"
@@ -42,6 +42,9 @@ check "overlay is private" "600" "$(stat -c '%a' "$overlay" 2>/dev/null || stat 
 # bind address, so the deprecated key must go when the port moves.
 check "deprecated prometheus port removed" "null" "$(yq '.metrics.prometheus.port' "$overlay")"
 check "prometheus stays enabled" "true" "$(yq '.metrics.prometheus.enabled' "$overlay")"
+
+out="$(yq() { local a; [[ -p /dev/stdin ]] || { echo "yq stdin is not a pipe" >&2; return 1; }; for a in "$@"; do [[ -e "$a" ]] && { echo "yq opened $a" >&2; return 1; }; done; command yq "$@"; }; write_overlay webserver 2>&1 || true)"
+check "pod config reaches yq on stdin" "0.0.0.0:9394" "$(yq '.probe_server.bind_address' "$out" 2>/dev/null)"
 
 # malformed_pod_config_fails: a yq failure must not produce a header-only overlay.
 printf 'probe_server: [unclosed\n' >"$TMP/bad.yaml"
@@ -139,8 +142,11 @@ check "watcher does not watch the repo root itself" "no" "$(grep -qE -- '(-W|--w
 # script binary cannot report it.)
 out="$(exec() { printf 'dyld=%s\nld=%s\nargs=%s\n' "${DYLD_FALLBACK_LIBRARY_PATH:-}" "${LD_LIBRARY_PATH:-}" "$*"; }; launch indexer "$overlay")"
 check "launcher passes mode and config" "args=$FAKE_BINARY --mode=indexer --config=$overlay" "$(grep '^args=' <<<"$out")"
-check "launcher adds every fips artifacts dir (macOS)" "yes" "$(grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys-aaaa/out/build/artifacts' && grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys-bbbb/out/build/artifacts' && echo yes || echo no)"
-check "launcher adds the fips artifacts dir (Linux)" "yes" "$(grep '^ld=' <<<"$out" | grep -q 'aws-lc-fips-sys-' && echo yes || echo no)"
+check "launcher adds every fips artifacts dir (macOS)" "yes" "$(grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys/aaaa/out/build/artifacts' && grep '^dyld=' <<<"$out" | grep -q 'aws-lc-fips-sys/bbbb/out/build/artifacts' && echo yes || echo no)"
+check "launcher adds the fips artifacts dir (Linux)" "yes" "$(grep '^ld=' <<<"$out" | grep -q 'aws-lc-fips-sys/' && echo yes || echo no)"
+rm -rf "$FAKE_TARGET/build"
+out="$(bash -c "ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' ORBIT_BINARY_OVERRIDE='$FAKE_BINARY' source '$SCRIPT'; exec() { printf 'args=%s ld=%s\n' \"\$*\" \"\${LD_LIBRARY_PATH-unset}\"; }; launch webserver '$overlay'" 2>&1 || true)"
+check "launcher runs without fips artifacts" "args=$FAKE_BINARY --mode=webserver --config=$overlay ld=unset" "$out"
 
 # project_file: the reloaders must agree with the wrapper.
 PROJECT="$HERE/../../../caproni-project.yaml"
