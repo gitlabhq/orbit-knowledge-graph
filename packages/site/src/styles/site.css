@@ -354,11 +354,16 @@
   user-select: none;
 }
 
+/* A match reads in the Orbit blue with a thin underline, instead of a filled block, so long matches stay
+   light. */
 .next-demo mark,
 .next-context mark {
-  border-radius: 0.1875rem;
-  background: color-mix(in srgb, var(--trace-lit) 34%, transparent);
-  color: inherit;
+  background: transparent;
+  color: var(--trace-lit);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--trace-lit) 60%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
 .next-inspector {
