@@ -1,0 +1,45 @@
+.orbit-perf-base:
+  extends:
+    - .job-template
+    - .sccache-template
+  stage: benchmark
+  timeout: 2h
+  tags: [saas-linux-large-amd64]
+  services:
+    - docker:dind
+  variables:
+    MISE_DISABLE_TOOLS: lefthook
+    # docker:dind, mirrors caproni .integration-base
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: 1
+    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+    FF_NETWORK_PER_BUILD: 1
+    SYNTH_CONFIG: crates/xtask/simulator_medium.yaml  # ~12M nodes / ~59M edges
+    ROUNDS: "10"
+    CONCURRENCY: "20"
+    WARMUP_ROUNDS: "1"
+    SEED: "42"
+    GKG_IMAGE: ${CI_REGISTRY_IMAGE}/gkg
+  script:
+    - bash scripts/ci/orbit-perf.sh
+  artifacts:
+    when: always
+    paths:
+      - loadtest-results.md
+
+.docker-build-mr:
+  stage: build
+  image: docker:29
+  tags:
+    - ${RUNNER_LARGE}
+  needs: []
+  services:
+    - name: docker:29-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    IMAGE_NAME: gkg
+  script:
+    - ./scripts/release/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"

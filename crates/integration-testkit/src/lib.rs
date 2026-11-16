@@ -39,14 +39,19 @@ pub fn load_ontology_overlay(name: &str) -> ontology::Ontology {
         .unwrap_or_else(|e| panic!("ontology overlay '{name}' failed to load: {e}"))
 }
 
+static ONTOLOGY: std::sync::LazyLock<std::sync::Arc<ontology::Ontology>> =
+    std::sync::LazyLock::new(|| {
+        let ont = load_unprefixed_ontology();
+        let prefix = &*TABLE_PREFIX;
+        if prefix.is_empty() {
+            std::sync::Arc::new(ont)
+        } else {
+            std::sync::Arc::new(ont.with_schema_version_prefix(prefix))
+        }
+    });
+
 pub fn load_ontology() -> std::sync::Arc<ontology::Ontology> {
-    let ont = load_unprefixed_ontology();
-    let prefix = &*TABLE_PREFIX;
-    if prefix.is_empty() {
-        std::sync::Arc::new(ont)
-    } else {
-        std::sync::Arc::new(ont.with_schema_version_prefix(prefix))
-    }
+    std::sync::Arc::clone(&ONTOLOGY)
 }
 
 pub fn derive_clickhouse_data_model(
