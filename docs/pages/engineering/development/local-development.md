@@ -20,7 +20,7 @@ configuration for GitLab development. Its Orbit fragment deploys everything Orbi
 | Siphon (CDC from PostgreSQL to ClickHouse) | `gitlab-dev-stack` | in-cluster only |
 | Orbit webserver, indexers, dispatcher, health check | `gitlab` | replaced by your local processes |
 
-Rails reaches Orbit through the `orbit-webserver` Service on gRPC port 50054. Both paths
+Rails reaches Orbit through the `gkg-webserver` Service on gRPC port 50054. Both paths
 below arrange for that traffic to land on the webserver you run.
 
 ## Prerequisites
@@ -77,7 +77,7 @@ edit mode. Enable it in `caproni.local.yaml` in your `gitlab-caproni` checkout:
 repositories:
   knowledge-graph:
     directory: /path/to/your/knowledge-graph
-    edit_reloaders: [orbit-webserver, orbit-indexer-sdlc, orbit-indexer-code, orbit-dispatcher]
+    edit_reloaders: [gkg-webserver, gkg-indexer-sdlc, gkg-indexer-code, gkg-dispatcher]
 ```
 
 `directory` comes first for a reason. Without it Caproni clones a second copy under
@@ -116,7 +116,7 @@ pods bind the chart's single port and four host processes cannot share it. The w
 keeps the chart's 9394, the indexers take 9395 and 9396, the dispatcher 9397.
 
 To see that the UI is served by your build, open `http://gitlab.caproni.test/dashboard/orbit`
-and watch the `[orbit-webserver]` lines in the `caproni run` terminal. Attach a debugger to
+and watch the `[gkg-webserver]` lines in the `caproni run` terminal. Attach a debugger to
 the `gkg-server` process by name; it is a normal host process.
 
 Edit a Rust file and the build watcher rebuilds; each mode restarts inside its mirrord
@@ -164,7 +164,7 @@ The webserver listens for gRPC on `0.0.0.0:50054` by default. Override ports in
 `dev:connect` owns the session's cluster state and undoes it on exit:
 
 1. Records the replica count of every Orbit deployment, then scales them to zero.
-1. Creates an EndpointSlice on the `orbit-webserver` Service that points at your host. The
+1. Creates an EndpointSlice on the `gkg-webserver` Service that points at your host. The
    gRPC calls Rails and Workhorse make to the Service name then reach your webserver. That is
    why `config/dev.yaml` binds gRPC on `0.0.0.0`: a loopback listener is unreachable from the VM.
 1. Port-forwards ClickHouse to `127.0.0.1:8123` and NATS to `127.0.0.1:4222`, the addresses
@@ -225,8 +225,8 @@ trap and leaves `.dev/connect-state` behind. The next `dev:connect` repairs it f
 `dev:check` warns about the file. To fix it by hand:
 
 ```shell
-caproni kubectl -n gitlab scale deploy -l app.kubernetes.io/name=orbit --replicas=1
-caproni kubectl -n gitlab delete endpointslice orbit-webserver-orbit-native-dev
+caproni kubectl -n gitlab scale deploy -l app.kubernetes.io/name=gkg --replicas=1
+caproni kubectl -n gitlab delete endpointslice gkg-webserver-orbit-native-dev
 ```
 
 **The dashboard loads but queries fail with a connection error:**
@@ -251,7 +251,7 @@ caproni kubectl -n gitlab-dev-stack exec deploy/gitlab-dev-stack-nats-box -- nat
 
 Idle consumers also expire on their own after an hour.
 
-**`cannot start orbit-webserver: port 50054 already in use` from `caproni run`:**
+**`cannot start gkg-webserver: port 50054 already in use` from `caproni run`:**
 
 Caproni checks the port on the host before it starts a process. A native `mise run dev` or
 a `gkg-server` left over from an earlier session holds it; stop that first.
@@ -272,8 +272,8 @@ at zero, and host processes behind (`caproni-edit-mode.sh`, `watchexec`, `mirror
 `gkg-server`). Delete the copies, scale the originals back, and kill the leftovers:
 
 ```shell
-caproni kubectl -n gitlab delete deploy orbit-webserver-caproni orbit-indexer-sdlc-caproni orbit-indexer-code-caproni orbit-dispatcher-caproni --ignore-not-found
-caproni kubectl -n gitlab scale deploy -l app.kubernetes.io/name=orbit --replicas=1
+caproni kubectl -n gitlab delete deploy gkg-webserver-caproni gkg-indexer-sdlc-caproni gkg-indexer-code-caproni gkg-dispatcher-caproni --ignore-not-found
+caproni kubectl -n gitlab scale deploy -l app.kubernetes.io/name=gkg --replicas=1
 pkill -f caproni-edit-mode.sh; pkill -f 'mirrord intproxy'; pkill -x gkg-server
 ```
 
