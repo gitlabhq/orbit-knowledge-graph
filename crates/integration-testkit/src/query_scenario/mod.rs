@@ -64,6 +64,16 @@ pub fn validate_parse(root: &str) {
     }
 }
 
+pub(super) fn scenarios_under(root: &Path) -> Vec<(String, QueryScenario)> {
+    let mut files = Vec::new();
+    scenario::discover(root, &mut files);
+    files.sort();
+    files
+        .iter()
+        .flat_map(|file| read_scenarios(root, file))
+        .collect()
+}
+
 fn read_scenarios(root: &Path, file: &Path) -> Vec<(String, QueryScenario)> {
     let name = scenario::scenario_name(root, file);
     scenario::read_cases(file)
@@ -121,13 +131,7 @@ pub async fn run_query(
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let root = Path::new(root);
     let presets: Arc<Path> = Arc::from(Path::new(presets));
-    let mut files = Vec::new();
-    scenario::discover(root, &mut files);
-    files.sort();
-    let mut scenarios: Vec<_> = files
-        .iter()
-        .flat_map(|file| read_scenarios(root, file))
-        .collect();
+    let mut scenarios = scenarios_under(root);
     assert!(
         !scenarios.is_empty(),
         "no query scenario files found under {}",
@@ -161,6 +165,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
             let database = Database::for_scenario(&config, &steps, &name);
             (name, config, steps, database)
         })
+        .filter(|(_, _, steps, _)| !compiles_only(steps))
         .collect();
     let datasets = Arc::new(Datasets::new(
         scenarios.iter().map(|(.., database)| database),
@@ -232,24 +237,17 @@ async fn run_case(
     name: &str,
     presets: &Path,
 ) {
-    let security_override = resolve_preset("security", &cfg.security, presets, name);
+    let (security, ontology, data_model) = compile_context(cfg, presets, name);
     let redaction_with_default = cfg
         .redaction
         .clone()
         .unwrap_or(PresetOr::Preset("allow_all".into()));
-    let redaction_config =
-        resolve_preset("redaction", &Some(redaction_with_default), presets, name);
-    let security = build_security(&security_override);
-    let redaction = build_redaction(&redaction_config);
-    let ontology = cfg
-        .ontology_overlay
-        .as_ref()
-        .map_or_else(load_ontology, |name| {
-            Arc::new(
-                crate::load_ontology_overlay(name).with_schema_version_prefix(&crate::TABLE_PREFIX),
-            )
-        });
-    let data_model = derive_clickhouse_data_model(&ontology);
+    let redaction = build_redaction(&resolve_preset(
+        "redaction",
+        &Some(redaction_with_default),
+        presets,
+        name,
+    ));
 
     for (index, step) in steps.iter().enumerate() {
         if !step.seed.is_empty() {
@@ -275,6 +273,83 @@ async fn run_case(
             .await;
         }
     }
+}
+
+fn compile_context(
+    cfg: &ScenarioConfig,
+    presets: &Path,
+    name: &str,
+) -> (
+    SecurityContext,
+    Arc<ontology::Ontology>,
+    Arc<query_data_model::ClickHouseDataModel>,
+) {
+    let security = build_security(&resolve_preset("security", &cfg.security, presets, name));
+    let ontology = cfg
+        .ontology_overlay
+        .as_ref()
+        .map_or_else(load_ontology, |name| {
+            Arc::new(
+                crate::load_ontology_overlay(name).with_schema_version_prefix(&crate::TABLE_PREFIX),
+            )
+        });
+    let data_model = derive_clickhouse_data_model(&ontology);
+    (security, ontology, data_model)
+}
+
+pub(super) fn compiles_only(steps: &[QueryStep]) -> bool {
+    steps
+        .iter()
+        .all(|step| step.seed.is_empty() && step.expect.compile_error.is_some())
+}
+
+pub async fn run_compile_only_dir(root: &str, presets: &str) {
+    let root = Path::new(root);
+    let presets: Arc<Path> = Arc::from(Path::new(presets));
+    let mut handles = Vec::new();
+    for (name, scenario) in scenarios_under(root) {
+        let (config, steps) = scenario.into_steps();
+        if !compiles_only(&steps) {
+            continue;
+        }
+        let presets = Arc::clone(&presets);
+        let task_name = name.clone();
+        handles.push((
+            name,
+            tokio::task::spawn(async move {
+                let (security, ontology, data_model) =
+                    compile_context(&config, &presets, &task_name);
+                for (index, step) in steps.iter().enumerate() {
+                    let step_name = step_label(&task_name, index, steps.len());
+                    for (frontend_key, query) in &step.query {
+                        let frontend = frontend_key.parse::<Frontend>().unwrap_or_else(|_| {
+                            panic!("{step_name}: unknown query language '{frontend_key}'")
+                        });
+                        let label = format!("{step_name} [{frontend_key}]");
+                        let compiled = compile_like_server(
+                            query,
+                            frontend,
+                            (&data_model, &ontology),
+                            &security,
+                        )
+                        .await;
+                        assert_compilation(
+                            compiled,
+                            &step.expect,
+                            ("clickhouse", frontend_key),
+                            &label,
+                        );
+                    }
+                }
+            }),
+        ));
+    }
+    assert!(
+        !handles.is_empty(),
+        "no compile-only scenarios under {}",
+        root.display()
+    );
+    collect_subtest_results(handles).await;
 }
 
 pub(super) fn step_label(name: &str, index: usize, steps: usize) -> String {

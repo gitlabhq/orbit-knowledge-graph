@@ -20,10 +20,9 @@ impl Database {
         if steps.iter().any(|step| !step.seed.is_empty()) {
             return Self::Private(scenario::database_name(name));
         }
-        if steps.iter().all(|step| step.expect.compile_error.is_some())
-            || config.seed.is_none()
-                && config.extra_seed.is_empty()
-                && config.ontology_overlay.is_none()
+        if config.seed.is_none()
+            && config.extra_seed.is_empty()
+            && config.ontology_overlay.is_none()
         {
             return Self::Base;
         }

@@ -12,20 +12,17 @@ use query_engine::shared::PipelineOutput;
 use super::pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use super::{
     QueryStep, assert_compilation, assert_output, assert_pagination, assert_repeated_response,
-    pipeline_output, read_scenarios, repeat_count, seed_preset, step_label, validate_response,
+    pipeline_output, repeat_count, scenarios_under, seed_preset, step_label, validate_response,
 };
+use crate::scenario::Seed;
 use crate::scenario::seed::{group_by_columns, values_insert};
-use crate::scenario::{Seed, discover};
 
 pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
     let root = Path::new(root);
     let ontology = Arc::new(crate::load_unprefixed_ontology());
     let base = seed_preset(Path::new(presets), seed);
-    let mut files = Vec::new();
-    discover(root, &mut files);
-    files.sort();
     let mut ran = 0;
-    for (name, scenario) in files.iter().flat_map(|file| read_scenarios(root, file)) {
+    for (name, scenario) in scenarios_under(root) {
         if !scenario.config.duckdb {
             continue;
         }
