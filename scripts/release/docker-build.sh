@@ -26,6 +26,9 @@ fi
 if [ -n "$ORBIT_BILLING_ENFORCED" ]; then
   BUILD_ARGS="$BUILD_ARGS --build-arg ORBIT_BILLING_ENFORCED=$ORBIT_BILLING_ENFORCED"
 fi
+if [ "${CI_COMMIT_REF_PROTECTED:-}" = "true" ]; then
+  BUILD_ARGS="$BUILD_ARGS --build-arg SCCACHE_GCS_RW_MODE=READ_WRITE"
+fi
 
 SECRET_ARGS=""
 if [ -n "$SCCACHE_GCS_KEY" ] && [ -f "$SCCACHE_GCS_KEY" ]; then

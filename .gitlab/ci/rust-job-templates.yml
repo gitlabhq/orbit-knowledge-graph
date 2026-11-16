@@ -9,12 +9,18 @@
       prefix: cargo-home
       files:
         - Cargo.lock
+    fallback_keys:
+      - cargo-home-latest
     paths: *cargo-home-paths
     policy: pull
   push:
     key: *cargo-home-key
     paths: *cargo-home-paths
     # So only merged code writes the cache; set in unit-test.
+    policy: $CARGO_HOME_CACHE_POLICY
+  push-latest:
+    key: cargo-home-latest
+    paths: *cargo-home-paths
     policy: $CARGO_HOME_CACHE_POLICY
 
 # Extend after `.job-template`; for jobs that resolve no dependencies and the release CLI builds.
