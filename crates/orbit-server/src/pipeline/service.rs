@@ -18,7 +18,9 @@ use query_data_model::introspection::SchemaResponse;
 use query_engine::pipeline::{
     MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
-use query_engine::shared::{DagStage, ExtractionStage, OutputStage, PipelineOutput};
+use query_engine::shared::{
+    DagStage, ExecutionOutput, ExtractionStage, OutputStage, PipelineOutput,
+};
 
 use super::correlation;
 use super::helpers::send_query_result;
@@ -179,20 +181,12 @@ impl QueryPipelineService {
                 return Ok(QueryServiceOutput::Schema(response));
             }
 
-            let output = PipelineRunner::start(&mut ctx, &mut obs)
+            let ran = PipelineRunner::start(&mut ctx, &mut obs)
                 .then(&SecurityStage)
                 .await?
                 .then(&dag)
-                .await?
-                .then(&ExtractionStage)
-                .await?
-                .then(&AuthorizationStage)
-                .await?
-                .then(&RedactionStage)
-                .await?
-                .then(&HydrationStage)
-                .await?
-                .then(&OutputStage)
+                .await?;
+            let output = respond(ran)
                 .await?
                 .finish()
                 .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
@@ -219,6 +213,21 @@ impl QueryPipelineService {
         }
         Ok(())
     }
+}
+
+pub async fn respond(
+    ran: PipelineRunner<'_, ExecutionOutput>,
+) -> Result<PipelineRunner<'_, PipelineOutput>, PipelineError> {
+    ran.then(&ExtractionStage)
+        .await?
+        .then(&AuthorizationStage)
+        .await?
+        .then(&RedactionStage)
+        .await?
+        .then(&HydrationStage)
+        .await?
+        .then(&OutputStage)
+        .await
 }
 
 async fn deliver(

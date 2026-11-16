@@ -2,8 +2,8 @@
 //! relationship and property names a query was written with, not plan, output or catalog ids.
 
 use query_data_model::plan::logical::{
-    Columns, Comparison, Expr, Literal, LogicalOperation, LogicalPlan, Matching, Measure, Operand,
-    Order, Predicate, Projection,
+    Columns, Comparison, Expr, Literal, LogicalOperation, LogicalPlan, LogicalType, Matching,
+    Measure, Operand, Order, Predicate, Projection,
 };
 use query_data_model::plan::tracking::{NodeId, Ref};
 use query_data_model::{Direction, Model, RelationshipId};
@@ -35,16 +35,21 @@ impl Names<'_> {
         self.plan.name(binding).unwrap_or("_").to_string()
     }
 
-    /// The binding a node introduces: its last named output.
+    /// The binding a node introduces, its last named output, with its entity when it has one.
     fn introduced(&self, node: NodeId) -> String {
-        let named: Vec<Ref> = self
+        let named = self
             .plan
             .outputs(node)
             .filter(|output| self.plan.name(*output).is_some())
-            .collect();
-        named
-            .last()
-            .map_or("_".into(), |output| self.binding(*output))
+            .last();
+        match named.map(|output| (output, self.plan.value(output))) {
+            Some((output, LogicalType::Entity(entity))) => {
+                let entity = &self.model.graph().entity(*entity).name;
+                format!("{}: {entity}", self.binding(output))
+            }
+            Some((output, _)) => self.binding(output),
+            None => "_".into(),
+        }
     }
 
     fn property(&self, id: query_data_model::PropertyId) -> &str {
@@ -76,13 +81,7 @@ impl Names<'_> {
     fn operation(&self, node: NodeId) -> String {
         let to = || self.introduced(node);
         match self.plan.operation(node) {
-            LogicalOperation::Entities(entity) => {
-                format!(
-                    "Entities {}: {}",
-                    to(),
-                    self.model.graph().entity(*entity).name
-                )
-            }
+            LogicalOperation::Entities(_) => format!("Entities {}", to()),
             LogicalOperation::Filter(predicate) => format!("Filter {}", self.predicate(predicate)),
             LogicalOperation::Follow {
                 from,

@@ -121,6 +121,7 @@ svg#dag { display: block; width: 100%; height: auto; margin: 0 auto; font-family
 .code .added { display: block; margin: 0 calc(-1 * var(--space-4)); padding: 0 var(--space-4); background: var(--diff-added-bg); color: var(--success-text); }
 .code .line { display: block; }
 .code-yaml { counter-reset: line; max-height: 560px; }
+.code-table { max-height: 560px; white-space: pre; overflow-wrap: normal; }
 .code-yaml .line { padding-left: 5ch; text-indent: -5ch; }
 .code-yaml .line::before { counter-increment: line; content: counter(line); display: inline-block; width: 4ch; margin-right: 1ch; text-align: right; text-indent: 0; color: var(--text-subtle); }
 .code-yaml .named { margin: 0 calc(-1 * var(--space-4)); padding: 0 var(--space-4) 0 calc(var(--space-4) + 5ch); background: color-mix(in srgb, var(--diff-target) 12%, transparent); }

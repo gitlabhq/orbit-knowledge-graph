@@ -29,11 +29,13 @@
   // Rewrites renumber plan ids, so lines compare with their ids masked.
   const shape = (line) => line.replace(/PlanId\(\d+\)/g, "PlanId");
 
-  function sql(text) {
-    const block = node("pre", undefined, "code code-sql");
-    Highlight.render(block, Highlight.sql(text));
+  function highlighted(cls, tokens) {
+    const block = node("pre", undefined, `code ${cls}`);
+    Highlight.render(block, tokens);
     return block;
   }
+
+  const sql = (text) => highlighted("code-sql", Highlight.sql(text));
 
   function lines(cls, rows, paint) {
     const block = node("pre", undefined, `code ${cls}`);
@@ -49,7 +51,7 @@
   const plan = (rows, added) => lines("code-plan", (rows || []).map((row) => [row, added && added.has(row) && "added"]),
     (span, row) => Highlight.render(span, Highlight.plan(row)));
 
-  const yaml = (text, marks) => lines("code-yaml", numbered(text, marks || new Set()), (span, tokens) => Highlight.render(span, tokens));
+  const yaml = (text, marks) => lines("code-yaml", numbered(text, marks), (span, tokens) => Highlight.render(span, tokens));
 
   function cell(value) {
     if (value === null || value === undefined) return "";
@@ -94,19 +96,37 @@
     return box;
   }
 
-  function marks(plans) {
-    const text = plans.join("\n"), found = new Set(), bound = {};
-    for (const [, binding, entity] of text.matchAll(/Entities (\w+): (\w+)/g)) { bound[binding] = entity; found.add(entity); }
-    for (const [, names] of text.matchAll(/\[([A-Z0-9_|]+)\]/g)) for (const name of names.split("|")) found.add(name);
+  const ENTITIES = /Entities (\w+): (\w+)/g;
+  const TRAVERSALS = /\b(?:Follow|Neighbors|Shortest) (\w+) (<?)-\[([A-Z0-9_|]+)\]-(>?) (\w+)(?:: (\w+))?/g;
+
+  const entities = (text) => Object.fromEntries([
+    ...[...text.matchAll(ENTITIES)].map(([, binding, entity]) => [binding, entity]),
+    ...[...text.matchAll(TRAVERSALS)].filter((step) => step[6]).map((step) => [step[5], step[6]]),
+  ]);
+
+  const variant = (source, target) => new RegExp(`\\b${source || "\\w+"} -> ${target || "\\w+"}\\b`);
+
+  function marks(plans, query) {
+    const text = plans.join("\n"), found = new Set(), bound = entities(text), variants = new Map();
+    for (const entity of Object.values(bound)) found.add(entity);
     const read = (binding, property) => { if (bound[binding]) found.add(`${bound[binding]}.${property}`); };
     for (const [, binding, property] of text.matchAll(/\b(\w+)\.(\w+)/g)) read(binding, property);
     for (const [, binding, list] of text.matchAll(/\b(\w+)\{([\w, ]+)\}/g)) for (const property of list.split(", ")) read(binding, property);
-    return found;
+    const own = [...text.matchAll(TRAVERSALS)].flatMap(([, from, , , , to]) => [from, to]);
+    const reads = new Set([...Object.keys(bound), ...Object.values(bound), ...own]);
+    const all = query.join("\n"), entity = entities(all);
+    for (const [, from, incoming, rels, outgoing, to] of all.matchAll(TRAVERSALS)) {
+      const [a, b] = [entity[from], entity[to]];
+      if (![from, to, a, b].some((name) => reads.has(name))) continue;
+      const ends = incoming ? [variant(b, a)] : outgoing ? [variant(a, b)] : [variant(a, b), variant(b, a)];
+      for (const rel of rels.split("|")) { found.add(rel); variants.set(rel, [...(variants.get(rel) || []), ...ends]); }
+    }
+    return { found, variants };
   }
 
   const KEY = /^(\s*)(?:-\s+)?([^\s:#'"{}[\],][^:#]*?)\s*:(?:\s|$)/;
 
-  function numbered(text, found) {
+  function numbered(text, { found = new Set(), variants = new Map() } = {}) {
     const stack = [];
     const raw = text.replace(/\n$/, "").split("\n");
     return Highlight.yaml(raw.join("\n"), names).map((tokens, i) => {
@@ -114,10 +134,11 @@
       if (!m) return [tokens];
       const [, indent, key] = m;
       while (stack.length && stack[stack.length - 1].indent >= indent.length) stack.pop();
-      const parent = stack[stack.length - 1]?.key;
       const entity = stack.findLast((outer) => found.has(outer.key))?.key;
+      const rel = stack.findLast((outer) => variants.has(outer.key))?.key;
       stack.push({ indent: indent.length, key });
-      const named = found.has(key) || (key.includes("->") && found.has(parent)) || found.has(`${entity}.${key}`);
+      const traversed = rel && variants.get(rel).some((pattern) => pattern.test(raw[i]));
+      const named = found.has(key) || traversed || found.has(`${entity}.${key}`);
       return [tokens, named && "line named"];
     });
   }
@@ -151,8 +172,9 @@
     const nav = node("nav", undefined, "tabs");
     nav.setAttribute("aria-label", "Package file");
     nav.append(...list.map((f) => button(f.path, `tab${f === shown ? " tab-active" : ""}`, () => { view.path = f.path; })));
-    const plans = isCombine(s) ? Object.values(run.subplans).map((sub) => sub.plan || []).flat() : run.subplans[s.id].plan || [];
-    return [...parts, nav, yaml(shown.text, marks(plans))];
+    const subplans = Object.values(run.subplans).flatMap((sub) => sub.plan || []);
+    const plans = isCombine(s) ? subplans : run.subplans[s.id].plan || [];
+    return [...parts, nav, yaml(shown.text, marks(plans, [...run.logical, ...subplans]))];
   }
 
   function body(run, s, tab) {
@@ -216,13 +238,32 @@
     nav.append(button("Back to the logical plan", "button button-sm button-tertiary tabs-trailing", () => { run.selected = null; }));
   }
 
-  function render(run, model) {
+  function formatted(run, format) {
+    if (!(format in run.formats)) {
+      run.formats[format] = null;
+      fetch(`/api/runs/${run.id}/result?format=${format}`)
+        .then(async (response) => {
+          const body = await response.json();
+          return response.ok ? { body } : { error: body.error || response.statusText };
+        })
+        .catch((error) => ({ error: error.message }))
+        .then((result) => { run.formats[format] = result; rerender(); });
+    }
+    const result = run.formats[format];
+    if (!result) return empty("Formatting the response", "The server's formatter renders this run's response.");
+    if (result.error) return node("div", result.error, "alert alert-danger");
+    if (format === "gql") return highlighted("code-table", Highlight.gql(result.body));
+    return yaml(typeof result.body === "string" ? result.body : JSON.stringify(result.body, null, 2));
+  }
+
+  function render(run, model, format) {
     names = model;
     grants(run);
     const rows = document.getElementById("rows");
     if (run.error) rows.replaceChildren(node("div", run.error, "alert alert-danger"));
-    else if (run.rows) rows.replaceChildren(table(run.rows, "No rows for this caller"));
-    else rows.replaceChildren(empty("No results yet", "Pick an example or write a query, then run it."));
+    else if (!run.rows) rows.replaceChildren(empty("No results yet", "Pick an example or write a query, then run it."));
+    else if (format === "table") rows.replaceChildren(table(run.rows, "No rows for this caller"));
+    else rows.replaceChildren(formatted(run, format));
     document.getElementById("count").textContent = run.rows ? String(run.rows.length) : "";
     const title = document.getElementById("title"), meta = document.getElementById("stage-meta");
     const detail = document.getElementById("detail");

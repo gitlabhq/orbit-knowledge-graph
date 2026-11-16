@@ -88,17 +88,23 @@ impl PipelineStage for DagStage {
             .await
             .map_err(PipelineError::from)
             .inspect_err(|e| obs.record_error(e))?;
+        record(obs, &outcome.compiled, &outcome.executed, start);
+        Ok(Self::hand_off(ctx, outcome))
+    }
+}
+
+impl DagStage {
+    pub fn hand_off(ctx: &mut QueryPipelineContext, outcome: Outcome) -> ExecutionOutput {
         let Outcome { compiled, executed } = outcome;
-        record(obs, &compiled, &executed, start);
         let result_context = compiled.base.result_context.clone();
         ctx.compiled = Some(compiled);
         ctx.phases
             .get_or_insert_default::<QueryExecutionLog>()
             .0
             .extend(executed.log);
-        Ok(ExecutionOutput {
+        ExecutionOutput {
             batches: executed.batches,
             result_context,
-        })
+        }
     }
 }

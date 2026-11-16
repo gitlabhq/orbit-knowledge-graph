@@ -24,16 +24,25 @@ pub struct PipelineRunner<'a, T> {
 
 impl<'a> PipelineRunner<'a, ()> {
     pub fn start(ctx: &'a mut QueryPipelineContext, obs: &'a mut dyn PipelineObserver) -> Self {
-        ctx.phases.insert(());
+        Self::resume(ctx, obs, ())
+    }
+}
+
+impl<'a, T: Send + Sync + 'static> PipelineRunner<'a, T> {
+    /// Starts at the stage that takes `input`, for a caller that ran the stages before it.
+    pub fn resume(
+        ctx: &'a mut QueryPipelineContext,
+        obs: &'a mut dyn PipelineObserver,
+        input: T,
+    ) -> Self {
+        ctx.phases.insert(input);
         Self {
             ctx,
             obs,
             _marker: PhantomData,
         }
     }
-}
 
-impl<'a, T: Send + Sync + 'static> PipelineRunner<'a, T> {
     pub async fn then<S>(self, stage: &S) -> Result<PipelineRunner<'a, S::Output>, PipelineError>
     where
         S: PipelineStage<Input = T>,

@@ -9,7 +9,7 @@ pub use helpers::{
     send_query_error,
 };
 pub use metrics::OTelPipelineObserver;
-pub use service::{QueryPipelineService, QueryServiceOutput, RawQuery};
+pub use service::{QueryPipelineService, QueryServiceOutput, RawQuery, respond};
 pub use stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, PeerExecutors, RedactionStage,
     RoutingOutput, RoutingStage, SecurityStage, ServeError, graph_executors,
