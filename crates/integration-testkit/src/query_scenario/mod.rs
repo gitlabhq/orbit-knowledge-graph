@@ -60,7 +60,9 @@ pub fn validate_parse(root: &str) {
     scenario::discover(root, &mut files);
     assert!(!files.is_empty(), "no files found under {}", root.display());
     for file in &files {
-        scenario::read_cases::<QueryScenario>(file);
+        for (name, scenario) in read_scenarios(root, file) {
+            scenario.into_steps(&name);
+        }
     }
 }
 
@@ -169,7 +171,7 @@ async fn run_scenarios(ctx: &TestContext, root: &str, presets: &str, skip_compil
     let scenarios: Vec<_> = scenarios
         .into_iter()
         .map(|(name, scenario)| {
-            let (config, steps) = scenario.into_steps();
+            let (config, steps) = scenario.into_steps(&name);
             let database = Database::for_scenario(&config, &steps, &name);
             (name, config, steps, database)
         })
