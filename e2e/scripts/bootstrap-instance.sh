@@ -97,7 +97,13 @@ orbit_promo.define_singleton_method(:license_restrictions) do
 end
 provisioned = orbit_promo.execute
 abort "orbit_promo provision failed: #{provisioned.message}" unless provisioned.success?
-warn 'orbit_promo add-on provisioned'
+account = ::Analytics::Orbit::Billing::InstanceAccount.new
+rows = ::GitlabSubscriptions::AddOnPurchase.for_self_managed.map do |purchase|
+  purchase.attributes.slice('subscription_add_on_id', 'subscription_add_on_uid', 'started_at', 'expires_on', 'quantity')
+end
+warn "orbit entitlement: gate=#{account.send(:promo_gate?)} add_on=#{account.send(:promo_add_on?)} " \
+  "entitled=#{account.entitled?} payload=#{provisioned.payload.inspect} purchases=#{rows.inspect}"
+abort 'Orbit is not entitled after provisioning orbit_promo' unless account.entitled?
 
 user = User.find_by(username: 'root') or abort 'no root user'
 token = user.personal_access_tokens.find_or_create_by!(name: 'e2e-bootstrap') do |t|
