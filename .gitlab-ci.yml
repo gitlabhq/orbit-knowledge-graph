@@ -666,6 +666,7 @@ generate-sbom:
   stage: security
   extends:
     - .job-template
+    - .full-build-image
   needs: []
   rules:
     - !reference [.skip-on-solo-schedule, rules]
@@ -1118,6 +1119,7 @@ fuzz-deep:
   stage: test
   extends:
     - .job-template
+    - .full-build-image
     - .fuzz-corpus
   tags:
     - ${RUNNER_LARGE}

@@ -1,6 +1,7 @@
 .orbit-perf-base:
   extends:
     - .job-template
+    - .full-build-image
     - .sccache-template
   stage: benchmark
   timeout: 2h

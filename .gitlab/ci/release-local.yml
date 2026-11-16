@@ -45,6 +45,7 @@
 .local-cli-build-linux:
   extends:
     - .job-template
+    - .full-build-image
     - .sccache-template
     - .no-cargo-home-cache
     - .local-cli-linux-rules
@@ -131,6 +132,7 @@ local-cli-smoke-linux-arm64:
 local-cli-build-windows-amd64:
   extends:
     - .job-template
+    - .full-build-image
     - .sccache-template
     - .no-cargo-home-cache
     - .local-cli-release-rules

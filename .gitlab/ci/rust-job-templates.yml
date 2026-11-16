@@ -32,9 +32,10 @@
 .job-template:
   tags:
     - saas-linux-medium-amd64
-  image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
+  image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph-slim:test-427e34c7@sha256:fca134ea42659c363c9f57ed11503b5a134d801042125b078bcc109b17744918
   variables:
-    MISE_DISABLE_TOOLS: lefthook
+    # The slim image leaves out these tools; mise must not download them.
+    MISE_DISABLE_TOOLS: "aqua:gitleaks/gitleaks,bun,cargo:cargo-bolero,cargo:cargo-cyclonedx,cargo:cargo-edit,cargo:cargo-geiger,cargo:cargo-zigbuild,clickhouse,github:duckdb/duckdb,lefthook,lychee,rumdl,vale,watchexec,zig"
     # Fail closed: an empty policy would let the runner upload.
     CARGO_HOME_CACHE_POLICY: pull
   before_script:
@@ -42,6 +43,12 @@
     - mise install
   cache:
     - !reference [.cargo-home-cache, pull]
+
+# For jobs that need a tool the slim image leaves out (bolero, cyclonedx, zig, clickhouse).
+.full-build-image:
+  image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
+  variables:
+    MISE_DISABLE_TOOLS: lefthook
 
 .sccache-template:
   variables:
