@@ -1639,7 +1639,11 @@ e2e:
     - |
       if [ -n "${E2E_CLI_PID:-}" ] && ! wait "$E2E_CLI_PID"; then
         tail -20 e2e-cli-image.log
-        echo "No orbit CLI image; the CLI suite skips"
+        if [ "${CI_COMMIT_BRANCH:-}" = "$CI_DEFAULT_BRANCH" ] || [ "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" = "automation/e2e-pin-bump" ]; then
+          echo "ERROR: no orbit CLI image; the CLI suite must run on this branch"
+          exit 1
+        fi
+        echo "WARNING: no orbit CLI image; the CLI suite skips"
         unset E2E_CLI_IMAGE
       fi
     - bash e2e/scripts/test.sh
