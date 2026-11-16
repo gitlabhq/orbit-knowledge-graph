@@ -103,6 +103,9 @@ abort "orbit_promo provision failed: #{provisioned.message}" unless provisioned.
 account = ::Analytics::Orbit::Billing::InstanceAccount.new
 abort 'Orbit is not entitled after provisioning orbit_promo' unless account.entitled?
 warn 'orbit_promo add-on provisioned'
+# The daily seat link cron re-provisions add-ons from the license and would expire orbit_promo.
+seat_link_cron = Sidekiq::Cron::Job.find('sync_seat_link_worker') or abort 'no sync_seat_link_worker cron job'
+seat_link_cron.disable!
 
 user = User.find_by(username: 'root') or abort 'no root user'
 token = user.personal_access_tokens.find_or_create_by!(name: 'e2e-bootstrap') do |t|
