@@ -337,7 +337,9 @@ impl OrbitClient {
                         EXIT_GENERIC,
                         request_failure_message("Orbit request", &error),
                     );
-                    if pending.is_none() || !error.is_connect() {
+                    // A connect timeout means the host drops packets: retrying
+                    // would pay the timeout again, so it fails fast instead.
+                    if pending.is_none() || !error.is_connect() || error.is_timeout() {
                         return Err(failure);
                     }
                     ("connection failed".to_string(), None, failure)
@@ -792,6 +794,88 @@ mod tests {
             );
             assert!(message.contains("tcp connect error"), "{message}");
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn connect_timeout_fails_once_and_skips_later_requests() {
+        // Linux drops new SYNs once the accept queue is full, like a host that drops packets.
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let listener = socket.listen(0).unwrap();
+        let address = listener.local_addr().unwrap();
+        let _queued = std::net::TcpStream::connect(address).unwrap();
+        let connect_timeout = Duration::from_millis(300);
+        let client = OrbitClient {
+            endpoint: ResolvedEndpoint {
+                base_url: format!("http://{address}"),
+                header_name: "Private-Token".into(),
+                header_value: "t".into(),
+            },
+            http: reqwest::Client::builder()
+                .connect_timeout(connect_timeout)
+                .build()
+                .unwrap(),
+            retries_enabled: true,
+        };
+
+        let started = std::time::Instant::now();
+        let first = client.get_grep(&[]).await.unwrap_err();
+        let elapsed = started.elapsed();
+        let later = client.get_grep(&[]).await.unwrap_err();
+
+        assert!(
+            first.to_string().starts_with("Orbit request timed out"),
+            "{first}"
+        );
+        assert!(elapsed < connect_timeout * 2, "retried: took {elapsed:?}");
+        assert!(
+            later
+                .to_string()
+                .starts_with("Orbit request skipped because the GitLab instance is unreachable"),
+            "{later}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_successful_retry_stops_skipping_the_instance() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let client = OrbitClient::new(ResolvedEndpoint {
+            base_url: format!("http://{address}"),
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap();
+
+        let retried = tokio::spawn({
+            let client = client.clone();
+            async move { client.query_raw(b"{}".to_vec()).await }
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while client.ensure_reachable().is_ok() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("the refused first attempt marks the instance");
+        let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+        let server = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.read(&mut [0; 4096]).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .await;
+            }
+        });
+
+        assert_eq!(retried.await.unwrap().unwrap(), b"{}");
+        assert_eq!(client.query_raw(b"{}".to_vec()).await.unwrap(), b"{}");
+        server.abort();
     }
 
     #[tokio::test]
