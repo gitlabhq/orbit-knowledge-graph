@@ -83,22 +83,14 @@ current = ::License.current
 if current && current.cloud_license? && !current.expired?
   warn "license already active: plan=#{current.plan} expires=#{current.expires_at}"
 else
-  result = ::GitlabSubscriptions::ActivateService.new.execute(code)
+  # Runs the seat link sync it queues before the add-on step, since that sync re-provisions add-ons.
+  require 'sidekiq/testing'
+  Sidekiq::Testing.disable!
+  result = Sidekiq::Testing.inline! { ::GitlabSubscriptions::ActivateService.new.execute(code) }
   abort "activation failed: #{result[:errors].inspect}" unless result[:success]
   l = ::License.current
   warn "license activated: plan=#{l.plan} expires=#{l.expires_at} cloud=#{l.cloud_license?}"
 end
-
-# A seat link sync re-provisions add-ons from the real license, so provision after it finishes.
-require 'sidekiq/api'
-seat_link_pending = lambda do
-  queued = Sidekiq::Queue.all.flat_map(&:to_a) + Sidekiq::ScheduledSet.new.to_a + Sidekiq::RetrySet.new.to_a
-  queued.any? { |job| job.klass == 'SyncSeatLinkRequestWorker' } ||
-    Sidekiq::Workers.new.any? { |_process, _thread, work| work.payload['class'] == 'SyncSeatLinkRequestWorker' }
-end
-seat_link_deadline = Time.current + 180
-sleep 2 while seat_link_pending.call && Time.current < seat_link_deadline
-abort 'SyncSeatLinkRequestWorker did not finish in 180s' if seat_link_pending.call
 
 # The staging subscription has no Orbit add-on, so provision the one its license would carry.
 orbit_promo = ::GitlabSubscriptions::AddOnPurchases::SelfManaged::ProvisionServices::OrbitPromo.new
@@ -109,12 +101,8 @@ end
 provisioned = orbit_promo.execute
 abort "orbit_promo provision failed: #{provisioned.message}" unless provisioned.success?
 account = ::Analytics::Orbit::Billing::InstanceAccount.new
-rows = ::GitlabSubscriptions::AddOnPurchase.for_self_managed.map do |purchase|
-  purchase.attributes.slice('subscription_add_on_id', 'subscription_add_on_uid', 'started_at', 'expires_on', 'quantity')
-end
-warn "orbit entitlement: gate=#{account.send(:promo_gate?)} add_on=#{account.send(:promo_add_on?)} " \
-  "entitled=#{account.entitled?} payload=#{provisioned.payload.inspect} purchases=#{rows.inspect}"
 abort 'Orbit is not entitled after provisioning orbit_promo' unless account.entitled?
+warn 'orbit_promo add-on provisioned'
 
 user = User.find_by(username: 'root') or abort 'no root user'
 token = user.personal_access_tokens.find_or_create_by!(name: 'e2e-bootstrap') do |t|
