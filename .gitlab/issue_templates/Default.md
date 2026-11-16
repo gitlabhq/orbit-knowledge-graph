@@ -8,6 +8,10 @@ in the author's own words and stay short.
 
 Each section below is for the *important* content a triager needs: the
 problem statement and the shape of the solution.
+
+This project is public. A public issue must not contain customer names,
+tenant names, credentials, or other sensitive data. To add them, mark the
+issue confidential first, or use an internal note.
 -->
 
 ### Problem to Solve

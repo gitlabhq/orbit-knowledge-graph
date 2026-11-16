@@ -1,6 +1,6 @@
 export const HOME = { title: "GitLab Orbit", description: "What GitLab Orbit is, and its developer docs." };
 
-export type Tab = { route: string; label: string; menu?: { route: string; label: string; description: string }[] };
+export type Tab = { route: string; label: string; menu?: { route: string; label: string; description: string; icon?: string }[] };
 
 export const NEXT_PAGE = {
   title: "Orbit Next",
@@ -14,15 +14,18 @@ export const TABS: Tab[] = [
     label: "Developers",
     menu: [
       { route: "engineering", label: "Contribute", description: "Set up Orbit and open your first merge request" },
-      { route: "engineering/development", label: "Development", description: "Run Orbit locally and extend it" },
-      { route: "engineering/architecture", label: "Architecture", description: "The design contracts of each component" },
-      { route: "engineering/adr", label: "ADRs", description: "Architecture decision records" },
-      { route: "engineering/testing", label: "Testing", description: "How Orbit is tested" },
-      { route: "team", label: "Team", description: "Who builds Orbit, and how we work" },
+      { route: "engineering/development", label: "Development", description: "Run Orbit locally and extend it", icon: "terminal" },
+      { route: "engineering/architecture", label: "Architecture", description: "The design contracts of each component", icon: "diagram" },
+      { route: "engineering/adr", label: "ADRs", description: "Architecture decision records", icon: "doc-text" },
+      { route: "engineering/testing", label: "Testing", description: "How Orbit is tested", icon: "work-item-test-case" },
+      { route: "engineering/runbooks", label: "Runbooks", description: "Operate Orbit and recover from failures", icon: "book" },
+      { route: "team", label: "Team", description: "Who builds Orbit, and how we work", icon: "users" },
     ],
   },
   { route: "next", label: "Coming soon" },
 ];
+
+export const GUIDES = TABS.flatMap((tab) => tab.menu ?? []).filter(({ route }) => route !== "engineering");
 
 export const USER_DOCS = { label: "Docs", href: "https://docs.gitlab.com/orbit/" };
 

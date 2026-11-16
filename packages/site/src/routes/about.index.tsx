@@ -1,4 +1,4 @@
-import { Embed, EmbedGrid, findPage, PageFrame, pageHeadOf, Video, VideoGrid } from "@gitlab-org/orbit-site";
+import { Embed, EmbedGrid, findPage, LinkedHeading, PageFrame, pageHeadOf, Video, VideoGrid } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
 import { PageFooter } from "../components/PageFooter";
 import { type DemoVideo, featured, links, videos } from "../content/demos";
@@ -14,12 +14,12 @@ function AboutPage() {
   const page = findPage("about");
   return (
     <PageFrame path="about" title={page?.meta.title ?? "About GitLab Orbit"} description={page?.meta.description} footer={page && <PageFooter page={page} />}>
-      {featured && <Video {...without(featured)} />}
+      {featured && <Video {...without(featured)} bare />}
       {links.length > 0 && (
         <section aria-labelledby="related" className="mt-10">
-          <h2 id="related" className="m-0 text-xl font-semibold text-default">
+          <LinkedHeading level={2} id="related" className="m-0 text-xl font-semibold text-default">
             Articles and demos
-          </h2>
+          </LinkedHeading>
           <EmbedGrid>
             {links.map((link) => (
               <Embed key={link.href} {...link} />
@@ -29,9 +29,9 @@ function AboutPage() {
       )}
       {videos.length > 0 && (
         <section aria-labelledby="videos" className="mt-6">
-          <h2 id="videos" className="m-0 text-xl font-semibold text-default">
+          <LinkedHeading level={2} id="videos" className="m-0 text-xl font-semibold text-default">
             Videos
-          </h2>
+          </LinkedHeading>
           <VideoGrid>
             {videos.map((video) => (
               <Video key={video.id} {...without(video)} />
