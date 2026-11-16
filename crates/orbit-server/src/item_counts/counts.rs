@@ -21,26 +21,7 @@ const PARALLEL_REPLICA_SETTINGS: [(&str, &str); 2] = [
         "50000000",
     ),
 ];
-const PARALLEL_REPLICA_CLUSTER_SQL: &str =
-    "SELECT toString(getSetting('cluster_for_parallel_replicas')) AS cluster";
-
 pub type ScopeCounts = HashMap<String, Result<HashMap<String, i64>, Status>>;
-
-pub async fn has_parallel_replica_cluster(client: &ArrowClickHouseClient) -> Result<bool, Status> {
-    let batches = fetch_status_query_batches(
-        client,
-        PARALLEL_REPLICA_CLUSTER_SQL,
-        "parallel replica cluster",
-        &QueryConfig {
-            use_query_cache: Some(false),
-            ..orbit_server_config::query::default_config()
-        },
-        |query| query,
-    )
-    .await?;
-    let clusters = String::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
-    Ok(clusters.iter().any(|cluster| !cluster.is_empty()))
-}
 
 pub async fn count_visible_entities(
     client: &ArrowClickHouseClient,

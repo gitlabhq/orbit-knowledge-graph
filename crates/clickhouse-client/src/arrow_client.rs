@@ -26,6 +26,7 @@ use tracing::Instrument;
 pub use clickhouse::QuerySummary;
 
 use crate::error::ClickHouseError;
+use crate::extract::FromArrowColumn;
 
 /// ClickHouse rejects an async insert that also carries `insert_quorum`.
 const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
@@ -81,6 +82,9 @@ where
     }
 }
 
+const PARALLEL_REPLICA_CLUSTER_SQL: &str =
+    "SELECT toString(getSetting('cluster_for_parallel_replicas')) AS cluster";
+
 #[derive(Clone)]
 pub struct ArrowClickHouseClient {
     client: Client,
@@ -89,6 +93,7 @@ pub struct ArrowClickHouseClient {
     insert_settings: std::collections::HashMap<String, String>,
     quorum_writes: bool,
     replicated: bool,
+    parallel_replica_cluster: bool,
     circuit_breaker: CircuitBreaker,
 }
 
@@ -131,6 +136,7 @@ impl ArrowClickHouseClient {
             insert_settings: insert_settings.clone(),
             quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
             replicated: false,
+            parallel_replica_cluster: false,
             circuit_breaker: CircuitBreaker::new(
                 service,
                 CircuitConfig::default(),
@@ -148,6 +154,23 @@ impl ArrowClickHouseClient {
     pub fn with_replicated(mut self, replicated: bool) -> Self {
         self.replicated = replicated;
         self
+    }
+
+    pub async fn with_detected_parallel_replica_cluster(mut self) -> Result<Self, ClickHouseError> {
+        let batches = self
+            .query(PARALLEL_REPLICA_CLUSTER_SQL)
+            .with_setting("use_query_cache", "0")
+            .fetch_arrow()
+            .await?;
+        self.parallel_replica_cluster = String::extract_column(&batches, 0)?
+            .iter()
+            .any(|cluster| !cluster.is_empty());
+        Ok(self)
+    }
+
+    /// The server names a `cluster_for_parallel_replicas` for this user, so `enable_parallel_replicas` can run.
+    pub fn has_parallel_replica_cluster(&self) -> bool {
+        self.parallel_replica_cluster
     }
 
     pub fn without_query_cache(mut self) -> Self {
