@@ -1,6 +1,6 @@
 import { orbitSite } from "@gitlab-org/orbit-site/vite";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
-import { siteMeta, siteRoot, sourcePaths, syncContent, syncTrackers } from "./build/content";
+import { siteMeta, siteRoot, sourcePaths, syncContent } from "./build/content";
 import { HOME, NEXT_PAGE } from "./src/sections";
 
 function syncSources(): Plugin {
@@ -15,9 +15,8 @@ function syncSources(): Plugin {
   };
 }
 
-export default defineConfig(async () => {
+export default defineConfig(() => {
   syncContent();
-  await syncTrackers();
   return mergeConfig(
     orbitSite({
       name: HOME.title,

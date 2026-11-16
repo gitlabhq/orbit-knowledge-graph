@@ -30,7 +30,6 @@ export const PAGES_DIR = "docs/pages";
 
 export const SECTIONS = [
   { route: "about", label: "About" },
-  { route: "roadmap", label: "Roadmap" },
   { route: "team", label: "Team" },
   { route: "engineering/development", label: "Development" },
   { route: "engineering/architecture", label: "Architecture" },
