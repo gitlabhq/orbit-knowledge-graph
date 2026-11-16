@@ -7,7 +7,7 @@ let queue = [];
 let timer = null;
 
 function fresh() {
-  return { id: null, stages: [], edges: [], logical: [], grants: [], subplans: {}, rows: null, formats: {}, error: null, selected: null, tab: null, done: false, t0: performance.now(), events: [] };
+  return { id: null, stages: [], edges: [], logical: [], grants: [], subplans: {}, combined: null, rows: null, formats: {}, error: null, selected: null, tab: null, done: false, t0: performance.now(), events: [] };
 }
 
 function stage(id) {
@@ -68,6 +68,7 @@ function apply(event, t) {
       break;
     }
     case "failed": { const s = stage(event.stage); s.status = "failed"; s.error = event.error; break; }
+    case "combined": run.combined = event.rows; break;
     case "done": run.rows = event.rows; run.done = true; break;
     case "error": run.error = event.error; run.done = true; break;
   }

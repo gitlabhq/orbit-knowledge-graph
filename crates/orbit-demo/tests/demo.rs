@@ -59,9 +59,17 @@ async fn result(page: SocketAddr, id: u64, format: &str) -> Response {
 
 async fn formats(demo: &Demo, caller: &str, query: &str) -> [Value; 3] {
     let page = demo.addresses.page;
-    let (id, _) = run(page, caller, query).await;
+    let (id, events) = run(page, caller, query).await;
     let log = demo.runs.get(id).unwrap();
     let output = log.response().unwrap().as_ref().unwrap();
+    let done = events
+        .iter()
+        .find(|event| event["event"] == "done")
+        .unwrap();
+    assert_eq!(
+        done["count"], output.row_count,
+        "the table shows the response"
+    );
     let formatters: [(&str, &dyn ResultFormatter); 3] = [
         ("toon", &ToonFormatter),
         ("gql", &GqlFormatter),
@@ -110,7 +118,10 @@ fn column(events: &[Value], name: &str) -> Vec<String> {
         .as_array()
         .unwrap()
         .iter()
-        .map(|row| row[name].as_str().unwrap().to_string())
+        .map(|row| match &row[name] {
+            Value::String(text) => text.clone(),
+            value => value.to_string(),
+        })
         .collect();
     paths.sort();
     paths
@@ -149,7 +160,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     expected.extend(stage(1, &["keys 0->1"], true));
     expected.extend(stage(2, &["keys 0->2", "keys 1->2", "keys 1->2"], true));
     expected.extend(stage(3, &[], false));
-    expected.push("done".into());
+    expected.extend(["combined", "done"].map(String::from));
     assert_eq!(kinds(&ran), expected);
 
     let split = ran.iter().find(|event| event["event"] == "split").unwrap();
@@ -288,7 +299,7 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     assert_eq!(graph(&raw), (5, 3));
     assert_eq!(result(page, 0, "llm").await.status, 400);
     assert_eq!(result(page, u64::MAX, "toon").await.status, 404);
-    let (diff, _) = run(page, "maintainer", DIFF).await;
+    let (diff, diff_events) = run(page, "maintainer", DIFF).await;
     let unresolved = result(page, diff, "toon").await;
     assert_eq!(unresolved.status, 422);
     assert!(
@@ -296,6 +307,9 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
         "{}",
         unresolved.body
     );
+    let failed = diff_events.last().unwrap();
+    assert_eq!(failed["event"], "error");
+    assert!(unresolved.body.contains(failed["error"].as_str().unwrap()));
 
     let deep = events(page, "maintainer", DEEP).await;
     let backends: Vec<&str> =

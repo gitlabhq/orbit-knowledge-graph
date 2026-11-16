@@ -209,7 +209,7 @@
         return packages(run, s);
       default:
         if (s.samples.length) return s.samples.flatMap((x) => [heading(`${x.request}: ${x.count} rows before the stage's checks`), table(x.rows)]);
-        return s.id === run.stages[run.stages.length - 1]?.id ? [heading("Combine output"), table(run.rows)] : [empty("No executor call", "This stage read nothing.")];
+        return s.id === run.stages[run.stages.length - 1]?.id ? [heading("Combine output"), table(run.combined)] : [empty("No executor call", "This stage read nothing.")];
     }
   }
 

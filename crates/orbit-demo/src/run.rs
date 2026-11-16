@@ -13,6 +13,7 @@ use compiler::surface;
 use query_data_model::Model;
 use query_data_model::catalog::Row;
 use query_data_model::surface::Statement;
+use query_engine::formatters::row_to_json;
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineRunner, QueryPipelineContext, TypeMap,
 };
@@ -200,12 +201,47 @@ async fn execute(
     let outcome = Runner::new(env, &executors, &checks, &mut observer)
         .run(Source::Parsed(parse()?))
         .await?;
-    let rows = json_rows(&outcome.executed.batches, ROWS);
+    let batches = &outcome.executed.batches;
+    log.push(json!({"event": "combined", "rows": json_rows(batches, ROWS)}));
+    let order: Vec<String> = batches.first().map_or_else(Vec::new, |batch| {
+        batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| field.name().clone())
+            .collect()
+    });
     let response = respond(demo, query, session, outcome)
         .await
         .map_err(|error| error.to_string());
+    let rows = response
+        .as_ref()
+        .map(|output| response_rows(output, &order))
+        .map_err(Clone::clone);
     let _ = log.response.set(response);
-    Ok(rows)
+    rows.map_err(anyhow::Error::msg)
+}
+
+/// The rows the caller may see, as the server's raw row helper renders them, in the DAG's
+/// column order.
+fn response_rows(output: &PipelineOutput, order: &[String]) -> Vec<Row> {
+    let position = |name: &str| {
+        let found = order.iter().position(|column| column == name);
+        found.unwrap_or(order.len())
+    };
+    output
+        .query_result
+        .authorized_rows()
+        .take(ROWS)
+        .map(|row| {
+            let Value::Object(fields) = row_to_json(row, &output.result_context) else {
+                unreachable!("row_to_json builds an object");
+            };
+            let mut fields: Vec<(String, Value)> = fields.into_iter().collect();
+            fields.sort_by_cached_key(|(name, _)| (position(name), name.clone()));
+            fields.into_iter().collect()
+        })
+        .collect()
 }
 
 async fn respond(
