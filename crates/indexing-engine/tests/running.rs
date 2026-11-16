@@ -24,8 +24,8 @@ async fn spawned_tasks_join_the_job_of_their_parent() {
     let event =
         Fired::Events(EventBatch::encode("shelves.changed", std::slice::from_ref(&shelf)).unwrap());
 
-    kit.trigger::<ShelfPlanner>(event).await.unwrap();
-    kit.settle().await;
+    kit.plan_and_submit::<ShelfPlanner>(event).await.unwrap();
+    kit.run_until_idle().await;
 
     let job = kit
         .last_job::<ShelfSplit>(&tenant(), &ShelfSplit::key(&shelf))
@@ -39,10 +39,10 @@ async fn spawned_tasks_join_the_job_of_their_parent() {
 async fn a_done_task_wakes_the_planner_of_another_worker_in_the_same_lane() {
     let kit = kit(script([]), vec![], StatusBoard::default());
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 5_000)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 5_000)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     let summaries = kit.find_tasks::<SummaryBuild>();
     assert_eq!(summaries.len(), 1);
@@ -53,10 +53,10 @@ async fn a_done_task_wakes_the_planner_of_another_worker_in_the_same_lane() {
 async fn a_task_with_no_change_writes_no_task_row_and_wakes_no_planner() {
     let kit = kit(script([Step::NoChange]), vec![], StatusBoard::default());
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     assert!(kit.find_tasks::<DocIndex>().is_empty());
     assert!(kit.find_tasks::<SummaryBuild>().is_empty());
@@ -71,10 +71,10 @@ async fn a_task_with_no_change_writes_no_task_row_and_wakes_no_planner() {
 async fn many_submits_for_one_key_give_one_task() {
     let kit = kit(script([]), vec![], StatusBoard::default());
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10), doc(1, 10), doc(1, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10), doc(1, 10), doc(1, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     assert_eq!(kit.find_tasks::<DocIndex>().len(), 1);
 }
@@ -88,10 +88,10 @@ async fn a_failed_task_retries_with_backoff_until_it_succeeds() {
     );
     let started = tokio::time::Instant::now();
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     assert_eq!(kit.find_tasks::<DocIndex>()[0].attempts, 3);
     assert_eq!(started.elapsed(), Duration::from_secs(11));
@@ -105,10 +105,10 @@ async fn a_task_dead_letters_after_its_last_attempt_and_fails_its_job() {
         StatusBoard::default(),
     );
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     let task = &kit.find_tasks::<DocIndex>()[0];
     assert_eq!(task.attempts, 5);
@@ -124,10 +124,10 @@ async fn a_task_dead_letters_after_its_last_attempt_and_fails_its_job() {
 async fn a_permanent_error_dead_letters_at_once() {
     let kit = kit(script([Step::Permanent]), vec![], StatusBoard::default());
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     let task = &kit.find_tasks::<DocIndex>()[0];
     assert_eq!(task.attempts, 1);
@@ -139,10 +139,10 @@ async fn a_deferred_task_uses_no_attempt() {
     let defers = (0..8).map(|_| Step::Defer(Duration::from_secs(30)));
     let kit = kit(script(defers), vec![], StatusBoard::default());
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     let task = &kit.find_tasks::<DocIndex>()[0];
     assert_eq!(task.attempts, 1);
@@ -154,10 +154,10 @@ async fn a_task_older_than_its_max_age_expires() {
     let defers = (0..30).map(|_| Step::Defer(Duration::from_secs(60 * 60)));
     let kit = kit(script(defers), vec![], StatusBoard::default());
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     assert_eq!(kit.find_tasks::<DocIndex>()[0].error_class, Some("expired"));
 }
@@ -171,10 +171,10 @@ async fn a_throttled_task_pauses_its_lane() {
     );
     let started = tokio::time::Instant::now();
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10), doc(2, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10), doc(2, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     assert_eq!(kit.find_tasks::<DocIndex>().len(), 2);
     assert!(
@@ -196,10 +196,10 @@ async fn a_timed_out_task_moves_to_its_on_timeout_lane() {
     )
     .config(config);
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     let task = &kit.find_tasks::<DocIndex>()[0];
     assert_eq!(task.lane, BIG);
@@ -214,10 +214,10 @@ async fn a_pool_that_no_module_registered_is_a_permanent_error() {
         StatusBoard::default(),
     );
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     assert_eq!(
         kit.find_tasks::<DocIndex>()[0].error_class,
@@ -235,10 +235,10 @@ async fn a_sized_pool_gives_a_permit() {
         .config(config)
         .module(register);
 
-    kit.trigger::<DocPlanner>(changed(&[doc(1, 10)]))
+    kit.plan_and_submit::<DocPlanner>(changed(&[doc(1, 10)]))
         .await
         .unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     assert_eq!(kit.find_tasks::<DocIndex>()[0].error_class, None);
 }
@@ -249,7 +249,7 @@ async fn a_campaign_plans_every_page_in_the_backfill_lane() {
     let kit = kit(script([]), docs, StatusBoard::default());
 
     kit.campaign::<DocPlanner>("rebuild").await.unwrap();
-    kit.settle().await;
+    kit.run_until_idle().await;
 
     let tasks = kit.find_tasks::<DocIndex>();
     assert_eq!(tasks.len(), 3);

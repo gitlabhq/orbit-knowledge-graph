@@ -39,7 +39,7 @@ pub(crate) enum Disposition {
 }
 
 impl Disposition {
-    pub(crate) fn of(
+    pub(crate) fn decide(
         attempt: Attempt,
         attempts_used: u16,
         age: Duration,

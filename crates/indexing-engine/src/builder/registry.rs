@@ -108,11 +108,11 @@ impl Registry {
         self.reconcilers.get(name)
     }
 
-    pub(crate) fn registered_pools(&self) -> &BTreeSet<&'static str> {
+    pub(crate) fn list_registered_pools(&self) -> &BTreeSet<&'static str> {
         &self.pools
     }
 
-    pub(crate) fn find_planners_after(&self, worker: &str) -> Vec<Arc<dyn ErasedPlanner>> {
+    pub(crate) fn find_planners_waiting_on(&self, worker: &str) -> Vec<Arc<dyn ErasedPlanner>> {
         self.planners
             .values()
             .filter(|registered| {
@@ -167,7 +167,7 @@ impl<P: Planner> ErasedPlanner for PlannerAdapter<P> {
     async fn plan(&self, fired: Fired) -> Result<Plan, PlanError> {
         let mut ctx = PlanContext::for_fired(&fired);
         self.0.plan(&mut ctx, fired).await?;
-        ctx.finish()
+        ctx.into_plan()
     }
 }
 

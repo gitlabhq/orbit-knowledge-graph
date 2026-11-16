@@ -50,38 +50,41 @@ impl Testkit {
     }
 
     pub async fn plan<P: Planner>(&self, fired: Fired) -> Result<PlannedTasks, PlanError> {
-        let plan = self.runtime().plan(P::NAME, fired).await?;
+        let plan = self.get_or_build_runtime().plan(P::NAME, fired).await?;
         Ok(PlannedTasks { plan })
     }
 
-    pub async fn trigger<P: Planner>(&self, fired: Fired) -> Result<(), PlanError> {
-        self.runtime().plan_and_submit(P::NAME, fired).await?;
+    pub async fn plan_and_submit<P: Planner>(&self, fired: Fired) -> Result<(), PlanError> {
+        self.get_or_build_runtime()
+            .plan_and_submit(P::NAME, fired)
+            .await?;
         Ok(())
     }
 
     pub async fn campaign<P: Planner>(&self, tag: &str) -> Result<(), PlanError> {
-        self.runtime().run_campaign(P::NAME, tag).await
+        self.get_or_build_runtime().run_campaign(P::NAME, tag).await
     }
 
     pub async fn reconcile<R: Reconciler>(&self) -> Result<(), ReconcileError> {
-        let runtime = Arc::clone(self.runtime());
+        let runtime = Arc::clone(self.get_or_build_runtime());
         let ctx = ReconcileContext::new(runtime.clone());
         runtime.reconcile(R::NAME, &ctx).await
     }
 
-    pub async fn settle(&self) {
-        self.runtime().settle().await;
+    pub async fn run_until_idle(&self) {
+        self.get_or_build_runtime().run_until_idle().await;
     }
 
     pub fn last_job<W: Worker>(&self, tenant: &Tenant, key: &Key) -> Option<JobSummary> {
-        self.runtime().find_last_job(tenant, W::NAME, key)
+        self.get_or_build_runtime()
+            .find_last_job(tenant, W::NAME, key)
     }
 
     pub fn find_tasks<W: Worker>(&self) -> Vec<TaskSummary> {
-        self.runtime().find_tasks(W::NAME)
+        self.get_or_build_runtime().find_tasks(W::NAME)
     }
 
-    fn runtime(&self) -> &Arc<KitRuntime> {
+    fn get_or_build_runtime(&self) -> &Arc<KitRuntime> {
         self.runtime.get_or_init(|| {
             let built = self
                 .builder

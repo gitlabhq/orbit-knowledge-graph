@@ -26,11 +26,11 @@ pub(crate) struct EncodedOutcome {
 
 impl<O: Payload> Outcome<O> {
     pub fn done(output: O) -> Self {
-        Self::complete(Completion::Done(output))
+        Self::from_completion(Completion::Done(output))
     }
 
     pub fn no_change() -> Self {
-        Self::complete(Completion::NoChange)
+        Self::from_completion(Completion::NoChange)
     }
 
     pub fn spawn<W: Worker>(mut self, inputs: impl IntoIterator<Item = W::Input>) -> Self {
@@ -74,7 +74,7 @@ impl<O: Payload> Outcome<O> {
         })
     }
 
-    fn complete(completion: Completion<O>) -> Self {
+    fn from_completion(completion: Completion<O>) -> Self {
         Self {
             completion,
             children: Ok(Vec::new()),

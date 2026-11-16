@@ -81,7 +81,7 @@ impl Pools {
         };
         match size {
             PoolConfig::Pod(limit) => {
-                let semaphore = self.find_semaphore(name, None, *limit);
+                let semaphore = self.find_or_create_semaphore(name, None, *limit);
                 let held = semaphore
                     .acquire_owned()
                     .await
@@ -94,7 +94,7 @@ impl Pools {
                 } else {
                     cluster.unknown_key
                 };
-                let semaphore = self.find_semaphore(name, key, limit);
+                let semaphore = self.find_or_create_semaphore(name, key, limit);
                 match tokio::time::timeout(cluster.max_wait, semaphore.acquire_owned()).await {
                     Ok(held) => Ok(Permit {
                         _held: held.map_err(TaskError::permanent)?,
@@ -105,7 +105,12 @@ impl Pools {
         }
     }
 
-    fn find_semaphore(&self, name: String, key: Option<String>, limit: u32) -> Arc<Semaphore> {
+    fn find_or_create_semaphore(
+        &self,
+        name: String,
+        key: Option<String>,
+        limit: u32,
+    ) -> Arc<Semaphore> {
         let mut semaphores = self.semaphores.lock();
         let semaphore = semaphores
             .entry(PoolSlot { pool: name, key })

@@ -136,7 +136,7 @@ impl StatusBoard {
 }
 
 impl Script {
-    fn next_step(&self) -> Step {
+    fn take_next_step(&self) -> Step {
         self.steps
             .lock()
             .pop_front()
@@ -164,7 +164,7 @@ impl Worker for DocIndex {
     }
 
     async fn run(&self, ctx: &TaskContext, doc: Doc) -> Result<Outcome<Indexed>, TaskError> {
-        match self.script.next_step() {
+        match self.script.take_next_step() {
             Step::Done { rows } => Ok(Outcome::done(Indexed { doc }).rows("pages", rows)),
             Step::NoChange => Ok(Outcome::no_change()),
             Step::Fail => Err(anyhow::anyhow!("the store did not answer").into()),

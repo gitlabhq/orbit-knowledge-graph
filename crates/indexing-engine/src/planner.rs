@@ -96,7 +96,7 @@ impl PlanContext {
         }
     }
 
-    pub(crate) fn finish(self) -> Result<Plan, PlanError> {
+    pub(crate) fn into_plan(self) -> Result<Plan, PlanError> {
         if let Some(error) = self.encode_error {
             return Err(error.into());
         }

@@ -9,7 +9,7 @@ async fn a_reconciler_replans_a_key_with_no_job_then_sees_it_done() {
 
     kit.reconcile::<DocStatus>().await.unwrap();
     assert!(board.indexed().is_empty());
-    kit.settle().await;
+    kit.run_until_idle().await;
     kit.reconcile::<DocStatus>().await.unwrap();
 
     assert_eq!(board.indexed(), [1]);

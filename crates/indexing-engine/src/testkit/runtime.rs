@@ -49,7 +49,7 @@ struct QueuedTask {
 impl KitRuntime {
     pub(super) fn new(engine: Engine) -> Self {
         let pools = Pools::new(
-            engine.registry.registered_pools().clone(),
+            engine.registry.list_registered_pools().clone(),
             engine.config.pools.clone(),
         );
         Self {
@@ -101,13 +101,13 @@ impl KitRuntime {
         reconciler.reconcile(ctx).await
     }
 
-    pub(super) async fn settle(&self) {
+    pub(super) async fn run_until_idle(&self) {
         loop {
-            let Some((ready_at, task)) = self.state.lock().take_next() else {
+            let Some((ready_at, task)) = self.state.lock().take_earliest_task() else {
                 return;
             };
             tokio::time::sleep_until(ready_at).await;
-            let (task, first_started) = self.state.lock().start(task);
+            let (task, first_started) = self.state.lock().mark_started(task);
             self.run(task, first_started).await;
         }
     }
@@ -128,8 +128,8 @@ impl KitRuntime {
     async fn run(&self, task: QueuedTask, first_started: Instant) {
         let lane = self.find_lane_config(&task);
         let attempt = self.run_attempt(&task, &lane).await;
-        match Disposition::of(attempt, task.attempts_used, first_started.elapsed(), &lane) {
-            Disposition::Finish(outcome) => self.finish(task, outcome).await,
+        match Disposition::decide(attempt, task.attempts_used, first_started.elapsed(), &lane) {
+            Disposition::Finish(outcome) => self.apply_outcome(task, outcome).await,
             Disposition::Retry { after } => self.state.lock().requeue(task.use_attempt(), after),
             Disposition::Redeliver { after } => self.state.lock().requeue(task, after),
             Disposition::PauseLane { after } => {
@@ -160,12 +160,16 @@ impl KitRuntime {
         }
     }
 
-    async fn finish(&self, task: QueuedTask, outcome: EncodedOutcome) {
-        let output = self.state.lock().complete(&task, outcome);
+    async fn apply_outcome(&self, task: QueuedTask, outcome: EncodedOutcome) {
+        let output = self.state.lock().record_outcome(&task, outcome);
         let Some(output) = output else {
             return;
         };
-        for planner in self.engine.registry.find_planners_after(task.input.worker) {
+        for planner in self
+            .engine
+            .registry
+            .find_planners_waiting_on(task.input.worker)
+        {
             let batch = EventBatch::done(task.input.worker, output.clone(), task.lane.clone());
             match planner.plan(Fired::Events(batch)).await {
                 Ok(plan) => {
@@ -264,17 +268,17 @@ impl KitState {
         });
     }
 
-    fn take_next(&mut self) -> Option<(Instant, QueuedTask)> {
+    fn take_earliest_task(&mut self) -> Option<(Instant, QueuedTask)> {
         let (index, ready_at) = self
             .queue
             .iter()
             .enumerate()
-            .map(|(index, task)| (index, self.ready_at(task)))
+            .map(|(index, task)| (index, self.compute_ready_at(task)))
             .min_by_key(|(_, ready_at)| *ready_at)?;
         Some((ready_at, self.queue.remove(index)))
     }
 
-    fn start(&mut self, mut task: QueuedTask) -> (QueuedTask, Instant) {
+    fn mark_started(&mut self, mut task: QueuedTask) -> (QueuedTask, Instant) {
         self.pending
             .remove(&(task.input.worker, task.input.key.clone()));
         let first_started = *task.first_started.get_or_insert_with(Instant::now);
@@ -293,7 +297,7 @@ impl KitState {
         );
     }
 
-    fn complete(&mut self, task: &QueuedTask, outcome: EncodedOutcome) -> Option<Vec<u8>> {
+    fn record_outcome(&mut self, task: &QueuedTask, outcome: EncodedOutcome) -> Option<Vec<u8>> {
         for child in outcome.children {
             self.enqueue(task.job_id, task.tenant.clone(), child, task.lane.clone());
         }
@@ -314,7 +318,7 @@ impl KitState {
             .record_task(task.input.worker, task.summarize(Some((class, message))));
     }
 
-    fn ready_at(&self, task: &QueuedTask) -> Instant {
+    fn compute_ready_at(&self, task: &QueuedTask) -> Instant {
         let paused_until = self
             .paused_lanes
             .get(&task.lane.format_id(task.input.worker));
