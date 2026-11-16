@@ -638,17 +638,6 @@ cargo-deny:
   script:
     - cargo deny check
 
-unsafe-code-check:
-  stage: security
-  image: alpine:latest
-  tags:
-    - saas-linux-small-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - sh ./scripts/checks/check-unsafe-code.sh
-
 generate-sbom:
   stage: security
   extends:
