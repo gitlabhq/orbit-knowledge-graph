@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use futures::FutureExt;
 use tokio::sync::OnceCell;
 
 use super::format::{QueryStep, ScenarioConfig};
@@ -42,12 +44,13 @@ impl Database {
 }
 
 pub(super) struct Datasets {
-    entries: HashMap<String, (OnceCell<TestContext>, AtomicUsize)>,
+    entries: HashMap<String, (OnceCell<Result<TestContext, String>>, AtomicUsize)>,
 }
 
 impl Datasets {
     pub(super) fn new<'a>(databases: impl Iterator<Item = &'a Database>) -> Self {
-        let mut entries: HashMap<String, (OnceCell<TestContext>, AtomicUsize)> = HashMap::new();
+        let mut entries: HashMap<String, (OnceCell<Result<TestContext, String>>, AtomicUsize)> =
+            HashMap::new();
         for database in databases {
             if let Database::Shared(name) = database {
                 entries
@@ -65,7 +68,19 @@ impl Datasets {
         name: &str,
         prepare: impl Future<Output = TestContext>,
     ) -> TestContext {
-        self.entries[name].0.get_or_init(|| prepare).await.clone()
+        let built = self.entries[name]
+            .0
+            .get_or_init(|| async {
+                AssertUnwindSafe(prepare)
+                    .catch_unwind()
+                    .await
+                    .map_err(|payload| crate::panic_message(&*payload))
+            })
+            .await;
+        match built {
+            Ok(database) => database.clone(),
+            Err(message) => panic!("shared dataset {name} failed to build: {message}"),
+        }
     }
 
     pub(super) async fn release(&self, base: &TestContext, name: &str) {
@@ -140,4 +155,70 @@ pub(super) async fn prepare(
         forked.optimize_if_needed().await;
     }
     forked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::query_scenario::QueryScenario;
+
+    const QUERY: &str = "query: {gql: 'MATCH (u:User {id: 1}) RETURN u'}\n";
+
+    fn database(yaml: &str) -> Database {
+        let scenario: QueryScenario = orbit_utils::yaml::from_str(yaml).unwrap();
+        let (config, steps) = scenario.into_steps();
+        Database::for_scenario(&config, &steps, "case")
+    }
+
+    fn shared(database: &Database) -> &str {
+        match database {
+            Database::Shared(name) => name,
+            _ => panic!("expected a shared database"),
+        }
+    }
+
+    #[test]
+    fn cases_share_a_database_only_when_their_dataset_matches() {
+        let seeded = |rows: &str| {
+            format!(
+                "config: {{extra_seed: {{gl_user: [{rows}]}}}}\n{QUERY}expect: {{node_count: 1}}"
+            )
+        };
+        let (first, same, other) = (
+            database(&seeded("{id: 1}")),
+            database(&seeded("{id: 1}")),
+            database(&seeded("{id: 2}")),
+        );
+        assert_eq!(shared(&first), shared(&same));
+        assert_ne!(shared(&first), shared(&other));
+        let preset = database(&format!(
+            "config: {{seed: other}}\n{QUERY}expect: {{node_count: 1}}"
+        ));
+        assert_ne!(shared(&preset), shared(&first));
+
+        let datasets = Datasets::new([&first, &same, &other].into_iter());
+        let users =
+            |database: &Database| datasets.entries[shared(database)].1.load(Ordering::Relaxed);
+        assert_eq!((users(&first), users(&other)), (2, 1));
+    }
+
+    #[test]
+    fn base_and_private_databases_follow_the_steps() {
+        assert!(matches!(
+            database(&format!("{QUERY}expect: {{node_count: 1}}")),
+            Database::Base
+        ));
+        assert!(matches!(
+            database(&format!(
+                "config: {{extra_seed: {{gl_user: [{{id: 1}}]}}}}\n{QUERY}expect: {{compile_error: schema}}"
+            )),
+            Database::Base
+        ));
+        assert!(matches!(
+            database(&format!(
+                "steps:\n  - seed: {{gl_user: [{{id: 1}}]}}\n    {QUERY}    expect: {{node_count: 1}}"
+            )),
+            Database::Private(_)
+        ));
+    }
 }
