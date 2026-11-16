@@ -154,6 +154,13 @@ impl ArrowClickHouseClient {
         self
     }
 
+    pub fn with_database(&self, database: &str) -> Self {
+        let mut client = self.clone();
+        client.client = client.client.with_database(database);
+        client.database = database.to_string();
+        client
+    }
+
     pub fn database(&self) -> &str {
         &self.database
     }
