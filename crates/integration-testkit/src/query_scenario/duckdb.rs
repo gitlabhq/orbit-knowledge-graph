@@ -35,7 +35,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
         database
             .initialize_schema(&generate_local_ddl(&ontology, ""))
             .unwrap_or_else(|e| panic!("{name}: local DDL: {e}"));
-        let (config, steps) = scenario.into_steps();
+        let (config, steps) = scenario.into_steps(&name);
         let preset = config
             .seed
             .as_ref()
