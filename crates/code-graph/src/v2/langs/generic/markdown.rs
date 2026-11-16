@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use orbit_utils::markdown::{FQN_SEPARATOR, LineIndex, sections, segment_path};
+use orbit_utils::markdown::{FQN_SEPARATOR, LineIndex, escape_segment, sections, segment_path};
 
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
@@ -27,10 +27,12 @@ fn parse_markdown(
     source: &str,
     file_path: &str,
 ) -> (Vec<CanonicalDefinition>, Vec<CanonicalImport>) {
-    let stem = Path::new(file_path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(file_path);
+    let stem = escape_segment(
+        Path::new(file_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(file_path),
+    );
     let lines = LineIndex::new(source);
     let position = |(line, column)| Position::new(line, column);
     let sections = sections(source);
@@ -38,7 +40,7 @@ fn parse_markdown(
         .iter()
         .enumerate()
         .map(|(index, section)| {
-            let parts: Vec<&str> = std::iter::once(stem)
+            let parts: Vec<&str> = std::iter::once(stem.as_str())
                 .chain(segment_path(&sections, index))
                 .collect();
             CanonicalDefinition {
