@@ -454,7 +454,7 @@ struct ListArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(
     about = "Report code quality from the local graph (nightly; needs ORBIT_NIGHTLY=1).",
-    long_about = "Report code quality from the local code graph: dependency cycles between directories, coupling hotspots, and functions nothing references. Layer rules in .gitlab/orbit-quality.yml (`layers:` entries with `name`, `from`, and `deny` or `allow_only` path globs) report forbidden dependencies. With --gate, indexes BASE and exits 3 (errors exit 1) when the commits since BASE add a layer violation, a dependency inside a cycle, or a function nothing references. Nightly: set ORBIT_NIGHTLY=1."
+    long_about = "Report code quality from the local code graph: dependency cycles between directories, coupling hotspots, and functions nothing references. Layer rules in .gitlab/orbit-quality.yml (`layers:` entries with `name`, `from`, and `deny` or `allow_only` path globs) report forbidden dependencies. With --gate, compares the change against BASE without indexing BASE and exits 3 (errors exit 1) when the commits since BASE add a layer violation, a dependency inside a cycle, or a function nothing references. Nightly: set ORBIT_NIGHTLY=1."
 )]
 struct QualityArgs {
     /// Rules to run (repeatable). Default: all of them.
@@ -465,7 +465,7 @@ struct QualityArgs {
     #[arg(long, value_name = "BASE")]
     diff: Option<String>,
 
-    /// Exit 3 when the commits since BASE add a layer violation, a dependency inside a cycle, or a function nothing references. Indexes BASE in a temporary worktree to compare, following renames.
+    /// Exit 3 when the commits since BASE add a layer violation, a dependency inside a cycle, or a function nothing references. Compares against the files the change touched at BASE, so BASE is not indexed; renames are followed.
     #[arg(long, requires = "diff")]
     gate: bool,
 

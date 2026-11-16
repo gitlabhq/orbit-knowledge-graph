@@ -84,7 +84,7 @@ pub(crate) fn run(options: Options) -> Result<()> {
     };
     let changed_ids: HashSet<i64> = changed.unwrap_or_default();
     let base = match (&options.diff, options.gate) {
-        (Some(base), true) => Some(BaseGraph::index(&git.repo_path, base)?),
+        (Some(base), true) => Some(BaseView::read(&git.repo_path, base)?),
         _ => None,
     };
 
@@ -125,71 +125,54 @@ pub(crate) fn run(options: Options) -> Result<()> {
         true => Some(hotspots(&graph, &git.repo_path, options.limit)?),
         false => None,
     };
-    let dead = match rules.contains(&Rule::Dead) || options.gate {
-        true => Some(dead_functions(&graph, &git.repo_path)?),
-        false => None,
+    let dead = match (rules.contains(&Rule::Dead), options.gate) {
+        (true, _) => Some(dead_functions(&graph, &git.repo_path, None)?),
+        (false, true) => Some(dead_functions(&graph, &git.repo_path, Some(&changed_ids))?),
+        (false, false) => None,
     };
 
-    let violations = match &base {
-        Some(base) => {
-            let base_reader = base.open()?;
-            let base_graph = Graph {
-                client: &base_reader,
-                params: [base.project_id.into(), base.commit_sha.clone().into()],
+    let violations = match (&base, &deps) {
+        (Some(base), Some(deps)) => {
+            let new_edge = |from: &str, to: &str| {
+                deps.files
+                    .get(&(from.to_string(), to.to_string()))
+                    .is_some_and(|edge| base.is_new(from, &edge.targets))
             };
-            let renames = Renames::between(&git.repo_path, &base.commit_sha, &git.commit_sha)?;
-            let base_deps = dependencies(&base_graph, options.depth)?;
-            let base_symbol_uses: HashSet<(String, String, String)> = match &layer_rules {
-                Some(config) if !config.forbid.is_empty() => layers::check_symbols(
-                    &config.forbid,
-                    used_symbols(&base_graph)?
-                        .iter()
-                        .map(|(f, s, l)| (f.as_str(), s.as_str(), *l)),
-                )
-                .into_iter()
-                .map(|u| (u.rule, renames.file(&u.file), u.symbol))
-                .collect(),
-                _ => HashSet::new(),
-            };
-            let base_layer_pairs: HashSet<(String, String, String)> = layer_rules
-                .as_ref()
-                .map(|config| layers::check(&config.layers, file_edges(&base_deps.files)))
-                .unwrap_or_default()
-                .into_iter()
-                .map(|v| (v.rule, renames.file(&v.from), renames.file(&v.to)))
-                .collect();
-            let base_edges: HashSet<(String, String)> = base_deps
-                .edges
-                .into_keys()
-                .map(|(from, to)| (renames.module(&from), renames.module(&to)))
-                .collect();
-            let base_dead: HashSet<(String, String)> = dead_functions(&base_graph, &base.checkout)?
-                .into_iter()
-                .map(|function| (renames.file(&function.file), function.name))
+            let base_modules: HashSet<(String, String)> = deps
+                .files
+                .iter()
+                .filter(|((from, _), edge)| !base.is_new(from, &edge.targets))
+                .map(|((from, to), _)| {
+                    (module_of(from, options.depth), module_of(to, options.depth))
+                })
+                .filter(|(from, to)| from != to)
                 .collect();
             let mut found = gate_violations(
                 cycles.as_deref().unwrap_or_default(),
-                &base_edges,
+                &base_modules,
                 dead.as_deref().unwrap_or_default(),
-                &base_dead,
                 &changed_ids,
+                base,
             );
-            found.extend(new_layer_violations(
-                layer_violations.as_deref().unwrap_or_default(),
-                &base_layer_pairs,
-            ));
+            found.extend(
+                layer_violations
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter(|v| new_edge(&v.from, &v.to))
+                    .map(|v| {
+                        format!(
+                            "the change adds {} -> {}, which breaks layer `{}`: {}",
+                            v.from, v.to, v.rule, v.example
+                        )
+                    }),
+            );
             found.extend(
                 symbol_uses
                     .as_deref()
                     .unwrap_or_default()
                     .iter()
-                    .filter(|u| {
-                        !base_symbol_uses.contains(&(
-                            u.rule.clone(),
-                            u.file.clone(),
-                            u.symbol.clone(),
-                        ))
-                    })
+                    .filter(|u| base.is_new_symbol(&u.file, &u.symbol))
                     .map(|u| {
                         format!(
                             "the change uses {} in {}:{}, which breaks `{}`",
@@ -199,7 +182,7 @@ pub(crate) fn run(options: Options) -> Result<()> {
             );
             found
         }
-        None => Vec::new(),
+        _ => Vec::new(),
     };
     let report = Report {
         repo: git.repo_path.display().to_string(),
@@ -317,7 +300,6 @@ struct Cycle {
 }
 
 struct Dependencies {
-    edges: BTreeMap<(String, String), ModuleEdge>,
     files: BTreeMap<(String, String), FileEdge>,
     cycles: Vec<Cycle>,
 }
@@ -326,6 +308,7 @@ struct Dependencies {
 struct FileEdge {
     refs: usize,
     example: String,
+    targets: BTreeSet<String>,
 }
 
 fn dependencies(graph: &Graph, depth: Option<usize>) -> Result<Dependencies> {
@@ -363,8 +346,15 @@ ORDER BY sf, sl, tf, tname",
             .or_insert_with(|| FileEdge {
                 refs: 0,
                 example: example(),
-            })
-            .refs += 1;
+                targets: BTreeSet::new(),
+            });
+        let file_edge = files
+            .get_mut(&(sfs[i].clone(), tfs[i].clone()))
+            .expect("just inserted");
+        file_edge.refs += 1;
+        file_edge
+            .targets
+            .insert(simple_name(&tnames[i]).to_string());
         let from = module_of(&sfs[i], depth);
         let to = module_of(&tfs[i], depth);
         if from == to {
@@ -422,11 +412,7 @@ ORDER BY sf, sl, tf, tname",
             .cmp(&a.modules.len())
             .then(a.modules.cmp(&b.modules))
     });
-    Ok(Dependencies {
-        edges,
-        files,
-        cycles,
-    })
+    Ok(Dependencies { files, cycles })
 }
 
 fn strongly_connected(adjacency: &[Vec<usize>]) -> Vec<Vec<usize>> {
@@ -564,7 +550,18 @@ fn is_entrypoint(name: &str) -> bool {
         })
 }
 
-fn dead_functions(graph: &Graph, repo: &Path) -> Result<Vec<Dead>> {
+fn dead_functions(graph: &Graph, repo: &Path, only: Option<&HashSet<i64>>) -> Result<Vec<Dead>> {
+    if only.is_some_and(HashSet::is_empty) {
+        return Ok(Vec::new());
+    }
+    let only_ids = only.map_or(String::new(), |ids| {
+        let list = ids
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("AND d.id IN ({list})")
+    });
     let commit = graph.params[1].as_str().unwrap_or("HEAD").to_string();
     let sql = format!(
         "WITH {DEFINITIONS_CTE}, {CALLS_CTE},
@@ -585,6 +582,7 @@ SELECT d.id, d.fqn, d.name, d.file_path AS file, CAST(d.start_line AS BIGINT) AS
 FROM d JOIN names n ON n.name = d.name LEFT JOIN owner o ON o.id = d.id
 WHERE d.definition_type = 'Function'
   AND d.id NOT IN (SELECT id FROM referenced)
+  {only_ids}
   AND NOT {}
 ORDER BY d.file_path, d.start_line",
         test_code("d.file_path", "d.fqn")
@@ -601,6 +599,9 @@ ORDER BY d.file_path, d.start_line",
         .filter(|&i| !is_entrypoint(&names[i]))
         .collect();
     let wanted: HashSet<&str> = candidates.iter().map(|&i| names[i].as_str()).collect();
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
     let committed = commit_files(repo, &commit)?;
     let mentions = count_identifiers(&committed, &wanted);
     let mut sources: HashMap<&str, Option<Vec<String>>> = HashMap::new();
@@ -853,92 +854,41 @@ ORDER BY file, line"
     Ok(i64_column(&batches, "id").into_iter().collect())
 }
 
-struct BaseGraph {
-    repo: PathBuf,
-    scratch: tempfile::TempDir,
-    checkout: PathBuf,
-    project_id: i64,
-    commit_sha: String,
+fn simple_name(fqn: &str) -> &str {
+    fqn.rsplit([':', '.', '#'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(fqn)
 }
 
-impl BaseGraph {
-    fn index(repo: &Path, base: &str) -> Result<Self> {
-        let commit_sha = resolve_commit(repo, base)?;
-        let merge_base = git(
-            repo,
-            &["merge-base", "--end-of-options", &commit_sha, "HEAD"],
-        )
-        .with_context(|| format!("{base} and HEAD share no history"))?
-        .trim()
-        .to_string();
-        let scratch = tempfile::Builder::new()
-            .prefix("orbit-quality-")
-            .tempdir()?;
-        let checkout = scratch.path().join("base");
-        git(
-            repo,
-            &[
-                "worktree",
-                "add",
-                "--detach",
-                "--quiet",
-                &checkout.to_string_lossy(),
-                &merge_base,
-            ],
-        )?;
-        let mut base = Self {
-            repo: repo.to_path_buf(),
-            checkout: dunce::canonicalize(&checkout)?,
-            project_id: 0,
-            commit_sha: merge_base,
-            scratch,
-        };
-        let status = without_repo_git_env(&mut Command::new(std::env::current_exe()?))
-            .args(["workspace", "index", "--db"])
-            .arg(base.db_path())
-            .arg(&base.checkout)
-            .env("ORBIT_DATA_DIR", base.scratch.path().join("data"))
-            .env("ORBIT_TELEMETRY_ENABLED", "false")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::inherit())
-            .status()
-            .context("failed to index the base commit")?;
-        anyhow::ensure!(
-            status.success(),
-            "indexing the base commit {} failed",
-            base.commit_sha
-        );
-        base.project_id = workspace::git_info(&base.checkout)?.project_id;
-        Ok(base)
+fn mentions(text: &str, name: &str) -> bool {
+    let name = name.trim_start_matches("::");
+    if name.is_empty() {
+        return false;
     }
-
-    fn db_path(&self) -> PathBuf {
-        self.scratch.path().join("base.duckdb")
-    }
-
-    fn open(&self) -> Result<crate::database::GraphReader> {
-        crate::database::GraphReader::open(Some(self.db_path()))
-    }
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    text.match_indices(name).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + name.len()..].chars().next();
+        !before.is_some_and(word) && !after.is_some_and(word)
+    })
 }
 
-impl Drop for BaseGraph {
-    fn drop(&mut self) {
-        let checkout = self.checkout.to_string_lossy();
-        if git(&self.repo, &["worktree", "remove", "--force", &checkout]).is_err() {
-            let _ = std::fs::remove_dir_all(&self.checkout);
-            let _ = git(&self.repo, &["worktree", "prune"]);
-        }
-    }
+/// The base of a change, read from git without indexing it: the files the
+/// change touched, keyed by their path at HEAD, with their content at the
+/// base (`None` for files the change added). Every other file is the same
+/// at the base as at HEAD, so the HEAD graph stands in for it.
+struct BaseView {
+    touched: HashMap<String, Option<String>>,
 }
 
-struct Renames {
-    dirs: Vec<(String, String)>,
-    files: HashMap<String, String>,
-}
-
-impl Renames {
-    fn between(repo: &Path, base: &str, head: &str) -> Result<Self> {
-        let output = git(
+impl BaseView {
+    fn read(repo: &Path, base: &str) -> Result<Self> {
+        let commit = resolve_commit(repo, base)?;
+        let merge_base = git(repo, &["merge-base", "--end-of-options", &commit, "HEAD"])
+            .with_context(|| format!("{base} and HEAD share no history"))?
+            .trim()
+            .to_string();
+        let status = git(
             repo,
             &[
                 "diff",
@@ -947,67 +897,81 @@ impl Renames {
                 "-z",
                 "--no-ext-diff",
                 "--end-of-options",
-                base,
-                head,
+                &merge_base,
+                "HEAD",
             ],
         )?;
-        Ok(Self::parse(&output))
+        Ok(Self {
+            touched: Self::parse_status(&status, |old| base_blob(repo, &merge_base, old)),
+        })
     }
 
-    fn parse(output: &str) -> Self {
-        let mut moved: BTreeMap<(String, String), usize> = BTreeMap::new();
-        let mut files = HashMap::new();
-        let mut fields = output.split('\0').filter(|field| !field.is_empty());
-        while let Some(status) = fields.next() {
-            if status.starts_with('R') || status.starts_with('C') {
-                let (Some(old), Some(new)) = (fields.next(), fields.next()) else {
-                    break;
-                };
-                if status.starts_with('R') {
-                    files.insert(old.to_string(), new.to_string());
-                    let old_dir = module_of(old, None);
-                    let new_dir = module_of(new, None);
-                    if old_dir != new_dir {
-                        *moved.entry((old_dir, new_dir)).or_insert(0) += 1;
+    fn parse_status(
+        status: &str,
+        mut content: impl FnMut(&str) -> Option<String>,
+    ) -> HashMap<String, Option<String>> {
+        let mut touched = HashMap::new();
+        let mut fields = status.split('\0').filter(|field| !field.is_empty());
+        while let Some(code) = fields.next() {
+            match code.chars().next() {
+                Some('R') | Some('C') => {
+                    let (Some(old), Some(new)) = (fields.next(), fields.next()) else {
+                        break;
+                    };
+                    let base = match code.starts_with('R') {
+                        true => content(old),
+                        false => None,
+                    };
+                    touched.insert(new.to_string(), base);
+                }
+                Some('A') => {
+                    if let Some(path) = fields.next() {
+                        touched.insert(path.to_string(), None);
                     }
                 }
-            } else {
-                fields.next();
+                Some('D') => {
+                    fields.next();
+                }
+                _ => {
+                    if let Some(path) = fields.next() {
+                        let base = content(path);
+                        touched.insert(path.to_string(), base);
+                    }
+                }
             }
         }
-        let mut best: BTreeMap<String, (usize, String)> = BTreeMap::new();
-        for ((old, new), count) in moved {
-            let entry = best.entry(old).or_insert((0, String::new()));
-            if count > entry.0 {
-                *entry = (count, new);
-            }
-        }
-        let mut dirs: Vec<(String, String)> =
-            best.into_iter().map(|(old, (_, new))| (old, new)).collect();
-        dirs.sort_by_key(|(old, _)| std::cmp::Reverse(old.len()));
-        Self { dirs, files }
+        touched
     }
 
-    fn file(&self, path: &str) -> String {
-        self.files
-            .get(path)
-            .cloned()
-            .unwrap_or_else(|| path.to_string())
+    /// Whether an edge from `file` to definitions with these names is new:
+    /// the file was touched and its base content names none of them.
+    fn is_new(&self, file: &str, targets: &BTreeSet<String>) -> bool {
+        match self.touched.get(file) {
+            None => false,
+            Some(None) => true,
+            Some(Some(text)) => !targets.iter().any(|name| mentions(text, name)),
+        }
     }
 
-    fn module(&self, module: &str) -> String {
-        for (old, new) in &self.dirs {
-            if module == old {
-                return new.clone();
-            }
-            if let Some(rest) = module.strip_prefix(old.as_str())
-                && rest.starts_with('/')
-            {
-                return format!("{new}{rest}");
-            }
-        }
-        module.to_string()
+    fn is_new_name(&self, file: &str, name: &str) -> bool {
+        self.is_new(file, &BTreeSet::from([name.to_string()]))
     }
+
+    fn is_new_symbol(&self, file: &str, symbol: &str) -> bool {
+        match self.touched.get(file) {
+            None => false,
+            Some(None) => true,
+            Some(Some(text)) => !mentions(text, symbol),
+        }
+    }
+}
+
+fn base_blob(repo: &Path, commit: &str, path: &str) -> Option<String> {
+    git(
+        repo,
+        &["show", "--end-of-options", &format!("{commit}:{path}")],
+    )
+    .ok()
 }
 
 fn used_symbols(graph: &Graph) -> Result<Vec<(String, String, i64)>> {
@@ -1033,33 +997,17 @@ fn file_edges(
         .map(|((from, to), edge)| (from.as_str(), to.as_str(), edge.refs, edge.example.as_str()))
 }
 
-fn new_layer_violations(
-    current: &[layers::Violation],
-    base: &HashSet<(String, String, String)>,
-) -> Vec<String> {
-    current
-        .iter()
-        .filter(|v| !base.contains(&(v.rule.clone(), v.from.clone(), v.to.clone())))
-        .map(|v| {
-            format!(
-                "the change adds {} -> {}, which breaks layer `{}`: {}",
-                v.from, v.to, v.rule, v.example
-            )
-        })
-        .collect()
-}
-
 fn gate_violations(
     cycles: &[Cycle],
-    base_edges: &HashSet<(String, String)>,
+    base_modules: &HashSet<(String, String)>,
     dead: &[Dead],
-    base_dead: &HashSet<(String, String)>,
     changed: &HashSet<i64>,
+    base: &BaseView,
 ) -> Vec<String> {
     let mut violations = Vec::new();
     for cycle in cycles {
         for edge in &cycle.edges {
-            if !base_edges.contains(&(edge.from.clone(), edge.to.clone())) {
+            if !base_modules.contains(&(edge.from.clone(), edge.to.clone())) {
                 violations.push(format!(
                     "the change adds {} -> {}, which closes a cycle of {} modules: {}",
                     edge.from,
@@ -1071,9 +1019,7 @@ fn gate_violations(
         }
     }
     for function in dead {
-        if changed.contains(&function.id)
-            && !base_dead.contains(&(function.file.clone(), function.name.clone()))
-        {
+        if changed.contains(&function.id) && base.is_new_name(&function.file, &function.name) {
             violations.push(format!(
                 "the change adds {} ({}), which nothing references",
                 function.fqn, function.loc
@@ -1394,44 +1340,77 @@ mod tests {
         }
     }
 
-    fn edges(cycles: &[Cycle], extra: &[(&str, &str)]) -> HashSet<(String, String)> {
-        cycles
-            .iter()
-            .flat_map(|cycle| cycle.edges.iter().cloned())
-            .chain(cycle(extra).edges)
-            .map(|edge| (edge.from, edge.to))
+    fn view(files: &[(&str, Option<&str>)]) -> BaseView {
+        BaseView {
+            touched: files
+                .iter()
+                .map(|(path, text)| (path.to_string(), text.map(String::from)))
+                .collect(),
+        }
+    }
+
+    fn pairs(list: &[(&str, &str)]) -> HashSet<(String, String)> {
+        list.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
             .collect()
     }
 
     #[test]
     fn gate_reports_only_what_the_base_did_not_have() {
-        let base = [cycle(&[("a", "b"), ("b", "a")])];
-        let base_edges = edges(&base, &[("c", "d")]);
         let head = [
             cycle(&[("a", "b"), ("b", "a")]),
             cycle(&[("c", "d"), ("d", "c")]),
         ];
-        let base_dead: HashSet<(String, String)> = [("m.rs".to_string(), "old".to_string())].into();
+        let base_modules = pairs(&[("a", "b"), ("b", "a"), ("c", "d")]);
         let head_dead = [dead(1, "old"), dead(2, "new"), dead(3, "untouched")];
         let changed: HashSet<i64> = [1, 2].into();
-        let violations = gate_violations(&head, &base_edges, &head_dead, &base_dead, &changed);
+        let base = view(&[("m.rs", Some("fn old() {}\n"))]);
+        let violations = gate_violations(&head, &base_modules, &head_dead, &changed, &base);
         assert_eq!(violations.len(), 2, "{violations:#?}");
         assert!(violations[0].contains("d -> c"));
         assert!(violations[1].contains("adds m::new"));
-        let same = edges(&base, &[]);
-        assert!(gate_violations(&base, &same, &head_dead[..1], &base_dead, &changed).is_empty());
     }
 
     #[test]
-    fn renames_map_base_modules_to_their_new_directory() {
-        let output = "R100\0src/b/y.rs\0src/d/y.rs\0R090\0src/b/mod.rs\0src/d/mod.rs\0M\0src/lib.rs\0R100\0src/a/x.rs\0src/a/z.rs\0";
-        let renames = Renames::parse(output);
-        assert_eq!(renames.module("src/b"), "src/d");
-        assert_eq!(renames.module("src/b/inner"), "src/d/inner");
-        assert_eq!(renames.module("src/bb"), "src/bb");
-        assert_eq!(renames.module("src/a"), "src/a");
-        assert_eq!(renames.file("src/b/y.rs"), "src/d/y.rs");
-        assert_eq!(renames.file("src/lib.rs"), "src/lib.rs");
+    fn untouched_files_and_names_already_in_the_base_are_not_new() {
+        let base = view(&[
+            (
+                "edited.rb",
+                Some("class A\n  def run = Net::HTTP.get(uri)\nend\n"),
+            ),
+            ("added.rb", None),
+        ]);
+        let names = |list: &[&str]| list.iter().map(|n| n.to_string()).collect::<BTreeSet<_>>();
+        assert!(!base.is_new("untouched.rb", &names(&["Anything"])));
+        assert!(!base.is_new_symbol("edited.rb", "Net::HTTP"));
+        assert!(base.is_new_symbol("edited.rb", "Open3"));
+        assert!(!base.is_new_symbol("edited.rb", "::Net::HTTP"));
+        assert!(base.is_new("added.rb", &names(&["Whatever"])));
+        assert!(base.is_new("edited.rb", &names(&["Helper"])));
+        assert!(!base.is_new("edited.rb", &names(&["Helper", "run"])));
+        assert!(base.is_new_symbol("edited.rb", "HTTP2"));
+    }
+
+    #[test]
+    fn mentions_respects_identifier_boundaries() {
+        assert!(mentions("x = Net::HTTP.new", "Net::HTTP"));
+        assert!(!mentions("x = Net::HTTPS.new", "Net::HTTP"));
+        assert!(!mentions("helper_run()", "run"));
+        assert!(mentions("self.run()", "run"));
+        assert!(!mentions("anything", ""));
+    }
+
+    #[test]
+    fn status_keys_touched_files_by_their_head_path() {
+        let status =
+            "M\0a.rb\0A\0new.rb\0D\0gone.rb\0R090\0old/b.rb\0new/b.rb\0C100\0c.rb\0copy.rb\0";
+        let touched = BaseView::parse_status(status, |path| Some(format!("base of {path}")));
+        assert_eq!(touched.len(), 4);
+        assert_eq!(touched["a.rb"].as_deref(), Some("base of a.rb"));
+        assert_eq!(touched["new.rb"], None);
+        assert_eq!(touched["new/b.rb"].as_deref(), Some("base of old/b.rb"));
+        assert_eq!(touched["copy.rb"], None);
+        assert!(!touched.contains_key("gone.rb"));
     }
 
     #[test]
