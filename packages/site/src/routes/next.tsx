@@ -92,7 +92,7 @@ function NextPage() {
 
       <Section
         id="sources" dark
-        className="page-dark-bottom"
+        className="page-dark-bottom next-sources"
         backdrop={<HopField hops={HOPS} anchor="#sources .hop-nodes" loop={LOOP} />}
         backdropFade="full"
         eyebrow="Third-party data"
@@ -111,6 +111,10 @@ function NextPage() {
           <div className="ripple-nodes hop-nodes" role="img" aria-label="Your agent starts at an incident in incident.io, follows the alert in Grafana to a deploy in GitLab, reads the Slack thread behind it, finds the line of code with code search, and ships the merge request that fixes it." />
           <RippleLog lines={LOG} loop={LOOP} />
         </div>
+        {/* Orbit Next describes upcoming features, so it carries GitLab's standard notice for them. */}
+        <p className="next-notice">
+          This page contains information related to upcoming products, features, and functionality. It is important to note that the information presented is for informational purposes only. Please do not rely on this information for purchasing or planning purposes. The development, release, and timing of any products, features, or functionality may be subject to change or delay and remain at the sole discretion of GitLab Inc.
+        </p>
       </Section>
 
     </PageFrame>

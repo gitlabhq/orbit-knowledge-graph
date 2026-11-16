@@ -22,20 +22,23 @@ const COLORS = {
 };
 
 const LOGO_FILL_MS = 900;
-const ORANGE = "252 109 38";
 
-// The GitLab tanuki as an outline, from 0 to 1: chin, left cheek, left ear, the dip between the ears,
-// right ear, right cheek. The tanuki route turns at every corner and names its steps at the cheeks and ears.
+// The GitLab tanuki as an outline, from the current logo, from 0 to 1: chin, left jaw, left cheek, left ear,
+// the dip between the ears, right ear, right cheek, right jaw. The tanuki route turns at every corner and
+// names its steps at the cheeks and the ears.
 const LOGO: [number, number][] = [
-  [0.5, 0.98],
-  [0.03, 0.62],
-  [0.17, 0.06],
-  [0.31, 0.4],
-  [0.69, 0.4],
-  [0.83, 0.06],
-  [0.97, 0.62],
+  [0.5, 0.99],
+  [0.1, 0.7],
+  [0.02, 0.4],
+  [0.19, 0.01],
+  [0.31, 0.32],
+  [0.69, 0.32],
+  [0.81, 0.01],
+  [0.98, 0.4],
+  [0.9, 0.7],
 ];
-const LOGO_STOPS = [1, 2, 5, 6];
+const LOGO_STOPS = [2, 3, 6, 7];
+const ORANGE = "252 109 38";
 
 const inside = (x: number, y: number, points: [number, number][]) => {
   let hit = false;

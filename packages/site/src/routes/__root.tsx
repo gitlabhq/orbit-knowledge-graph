@@ -15,14 +15,14 @@ const LANDINGS = new Set(["", "/next"]);
 function RootLayout() {
   const home = useRouterState({ select: (state) => LANDINGS.has(state.location.pathname.replace(/\/+$/, "")) });
 
-  // The landing top bar lies over the page, so it would cover the main area's scrollbar. Its right edge stops
-  // at the scrollbar, measured here, so the scrollbar runs the full height of the window.
+  // The landing top bar lies over the page, so it would cover the scrollbar of the panel that scrolls the
+  // page. Its right edge stops at that scrollbar, measured here, so the scrollbar runs the full height.
   useEffect(() => {
-    const main = document.getElementById("main");
-    if (!main) return;
-    const measure = () => document.documentElement.style.setProperty("--main-scrollbar", `${main.offsetWidth - main.clientWidth}px`);
+    const panel = document.querySelector<HTMLElement>(".page-panel");
+    if (!panel) return;
+    const measure = () => document.documentElement.style.setProperty("--main-scrollbar", `${panel.offsetWidth - panel.clientWidth}px`);
     const sized = new ResizeObserver(measure);
-    sized.observe(main);
+    sized.observe(panel);
     measure();
     return () => sized.disconnect();
   }, [home]);

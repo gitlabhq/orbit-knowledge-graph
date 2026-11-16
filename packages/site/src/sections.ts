@@ -1,4 +1,4 @@
-export const HOME = { title: "GitLab Orbit", description: "What GitLab Orbit is, its roadmap, and its developer docs." };
+export const HOME = { title: "GitLab Orbit", description: "What GitLab Orbit is, and its developer docs." };
 
 export type Tab = { route: string; label: string; menu?: { route: string; label: string; description: string }[] };
 

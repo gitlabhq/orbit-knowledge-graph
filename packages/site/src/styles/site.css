@@ -354,18 +354,13 @@
   user-select: none;
 }
 
-/* A match reads in the Orbit blue with a thin underline, instead of a filled block, so long matches stay
-   light. */
+/* A match gets a soft gray background, so long matches stay readable. */
 .next-demo mark,
 .next-context mark {
-  background: transparent;
-  color: var(--trace-lit);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--trace-lit) 60%, transparent);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
+  border-radius: 0.1875rem;
+  background: color-mix(in srgb, var(--gl-text-color-default) 16%, transparent);
+  color: var(--gl-text-color-default);
 }
-
 .next-inspector {
   display: flex;
   flex-direction: column;
@@ -644,7 +639,8 @@
 .next-branch-rows .next-context-hit > :last-child {
   border-radius: 0.1875rem;
   padding: 0 0.25rem;
-  background: color-mix(in srgb, var(--trace-lit) 34%, transparent);
+  background: color-mix(in srgb, var(--gl-text-color-default) 16%, transparent);
+  color: var(--gl-text-color-default);
 }
 
 .next-langs {
@@ -1034,7 +1030,7 @@
   width: 100%;
   max-width: 64rem;
   margin-inline: auto;
-  padding: 8rem 0 8rem;
+  padding: 8rem 0 14rem;
   text-align: left;
 }
 
@@ -1055,7 +1051,8 @@
   margin-top: 2rem;
 }
 
-/* The landing top bar stops at the main area's scrollbar, measured in the root layout. */
+/* The landing top bar stops at the main area's scrollbar, measured in the root layout, so the scrollbar
+   stays clear of it. */
 .site-shell-autohide > header {
   right: var(--main-scrollbar, 0px);
 }
@@ -1111,4 +1108,24 @@
 /* Tighter space between the tool chips and the input. */
 .next-chat .agent-prompt-box {
   gap: 0.5rem;
+}
+
+/* The notice for upcoming features, small, quiet, and centered at the bottom of the page. */
+.next-notice {
+  max-width: 48rem;
+  margin: 16rem auto 0;
+  text-align: center;
+  color: var(--gl-text-color-subtle);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+/* The last section ends right under the notice, and the empty spacer and footer after it are hidden, so
+   the notice sits at the bottom of the page. */
+.page-section.next-sources {
+  padding-bottom: 2rem;
+}
+
+.next-sources ~ * {
+  display: none;
 }
