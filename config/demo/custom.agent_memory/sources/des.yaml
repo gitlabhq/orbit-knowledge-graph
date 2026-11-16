@@ -1,0 +1,10 @@
+kind: source
+package: custom.agent_memory
+source: des
+declare:
+  connection: memory_lake
+  version: _siphon_replicated_at
+  watermark: _siphon_watermark
+  deleted: _siphon_deleted
+entities:
+  AgentMemory: {tables: [agent_memory], order_by: [traversal_path, id], query: generated}

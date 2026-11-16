@@ -16,6 +16,10 @@ const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]
 
 const DEEP: &str = "MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DEVELOPED_IN]->(mr:MergeRequest)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE i.status = 'In Review' AND f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN i.key, m.author, m.text, mr.iid, f.path, match.MSG LIMIT 20";
 
+const NOTES: &str = "MATCH (m:SlackMessage)-[:DISCUSSES]->(mr:MergeRequest)<-[:ABOUT]-(a:AgentMemory), (mr)-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE m.channel = 'orbit-query-engine' AND f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN m.author, m.sent_at, mr.iid, f.path, match.MSG, a.agent, a.note LIMIT 20";
+
+const MEMORIES: &str = "MATCH (a:AgentMemory)-[:ABOUT]->(mr:MergeRequest) WHERE a.agent = 'orbit-agent' RETURN mr.iid, a.note";
+
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
 const DIFF: &str = "MATCH (mr:MergeRequest) WHERE mr.id = 5001 RETURN mr.iid, mr.diff";
@@ -334,6 +338,43 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
     assert_eq!(
         column(&events(page, "zanzibar", DEEP).await, "i_key"),
         des_issues
+    );
+
+    let notes = events(page, "maintainer", NOTES).await;
+    let split = notes
+        .iter()
+        .find(|event| event["event"] == "split")
+        .unwrap();
+    let memory = split["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|stage| stage["connection"] == "memory_lake")
+        .expect("a stage reads the memory lake");
+    assert_eq!(memory["backend"], "duckdb");
+    let plans = notes
+        .iter()
+        .find(|event| event["event"] == "plans")
+        .unwrap();
+    assert_eq!(
+        plans["stages"][memory["id"].to_string()]["packages"],
+        json!(["custom.agent_memory"])
+    );
+    assert_eq!(
+        column(&notes, "mr_iid"),
+        ["412", "412", "418", "418", "421", "421"]
+    );
+    assert!(
+        column(&notes, "a_note")
+            .contains(&"Retry the flaky ClickHouse test with a pinned seed before merging.".into())
+    );
+    assert_eq!(
+        column(&events(page, "maintainer", MEMORIES).await, "mr_iid"),
+        ["23", "26", "412", "412", "418", "421"]
+    );
+    assert_eq!(
+        column(&events(page, "reporter", MEMORIES).await, "mr_iid"),
+        ["23", "26"]
     );
 
     let host = format!("127.0.0.1:{}", page.port());

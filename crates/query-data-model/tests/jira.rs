@@ -379,7 +379,7 @@ fn a_source_two_other_packages_declare_needs_its_own_declaration() {
     );
     assert!(
         errors.contains(
-            &"integration.extra: source des is declared by both integration.jira and integration.slack, so integration.extra must declare its own"
+            &"integration.extra: source des is declared by both custom.agent_memory and integration.jira, so integration.extra must declare its own"
                 .to_string()
         ),
         "{errors:?}"

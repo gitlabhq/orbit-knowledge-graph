@@ -1,0 +1,23 @@
+kind: storage
+package: custom.agent_memory
+store: memory
+engine:
+  kind: duckdb
+  connection: memory_lake
+  path_column: traversal_path
+entities:
+  AgentMemory:
+    complete: true
+    accepts: [id, merge_request_id]
+    table: agent_memory
+    columns:
+      id: {immutable: true, backend: {type: VARCHAR}}
+      note: {backend: {type: VARCHAR}}
+      agent: {immutable: true, selectivity: low, backend: {type: VARCHAR}}
+      merge_request_id: {immutable: true, backend: {type: BIGINT}}
+      created_at: {immutable: true, backend: {type: TIMESTAMP}}
+      traversal_path: {backend: {type: VARCHAR}}
+    access: {filter: [id, agent, merge_request_id], order: [id]}
+relationships:
+  ABOUT:
+    AgentMemory -> MergeRequest: {fk: {on: source, column: merge_request_id}}

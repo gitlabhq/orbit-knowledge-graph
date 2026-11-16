@@ -1,0 +1,15 @@
+kind: authorization
+package: custom.agent_memory
+entities:
+  AgentMemory:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path}}
+    properties:
+      open: [id, note, agent, merge_request_id, created_at]
+      hidden: [traversal_path]
+relationships:
+  ABOUT:
+    scope: namespace
+    permission: read
+    enforce: {duckdb: {scope_key: traversal_path, of: source}}
