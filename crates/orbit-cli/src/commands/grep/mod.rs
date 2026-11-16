@@ -198,8 +198,10 @@ async fn search(
                 .unwrap_or_else(|error| Outcome::Failed(error.to_string())),
         };
         match outcome {
-            Outcome::NoMatches(_) | Outcome::Skipped(_) | Outcome::Failed(_) | Outcome::Empty
-                if implicit => {}
+            Outcome::Failed(reason) if implicit => {
+                eprintln!("orbit: only code is shown; GitLab search failed: {reason}")
+            }
+            Outcome::NoMatches(_) | Outcome::Skipped(_) | Outcome::Empty if implicit => {}
             Outcome::Found(text) => {
                 let mut out = std::io::stdout().lock();
                 if printed {
