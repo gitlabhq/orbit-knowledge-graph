@@ -136,8 +136,6 @@ stages:
       prefix: cargo-home
       files:
         - Cargo.lock
-    # A Cargo.lock change misses the exact key; take the last main cache and
-    # let cargo-home-cache.sh drop the crates that no longer match.
     fallback_keys:
       - cargo-home-latest
     paths: *cargo-home-paths
