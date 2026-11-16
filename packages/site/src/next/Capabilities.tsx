@@ -1,8 +1,6 @@
 import type { CSSProperties } from "react";
 import { SEARCHES } from "./searches";
 
-// The branch search from the demo, as one row per branch: main and another branch have no match, and the
-// unmerged branch has all 14. The counts are real.
 function Branches() {
   const rows = [
     { branch: "main", matches: 0 },
@@ -26,9 +24,6 @@ function Branches() {
   );
 }
 
-// Text and regex search read any file, so the wall ends in "any text file". The first ones are among the
-// 20 languages that structural search also parses.
-// Ordered so each of the three rows fills by the chips' own widths.
 const SHOWN = ["typescript", "python", "ruby", "go", "vue", "terraform", "kotlin", "java", "rust", "scala", "swift", "yaml", "php"];
 
 function LanguageWall() {
@@ -44,7 +39,6 @@ function LanguageWall() {
   );
 }
 
-// One recorded match with the lines around it, as a search returns it.
 function Context() {
   const hit = SEARCHES.find((search) => search.id === "flag")!.files[0]!;
   return (

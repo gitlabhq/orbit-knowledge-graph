@@ -3,12 +3,9 @@ import { cn, Icon } from "@gitlab-org/orbit-site";
 import { CODE_MS, CROSS_SEARCHES, type FileHit, type Line, type Search, SEARCHES, STEP_MS } from "./searches";
 
 const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-// What you say to the agent: a code example asks in words, and its tool line shows the search it runs.
 const textOf = (search: Search) => search.ask ?? (search.kind === "code" ? search.label : search.pattern);
 const TYPE_MS = 22;
-// A chat in use fits the window with this much room below it.
 const BOTTOM_ROOM_PX = 48;
-// What the agent does in each tool, while it runs and once it is done.
 const VERBS: Record<string, [string, string]> = {
   "incident.io": ["Reading the incident…", "Read the incident"],
   Grafana: ["Checking Grafana alerts…", "Checked Grafana alerts"],
@@ -20,17 +17,14 @@ const VERBS: Record<string, [string, string]> = {
 const MAX_CHAT_PX = 420;
 const SEND_PAUSE_MS = 250;
 const stepsOf = (search: Search) => (search.steps ? search.steps.length : 1);
-// A code example shows its mode: text, regex, or structural. A question across tools shows its first tool.
 const MODE_ICONS = { text: "text-description", regex: "regular-expression", structural: "file-tree" } as const;
 const iconOf = (search: Search) => (search.kind === "cross" ? search.steps![0]!.icon : MODE_ICONS[search.mode]);
 
-// One code search per mode, text, regex, then structural, and questions that use third-party connectors.
 const GROUPS = [
   { label: "Code search", items: ["error", "flag", "unwrap"].map((id) => SEARCHES.find((item) => item.id === id)!) },
   { label: "Third-party connectors", items: CROSS_SEARCHES.filter((item) => item.id !== "epic") },
 ];
 const ALL = [...SEARCHES, ...CROSS_SEARCHES];
-// What the agent can query, as chips on the input and in the third-party section.
 export const SOURCES = [
   { label: "GitLab", icon: "tanuki" },
   { label: "Linear", icon: "work-item-issue" },
@@ -51,8 +45,6 @@ function Code({ line }: { line: Line }) {
   );
 }
 
-// A file's header: the project's short name, the last two parts of the path, and the branch when it is
-// not the default one.
 const SHORT_PATH = (path: string) => path.split("/").slice(-2).join("/");
 const DEFAULT_BRANCHES = new Set(["main", "master"]);
 
@@ -82,7 +74,6 @@ function File({ hit }: { hit: FileHit }) {
   );
 }
 
-// The thread for one example: the question, the Orbit tool lines as the search runs, and the answer. The path and the findings show on the map behind the chat.
 function Thread({ search, stage }: { search: Search; stage: number }) {
   const done = stage >= stepsOf(search);
   const code = done ? "Searched code" : "Searching code…";
@@ -92,8 +83,6 @@ function Thread({ search, stage }: { search: Search; stage: number }) {
       <div className="agent-reply" aria-live="polite">
         <ul className="agent-calls">
           {search.steps ? (
-            // One line per tool, in the order the path first reaches it, as in the agent log of the
-            // third-party section on this page. A tool the path returns to spins on its existing line.
             [...new Set(search.steps.slice(0, Math.min(stage + 1, search.steps.length)).map((step) => step.tool))].map((tool) => {
               const running = !done && search.steps![stage]?.tool === tool;
               return (
@@ -121,7 +110,6 @@ function Thread({ search, stage }: { search: Search; stage: number }) {
                   ))}
                 </div>
               )}
-              {search.steps && <p className="next-sample">Sample data. Third-party sources are coming soon.</p>}
             </div>
           </div>
         )}
@@ -130,16 +118,11 @@ function Thread({ search, stage }: { search: Search; stage: number }) {
   );
 }
 
-// The Orbit Next demo: example searches on the left, the chat in the middle, and room on the right where the
-// map behind the hero shows the results. Picking an example runs it in the window.
-// Any other pattern gets a note, because live search is not public yet.
 export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) => void }) {
   const [run, setRun] = useState<{ search: Search; start: number } | null>(null);
   const [pattern, setPattern] = useState("");
   const [stage, setStage] = useState(0);
   const [unknown, setUnknown] = useState(false);
-  // An example types itself into the input, then sends. The length comes from the time since it started,
-  // so a slow timer only skips ahead.
   const [typing, setTyping] = useState<{ search: Search; since: number; length: number } | null>(null);
 
   useEffect(() => {
@@ -152,14 +135,11 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
       }, SEND_PAUSE_MS);
       return () => window.clearTimeout(timer);
     }
-    // Long patterns type faster, so every example types in about a second at most.
     const per = Math.min(TYPE_MS, 1000 / total);
     const timer = window.setTimeout(() => setTyping({ ...typing, length: Math.min(total, Math.floor((performance.now() - typing.since) / per) + 1) }), per);
     return () => window.clearTimeout(timer);
   }, [typing]);
 
-  // The thread gets the height that keeps the whole chat in the window, measured from the top of the page,
-  // and scrolls inside when an answer is longer.
   const chat = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = chat.current;
@@ -170,8 +150,6 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
       if (!thread) return;
       const top = element.getBoundingClientRect().top + (main?.scrollTop ?? 0);
       const rest = element.offsetHeight - thread.offsetHeight;
-      // The whole chat keeps one height across examples, whether or not it shows tool chips, and fits the
-      // window with room below it.
       const total = Math.min(MAX_CHAT_PX, window.innerHeight - BOTTOM_ROOM_PX - top);
       element.style.setProperty("--thread-h", `${Math.max(140, total - rest)}px`);
     };
@@ -239,7 +217,6 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
         {run && <Thread key={run.start} search={run.search} stage={stage} />}
         <form onSubmit={submit} className="agent-prompt-box" aria-label="Search">
           {run?.search.steps && (
-            // A third-party example shows the tools it reads, as chips above the input.
             <ul className="agent-prompt-chips" aria-label="Tools">
               {[...new Map(run.search.steps.map((step) => [step.tool, step.icon])).entries()].map(([tool, icon]) => (
                 <li key={tool} className="agent-prompt-chip">
@@ -272,7 +249,6 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
           {unknown && <p className="next-note">Live search is coming soon. Pick an example to see what it does.</p>}
         </form>
       </div>
-      {/* The map behind the hero draws each search's findings and path in this column. */}
       <div className="next-demo-viz" aria-hidden="true" />
     </div>
   );

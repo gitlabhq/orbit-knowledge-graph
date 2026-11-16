@@ -1,17 +1,9 @@
-// Recorded searches for the Orbit Next demo. Every match is a real line of public gitlab-org code, read on
-// Nov 15, 2026 from these commits: gitlab-org/gitlab 6a9dcd6, knowledge-graph main and the
-// cursor-base-pagination-draft branch, site-kit main, and orbit-next main. Only the $X.unwrap() search has measured
-// numbers, from an early test in the Orbit Next README, on a smaller index than today's. Re-record the lines if the files move.
 
 export type Mode = "text" | "regex" | "structural";
 
-// How long the demo takes: slow enough to follow, fast enough to feel like search. A question across tools
-// takes one step per tool.
 export const CODE_MS = 900;
 export const STEP_MS = 800;
 
-// One hop of a cross-tool example: the tool Orbit reads, what it finds there, a short name for the map,
-// and the GitLab work it links to. `tone` marks the problem it starts from or the fix it ends on.
 export type CrossStep = { tool: string; icon: string; finding: string; name: string; links?: string[]; tone?: "risk" | "ok" };
 
 export const MODES: { mode: Mode; blurb: string; placeholder: string }[] = [
@@ -20,27 +12,20 @@ export const MODES: { mode: Mode; blurb: string; placeholder: string }[] = [
   { mode: "structural", blurb: "Patterns over the syntax tree, in 20 languages.", placeholder: "Search with a pattern, such as $X.unwrap()" },
 ];
 
-// The languages that structural search parses, from the Orbit Next search page.
 export const LANGUAGES = ["bash", "c", "cpp", "css", "elixir", "go", "html", "java", "javascript", "kotlin", "lua", "php", "python", "ruby", "rust", "scala", "swift", "tsx", "typescript", "yaml"];
 
-// One line of a file around a match. `match` is the part of a matching line to mark.
 export type Line = { n: number; text: string; match?: string };
 
 export type FileHit = { project: string; path: string; branch: string; lines: Line[] };
 
-// The measured passes of one query: files in the index, candidates after the trigram prefilter, files
-// scanned, matches, and milliseconds.
 export type Funnel = { files: number; candidates: number; scanned: number; matches: number; ms: number };
 
 export type Search = {
   id: string;
-  // A code search, or a question that crosses tools.
   kind: "code" | "cross";
   label: string;
-  // What you ask the agent, when it differs from the label.
   ask?: string;
   pattern: string;
-  // A shorter form of a long pattern, for the example cards.
   short?: string;
   mode: Mode;
   language?: string;
@@ -48,12 +33,9 @@ export type Search = {
   summary: string;
   funnel?: Funnel;
   files: FileHit[];
-  // More real matches, as file:line, that the map behind the hero marks next to the files shown.
   more?: string[];
   steps?: CrossStep[];
-  // Where each step sits on the map, as shares of its box, when the route is set rather than seeded.
   points?: [number, number][];
-  // The path traces the GitLab tanuki on the map, which then fills in.
   logo?: boolean;
 };
 
@@ -356,8 +338,6 @@ export const SEARCHES: Search[] = [
   },
 ];
 
-// Questions that cross tools. Third-party sources have not shipped, so the steps are sample data from the
-// team's third-party demo world: a pricing cache, epic ORB-1, and incident INC-77, on made-up projects.
 const cross = (id: string, label: string, pattern: string, summary: string, steps: CrossStep[], logo = false): Search => ({ id, kind: "cross", label, pattern, mode: "text", branches: "default", summary, files: [], steps, logo });
 
 export const CROSS_SEARCHES: Search[] = [
@@ -370,7 +350,6 @@ export const CROSS_SEARCHES: Search[] = [
       { tool: "Code search", icon: "code", finding: "cache.get in pricing.rb:57 has no timeout.", name: "pricing.rb:57" },
       { tool: "GitLab", icon: "tanuki", finding: "!43 fixed the stampede. p95 is back to 420 ms.", name: "!43 deployed", links: ["checkout-api!43"], tone: "ok" },
     ]),
-    // The same route as the third-party section on this page, which draws its path from these points.
     points: [
       [0.1, 0.6],
       [0.27, 0.24],
@@ -401,7 +380,6 @@ export const CROSS_SEARCHES: Search[] = [
   ], true),
 ];
 
-// The size of the Orbit Next prototype's index of open source code, from its search page on Nov 15, 2026.
 export const CORPUS = [
   { value: "51,656", label: "projects" },
   { value: "1.38 M", label: "branches" },
@@ -411,8 +389,6 @@ export const CORPUS = [
   { value: "767 GiB", label: "index" },
 ];
 
-// Warm query times from the Orbit Next repository: text search from its 3,351-project benchmark
-// (docs/clickhouse/code-search-benchmark.md), structural search from the early test in its README.
 export const LATENCY = [
   { label: "Text search, default branches", ms: 80, note: "benchmark, 3,351 projects" },
   { label: "Structural search", ms: 111, note: "early test" },

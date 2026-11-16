@@ -13,14 +13,10 @@ export const Route = createFileRoute("/next")({
   component: NextPage,
 });
 
-// The incident from the team's third-party demo world, followed from tool to tool. The names are made up.
-// The field and the log share one loop.
 const LOOP = 12000;
 const INCIDENT = CROSS_SEARCHES.find((search) => search.id === "incident")!;
 const AT = [0.03, 0.11, 0.19, 0.3, 0.41, 0.7];
-// The same incident and route as the hero's "Resolve an incident" example.
 const HOPS: Hop[] = INCIDENT.steps!.map((step, index) => ({ tool: step.tool, label: step.name, x: INCIDENT.points![index]![0], y: INCIDENT.points![index]![1], at: AT[index]!, tone: step.tone }));
-// Each read is one tool call. What it finds shows on the map, so the log keeps only the calls and the fix.
 const LOG: RippleLogLine[] = [
   { at: 0.03, tool: true, text: "Read the incident" },
   { at: 0.11, tool: true, text: "Checked Grafana alerts" },
@@ -33,8 +29,6 @@ const LOG: RippleLogLine[] = [
   { at: 0.78, tone: "ok", text: "p95 is back to 420 ms. INC-77 resolved." },
 ];
 
-// Built like the home hero, with the search map behind it in place of the graph sphere. The map acts out
-// each search the demo runs.
 function Hero() {
   const [search, setSearch] = useState<Search | null>(null);
   return (
@@ -63,7 +57,6 @@ function NextPage() {
         <Capabilities />
       </Section>
 
-      {/* Scale slides up over the pinned code search section, in the same band as the home page quotes. */}
       <FieldBand over eyebrow="Scale" className="next-scale">
         <h2 className="section-title">
           Built for <span className="orbit-fade">scale</span>
@@ -111,7 +104,6 @@ function NextPage() {
           <div className="ripple-nodes hop-nodes" role="img" aria-label="Your agent starts at an incident in incident.io, follows the alert in Grafana to a deploy in GitLab, reads the Slack thread behind it, finds the line of code with code search, and ships the merge request that fixes it." />
           <RippleLog lines={LOG} loop={LOOP} />
         </div>
-        {/* Orbit Next describes upcoming features, so it carries GitLab's standard notice for them. */}
         <p className="next-notice">
           This page contains information related to upcoming products, features, and functionality. It is important to note that the information presented is for informational purposes only. Please do not rely on this information for purchasing or planning purposes. The development, release, and timing of any products, features, or functionality may be subject to change or delay and remain at the sole discretion of GitLab Inc.
         </p>

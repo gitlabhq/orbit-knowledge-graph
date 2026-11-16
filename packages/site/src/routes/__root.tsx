@@ -8,15 +8,11 @@ export const Route = createRootRoute({
   component: RootLayout,
 });
 
-// The home page and the Orbit Next page start dark in both themes, so their top bar is dark too. It is clear
-// over the hero, and slides away while the reader scrolls down.
 const LANDINGS = new Set(["", "/next"]);
 
 function RootLayout() {
   const home = useRouterState({ select: (state) => LANDINGS.has(state.location.pathname.replace(/\/+$/, "")) });
 
-  // The landing top bar lies over the page, so it would cover the scrollbar of the panel that scrolls the
-  // page. Its right edge stops at that scrollbar, measured here, so the scrollbar runs the full height.
   useEffect(() => {
     const panel = document.querySelector<HTMLElement>(".page-panel");
     if (!panel) return;

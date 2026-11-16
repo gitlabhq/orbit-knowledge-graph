@@ -25,7 +25,6 @@
   .tone-trust { --tone: var(--tone-trust); }
 }
 
-/* Orbit Next: the code search demo, laid out like the Orbit Next search page, in this site's frosted look. */
 .next-search {
   display: flex;
   flex-direction: column;
@@ -204,23 +203,6 @@
   text-align: center;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 .next-panel {
   overflow: hidden;
   animation: agent-in 0.25s ease-out both;
@@ -245,8 +227,6 @@
   gap: 1rem;
   padding: 1rem;
 }
-
-
 
 .next-results {
   display: flex;
@@ -354,7 +334,6 @@
   user-select: none;
 }
 
-/* A match gets a soft gray background, so long matches stay readable. */
 .next-demo mark,
 .next-context mark {
   border-radius: 0.1875rem;
@@ -445,14 +424,10 @@
   color: var(--gl-text-color-subtle);
 }
 
-/* The hero's backdrop: the search map, faded in at the top and running to the hero's bottom edge. */
-/* No Orbit glow here: the map carries the hero. The copy sits higher than on the home page, so the
-   search bar shows in the first screen. */
 .next-hero::before,
 .next-hero::after {
   content: none;
 }
-
 
 .next-hero .orbit-hero-eyebrow {
   margin-bottom: 0.75rem;
@@ -581,7 +556,6 @@
   font-size: 0.75rem;
 }
 
-/* The capabilities under the demo: three cards, each with a small view of a search. */
 .next-bento {
   display: grid;
   gap: 1rem;
@@ -702,7 +676,6 @@
   }
 }
 
-/* The demo: examples in a column beside the chat window, so the chat stays in view while you pick. */
 .next-demo {
   display: grid;
   gap: 1rem;
@@ -711,9 +684,6 @@
   text-align: left;
 }
 
-
-/* Wide screens get a third column for the results on the map, as wide as the examples, so the chat sits in
-   the middle. The demo is wider than the text column and centers on the window. */
 .next-demo-viz {
   display: none;
 }
@@ -756,7 +726,6 @@
   text-transform: uppercase;
 }
 
-/* Each example stays on one line. */
 .next-demo-example {
   display: flex;
   white-space: nowrap;
@@ -777,7 +746,6 @@
   color: var(--gl-text-color-default);
 }
 
-/* The selected example takes the portal's section nav marker: a short bar in the Orbit fade at its left. */
 .next-demo-example {
   position: relative;
 }
@@ -800,15 +768,10 @@
   translate: 0 -50%;
 }
 
-/* The chat looks like the front page chat. Once an answer shows, the thread keeps one height and scrolls,
-   so the chat does not jump from one example to the next. */
 .next-chat {
   align-self: start;
   min-width: 0;
 }
-
-
-
 
 .next-message-code {
   font-family: var(--font-mono);
@@ -824,15 +787,11 @@
   border-radius: var(--radius-card);
 }
 
-
 .next-chat .agent-thread {
   height: var(--thread-h, 20rem);
   overflow-y: auto;
 }
 
-
-
-/* Declared after the base .next-demo rule so it wins: on wide screens the demo spans the window. */
 @media (min-width: 1100px) {
   .next-demo {
     flex-shrink: 0;
@@ -841,8 +800,6 @@
   }
 }
 
-/* On wide screens the chat keeps the home page chat's width (44rem) in the middle. The examples sit against its left edge,
-   and the right column stays open for the results on the map. */
 @media (min-width: 1100px) {
   .next-demo {
     grid-template-columns: minmax(17rem, 1fr) minmax(0, 44rem) minmax(17rem, 1fr);
@@ -858,8 +815,6 @@
   }
 }
 
-
-/* The mode chips are buttons in the home chat's chip style. The input starts at one line. */
 .next-chat .agent-prompt-chip {
   border: 0;
   cursor: pointer;
@@ -871,11 +826,6 @@
   color: var(--gl-text-color-default);
 }
 
-
-
-
-
-/* The window bar names the product: the Orbit logo and "Orbit Next", as plain text. */
 .next-chat-name {
   display: inline-flex;
   align-items: center;
@@ -885,12 +835,10 @@
   font-weight: 600;
 }
 
-/* Long labels must not squeeze the example icons. */
 .next-demo-example svg {
   flex-shrink: 0;
 }
 
-/* The window bar's name sits in the exact middle of the bar, whatever the lights take up. */
 .next-chat .agent-chat-head {
   position: relative;
 }
@@ -904,8 +852,6 @@
   transform: translate(-50%, -50%);
 }
 
-/* On wide screens the chat starts where the home page chat does, in a row tall enough for a full answer.
-   The map behind it measures from the row, so it stays put while the chat grows. */
 @media (min-width: 1100px) {
   .next-demo {
     align-items: start;
@@ -922,23 +868,18 @@
   }
 }
 
-/* Match counts stay on one line. */
 .next-branch-rows li > :last-child {
   white-space: nowrap;
 }
 
-/* Each card's small view takes the same height, so the three titles line up. */
 .next-card > :first-child {
   min-height: 8.5rem;
 }
 
-/* The tools the third-party section connects, as the chat's chips, above the path. */
 .next-section-tools {
   margin-bottom: 1.5rem;
 }
 
-/* Below the wide layout, the examples sit in centered rows above the chat, so the chat stays centered.
-   Declared last, so it wins over the base example styles. */
 @media (max-width: 1099px) {
   .next-demo {
     justify-items: center;
@@ -968,8 +909,6 @@
   }
 }
 
-
-/* Slimmer card views: tighter rows, smaller chips, and a lower shared height. */
 .next-card {
   padding: 1.25rem;
 }
@@ -1008,7 +947,6 @@
   margin-top: 0.5rem;
 }
 
-/* Language chips start at the left and grow to fill each row, with their text centered in each chip. */
 .next-langs {
   justify-content: flex-start;
 }
@@ -1021,9 +959,6 @@
   line-height: 1.5;
 }
 
-
-/* The scale band slides over like the home page quotes, but its text reads like the other sections: left
-   aligned, at the page's width. */
 .next-scale .field-band-body {
   align-items: stretch;
   gap: 0;
@@ -1051,52 +986,36 @@
   margin-top: 2rem;
 }
 
-/* The landing top bar stops at the main area's scrollbar, measured in the root layout, so the scrollbar
-   stays clear of it. */
 .site-shell-autohide > header {
   right: var(--main-scrollbar, 0px);
 }
 
-/* The scale band has no wave of dots. */
 .next-scale .field-band-field {
   display: none;
 }
 
-
-/* A smaller headline than the home page's, so the chat has room to grow. */
 .orbit-hero .next-hero-title {
   font-size: clamp(2.25rem, 4vw, 3.25rem);
 }
 
-
-/* The demo starts close under the headline. */
 .next-hero .next-hero-demo {
   margin-top: 2.5rem;
 }
 
-
-
-
-/* The Orbit Next headline sits higher than the home page's, with the demo just below it. */
 .orbit-hero.orbit-hero-lg.next-hero {
   padding-top: 8rem;
 }
 
-
-
-/* The examples start a little below the chat's top edge. */
 @media (min-width: 1100px) {
   .next-demo-examples {
     margin-top: 4.5rem;
   }
 }
 
-/* The input and its placeholder use the chat's text size, before and after an answer. */
 .next-chat.agent-chat .agent-prompt-input {
   font-size: var(--gl-font-size-300);
 }
 
-/* Each example is only as wide as its label, so a selected one's fill hugs the text. */
 .next-demo-group {
   align-items: flex-start;
 }
@@ -1105,12 +1024,10 @@
   width: fit-content;
 }
 
-/* Tighter space between the tool chips and the input. */
 .next-chat .agent-prompt-box {
   gap: 0.5rem;
 }
 
-/* The notice for upcoming features, small, quiet, and centered at the bottom of the page. */
 .next-notice {
   max-width: 48rem;
   margin: 9rem auto 0;
@@ -1120,8 +1037,6 @@
   line-height: 1.5;
 }
 
-/* The last section ends right under the notice, and the empty spacer and footer after it are hidden, so
-   the notice sits at the bottom of the page. */
 .page-section.next-sources {
   padding-bottom: 2rem;
 }
@@ -1130,8 +1045,6 @@
   display: none;
 }
 
-/* The Orbit Next page ends on a dark section: it does not bounce past its end, and the space past it is dark
-   too, so no light page shows below it. */
 .page-panel:has(.next-sources),
 html:has(.next-sources) {
   overscroll-behavior-y: none;

@@ -1,20 +1,10 @@
 import { useEffect, useRef } from "react";
 import { CODE_MS, type Search, STEP_MS } from "./searches";
 
-// The hero's backdrop: a dot grid in the style of the kit's RippleField. Results land on the right of the
-// chat, out to the window edge, from the `region` column on. A code search sends one ring out from the
-// middle of that side and marks each matching file as a finding when the ring reaches it. A question across
-// tools runs from tool to tool down that side, as in the third-party section below. Nothing shows before
-// the ring or a link reaches it, and nothing shows when the region is hidden, as on phones.
-
 const GAP = 18;
 const RING_MS = 1800;
 const BURST_MS = 900;
-// The height results spread over, centered in the demo row. It is fixed, so nothing moves when the chat
-// grows as an answer arrives.
 const MAP_TALL = 380;
-// Where the results start, from the top of the demo row, so they center on the chat beside them while it
-// runs.
 const MAP_LIFT = 20;
 const COLORS = {
   light: { rest: "120 125 140", path: "110 126 224", risk: "214 64 64", ok: "40 160 90" },
@@ -23,9 +13,6 @@ const COLORS = {
 
 const LOGO_FILL_MS = 900;
 
-// The GitLab tanuki as an outline, from the current logo, from 0 to 1: chin, left jaw, left cheek, left ear,
-// the dip between the ears, right ear, right cheek, right jaw. The tanuki route turns at every corner and
-// names its steps at the cheeks and the ears.
 const LOGO: [number, number][] = [
   [0.5, 0.99],
   [0.1, 0.7],
@@ -50,8 +37,6 @@ const inside = (x: number, y: number, points: [number, number][]) => {
   return hit;
 };
 
-// A small seeded random number generator, so each example always lays out the same way, and differently
-// from the others.
 const seeded = (text: string) => {
   let state = [...text].reduce((total, char) => (total * 31 + char.charCodeAt(0)) >>> 0, 2166136261);
   return () => {
@@ -63,7 +48,6 @@ const seeded = (text: string) => {
   };
 };
 
-// The box the tanuki fills, on the right of the chat.
 const logoBox = (left: number, wide: number, top: number, tall: number) => {
   const size = Math.min(wide * 0.7, tall);
   return { x: left + (wide - size) / 2, y: top + (tall - size * 0.9) / 2, w: size, h: size * 0.9 };
@@ -112,8 +96,6 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       }
     };
 
-    // Where each result lands. Positions depend only on the demo row and the window, so nothing moves while
-    // a search runs or when it ends.
     const stopsOf = (search: Search, area: DOMRect, own: DOMRect): Stop[] => {
       const snap = (value: number) => Math.round(value / GAP) * GAP;
       const left = area.left - own.left;
@@ -124,7 +106,6 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       if (search.steps) {
         const steps = search.steps;
         if (search.logo) {
-          // The route runs the whole tanuki outline, with a dot at every corner, and closes at the chin.
           const box = logoBox(left, wide, top, tall);
           const corners = [...LOGO.keys(), 0];
           const leg = (steps.length * STEP_MS) / (corners.length - 1);
@@ -139,8 +120,6 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
           });
           return route;
         }
-        // Any other path runs left to right and zigzags up and down, as in the third-party section below. The
-        // heights are seeded, so each example takes its own route. The first stop has no link into it.
         const stops = steps.map((step, index) => {
           const point = search.points?.[index];
           const px = snap(left + wide * (point ? point[0] : 0.1 + (0.8 * index) / Math.max(1, steps.length - 1)));
@@ -150,8 +129,6 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
         stops.forEach((stop, index) => index > 0 && Object.assign(stop, { ox: stops[index - 1]!.px, oy: stops[index - 1]!.py }));
         return stops;
       }
-      // Code findings take cells of a 3 by 5 grid, picked and nudged in a seeded order, so each example
-      // lands differently and no two labels share a cell.
       const names = [...search.files.map((hit) => `${hit.path.split("/").at(-1)}:${hit.lines.find((line) => line.match)!.n}`), ...(search.more ?? [])];
       const cells = Array.from({ length: 15 }, (_, cell) => ({ cell, order: random() })).sort((a, b) => a.order - b.order);
       return names.slice(0, cells.length).map((name, index) => {
@@ -161,7 +138,6 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
           tone: "path" as const,
           from: 0,
           at: CODE_MS,
-          // Columns stay apart and the middle one sits half a row lower, so neighbors' labels never meet.
           px: snap(left + 60 + ((wide - 60) * ((cell % 3) + 0.4 + random() * 0.2)) / 3),
           py: snap(top + (MAP_TALL * (Math.floor(cell / 3) + 0.1 + (cell % 3 === 1 ? 0.5 : 0) + random() * 0.25)) / 5.5),
           ox: 0,
@@ -182,7 +158,6 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       const { search, since } = state.current;
       const age = still() ? 1e6 : now - since;
       const stops = search && chat && area && area.width > 120 ? stopsOf(search, area, own) : [];
-      // A cross-tool path chains its stops with links. A code search uses only the ring.
       const legs = search?.steps ? stops.map((stop) => ({ stop, progress: Math.max(0, Math.min(1, (age - stop.from) / (stop.at - stop.from))) })) : [];
       const heads = legs.filter((leg) => leg.progress > 0 && leg.progress < 1).map(({ stop, progress }) => ({ x: stop.ox + (stop.px - stop.ox) * progress, y: stop.oy + (stop.py - stop.oy) * progress }));
 
@@ -192,7 +167,6 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       const reach = Math.hypot(Math.max(cx, width - cx), Math.max(cy, height - cy));
       const ring = code ? (age / RING_MS) * reach : -1e4;
       const fade = code ? Math.max(0, 1 - age / (RING_MS * 1.1)) : 0;
-      // The tanuki fills once its route closes.
       const fillAge = search?.logo && stops.length ? age - stops.at(-1)!.at : -1;
       const fill = fillAge > 0 ? Math.min(1, fillAge / LOGO_FILL_MS) : 0;
       const box = fill > 0 && chat && area ? logoBox(area.left - own.left, Math.max(area.width, own.width - (area.left - own.left) - 60), area.top - own.top + MAP_LIFT, MAP_TALL) : null;
@@ -206,7 +180,6 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
             if (progress <= 0) continue;
             const { d, t } = toSegment(x, y, stop.ox, stop.oy, stop.px, stop.py);
             if (d < GAP * 0.6 && t <= progress) lit = Math.max(lit, 0.32);
-            // A ring spreads from each stop for a moment after the pulse reaches it, as in the section below.
             const since = age - stop.at;
             if (since < 0 || since > BURST_MS) continue;
             const burst = Math.exp(-((Math.hypot(x - stop.px, y - stop.py) - since * 0.12) ** 2) / 200) * (1 - since / BURST_MS) * 0.8;

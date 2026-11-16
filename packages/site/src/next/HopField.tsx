@@ -1,20 +1,14 @@
 import { useEffect, useRef } from "react";
 import { cn } from "@gitlab-org/orbit-site";
 
-// One stop on the agent's path: the tool it reads, what it finds there, where it sits inside the anchor box
-// (0 to 1), and when the path reaches it, as a share of the loop. `tone` colors the stop: `risk` for the
-// incident it starts from, `ok` for the fix it ends on.
 export type Hop = { tool: string; label: string; x: number; y: number; at: number; tone?: "risk" | "ok" };
 
 const GAP = 18;
-// The same dots and colors as the kit's RippleField, so the two read as one family.
 const COLORS = {
   light: { rest: "120 125 140", risk: "214 64 64", ok: "40 160 90", path: "110 126 224" },
   dark: { rest: "200 205 225", risk: "240 110 110", ok: "110 205 140", path: "160 182 255" },
 };
 
-// The kit's RippleLog keeps time the same way, so a RippleLog with the same `loop` stays in step with
-// this field. Reduced motion holds the end of the loop, with every stop reached.
 const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const phaseAt = (loop: number) => (still() ? 0.97 : (performance.now() % loop) / loop);
 
@@ -25,12 +19,6 @@ const toSegment = (x: number, y: number, ax: number, ay: number, bx: number, by:
   return { d: Math.hypot(x - ax - t * dx, y - ay - t * dy), t };
 };
 
-// A dot field where a pulse travels from tool to tool: from an incident, through each tool the agent reads,
-// to the fix. Each stop lights and rings when the pulse reaches it, and the path it took stays lit. It fills
-// its box, such as a Section backdrop, and places the stops inside the element that `anchor` selects. It
-// pauses off screen.
-// With `start`, a performance.now() time, the path runs once from then and holds at the end, instead of
-// looping.
 export function HopField({ hops, anchor, loop = 12000, start, className }: { hops: Hop[]; anchor: string; loop?: number; start?: number; className?: string }) {
   const canvas = useRef<HTMLCanvasElement>(null);
 
@@ -71,7 +59,6 @@ export function HopField({ hops, anchor, loop = 12000, start, className }: { hop
       const f = start === undefined ? phaseAt(loop) : still() ? 1 : Math.min(1, (performance.now() - start) / loop);
       const toneOf = (hop: Hop) => (hop.tone ? palette[hop.tone] : palette.path);
 
-      // The pulse: on the segment it is crossing, how far along it is.
       const legs = stops.slice(1).map((to, index) => {
         const from = stops[index]!;
         const progress = Math.max(0, Math.min(1, (f - from.at) / (to.at - from.at)));
@@ -90,7 +77,6 @@ export function HopField({ hops, anchor, loop = 12000, start, className }: { hop
             const { d, t } = toSegment(x, y, leg.from.px, leg.from.py, leg.to.px, leg.to.py);
             if (d < GAP * 0.6 && t <= leg.progress) lit = Math.max(lit, 0.32);
           }
-          // A ring spreads from each stop for a moment after the pulse reaches it.
           for (const stop of stops) {
             const age = f - stop.at;
             if (age < 0 || age > 0.08) continue;
@@ -103,7 +89,6 @@ export function HopField({ hops, anchor, loop = 12000, start, className }: { hop
           dot(x, y, lit, lit > 0.1 ? color : palette.rest);
         }
 
-      // A stop shows only once the pulse reaches it, named below its dot.
       ctx.textAlign = "center";
       ctx.font = `600 12px ${style.fontFamily}`;
       for (const stop of stops) {

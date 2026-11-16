@@ -40,8 +40,6 @@ export const SECTIONS = [
   { route: "engineering/testing", label: "Testing" },
 ];
 
-// Pages that stay in the repository but not on the public site: internal operations, billing controls, and
-// guides written for coding agents.
 export const OFF_SITE = [
   "engineering/adr/006_dap_integration.md",
   "engineering/adr/007_monetization_engineering.md",
