@@ -1017,24 +1017,20 @@ integration-test:
         test(=server::performance::performance_queries)
       )
 
-# For lanes that need only the shared ClickHouse; run-container-tests.sh skips its own container.
-.clickhouse-service:
-  services:
-    - name: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
-      alias: clickhouse
-      variables:
-        CLICKHOUSE_USER: default
-        CLICKHOUSE_PASSWORD: testpass # gitleaks:allow
-        CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+# For lanes that need only the shared ClickHouse. It starts during the compile; a service would pull first.
+.local-clickhouse:
+  services: []
   variables:
-    GKG_TEST_CLICKHOUSE_URL: http://clickhouse:8123
+    GKG_TEST_CLICKHOUSE_URL: http://127.0.0.1:8123
+    GKG_TEST_CLICKHOUSE_WAIT: ./scripts/ci/start-clickhouse.sh wait
   before_script:
     - !reference [.sccache-template, before_script]
+    - setsid ./scripts/ci/start-clickhouse.sh > /tmp/start-clickhouse.log 2>&1 &
 
 integration-test-data-correctness:
   extends:
     - .integration-test-template
-    - .clickhouse-service
+    - .local-clickhouse
   variables:
     SUBTEST_CONCURRENCY: "16"
     NEXTEST_FILTER: >-
@@ -1050,7 +1046,7 @@ corpus-smoke-test:
   extends:
     - .test-template
     - .docs-mr-and-main-rules
-    - .clickhouse-service
+    - .local-clickhouse
   variables:
     NEXTEST_FILTER: test(corpus_smoke)
   needs: []
