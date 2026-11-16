@@ -11,7 +11,6 @@ export const Route = createFileRoute("/team")({
 
 const PRINCIPLE_ICONS = ["code", "users", "tanuki-ai", "rocket"];
 
-// The whole card links to the profile. The username shows in a tag when you hover or focus the avatar.
 function MemberCard({ member }: { member: TeamMember }) {
   return (
     <article className="card glass group relative flex h-full items-center gap-3.5 px-4 py-3.5">
