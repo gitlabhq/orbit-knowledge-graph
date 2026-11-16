@@ -9,8 +9,7 @@ const COLORS = {
   dark: { rest: "200 205 225", risk: "240 110 110", ok: "110 205 140", path: "160 182 255" },
 };
 
-const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-const phaseAt = (loop: number) => (still() ? 0.97 : (performance.now() % loop) / loop);
+export const phaseAt = (loop: number) => (performance.now() % loop) / loop;
 
 const toSegment = (x: number, y: number, ax: number, ay: number, bx: number, by: number) => {
   const dx = bx - ax;
@@ -56,7 +55,7 @@ export function HopField({ hops, anchor, loop = 12000, start, className }: { hop
       const box = document.querySelector(anchor)?.getBoundingClientRect() ?? own;
       const snap = (value: number) => Math.round(value / GAP) * GAP;
       const stops = hops.map((hop) => ({ ...hop, px: snap(box.left - own.left + hop.x * box.width), py: snap(box.top - own.top + hop.y * box.height) }));
-      const f = start === undefined ? phaseAt(loop) : still() ? 1 : Math.min(1, (performance.now() - start) / loop);
+      const f = start === undefined ? phaseAt(loop) : Math.min(1, (performance.now() - start) / loop);
       const toneOf = (hop: Hop) => (hop.tone ? palette[hop.tone] : palette.path);
 
       const legs = stops.slice(1).map((to, index) => {
@@ -102,7 +101,7 @@ export function HopField({ hops, anchor, loop = 12000, start, className }: { hop
 
     const tick = () => {
       draw();
-      if (visible && !still()) frame = requestAnimationFrame(tick);
+      if (visible) frame = requestAnimationFrame(tick);
     };
     const resize = () => {
       const rect = element.getBoundingClientRect();

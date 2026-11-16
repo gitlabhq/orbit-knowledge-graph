@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { FieldBand, Icon, PageFrame, pageHead, RippleLog, type RippleLogLine, Section } from "@gitlab-org/orbit-site";
+import { FieldBand, Icon, PageFrame, pageHead, type RippleLogLine, Section } from "@gitlab-org/orbit-site";
 import { createFileRoute } from "@tanstack/react-router";
+import { AgentLog } from "../next/AgentLog";
 import { Capabilities } from "../next/Capabilities";
 import { CodeSearch, SOURCES } from "../next/CodeSearch";
 import { type Hop, HopField } from "../next/HopField";
@@ -102,7 +103,7 @@ function NextPage() {
         </ul>
         <div className="ripple-stage">
           <div className="ripple-nodes hop-nodes" role="img" aria-label="Your agent starts at an incident in incident.io, follows the alert in Grafana to a deploy in GitLab, reads the Slack thread behind it, finds the line of code with code search, and ships the merge request that fixes it." />
-          <RippleLog lines={LOG} loop={LOOP} />
+          <AgentLog lines={LOG} loop={LOOP} />
         </div>
         <p className="next-notice">
           This page contains information related to upcoming products, features, and functionality. It is important to note that the information presented is for informational purposes only. Please do not rely on this information for purchasing or planning purposes. The development, release, and timing of any products, features, or functionality may be subject to change or delay and remain at the sole discretion of GitLab Inc.

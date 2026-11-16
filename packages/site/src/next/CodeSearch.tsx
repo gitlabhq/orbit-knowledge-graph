@@ -2,7 +2,6 @@ import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "re
 import { cn, Icon } from "@gitlab-org/orbit-site";
 import { CODE_MS, CROSS_SEARCHES, type FileHit, type Line, type Search, SEARCHES, STEP_MS } from "./searches";
 
-const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const textOf = (search: Search) => search.ask ?? (search.kind === "code" ? search.label : search.pattern);
 const TYPE_MS = 22;
 const BOTTOM_ROOM_PX = 48;
@@ -169,13 +168,12 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
     onSearch?.(search);
     setPattern("");
     setUnknown(false);
-    setStage(still() ? stepsOf(search) : 0);
+    setStage(0);
   };
 
   const pick = (search: Search) => {
     setUnknown(false);
-    if (still()) start(search);
-    else setTyping({ search, since: performance.now(), length: 0 });
+    setTyping({ search, since: performance.now(), length: 0 });
   };
 
   const submit = (event: FormEvent) => {

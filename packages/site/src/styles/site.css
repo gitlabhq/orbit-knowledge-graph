@@ -670,11 +670,6 @@
   color: var(--gl-text-color-default);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .next-lang {
-    animation: none;
-  }
-}
 
 .next-demo {
   display: grid;
@@ -1050,8 +1045,19 @@ html:has(.next-sources) {
   overscroll-behavior-y: none;
 }
 
-.page-panel:has(.next-sources),
-html:has(.next-sources),
-body:has(.next-sources) {
-  background-color: var(--band-dark, #131217);
+
+@media (prefers-reduced-motion: reduce) {
+  .next-demo .agent-call-running .agent-call-mark {
+    animation-duration: 1s !important;
+  }
+
+  .next-demo .agent-answer,
+  .next-demo .agent-call,
+  .next-sources .trace-log-line {
+    animation-duration: 0.3s !important;
+  }
+
+  .next-lang {
+    animation-duration: 4s !important;
+  }
 }

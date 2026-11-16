@@ -55,7 +55,6 @@ const logoBox = (left: number, wide: number, top: number, tall: number) => {
 
 type Stop = { name: string; tone: "path" | "risk" | "ok"; from: number; at: number; px: number; py: number; ox: number; oy: number };
 
-const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const toSegment = (x: number, y: number, ax: number, ay: number, bx: number, by: number) => {
   const dx = bx - ax;
@@ -156,7 +155,7 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
       const chat = document.querySelector(anchor)?.getBoundingClientRect();
       const area = document.querySelector(region)?.getBoundingClientRect();
       const { search, since } = state.current;
-      const age = still() ? 1e6 : now - since;
+      const age = now - since;
       const stops = search && chat && area && area.width > 120 ? stopsOf(search, area, own) : [];
       const legs = search?.steps ? stops.map((stop) => ({ stop, progress: Math.max(0, Math.min(1, (age - stop.from) / (stop.at - stop.from))) })) : [];
       const heads = legs.filter((leg) => leg.progress > 0 && leg.progress < 1).map(({ stop, progress }) => ({ x: stop.ox + (stop.px - stop.ox) * progress, y: stop.oy + (stop.py - stop.oy) * progress }));
@@ -209,7 +208,7 @@ export function SearchMap({ search, anchor, region }: { search: Search | null; a
 
     const tick = (now: number) => {
       draw(now);
-      if (visible && !still()) frame = requestAnimationFrame(tick);
+      if (visible) frame = requestAnimationFrame(tick);
     };
     const resize = () => {
       const rect = element.getBoundingClientRect();
