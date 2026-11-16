@@ -17,4 +17,3 @@ tiers:
 - ultimate
 events:
 - name: orbit_graph_stats
-  operator: last(graph_bytes)
