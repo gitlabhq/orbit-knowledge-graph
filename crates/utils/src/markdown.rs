@@ -1,6 +1,10 @@
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+
 use comrak::nodes::{AstNode, LineColumn, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use rustc_hash::{FxHashMap, FxHashSet};
+use serde_saphyr::granit_parser::{Event, Parser, ScalarStyle};
 
 /// Separator between FQN segments. A `#` or `\` inside heading text or the
 /// file stem is escaped with `\` in the segment, so the FQN splits
@@ -8,6 +12,56 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub const FQN_SEPARATOR: &str = "#";
 
 pub const MAX_SECTIONS_PER_FILE: usize = 10_000;
+
+pub const FRONT_MATTER_NAME: &str = "front_matter";
+
+const FRONT_MATTER_DELIMITER: &str = "---";
+
+const MAX_FRONT_MATTER_YAML_BYTES: usize = 64 * 1024;
+
+const MAX_FRONT_MATTER_VALUE_BYTES: usize = 4 * 1024;
+
+const METADATA_KEY: &str = "metadata";
+
+#[derive(Debug)]
+pub struct FrontMatterField {
+    pub key: &'static str,
+    pub column: &'static str,
+}
+
+const fn field(key: &'static str, column: &'static str) -> FrontMatterField {
+    FrontMatterField { key, column }
+}
+
+pub const FRONT_MATTER_FIELDS: [FrontMatterField; 12] = [
+    field("name", "front_matter_name"),
+    field("description", "front_matter_description"),
+    field("license", "front_matter_license"),
+    field("compatibility", "front_matter_compatibility"),
+    field("allowed-tools", "front_matter_allowed_tools"),
+    field(METADATA_KEY, "front_matter_metadata"),
+    field("title", "front_matter_title"),
+    field("stage", "front_matter_stage"),
+    field("group", "front_matter_group"),
+    field("info", "front_matter_info"),
+    field("version", "front_matter_version"),
+    field("category", "front_matter_category"),
+];
+
+pub type FrontMatterValues = [String; FRONT_MATTER_FIELDS.len()];
+
+#[derive(Debug)]
+pub struct Document {
+    pub front_matter: Option<FrontMatter>,
+    pub sections: Vec<Section>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontMatter {
+    pub start: usize,
+    pub end: usize,
+    pub values: FrontMatterValues,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Section {
@@ -23,23 +77,28 @@ pub struct Section {
     pub end: usize,
 }
 
-/// The sections of a Markdown document. Only headings at the top level of the
-/// document count: a heading inside a block quote or list item is quoted
-/// content, not document structure.
-pub fn sections(source: &str) -> Vec<Section> {
+/// Only headings at the top level of the document count as sections: a heading
+/// inside a block quote or list item is quoted content, not document structure.
+pub fn parse(source: &str) -> Document {
     let arena = Arena::new();
     let mut options = Options::default();
-    options.extension.front_matter_delimiter = Some("---".to_string());
+    options.extension.front_matter_delimiter = Some(FRONT_MATTER_DELIMITER.to_string());
     let root = parse_document(&arena, source, &options);
     let lines = LineIndex::new(source);
 
+    let mut front_matter = None;
     let mut sections: Vec<Section> = Vec::new();
     let mut open: Vec<(u8, usize)> = Vec::new();
 
     for node in root.children() {
         let data = node.data.borrow();
-        let NodeValue::Heading(heading) = &data.value else {
-            continue;
+        let heading = match &data.value {
+            NodeValue::Heading(heading) => heading,
+            NodeValue::FrontMatter(block) => {
+                front_matter = Some(parse_front_matter(source, block));
+                continue;
+            }
+            _ => continue,
         };
         let name = inline_text(node);
         if name.is_empty() {
@@ -66,8 +125,162 @@ pub fn sections(source: &str) -> Vec<Section> {
             end: source.len(),
         });
     }
-    assign_unique_segments(&mut sections);
-    sections
+    let reserved = front_matter.as_ref().map(|_| FRONT_MATTER_NAME);
+    assign_unique_segments(&mut sections, reserved);
+    Document {
+        front_matter,
+        sections,
+    }
+}
+
+/// `block` is comrak's front matter slice of `source`: it starts after any
+/// byte order mark and runs to the end of the blank line after the closing
+/// delimiter, when there is one.
+fn parse_front_matter(source: &str, block: &str) -> FrontMatter {
+    let start = source.len() - source.strip_prefix('\u{feff}').unwrap_or(source).len();
+    let through_delimiter = block.trim_end_matches(['\r', '\n']);
+    let line_ending = &block[through_delimiter.len()..];
+    let line_ending = if line_ending.starts_with("\r\n") {
+        2
+    } else {
+        usize::from(line_ending.starts_with('\n'))
+    };
+    let yaml = through_delimiter
+        .strip_suffix(FRONT_MATTER_DELIMITER)
+        .and_then(|inner| inner.split_once('\n'))
+        .map_or("", |(_, yaml)| yaml);
+    FrontMatter {
+        start,
+        end: start + through_delimiter.len() + line_ending,
+        values: front_matter_values(yaml),
+    }
+}
+
+fn front_matter_values(yaml: &str) -> FrontMatterValues {
+    if yaml.len() > MAX_FRONT_MATTER_YAML_BYTES {
+        return FrontMatterValues::default();
+    }
+    let mut events = YamlEvents(Parser::new_from_str(yaml));
+    read_values(&mut events)
+        .filter(|_| events.all_valid())
+        .map(|values| values.map(truncate_value))
+        .unwrap_or_default()
+}
+
+fn read_values(events: &mut YamlEvents<'_>) -> Option<FrontMatterValues> {
+    let mut values = FrontMatterValues::default();
+    let Event::StreamStart = events.next()? else {
+        return None;
+    };
+    match events.next()? {
+        Event::StreamEnd => return Some(values),
+        Event::DocumentStart(..) => {}
+        _ => return None,
+    }
+    let Event::MappingStart(..) = events.next()? else {
+        return None;
+    };
+    while let Entry::Pair(key, value) = events.entry()? {
+        let slot = key
+            .as_deref()
+            .and_then(|key| FRONT_MATTER_FIELDS.iter().position(|f| f.key == key));
+        let Some(slot) = slot else {
+            events.skip(value)?;
+            continue;
+        };
+        values[slot] = if FRONT_MATTER_FIELDS[slot].key == METADATA_KEY {
+            events.metadata_json(value)?
+        } else {
+            events.scalar_text(value)?
+        };
+    }
+    Some(values)
+}
+
+fn truncate_value(mut value: String) -> String {
+    value.truncate(value.floor_char_boundary(MAX_FRONT_MATTER_VALUE_BYTES));
+    value
+}
+
+enum Entry<'a> {
+    End,
+    Pair(Option<Cow<'a, str>>, Event<'a>),
+}
+
+struct YamlEvents<'a>(Parser<'a, serde_saphyr::granit_parser::StrInput<'a>>);
+
+impl<'a> YamlEvents<'a> {
+    fn next(&mut self) -> Option<Event<'a>> {
+        loop {
+            match self.0.next()? {
+                Ok((Event::Comment(..), _)) => continue,
+                Ok((event, _)) => return Some(event),
+                Err(_) => return None,
+            }
+        }
+    }
+
+    fn all_valid(&mut self) -> bool {
+        self.0.all(|event| event.is_ok())
+    }
+
+    fn entry(&mut self) -> Option<Entry<'a>> {
+        let key = match self.next()? {
+            Event::MappingEnd => return Some(Entry::End),
+            Event::Scalar(key, ..) => Some(key),
+            other => {
+                self.skip(other)?;
+                None
+            }
+        };
+        Some(Entry::Pair(key, self.next()?))
+    }
+
+    fn skip(&mut self, first: Event<'a>) -> Option<()> {
+        let mut depth = 0usize;
+        let mut event = first;
+        loop {
+            match event {
+                Event::SequenceStart(..) | Event::MappingStart(..) => depth += 1,
+                Event::SequenceEnd | Event::MappingEnd => depth -= 1,
+                _ => {}
+            }
+            if depth == 0 {
+                return Some(());
+            }
+            event = self.next()?;
+        }
+    }
+
+    fn scalar_text(&mut self, value: Event<'a>) -> Option<String> {
+        match value {
+            Event::Scalar(text, style, ..) if !is_null(&text, style) => Some(text.into_owned()),
+            other => self.skip(other).map(|()| String::new()),
+        }
+    }
+
+    fn metadata_json(&mut self, value: Event<'a>) -> Option<String> {
+        let Event::MappingStart(..) = value else {
+            return self.skip(value).map(|()| String::new());
+        };
+        let mut metadata = BTreeMap::new();
+        while let Entry::Pair(key, value) = self.entry()? {
+            let text = self.scalar_text(value)?;
+            if let Some(key) = key
+                && !text.is_empty()
+            {
+                metadata.insert(key.into_owned(), text);
+            }
+        }
+        if metadata.is_empty() {
+            return Some(String::new());
+        }
+        serde_json::to_string(&metadata).ok()
+    }
+}
+
+fn is_null(text: &str, style: ScalarStyle) -> bool {
+    style == ScalarStyle::Plain && matches!(text, "" | "~" | "null" | "Null" | "NULL")
 }
 
 pub fn segment_path(sections: &[Section], index: usize) -> Vec<&str> {
@@ -85,7 +298,7 @@ pub fn escape_segment(name: &str) -> String {
     name.replace('\\', "\\\\").replace('#', "\\#")
 }
 
-fn assign_unique_segments(sections: &mut [Section]) {
+fn assign_unique_segments(sections: &mut [Section], reserved_top_level: Option<&str>) {
     let mut siblings: FxHashMap<Option<usize>, SiblingSegments> = FxHashMap::default();
     for section in sections.iter() {
         siblings
@@ -93,6 +306,9 @@ fn assign_unique_segments(sections: &mut [Section]) {
             .or_default()
             .used
             .insert(section.segment.clone());
+    }
+    if let Some(segment) = reserved_top_level {
+        siblings.entry(None).or_default().claim(segment.to_string());
     }
     for section in sections.iter_mut() {
         let segment = std::mem::take(&mut section.segment);
@@ -191,6 +407,14 @@ impl LineIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sections(source: &str) -> Vec<Section> {
+        parse(source).sections
+    }
+
+    fn front_matter(source: &str) -> FrontMatter {
+        parse(source).front_matter.expect("front matter")
+    }
 
     fn fqns(source: &str) -> Vec<String> {
         let sections = sections(source);
@@ -317,5 +541,167 @@ mod tests {
             (1, 4)
         );
         assert_eq!(lines.end_position(source, source.len()), (3, 3));
+    }
+
+    #[test]
+    fn front_matter_ends_at_its_closing_delimiter_line() {
+        let block = "---\ntitle: Doc\n---\n";
+        for source in [
+            format!("{block}# Real\n"),
+            format!("{block}\n# Real\n"),
+            format!("{block}\n\n\n# Real\n"),
+        ] {
+            let parsed = parse(&source);
+            let front_matter = parsed.front_matter.expect("front matter");
+            assert_eq!((front_matter.start, front_matter.end), (0, block.len()));
+            assert_eq!(parsed.sections[0].start, source.find("# Real").unwrap());
+        }
+    }
+
+    #[test]
+    fn front_matter_ranges_handle_crlf_eof_and_a_byte_order_mark() {
+        let source = "---\r\ntitle: Doc\r\n---\r\n\r\n# Real\r\n";
+        let crlf = front_matter(source);
+        assert_eq!(crlf.end, "---\r\ntitle: Doc\r\n---\r\n".len());
+
+        let at_eof = "---\ntitle: Doc\n---";
+        assert_eq!(front_matter(at_eof).end, at_eof.len());
+
+        let with_bom = "\u{feff}---\ntitle: Doc\n---\n";
+        let bom = front_matter(with_bom);
+        assert_eq!((bom.start, bom.end), (3, with_bom.len()));
+    }
+
+    #[test]
+    fn a_blank_front_matter_block_counts_and_adjacent_delimiters_do_not() {
+        let blank = "---\n\n---\n\nBody\n";
+        assert_eq!(front_matter(blank).end, "---\n\n---\n".len());
+        assert!(parse("---\n---\n\nBody\n").front_matter.is_none());
+    }
+
+    #[test]
+    fn a_top_level_heading_named_like_the_front_matter_is_suffixed() {
+        let source = "---\ntitle: Doc\n---\n\n# front_matter\n\n## front_matter\n";
+        assert_eq!(
+            fqns(source),
+            vec!["front_matter-1", "front_matter-1#front_matter"]
+        );
+        assert_eq!(fqns("# front_matter\n"), vec!["front_matter"]);
+    }
+
+    #[test]
+    fn front_matter_ranges_stay_on_char_boundaries() {
+        for source in [
+            "\u{feff}---\nt\u{e9}tle: \u{4f60}\n---\n",
+            "---\n\u{e9}: x\n  \u{4f60}\n---",
+            "---\r\n\"\u{e9}\": 1\r\n---\r\n\r\n",
+        ] {
+            let FrontMatter { start, end, .. } = front_matter(source);
+            assert!(
+                start <= end && end <= source.len(),
+                "{start}..{end} in {source:?}"
+            );
+            assert!(
+                source.get(start..end).is_some(),
+                "{start}..{end} in {source:?}"
+            );
+        }
+    }
+
+    fn values(source: &str) -> Vec<(&'static str, String)> {
+        let values = front_matter(source).values;
+        FRONT_MATTER_FIELDS
+            .iter()
+            .zip(values)
+            .filter(|(_, value)| !value.is_empty())
+            .map(|(field, value)| (field.column, value))
+            .collect()
+    }
+
+    fn owned(pairs: &[(&'static str, &str)]) -> Vec<(&'static str, String)> {
+        pairs.iter().map(|&(c, v)| (c, v.to_string())).collect()
+    }
+
+    #[test]
+    fn agent_skills_fields_are_read_verbatim() {
+        let source = "---\nname: review-mr\ndescription: >-\n  Review a merge\n  request.\nlicense: MIT\ncompatibility: Requires git\nallowed-tools: Bash(git:*) Read\nmetadata:\n  author: example-org\n  version: 1.0\n  tags: [a, b]\n  nested: {k: v}\n  empty: ~\nversion: 2.1.0\ncategory: Development Workflow\nunknown: ignored\n---\n# Review\n";
+        assert_eq!(
+            values(source),
+            owned(&[
+                ("front_matter_name", "review-mr"),
+                ("front_matter_description", "Review a merge request."),
+                ("front_matter_license", "MIT"),
+                ("front_matter_compatibility", "Requires git"),
+                ("front_matter_allowed_tools", "Bash(git:*) Read"),
+                (
+                    "front_matter_metadata",
+                    r#"{"author":"example-org","version":"1.0"}"#
+                ),
+                ("front_matter_version", "2.1.0"),
+                ("front_matter_category", "Development Workflow"),
+            ])
+        );
+    }
+
+    #[test]
+    fn gitlab_docs_fields_are_read_verbatim() {
+        let source = "---\r\nstage: Verify\r\ngroup: Pipeline Authoring\r\ninfo: To determine the technical writer, see https://example.com\r\ntitle: 'CI/CD: \"YAML\" syntax'\r\ndescription: Configure pipelines.\r\n---\r\n";
+        assert_eq!(
+            values(source),
+            owned(&[
+                ("front_matter_description", "Configure pipelines."),
+                ("front_matter_title", "CI/CD: \"YAML\" syntax"),
+                ("front_matter_stage", "Verify"),
+                ("front_matter_group", "Pipeline Authoring"),
+                (
+                    "front_matter_info",
+                    "To determine the technical writer, see https://example.com"
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn non_string_scalars_keep_their_source_text_and_collections_are_skipped() {
+        let source = "---\nversion: 1.10\nname: 0x1F\nstage: true\ngroup: null\ntitle: [a, b]\ninfo:\n  k: v\ncategory: '~'\nmetadata: [a]\n---\n";
+        assert_eq!(
+            values(source),
+            owned(&[
+                ("front_matter_name", "0x1F"),
+                ("front_matter_stage", "true"),
+                ("front_matter_version", "1.10"),
+                ("front_matter_category", "~"),
+            ])
+        );
+        assert!(values("---\nmetadata: plain\n---\n").is_empty());
+        assert!(values("---\nmetadata: {list: [1]}\n---\n").is_empty());
+    }
+
+    #[test]
+    fn long_values_are_truncated_on_a_char_boundary() {
+        let long = "\u{e9}".repeat(MAX_FRONT_MATTER_VALUE_BYTES);
+        let source = format!("---\ndescription: a{long}\n---\n");
+        let [(_, value)] = values(&source).try_into().unwrap();
+        assert_eq!(value.len(), MAX_FRONT_MATTER_VALUE_BYTES - 1);
+        assert!(value.starts_with("a\u{e9}"));
+    }
+
+    #[test]
+    fn invalid_or_non_mapping_yaml_stores_no_values() {
+        for source in [
+            "---\nname: [unclosed\n---\n",
+            "---\nname: a\nbad: \"unterminated\n---\n",
+            "---\n- name\n- title\n---\n",
+            "---\njust text\n---\n",
+            "---\n\n---\n",
+        ] {
+            assert!(values(source).is_empty(), "{source:?}");
+            assert!(parse(source).front_matter.is_some(), "{source:?}");
+        }
+        let huge = format!(
+            "---\nname: a\nfiller: {}\n---\n",
+            "x".repeat(MAX_FRONT_MATTER_YAML_BYTES)
+        );
+        assert!(values(&huge).is_empty());
     }
 }

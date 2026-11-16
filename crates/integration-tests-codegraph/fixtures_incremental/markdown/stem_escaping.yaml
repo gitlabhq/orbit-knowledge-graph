@@ -11,6 +11,12 @@ fixtures:
     content: |
       # Intro
 
+  - path: docs/F#.md
+    content: |
+      ---
+      title: F sharp
+      ---
+
 tests:
   - name: "the escaped stem prefixes every section fqn"
     query: |
@@ -22,3 +28,12 @@ tests:
       - { row: { fqn: "C\\##Basics", id: 7431661662255701000 } }
       - { row: { fqn: "C\\##Basics#Types", id: 4581922493871891585 } }
       - { row: { fqn: "a\\\\\\#b#Intro", id: 2925747467374241587 } }
+
+  - name: "the escaped stem prefixes the front matter fqn"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'FrontMatter'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "F\\##front_matter" } }

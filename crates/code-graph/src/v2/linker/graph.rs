@@ -9,6 +9,7 @@ use crate::v2::types::{
     Range, Relationship, containment_relationship,
 };
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
+use orbit_utils::markdown::FRONT_MATTER_FIELDS;
 
 fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
@@ -1324,6 +1325,15 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
         b.col("definition_type")?
             .push_str(self.def.definition_type)?;
         write_range(b, &self.def.range)?;
+        let front_matter = self
+            .def
+            .metadata
+            .as_ref()
+            .and_then(|m| m.front_matter.as_ref());
+        for (index, field) in FRONT_MATTER_FIELDS.iter().enumerate() {
+            let value = front_matter.map_or("", |values| values[index].as_str());
+            b.col(field.column)?.push_str(value)?;
+        }
         Ok(())
     }
 }
