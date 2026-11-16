@@ -22,6 +22,7 @@ pub(super) struct Route {
 }
 
 pub(super) struct Checkouts<'a> {
+    pub(super) single: bool,
     pub(super) exists: &'a dyn Fn(&str) -> bool,
     pub(super) indexed: &'a dyn Fn() -> Vec<(PathBuf, String, String)>,
 }
@@ -88,7 +89,12 @@ pub(super) fn route(
     let searchable = searchable(query, kinds, options);
     let remote_only = searchable.is_some() && !kinds.is_empty() && every_kind_hosted(kinds);
     let explicit = !targets.is_empty();
-    let implicit = !explicit && local_paths.is_empty() && kinds.is_empty() && !keeps_local();
+    let implicit = checkouts.single
+        && !explicit
+        && local_paths.is_empty()
+        && kinds.is_empty()
+        && plain(options)
+        && !keeps_local();
     if targets.is_empty() && local_paths.is_empty() && !searched_kinds(kinds).is_empty() {
         targets.push(Target::Origin(
             repo.map_or_else(|| PathBuf::from("."), Path::to_path_buf),
@@ -142,12 +148,22 @@ pub(super) fn route(
 }
 
 fn keeps_local() -> bool {
-    std::env::var("ORBIT_NO_GITLAB").is_ok_and(|value| {
-        !matches!(
+    match std::env::var("ORBIT_NO_GITLAB") {
+        Ok(value) => !matches!(
             value.trim().to_lowercase().as_str(),
-            "" | "0" | "false" | "off" | "no"
-        )
-    })
+            "" | "0" | "n" | "no" | "f" | "false" | "off"
+        ),
+        Err(_) => crate::settings::load().gitlab.enabled == Some(false),
+    }
+}
+
+fn plain(options: &Options) -> bool {
+    !options.fixed
+        && !options.word
+        && options.before == 0
+        && options.after == 0
+        && options.max_count.is_none()
+        && options.max_columns.is_none()
 }
 
 fn graph_route(
@@ -221,6 +237,10 @@ fn searchable(query: Option<&str>, kinds: &[String], options: &Options) -> Optio
         .ok()?
         .into_iter()
         .filter(|alternative| options.fixed || !Term::parse(alternative).is_regex())
+        .map(|alternative| match options.fixed {
+            true => alternative,
+            false => Term::parse(&alternative).search_text().to_string(),
+        })
         .collect();
     (!keywords.is_empty()).then_some(keywords)
 }

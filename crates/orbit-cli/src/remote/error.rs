@@ -2,7 +2,7 @@ use cynic::GraphQlError;
 
 pub(crate) const EXIT_GENERIC: i32 = 1;
 pub(crate) const EXIT_UNAVAILABLE: i32 = 2;
-const EXIT_UNAUTHENTICATED: i32 = 3;
+pub(crate) const EXIT_UNAUTHENTICATED: i32 = 3;
 pub(crate) const EXIT_FORBIDDEN: i32 = 4;
 pub(crate) const EXIT_RATE_LIMITED: i32 = 5;
 

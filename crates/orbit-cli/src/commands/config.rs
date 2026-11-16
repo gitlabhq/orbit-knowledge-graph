@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::settings::{self, Settings};
 
-const KNOWN_KEYS: &[&str] = &["telemetry.enabled"];
+const KNOWN_KEYS: &[&str] = &["telemetry.enabled", "gitlab.enabled"];
 
 pub fn get(key: &str) -> Result<()> {
     match read_key(&settings::load(), key)? {
@@ -34,6 +34,7 @@ pub fn list() -> Result<()> {
 fn read_key(settings: &Settings, key: &str) -> Result<Option<String>> {
     match key {
         "telemetry.enabled" => Ok(settings.telemetry.enabled.map(|b| b.to_string())),
+        "gitlab.enabled" => Ok(settings.gitlab.enabled.map(|b| b.to_string())),
         _ => bail!("unknown setting `{key}` (known: {})", KNOWN_KEYS.join(", ")),
     }
 }
@@ -44,6 +45,12 @@ fn apply_set(settings: &mut Settings, key: &str, value: &str) -> Result<String> 
             let parsed = settings::parse_bool(value)
                 .with_context(|| format!("`{key}` expects a boolean, got `{value}`"))?;
             settings.telemetry.enabled = Some(parsed);
+            Ok(parsed.to_string())
+        }
+        "gitlab.enabled" => {
+            let parsed = settings::parse_bool(value)
+                .with_context(|| format!("`{key}` expects a boolean, got `{value}`"))?;
+            settings.gitlab.enabled = Some(parsed);
             Ok(parsed.to_string())
         }
         _ => bail!("unknown setting `{key}` (known: {})", KNOWN_KEYS.join(", ")),

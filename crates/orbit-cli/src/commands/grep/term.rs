@@ -53,6 +53,10 @@ impl Term {
         }
     }
 
+    pub(super) fn search_text(&self) -> &str {
+        self.text()
+    }
+
     fn text(&self) -> &str {
         self.text.as_deref().unwrap_or(&self.raw)
     }
