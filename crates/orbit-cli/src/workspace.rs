@@ -461,9 +461,10 @@ pub fn git_working_changes(repo_path: &Path) -> Result<GitChanges> {
 }
 
 /// Files in the index that the ignore rules match, such as files force-added
-/// under an ignored directory.
+/// under an ignored directory. Names that are not UTF-8 are left out, since the
+/// graph cannot hold them.
 pub fn git_tracked_ignored(repo_path: &Path) -> Result<Vec<String>> {
-    let listed = git_stdout(
+    let listed = git_output(
         repo_path,
         &[
             "ls-files",
@@ -474,8 +475,9 @@ pub fn git_tracked_ignored(repo_path: &Path) -> Result<Vec<String>> {
         ],
     )?;
     Ok(listed
-        .split('\0')
+        .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
+        .filter_map(|path| std::str::from_utf8(path).ok())
         .map(str::to_string)
         .collect())
 }
@@ -525,6 +527,10 @@ fn parse_porcelain(output: &str, changes: &mut GitChanges) {
 }
 
 fn git_stdout(repo_path: &Path, args: &[&str]) -> Result<String> {
+    String::from_utf8(git_output(repo_path, args)?).context("git output is not valid UTF-8")
+}
+
+fn git_output(repo_path: &Path, args: &[&str]) -> Result<Vec<u8>> {
     let output = Command::new("git")
         .args(args)
         .current_dir(repo_path)
@@ -538,7 +544,7 @@ fn git_stdout(repo_path: &Path, args: &[&str]) -> Result<String> {
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    String::from_utf8(output.stdout).context("git output is not valid UTF-8")
+    Ok(output.stdout)
 }
 
 /// Mask clears the sign bit so the result is always a positive i64.

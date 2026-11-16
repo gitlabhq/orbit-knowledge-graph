@@ -34,7 +34,7 @@ impl Project<'_> {
     /// Indexes every file and rewrites the whole graph. The snapshots go in
     /// place once the rows are written.
     pub(super) fn index_all(&self) -> Result<Vec<FamilyOutput>> {
-        let repository = input::directory(&self.git.repo_path)?;
+        let repository = input::directory(&self.git.repo_path, &self.working.removed)?;
         let families = input::split(&repository, None);
         let owner = families.values().next().map(|(family, _)| *family);
         let names: Vec<String> = families.keys().map(|name| name.to_string()).collect();
