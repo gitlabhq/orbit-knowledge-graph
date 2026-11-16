@@ -10,7 +10,7 @@
 #
 # `connect` holds the session state the modes need: port-forwards for
 # ClickHouse and NATS, the in-cluster Orbit scaled to zero so only local code
-# consumes NATS, and an EndpointSlice that routes the gkg-webserver Service to
+# consumes NATS, and an EndpointSlice that routes the orbit-webserver Service to
 # this host so GitLab Rails reaches the local webserver. Ctrl+C undoes all of it.
 set -euo pipefail
 
@@ -36,15 +36,15 @@ STATE_FILE="$GENERATED_DIR/connect-state"
 # Fixed Caproni names. The databases and users live in config/dev.yaml.
 GITLAB_NS="gitlab"
 STACK_NS="gitlab-dev-stack"
-ORBIT_SELECTOR="app.kubernetes.io/name=gkg,app.kubernetes.io/instance=gkg"
+ORBIT_SELECTOR="app.kubernetes.io/name=orbit,app.kubernetes.io/instance=gkg"
 SECRET_NAME="gitlab-dev-stack-gkg-secrets"
 CLICKHOUSE_SVC="gitlab-dev-stack-clickhouse"
 NATS_SVC="gitlab-dev-stack-nats"
 CLICKHOUSE_LOCAL_PORT=8123
 NATS_LOCAL_PORT=4222
-WEBSERVER_SVC="gkg-webserver"
+WEBSERVER_SVC="orbit-webserver"
 WEBSERVER_GRPC_PORT=50054
-ENDPOINTSLICE_NAME="gkg-webserver-orbit-native-dev"
+ENDPOINTSLICE_NAME="orbit-webserver-orbit-native-dev"
 
 # Filled by load_cluster_values; tests set them directly.
 CLICKHOUSE_URL="http://127.0.0.1:${CLICKHOUSE_LOCAL_PORT}"
