@@ -13,7 +13,7 @@ const VERBS: Record<string, [string, string]> = {
   "incident.io": ["Reading the incident…", "Read the incident"],
   Grafana: ["Checking Grafana alerts…", "Checked Grafana alerts"],
   GitLab: ["Tracing GitLab deploys…", "Traced GitLab deploys"],
-  Jira: ["Reading Jira issues…", "Read Jira issues"],
+  Linear: ["Reading Linear issues…", "Read Linear issues"],
   Slack: ["Searching Slack…", "Searched Slack"],
   "Code search": ["Searching code…", "Searched code"],
 };
@@ -33,7 +33,7 @@ const ALL = [...SEARCHES, ...CROSS_SEARCHES];
 // What the agent can query, as chips on the input and in the third-party section.
 export const SOURCES = [
   { label: "GitLab", icon: "tanuki" },
-  { label: "Jira", icon: "work-item-issue" },
+  { label: "Linear", icon: "work-item-issue" },
   { label: "Slack", icon: "comment" },
   { label: "incident.io", icon: "status-alert" },
   { label: "Grafana", icon: "chart" },

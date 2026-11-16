@@ -386,17 +386,17 @@ export const CROSS_SEARCHES: Search[] = [
     { tool: "GitLab", icon: "tanuki", finding: "v1.4.2 shipped checkout-api!42, the pricing cache.", name: "!42", links: ["checkout-api!42"] },
     { tool: "Code search", icon: "code", finding: "!42 added cache.get in pricing.rb:57, with no timeout.", name: "pricing.rb:57" },
   ]),
-  cross("epic", "Track a Jira epic", "Is Jira epic ORB-1 on track?", "On track for the 500 ms goal. ORB-13 has no code yet.", [
-    { tool: "Jira", icon: "work-item-issue", finding: "ORB-1, checkout latency below 500 ms, has 3 stories.", name: "ORB-1" },
+  cross("epic", "Track a Linear project", "Is Linear project ORB-1 on track?", "On track for the 500 ms goal. ORB-13 has no code yet.", [
+    { tool: "Linear", icon: "work-item-issue", finding: "ORB-1, checkout latency below 500 ms, has 3 issues.", name: "ORB-1" },
     { tool: "GitLab", icon: "tanuki", finding: "ORB-12 shipped in !42 and !43.", name: "ORB-12 shipped", links: ["checkout-api!42", "checkout-api!43"] },
     { tool: "GitLab", icon: "tanuki", finding: "ORB-14 is in review in !44. Its pipeline passed.", name: "ORB-14 in review", links: ["checkout-api!44"] },
-    { tool: "Jira", icon: "work-item-issue", finding: "ORB-13 has no merge request yet.", name: "ORB-13" },
+    { tool: "Linear", icon: "work-item-issue", finding: "ORB-13 has no merge request yet.", name: "ORB-13" },
     { tool: "Grafana", icon: "chart", finding: "Checkout p95 is at 420 ms, under the goal.", name: "p95 420 ms" },
   ]),
   cross("why", "Explain why this code changed", "Explain every decision behind the pricing cache code.", "Three decisions: !42 added the cache for ORB-1's 500 ms goal, !43 added request coalescing after INC-77, and the team set the 30 s TTL in Slack.", [
     { tool: "Code search", icon: "code", finding: "The pricing cache lives in pricing.rb, with PRICE_TTL = 30.seconds.", name: "pricing.rb" },
     { tool: "GitLab", icon: "tanuki", finding: "!42 added the cache. !43 added request coalescing and set the TTL.", name: "!42, !43", links: ["checkout-api!42", "checkout-api!43"] },
-    { tool: "Jira", icon: "work-item-issue", finding: "ORB-12, under ORB-1: bring checkout p95 below 500 ms.", name: "ORB-1" },
+    { tool: "Linear", icon: "work-item-issue", finding: "ORB-12, under ORB-1: bring checkout p95 below 500 ms.", name: "ORB-1" },
     { tool: "Slack", icon: "comment", finding: "“Keep the TTL at 30 s. Any longer and flash-sale prices go stale.”", name: "TTL decision" },
   ], true),
 ];
