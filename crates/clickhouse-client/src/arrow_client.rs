@@ -204,7 +204,6 @@ impl ArrowClickHouseClient {
         Ok(self)
     }
 
-    /// The server names a `cluster_for_parallel_replicas` for this user, so `enable_parallel_replicas` can run.
     pub fn has_parallel_replica_cluster(&self) -> bool {
         self.parallel_replica_cluster
     }
