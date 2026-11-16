@@ -1,3 +1,5 @@
+#![deny(clippy::allow_attributes, clippy::allow_attributes_without_reason)]
+
 mod builder;
 mod config;
 mod disposition;
