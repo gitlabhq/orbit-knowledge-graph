@@ -437,13 +437,42 @@ description = "Regenerate rust-toolchain.toml from mise.toml"
 run = "bash ./scripts/checks/check-rust-toolchain.sh --check"
 description = "Fail if rust-toolchain.toml is out of sync with mise.toml"
 
+[tasks."spec:engine:tools"]
+description = "Download the pinned TLA+ tools for the indexing engine spec"
+shell = "bash -c"
+run = """
+set -euo pipefail
+jar=target/tla2tools-1.7.4.jar
+[ -f "$jar" ] && exit 0
+mkdir -p target
+curl -fsSL -o "$jar.tmp" https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  $jar.tmp" | shasum -a 256 -c -
+mv "$jar.tmp" "$jar"
+"""
+
 [tasks."spec:engine"]
-run = "bash ./scripts/dev/check-engine-spec.sh pass"
 description = "Model-check the indexing engine lease and dedupe spec with TLC (needs Java 11+)"
+depends = ["spec:engine:tools"]
+shell = "bash -c"
+run = """
+set -euo pipefail
+for config in specs/indexing-engine/*.cfg; do
+  java -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine/LeaseDedupe.tla
+done
+"""
 
 [tasks."spec:engine:counterexample"]
-run = "bash ./scripts/dev/check-engine-spec.sh counterexample"
-description = "Show the TLC counterexamples against the indexing engine rules as ADR 023 writes them"
+description = "Check that TLC still finds each counterexample against the rules as ADR 023 writes them"
+depends = ["spec:engine:tools"]
+shell = "bash -c"
+run = """
+set -uo pipefail
+for config in specs/indexing-engine/counterexamples/*.cfg; do
+  java -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine/LeaseDedupe.tla > /dev/null
+  [ $? -eq 12 ] || { echo "$config: expected an invariant violation (TLC exit 12)"; exit 1; }
+  echo "$config: violation found, as expected"
+done
+"""
 
 [tasks."schema:bump"]
 run = "cargo xtask migration-ledger bump"
