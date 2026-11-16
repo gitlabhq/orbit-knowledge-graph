@@ -385,6 +385,88 @@ fn a_refresh_matches_a_full_index_when_files_come_and_go() {
 }
 
 #[test]
+fn indexes_and_refreshes_files_git_tracks_under_ignored_directories() {
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(
+        repo,
+        &[
+            (".gitignore", ".claude/\n"),
+            ("app.py", "def app():\n    pass\n"),
+        ],
+    );
+    write_file(repo, ".claude/skills/demo/SKILL.md", "# Demo\n\n## Usage\n");
+    write_file(repo, ".claude/tool.py", "def tool():\n    pass\n");
+    git(
+        repo,
+        &[
+            "add",
+            "--force",
+            ".claude/skills/demo/SKILL.md",
+            ".claude/tool.py",
+        ],
+    );
+    git(repo, &["commit", "-qm", "track ignored files"]);
+    write_file(repo, ".claude/local.py", "def local():\n    pass\n");
+    let names = |sql: &str| -> Vec<String> {
+        rows(&orbit_sql(sql, data.path()))
+            .iter()
+            .map(|row| row["n"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let files = "SELECT path AS n FROM gl_file ORDER BY path";
+    let definitions = "SELECT fqn AS n FROM gl_definition ORDER BY fqn";
+
+    assert!(orbit_index(repo, data.path()));
+    assert_eq!(
+        names(files),
+        [
+            ".claude/skills/demo/SKILL.md",
+            ".claude/tool.py",
+            ".gitignore",
+            "app.py"
+        ]
+    );
+    assert_eq!(
+        names(definitions),
+        [
+            ".claude.tool.tool",
+            "SKILL#Demo",
+            "SKILL#Demo#Usage",
+            "app.app"
+        ]
+    );
+
+    write_file(
+        repo,
+        ".claude/tool.py",
+        "def tool():\n    pass\n\ndef added():\n    pass\n",
+    );
+    assert!(orbit_index(repo, data.path()));
+    assert_eq!(graph_tables(data.path()), full_index_tables(repo));
+
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    write_file(
+        repo,
+        ".claude/tool.py",
+        "def tool():\n    pass\n\ndef refreshed():\n    pass\n",
+    );
+    let refreshed = orbit_cmd()
+        .args(["refresh", repo.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data.path())
+        .output()
+        .unwrap();
+    assert!(
+        refreshed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&refreshed.stderr)
+    );
+    assert_eq!(graph_tables(data.path()), full_index_tables(repo));
+    assert!(names(definitions).contains(&".claude.tool.refreshed".to_string()));
+}
+
+#[test]
 fn index_db_flag_writes_to_custom_path() {
     let tmp = tempfile::TempDir::new().unwrap();
     let db_path = tmp.path().join("custom.duckdb");
