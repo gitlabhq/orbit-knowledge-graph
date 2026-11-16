@@ -6,7 +6,7 @@ instructions: |
   - `{{orbit}} context` reads what grep found, with connections: `{{orbit}} context a.rs:10-40 a_test.rs:5-60 Name; {{orbit}} grep 'x'`. Batch the reads and searches you can name.{{remote_gitlab}}{{remote_query}}{{server_entities}}
 
 remote:
-  remote_gitlab: "\n- Read GitLab with `{{orbit}}` rather than glab and glab api; writes stay with glab. Shortcuts: {{gitlab_kinds}}. `{{orbit}} context mr:42 job:9` reads GitLab; bare `{{orbit}} context` reads the branch's MR and CI failures, and `repo:group/project symbol:Name` a sibling project."
+  remote_gitlab: "\n- Read GitLab with `{{orbit}}` rather than glab and glab api; writes stay with glab. `{{orbit}} context mr:42 job:9` reads GitLab; bare `{{orbit}} context` reads the branch's MR and CI failures, and `repo:group/project symbol:Name` a sibling project."
   remote_query: "\n- Use `{{orbit}} query` for counts, rankings, and relationships across providers. {{query_syntax}}"
 server_entities: "\n\nConnected providers and their entities, for `{{orbit}} query` and `{{orbit}} grep provider:type:words`:\n{{entities}}"
 
