@@ -485,6 +485,18 @@ log-safety-check:
   script:
     - mise run lint:logs
 
+engine-boundaries-check:
+  stage: lint
+  image: python:3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - python3 scripts/checks/check_engine_boundaries_test.py
+    - python3 scripts/checks/check_engine_boundaries.py
+
 metrics-catalog-check:
   stage: lint
   extends:

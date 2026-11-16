@@ -234,6 +234,13 @@ run = [
 ]
 description = "Check log, span and print call sites against the red data rules (scripts/linting/logs)"
 
+[tasks."lint:engine"]
+run = [
+  "python3 scripts/checks/check_engine_boundaries_test.py",
+  "python3 scripts/checks/check_engine_boundaries.py",
+]
+description = "Check the indexing engine dependencies, flow isolation and the frozen V1 indexer folders"
+
 [tasks."lint:deps"]
 run = "cargo shear"
 description = "Check for unused workspace and crate dependencies"
