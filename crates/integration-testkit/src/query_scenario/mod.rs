@@ -179,7 +179,7 @@ async fn run_scenarios(ctx: &TestContext, root: &str, presets: &str, skip_compil
         .collect();
     assert!(
         !scenarios.is_empty(),
-        "every matching scenario under {} only compiles; run them with `cargo test --test local -E 'test(compile_only_scenarios)'`",
+        "every matching scenario under {} only compiles; run `cargo nextest run --test local -E 'test(compile_only_scenarios)'`, which runs every compile-only case",
         root.display()
     );
     let datasets = Arc::new(Datasets::new(
@@ -323,7 +323,7 @@ pub async fn run_compile_only_dir(root: &str, presets: &str) {
     let presets: Arc<Path> = Arc::from(Path::new(presets));
     let mut handles = Vec::new();
     for (name, scenario) in scenarios_under(root) {
-        let (config, steps) = scenario.into_steps();
+        let (config, steps) = scenario.into_steps(&name);
         if !compiles_only(&steps) {
             continue;
         }

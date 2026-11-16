@@ -285,7 +285,7 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
 | `duckdb` | bool | Default `false`. Also run the scenario in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with CALLS rows in `gl_edge`. |
 
-A scenario whose every step expects `compile_error` never queries. It runs without ClickHouse in `cargo test --test local` through `run_compile_only_dir`, and the ClickHouse runner skips it.
+A scenario whose every step expects `compile_error` never queries. For `scenarios/`, it runs without ClickHouse in `cargo test --test local` through `run_compile_only_dir`, and `run_querying_dir` skips it on ClickHouse. `run_dir` still runs every case.
 
 Scenarios with the same `seed`, `extra_seed`, `unmerged_seed`, and `ontology_overlay` share one database. The runner builds it for the first case and drops it after the last. A scenario whose steps add seed rows gets its own database.
 
