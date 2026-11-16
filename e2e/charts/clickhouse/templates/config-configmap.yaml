@@ -31,6 +31,10 @@ data:
                 <max_download_threads>1</max_download_threads>
                 <input_format_parallel_parsing>0</input_format_parallel_parsing>
                 <output_format_parallel_formatting>0</output_format_parallel_formatting>
+                {{- if include "clickhouse.replicated" . }}
+                <!-- Item counts turn on parallel replicas, which fail with CLUSTER_DOESNT_EXIST without a named cluster. -->
+                <cluster_for_parallel_replicas>default</cluster_for_parallel_replicas>
+                {{- end }}
             </default>
         </profiles>
     </clickhouse>
