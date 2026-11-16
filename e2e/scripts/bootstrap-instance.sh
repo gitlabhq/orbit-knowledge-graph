@@ -89,9 +89,15 @@ else
   warn "license activated: plan=#{l.plan} expires=#{l.expires_at} cloud=#{l.cloud_license?}"
 end
 
-# Turned off here, minutes before the tests: each Puma worker caches flag values for about a minute.
-%i[orbit_promo_access_gate orbit_trial].each { |flag| ::Feature.disable(flag) }
-warn 'orbit_promo_access_gate and orbit_trial turned off'
+# The staging subscription has no Orbit add-on, so provision the one its license would carry.
+orbit_promo = ::GitlabSubscriptions::AddOnPurchases::SelfManaged::ProvisionServices::OrbitPromo.new
+orbit_promo.define_singleton_method(:license_restrictions) do
+  { add_on_products: { orbit_promo: [{ quantity: 1, started_on: Date.current.to_s,
+    expires_on: 1.year.from_now.to_date.to_s, purchase_xid: 'e2e', trial: false }] } }
+end
+provisioned = orbit_promo.execute
+abort "orbit_promo provision failed: #{provisioned.message}" unless provisioned.success?
+warn 'orbit_promo add-on provisioned'
 
 user = User.find_by(username: 'root') or abort 'no root user'
 token = user.personal_access_tokens.find_or_create_by!(name: 'e2e-bootstrap') do |t|
