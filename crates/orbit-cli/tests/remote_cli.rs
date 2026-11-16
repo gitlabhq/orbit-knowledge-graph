@@ -1433,10 +1433,9 @@ fn a_refresh_that_cannot_write_leaves_the_file_marked_as_edited() {
 }
 
 #[test]
-fn a_plain_grep_searches_only_local_code() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-    listener.set_nonblocking(true).unwrap();
-    let base_url = format!("http://localhost:{}", listener.local_addr().unwrap().port());
+fn a_plain_grep_searches_local_code_and_gitlab_together() {
+    let (base_url, handle) = serve_once(GREP_RESPONSE, "application/json");
+    let base_url = base_url.replace("127.0.0.1", "localhost");
     let repo = committed_repo(
         "https://localhost/my-group/my-project",
         &[("util.py", "def alpha_marker():\n    return 1\n")],
@@ -1450,7 +1449,74 @@ fn a_plain_grep_searches_only_local_code() {
     )
     .output()
     .expect("run orbit binary");
+    let request = handle.join().expect("join mock");
+    assert_eq!(
+        request.request_line,
+        "GET /api/v4/orbit/grep?search=alpha_marker&full_path=my-group HTTP/1.1"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let code = stdout.find("util.py").expect("local hits");
+    let gitlab = stdout.find("MergeRequest[42]  Add runner").expect("GitLab hits");
+    assert!(code < gitlab, "{stdout}");
+}
 
+#[test]
+fn a_plain_grep_with_a_path_or_no_gitlab_stays_local() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    listener.set_nonblocking(true).unwrap();
+    let base_url = format!("http://localhost:{}", listener.local_addr().unwrap().port());
+    let repo = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[("util.py", "def alpha_marker():\n    return 1\n")],
+    );
+    let data = tempfile::tempdir().unwrap();
+    let pathed = orbit_command(
+        repo.path(),
+        data.path(),
+        &base_url,
+        &["grep", "alpha_marker", "util.py"],
+    )
+    .output()
+    .expect("run orbit binary");
+    assert!(String::from_utf8_lossy(&pathed.stdout).contains("alpha_marker"));
+    let local = orbit_command(
+        repo.path(),
+        data.path(),
+        &base_url,
+        &["grep", "alpha_marker"],
+    )
+    .env("ORBIT_NO_GITLAB", "1")
+    .output()
+    .expect("run orbit binary");
+    assert!(String::from_utf8_lossy(&local.stdout).contains("alpha_marker"));
+    assert!(listener.accept().is_err(), "a local grep called GitLab");
+}
+
+#[test]
+fn a_slow_gitlab_does_not_hold_back_local_hits() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let base_url = format!("http://localhost:{}", listener.local_addr().unwrap().port());
+    thread::spawn(move || {
+        let held: Vec<_> = listener.incoming().take(4).collect();
+        thread::sleep(Duration::from_secs(20));
+        drop(held);
+    });
+    let repo = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[("util.py", "def alpha_marker():\n    return 1\n")],
+    );
+    let data = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let output = orbit_command(
+        repo.path(),
+        data.path(),
+        &base_url,
+        &["grep", "alpha_marker"],
+    )
+    .output()
+    .expect("run orbit binary");
+    assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("alpha_marker"));
-    assert!(listener.accept().is_err(), "plain grep called GitLab");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("only code is shown"));
+    assert!(started.elapsed() < Duration::from_secs(8), "{:?}", started.elapsed());
 }

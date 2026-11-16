@@ -674,18 +674,15 @@ mod tests {
                 let rendered = render_instructions(launcher, remote, &Providers::new());
                 assert!(rendered.contains(expected), "{launcher}: {rendered}");
                 assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
-                assert_eq!(
-                    rendered.matches("MANDATORY").count(),
-                    if remote { 4 } else { 2 },
-                    "{launcher}"
-                );
+                assert!(!rendered.contains("MANDATORY"), "{launcher}: {rendered}");
                 for phrase in [
                     &format!(
-                        "MANDATORY: `{launcher} grep` must be used for search instead of grep and rg."
+                        "`{launcher} grep` is one search across every connected provider: your code"
                     ),
-                    "Ignores case, `_`, `-`",
+                    "key words before you start",
+                    "ignores case, `_`, `-`",
                     "`a|b` OR",
-                    "Batch all reads and searches you can name",
+                    "Batch the reads and searches you can name",
                 ] {
                     assert!(rendered.contains(phrase), "{launcher}: {phrase}");
                 }
@@ -695,7 +692,12 @@ mod tests {
                     "{launcher}: {rendered}"
                 );
                 assert!(
-                    rendered.contains("instead of glab and glab api") == remote,
+                    rendered.contains("rather than glab and glab api") == remote,
+                    "{launcher}"
+                );
+                assert_eq!(
+                    rendered.contains("MRs, issues, and discussions"),
+                    remote,
                     "{launcher}"
                 );
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
@@ -710,7 +712,9 @@ mod tests {
             2,
             "{local}"
         );
-        assert!(search_nudge_text().contains("MANDATORY"));
+        assert!(!search_nudge_text().contains("MANDATORY"));
+        assert!(search_nudge_text().contains("every connected provider"));
+        assert!(!gitlab_nudge_text().contains("MANDATORY"));
         assert!(gitlab_nudge_text().contains("`milestone:`"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");

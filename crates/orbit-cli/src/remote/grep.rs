@@ -120,6 +120,7 @@ pub(crate) struct Request {
     pub(crate) kinds: Vec<&'static str>,
     pub(crate) graph: Option<String>,
     pub(crate) budget: Budget,
+    pub(crate) implicit: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -370,7 +371,7 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         ),
     };
     if let Outcome::Found(mut text) = rendered {
-        if let Some(winner) = winner {
+        if let Some(winner) = winner.filter(|_| !request.implicit) {
             text.push_str(&inline(&client, &winner, home_project.as_deref()).await);
         }
         if any_word {
@@ -1349,6 +1350,7 @@ mod tests {
             kinds: vec!["MergeRequest"],
             graph: None,
             budget: Budget::default(),
+            implicit: false,
         };
         let scopes = ["MergeRequest".to_string()];
         assert_eq!(
