@@ -28,7 +28,6 @@ strum = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

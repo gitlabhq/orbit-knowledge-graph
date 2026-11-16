@@ -182,10 +182,7 @@ async fn a_parallel_replica_cluster_turns_on_parallel_reads(ctx: &TestContext) {
         &settings,
         &HashMap::new(),
         "graph",
-    )
-    .with_detected_parallel_replica_cluster()
-    .await
-    .expect("parallel replica cluster");
+    );
 
     ItemCountService::new(Arc::new(client))
         .count_items(
