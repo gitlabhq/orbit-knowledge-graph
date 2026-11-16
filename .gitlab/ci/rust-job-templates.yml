@@ -32,7 +32,7 @@
 .job-template:
   tags:
     - saas-linux-medium-amd64
-  image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph-lean:test-26ba65e6@sha256:3d43484a514e98ba6a0833a9d70ef518a8a2a76c43f93f941923fb10841816c6
+  image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:3775d4e@sha256:4f3e96295f9f0d83f6550e626d30df7ae4c9dbc8a31ce61605bb6f246b7d50de
   variables:
     MISE_DISABLE_TOOLS: lefthook,clickhouse
     # Fail closed: an empty policy would let the runner upload.
