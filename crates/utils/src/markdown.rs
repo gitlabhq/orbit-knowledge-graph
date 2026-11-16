@@ -2,8 +2,9 @@ use comrak::nodes::{AstNode, LineColumn, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Separator between FQN segments. A `#` or `\` inside heading text is
-/// escaped with `\` in the segment, so the FQN splits unambiguously.
+/// Separator between FQN segments. A `#` or `\` inside heading text or the
+/// file stem is escaped with `\` in the segment, so the FQN splits
+/// unambiguously.
 pub const FQN_SEPARATOR: &str = "#";
 
 pub const MAX_SECTIONS_PER_FILE: usize = 10_000;
@@ -80,7 +81,7 @@ pub fn segment_path(sections: &[Section], index: usize) -> Vec<&str> {
     path
 }
 
-fn escape_segment(name: &str) -> String {
+pub fn escape_segment(name: &str) -> String {
     name.replace('\\', "\\\\").replace('#', "\\#")
 }
 
