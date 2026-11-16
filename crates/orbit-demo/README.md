@@ -17,7 +17,9 @@ mise run demo         # starts ClickHouse and RustFS behind their relays, then t
 Open <http://localhost:8484/>. Pick a caller and an example, or write any GQL the packages allow.
 The page uses the design tokens and components of the Data Extraction Service POC UI, in light and dark.
 Click a stage to see its logical sub-plan, its planned and emitted plans, its rendered request,
-its security operations, its key sets, its timing and its sample rows.
+its security operations, its key sets, its timing, its sample rows and the package YAML that
+declares what it reads. `GET /api/packages/<name>` serves a package's YAML files as the model
+loaded them, from `config/model`, `config/demo` and `crates/integration-testkit/model-variants`.
 
 `mise run test:demo` runs the crate's tests and `scripts/lockdown-tests.sh`, which proves each
 network block on its own.

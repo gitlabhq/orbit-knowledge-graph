@@ -123,10 +123,13 @@ svg#dag { display: block; width: 100%; height: auto; margin: 0 auto; font-family
 .code-yaml .line::before { counter-increment: line; content: counter(line); display: inline-block; width: 4ch; margin-right: 1ch; text-align: right; text-indent: 0; color: var(--text-subtle); }
 .code-yaml .named { margin: 0 calc(-1 * var(--space-4)); padding: 0 var(--space-4) 0 calc(var(--space-4) + 5ch); background: color-mix(in srgb, var(--diff-target) 12%, transparent); }
 .detail .segmented { align-self: flex-start; flex-wrap: wrap; }
+.detail .tab { padding: var(--space-2); font-size: var(--font-sm); }
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); }
 .fact { display: flex; flex-direction: column; gap: 2px; padding: var(--space-3) var(--space-4); border: 1px solid var(--border-default); border-radius: var(--radius-lg); }
 .fact-label { font-size: var(--font-xs); color: var(--text-subtle); }
 .fact-value { font-size: var(--font-lg); font-weight: 600; color: var(--text-heading); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* Shades the right edge while columns remain; the local layer covers the shade at the end. */
+.table-scroll { background: linear-gradient(to right, transparent, var(--bg-default) 50%) right / 48px 100% no-repeat local, linear-gradient(to right, transparent, color-mix(in srgb, var(--text-heading) 14%, transparent)) right / 20px 100% no-repeat scroll; }
 .table td { font-family: var(--mono); font-size: var(--font-xs); overflow-wrap: break-word; }
 .table td.word { white-space: nowrap; }
 .table td.prose { min-width: 40ch; }
