@@ -1,7 +1,6 @@
 .orbit-perf-base:
   extends:
     - .job-template
-    - .full-build-image
     - .sccache-template
   stage: benchmark
   timeout: 2h
@@ -9,6 +8,7 @@
   services:
     - docker:dind
   variables:
+    MISE_DISABLE_TOOLS: lefthook
     # docker:dind, mirrors caproni .integration-base
     DOCKER_HOST: tcp://docker:2376
     DOCKER_TLS_CERTDIR: "/certs"
