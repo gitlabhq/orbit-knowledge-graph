@@ -1,14 +1,16 @@
 //! The demo end to end on the demo services (`scripts/services.sh`): query 4 through the
-//! API, its event stream and rows per caller, the package YAML it serves, the page's guard, and
-//! the seed reload.
+//! API, its event stream and rows per caller, its response in each server format, the package
+//! YAML it serves, the page's guard, and the seed reload.
 
 mod support;
 
 use std::net::SocketAddr;
 
+use orbit_demo::Demo;
 use orbit_demo::lockdown::CSP;
+use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter, ToonFormatter};
 use serde_json::{Value, json};
-use support::{checked, exchange, get, post};
+use support::{Response, checked, exchange, get, post};
 
 const DISCUSSED: &str = "MATCH (mr:MergeRequest {state: 'opened'})<-[:DISCUSSES]-(m:SlackMessage) RETURN mr.iid, m.author, m.sent_at ORDER BY mr.iid LIMIT 20";
 
@@ -16,7 +18,7 @@ const DEEP: &str = "MATCH (m:SlackMessage)-[:MENTIONS_ISSUE]->(i:JiraIssue)-[:DE
 
 const QUERY_4: &str = "MATCH (mr:MergeRequest {state: 'opened'})-[:SOURCE_HEAD]->(h:Head)-[:HEAD_FILE]->(f:File) WHERE f.content MATCHES ast('todo!($$$MSG)', 'rust') RETURN mr.iid, h.branch, f.path, match.MSG ORDER BY mr.iid LIMIT 20";
 
-async fn events(page: SocketAddr, caller: &str, query: &str) -> Vec<Value> {
+async fn run(page: SocketAddr, caller: &str, query: &str) -> (u64, Vec<Value>) {
     let host = format!("localhost:{}", page.port());
     let body = json!({"query": query, "caller": caller}).to_string();
     let started = exchange(
@@ -25,15 +27,56 @@ async fn events(page: SocketAddr, caller: &str, query: &str) -> Vec<Value> {
     )
     .await;
     assert_eq!(started.status, 200, "{}", started.body);
-    let id = serde_json::from_str::<Value>(&started.body).unwrap()["run"].clone();
+    let id = serde_json::from_str::<Value>(&started.body).unwrap()["run"]
+        .as_u64()
+        .unwrap();
     let stream = exchange(page, &get(&format!("/api/runs/{id}/events"), &host, "")).await;
     assert_eq!(stream.header("content-type"), Some("text/event-stream"));
-    stream
+    let events = stream
         .body
         .lines()
         .filter_map(|line| line.strip_prefix("data: "))
         .map(|data| serde_json::from_str(data).unwrap())
-        .collect()
+        .collect();
+    (id, events)
+}
+
+async fn events(page: SocketAddr, caller: &str, query: &str) -> Vec<Value> {
+    run(page, caller, query).await.1
+}
+
+async fn result(page: SocketAddr, id: u64, format: &str) -> Response {
+    let host = format!("localhost:{}", page.port());
+    let path = format!("/api/runs/{id}/result?format={format}");
+    exchange(page, &get(&path, &host, "")).await
+}
+
+/// A run's TOON, GQL and Raw formats as the page reads them, each checked against what the
+/// engine's formatter renders from the run's own response.
+async fn formats(demo: &Demo, caller: &str, query: &str) -> [Value; 3] {
+    let page = demo.addresses.page;
+    let (id, _) = run(page, caller, query).await;
+    let log = demo.runs.get(id).unwrap();
+    let output = log.response().unwrap().as_ref().unwrap();
+    let formatters: [(&str, &dyn ResultFormatter); 3] = [
+        ("toon", &ToonFormatter),
+        ("gql", &GqlFormatter),
+        ("raw", &GraphFormatter),
+    ];
+    let mut served = Vec::new();
+    for (format, formatter) in formatters {
+        let response = result(page, id, format).await;
+        assert_eq!(response.status, 200, "{format}: {}", response.body);
+        let body: Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(body, formatter.format(output), "{format}");
+        served.push(body);
+    }
+    served.try_into().unwrap()
+}
+
+fn graph(raw: &Value) -> (usize, usize) {
+    let count = |key: &str| raw[key].as_array().unwrap().len();
+    (count("nodes"), count("edges"))
 }
 
 fn kinds(events: &[Value]) -> Vec<String> {
@@ -227,6 +270,20 @@ async fn the_demo_runs_query_4_and_guards_its_page() {
             "2026-11-10T14:20:00Z"
         ]
     );
+
+    let [toon, gql, raw] = formats(&demo, "maintainer", DISCUSSED).await;
+    assert!(
+        toon.as_str()
+            .unwrap()
+            .starts_with("query_type: traversal\n")
+    );
+    assert!(gql.as_str().unwrap().ends_with("\n11 rows\n"), "{gql}");
+    assert_eq!(graph(&raw), (18, 11));
+    let [_, gql, raw] = formats(&demo, "reporter", DISCUSSED).await;
+    assert!(gql.as_str().unwrap().ends_with("\n3 rows\n"), "{gql}");
+    assert_eq!(graph(&raw), (5, 3));
+    assert_eq!(result(page, 0, "llm").await.status, 400);
+    assert_eq!(result(page, u64::MAX, "toon").await.status, 404);
 
     let deep = events(page, "maintainer", DEEP).await;
     let backends: Vec<&str> =

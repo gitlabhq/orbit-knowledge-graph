@@ -114,7 +114,7 @@ pub struct Runs {
 }
 
 impl Runs {
-    fn get(&self, id: u64) -> Option<Arc<RunLog>> {
+    pub fn get(&self, id: u64) -> Option<Arc<RunLog>> {
         self.logs
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
