@@ -797,6 +797,7 @@ mod tests {
         assert!(edited_since_index(temp.path(), &["a.rs"]).is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn edited_since_index_treats_pathspecs_literally() {
         let (_temp, repo, _base) = committed_repo();

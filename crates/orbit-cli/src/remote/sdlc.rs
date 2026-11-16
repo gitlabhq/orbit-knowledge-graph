@@ -12,8 +12,7 @@ pub(crate) enum Found {
 pub(crate) fn current_branch(dir: &Path) -> Result<String, RemoteError> {
     crate::workspace::repository_at(dir)
         .current_branch_name()
-        .ok()
-        .flatten()
+        .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("could not run git: {e}")))?
         .ok_or_else(|| {
             RemoteError::new(
                 EXIT_GENERIC,
