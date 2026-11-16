@@ -84,7 +84,6 @@ include:
   - local: .gitlab/ci/orbit-perf.yml
   - local: .gitlab/ci/release-local.yml
   - local: .gitlab/ci/stale-mr.yml
-  - local: .gitlab/ci/team-dashboard.yml
   - local: .gitlab/ci/e2e-pin-bump.yml
   - local: .gitlab/ci/doc-principles-sync.yml
   - local: .gitlab/ci/release-deploy-mr.yml
@@ -136,12 +135,18 @@ stages:
       prefix: cargo-home
       files:
         - Cargo.lock
+    fallback_keys:
+      - cargo-home-latest
     paths: *cargo-home-paths
     policy: pull
   push:
     key: *cargo-home-key
     paths: *cargo-home-paths
     # So only merged code writes the cache; set in unit-test.
+    policy: $CARGO_HOME_CACHE_POLICY
+  push-latest:
+    key: cargo-home-latest
+    paths: *cargo-home-paths
     policy: $CARGO_HOME_CACHE_POLICY
 
 # For jobs that resolve no dependencies, and for the release CLI builds,
@@ -945,6 +950,7 @@ unit-test:
         CARGO_HOME_CACHE_POLICY: pull-push
   cache:
     - !reference [.cargo-home-cache, push]
+    - !reference [.cargo-home-cache, push-latest]
   tags:
     - ${RUNNER_LARGE}
   needs: []

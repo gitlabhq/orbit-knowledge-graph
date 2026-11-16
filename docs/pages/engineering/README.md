@@ -22,14 +22,4 @@ Then:
 1. Pick an [open issue](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues). The `orbit::hackathon` label marks good first issues.
 1. [Write your first Orbit query](development/contributor-guides/first-query.md) to see the graph from the inside.
 1. Read [CONTRIBUTING.md](../../../CONTRIBUTING.md) for the conventions for code, docs, issues, and merge requests.
-1. For the full stack on your computer, set up [local development](development/local-development.md).
-
-## Guides
-
-| Section | Contents |
-|---|---|
-| [Development](development/README.md) | How to run Orbit locally, add a language or a data source, and test a change. |
-| [Architecture](architecture/README.md) | The design contracts of each Orbit component. |
-| [Architecture decisions](adr/README.md) | The architecture decision records (ADRs). |
-| [Testing](testing/README.md) | How the Orbit team tests Orbit. |
-| [Runbooks](runbooks/README.md) | How to operate Orbit, recover from failures, and restore Orbit after a disaster. |
+1. GitLab team members can run the full stack on their computer with [local development](development/local-development.md).

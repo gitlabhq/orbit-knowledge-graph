@@ -460,6 +460,26 @@ pub fn git_working_changes(repo_path: &Path) -> Result<GitChanges> {
     Ok(changes.settled())
 }
 
+/// Names that are not UTF-8 are left out, since the graph cannot hold them.
+pub fn git_tracked_ignored(repo_path: &Path) -> Result<Vec<String>> {
+    let listed = git_output(
+        repo_path,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--ignored",
+            "--exclude-standard",
+        ],
+    )?;
+    Ok(listed
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .filter_map(|path| std::str::from_utf8(path).ok())
+        .map(str::to_string)
+        .collect())
+}
+
 fn git_status(repo_path: &Path) -> Result<String> {
     git_stdout(
         repo_path,
@@ -505,6 +525,10 @@ fn parse_porcelain(output: &str, changes: &mut GitChanges) {
 }
 
 fn git_stdout(repo_path: &Path, args: &[&str]) -> Result<String> {
+    String::from_utf8(git_output(repo_path, args)?).context("git output is not valid UTF-8")
+}
+
+fn git_output(repo_path: &Path, args: &[&str]) -> Result<Vec<u8>> {
     let output = Command::new("git")
         .args(args)
         .current_dir(repo_path)
@@ -518,7 +542,7 @@ fn git_stdout(repo_path: &Path, args: &[&str]) -> Result<String> {
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    String::from_utf8(output.stdout).context("git output is not valid UTF-8")
+    Ok(output.stdout)
 }
 
 /// Mask clears the sign bit so the result is always a positive i64.
