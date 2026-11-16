@@ -102,7 +102,6 @@ async fn read_scope_counts(
             let query = (0..entities.len()).fold(query, |query, index| {
                 bind_prefix_parameters(query, &build_scope_parameter_name(index), &[scope])
             });
-            let query = query.with_setting("cancel_http_readonly_queries_on_client_close", "1");
             PARALLEL_REPLICA_SETTINGS
                 .into_iter()
                 .filter(|_| parallel_replicas)
