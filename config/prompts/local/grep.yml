@@ -20,12 +20,14 @@ description: >-
   nodes or short names: `def:`, `class:`, `method:`, `dir:`, and on GitLab `mr:`,
   `issue:`, `branch:`, `commit:`, `comment:`. A trailing `def:` applies to the
   words before it. `file:x` keeps paths containing x, and alone lists them.
-  `code:` is the local provider: `code:def:words`, `code:class:words`, or
-  `code:file:x` narrow it as `def:`, `class:`, and `file:` do.
+  `code:` is the local provider: `code:def:words` and `code:file:x` narrow it
+  as `def:` and `file:` do.
   `repo:group/project` searches that GitLab project. `-F` reads the query literally.
-  A plain search with no paths or filters also searches every connected provider, such as
-  the GitLab group behind `origin`, alongside local code: code prints first, and a
-  provider that has not answered within 3 seconds is left out with a note on stderr.
+  A plain search with no paths, qualifiers, or flags such as -F, -w, -A, or -m also
+  searches every connected provider, such as the GitLab group behind `origin`, alongside
+  local code: code prints first, a provider that has not answered within 3 seconds is
+  left out with a note on stderr, and it exits 0 when any provider matches.
+  `setup --no-gitlab`, `config set gitlab.enabled false`, or ORBIT_NO_GITLAB keeps it local.
   A GitLab kind searches only GitLab, waits for it, and prints tokens for `context`. Name a GitLab project, group, URL,
   `Project[id]`, or `Group[id]` as a path to search it instead. An indexed checkout of that project
   is searched locally; read another project's code with `context repo:group/project`.

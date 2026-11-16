@@ -78,6 +78,7 @@ pub(crate) async fn run(
     };
     let sections = qualifier::apply(query, &mut options, &mut paths);
     let budget = crate::remote::grep::Budget::default();
+    let single = sections.len() == 1;
     let mut found = false;
     for section in sections {
         if found {
@@ -98,6 +99,7 @@ pub(crate) async fn run(
             filter,
             options,
             &budget,
+            single,
         )
         .await
         {
@@ -120,6 +122,7 @@ async fn search(
     mut filter: RecallFilter,
     options: Options,
     budget: &crate::remote::grep::Budget,
+    single: bool,
 ) -> Result<()> {
     let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new("."))).ok();
     let exists = |path: &str| {
@@ -133,6 +136,7 @@ async fn search(
         &filter.kinds,
         &options,
         remote::Checkouts {
+            single,
             exists: &exists,
             indexed: &indexed,
         },

@@ -194,6 +194,16 @@ pub(crate) fn keep_local() {
     NO_GITLAB.store(true, Ordering::Relaxed);
 }
 
+pub(crate) fn remember_gitlab(enabled: bool) {
+    let mut settings = crate::settings::load();
+    if settings.gitlab.enabled == Some(false) || !enabled {
+        settings.gitlab.enabled = (!enabled).then_some(false);
+        if let Err(error) = crate::settings::save(&settings) {
+            eprintln!("orbit: could not save gitlab.enabled: {error:#}");
+        }
+    }
+}
+
 pub(crate) fn keeps_local() -> bool {
     NO_GITLAB.load(Ordering::Relaxed)
 }

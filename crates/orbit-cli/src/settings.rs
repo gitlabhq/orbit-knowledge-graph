@@ -11,6 +11,13 @@ const SETTINGS_FILE: &str = "settings.json";
 #[serde(default)]
 pub struct Settings {
     pub telemetry: TelemetrySettings,
+    pub gitlab: GitlabSettings,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitlabSettings {
+    pub enabled: Option<bool>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -72,6 +79,7 @@ mod tests {
             telemetry: TelemetrySettings {
                 enabled: Some(false),
             },
+            ..Settings::default()
         };
         save_to(dir.path(), &settings).unwrap();
 

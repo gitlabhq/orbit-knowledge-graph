@@ -1035,6 +1035,7 @@ async fn dispatch(
             if no_gitlab {
                 commands::setup::spec::keep_local();
             }
+            commands::setup::spec::remember_gitlab(!no_gitlab);
             let components = commands::setup::Component::from_flags(&install, &skip)?;
             let agent_plugins = commands::setup::Component::AgentPlugins;
             let ask_agent_plugins =

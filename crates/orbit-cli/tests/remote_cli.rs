@@ -1491,7 +1491,68 @@ fn a_plain_grep_with_a_path_or_no_gitlab_stays_local() {
     .output()
     .expect("run orbit binary");
     assert!(String::from_utf8_lossy(&local.stdout).contains("alpha_marker"));
+    for args in [
+        &["grep", "-F", "alpha_marker"][..],
+        &["grep", "-w", "alpha_marker"],
+        &["grep", "-A1", "alpha_marker"],
+        &["grep", "-m", "1", "alpha_marker"],
+        &["grep", "-l", "alpha_marker"],
+        &["grep", "alpha_marker code:def:alpha"],
+    ] {
+        let output = orbit_command(repo.path(), data.path(), &base_url, args)
+            .output()
+            .expect("run orbit binary");
+        assert!(output.status.success(), "{args:?}");
+    }
+    let off = orbit_command(
+        repo.path(),
+        data.path(),
+        &base_url,
+        &["config", "set", "gitlab.enabled", "false"],
+    )
+    .output()
+    .expect("run orbit binary");
+    assert!(
+        off.status.success(),
+        "{}",
+        String::from_utf8_lossy(&off.stderr)
+    );
+    let saved = orbit_command(
+        repo.path(),
+        data.path(),
+        &base_url,
+        &["grep", "alpha_marker"],
+    )
+    .output()
+    .expect("run orbit binary");
+    assert!(String::from_utf8_lossy(&saved.stdout).contains("alpha_marker"));
     assert!(listener.accept().is_err(), "a local grep called GitLab");
+}
+
+#[test]
+fn an_unreachable_gitlab_costs_a_plain_grep_one_quiet_line() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let base_url = format!("http://localhost:{port}");
+    let repo = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[("util.py", "def alpha_marker():\n    return 1\n")],
+    );
+    let data = tempfile::tempdir().unwrap();
+    let output = orbit_command(
+        repo.path(),
+        data.path(),
+        &base_url,
+        &["grep", "alpha_marker"],
+    )
+    .output()
+    .expect("run orbit binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(!stderr.contains("retrying"), "{stderr}");
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(stderr.contains("only code is shown"), "{stderr}");
 }
 
 #[test]

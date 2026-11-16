@@ -9,7 +9,9 @@ use orbit_cli_graphql::queries::namespace_kind::{NamespaceKind, NamespaceKindVar
 use serde::Deserialize;
 
 use super::client::OrbitClient;
-use super::error::{EXIT_FORBIDDEN, EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError};
+use super::error::{
+    EXIT_FORBIDDEN, EXIT_GENERIC, EXIT_UNAUTHENTICATED, EXIT_UNAVAILABLE, RemoteError,
+};
 use super::retry::Policy;
 use super::server_schema::{Anchor, Entities, Entity};
 
@@ -197,7 +199,7 @@ struct Resolved {
 }
 
 impl Resolved {
-    fn new(target: &Target) -> Result<Self, Outcome> {
+    fn new(target: &Target, implicit: bool) -> Result<Self, Outcome> {
         let origin = match target {
             Target::Origin(dir) => match super::origin::project(dir) {
                 Some(origin) => Some(origin),
@@ -211,6 +213,10 @@ impl Resolved {
         };
         let client = OrbitClient::from_env_in(&dir)
             .map_err(|error| Outcome::Skipped(first_line(&error.message)))?;
+        let client = match implicit {
+            true => client.without_retries(),
+            false => client,
+        };
         let api_host = client
             .get_host()
             .map_err(|error| Outcome::Failed(first_line(&error.message)))?;
@@ -242,7 +248,7 @@ impl Resolved {
 }
 
 pub(crate) async fn search(request: Request, query: String) -> Outcome {
-    let resolved = match Resolved::new(&request.target) {
+    let resolved = match Resolved::new(&request.target, request.implicit) {
         Ok(resolved) => resolved,
         Err(outcome) => return outcome,
     };
@@ -439,7 +445,9 @@ fn outcome_for(target: &Target, error: &RemoteError) -> Outcome {
             "Orbit isn't enabled for the GitLab group of this repository's `origin`, or you can't read it"
                 .into(),
         ),
-        EXIT_UNAVAILABLE | EXIT_FORBIDDEN => Outcome::Skipped(first_line(&error.message)),
+        EXIT_UNAVAILABLE | EXIT_FORBIDDEN | EXIT_UNAUTHENTICATED => {
+            Outcome::Skipped(first_line(&error.message))
+        }
         _ => Outcome::Failed(first_line(&error.message)),
     }
 }
