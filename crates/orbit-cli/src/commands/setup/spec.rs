@@ -152,7 +152,23 @@ fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> S
             .trim_end()
             .replace("{{entities}}", &entities.join("\n")),
     };
+    let (providers, finds, narrow) = match (entities.is_empty(), remote) {
+        (false, _) => (
+            " and every provider listed at the end at once",
+            ", discussions, and history",
+            ", or to one provider with `provider:type:words`",
+        ),
+        (true, true) => (
+            " and connected providers at once",
+            ", discussions, and history",
+            "",
+        ),
+        (true, false) => ("", "", ""),
+    };
     let text = text
+        .replace("{{providers}}", providers)
+        .replace("{{finds}}", finds)
+        .replace("{{narrow}}", narrow)
         .replace("{{server_entities}}", &entities)
         .replace("{{query_syntax}}", crate::descriptions::gql_syntax());
     substitute_launcher(&text, launcher)
@@ -676,9 +692,7 @@ mod tests {
                 assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
                 assert!(!rendered.contains("MANDATORY"), "{launcher}: {rendered}");
                 for phrase in [
-                    &format!(
-                        "`{launcher} grep` is one search across every connected provider: your code"
-                    ),
+                    &format!("`{launcher} grep 'words'` searches your code"),
                     "key words before you start",
                     "ignores case, `_`, `-`",
                     "`a|b` OR",
@@ -696,7 +710,7 @@ mod tests {
                     "{launcher}"
                 );
                 assert_eq!(
-                    rendered.contains("MRs, issues, and discussions"),
+                    rendered.contains("connected providers at once"),
                     remote,
                     "{launcher}"
                 );
@@ -726,11 +740,16 @@ mod tests {
         let rendered = render_instructions(GLAB_LAUNCHER, true, &providers);
         assert!(
             rendered.ends_with(
-                "for `glab orbit query` and `glab orbit grep gitlab:type:words`:\n- gitlab: Widget"
+                "for `glab orbit query` and `glab orbit grep provider:type:words`:\n- gitlab: Widget"
             ),
             "{rendered}"
         );
-        assert!(!render_instructions(GLAB_LAUNCHER, false, &providers).contains("Widget"));
+        assert!(rendered.contains("every provider listed at the end"), "{rendered}");
+        assert!(rendered.contains("`provider:type:words`"), "{rendered}");
+        let local = render_instructions(GLAB_LAUNCHER, false, &providers);
+        assert!(!local.contains("Widget"), "{local}");
+        assert!(local.contains("searches your code. Run it"), "{local}");
+        assert!(!local.contains("provider"), "{local}");
     }
 
     const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh"];

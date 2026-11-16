@@ -1,8 +1,8 @@
 name: grep
 version: 2.11.0
-short: Search every line in local code, tests, config, and docs
+short: Search every line in local code, tests, config, and docs, plus connected providers
 description: >-
-  Search every line in local code, tests, config, and docs, like ripgrep.
+  Search every line in local code, tests, config, and docs, plus connected providers, like ripgrep.
   Matching ignores case, `_`, and `-`; quote `a|b|c` for OR alternatives.
   Output follows rg's heading layout: each file's path once, then `line:text` for each match.
   A `line-» Kind name:start-end` line precedes the matches inside each definition.
@@ -21,8 +21,10 @@ description: >-
   `issue:`, `branch:`, `commit:`, `comment:`. A trailing `def:` applies to the
   words before it. `file:x` keeps paths containing x, and alone lists them.
   `repo:group/project` searches that GitLab project. `-F` reads the query literally.
-  A plain search covers local code only. A GitLab kind searches the GitLab group
-  behind `origin` and prints tokens for `context`. Name a GitLab project, group, URL,
+  A plain search with no paths or filters also searches every connected provider, such as
+  the GitLab group behind `origin`, alongside local code: code prints first, and a
+  provider that has not answered within 3 seconds is left out with a note on stderr.
+  A GitLab kind searches only GitLab, waits for it, and prints tokens for `context`. Name a GitLab project, group, URL,
   `Project[id]`, or `Group[id]` as a path to search it instead. An indexed checkout of that project
   is searched locally; read another project's code with `context repo:group/project`.
   GitLab kinds: `issue:`, `mr:`, `comment:`, `commit:`, `milestone:`, `user:`,

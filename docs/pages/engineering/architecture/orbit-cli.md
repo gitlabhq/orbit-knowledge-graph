@@ -64,7 +64,7 @@ The main commands that read the local graph are:
 - `glab orbit grep` works like grep. It shows each match inside its enclosing
   definition, with that definition's callers and callees. When authenticated
   with `glab`, a GitLab kind such as `mr:` or `issue:` searches the top-level
-  group behind `origin`; a plain search covers local code only.
+  group behind `origin`; a plain search with no paths or filters also searches it, alongside local code, with a 3 second deadline.
 - `glab orbit context` expands a definition, a file, a line range, or a
   folder. When authenticated with `glab`, it also reads GitLab targets such as
   `mr:42`, `issue:7`, and `pipeline:123`.
