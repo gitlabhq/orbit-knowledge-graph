@@ -1456,7 +1456,9 @@ fn a_plain_grep_searches_local_code_and_gitlab_together() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let code = stdout.find("util.py").expect("local hits");
-    let gitlab = stdout.find("MergeRequest[42]  Add runner").expect("GitLab hits");
+    let gitlab = stdout
+        .find("MergeRequest[42]  Add runner")
+        .expect("GitLab hits");
     assert!(code < gitlab, "{stdout}");
 }
 
@@ -1518,5 +1520,9 @@ fn a_slow_gitlab_does_not_hold_back_local_hits() {
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("alpha_marker"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("only code is shown"));
-    assert!(started.elapsed() < Duration::from_secs(8), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        started.elapsed()
+    );
 }

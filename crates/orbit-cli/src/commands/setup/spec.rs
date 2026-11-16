@@ -100,7 +100,7 @@ struct SetupTexts {
     instructions: String,
     #[serde(default)]
     remote: BTreeMap<String, String>,
-    server_entities: String,
+    code_entities: String,
     nudge_search: String,
     nudge_gitlab: String,
     #[serde(default)]
@@ -140,36 +140,31 @@ fn render_instructions(launcher: &str, remote: bool, providers: &Providers) -> S
         let value = if remote { value.as_str() } else { "" };
         text = text.replace(&format!("{{{{{name}}}}}"), value);
     }
-    let entities = providers
-        .iter()
-        .filter(|(_, entities)| remote && !entities.is_empty())
-        .map(|(name, entities)| format!("- {name}: {}", entities.join(", ")))
-        .collect::<Vec<_>>();
-    let entities = match entities.is_empty() {
-        true => String::new(),
-        false => TEXTS
-            .server_entities
-            .trim_end()
-            .replace("{{entities}}", &entities.join("\n")),
-    };
-    let (providers, finds, narrow) = match (entities.is_empty(), remote) {
-        (false, _) => (
-            " and every provider listed at the end at once",
-            ", discussions, and history",
-            ", or to one provider with `provider:type:words`",
-        ),
-        (true, true) => (
-            " and connected providers at once",
-            ", discussions, and history",
-            "",
-        ),
-        (true, false) => ("", "", ""),
-    };
+    let mut listed = vec![format!(
+        "- {}: {}",
+        crate::commands::grep::CODE,
+        TEXTS.code_entities.trim()
+    )];
+    let gitlab = crate::remote::server_schema::PROVIDER;
+    if remote
+        && !providers
+            .get(gitlab)
+            .is_some_and(|entities| !entities.is_empty())
+    {
+        listed.push(format!(
+            "- {gitlab}: {}",
+            crate::remote::grep::searched_kinds().join(", ")
+        ));
+    }
+    listed.extend(
+        providers
+            .iter()
+            .filter(|(name, entities)| !entities.is_empty() && (remote || name.as_str() != gitlab))
+            .map(|(name, entities)| format!("- {name}: {}", entities.join(", "))),
+    );
+    listed.sort();
     let text = text
-        .replace("{{providers}}", providers)
-        .replace("{{finds}}", finds)
-        .replace("{{narrow}}", narrow)
-        .replace("{{server_entities}}", &entities)
+        .replace("{{entities}}", &listed.join("\n"))
         .replace("{{query_syntax}}", crate::descriptions::gql_syntax());
     substitute_launcher(&text, launcher)
 }
@@ -692,8 +687,10 @@ mod tests {
                 assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
                 assert!(!rendered.contains("MANDATORY"), "{launcher}: {rendered}");
                 for phrase in [
-                    &format!("`{launcher} grep 'words'` searches your code"),
-                    "key words before you start",
+                    &format!("`{launcher} grep 'words'` searches every provider below"),
+                    "`code:def:words`",
+                    "\n- code: Definition, File, Directory",
+                    "Run it first, on a task's key words",
                     "ignores case, `_`, `-`",
                     "`a|b` OR",
                     "Batch the reads and searches you can name",
@@ -709,47 +706,56 @@ mod tests {
                     rendered.contains("rather than glab and glab api") == remote,
                     "{launcher}"
                 );
+                assert_eq!(rendered.contains("`gitlab:mr:words`"), remote, "{launcher}");
                 assert_eq!(
-                    rendered.contains("connected providers at once"),
+                    rendered.contains("\n- gitlab: WorkItem, MergeRequest"),
                     remote,
                     "{launcher}"
                 );
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
                 assert!(!rendered.contains("`branch:`"), "{launcher}");
-                let budget = if remote { 255 } else { 80 };
+                let budget = if remote { 255 } else { 90 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
         let local = render_instructions(DIRECT_LAUNCHER, false, &Providers::new());
         assert_eq!(
             local.lines().filter(|line| line.starts_with("- ")).count(),
-            2,
+            3,
             "{local}"
         );
         assert!(!search_nudge_text().contains("MANDATORY"));
         assert!(search_nudge_text().contains("every connected provider"));
         assert!(!gitlab_nudge_text().contains("MANDATORY"));
-        assert!(gitlab_nudge_text().contains("`milestone:`"));
+        assert!(search_nudge_text().contains("`code:def:words`"));
+        assert!(gitlab_nudge_text().contains("`gitlab:mr:words`"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }
 
     #[test]
-    fn server_entities_get_their_own_block_and_leave_grep_alone() {
-        let providers = Providers::from([("gitlab".into(), vec!["Widget".into()])]);
+    fn every_provider_is_listed_with_code_first_and_gitlab_only_when_reached() {
+        let providers = Providers::from([
+            ("gitlab".into(), vec!["Widget".into()]),
+            ("slack".into(), vec!["SlackMessage".into()]),
+        ]);
         let rendered = render_instructions(GLAB_LAUNCHER, true, &providers);
         assert!(
             rendered.ends_with(
-                "for `glab orbit query` and `glab orbit grep provider:type:words`:\n- gitlab: Widget"
+                "for `glab orbit grep provider:type:words` and `glab orbit query`:\n\
+                 - code: Definition, File, Directory\n- gitlab: Widget\n- slack: SlackMessage"
             ),
             "{rendered}"
         );
-        assert!(rendered.contains("every provider listed at the end"), "{rendered}");
-        assert!(rendered.contains("`provider:type:words`"), "{rendered}");
         let local = render_instructions(GLAB_LAUNCHER, false, &providers);
+        assert!(
+            local.ends_with(
+                "for `glab orbit grep provider:type:words`:\n\
+                 - code: Definition, File, Directory\n- slack: SlackMessage"
+            ),
+            "{local}"
+        );
         assert!(!local.contains("Widget"), "{local}");
-        assert!(local.contains("searches your code. Run it"), "{local}");
-        assert!(!local.contains("provider"), "{local}");
     }
 
     const UNLABELED: &[&str] = &["hook-guard", "send-event", "refresh"];

@@ -142,7 +142,10 @@ mod tests {
         for query in [r"\.route(", r"foo\(bar"] {
             let found = matcher(&[Term::parse(query)], &options).unwrap();
             let line = query.replace('\\', "");
-            assert!(found.is_match(format!("x{line}y").as_bytes()).unwrap(), "{query}");
+            assert!(
+                found.is_match(format!("x{line}y").as_bytes()).unwrap(),
+                "{query}"
+            );
         }
         let both = [Term::parse("Router::new"), Term::parse(r"\.route(")];
         let found = matcher(&both, &options).unwrap();
