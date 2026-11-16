@@ -26,10 +26,8 @@ pub(super) fn directory(root: &Path) -> Result<Repository> {
     })
 }
 
-/// The per-path load opens a file's parent without following symlinks, so it
-/// fails when a file or symlink replaced a directory above a tracked path. Git
-/// does not always report such a path as removed (sparse checkout,
-/// skip-worktree, assume-unchanged), so it counts as absent here.
+/// The per-path load fails on a parent that is no longer a real directory, and
+/// sparse checkout, skip-worktree or assume-unchanged can keep such paths listed.
 fn under_real_directories(root: &Path, path: &str) -> bool {
     Path::new(path)
         .ancestors()
@@ -38,8 +36,6 @@ fn under_real_directories(root: &Path, path: &str) -> bool {
         .all(|parent| std::fs::symlink_metadata(root.join(parent)).is_ok_and(|meta| meta.is_dir()))
 }
 
-/// The walk skips ignored directories whole, so the files git tracks under them
-/// are offered by path, as the server indexes every tracked file.
 struct WorkingTree<'a> {
     root: &'a Path,
     tracked_ignored: Vec<String>,

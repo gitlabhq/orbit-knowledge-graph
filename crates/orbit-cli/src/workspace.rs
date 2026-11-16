@@ -460,9 +460,7 @@ pub fn git_working_changes(repo_path: &Path) -> Result<GitChanges> {
     Ok(changes.settled())
 }
 
-/// Files in the index that the ignore rules match, such as files force-added
-/// under an ignored directory. Names that are not UTF-8 are left out, since the
-/// graph cannot hold them.
+/// Names that are not UTF-8 are left out, since the graph cannot hold them.
 pub fn git_tracked_ignored(repo_path: &Path) -> Result<Vec<String>> {
     let listed = git_output(
         repo_path,
