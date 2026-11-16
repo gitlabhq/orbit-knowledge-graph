@@ -128,8 +128,20 @@ FROM targets t
 JOIN gl_edge e ON e.source_id = t.target_id OR e.target_id = t.target_id
 LEFT JOIN import_files i ON i.id = e.source_id
 JOIN labels l ON l.id = CASE WHEN e.source_id = t.target_id THEN e.target_id ELSE COALESCE(i.file_id, e.source_id) END
-WHERE e.relationship_kind <> 'DEFINES'
-  AND (t.path IS NULL OR l.path <> t.path OR l.reference = 'external/unresolved')
+WHERE (
+    e.relationship_kind = 'DEFINES'
+    AND EXISTS (SELECT 1 FROM labels s WHERE s.id = t.target_id AND s.def_kind = 'Section')
+    AND NOT (
+      l.reference LIKE 'File:%'
+      AND EXISTS (
+        SELECT 1 FROM gl_edge p
+        WHERE p.target_id = e.target_id AND p.relationship_kind = 'DEFINES' AND p.source_id <> e.source_id
+      )
+    )
+  ) OR (
+    e.relationship_kind <> 'DEFINES'
+    AND (t.path IS NULL OR l.path <> t.path OR l.reference = 'external/unresolved')
+  )
 ORDER BY t.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
         ),
         &params,
