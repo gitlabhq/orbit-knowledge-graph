@@ -371,7 +371,6 @@ agent-plugins-nightly:
     - cd packages/agent-plugins-nightly
     - bun run test
 
-# One xtask build for all generated-file checks; no check needs the loadtest feature.
 xtask-build:
   stage: lint
   extends:
@@ -1195,27 +1194,13 @@ container_scanning:
       variables:
         CS_IMAGE: ${CI_REGISTRY_IMAGE}/gkg:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}
 
-# Manual MR image build. orbit-perf:mr builds its own image in its child pipeline.
 docker-build-mr:
-  stage: build
-  image: docker:29
-  tags:
-    - ${RUNNER_LARGE}
-  needs: []
-  services:
-    - name: docker:29-dind
-      alias: docker
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    IMAGE_NAME: gkg
+  extends: .docker-build-mr
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
       interruptible: true
-  script:
-    - ./scripts/release/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
 # Tag = Dockerfile hash; the e2e job resolves the same tag.
 e2e-robot-image:

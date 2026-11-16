@@ -11,21 +11,8 @@ variables:
   CI_MERGE_REQUEST_IID: $ORBIT_PERF_MR_IID
 
 docker-build-mr:
-  stage: build
-  image: docker:29
-  tags:
-    - ${RUNNER_LARGE}
-  needs: []
+  extends: .docker-build-mr
   interruptible: true
-  services:
-    - name: docker:29-dind
-      alias: docker
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    IMAGE_NAME: gkg
-  script:
-    - ./scripts/release/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${ORBIT_PERF_MR_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
 orbit-perf:mr:
   extends: .orbit-perf-base
