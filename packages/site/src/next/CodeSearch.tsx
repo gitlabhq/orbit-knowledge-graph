@@ -226,10 +226,11 @@ export function CodeSearch({ onSearch }: { onSearch?: (search: Search | null) =>
         </div>
         {run && <Thread key={run.start} search={run.search} stage={stage} />}
         <form onSubmit={submit} className="agent-prompt-box" aria-label="Search">
-          {run?.search.steps && (
-            // A third-party example shows the tools it reads, as chips above the input.
+          {run && (
+            // The tools an example reads, as chips above the input: code search for a code example, and each
+            // tool for a third-party one. Every example shows a row, so the chat keeps one height.
             <ul className="agent-prompt-chips" aria-label="Tools">
-              {[...new Map(run.search.steps.map((step) => [step.tool, step.icon])).entries()].map(([tool, icon]) => (
+              {[...new Map((run.search.steps ?? [{ tool: "Code search", icon: "code" }]).map((step) => [step.tool, step.icon])).entries()].map(([tool, icon]) => (
                 <li key={tool} className="agent-prompt-chip">
                   <Icon name={icon} size={12} />
                   {tool}

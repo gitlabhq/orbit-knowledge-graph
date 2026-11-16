@@ -777,7 +777,7 @@
 }
 
 .next-demo-example-on {
-  border-color: color-mix(in srgb, var(--gl-text-color-default) 18%, transparent);
+  background: color-mix(in srgb, var(--gl-text-color-default) 10%, transparent);
   color: var(--gl-text-color-default);
 }
 
@@ -1053,21 +1053,29 @@
   opacity: 0.45;
 }
 
-/* The headline is 2.0625rem shorter than the home page's, so the demo starts that much further below it and
-   the chat lands where the home page chat does. */
+/* The demo starts close under the headline. */
 .next-hero .next-hero-demo {
-  margin-top: calc(3rem + 2.0625rem);
+  margin-top: 2.5rem;
 }
 
 
-/* The examples start a little above the chat, beside the headline's last line. */
-@media (min-width: 1100px) {
-  .next-demo-examples {
-    margin-top: -3rem;
-  }
-}
+
 
 /* The Orbit Next headline sits higher than the home page's, with the demo just below it. */
 .orbit-hero.orbit-hero-lg.next-hero {
   padding-top: 8rem;
+}
+
+
+
+/* The examples start a little below the chat's top edge. */
+@media (min-width: 1100px) {
+  .next-demo-examples {
+    margin-top: 4.5rem;
+  }
+}
+
+/* Typed text keeps the placeholder's size, before and after an answer. */
+.next-chat.agent-chat .agent-prompt-input {
+  font-size: var(--gl-font-size-400);
 }

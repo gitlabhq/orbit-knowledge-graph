@@ -17,7 +17,7 @@ export const Route = createFileRoute("/next")({
 // The field and the log share one loop.
 const LOOP = 12000;
 const INCIDENT = CROSS_SEARCHES.find((search) => search.id === "incident")!;
-const AT = [0.03, 0.11, 0.19, 0.27, 0.35, 0.43, 0.7];
+const AT = [0.03, 0.11, 0.19, 0.3, 0.41, 0.7];
 // The same incident and route as the hero's "Resolve an incident" example.
 const HOPS: Hop[] = INCIDENT.steps!.map((step, index) => ({ tool: step.tool, label: step.name, x: INCIDENT.points![index]![0], y: INCIDENT.points![index]![1], at: AT[index]!, tone: step.tone }));
 // Each read is one tool call. What it finds shows on the map, so the log keeps only the calls and the fix.
@@ -25,9 +25,8 @@ const LOG: RippleLogLine[] = [
   { at: 0.03, tool: true, text: "Explore incident.io" },
   { at: 0.11, tool: true, text: "Explore Grafana" },
   { at: 0.19, tool: true, text: "Explore GitLab" },
-  { at: 0.27, tool: true, text: "Explore Jira" },
-  { at: 0.35, tool: true, text: "Explore Slack" },
-  { at: 0.43, tool: true, text: "Explore code search" },
+  { at: 0.3, tool: true, text: "Explore Slack" },
+  { at: 0.41, tool: true, text: "Explore code search" },
   { at: 0.52, text: "Adding a timeout to cache.get." },
   { at: 0.6, tone: "ok", text: "checkout-api!43 opened, pipeline passed" },
   { at: 0.7, tone: "ok", text: "!43 deployed to production" },
@@ -109,7 +108,7 @@ function NextPage() {
           ))}
         </ul>
         <div className="ripple-stage">
-          <div className="ripple-nodes hop-nodes" role="img" aria-label="Your agent starts at an incident in incident.io, follows the alert in Grafana to a deploy in GitLab, reads the Jira story and the Slack thread behind it, finds the line of code with code search, and ships the merge request that fixes it." />
+          <div className="ripple-nodes hop-nodes" role="img" aria-label="Your agent starts at an incident in incident.io, follows the alert in Grafana to a deploy in GitLab, reads the Slack thread behind it, finds the line of code with code search, and ships the merge request that fixes it." />
           <RippleLog lines={LOG} loop={LOOP} />
         </div>
       </Section>
