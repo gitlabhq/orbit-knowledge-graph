@@ -38,3 +38,12 @@ else
     ) &
   fi
 fi
+
+export E2E_CLI_IMAGE="${CI_REGISTRY_IMAGE}/orbit-cli-e2e:${CI_COMMIT_SHORT_SHA}"
+E2E_CLI_PID=""
+if docker manifest inspect "$E2E_CLI_IMAGE" >/dev/null 2>&1; then
+  echo "Reusing existing image ${E2E_CLI_IMAGE}"
+else
+  bash scripts/ci/fetch-orbit-cli.sh "$E2E_CLI_IMAGE" > e2e-cli-image.log 2>&1 &
+  E2E_CLI_PID=$!
+fi

@@ -994,11 +994,15 @@ cli-integration-test:
   needs: []
   script:
     - cargo build -p orbit-cli
+    - bash scripts/ci/stage-orbit-cli.sh orbit-cli-e2e
     - cargo nextest run --profile ci --test cli --test outside_repository --no-fail-fast
     - mv target/nextest/ci/junit.xml target/nextest/ci/junit-cli.xml
     - cargo nextest run --profile ci -p orbit-cli --test remote_cli --test no_index --no-fail-fast
     - sccache --show-stats || true
   artifacts:
+    paths:
+      - orbit-cli-e2e/
+    expire_in: 1 day
     reports:
       junit:
         - target/nextest/ci/junit-cli.xml
@@ -1633,6 +1637,16 @@ e2e:
           exit 1
         fi
         tail -3 e2e-image-build.log
+      fi
+    - |
+      if [ -n "${E2E_CLI_PID:-}" ] && ! wait "$E2E_CLI_PID"; then
+        tail -20 e2e-cli-image.log
+        if [ "${CI_COMMIT_BRANCH:-}" = "$CI_DEFAULT_BRANCH" ] || [ "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" = "automation/e2e-pin-bump" ]; then
+          echo "ERROR: no orbit CLI image; the CLI suite must run on this branch"
+          exit 1
+        fi
+        echo "WARNING: no orbit CLI image; the CLI suite skips"
+        unset E2E_CLI_IMAGE
       fi
     - bash e2e/scripts/test.sh
   after_script:
