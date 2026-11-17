@@ -714,9 +714,9 @@ mod tests {
                 assert!(!rendered.contains("MANDATORY"), "{launcher}: {rendered}");
                 for phrase in [
                     &format!("`{launcher} grep 'words'` searches every provider below"),
-                    "`code:def:words`",
+                    "`code:def:Name`",
                     "\n- code (local code): Definition, Directory, File",
-                    "Run it first, on a task's key words",
+                    "Run it first on the task's key words",
                     "Ignores case, `_`, `-`",
                     "`a|b` OR",
                     "Batch the reads and searches you can name",
@@ -741,7 +741,7 @@ mod tests {
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
                 assert!(!rendered.contains("`branch:`"), "{launcher}");
                 let budget = if remote { 255 } else { 90 };
-                assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
+                assert!(rendered.split_whitespace().count() <= budget, "{launcher}: {} words", rendered.split_whitespace().count());
             }
         }
         let local = render_instructions(DIRECT_LAUNCHER, false, &Providers::new());
@@ -753,7 +753,7 @@ mod tests {
         assert!(!search_nudge_text().contains("MANDATORY"));
         assert!(search_nudge_text().contains("every connected provider"));
         assert!(!gitlab_nudge_text().contains("MANDATORY"));
-        assert!(search_nudge_text().contains("`code:def:words`"));
+        assert!(search_nudge_text().contains("`code:def:Name`"));
         assert!(gitlab_nudge_text().contains("`gitlab:mr:words`"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
