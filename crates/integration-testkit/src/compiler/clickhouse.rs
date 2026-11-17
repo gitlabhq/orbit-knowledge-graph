@@ -83,7 +83,7 @@ fn compile(
     let security = crate::query_scenario::build_security(&scenario.security);
     match &scenario.hydration {
         Some(setup) => {
-            let (input, options) = hydration_input(setup, language, raw, model)?;
+            let (input, options) = hydration_input(setup, raw, model)?;
             compiler::compile_input_model(input, options, model, &security)
         }
         None => {

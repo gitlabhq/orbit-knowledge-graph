@@ -16,16 +16,6 @@ cases:
         allow:
           project: [1000, 1001]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "start", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}},
-            {"id": "callee", "entity": "Definition", "id_range": {"start": 12003, "end": 12003}}
-          ],
-          "relationships": [{"type": "CALLS", "from": "start", "to": "callee", "hops": [2, 2]}],
-          "limit": 10
-        }
       gql: |
         MATCH (start:Definition)-[:CALLS*2..2]->(callee:Definition) WHERE start.id >= 12000 AND start.id <= 12999 AND callee.id = 12003 RETURN start, callee LIMIT 10
     expect:
@@ -43,16 +33,6 @@ cases:
         allow:
           project: [1000]
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "start", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}},
-            {"id": "callee", "entity": "Definition", "id_range": {"start": 12003, "end": 12003}}
-          ],
-          "relationships": [{"type": "CALLS", "from": "start", "to": "callee", "hops": [2, 2]}],
-          "limit": 10
-        }
       gql: |
         MATCH (start:Definition)-[:CALLS*2..2]->(callee:Definition) WHERE start.id >= 12000 AND start.id <= 12999 AND callee.id = 12003 RETURN start, callee LIMIT 10
     expect:

@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use compiler::Frontend;
 use compiler::config::{self, CompilerCtx};
 use compiler::passes::{frontend, normalize, plan};
 use duckdb_client::{DuckDbClient, OpenMode};
@@ -746,38 +747,22 @@ fn check_pipeline(
         label,
     };
     match (backend, language, scenario.hydration.as_ref()) {
-        ("clickhouse", _, Some(setup)) => {
-            match hydration_input(setup, language, raw, remote.as_ref()) {
-                Ok((input, options)) => {
-                    let mut ctx = config::ChHydrationCtx::new(security(), Arc::clone(remote));
-                    ctx.set_input(input);
-                    ctx.set_hydration_options(options);
-                    observe.run(ctx, config::ChHydrationCtx::PHASES, |ctx, f| {
-                        config::run_ch_hydration_observed(ctx, f)
-                    })
-                }
-                Err(error) => (vec![format!("{label}: {error}")], None),
+        ("clickhouse", _, Some(setup)) => match hydration_input(setup, raw, remote.as_ref()) {
+            Ok((input, options)) => {
+                let mut ctx = config::ChHydrationCtx::new(security(), Arc::clone(remote));
+                ctx.set_input(input);
+                ctx.set_hydration_options(options);
+                observe.run(ctx, config::ChHydrationCtx::PHASES, |ctx, f| {
+                    config::run_ch_hydration_observed(ctx, f)
+                })
             }
-        }
-        ("clickhouse", "json", None) => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(security(), Arc::clone(remote));
-            ctx.set_raw(raw.to_string());
-            observe.run(ctx, config::ClickhouseJsonDslCtx::PHASES, |ctx, f| {
-                config::run_clickhouse_json_dsl_observed(ctx, f)
-            })
-        }
+            Err(error) => (vec![format!("{label}: {error}")], None),
+        },
         ("clickhouse", "gql", None) => {
             let mut ctx = config::ClickhouseGqlCtx::new(security(), Arc::clone(remote));
             ctx.set_raw(raw.to_string());
             observe.run(ctx, config::ClickhouseGqlCtx::PHASES, |ctx, f| {
                 config::run_clickhouse_gql_observed(ctx, f)
-            })
-        }
-        ("duckdb", "json", None) => {
-            let mut ctx = config::DuckdbJsonDslCtx::new(Arc::clone(&models.local));
-            ctx.set_raw(raw.to_string());
-            observe.run(ctx, config::DuckdbJsonDslCtx::PHASES, |ctx, f| {
-                config::run_duckdb_json_dsl_observed(ctx, f)
             })
         }
         ("duckdb", "gql", None) => {
@@ -796,14 +781,10 @@ fn check_pipeline(
 
 fn hydration_input(
     setup: &HydrationSetup,
-    language: &str,
     raw: &str,
     model: &ClickHouseDataModel,
 ) -> compiler::Result<(compiler::input::Input, plan::HydrationCompileOptions)> {
-    let input = match language {
-        "json" => frontend::json_dsl::parse(raw, model)?,
-        _ => frontend::gql::parse(raw)?,
-    };
+    let input = frontend::gql::parse(raw)?;
     let mut input = normalize::normalize(input, model)?;
     input.query_type = compiler::input::QueryType::Hydration;
     for (alias, columns) in &setup.columns {
@@ -1425,7 +1406,6 @@ fn fixtures_name_phases_that_run_and_fields_they_write() {
 cases:
   - name: targets
     query:
-      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}]}'
       gql: 'MATCH (u:User {id: 1}) RETURN u'
     physical:
       clickhouse:
@@ -1445,21 +1425,21 @@ cases:
     )
     .unwrap_err();
 
-    for frontend in ["json", "gql"] {
-        assert!(failures.iter().any(|failure| failure.contains(&format!(
-            "[{frontend}/clickhouse]: phase planner does not run"
-        ))));
-        assert!(failures.iter().any(|failure| failure.contains(&format!(
-            "[{frontend}/clickhouse].normalize: phase normalize does not write output"
-        ))));
-    }
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("[gql/clickhouse]: phase planner does not run"))
+    );
+    assert!(failures.iter().any(|failure| {
+        failure.contains("[gql/clickhouse].normalize: phase normalize does not write output")
+    }));
 }
 
 #[test]
 fn aliases_resolve_to_state_fields_and_reject_double_targets() {
     let parse = |physical: &str| {
         orbit_utils::yaml::from_str::<Scenario>(&format!(
-            "name: aliases\nquery: {{json: q, gql: q}}\nlogical: {{expect: ['(_)']}}\nphysical: {physical}"
+            "name: aliases\nquery: {{gql: q}}\nlogical: {{expect: ['(_)']}}\nphysical: {physical}"
         ))
     };
     let scenario = parse("{clickhouse: {planned: {expect: ['(_)']}, point_lookup: true, sql: {contains: [x]}, indexes: [{table: t, name: i}]}, duckdb: {emitted: {expect: ['(_)']}}}").unwrap();
@@ -1484,7 +1464,7 @@ fn rejections_check_the_phase_reason_and_message() {
     let directory = tempfile::tempdir().unwrap();
     let case = |name: &str, gql: &str, rejected: &str| {
         format!(
-            "  - name: {name}\n    query: {{gql: '{gql}'}}\n    missing_frontends: {{json: GQL only}}\n    physical:\n      clickhouse:\n{rejected}"
+            "  - name: {name}\n    query: {{gql: '{gql}'}}\n    physical:\n      clickhouse:\n{rejected}"
         )
     };
     let cases = [
