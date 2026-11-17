@@ -77,7 +77,7 @@ To create the Secrets:
 
    ```shell
    kubectl -n gitlab-orbit create secret generic dip-clickhouse-dsn \
-     --from-literal=CLICKHOUSE_DSN='clickhouse://dip:<dip_password>@<clickhouse_host>:9000/snowplow'
+     --from-literal=CLICKHOUSE_DSN='clickhouse://dip:<dip_password>@<clickhouse_host>:9000'
    kubectl -n gitlab-orbit create secret generic dip-serviceping-exporter \
      --from-literal=password='<exporter_password>'
    kubectl -n gitlab-orbit create secret generic gitlab-service-ping-key \
