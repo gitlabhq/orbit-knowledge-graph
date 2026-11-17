@@ -135,7 +135,8 @@ For every value, see the [DIP chart README](https://gitlab.com/gitlab-org/analyt
 
 ## Install the Service Ping exporter
 
-The exporter is a weekly CronJob. It starts in `dry-run` mode, which builds each payload and logs it without sending anything.
+The exporter is a weekly CronJob.
+It starts in `dry-run` mode, which builds each payload and logs it without sending anything.
 
 To install the exporter:
 
@@ -143,8 +144,7 @@ To install the exporter:
 
    ```yaml
    gitlab:
-     # The GitLab address the cluster reaches, as in orbit-values.yaml.
-     url: https://gitlab.example.com
+     url: <gitlab_url>
      keySecret:
        name: gitlab-service-ping-key
    clickhouse:
@@ -152,10 +152,15 @@ To install the exporter:
      passwordSecret:
        secretName: dip-serviceping-exporter
    component:
-     # The GitLab Orbit version you run, from image.tag in orbit-values.yaml.
      version: "<orbit_version>"
    command: dry-run
    ```
+
+   Replace the following values:
+
+   - `<gitlab_url>`: The GitLab address the cluster reaches, the same as `gitlab.baseUrl` in `orbit-values.yaml`.
+   - `<clickhouse_host>`: The host name of your ClickHouse server.
+   - `<orbit_version>`: The GitLab Orbit version you run, from `image.tag` in `orbit-values.yaml`.
 
 1. Install the chart:
 
@@ -165,8 +170,13 @@ To install the exporter:
      --version 0.1.0 --namespace gitlab-orbit --values exporter-values.yaml
    ```
 
-Keep `command: dry-run` until [Verify the setup](#verify-the-setup) shows a payload with your events.
-Then set `command: run` and upgrade the release. From then on the CronJob posts every Monday at 03:00 UTC.
+Keep `command: dry-run` until [Verify the setup](#verify-the-setup) shows a payload for a closed week with your events.
+Then set `command: run` and upgrade the release.
+From then on the CronJob posts every Monday at 03:00 UTC.
+Until GitLab turns on the `component_usage_data` endpoint on `version.gitlab.com`, each run logs a `404` and keeps the payload pending for up to five weeks.
+
+For ClickHouse over TLS, store a full DSN ending in `?secure=true` in a Secret and set `clickhouse.existingSecret` to its name instead of `clickhouse.host` and `clickhouse.passwordSecret`.
+For every value, see the [exporter chart](https://gitlab.com/gitlab-org/analytics-section/analytics-instrumentation/serviceping-exporter/-/tree/main/charts/serviceping-exporter).
 
 ## Point GitLab Orbit at the Data Insights Platform
 
