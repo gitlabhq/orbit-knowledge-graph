@@ -5,16 +5,8 @@ use orbit_cli_graphql::ORBIT_SINCE;
 
 const TAG: &str = "@gl_introduced(version: \"";
 
-fn release_line(version: &str) -> (u64, u64) {
-    let mut parts = version.split('.').map(|part| {
-        part.parse::<u64>()
-            .unwrap_or_else(|_| panic!("{version}: not a version"))
-    });
-    (parts.next().expect("major"), parts.next().expect("minor"))
-}
-
 #[test]
-fn only_fields_newer_than_the_first_orbit_release_are_tagged() {
+fn only_fields_newer_than_the_orbit_floor_are_tagged() {
     let (major, minor, _) = ORBIT_SINCE[0];
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("queries");
     let mut tagged = 0;
@@ -27,10 +19,11 @@ fn only_fields_newer_than_the_first_orbit_release_are_tagged() {
                 .next()
                 .expect("closing quote");
             tagged += 1;
+            let tag = semver::Version::parse(version).expect("tag version");
             assert!(
-                release_line(version) > (major, minor),
-                "{}: a field tagged {version} is stripped on GitLab {major}.{minor}.x, \
-                 which serves every untagged Orbit field",
+                (tag.major, tag.minor) > (major, minor),
+                "{}: tag {version} is not newer than the Orbit floor {major}.{minor}, \
+                 which already serves the field; remove the tag",
                 path.display(),
             );
         }

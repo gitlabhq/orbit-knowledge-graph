@@ -11,6 +11,9 @@ workspace = true
 cynic = { workspace = true }
 serde = { workspace = true }
 
+[dev-dependencies]
+semver = { workspace = true }
+
 [build-dependencies]
 cynic-codegen = { workspace = true }
 cynic-querygen = { workspace = true }

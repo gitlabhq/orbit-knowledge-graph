@@ -29,13 +29,6 @@ fn serve(replies: &'static [(u16, Option<&'static str>)]) -> MockServer {
             reader
                 .read_line(&mut request_line)
                 .expect("read request line");
-            if request_line.starts_with("GET /api/v4/version") {
-                let _ = write!(
-                    stream,
-                    "HTTP/1.1 404 X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                );
-                continue;
-            }
             let mut content_length = 0;
             loop {
                 let mut line = String::new();
@@ -51,6 +44,13 @@ fn serve(replies: &'static [(u16, Option<&'static str>)]) -> MockServer {
             reader
                 .read_exact(&mut vec![0; content_length])
                 .expect("read body");
+            if request_line.starts_with("GET /api/v4/version") {
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 404 X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                continue;
+            }
             let index = served.fetch_add(1, Ordering::SeqCst).min(replies.len() - 1);
             let (status, retry_after) = replies[index];
             let retry_after = retry_after

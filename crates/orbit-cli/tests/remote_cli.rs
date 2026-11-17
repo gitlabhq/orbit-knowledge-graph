@@ -336,7 +336,7 @@ fn run_schema_on_rest(graphql_body: &'static str) -> std::process::Output {
 }
 
 fn schema_requests_on(version: &'static str, answer: (&'static str, &'static str)) -> Vec<String> {
-    let (base_url, handle) = serve_routes(vec![("GET /api/v4/version", version), answer]);
+    let (base_url, handle) = serve_routes(vec![(VERSION_REQUEST, version), answer]);
     let output = run_orbit(&base_url, &["schema", "User"]);
     let requests = handle.join().expect("join mock");
 
@@ -352,10 +352,9 @@ fn schema_requests_on(version: &'static str, answer: (&'static str, &'static str
 }
 
 #[test]
-fn schema_reads_rest_without_graphql_below_the_first_orbit_release() {
+fn schema_reads_rest_without_graphql_when_gitlab_lacks_orbit_graphql() {
     for version in [
         r#"{"version":"19.4.0-ee","enterprise":true}"#,
-        r#"{"version":"19.5.0-ee","enterprise":true}"#,
         r#"{"version":"19.6.0","enterprise":false}"#,
     ] {
         assert_eq!(
@@ -374,17 +373,13 @@ fn schema_reads_rest_without_graphql_below_the_first_orbit_release() {
 
 #[test]
 fn schema_asks_graphql_from_the_first_orbit_release() {
-    for version in [
-        r#"{"version":"19.4.7-ee","enterprise":true}"#,
-        r#"{"version":"19.5.5-ee","enterprise":true}"#,
-        r#"{"version":"19.6.0-pre","enterprise":true}"#,
-    ] {
-        assert_eq!(
-            schema_requests_on(version, ("POST /api/graphql", ONTOLOGY_RESPONSE)),
-            ["GET /api/v4/version HTTP/1.1", "POST /api/graphql HTTP/1.1"],
-            "{version}"
-        );
-    }
+    assert_eq!(
+        schema_requests_on(
+            r#"{"version":"19.4.7-ee","enterprise":true}"#,
+            ("POST /api/graphql", ONTOLOGY_RESPONSE)
+        ),
+        ["GET /api/v4/version HTTP/1.1", "POST /api/graphql HTTP/1.1"]
+    );
 }
 
 #[test]

@@ -5029,6 +5029,7 @@ dependencies = [
  "cynic-codegen",
  "cynic-querygen",
  "prettyplease",
+ "semver",
  "serde",
  "syn 2.0.118",
 ]

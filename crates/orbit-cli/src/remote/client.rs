@@ -263,7 +263,7 @@ impl OrbitClient {
             .get(self.url(VERSION_PATH))
             .timeout(SHORT_REQUEST_TIMEOUT);
         let response = self.send_raw(request).await.ok()?.error_for_status().ok()?;
-        serde_json::from_slice(&read_body(response).await.ok()?).ok()
+        response.json().await.ok()
     }
 
     async fn post_json(
