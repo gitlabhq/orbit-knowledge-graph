@@ -1,10 +1,8 @@
 //! gRPC server HTTP/2 tuning configuration.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcConfig {
     pub keepalive_interval_secs: u64,
     pub keepalive_timeout_secs: u64,
@@ -19,9 +17,7 @@ pub struct GrpcConfig {
     pub max_connection_age_grace_secs: u64,
     pub stream_timeout_secs: u64,
     pub max_header_list_size_bytes: u32,
-    #[schemars(range(min = 65536, max = 4194304))]
     pub result_chunk_bytes: usize,
-    #[schemars(range(min = 1048576))]
     pub max_result_bytes: usize,
 }
 
