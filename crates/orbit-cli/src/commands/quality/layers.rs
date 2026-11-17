@@ -29,6 +29,7 @@ struct ForbidSpec {
 #[derive(Debug)]
 pub(crate) struct Forbid {
     pub name: String,
+    names: Vec<String>,
     symbols: Vec<regex::Regex>,
     only_in: Vec<GlobMatcher>,
     paths: Vec<GlobMatcher>,
@@ -51,6 +52,7 @@ pub(crate) struct SymbolUse {
     pub rule: String,
     pub file: String,
     pub symbol: String,
+    pub matched: String,
     pub line: i64,
 }
 
@@ -68,6 +70,11 @@ impl Forbid {
             spec.name
         );
         Ok(Self {
+            names: spec
+                .symbols
+                .iter()
+                .map(|symbol| symbol.trim_start_matches("::").to_string())
+                .collect(),
             symbols: spec
                 .symbols
                 .iter()
@@ -79,10 +86,15 @@ impl Forbid {
         })
     }
 
-    pub(crate) fn forbids(&self, file: &str, symbol: &str) -> bool {
-        (self.paths.is_empty() || any(&self.paths, file))
-            && !any(&self.only_in, file)
-            && self.symbols.iter().any(|pattern| pattern.is_match(symbol))
+    /// The configured symbol this use matches, when the rule applies to the file.
+    pub(crate) fn forbids(&self, file: &str, symbol: &str) -> Option<&str> {
+        if !(self.paths.is_empty() || any(&self.paths, file)) || any(&self.only_in, file) {
+            return None;
+        }
+        self.symbols
+            .iter()
+            .position(|pattern| pattern.is_match(symbol))
+            .map(|i| self.names[i].as_str())
     }
 }
 
@@ -92,13 +104,16 @@ pub(crate) fn check_symbols<'a>(
 ) -> Vec<SymbolUse> {
     let mut out: Vec<SymbolUse> = Vec::new();
     for (file, symbol, line) in uses {
-        for rule in rules.iter().filter(|rule| rule.forbids(file, symbol)) {
-            out.push(SymbolUse {
-                rule: rule.name.clone(),
-                file: file.to_string(),
-                symbol: symbol.trim_start_matches("::").to_string(),
-                line,
-            });
+        for rule in rules {
+            if let Some(matched) = rule.forbids(file, symbol) {
+                out.push(SymbolUse {
+                    rule: rule.name.clone(),
+                    file: file.to_string(),
+                    symbol: symbol.trim_start_matches("::").to_string(),
+                    matched: matched.to_string(),
+                    line,
+                });
+            }
         }
     }
     out.sort_by(|a, b| {
@@ -306,6 +321,7 @@ forbid:
             ]
         );
         assert_eq!(found[1].symbol, "Net::HTTP::Post");
+        assert_eq!(found[1].matched, "Net::HTTP");
     }
 
     #[test]

@@ -172,7 +172,7 @@ pub(crate) fn run(options: Options) -> Result<()> {
                     .as_deref()
                     .unwrap_or_default()
                     .iter()
-                    .filter(|u| base.is_new_symbol(&u.file, &u.symbol))
+                    .filter(|u| base.is_new_symbol(&u.file, &u.matched))
                     .map(|u| {
                         format!(
                             "the change uses {} in {}:{}, which breaks `{}`",
@@ -961,7 +961,7 @@ impl BaseView {
         match self.touched.get(file) {
             None => false,
             Some(None) => true,
-            Some(Some(text)) => !mentions(text, symbol),
+            Some(Some(text)) => !mentions(text, symbol.trim_end_matches('*')),
         }
     }
 }
@@ -1389,6 +1389,12 @@ mod tests {
         assert!(base.is_new("edited.rb", &names(&["Helper"])));
         assert!(!base.is_new("edited.rb", &names(&["Helper", "run"])));
         assert!(base.is_new_symbol("edited.rb", "HTTP2"));
+        let rust = view(&[(
+            "server.rs",
+            Some("use orbit_billing::{BillingTracker, QuotaService};\n"),
+        )]);
+        assert!(!rust.is_new_symbol("server.rs", "orbit_billing"));
+        assert!(rust.is_new_symbol("server.rs", "orbit_billing::BillingTracker"));
     }
 
     #[test]
