@@ -467,7 +467,7 @@ pub struct Engine {
     pub handlers: ::core::option::Option<Handlers>,
     #[prost(message, optional, tag = "5")]
     pub datalake_retry: ::core::option::Option<DatalakeRetry>,
-    #[prost(enumeration = "IndexerModule", repeated, tag = "6")]
+    #[prost(enumeration = "IndexerModule", repeated, packed = "false", tag = "6")]
     pub modules: ::prost::alloc::vec::Vec<i32>,
 }
 impl ::prost::Name for Engine {

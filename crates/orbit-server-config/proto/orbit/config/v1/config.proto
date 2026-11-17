@@ -148,7 +148,7 @@ message DatalakeRetry {
 
 message EntityHandler {
   optional uint64 datalake_batch_size = 1;
-  optional uint64 system_notes_resolve_lookup_batch_size = 2 [(buf.validate.field).required = true];
+  optional uint64 system_notes_resolve_lookup_batch_size = 2 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1];
   map<string, uint64> batch_size_overrides = 3;
 }
 
@@ -200,7 +200,7 @@ message Engine {
   map<string, SubscriptionConfig> topics = 3;
   Handlers handlers = 4 [(buf.validate.field).required = true];
   DatalakeRetry datalake_retry = 5 [(buf.validate.field).required = true];
-  repeated IndexerModule modules = 6;
+  repeated IndexerModule modules = 6 [(buf.validate.field).repeated.min_items = 1];
 }
 
 // The Rust task structs flatten ScheduleConfiguration, so cron and
