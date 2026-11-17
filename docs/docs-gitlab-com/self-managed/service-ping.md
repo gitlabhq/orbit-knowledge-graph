@@ -27,7 +27,7 @@ Both components are optional. Without them, GitLab Orbit runs as before and repo
 
 Prerequisites:
 
-- GitLab Orbit 1.3.0 or later, with Helm chart `<orbit_chart_version>` or later. <!-- TODO: the chart version that ships analytics.local_collector_url, from orbit-helm-charts!209 -->
+- GitLab Orbit 1.3.0 or later, with Helm chart `<orbit_chart_version>` or later. <!-- TODO: the chart version that ships analytics.local_collector, from orbit-helm-charts!209 -->
 - GitLab 19.6 or later. The exporter reads the Service Ping settings through an API that earlier versions do not have.
 - The NATS server and the ClickHouse server that GitLab Orbit uses.
 - A ClickHouse account that can create databases and users, for the DIP migrations.
@@ -170,7 +170,7 @@ Then set `command: run` and upgrade the release. From then on the CronJob posts 
 
 ## Point GitLab Orbit at the Data Insights Platform
 
-GitLab Orbit sends its usage events to DIP when `analytics.local_collector_url` is set.
+GitLab Orbit sends its usage events to DIP when `analytics.local_collector.enabled` is `true`.
 
 To point GitLab Orbit at DIP:
 
@@ -178,13 +178,16 @@ To point GitLab Orbit at DIP:
 
    ```yaml
    analytics:
-     local_collector_url: http://platform-single.gitlab-orbit.svc:8082
+     local_collector:
+       enabled: true
+       url: http://platform-single.gitlab-orbit.svc:8082
    ```
 
 1. Run the `helm upgrade` command from [Install GitLab Orbit](orbit-setup.md#install-gitlab-orbit).
 
 The webserver and indexer pods restart and send every usage event to DIP from then on.
-This value does not change `analytics.enabled`, which controls the GitLab-hosted collector and stays off by default.
+To stop local collection, set `enabled: false` and upgrade again; the URL can stay.
+This block does not change `analytics.enabled`, which controls the GitLab-hosted collector and stays off by default.
 
 ## Verify the setup
 
