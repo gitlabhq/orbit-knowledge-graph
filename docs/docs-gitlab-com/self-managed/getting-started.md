@@ -35,6 +35,7 @@ Each step depends on the step before it:
 1. Install NATS on the cluster with JetStream turned on.
 1. [Set up data replication](data-replication.md) to copy GitLab rows into the ClickHouse data lake.
 1. [Set up GitLab Orbit](orbit-setup.md) and turn on indexing for a top-level group.
+1. Optional. [Set up Service Ping](service-ping.md) to report GitLab Orbit usage.
 
 You can verify steps 1 to 3 before you install GitLab Orbit.
 
