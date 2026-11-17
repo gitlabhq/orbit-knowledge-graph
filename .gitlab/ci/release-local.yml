@@ -96,6 +96,66 @@ local-cli-build-linux-musl-arm64:
     ARCH: aarch64
     LIBC: musl
 
+# PGO prototype: manual, MR-only. Each job builds the CLI with and without PGO for
+# one target, compares them on held-out repos, and uploads pgo-report/report.json.
+.local-cli-pgo-linux:
+  extends:
+    - .job-template
+    - .sccache-template
+    - .no-cargo-home-cache
+    - .local-cli-infra-retry
+  stage: build
+  needs: []
+  timeout: 3h
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+  variables:
+    PLATFORM: linux
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file jq valgrind git ca-certificates
+  script:
+    - ./scripts/ci/pgo-compare.sh
+  artifacts:
+    when: always
+    paths:
+      - pgo-report/
+    expire_in: 7 days
+
+local-cli-pgo-linux-amd64:
+  extends: .local-cli-pgo-linux
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: x86_64
+    LIBC: gnu
+
+local-cli-pgo-linux-arm64:
+  extends: .local-cli-pgo-linux
+  tags:
+    - saas-linux-large-arm64
+  variables:
+    ARCH: aarch64
+    LIBC: gnu
+
+local-cli-pgo-linux-musl-amd64:
+  extends: .local-cli-pgo-linux
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: x86_64
+    LIBC: musl
+
+local-cli-pgo-linux-musl-arm64:
+  extends: .local-cli-pgo-linux
+  tags:
+    - saas-linux-large-arm64
+  variables:
+    ARCH: aarch64
+    LIBC: musl
+
 .local-cli-smoke-linux:
   extends:
     - .local-cli-linux-rules

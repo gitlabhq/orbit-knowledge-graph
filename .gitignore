@@ -98,3 +98,4 @@ packages/site/src/routeTree.gen.ts
 .mcp.json
 CLAUDE.local.md
 AGENTS.local.md
+pgo-report/

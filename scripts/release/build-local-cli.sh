@@ -14,6 +14,9 @@ set -euo pipefail
 #
 # Linux builds use cargo-zigbuild. The default glibc build links against glibc
 # 2.28 so it runs on EL8 and later. Set LIBC=musl for the fully static variant.
+# Set PGO=1 (Linux only, experimental) to build with profile-guided optimization:
+# instrumented build, training run, profile merge, optimized build. See
+# scripts/release/pgo-build.sh. Without PGO the build is unchanged.
 # Set PRINT_TARGET=1 to print the resolved Rust target and archive name without
 # building; this is useful for validating PLATFORM/ARCH/LIBC combinations.
 
@@ -89,7 +92,18 @@ if [ "$PLATFORM" = "linux" ]; then
 else
     BUILD=(rustup run "$TOOLCHAIN" cargo build --release --locked -p orbit-cli --bin orbit --target "$TARGET" --features duckdb-client/bundled)
 fi
-"${BUILD[@]}"
+BIN_DIR="target/${TARGET}/release"
+if [ "${PGO:-0}" = "1" ]; then
+    if [ "$PLATFORM" != "linux" ] || [ -n "${CI_COMMIT_TAG:-}" ]; then
+        echo "PGO=1 is only supported for untagged Linux builds" >&2
+        exit 1
+    fi
+    # shellcheck source=scripts/release/pgo-build.sh
+    . "$(dirname "$0")/pgo-build.sh"
+    pgo_build
+else
+    "${BUILD[@]}"
+fi
 
 if [ -n "${CI_COMMIT_TAG:-}" ]; then
     expected="[\"ORBIT_RELEASE_VERSION\",\"${CI_COMMIT_TAG#v}\"]"
@@ -98,8 +112,6 @@ if [ -n "${CI_COMMIT_TAG:-}" ]; then
         exit 1
     fi
 fi
-
-BIN_DIR="target/${TARGET}/release"
 
 if [ "$PLATFORM" = "windows" ]; then
     (cd "$BIN_DIR" && zip "$OLDPWD/$ARCHIVE" orbit.exe)
