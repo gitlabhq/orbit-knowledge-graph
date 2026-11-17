@@ -5,7 +5,7 @@ robotframework:
   version: "7.5"
   requestsVersion: "0.9.7"
   pabotVersion: "5.2.2"
-  processes: 12
+  processes: 16
 
 resources:
   requests:
