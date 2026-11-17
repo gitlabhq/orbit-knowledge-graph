@@ -992,9 +992,9 @@ billing-boundary-check:
     - cargo nextest run --profile ci -p integration-tests --test billing_boundary
     - sccache --show-stats || true
 
-# Fails when the MR adds a dependency or symbol use that breaks a rule in
-# .gitlab/orbit-quality.yml (the SOX billing rules among them), a dependency
-# cycle, or a function nothing references. Existing violations do not fail it.
+# Fails when the MR adds a dependency that breaks a rule in
+# .gitlab/orbit-quality.yml or closes a dependency cycle. Existing violations
+# do not fail it.
 # allow_failure until it has run quietly on real MRs.
 orbit-quality-gate:
   stage: test

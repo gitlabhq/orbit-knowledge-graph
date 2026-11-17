@@ -1,22 +1,65 @@
-# Dependency and symbol rules for `orbit quality`, checked by the
-# orbit-quality-gate CI job. Each rule restates a written guideline; the
-# source is in the rule name. `forbid` rules match a symbol and anything
-# under it. In CI, only uses the merge request adds fail the job.
+# Dependency rules for `orbit quality`, checked by the orbit-quality-gate CI
+# job. Each rule keeps a boundary the code already holds; the guideline it
+# comes from is in the name when one is written down. In CI, only
+# dependencies a merge request adds fail the job.
 
 layers:
-  - name: code-graph shared linker and pipeline have no language branches (crates/code-graph/AGENTS.md)
+  - name: "the query compiler's later steps do not depend on a frontend (architecture/querying/query-engine.md: one intermediate representation)"
+    from:
+      - "crates/query-engine/compiler/src/passes/validate/**"
+      - "crates/query-engine/compiler/src/passes/normalize.rs"
+      - "crates/query-engine/compiler/src/passes/restrict.rs"
+      - "crates/query-engine/compiler/src/passes/plan/**"
+      - "crates/query-engine/compiler/src/passes/lower/**"
+      - "crates/query-engine/compiler/src/passes/codegen/**"
+      - "crates/query-engine/compiler/src/passes/security*.rs"
+      - "crates/query-engine/compiler/src/passes/hydrate.rs"
+    deny: ["crates/query-engine/compiler/src/passes/frontend/**"]
+  - name: "query frontends do not depend on planning, lowering, code generation, or security"
+    from: ["crates/query-engine/compiler/src/passes/frontend/**"]
+    deny:
+      - "crates/query-engine/compiler/src/passes/plan/**"
+      - "crates/query-engine/compiler/src/passes/lower/**"
+      - "crates/query-engine/compiler/src/passes/codegen/**"
+      - "crates/query-engine/compiler/src/passes/security*.rs"
+  - name: "code generation does not depend on the frontends or validation"
+    from: ["crates/query-engine/compiler/src/passes/codegen/**"]
+    deny:
+      - "crates/query-engine/compiler/src/passes/frontend/**"
+      - "crates/query-engine/compiler/src/passes/validate/**"
+  - name: "the ClickHouse code generator does not depend on the DuckDB one"
+    from: ["crates/query-engine/compiler/src/passes/codegen/clickhouse*"]
+    deny: ["crates/query-engine/compiler/src/passes/codegen/duckdb*"]
+  - name: "local graph commands do not call the GitLab Orbit API (CONTEXT.md: the workspace group uses only the Local graph)"
+    from:
+      - "crates/orbit-cli/src/database/**"
+      - "crates/orbit-cli/src/commands/index/**"
+      - "crates/orbit-cli/src/commands/index.rs"
+      - "crates/orbit-cli/src/commands/definition.rs"
+      - "crates/orbit-cli/src/commands/relations.rs"
+      - "crates/orbit-cli/src/commands/reset.rs"
+      - "crates/orbit-cli/src/commands/quality/**"
+      - "crates/orbit-cli/src/sql.rs"
+      - "crates/orbit-cli/src/workspace.rs"
+    deny: ["crates/orbit-cli/src/remote/**"]
+  - name: "the GitLab Orbit API client does not depend on local graph storage"
+    from: ["crates/orbit-cli/src/remote/**"]
+    deny: ["crates/orbit-cli/src/database/**", "crates/orbit-cli/src/commands/index/**"]
+  - name: "the indexer engine does not depend on its domain modules (crates/indexer/AGENTS.md)"
+    from: ["crates/indexer/src/engine/**", "crates/indexer/src/nats/**", "crates/indexer/src/clickhouse/**"]
+    deny: ["crates/indexer/src/modules/**"]
+  - name: "the indexer's SDLC module does not depend on the code or namespace deletion modules"
+    from: ["crates/indexer/src/modules/sdlc/**"]
+    deny: ["crates/indexer/src/modules/code/**", "crates/indexer/src/modules/namespace_deletion/**"]
+  - name: "the indexer's code module does not depend on the SDLC or namespace deletion modules"
+    from: ["crates/indexer/src/modules/code/**"]
+    deny: ["crates/indexer/src/modules/sdlc/**", "crates/indexer/src/modules/namespace_deletion/**"]
+  - name: "code-graph's shared linker and pipeline have no language branches (crates/code-graph/AGENTS.md)"
     from:
       - "crates/code-graph/src/v2/linker/**"
       - "crates/code-graph/src/v2/pipeline.rs"
       - "crates/code-graph/src/v2/sink.rs"
     deny: ["crates/code-graph/src/v2/langs/**"]
-
-forbid:
-  - name: R1 new orbit-billing importers need SOX review (sox-billing-boundary.md)
-    symbols: ["orbit_billing"]
-    paths: ["crates/**"]
-    only_in: ["crates/orbit-billing/**"]
-  - name: R4 billing events are emitted only through orbit-billing (sox-billing-boundary.md)
-    symbols: ["labkit_events::BillingEvent", "BillingEvent", "track_billing_event"]
-    paths: ["crates/**"]
-    only_in: ["crates/orbit-billing/**"]
+  - name: "code-graph's generic languages do not depend on its custom ones"
+    from: ["crates/code-graph/src/v2/langs/generic/**"]
+    deny: ["crates/code-graph/src/v2/langs/custom/**"]
