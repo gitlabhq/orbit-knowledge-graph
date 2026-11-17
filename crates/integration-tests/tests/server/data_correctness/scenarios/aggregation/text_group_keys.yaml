@@ -1,0 +1,87 @@
+description: A free-text group key buckets every entity that shares its value into one row
+
+config:
+  security:
+    paths: ["1/"]
+  redaction:
+    allow:
+      ci_pipeline: [98501, 98502, 98503]
+      ci_build: [98511, 98512, 98513, 98514, 98515, 98516]
+      work_item: [98521, 98522, 98523]
+  extra_seed:
+    gl_pipeline:
+      - { id: 98501, iid: 501, ref: main, status: failed, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 98502, iid: 502, ref: main, status: failed, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 98503, iid: 503, ref: feature, status: failed, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_job:
+      - { id: 98511, name: check-style, status: failed, project_id: 1000, pipeline_id: 98501, traversal_path: "1/100/1000/" }
+      - { id: 98512, name: check-style, status: failed, project_id: 1000, pipeline_id: 98502, traversal_path: "1/100/1000/" }
+      - { id: 98513, name: check-style, status: failed, project_id: 1000, pipeline_id: 98503, traversal_path: "1/100/1000/" }
+      - { id: 98514, name: build, status: failed, project_id: 1000, pipeline_id: 98501, traversal_path: "1/100/1000/" }
+      - { id: 98515, name: build, status: failed, project_id: 1000, pipeline_id: 98502, traversal_path: "1/100/1000/" }
+      - { id: 98516, name: lint, status: failed, project_id: 1000, pipeline_id: 98501, traversal_path: "1/100/1000/" }
+    gl_ci_edge:
+      - { traversal_path: "1/100/1000/", source_id: 98501, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 98511, target_kind: Job }
+      - { traversal_path: "1/100/1000/", source_id: 98502, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 98512, target_kind: Job }
+      - { traversal_path: "1/100/1000/", source_id: 98503, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 98513, target_kind: Job }
+      - { traversal_path: "1/100/1000/", source_id: 98501, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 98514, target_kind: Job }
+      - { traversal_path: "1/100/1000/", source_id: 98502, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 98515, target_kind: Job }
+      - { traversal_path: "1/100/1000/", source_id: 98501, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 98516, target_kind: Job }
+    gl_work_item:
+      - { id: 98521, iid: 521, title: Flaky check-style, state: opened, work_item_type: issue, confidential: false, project_id: 1000, author_id: 1, namespace_id: 100, traversal_path: "1/100/" }
+      - { id: 98522, iid: 522, title: Flaky check-style, state: opened, work_item_type: issue, confidential: false, project_id: 1000, author_id: 1, namespace_id: 100, traversal_path: "1/100/" }
+      - { id: 98523, iid: 523, title: Release notes, state: opened, work_item_type: issue, confidential: false, project_id: 1000, author_id: 1, namespace_id: 100, traversal_path: "1/100/" }
+
+cases:
+  - name: job_name_shared_value
+    description: Jobs that share a name land in one row with the summed count
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"j","entity":"Job","node_ids":[98511,98512,98513,98514,98515,98516]}],"group_by":[{"key":"j.name","as":"name"}],"aggregations":[{"count":"j","as":"n"}],"aggregation_sort":"-n"}
+      gql: |
+        MATCH (j:Job) WHERE j.id IN [98511, 98512, 98513, 98514, 98515, 98516] RETURN j.name AS name, count(j) AS n ORDER BY n DESC
+    expect:
+      row_count: 3
+      row_values:
+        - { name: check-style, n: 3 }
+        - { name: build, n: 2 }
+        - { name: lint, n: 1 }
+
+  - name: pipeline_ref_shared_value
+    description: Pipelines that share a ref land in one row with the summed count
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Pipeline","node_ids":[98501,98502,98503]}],"group_by":[{"key":"p.ref","as":"ref"}],"aggregations":[{"count":"p","as":"n"}],"aggregation_sort":"-n"}
+      gql: |
+        MATCH (p:Pipeline) WHERE p.id IN [98501, 98502, 98503] RETURN p.ref AS ref, count(p) AS n ORDER BY n DESC
+    expect:
+      row_count: 2
+      row_values:
+        - { ref: main, n: 2 }
+        - { ref: feature, n: 1 }
+
+  - name: work_item_title_shared_value
+    description: Work items that share a title land in one row with the summed count
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[98521,98522,98523]}],"group_by":[{"key":"w.title","as":"title"}],"aggregations":[{"count":"w","as":"n"}],"aggregation_sort":"-n"}
+      gql: |
+        MATCH (w:WorkItem) WHERE w.id IN [98521, 98522, 98523] RETURN w.title AS title, count(w) AS n ORDER BY n DESC
+    expect:
+      row_count: 2
+      row_values:
+        - { title: Flaky check-style, n: 2 }
+        - { title: Release notes, n: 1 }
+
+  - name: pipeline_ref_counts_jobs_per_ref
+    description: A text key from the pipeline groups its jobs per ref, not per pipeline
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"pl","entity":"Pipeline","node_ids":[98501,98502,98503]},{"id":"j","entity":"Job"}],"relationships":[{"type":"HAS_JOB","from":"pl","to":"j"}],"group_by":[{"key":"pl.ref","as":"ref"}],"aggregations":[{"count":"j","as":"n"}],"aggregation_sort":"-n"}
+      gql: |
+        MATCH (pl:Pipeline)-[:HAS_JOB]->(j:Job) WHERE pl.id IN [98501, 98502, 98503] RETURN pl.ref AS ref, count(j) AS n ORDER BY n DESC
+    expect:
+      row_count: 2
+      row_values:
+        - { ref: main, n: 5 }
+        - { ref: feature, n: 1 }

@@ -11,55 +11,44 @@ config:
       work_item: [4001]
 
 cases:
-  - name: text_prefix_on_ungrouped_node_rejected
-    description: A text prefix filter requires grouping by its node
+  - name: text_prefix_on_ungrouped_node
+    description: A text prefix filter on an ungrouped node counts every match in the path scope
     query:
       json: |
         {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4001],"filters":{"title":{"starts_with":"Fix a"}}}],"aggregations":[{"count":"w","as":"n"}]}
       gql: |
         MATCH (w:WorkItem {id: 4001}) WHERE w.title STARTS WITH 'Fix a' RETURN count(w) AS n
     expect:
-      compile_error: schema
+      row_values: [{ n: 1 }]
 
-  - name: text_contains_on_ungrouped_node_rejected
-    description: A CONTAINS filter requires grouping by its node
+  - name: text_contains_on_ungrouped_node
+    description: A CONTAINS filter on an ungrouped node counts every match under the grouped node
     query:
       gql: |
         MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.title CONTAINS 'auth' RETURN g, count(w) AS n
     expect:
-      compile_error: schema
+      groups:
+        g:
+          entity: Group
+          ids: [100]
+          rows:
+            - { entity: Group, id: 100, values: { n: 1 } }
 
-  - name: negated_text_match_on_ungrouped_node_rejected
-    description: A negated CONTAINS filter requires grouping by its node
+  - name: negated_text_match_on_ungrouped_node
+    description: A negated CONTAINS filter on an ungrouped node counts the work item whose empty description lacks the word
     query:
       gql: |
         MATCH (w:WorkItem {id: 4001}) WHERE NOT w.description CONTAINS 'login' RETURN count(w) AS n
     expect:
-      compile_error: schema
+      row_values: [{ n: 1 }]
 
-  - name: text_ordering_on_ungrouped_node_rejected
-    description: An ordering comparison on text requires grouping by its node
+  - name: text_ordering_on_ungrouped_node
+    description: An ordering comparison on text of an ungrouped node counts the matching work item
     query:
       gql: |
         MATCH (w:WorkItem {id: 4001}) WHERE w.title < 'G' RETURN count(w) AS n
     expect:
-      compile_error: schema
-
-  - name: cross_node_text_ordering_rejected
-    description: A text ordering comparison between nodes requires grouping by the left node
-    query:
-      gql: |
-        MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.title > l.title RETURN count(w) AS n
-    expect:
-      compile_error: schema
-
-  - name: cross_node_text_ordering_rhs_rejected
-    description: A text ordering comparison between nodes requires grouping by the right node
-    query:
-      gql: |
-        MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.title > l.title RETURN w, count(l) AS n
-    expect:
-      compile_error: schema
+      row_values: [{ n: 1 }]
 
   - name: text_filter_on_grouped_node
     description: A text filter works on a grouped node and returns its readable rows
@@ -70,10 +59,12 @@ cases:
       empty_aggregation: true
 
   - name: text_group_key_rows
-    description: A text group key returns one row per readable work item
+    description: A text group key returns one row per title in the path scope
     query:
       gql: |
-        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) RETURN w.title AS title, count(w) AS n
+        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) RETURN w.title AS title, count(w) AS n ORDER BY title
     expect:
+      row_count: 2
       row_values:
+        - { title: Fix auth bug, n: 1 }
         - { title: Implement login page, n: 1 }

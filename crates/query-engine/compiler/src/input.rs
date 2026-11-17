@@ -97,18 +97,8 @@ pub struct Input {
 }
 
 impl Input {
-    pub(crate) fn aggregation_row_nodes(
-        &self,
-        model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-    ) -> std::collections::HashSet<&str> {
-        let groups = &self.aggregation.group_by;
-        let text_groups = property_groups(groups)
-            .filter(|(node, property)| {
-                self.entity_of(node)
-                    .is_some_and(|entity| model.property_is_free_text(entity, property))
-            })
-            .map(|(node, _)| node);
-        node_group_ids(groups).chain(text_groups).collect()
+    pub(crate) fn aggregation_row_nodes(&self) -> std::collections::HashSet<&str> {
+        node_group_ids(&self.aggregation.group_by).collect()
     }
 
     /// Whether this query has the "search shape": a single-node table scan

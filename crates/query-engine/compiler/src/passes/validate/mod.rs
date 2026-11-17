@@ -357,41 +357,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             .map(|property| property.data_type)
     }
 
-    fn check_aggregation_text_filters(&self, input: &Input) -> Result<()> {
-        let model = self.model.get();
-        let row_nodes = input.aggregation_row_nodes(model);
-        let node_filters = input.nodes.iter().flat_map(|node| {
-            node.filters.iter().flat_map(move |(property, filters)| {
-                filters
-                    .iter()
-                    .map(move |filter| (node.id.as_str(), property.as_str(), filter.op))
-            })
-        });
-        let conditions = input.conditions().flat_map(|condition| {
-            condition
-                .node_properties()
-                .map(move |(alias, property)| (alias, property, condition.filter.op))
-        });
-        for (alias, property, op) in node_filters.chain(conditions) {
-            if !op.is_some_and(|op| op.is_like() || op.is_token() || op.is_ordering()) {
-                continue;
-            }
-            let Some(entity) = input.entity_of(alias) else {
-                continue;
-            };
-            if row_nodes.contains(alias)
-                || model.entity_authorized_by_namespace(entity)
-                || !model.property_is_free_text(entity, property)
-            {
-                continue;
-            }
-            return Err(QueryError::Validation(format!(
-                "aggregation filter on {entity}.{property}: text matching and ordering require grouping by \"{alias}\""
-            )));
-        }
-        Ok(())
-    }
-
     /// Validate what the JSON schema used to enforce, natively on `Input`, so
     /// every frontend is held to the same rules. Complexity caps live in
     /// [`Self::check_depth`].
@@ -1458,8 +1423,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 }
             }
         }
-
-        self.check_aggregation_text_filters(input)?;
 
         if let Some(sort) = &input.aggregation.sort {
             let mut output_names: HashSet<String> = group_output_names.into_iter().collect();

@@ -220,7 +220,7 @@ cases:
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT token_match(v.title, 'SQLi') RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
-      compile_error: schema
+      compile_error: authorization
 
   - name: role_scoped_negation_aggregation
     description: A matching grouped negation cannot bypass the vulnerability role requirement

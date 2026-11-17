@@ -218,10 +218,8 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         .is_some_and(|order| order.node == node.alias);
     let local_predicate = condition_nodes.contains(&node.alias) && !pattern.holds_fk(&node.alias);
     let uncovered_filter = pattern.has_uncovered_filter(node);
-    let returned = !pattern.aggregate()
-        || input
-            .aggregation_row_nodes(pattern.model)
-            .contains(node.alias.as_str());
+    let returned =
+        !pattern.aggregate() || input.aggregation_row_nodes().contains(node.alias.as_str());
     let role_floor = node.entity.as_deref().is_some_and(|entity| {
         pattern
             .model
