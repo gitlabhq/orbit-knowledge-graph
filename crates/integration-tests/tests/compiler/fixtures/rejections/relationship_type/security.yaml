@@ -5,8 +5,6 @@ cases:
         MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
         WHERE type(r) = 'NOPE_PRIVATE_TYPE'
         RETURN u LIMIT 10
-    missing_frontends:
-      json: The source scenario supplies only GQL.
     physical:
       clickhouse:
         rejected:
@@ -23,8 +21,6 @@ cases:
         MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
         WHERE NOT type(r) IN ['AUTHORED', 'NOPE_PRIVATE_TYPE']
         RETURN u LIMIT 10
-    missing_frontends:
-      json: The source scenario supplies only GQL.
     physical:
       clickhouse:
         rejected:

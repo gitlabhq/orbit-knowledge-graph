@@ -3,8 +3,6 @@ cases:
     query:
       gql: |
         MATCH (u:User {id: 1}) RETURN u LIMIT(1)
-    missing_frontends:
-      json: The source scenario supplies only GQL.
     physical:
       clickhouse:
         rejected:

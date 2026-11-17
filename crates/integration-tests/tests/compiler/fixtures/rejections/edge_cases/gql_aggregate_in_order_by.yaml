@@ -3,8 +3,6 @@ cases:
     query:
       gql: |
         MATCH (mr:MergeRequest {project_id: 1})-[:IN_PROJECT]->(p:Project) RETURN p.full_path, count(mr) ORDER BY count(mr) LIMIT 10
-    missing_frontends:
-      json: The source scenario supplies only GQL.
     physical:
       clickhouse:
         rejected:

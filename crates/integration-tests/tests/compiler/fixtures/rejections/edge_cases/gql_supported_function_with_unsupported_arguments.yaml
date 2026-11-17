@@ -3,8 +3,6 @@ cases:
     query:
       gql: |
         MATCH (u:User) RETURN count(*)
-    missing_frontends:
-      json: The source scenario supplies only GQL.
     physical:
       clickhouse:
         rejected:
@@ -19,8 +17,6 @@ cases:
     query:
       gql: |
         MATCH (u:User {id: 1})-[:AUTHORED]->(m:MergeRequest) WHERE count(m) > 1 RETURN u LIMIT 10
-    missing_frontends:
-      json: The source scenario supplies only GQL.
     physical:
       clickhouse:
         rejected:
@@ -33,8 +29,6 @@ cases:
     query:
       gql: |
         MATCH (m:MergeRequest) RETURN token_match(m.title, 'login') LIMIT 10
-    missing_frontends:
-      json: The source scenario supplies only GQL.
     physical:
       clickhouse:
         rejected:
