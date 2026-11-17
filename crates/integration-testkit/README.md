@@ -278,11 +278,14 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 
 | Field | Type | Description |
 |---|---|---|
-| `extra_seed` | `Seed` | Additional rows to insert; triggers a DB fork |
+| `seed` | string | A named dataset in `presets/seed.yaml`. The scenario runs on a database that holds only that dataset, without the base seed |
+| `extra_seed` | `Seed` | Additional rows to insert on top of the base seed or `seed` |
 | `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert each row as its own part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
 | `duckdb` | bool | Default `false`. Also run the scenario in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with CALLS rows in `gl_edge`. |
+
+Scenarios with the same `seed`, `extra_seed`, `unmerged_seed`, and `ontology_overlay` share one database. The runner builds it for the first case and drops it after the last. A scenario whose steps add seed rows gets its own database.
 
 #### `config.security` — `SecurityOverride`
 

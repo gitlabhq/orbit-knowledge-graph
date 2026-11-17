@@ -1,5 +1,6 @@
 import { pageHead, SiteShell, site } from "@gitlab-org/orbit-site";
 import { createRootRoute, HeadContent, Outlet, useRouterState } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { TabNav } from "../components/TabNav";
 
 export const Route = createRootRoute({
@@ -7,10 +8,20 @@ export const Route = createRootRoute({
   component: RootLayout,
 });
 
-// The home page starts dark in both themes, so its top bar is dark too. It is clear over the hero, and
-// slides away while the reader scrolls down.
+const LANDINGS = new Set(["", "/next"]);
+
 function RootLayout() {
-  const home = useRouterState({ select: (state) => state.location.pathname.replace(/\/+$/, "") === "" });
+  const home = useRouterState({ select: (state) => LANDINGS.has(state.location.pathname.replace(/\/+$/, "")) });
+
+  useEffect(() => {
+    const panel = document.querySelector<HTMLElement>(".page-panel");
+    if (!panel) return;
+    const measure = () => document.documentElement.style.setProperty("--main-scrollbar", `${panel.offsetWidth - panel.clientWidth}px`);
+    const sized = new ResizeObserver(measure);
+    sized.observe(panel);
+    measure();
+    return () => sized.disconnect();
+  }, [home]);
   return (
     <>
       <HeadContent />

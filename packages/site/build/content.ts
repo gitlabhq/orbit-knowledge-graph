@@ -1,11 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
-import { parseFrontmatter } from "@gitlab-org/orbit-markdown/author";
-import { parse as parseYaml } from "yaml";
-import { itemFields } from "../src/roadmap/schema";
-import { PAGES_DIR, SECTIONS } from "../src/sections";
-import { fetchTrackers, type Tracker } from "./trackers";
+import { OFF_SITE, PAGES_DIR, SECTIONS } from "../src/sections";
 
 export const siteRoot = join(import.meta.dirname, "..");
 const repoRoot = join(siteRoot, "../..");
@@ -39,7 +35,7 @@ export function sourceFiles(): Map<string, string> {
     [ENGINEERING_HOME, "engineering"],
     ...SECTIONS.flatMap(({ route }) =>
       readdirSync(join(repoRoot, dirOf(route)), { recursive: true, encoding: "utf8" })
-        .filter((name) => name.endsWith(".md"))
+        .filter((name) => name.endsWith(".md") && !OFF_SITE.includes(posix.join(route, name)))
         .map((name): [string, string] => [posix.join(dirOf(route), name), routeOf(route, name)]),
     ),
   ]);
@@ -79,8 +75,6 @@ function commitDates(files: string[]) {
   }
 }
 
-let trackers: Record<string, Tracker> = {};
-
 function syncData() {
   rmSync(dataDir, { recursive: true, force: true });
   for (const { route } of SECTIONS)
@@ -88,29 +82,11 @@ function syncData() {
       mkdirSync(join(dataDir, route), { recursive: true });
       copyFileSync(join(repoRoot, dirOf(route), name), join(dataDir, route, name));
     }
-  mkdirSync(join(dataDir, "roadmap"), { recursive: true });
-  writeFileSync(join(dataDir, "roadmap", "trackers.yaml"), JSON.stringify(trackers));
 }
-
-const trackingUrls = () =>
-  [...sourceFiles()]
-    .filter(([, route]) => route.startsWith("roadmap/"))
-    .map(([file]) => parseFrontmatter(readFileSync(join(repoRoot, file), "utf8")).frontmatter.tracking)
-    .filter((url): url is string => typeof url === "string");
-
-export async function syncTrackers() {
-  trackers = await fetchTrackers(trackingUrls(), process.env.ORBIT_MARKDOWN_TOKEN);
-  syncData();
-}
-
-const sectionData = (route: string, name: string) => parseYaml(readFileSync(join(dataDir, route, name), "utf8"));
-
-let roadmapSchema = { themes: [] as string[] };
 
 export function syncContent() {
   const routes = sourceFiles();
   syncData();
-  roadmapSchema = { themes: sectionData("roadmap", "roadmap.yaml").themes.map((theme: { id: string }) => theme.id) };
   rmSync(contentDir, { recursive: true, force: true });
   sourceOfRoute.clear();
   for (const [file, route] of routes) {
@@ -130,11 +106,5 @@ export function siteMeta(route: string, frontmatter: Record<string, unknown>, bo
     lastChanged: changedOn.get(source),
     order: typeof frontmatter.order === "number" ? frontmatter.order : undefined,
     words: body.split(/\s+/).filter(Boolean).length,
-    ...roadmapFields(route, frontmatter),
   };
-}
-
-function roadmapFields(route: string, frontmatter: Record<string, unknown>) {
-  if (route.startsWith("roadmap/")) return { item: itemFields(frontmatter, roadmapSchema.themes) };
-  return {};
 }

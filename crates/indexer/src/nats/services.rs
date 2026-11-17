@@ -7,45 +7,78 @@
 //!
 //! Handlers receive `NatsServices` via [`HandlerContext`](crate::handler::HandlerContext):
 //!
-//! ```ignore
-//! async fn handle(&self, ctx: HandlerContext, envelope: Envelope) -> Result<(), HandlerError> {
-//!     let derived = DerivedEvent { /* ... */ };
-//!     let subscription = Subscription::new("stream", "subject");
-//!     ctx.nats.publish(&subscription, &Envelope::new(&derived)?).await?;
-//!     Ok(())
-//! }
+//! ```no_run
+//! # use indexer::handler::{HandlerContext, HandlerError};
+//! # use indexer::types::{Envelope, Event, Subscription};
+//! # #[derive(serde::Serialize, serde::Deserialize)]
+//! # struct DerivedEvent;
+//! # impl Event for DerivedEvent {
+//! #     fn subscription() -> Subscription { Subscription::new("stream", "subject") }
+//! # }
+//! # async fn handle(ctx: HandlerContext, _envelope: Envelope) -> Result<(), HandlerError> {
+//! let derived = DerivedEvent { /* ... */ };
+//! let envelope = Envelope::new(&derived)
+//!     .map_err(|e| HandlerError::Processing(format!("serialize failed: {e}")))?;
+//! ctx.nats
+//!     .publish(&DerivedEvent::subscription(), &envelope)
+//!     .await
+//!     .map_err(|e| HandlerError::Processing(format!("publish failed: {e}")))?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # KV Operations
 //!
 //! Handlers can use KV operations for caching. For locking, prefer
-//! `crate::locking::LockService`, which encodes expiration in the value and
-//! handles re-acquire over a delete marker:
+//! [`LockGuard`](crate::locking::LockGuard), which wraps `LockService`. The service encodes
+//! expiration in the value and handles re-acquire over a delete marker:
 //!
-//! ```ignore
-//! async fn handle(&self, ctx: HandlerContext, envelope: Envelope) -> Result<(), HandlerError> {
-//!     let guard = crate::locking::LockGuard::acquire(
-//!         ctx.lock_service.clone(),
-//!         "my-key",
-//!         Duration::from_secs(300),
-//!     )
-//!     .await?;
-//!     // ...
-//!     Ok(())
-//! }
+//! ```no_run
+//! # use std::time::Duration;
+//! # use indexer::handler::{HandlerContext, HandlerError};
+//! # use indexer::locking::LockGuard;
+//! # async fn handle(ctx: HandlerContext) -> Result<(), HandlerError> {
+//! let ttl = Duration::from_secs(300);
+//! let acquired = LockGuard::acquire(ctx.lock_service.clone(), "my-key", ttl)
+//!     .await
+//!     .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?;
+//! let guard = match acquired {
+//!     Ok(guard) => guard,
+//!     Err(held) => {
+//!         return Err(HandlerError::Deferred {
+//!             reason: "lock my-key held by another indexer".into(),
+//!             delay: held.time_left.unwrap_or(ttl),
+//!         });
+//!     }
+//! };
+//! // ...
+//! # let _: &LockGuard = &guard;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Testing
 //!
-//! Use [`MockNatsServices`](crate::testkit::MockNatsServices) for fast unit tests:
+//! Use [`MockNatsServices`](crate::testkit::MockNatsServices) for fast unit tests
+//! (requires the `testkit` feature outside this crate's own tests):
 //!
-//! ```ignore
+//! ```no_run
+//! # use std::sync::Arc;
+//! # use indexer::handler::{Handler, HandlerContext, HandlerError};
+//! # use indexer::types::Envelope;
+//! # use indexer::nats::ProgressNotifier;
+//! # use indexer::testkit::{MockLockService, MockNatsServices};
+//! # async fn check(handler: &dyn Handler, envelope: Envelope) -> Result<(), HandlerError> {
 //! let mock_nats = MockNatsServices::new();
-//! let ctx = HandlerContext::new(destination, metrics, Arc::new(mock_nats.clone()));
-//!
+//! let ctx = HandlerContext::new(
+//!     Arc::new(mock_nats.clone()),
+//!     Arc::new(MockLockService::new()),
+//!     ProgressNotifier::noop(),
+//! );
 //! handler.handle(ctx, envelope).await?;
-//!
 //! assert_eq!(mock_nats.get_published().len(), 1);
+//! # Ok(())
+//! # }
 //! ```
 
 use async_trait::async_trait;

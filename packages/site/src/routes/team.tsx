@@ -1,6 +1,7 @@
 import { Avatar, cn, findPage, Icon, PageFrame, pageHeadOf, segment, SiteLink } from "@gitlab-org/orbit-site";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PageFooter } from "../components/PageFooter";
+import { Sidebar } from "../components/Sidebar";
 import { mission, people, principles, profileUrl, type TeamMember } from "../team/team";
 
 export const Route = createFileRoute("/team")({
@@ -10,7 +11,6 @@ export const Route = createFileRoute("/team")({
 
 const PRINCIPLE_ICONS = ["code", "users", "tanuki-ai", "rocket"];
 
-// The whole card links to the profile. The username shows in a tag when you hover or focus the avatar.
 function MemberCard({ member }: { member: TeamMember }) {
   return (
     <article className="card glass group relative flex h-full items-center gap-3.5 px-4 py-3.5">
@@ -45,6 +45,7 @@ function TeamPage() {
   return (
     <PageFrame
       path="team"
+      nav={<Sidebar />}
       title="Meet the team"
       description={mission}
       footer={page && <PageFooter page={page} />}
@@ -92,8 +93,8 @@ function TeamPage() {
               View the source
               <Icon name="external-link" size={12} />
             </SiteLink>
-            <Link to="/content" className={segment(false, true)}>
-              Read the content
+            <Link to="/about" className={segment(false, true)}>
+              See what's new
             </Link>
           </div>
         </section>

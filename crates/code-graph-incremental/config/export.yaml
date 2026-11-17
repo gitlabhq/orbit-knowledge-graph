@@ -75,6 +75,18 @@ entities:
       - { name: end_byte, type: Int64, position: end_byte, span: [tag:definition_span, __defname] }
       - { name: start_char, type: Int64, position: start_col, span: [tag:definition_span, __defname] }
       - { name: end_char, type: Int64, position: end_col, span: [tag:definition_span, __defname] }
+      - { name: front_matter_name, type: Utf8, from: child_sym("__front_matter_name") }
+      - { name: front_matter_description, type: Utf8, from: child_sym("__front_matter_description") }
+      - { name: front_matter_license, type: Utf8, from: child_sym("__front_matter_license") }
+      - { name: front_matter_compatibility, type: Utf8, from: child_sym("__front_matter_compatibility") }
+      - { name: front_matter_allowed_tools, type: Utf8, from: child_sym("__front_matter_allowed_tools") }
+      - { name: front_matter_metadata, type: Utf8, from: child_sym("__front_matter_metadata") }
+      - { name: front_matter_title, type: Utf8, from: child_sym("__front_matter_title") }
+      - { name: front_matter_stage, type: Utf8, from: child_sym("__front_matter_stage") }
+      - { name: front_matter_group, type: Utf8, from: child_sym("__front_matter_group") }
+      - { name: front_matter_info, type: Utf8, from: child_sym("__front_matter_info") }
+      - { name: front_matter_version, type: Utf8, from: child_sym("__front_matter_version") }
+      - { name: front_matter_category, type: Utf8, from: child_sym("__front_matter_category") }
 
   ImportedSymbol:
     source: __import|__import_type

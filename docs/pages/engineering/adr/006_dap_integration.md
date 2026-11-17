@@ -1,7 +1,7 @@
 ---
 title: "GKG ADR 006: Orbit + Duo Agent Platform integration"
 creation-date: "2026-03-26"
-last-updated: "2026-07-08"
+last-updated: "2026-11-15"
 authors: [ "@michaelangeloio", "@dgruzd", "@jgdoyon1", "@michaelusa", "@bohdanpk", "@thomas-schmidt", "@shekharpatnaik", "@eduardobonet" ]
 toc_hide: true
 ---
@@ -31,7 +31,7 @@ Orbit has four consumption channels, each with its own authentication and billin
 
 | Channel | Path | Authentication | Billing |
 |---------|------|----------------|---------|
-| DAP (DWS) | User to Rails to DWS to Workhorse to Rails (Orbit MCP) to Orbit | User OAuth token with the workflow scope | Zero-rated, bundled with the Duo seat |
+| DAP (DWS) | User to Rails to DWS to Workhorse to Rails (Orbit MCP) to Orbit | User OAuth token with the workflow scope | Metered per query with GitLab Credits |
 | Frontend dashboard | User to Rails to Orbit over gRPC | User JSON Web Token (JWT) | Included in the license |
 | Core features | Internal Rails service to Orbit | System JWT | Infrastructure, not billed |
 | External agents through MCP or the GitLab command-line interface (CLI) | Agent to Rails OAuth to Orbit | OAuth and user JWT | Metered, paid add-on |
@@ -157,7 +157,7 @@ That variant is a single agent with shell access, and its system prompt includes
 The skill teaches the agent to reach Orbit through the GitLab CLI, which is already signed in.
 The agent reads the schema and the query language first, then runs queries against the same REST API as the other channels.
 The CLI also serves a local graph for code structure questions about the current branch, which the remote graph does not cover.
-Flows that already give the agent a shell get Orbit this way at no extra cost.
+Flows that already give the agent a shell get Orbit this way with no extra integration work.
 The MCP path exists for the surfaces that have no shell.
 
 ### Caller identification
@@ -170,7 +170,7 @@ The source travels to Orbit as a required claim on the JWT, and the claim matche
 So both sides of the gRPC boundary can report usage, query mix, and latency for each channel.
 
 Detection by scope is enough for metrics, but a user can defeat it by extracting a workflow token and replaying it.
-Zero-rating needs stronger attribution.
+Billing by channel needs stronger attribution.
 So Workhorse stamps Orbit calls from DWS with a short-lived signed channel header, and Rails verifies it.
 [ADR 007](007_monetization_engineering.md) covers that mechanism.
 

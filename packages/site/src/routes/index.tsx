@@ -17,9 +17,6 @@ $ glab orbit setup
 $ glab orbit status --full-path my-group/my-project
 $ glab orbit query "CALL db.schema('MergeRequest')"`;
 
-// A zero-day, such as React2Shell, has no scanner finding yet. The graph already knows which files import
-// the package, which projects use them, and which of those run in production. The names are made up. The
-// field and the log share one loop.
 const ZERO_DAY = {
   source: { label: "react-server-dom-webpack", x: 0.12, y: 0.5 },
   nodes: [
@@ -44,8 +41,6 @@ const ZERO_DAY = {
   ],
 };
 
-// Example questions for the hero chat, with synthetic answers. The projects and numbers are made up, to
-// show what an answer looks like.
 const CHAT: PromptExample[] = [
   {
     label: "Review a merge request with proof",
@@ -148,13 +143,8 @@ const CHAT: PromptExample[] = [
   },
 ];
 
-// A prompt to paste into an agent, so the agent sets up GitLab Orbit for itself. CLI first, MCP second.
-// The agents that `glab orbit setup` configures with the Orbit hooks and skill. The others run the same CLI,
-// and load the skill with `glab orbit skills get`.
 const SETUP_AGENTS = new Set(["Claude Code", "Codex", "OpenCode", "Pi"]);
 
-// A setup prompt to paste into the agent, tailored to it. Without an agent, it works for any agent. Every
-// prompt uses the GitLab Orbit CLI and ends with the orbit-start skill.
 const setupPrompt = (agent: string | null) => {
   const name = agent ?? "this agent";
   const access = `GitLab Orbit needs GitLab Premium or Ultimate, and it must be turned on for my top-level group. If it is not, show me how: ${DOCS}/quickstart/.`;
@@ -179,8 +169,6 @@ ${access}
 Do not say that the connection works until glab orbit status confirms it. Then run /orbit-start. If /orbit-start is not available, run glab orbit skills get orbit-start and follow it.`;
 };
 
-
-// The command part of a panel: the lines from the first prompt to the first blank line, without the prompt.
 const commandOf = (code: string) => code.trim().split(/\n\s*\n/)[0]!.replace(/^\$ /, "");
 
 const USE_CASES: UseCase[] = [
@@ -262,9 +250,6 @@ $ glab orbit query "
   },
 ];
 
-// The slideshow between the zero-day and token cost sections: customer quotes, with the bug fix cost
-// example between them. Compare the Market is published; the other quotes are anonymized, from Orbit
-// design partner conversations. Never add a company name to an anonymized quote.
 const QUOTES: Record<string, ComponentProps<typeof Testimonial>> = {
   ctm: {
     quote: "GitLab Orbit gave us an AI code reviewer that actually understands our codebase, not just the diff in front of it.",
@@ -307,7 +292,6 @@ const QUOTES: Record<string, ComponentProps<typeof Testimonial>> = {
   },
 };
 
-
 const SLIDES: Slide[] = [
   { id: "ctm", label: "Compare the Market", content: <Testimonial {...QUOTES.ctm!} /> },
   { id: "insurer", label: "US insurer", content: <Testimonial {...QUOTES.insurer!} /> },
@@ -317,7 +301,6 @@ const SLIDES: Slide[] = [
   { id: "platform", label: "Healthcare diagnostics company", content: <Testimonial {...QUOTES.platform!} /> },
 ];
 
-// The agents with a GitLab Orbit setup, for the logo rows.
 const AGENTS = [
   { name: "GitLab Duo", mark: "gitlab" },
   { name: "Claude Code", mark: "claude" },
@@ -329,7 +312,6 @@ const AGENTS = [
 
 const DEMO = "https://about.gitlab.com/sales/?contact-topic=request-demo";
 
-// A link to the GitLab sales team, such as "Request a demo" or "Talk to sales".
 function SalesLink({ label }: { label: string }) {
   return (
     <SiteLink href={DEMO} aria-label={`${label} (opens in a new tab)`} className="pill-link">
@@ -348,11 +330,6 @@ function QuickstartLink() {
   );
 }
 
-// The first screen, from the very top, behind the top bar, with the setup command
-// lower down.
-// Copy a setup prompt to paste into an agent. Picking an agent tailors the prompt to it and copies it right
-// away. In the hero, the copy button is the white main action above the agents, next to Quickstart. With
-// `inline`, the agents and a frosted copy button share one row, and the logos fly in as the row scrolls in.
 function SetupPicker({ className, inline = false }: { className?: string; inline?: boolean }) {
   const [agent, setAgent] = useState<string | null>(null);
   const pick = (name: string) => {
@@ -415,7 +392,6 @@ function Hero() {
   );
 }
 
-// A short looping screen recording, small and centered, with an optional caption.
 function Clip({ src, poster, width, height, label, caption }: { src: string; poster: string; width: number; height: number; label: string; caption?: string }) {
   return (
     <figure className="mx-auto my-0 max-w-[46rem]">
@@ -514,7 +490,6 @@ function HomePage() {
       </Section>
 
       <Section id="connect" snug backdrop={<OrbitHalo />} backdropFade="band" eyebrow="Connect your agent" title={<>Works with <span className="orbit-fade">your agents</span></>} lede="Built into GitLab Duo. Connect your agent with the CLI or MCP.">
-        {/* The terminal takes the width of the picker row above it, so their right edges line up. */}
         <div className="inline-flex max-w-full flex-col gap-6">
           <SetupPicker inline />
           <Reveal from="right" delay={300} className="w-0 min-w-full">

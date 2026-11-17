@@ -1,5 +1,5 @@
 query SessionStart($fullPath: ID!, $scoped: Boolean!, $withSchema: Boolean!) {
-  orbit @gl_introduced(version: "19.4.0") {
+  orbit @gl_introduced(version: "19.3.0") {
     serviceStatus @skip(if: $scoped) {
       state
     }
@@ -12,12 +12,14 @@ query SessionStart($fullPath: ID!, $scoped: Boolean!, $withSchema: Boolean!) {
     }
   }
   group(fullPath: $fullPath) @include(if: $scoped) {
-    orbit @gl_introduced(version: "19.4.0") {
+    id
+    orbit @gl_introduced(version: "19.3.0") {
       ...ScopeIndexing
     }
   }
   project(fullPath: $fullPath) @include(if: $scoped) {
-    orbit @gl_introduced(version: "19.4.0") {
+    id
+    orbit @gl_introduced(version: "19.3.0") {
       ...ScopeIndexing
     }
   }

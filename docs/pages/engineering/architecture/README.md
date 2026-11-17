@@ -59,6 +59,8 @@ covers the setup.
 ## More pages
 
 - [Orbit CLI](orbit-cli.md) brings Orbit to your terminal and to your AI agents.
+- [Monetization](monetization.md) explains how Orbit reports billable usage and
+  checks quota.
 - [Testing](../testing/README.md) shows how we prove a change works before it
   ships.
 - The [ADRs](../adr/) record our main decisions and why we made them.
