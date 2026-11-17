@@ -9,8 +9,8 @@ robotframework:
 
 resources:
   requests:
-    cpu: "1"
-    memory: 1Gi
+    cpu: 300m
+    memory: 512Mi
   limits:
     cpu: "4"
     memory: 2Gi
