@@ -87,7 +87,6 @@ pub async fn run(
     config.engine.resolve_runtime_defaults(&resources);
     let config = &config;
 
-    config.schema.validate()?;
     config.graph.validate()?;
 
     let module_names: Vec<&str> = config.engine.modules.iter().map(|m| (*m).into()).collect();

@@ -55,9 +55,6 @@ pub enum IndexerError {
     #[error("Schema readiness wait failed: {0}")]
     SchemaWait(#[from] crate::schema::version::SchemaWaitError),
 
-    #[error("Invalid configuration: {0}")]
-    InvalidConfig(#[from] orbit_server_config::SchemaConfigError),
-
     #[error("Invalid graph ClickHouse configuration: {0}")]
     InvalidGraphConfig(#[from] orbit_server_config::ConfigurationError),
 

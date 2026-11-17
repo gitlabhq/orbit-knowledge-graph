@@ -53,5 +53,5 @@ pub use object_storage::{ObjectStorageAuth, ObjectStorageConfig, ObjectStoragePr
 pub use probe_server::{DEFAULT_PROBE_SERVER_PORT, ProbeServerConfig};
 pub use query::{CompilerDerivedSettings, QueryConfig, QuerySettings};
 pub use resources::{ContainerResources, MIN_DATALAKE_BATCH_SIZE, derive_concurrency_groups};
-pub use schema::{SchemaConfig, SchemaConfigError};
+pub use schema::SchemaConfig;
 pub use tls::TlsConfig;

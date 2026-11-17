@@ -766,6 +766,7 @@ pub struct Grpc {
     pub stream_timeout_secs: ::core::option::Option<u64>,
     #[prost(uint32, optional, tag = "10")]
     pub max_header_list_size_bytes: ::core::option::Option<u32>,
+    /// GitLab Rails rejects gRPC messages over 8 MiB.
     #[prost(uint64, optional, tag = "11")]
     pub result_chunk_bytes: ::core::option::Option<u64>,
     #[prost(uint64, optional, tag = "12")]
