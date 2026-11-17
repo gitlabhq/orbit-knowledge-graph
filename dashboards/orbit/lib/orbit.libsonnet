@@ -922,7 +922,7 @@ local GKG_IDX_SEL = 'container=~"(gkg|orbit)-indexer", ' + CLUSTER_SEL;
 local GKG_DSP_SEL = 'container=~"(gkg|orbit)-dispatcher", ' + CLUSTER_SEL;
 local GKG_ANY_SEL = 'container=~"(gkg|orbit)-.*", ' + CLUSTER_SEL;
 local SIPHON_SEL = 'namespace="siphon", ' + CLUSTER_SEL;
-local NATS_SEL = CLUSTER_SEL;
+local NATS_SEL = if IS_DEDICATED then CLUSTER_SEL else 'namespace="nats", container="prom-exporter", env=~"$cluster"';
 local RAILS_SEL = if IS_DEDICATED then 'env=~".*"' else 'env=~"$rails_env"';
 
 // ---------- Indexer pool helpers ----------

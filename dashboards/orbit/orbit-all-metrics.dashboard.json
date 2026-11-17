@@ -8021,7 +8021,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(nats_varz_in_msgs{cluster=~\"$cluster\"}[5m]))",
+          "expr": "sum(rate(nats_varz_in_msgs{namespace=\"nats\", container=\"prom-exporter\", env=~\"$cluster\"}[5m]))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -8072,7 +8072,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(nats_varz_out_msgs{cluster=~\"$cluster\"}[5m]))",
+          "expr": "sum(rate(nats_varz_out_msgs{namespace=\"nats\", container=\"prom-exporter\", env=~\"$cluster\"}[5m]))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -8123,7 +8123,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(nats_varz_in_bytes{cluster=~\"$cluster\"}[5m]))",
+          "expr": "sum(rate(nats_varz_in_bytes{namespace=\"nats\", container=\"prom-exporter\", env=~\"$cluster\"}[5m]))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -8174,7 +8174,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(nats_varz_out_bytes{cluster=~\"$cluster\"}[5m]))",
+          "expr": "sum(rate(nats_varz_out_bytes{namespace=\"nats\", container=\"prom-exporter\", env=~\"$cluster\"}[5m]))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -8225,7 +8225,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(nats_varz_slow_consumers{cluster=~\"$cluster\"}[5m]))",
+          "expr": "sum(rate(nats_varz_slow_consumers{namespace=\"nats\", container=\"prom-exporter\", env=~\"$cluster\"}[5m]))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -8276,7 +8276,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (stream_name) (nats_stream_total_messages{cluster=~\"$cluster\"})",
+          "expr": "sum by (stream_name) (nats_stream_total_messages{namespace=\"nats\", container=\"prom-exporter\", env=~\"$cluster\"})",
           "legendFormat": "{{stream_name}}",
           "refId": "A"
         }
@@ -8327,7 +8327,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (stream_name) (nats_stream_total_bytes{cluster=~\"$cluster\"})",
+          "expr": "sum by (stream_name) (nats_stream_total_bytes{namespace=\"nats\", container=\"prom-exporter\", env=~\"$cluster\"})",
           "legendFormat": "{{stream_name}}",
           "refId": "A"
         }
@@ -8378,7 +8378,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_pending{cluster=~\"$cluster\"})",
+          "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_pending{namespace=\"nats\", container=\"prom-exporter\", env=~\"$cluster\"})",
           "legendFormat": "{{stream_name}} / {{consumer_name}}",
           "refId": "A"
         }
@@ -8429,7 +8429,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (stream_name, consumer_name) (rate(nats_consumer_num_redelivered{cluster=~\"$cluster\"}[5m]))",
+          "expr": "sum by (stream_name, consumer_name) (rate(nats_consumer_num_redelivered{namespace=\"nats\", container=\"prom-exporter\", env=~\"$cluster\"}[5m]))",
           "legendFormat": "{{stream_name}} / {{consumer_name}}",
           "refId": "A"
         }
@@ -8480,7 +8480,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_ack_pending{cluster=~\"$cluster\"})",
+          "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_ack_pending{namespace=\"nats\", container=\"prom-exporter\", env=~\"$cluster\"})",
           "legendFormat": "{{stream_name}} / {{consumer_name}}",
           "refId": "A"
         }
