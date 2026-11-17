@@ -358,8 +358,20 @@ mod tests {
         let entities = crate::commands::grep::code_entities();
         assert_eq!(entities, strings(&["Definition", "Directory", "File"]));
         for entity in entities {
-            let query = format!("code:{entity}:x");
-            assert!(parse(&query, true).is_some(), "{query}");
+            for name in [entity.clone(), entity.to_lowercase()] {
+                let query = format!("code:{name}:x");
+                assert!(parse(&query, true).is_some(), "{query}");
+            }
+        }
+        for entity in crate::remote::grep::searched_kinds() {
+            for name in [entity.to_string(), entity.to_lowercase()] {
+                let query = format!("gitlab:{name}:x");
+                assert_eq!(
+                    sections(&query),
+                    vec![(strings(&[entity]), "x".into())],
+                    "{query}"
+                );
+            }
         }
     }
 
