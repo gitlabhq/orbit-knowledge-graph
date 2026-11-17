@@ -100,6 +100,16 @@ for pod in $($KC get pods -n "$NS_GKG" -o jsonpath='{.items[*].metadata.name}' 2
     > "$DIAG_DIR/${GKG_NS_SHORT}-${pod}.log" || true
 done
 
+log "Capturing Siphon and Sidekiq logs"
+for pod in $($KC get pods -n "$NS_SIPHON" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+  $KC logs "$pod" -n "$NS_SIPHON" --all-containers 2>/dev/null \
+    | gzip > "$DIAG_DIR/siphon-${pod}.log.gz" || true
+done
+for pod in $($KC get pods -n "$NS_GITLAB" -l app=sidekiq -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+  $KC logs "$pod" -n "$NS_GITLAB" --all-containers 2>/dev/null \
+    | gzip > "$DIAG_DIR/gitlab-${pod}.log.gz" || true
+done
+
 if [ "$result" = "pass" ] && [ "$CHAOS_FAILED" -eq 0 ]; then
   log "Tests passed"
   exit 0
