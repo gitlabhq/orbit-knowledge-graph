@@ -25,6 +25,17 @@ fn serve(replies: &'static [(u16, Option<&'static str>)]) -> MockServer {
         for stream in listener.incoming() {
             let mut stream = stream.expect("accept");
             let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            let mut request_line = String::new();
+            reader
+                .read_line(&mut request_line)
+                .expect("read request line");
+            if request_line.starts_with("GET /api/v4/version") {
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 404 X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                continue;
+            }
             let mut content_length = 0;
             loop {
                 let mut line = String::new();

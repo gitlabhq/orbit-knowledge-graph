@@ -5007,6 +5007,7 @@ dependencies = [
  "rustc-hash 2.1.3",
  "rustix",
  "rustls",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",

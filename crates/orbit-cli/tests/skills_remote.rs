@@ -8,6 +8,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
+const VERSION_REQUEST: &str = "GET /api/v4/version";
 
 #[derive(Clone)]
 struct Reply {
@@ -31,39 +32,49 @@ fn mock_server(replies: Vec<Reply>) -> (String, thread::JoinHandle<Vec<Request>>
         let mut requests = Vec::new();
         listener.set_nonblocking(true).unwrap();
         for reply in replies {
-            let deadline = std::time::Instant::now() + ACCEPT_TIMEOUT;
-            let mut stream = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        stream.set_nonblocking(false).unwrap();
-                        break stream;
+            let (mut stream, request_line, headers) = loop {
+                let deadline = std::time::Instant::now() + ACCEPT_TIMEOUT;
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => {
+                            stream.set_nonblocking(false).unwrap();
+                            break stream;
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(
+                                std::time::Instant::now() < deadline,
+                                "mock server timed out"
+                            );
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("mock accept failed: {error}"),
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(
-                            std::time::Instant::now() < deadline,
-                            "mock server timed out"
-                        );
-                        thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(error) => panic!("mock accept failed: {error}"),
-                }
-            };
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            let request_line = line.trim_end().to_string();
-            let mut headers = BTreeMap::new();
-            loop {
-                line.clear();
+                };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
-                let trimmed = line.trim_end();
-                if trimmed.is_empty() {
-                    break;
+                let request_line = line.trim_end().to_string();
+                let mut headers = BTreeMap::new();
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).unwrap();
+                    let trimmed = line.trim_end();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = trimmed.split_once(':') {
+                        headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+                    }
                 }
-                if let Some((name, value)) = trimmed.split_once(':') {
-                    headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+                if !request_line.starts_with(VERSION_REQUEST) {
+                    break (stream, request_line, headers);
                 }
-            }
+                stream
+                    .write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .unwrap();
+            };
             requests.push(Request {
                 line: request_line,
                 headers,

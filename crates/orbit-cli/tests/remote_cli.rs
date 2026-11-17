@@ -1,11 +1,12 @@
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
+const VERSION_REQUEST: &str = "GET /api/v4/version";
 
 struct CapturedRequest {
     request_line: String,
@@ -56,9 +57,33 @@ fn answer_request(
     content_type: &str,
     content_encoding: Option<&str>,
 ) -> CapturedRequest {
-    let mut stream = accept_within(listener, ACCEPT_TIMEOUT);
-    let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+    let (mut stream, request) = accept_request(listener, false);
+    let encoding_header = content_encoding
+        .map(|encoding| format!("Content-Encoding: {encoding}\r\n"))
+        .unwrap_or_default();
+    respond(
+        &mut stream,
+        200,
+        content_type,
+        &encoding_header,
+        response_body,
+    );
+    request
+}
 
+fn accept_request(listener: &TcpListener, serves_version: bool) -> (TcpStream, CapturedRequest) {
+    loop {
+        let mut stream = accept_within(listener, ACCEPT_TIMEOUT);
+        let request = read_request(&stream);
+        if serves_version || !request.request_line.starts_with(VERSION_REQUEST) {
+            return (stream, request);
+        }
+        respond(&mut stream, 404, "application/json", "", b"{}");
+    }
+}
+
+fn read_request(stream: &TcpStream) -> CapturedRequest {
+    let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
     let mut request_line = String::new();
     reader
         .read_line(&mut request_line)
@@ -88,21 +113,7 @@ fn answer_request(
     }
 
     let mut body = vec![0u8; content_length];
-    if content_length > 0 {
-        reader.read_exact(&mut body).expect("read request body");
-    }
-
-    let encoding_header = content_encoding
-        .map(|encoding| format!("Content-Encoding: {encoding}\r\n"))
-        .unwrap_or_default();
-    let head = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{encoding_header}Content-Length: {}\r\nConnection: close\r\n\r\n",
-        response_body.len()
-    );
-    stream.write_all(head.as_bytes()).expect("write head");
-    stream.write_all(response_body).expect("write response");
-    stream.flush().expect("flush response");
-
+    reader.read_exact(&mut body).expect("read request body");
     CapturedRequest {
         request_line: request_line.trim_end().to_string(),
         auth_header,
@@ -111,7 +122,17 @@ fn answer_request(
     }
 }
 
-fn accept_within(listener: &TcpListener, timeout: Duration) -> std::net::TcpStream {
+fn respond(stream: &mut TcpStream, status: u16, content_type: &str, headers: &str, body: &[u8]) {
+    let head = format!(
+        "HTTP/1.1 {status} Mock\r\nContent-Type: {content_type}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).expect("write head");
+    stream.write_all(body).expect("write response");
+    stream.flush().expect("flush response");
+}
+
+fn accept_within(listener: &TcpListener, timeout: Duration) -> TcpStream {
     listener
         .set_nonblocking(true)
         .expect("set non-blocking accept");
@@ -312,6 +333,58 @@ fn run_schema_on_rest(graphql_body: &'static str) -> std::process::Output {
         "GET /api/v4/orbit/schema?expand=User%2CProject HTTP/1.1"
     );
     output
+}
+
+fn schema_requests_on(version: &'static str, answer: (&'static str, &'static str)) -> Vec<String> {
+    let (base_url, handle) = serve_routes(vec![("GET /api/v4/version", version), answer]);
+    let output = run_orbit(&base_url, &["schema", "User"]);
+    let requests = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{version} stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    requests
+        .into_iter()
+        .map(|request| request.request_line)
+        .collect()
+}
+
+#[test]
+fn schema_reads_rest_without_graphql_below_the_first_orbit_release() {
+    for version in [
+        r#"{"version":"19.4.0-ee","enterprise":true}"#,
+        r#"{"version":"19.5.0-ee","enterprise":true}"#,
+        r#"{"version":"19.6.0","enterprise":false}"#,
+    ] {
+        assert_eq!(
+            schema_requests_on(
+                version,
+                ("GET /api/v4/orbit/schema", r#"{"schema_version":"1"}"#)
+            ),
+            [
+                "GET /api/v4/version HTTP/1.1",
+                "GET /api/v4/orbit/schema?expand=User HTTP/1.1"
+            ],
+            "{version}"
+        );
+    }
+}
+
+#[test]
+fn schema_asks_graphql_from_the_first_orbit_release() {
+    for version in [
+        r#"{"version":"19.4.7-ee","enterprise":true}"#,
+        r#"{"version":"19.5.5-ee","enterprise":true}"#,
+        r#"{"version":"19.6.0-pre","enterprise":true}"#,
+    ] {
+        assert_eq!(
+            schema_requests_on(version, ("POST /api/graphql", ONTOLOGY_RESPONSE)),
+            ["GET /api/v4/version HTTP/1.1", "POST /api/graphql HTTP/1.1"],
+            "{version}"
+        );
+    }
 }
 
 #[test]
@@ -848,26 +921,11 @@ fn query_posts_positional_text_as_query_string() {
 
 #[test]
 fn http_403_exits_with_code_four() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-    let addr = listener.local_addr().unwrap();
-    let base_url = format!("http://{addr}");
-    let handle = thread::spawn(move || {
-        let mut stream = accept_within(&listener, ACCEPT_TIMEOUT);
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let mut line = String::new();
-        while reader.read_line(&mut line).unwrap() > 0 {
-            if line == "\r\n" {
-                break;
-            }
-            line.clear();
-        }
-        let body = "No Orbit enabled namespaces";
-        let response = format!(
-            "HTTP/1.1 403 Forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        stream.write_all(response.as_bytes()).unwrap();
-    });
+    let (base_url, handle) = serve_routes_with_status(vec![(
+        "POST /api/graphql",
+        403,
+        "No Orbit enabled namespaces",
+    )]);
 
     let output = run_orbit(&base_url, &["status"]);
     handle.join().unwrap();
@@ -1009,48 +1067,27 @@ fn serve_routes_with_status(
 ) -> (String, thread::JoinHandle<Vec<CapturedRequest>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let base_url = format!("http://{}", listener.local_addr().expect("mock addr"));
+    let serves_version = routes
+        .iter()
+        .any(|(pattern, _, _)| pattern.starts_with(VERSION_REQUEST));
     let handle = thread::spawn(move || {
         (0..routes.len())
             .map(|_| {
-                let mut stream = accept_within(&listener, ACCEPT_TIMEOUT);
-                let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
-                let mut request_line = String::new();
-                reader.read_line(&mut request_line).expect("read request line");
-                let mut content_length = 0usize;
-                loop {
-                    let mut line = String::new();
-                    reader.read_line(&mut line).expect("read header line");
-                    let trimmed = line.trim_end();
-                    if trimmed.is_empty() {
-                        break;
-                    }
-                    if let Some((name, value)) = trimmed.split_once(':')
-                        && name.trim().eq_ignore_ascii_case("content-length")
-                    {
-                        content_length = value.trim().parse().expect("parse content-length");
-                    }
-                }
-                let mut body = vec![0u8; content_length];
-                reader.read_exact(&mut body).expect("read request body");
-                let text = String::from_utf8_lossy(&body);
+                let (mut stream, request) = accept_request(&listener, serves_version);
                 let (status, response_body) = routes
                     .iter()
                     .find(|(pattern, _, _)| {
-                        request_line.contains(pattern) || text.contains(pattern)
+                        request.request_line.contains(pattern) || request.body.contains(pattern)
                     })
                     .map_or((200, "[]"), |(_, status, body)| (*status, *body));
-                let response = format!(
-                    "HTTP/1.1 {status} Mock\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
-                    response_body.len()
+                respond(
+                    &mut stream,
+                    status,
+                    "application/json",
+                    "",
+                    response_body.as_bytes(),
                 );
-                stream.write_all(response.as_bytes()).expect("write response");
-                stream.flush().expect("flush response");
-                CapturedRequest {
-                    request_line: request_line.trim_end().to_string(),
-                    auth_header: None,
-                    accept_encoding: None,
-                    body: String::from_utf8(body).expect("utf8 body"),
-                }
+                request
             })
             .collect()
     });

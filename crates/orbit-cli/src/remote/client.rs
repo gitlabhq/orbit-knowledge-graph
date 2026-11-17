@@ -8,7 +8,7 @@ use cynic::{GraphQlResponse, Operation};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use super::api::{Api, ErrorExtensions};
+use super::api::{Api, ErrorExtensions, Instance};
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
 use super::retry::{self, Policy};
 
@@ -20,6 +20,7 @@ const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 const QUERY_PATH: &str = "/api/v4/orbit/query";
 const GRAPHQL_PATH: &str = "/api/graphql";
+const VERSION_PATH: &str = "/api/v4/version";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
 const GREP_PATH: &str = "/api/v4/orbit/grep";
 const CONTEXT_PATH: &str = "/api/v4/orbit/context";
@@ -235,7 +236,7 @@ impl OrbitClient {
         Q: DeserializeOwned,
         V: Serialize,
     {
-        if Api::selected() == Some(Api::Rest) {
+        if Api::selected(self.instance()).await == Some(Api::Rest) {
             return Ok(None);
         }
         let request = serde_json::to_vec(operation).map_err(|error| {
@@ -254,6 +255,15 @@ impl OrbitClient {
             })?;
         let api = Api::remember_from(response.errors.as_deref().unwrap_or_default());
         Ok((api == Api::Graphql).then_some(response))
+    }
+
+    async fn instance(&self) -> Option<Instance> {
+        let request = self
+            .http
+            .get(self.url(VERSION_PATH))
+            .timeout(SHORT_REQUEST_TIMEOUT);
+        let response = self.send_raw(request).await.ok()?.error_for_status().ok()?;
+        serde_json::from_slice(&read_body(response).await.ok()?).ok()
     }
 
     async fn post_json(
