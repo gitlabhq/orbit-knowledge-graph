@@ -146,7 +146,7 @@ the copies, and restores the replica counts.
    mise run dev:setup
    ```
 
-   The cluster already created the `gkg` database and applied the schema from `main` when it
+   The cluster already created the `orbit` database and applied the schema from `main` when it
    came up. This step applies your checkout's schema on top, over the ClickHouse HTTP port.
 
 1. **Start all services:**
