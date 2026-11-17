@@ -11,8 +11,7 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
 ignore = [
-    # chrono unmaintained, no safe upgrade. Direct workspace dep and transitive via arrow.
-    "RUSTSEC-2026-0543",
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained with no safe upgrade; direct workspace dep and transitive via arrow" },
     # astral-tokio-tar unmaintained - dev-only via testcontainers, reached through
     # integration-testkit and testcontainers-modules (nats-client, integration-tests).
     # No safe upgrade available. Remove when testcontainers drops it
