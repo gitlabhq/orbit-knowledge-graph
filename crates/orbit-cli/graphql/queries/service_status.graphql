@@ -1,5 +1,5 @@
 query ServiceStatus {
-  orbit @gl_introduced(version: "19.4.0") {
+  orbit @gl_introduced(version: "19.3.0") {
     serviceStatus {
       state
       version

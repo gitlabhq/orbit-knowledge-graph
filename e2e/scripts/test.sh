@@ -43,6 +43,9 @@ HELM_ARGS=(install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner"
 if [ -n "${E2E_ROBOT_IMAGE:-}" ]; then
   HELM_ARGS+=(--set "image=$E2E_ROBOT_IMAGE")
 fi
+if [ -n "${E2E_CLI_IMAGE:-}" ]; then
+  HELM_ARGS+=(--set "cliImage=$E2E_CLI_IMAGE")
+fi
 helm "${HELM_ARGS[@]}"
 
 "$E2E_DIR/scripts/ch-chaos.sh" indexing &

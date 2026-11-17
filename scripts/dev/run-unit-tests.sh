@@ -23,7 +23,7 @@ args=(cargo nextest run --workspace \
   --test vfs_paths --test safe_fs \
   --test budgets --test export --test link --test parse --test pipeline \
   --test resolve --test rewrite --test snapshot --test tree_storage \
-  --test macros)
+  --test macros --test introduced_versions)
 
 # Append caller's arguments last (e.g. --profile ci) so they can
 # override defaults.
