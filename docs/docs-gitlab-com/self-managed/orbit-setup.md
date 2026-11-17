@@ -215,7 +215,7 @@ Adjust the values for your environment:
 - If the ClickHouse certificate comes from your own CA, add the CA certificate to `trust.extraCAs`.
 - If a load balancer or a service mesh handles TLS, remove the `tls` block.
 - If NATS requires a password, set `nats.username`, add `nats-password` to the Secret and `natsPassword` to `secrets`, and turn on `nats.tls` so the password does not cross the network in clear text.
-- Snowplow analytics to the GitLab-hosted collector is off by default. To report GitLab Orbit usage through Service Ping instead, see [Set up Service Ping for GitLab Orbit](service-ping.md).
+- Snowplow analytics to the GitLab-hosted collector is off by default. To turn it on, set `analytics.enabled: true`. To report GitLab Orbit usage through Service Ping, see [Set up Service Ping for GitLab Orbit](service-ping.md).
 
 For TLS, private certificate authorities, NATS TLS, and plaintext connections, see [Networking for GitLab Orbit](networking.md).
 For every value and its default, see the [GitLab Orbit Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts).
