@@ -92,7 +92,7 @@ if [ "$PLATFORM" = "linux" ]; then
 else
     BUILD=(rustup run "$TOOLCHAIN" cargo build --release --locked -p orbit-cli --bin orbit --target "$TARGET" --features duckdb-client/bundled)
 fi
-BIN_DIR="target/${TARGET}/release"
+BIN_DIR="${CARGO_TARGET_DIR:-target}/${TARGET}/release"
 if [ "${PGO:-0}" = "1" ]; then
     if [ "$PLATFORM" != "linux" ] || [ -n "${CI_COMMIT_TAG:-}" ]; then
         echo "PGO=1 is only supported for untagged Linux builds" >&2

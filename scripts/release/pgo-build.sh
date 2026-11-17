@@ -11,6 +11,7 @@
 
 PGO_REPORT_DIR="${PGO_REPORT_DIR:-pgo-report}"
 PGO_WORK_DIR="${PGO_WORK_DIR:-target/pgo}"
+PGO_LINKER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pgo-linker.sh"
 PGO_HOST=$(rustc -vV | awk '/^host:/ { print $2 }')
 
 pgo_stage() {
@@ -25,18 +26,19 @@ pgo_stage() {
     }
 }
 
+# cc-rs forwards -Cprofile-generate/-Cprofile-use to clang (zig cc) as -fprofile-*;
+# duckdb's C++ static initializers then crash before the profile runtime is up.
+# Only Rust is profiled, so switch that off for the target's C and C++.
 pgo_cargo_build() {
-    RUSTC_WRAPPER="" CARGO_TARGET_DIR="$1" RUSTFLAGS="${RUSTFLAGS:-} $2" "${BUILD[@]}"
+    local triple="${TARGET//-/_}" no_clang_pgo="-fno-profile-generate -fno-profile-use"
+    env RUSTC_WRAPPER="" CARGO_TARGET_DIR="$1" RUSTFLAGS="${RUSTFLAGS:-} $2" PGO_TARGET="$TARGET" \
+        "CFLAGS_${triple}=$no_clang_pgo" "CXXFLAGS_${triple}=$no_clang_pgo" "${BUILD[@]}"
 }
 
-# The instrumented binary is built for the host with the native linker and only
-# runs on this machine: with -Cprofile-generate it segfaults at startup when linked
-# by zig (glibc 2.28 and musl). The profile is keyed on source, so it still applies
-# to the zigbuild -Cprofile-use build of $TARGET.
+# Built through the same zigbuild path and target as the optimized build, so both get
+# the same crate hashes: a profile only matches functions with identical mangled names.
 pgo_instrumented_build() {
-    RUSTC_WRAPPER="" CARGO_TARGET_DIR="$PGO_WORK_DIR/gen" RUSTFLAGS="${RUSTFLAGS:-} -Cprofile-generate=$PGO_WORK_DIR/raw" \
-        rustup run "$TOOLCHAIN" cargo build --release --locked -p orbit-cli --bin orbit \
-        --target "$PGO_HOST" --features duckdb-client/bundled
+    pgo_cargo_build "$PGO_WORK_DIR/gen" "-Cprofile-generate=$PGO_WORK_DIR/raw -Clinker=$PGO_LINKER"
 }
 
 pgo_train() {
@@ -45,7 +47,7 @@ pgo_train() {
     for dir in $PGO_TRAIN_DIRS; do
         rm -rf "$PGO_WORK_DIR/data"
         ORBIT_TELEMETRY_ENABLED=false ORBIT_DATA_DIR="$PGO_WORK_DIR/data" \
-            "$PGO_WORK_DIR/gen/${PGO_HOST}/release/orbit" workspace index "$dir" >/dev/null || return 1
+            "$PGO_WORK_DIR/gen/${TARGET}/release/orbit" workspace index "$dir" >/dev/null || return 1
     done
     rm -rf "$PGO_WORK_DIR/data"
 }
