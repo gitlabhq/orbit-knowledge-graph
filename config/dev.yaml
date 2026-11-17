@@ -28,7 +28,7 @@ datalake:
     max_query_size: "10485760"
 
 graph:
-  database: "gkg"
+  database: "orbit"
   username: "gitlab-dev-stack"
   insert_settings:
     async_insert: "1"

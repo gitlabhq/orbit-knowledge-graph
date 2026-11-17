@@ -36,7 +36,7 @@ STATE_FILE="$GENERATED_DIR/connect-state"
 # Fixed Caproni names. The databases and users live in config/dev.yaml.
 GITLAB_NS="gitlab"
 STACK_NS="gitlab-dev-stack"
-ORBIT_SELECTOR="app.kubernetes.io/name=orbit,app.kubernetes.io/instance=gkg"
+ORBIT_SELECTOR="app.kubernetes.io/name=orbit,app.kubernetes.io/instance=orbit"
 SECRET_NAME="gitlab-dev-stack-gkg-secrets"
 CLICKHOUSE_SVC="gitlab-dev-stack-clickhouse"
 NATS_SVC="gitlab-dev-stack-nats"
