@@ -92,8 +92,6 @@ else
   warn "license activated: plan=#{l.plan} expires=#{l.expires_at} cloud=#{l.cloud_license?}"
 end
 
-# Auto DevOps runs a pipeline for every push to a test project, and those jobs delay the mergeability checks.
-# update! validates every setting, and this instance fails validation on unrelated ones.
 settings = ::ApplicationSetting.current_without_cache
 settings.update_columns(auto_devops_enabled: false)
 abort "auto_devops_enabled still on" if settings.reload.auto_devops_enabled

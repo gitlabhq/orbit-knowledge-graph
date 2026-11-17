@@ -144,8 +144,6 @@ deploymentProfiles:
 deployments:
   postgres-producer:
     profile: producer
-    # /health/ready fails during each ~10 s per-table snapshot merge, and the 10 s probe
-    # period can stay in phase with them until every initial snapshot is merged.
     probes:
       readiness:
         httpGet:

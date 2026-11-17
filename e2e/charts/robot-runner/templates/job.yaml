@@ -8,7 +8,6 @@ spec:
   template:
     metadata:
       annotations:
-        # backoffLimit is 0, so a scale-down eviction fails the whole run.
         cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
     spec:
       restartPolicy: Never
