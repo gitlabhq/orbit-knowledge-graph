@@ -100,33 +100,37 @@ To install DIP:
 1. Download the chart to get the values file:
 
    ```shell
-   helm pull data-insights-platform --version <dip_chart_version> --untar \
+   helm pull data-insights-platform --version 2.10.0 --untar \
      --repo https://gitlab.com/api/v4/projects/70800837/packages/helm/stable
    ```
-
-   <!-- TODO: the first DIP chart version with values-orbit.yaml, from data-insights-platform-helm-charts!247 -->
 
 1. Install the chart with that values file and your NATS address:
 
    ```shell
    helm upgrade --install dip data-insights-platform \
      --repo https://gitlab.com/api/v4/projects/70800837/packages/helm/stable \
-     --version <dip_chart_version> \
+     --version 2.10.0 \
      --namespace gitlab-orbit \
      --values data-insights-platform/values-orbit.yaml \
      --set single.pipeline.nats.addr=nats://nats.nats.svc.cluster.local:4222
    ```
 
-   The install runs the ClickHouse migrations first. They create the `snowplow` and `serviceping` databases, the `serviceping_exporter` user, and the view the exporter reads.
+   The install runs the ClickHouse migrations first.
+   They create the `snowplow` and `serviceping` databases, the `serviceping_exporter` user, and the view the exporter reads.
 
 1. Confirm that the `platform-single-0` pod is `Running`:
 
    ```shell
-   kubectl -n gitlab-orbit get pods -l app=platform
+   kubectl -n gitlab-orbit get pods -l app=platform-single
    ```
 
-If NATS requires TLS client certificates, mount them with `natsClientCertsSecretName` and set
-`single.pipeline.nats.caCertPath`, `clientCertPath`, and `clientKeyPath`.
+Adjust the values for your environment:
+
+- If NATS requires TLS client certificates, mount them with `natsClientCertsSecretName` and set `single.pipeline.nats.caCertPath`, `clientCertPath`, and `clientKeyPath`.
+- A NATS server that requires a username and password is not supported. See [issue 225](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/225).
+- For ClickHouse over TLS, such as ClickHouse Cloud, add `?secure=true` to the DSN in the `dip-clickhouse-dsn` Secret.
+- DIP runs in single mode: one pod, one stream, and tables for one ClickHouse node.
+
 For every value, see the [DIP chart README](https://gitlab.com/gitlab-org/analytics-section/platform-insights/data-insights-platform-helm-charts#rendering-the-pipeline-config-from-values).
 
 ## Install the Service Ping exporter
