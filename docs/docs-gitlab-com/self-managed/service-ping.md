@@ -20,23 +20,19 @@ On GitLab Self-Managed, two components next to GitLab Orbit do this:
 - The Service Ping exporter counts them once a week and sends the counts to `version.gitlab.com`.
 
 Raw events never leave your cluster.
-The exporter follows the Service Ping settings of your GitLab instance under **Admin > Settings > Metrics and profiling**:
-nothing is sent while Service Ping is turned off, and optional metrics are left out unless you allow them.
-
-Both components are optional. Without them, GitLab Orbit runs as before and reports no usage.
+The exporter follows the Service Ping settings of your GitLab instance, so nothing is sent while Service Ping is turned off.
+Both components are optional.
+Without them, GitLab Orbit runs as before and reports no usage.
 
 Prerequisites:
 
 - GitLab Orbit 1.3.0 or later, with Helm chart `<orbit_chart_version>` or later. <!-- TODO: the chart version that ships analytics.local_collector, from orbit-helm-charts!209 -->
-- GitLab 19.6 or later. The exporter reads the Service Ping settings through an API that earlier versions do not have.
+- GitLab 19.6 or later.
+  The exporter reads the Service Ping settings through an API that earlier versions do not have.
 - The NATS server and the ClickHouse server that GitLab Orbit uses.
 - A ClickHouse account that can create databases and users, for the DIP migrations.
 - Outbound HTTPS from the exporter pod to `version.gitlab.com`.
-
-Limitations:
-
-- A NATS server that requires a username and password is not supported. DIP connects to NATS without credentials, or with TLS client certificates. See [issue 225](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/225).
-- DIP runs in single mode: one pod, one stream, tables for one ClickHouse node.
+- Outbound access from the DIP pod to `iglucentral.com` and `gitlab-org.gitlab.io`, to resolve event schemas.
 
 Set up Service Ping for GitLab Orbit in this order:
 
