@@ -1,9 +1,12 @@
 import { Embed, EmbedGrid, findPage, LinkedHeading, PageFrame, pageHeadOf, Video, VideoGrid } from "@gitlab-org/orbit-site";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { PageFooter } from "../components/PageFooter";
 import { type DemoVideo, featured, links, videos } from "../content/demos";
 
 export const Route = createFileRoute("/about/")({
+  beforeLoad: ({ location }) => {
+    if (location.hash === "roadmap") throw redirect({ to: "/next", replace: true });
+  },
   head: () => pageHeadOf(findPage("about")),
   component: AboutPage,
 });
