@@ -131,6 +131,9 @@ toml_edit = "0.25"
 toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 opentelemetry_sdk = "0.32"
+url = "2.5"
+http = "1"
+hyper-util = "0.1.20"
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
 bolero = "0.13.4"
