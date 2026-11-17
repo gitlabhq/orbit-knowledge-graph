@@ -184,20 +184,26 @@ GitLab Orbit sends its usage events to DIP when `analytics.local_collector.enabl
 
 To point GitLab Orbit at DIP:
 
-1. Add the value to `orbit-values.yaml`:
+1. Add the values to `orbit-values.yaml`:
 
    ```yaml
+   image:
+     tag: "<orbit_version>"
+
    analytics:
      local_collector:
        enabled: true
        url: http://platform-single.gitlab-orbit.svc:8082
    ```
 
+   Replace `<orbit_version>` with GitLab Orbit 1.3.0 or later.
+   The chart fails to render with an older version.
+
 1. Run the `helm upgrade` command from [Install GitLab Orbit](orbit-setup.md#install-gitlab-orbit).
 
-The webserver and indexer pods restart and send every usage event to DIP from then on.
-To stop local collection, set `enabled: false` and upgrade again; the URL can stay.
-This block does not change `analytics.enabled`, which controls the GitLab-hosted collector and stays off by default.
+The webserver, indexer, and dispatcher pods restart, and GitLab Orbit sends every usage event to DIP from then on.
+To stop local collection, set `enabled: false` and upgrade again.
+The URL can stay.
 
 ## Verify the setup
 
