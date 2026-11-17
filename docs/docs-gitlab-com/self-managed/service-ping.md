@@ -214,19 +214,21 @@ To verify the setup:
 1. Count the events DIP stored, with your ClickHouse client:
 
    ```sql
-   SELECT count() FROM snowplow.enriched_events WHERE app_id = 'gkg-server'
+   SELECT count() FROM serviceping.events WHERE app_id = 'gkg-server'
    ```
 
-   The count is greater than zero within a minute of the query.
+   The count is greater than zero in a minute of the query.
 
 1. Run the exporter once and read its log:
 
    ```shell
    kubectl -n gitlab-orbit create job --from=cronjob/serviceping-exporter serviceping-exporter-check
-   kubectl -n gitlab-orbit logs job/serviceping-exporter-check
+   kubectl -n gitlab-orbit logs -f job/serviceping-exporter-check
    ```
 
-   In `dry-run` mode the log shows the payload for each weekly window, with the Service Ping settings it read from GitLab.
+   In `dry-run` mode the log shows the payload for each closed weekly window, with the Service Ping settings it read from GitLab.
+   A window closes on Monday at 00:00 UTC, so the first payload appears after the first Monday that follows your first event.
+   Until then, the log shows the settings and no payload.
 
 ## Related topics
 
