@@ -92,6 +92,9 @@ else
   warn "license activated: plan=#{l.plan} expires=#{l.expires_at} cloud=#{l.cloud_license?}"
 end
 
+# Auto DevOps runs a pipeline for every push to a test project, and those jobs delay the mergeability checks.
+::ApplicationSetting.current_without_cache.update!(auto_devops_enabled: false)
+
 account = ::Analytics::Orbit::Billing::InstanceAccount.new
 abort 'Orbit is not entitled by the license add-ons' unless account.entitled?
 
