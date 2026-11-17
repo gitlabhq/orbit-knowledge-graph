@@ -1,0 +1,22 @@
+# Dependency and symbol rules for `orbit quality`, checked by the
+# orbit-quality-gate CI job. Each rule restates a written guideline; the
+# source is in the rule name. `forbid` rules match a symbol and anything
+# under it. In CI, only uses the merge request adds fail the job.
+
+layers:
+  - name: code-graph shared linker and pipeline have no language branches (crates/code-graph/AGENTS.md)
+    from:
+      - "crates/code-graph/src/v2/linker/**"
+      - "crates/code-graph/src/v2/pipeline.rs"
+      - "crates/code-graph/src/v2/sink.rs"
+    deny: ["crates/code-graph/src/v2/langs/**"]
+
+forbid:
+  - name: R1 new orbit-billing importers need SOX review (sox-billing-boundary.md)
+    symbols: ["orbit_billing"]
+    paths: ["crates/**"]
+    only_in: ["crates/orbit-billing/**"]
+  - name: R4 billing events are emitted only through orbit-billing (sox-billing-boundary.md)
+    symbols: ["labkit_events::BillingEvent", "BillingEvent", "track_billing_event"]
+    paths: ["crates/**"]
+    only_in: ["crates/orbit-billing/**"]
