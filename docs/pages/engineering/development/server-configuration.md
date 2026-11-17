@@ -1,7 +1,7 @@
 # Server configuration
 
 `gkg-server` reads the same configuration in all modes. The default values are in
-[`config/default.yaml`](../../../../config/default.yaml). The types and allowed values are in [`config/schemas/config.schema.json`](../../../../config/schemas/config.schema.json).
+[`config/default.yaml`](../../../../config/default.yaml). The types and allowed values are in [`config.proto`](../../../../crates/orbit-server-config/proto/orbit/config/v1/config.proto).
 
 ## Load order
 
