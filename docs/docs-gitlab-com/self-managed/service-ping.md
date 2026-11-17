@@ -230,6 +230,11 @@ To verify the setup:
    A window closes on Monday at 00:00 UTC, so the first payload appears after the first Monday that follows your first event.
    Until then, the log shows the settings and no payload.
 
+## Upgrade
+
+Upgrade the DIP and exporter releases with the `helm upgrade` commands above, and GitLab Orbit as in [Upgrade GitLab Orbit](orbit-setup.md#upgrade-gitlab-orbit).
+The DIP migrations run again on every upgrade.
+
 ## Related topics
 
 - [Set up GitLab Orbit](orbit-setup.md)
