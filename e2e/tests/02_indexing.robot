@@ -22,16 +22,15 @@ Project Issue And Note Are Indexed
     Start Indexing Budget    240
 
     ${project_name}=    Set Variable    e2e-prj-${suffix}
-    ${project}=    Create Project    ${project_name}    ${SHARED_NAMESPACE_ID}
-    Wait For Node Indexed Within Budget    Project    ${project["id"]}    ${project_name}
-
     ${issue_title}=    Set Variable    e2e-issue-${suffix}
+    ${note_body}=    Set Variable    e2e-note-${suffix}
+    ${project}=    Create Project    ${project_name}    ${SHARED_NAMESPACE_ID}
     ${issue}=    Create Issue    ${project["id"]}    ${issue_title}
+    ${note}=    Create Note On Issue    ${project["id"]}    ${issue["iid"]}    ${note_body}
+
+    Wait For Node Indexed Within Budget    Project    ${project["id"]}    ${project_name}
     Wait For Node Indexed Within Budget    WorkItem    ${issue["id"]}    ${issue_title}
     ...    label_field=title
-
-    ${note_body}=    Set Variable    e2e-note-${suffix}
-    ${note}=    Create Note On Issue    ${project["id"]}    ${issue["iid"]}    ${note_body}
     Wait For Node Indexed Within Budget    Note    ${note["id"]}
 
 Epic Issue And Notes Hierarchy Is Indexed
@@ -45,23 +44,20 @@ Epic Issue And Notes Hierarchy Is Indexed
     Start Indexing Budget    240
 
     ${epic_title}=    Set Variable    e2e-epic-${suffix}
-    ${epic}=    Create Epic    ${SHARED_NAMESPACE_ID}    ${epic_title}
-    Wait For Node Indexed Within Budget    WorkItem    ${epic["work_item_id"]}    ${epic_title}
-    ...    label_field=title
-
     ${project_name}=    Set Variable    e2e-hier-prj-${suffix}
-    ${project}=    Create Project    ${project_name}    ${SHARED_NAMESPACE_ID}
-    Wait For Node Indexed Within Budget    Project    ${project["id"]}    ${project_name}
-
     ${issue_title}=    Set Variable    e2e-hier-issue-${suffix}
+    ${epic}=    Create Epic    ${SHARED_NAMESPACE_ID}    ${epic_title}
+    ${project}=    Create Project    ${project_name}    ${SHARED_NAMESPACE_ID}
     ${issue}=    Create Issue    ${project["id"]}    ${issue_title}
-    Wait For Node Indexed Within Budget    WorkItem    ${issue["id"]}    ${issue_title}
-    ...    label_field=title
-
     Add Issue To Epic    ${SHARED_NAMESPACE_ID}    ${epic["iid"]}    ${issue["id"]}
-
     ${note1}=    Create Note On Issue    ${project["id"]}    ${issue["iid"]}    e2e-note-a-${suffix}
     ${note2}=    Create Note On Issue    ${project["id"]}    ${issue["iid"]}    e2e-note-b-${suffix}
+
+    Wait For Node Indexed Within Budget    WorkItem    ${epic["work_item_id"]}    ${epic_title}
+    ...    label_field=title
+    Wait For Node Indexed Within Budget    Project    ${project["id"]}    ${project_name}
+    Wait For Node Indexed Within Budget    WorkItem    ${issue["id"]}    ${issue_title}
+    ...    label_field=title
     Wait For Node Indexed Within Budget    Note    ${note1["id"]}
     Wait For Node Indexed Within Budget    Note    ${note2["id"]}
 
