@@ -352,9 +352,7 @@ ORDER BY sf, sl, tf, tname",
             .get_mut(&(sfs[i].clone(), tfs[i].clone()))
             .expect("just inserted");
         file_edge.refs += 1;
-        file_edge
-            .targets
-            .insert(simple_name(&tnames[i]).to_string());
+        file_edge.targets.insert(tnames[i].clone());
         let from = module_of(&sfs[i], depth);
         let to = module_of(&tfs[i], depth);
         if from == to {
@@ -854,10 +852,31 @@ ORDER BY file, line"
     Ok(i64_column(&batches, "id").into_iter().collect())
 }
 
-fn simple_name(fqn: &str) -> &str {
-    fqn.rsplit([':', '.', '#'])
-        .find(|part| !part.is_empty())
-        .unwrap_or(fqn)
+/// Whether source text refers to the definition `fqn`. A bare name such as
+/// `read` or `new` appears in most files, so the name has to come with its
+/// owner (`manifest::read`, `Manifest.read`, `Foo#read`), or be imported or
+/// qualified on its own line together with the owner.
+fn refers_to(text: &str, fqn: &str) -> bool {
+    let parts: Vec<&str> = fqn
+        .split([':', '.', '#'])
+        .filter(|part| !part.is_empty())
+        .collect();
+    let Some((name, owners)) = parts.split_last() else {
+        return false;
+    };
+    let Some(owner) = owners.last() else {
+        return mentions(text, name);
+    };
+    [
+        format!("{owner}::{name}"),
+        format!("{owner}.{name}"),
+        format!("{owner}#{name}"),
+    ]
+    .iter()
+    .any(|qualified| mentions(text, qualified))
+        || text
+            .lines()
+            .any(|line| mentions(line, owner) && mentions(line, name))
 }
 
 fn mentions(text: &str, name: &str) -> bool {
@@ -945,11 +964,13 @@ impl BaseView {
 
     /// Whether an edge from `file` to definitions with these names is new:
     /// the file was touched and its base content names none of them.
+    /// Whether an edge from `file` to these definitions is new: the file was
+    /// touched and its base content does not refer to any of them.
     fn is_new(&self, file: &str, targets: &BTreeSet<String>) -> bool {
         match self.touched.get(file) {
             None => false,
             Some(None) => true,
-            Some(Some(text)) => !targets.iter().any(|name| mentions(text, name)),
+            Some(Some(text)) => !targets.iter().any(|fqn| refers_to(text, fqn)),
         }
     }
 
@@ -1386,8 +1407,8 @@ mod tests {
         assert!(base.is_new_symbol("edited.rb", "Open3"));
         assert!(!base.is_new_symbol("edited.rb", "::Net::HTTP"));
         assert!(base.is_new("added.rb", &names(&["Whatever"])));
-        assert!(base.is_new("edited.rb", &names(&["Helper"])));
-        assert!(!base.is_new("edited.rb", &names(&["Helper", "run"])));
+        assert!(base.is_new("edited.rb", &names(&["Helper::call"])));
+        assert!(!base.is_new("edited.rb", &names(&["Helper::call", "Net::HTTP.get"])));
         assert!(base.is_new_symbol("edited.rb", "HTTP2"));
         let rust = view(&[(
             "server.rs",
@@ -1395,6 +1416,25 @@ mod tests {
         )]);
         assert!(!rust.is_new_symbol("server.rs", "orbit_billing"));
         assert!(rust.is_new_symbol("server.rs", "orbit_billing::BillingTracker"));
+    }
+
+    #[test]
+    fn a_bare_method_name_is_not_a_reference_to_it() {
+        let text = "fn run_query() {\n    let body = std::fs::read(path);\n}\n";
+        assert!(!refers_to(text, "orbit_cli::database::manifest::read"));
+        assert!(refers_to(
+            "use crate::database::manifest;\nmanifest::read(p, q);\n",
+            "orbit_cli::database::manifest::read"
+        ));
+        assert!(refers_to(
+            "use crate::database::manifest::{read, write};\n",
+            "orbit_cli::database::manifest::read"
+        ));
+        assert!(refers_to(
+            "x = Manifest.read(path)\n",
+            "Gitlab::Manifest.read"
+        ));
+        assert!(refers_to("helper()\n", "helper"));
     }
 
     #[test]
