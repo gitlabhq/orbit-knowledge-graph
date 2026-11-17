@@ -92,6 +92,11 @@ else
   warn "license activated: plan=#{l.plan} expires=#{l.expires_at} cloud=#{l.cloud_license?}"
 end
 
+settings = ::ApplicationSetting.current_without_cache
+settings.update_columns(auto_devops_enabled: false)
+abort "auto_devops_enabled still on" if settings.reload.auto_devops_enabled
+::ApplicationSetting.expire
+
 account = ::Analytics::Orbit::Billing::InstanceAccount.new
 abort 'Orbit is not entitled by the license add-ons' unless account.entitled?
 
