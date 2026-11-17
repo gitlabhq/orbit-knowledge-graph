@@ -2,25 +2,25 @@
 instructions: |
   ## Orbit
 
-  - `{{orbit}} grep 'words'` searches every provider below. Run it first on the task's key words to find the code{{finds}}. Narrow with `provider:type:words`{{examples}}; `code:def:Name` finds definitions. Ignores case, `_`, `-`; `a|b` OR.
+  - `{{orbit}} grep 'words'` searches every provider below. Run it first on the task's key words to find the code{{finds}}. Narrow to one entity with `provider:entity:words`{{examples}}. Ignores case, `_`, `-`; `a|b` OR.
   - `{{orbit}} context` reads what grep found, with connections: `{{orbit}} context a.rs:10-40 a_test.rs:5-60 Name; {{orbit}} grep 'x'`. Batch the reads and searches you can name.{{remote_gitlab}}{{remote_query}}
 
-  Entities per provider, for `{{orbit}} grep provider:type:words`{{query_for}}:
+  Entities per provider, for `{{orbit}} grep provider:entity:words`{{query_for}}:
   {{entities}}
 
 remote:
   remote_gitlab: "\n- Read GitLab with `{{orbit}}` rather than glab and glab api; writes stay with glab. `{{orbit}} context mr:42 job:9` reads GitLab; bare `{{orbit}} context` reads the branch's MR and CI failures, and `repo:group/project symbol:Name` a sibling project."
   remote_query: "\n- Use `{{orbit}} query` for counts, rankings, and relationships across providers. {{query_syntax}}"
   finds: ", MRs, and discussions"
-  examples: ", such as `gitlab:mr:words`"
+  examples: ", such as `gitlab:mergerequest:words`"
   query_for: " and `{{orbit}} query`"
 providers:
   code: {description: local code}
   gitlab: {description: origin's group}
 
 nudge_gitlab: |
-  `{{orbit}}` reads GitLab; writes stay with glab. `{{orbit}} grep 'words'` searches code and every connected provider together, or one with `gitlab:mr:words`. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI; `{{orbit}} context repo:group/project symbol:Name file:path` reads a sibling project's code.
+  `{{orbit}}` reads GitLab; writes stay with glab. `{{orbit}} grep 'words'` searches code and every connected provider together, or one entity with `gitlab:mergerequest:words`. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI; `{{orbit}} context repo:group/project symbol:Name file:path` reads a sibling project's code.
 nudge_search: |
-  `{{orbit}} grep 'words'` searches code and every connected provider at once, with the enclosing definitions. Ignores case, `_`, `-`; `a|b` OR. Narrow to one provider with `provider:type:words`, such as `gitlab:mr:words`, or to code with paths, as with rg. `code:def:Name` finds where a name is defined, with its source.
+  `{{orbit}} grep 'words'` searches code and every connected provider at once, with the enclosing definitions. Ignores case, `_`, `-`; `a|b` OR. Narrow to one entity with `provider:entity:words`, such as `gitlab:mergerequest:words`, or to code with paths, as with rg.
 template_vars:
   reminder: "[orbit] Search with {{orbit}} grep 'words': code and connected providers at once, with enclosing definitions."

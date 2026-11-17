@@ -714,7 +714,7 @@ mod tests {
                 assert!(!rendered.contains("MANDATORY"), "{launcher}: {rendered}");
                 for phrase in [
                     &format!("`{launcher} grep 'words'` searches every provider below"),
-                    "`code:def:Name`",
+                    "`provider:entity:words`",
                     "\n- code (local code): Definition, Directory, File",
                     "Run it first on the task's key words",
                     "Ignores case, `_`, `-`",
@@ -732,7 +732,11 @@ mod tests {
                     rendered.contains("rather than glab and glab api") == remote,
                     "{launcher}"
                 );
-                assert_eq!(rendered.contains("`gitlab:mr:words`"), remote, "{launcher}");
+                assert_eq!(
+                    rendered.contains("`gitlab:mergerequest:words`"),
+                    remote,
+                    "{launcher}"
+                );
                 assert_eq!(
                     rendered.contains("\n- gitlab (origin's group): WorkItem, MergeRequest"),
                     remote,
@@ -741,7 +745,11 @@ mod tests {
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
                 assert!(!rendered.contains("`branch:`"), "{launcher}");
                 let budget = if remote { 255 } else { 90 };
-                assert!(rendered.split_whitespace().count() <= budget, "{launcher}: {} words", rendered.split_whitespace().count());
+                assert!(
+                    rendered.split_whitespace().count() <= budget,
+                    "{launcher}: {} words",
+                    rendered.split_whitespace().count()
+                );
             }
         }
         let local = render_instructions(DIRECT_LAUNCHER, false, &Providers::new());
@@ -753,8 +761,8 @@ mod tests {
         assert!(!search_nudge_text().contains("MANDATORY"));
         assert!(search_nudge_text().contains("every connected provider"));
         assert!(!gitlab_nudge_text().contains("MANDATORY"));
-        assert!(search_nudge_text().contains("`code:def:Name`"));
-        assert!(gitlab_nudge_text().contains("`gitlab:mr:words`"));
+        assert!(search_nudge_text().contains("`gitlab:mergerequest:words`"));
+        assert!(gitlab_nudge_text().contains("`gitlab:mergerequest:words`"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }
@@ -768,7 +776,7 @@ mod tests {
         let rendered = render_instructions(GLAB_LAUNCHER, true, &providers);
         assert!(
             rendered.ends_with(
-                "for `glab orbit grep provider:type:words` and `glab orbit query`:\n\
+                "for `glab orbit grep provider:entity:words` and `glab orbit query`:\n\
                  - code (local code): Definition, Directory, File\n\
                  - gitlab (origin's group): Widget\n- slack: SlackMessage"
             ),
@@ -777,7 +785,7 @@ mod tests {
         let local = render_instructions(GLAB_LAUNCHER, false, &providers);
         assert!(
             local.ends_with(
-                "for `glab orbit grep provider:type:words`:\n\
+                "for `glab orbit grep provider:entity:words`:\n\
                  - code (local code): Definition, Directory, File\n- slack: SlackMessage"
             ),
             "{local}"
