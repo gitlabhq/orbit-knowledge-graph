@@ -1,16 +1,13 @@
 use std::sync::{Arc, LazyLock};
 
-use query_engine::compiler::{CompiledQueryContext, Frontend, Input, QueryType};
-use query_engine::formatters::{
-    FormatName, GQL_OUTPUT_FORMAT_VERSION, GqlFormatter, GraphFormatter, GraphResponse,
-    ResultFormatter, TOON_OUTPUT_FORMAT_VERSION, ToonFormatter,
-};
+use query_engine::compiler::{CompiledQueryContext, Input, QueryType};
+use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
 use regex::Regex;
 use serde_json::Value;
 
-use super::format::{OutputExpect, OutputFormat};
+use super::output_format::assert_format;
 use super::{QueryExpect, assert_response};
 
 static RESPONSE_SCHEMA: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
@@ -138,143 +135,14 @@ pub(super) fn assert_compilation(
     }
 }
 
-pub(super) fn assert_output(
-    output: &PipelineOutput,
-    frontend: Frontend,
-    expect: &QueryExpect,
-    label: &str,
-) -> Value {
+pub(super) fn assert_output(output: &PipelineOutput, expect: &QueryExpect, label: &str) -> Value {
     assert_pagination(output, label);
     let response = GraphFormatter.format(output);
     for (format, expected) in &expect.format {
-        if *format == OutputFormat::Gql && frontend != Frontend::Gql {
-            continue;
-        }
         assert_format(output, &response, *format, expected, label);
     }
     assert_response(&output.compiled.input, response.clone(), expect, label);
     response
-}
-
-fn assert_format(
-    output: &PipelineOutput,
-    graph: &Value,
-    format: OutputFormat,
-    expect: &OutputExpect,
-    label: &str,
-) {
-    let (formatter, name, version): (&dyn ResultFormatter, _, _) = match format {
-        OutputFormat::Toon => (
-            &ToonFormatter,
-            FormatName::Toon,
-            &*TOON_OUTPUT_FORMAT_VERSION,
-        ),
-        OutputFormat::Gql => (&GqlFormatter, FormatName::Gql, &*GQL_OUTPUT_FORMAT_VERSION),
-    };
-    let format: &str = format.into();
-    let (formatted, stamped_version, stamped_name) = formatter.format_stamped(output);
-    assert_eq!(stamped_name, name, "{label}: {format} format name");
-    assert_eq!(
-        stamped_version,
-        version.to_string(),
-        "{label}: {format} format version"
-    );
-    let Value::String(text) = formatted else {
-        panic!("{label}: {format} output must be a string, got {formatted}");
-    };
-    let value = match name {
-        FormatName::Toon => toon_value(&text, graph, label),
-        _ => {
-            let (header, rows) = GqlFormatter.table(output);
-            let columns: serde_json::Map<String, Value> = header
-                .iter()
-                .enumerate()
-                .map(|(index, name)| {
-                    let values = rows.iter().map(|row| Value::from(row[index].as_str()));
-                    (name.clone(), values.collect())
-                })
-                .collect();
-            serde_json::json!({"header": header, "rows": rows, "columns": columns})
-        }
-    };
-    for fragment in &expect.contains {
-        assert!(
-            text.contains(fragment),
-            "{label}: {format} output lacks {fragment:?}:\n{text}"
-        );
-    }
-    if let Some(suffix) = &expect.ends_with {
-        assert!(
-            text.ends_with(suffix),
-            "{label}: {format} output does not end with {suffix:?}:\n{text}"
-        );
-    }
-    for key in &expect.absent {
-        assert!(
-            value.get(key).is_none(),
-            "{label}: {format} output has {key}: {value}"
-        );
-    }
-    if let Some(expected) = &expect.value
-        && let Some(mismatch) = subset_mismatch(format, expected, &value)
-    {
-        panic!("{label}: {mismatch}\n{value}");
-    }
-}
-
-fn toon_value(text: &str, graph: &Value, label: &str) -> Value {
-    let value: Value = toon_format::decode_strict(text)
-        .unwrap_or_else(|error| panic!("{label}: invalid TOON ({error}): {text}"));
-    assert_eq!(
-        text,
-        toon_format::encode_default(&value).unwrap() + "\n",
-        "{label}: TOON output is not the canonical encoding"
-    );
-    let toon_nodes: usize = value["nodes"].as_object().map_or(0, |tables| {
-        tables
-            .values()
-            .filter_map(Value::as_array)
-            .map(Vec::len)
-            .sum()
-    });
-    let count = |key: &str, value: &Value| value[key].as_array().map_or(0, Vec::len);
-    if value["query_type"] != "aggregation" {
-        assert_eq!(
-            (toon_nodes, count("edges", &value)),
-            (count("nodes", graph), count("edges", graph)),
-            "{label}: TOON and graph responses disagree on node and edge counts"
-        );
-    }
-    value
-}
-
-fn subset_mismatch(path: &str, expected: &Value, actual: &Value) -> Option<String> {
-    match (expected, actual) {
-        (Value::Object(expected), Value::Object(actual)) => {
-            expected
-                .iter()
-                .find_map(|(key, value)| match actual.get(key) {
-                    Some(found) => subset_mismatch(&format!("{path}.{key}"), value, found),
-                    None => Some(format!("{path}.{key} is missing")),
-                })
-        }
-        (Value::Array(expected), Value::Array(actual)) if expected.len() == actual.len() => {
-            expected
-                .iter()
-                .zip(actual)
-                .enumerate()
-                .find_map(|(index, (value, found))| {
-                    subset_mismatch(&format!("{path}[{index}]"), value, found)
-                })
-        }
-        (Value::Array(expected), Value::Array(actual)) => Some(format!(
-            "{path} has {} items, expected {}",
-            actual.len(),
-            expected.len()
-        )),
-        _ if expected == actual => None,
-        _ => Some(format!("{path} is {actual}, expected {expected}")),
-    }
 }
 
 pub(super) fn assert_pagination(output: &PipelineOutput, label: &str) {

@@ -354,7 +354,7 @@ only IDs and the relationship type.
 | `absent` | [key] | The decoded value has none of these top-level keys |
 | `value` | object | A partial match on the decoded value: objects may have extra keys, arrays match item by item |
 
-Each format also checks its format name and version. TOON decodes to its JSON value, must be the canonical encoding, and, for queries other than aggregations, must have the same node and edge counts as the graph response. GQL decodes to `{header, rows, columns}` from its result table: `header` lists the column names, `rows` holds the cells by row, and `columns` maps each column name to its cells. GQL checks run only for the GQL query.
+Each format also checks its format name and version. TOON decodes to its JSON value, must be the canonical encoding, and, for queries other than aggregations, must have the same node and edge counts as the graph response. GQL decodes to `{header, rows, columns}` from its result table: `header` lists the column names, `rows` holds the cells by row, and `columns` maps each column name to its cells. Every format runs for every query language of the case, because a JSON query can also ask for GQL output. A new format is one module in `src/query_scenario/output_format/` that implements `Encoding`, plus one `OutputFormat` variant.
 
 **Compilation:**
 

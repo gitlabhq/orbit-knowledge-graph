@@ -5,6 +5,7 @@
 mod datasets;
 mod duckdb;
 mod format;
+mod output_format;
 mod pagination;
 #[cfg(test)]
 mod regression;
@@ -333,7 +334,7 @@ async fn run_frontend(
         redaction,
     )
     .await;
-    let baseline = assert_output(&output, frontend, expect, label);
+    let baseline = assert_output(&output, expect, label);
     let count = repeat_count(expect, label);
     for run in 2..=count {
         let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
@@ -348,7 +349,7 @@ async fn run_frontend(
             redaction,
         )
         .await;
-        let rerun = assert_output(&output, frontend, expect, label);
+        let rerun = assert_output(&output, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
     }
 }
@@ -386,7 +387,7 @@ async fn run_pages(
             redaction,
         )
         .await;
-        let response = assert_output(&output, frontend, page_expect, &page_label);
+        let response = assert_output(&output, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
         assert_page_bounds(&response, i, expect.pages.len(), &page_label);

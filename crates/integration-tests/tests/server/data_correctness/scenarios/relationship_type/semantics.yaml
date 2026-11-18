@@ -514,16 +514,6 @@ cases:
     description: RETURN r in a traversal is accepted; the edges table lists its edges and the gql table
       adds an r column
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
-          ],
-          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-          "limit": 50
-        }
       gql: |
         MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, r, mr.title LIMIT 50
     expect:

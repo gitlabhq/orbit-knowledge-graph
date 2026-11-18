@@ -242,6 +242,18 @@ fn toon_expectations_check_text_value_and_absent_keys() {
 }
 
 #[test]
+fn gql_format_expectations_also_run_for_json_queries() {
+    let query = json!({"json": r#"{"query_type": "traversal", "nodes": [{"id": "d", "entity": "Definition", "node_ids": [1]}], "limit": 1}"#});
+    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  gql:\n";
+    run_suite(query.clone(), &format!("{base}    value: {{header: [d]}}"));
+    rejects(
+        query,
+        &format!("{base}    value: {{header: [e]}}"),
+        "gql.header[0] is \"d\", expected \"e\"",
+    );
+}
+
+#[test]
 fn gql_format_expectations_check_text_and_table() {
     let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
     let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  gql:\n";

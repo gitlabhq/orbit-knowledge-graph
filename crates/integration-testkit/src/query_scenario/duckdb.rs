@@ -80,7 +80,7 @@ fn run_step(
         };
         if expect.pages.is_empty() {
             let output = execute(database, &compiled, &label);
-            let baseline = assert_output(&output, frontend, expect, &label);
+            let baseline = assert_output(&output, expect, &label);
             for run in 2..=repeat_count(expect, &label) {
                 let compiled = compile_local(query, frontend, ontology)
                     .map(Arc::new)
@@ -88,7 +88,7 @@ fn run_step(
                 let compiled = assert_compilation(compiled, expect, ("duckdb", key), &label)
                     .expect("repeated query should compile");
                 let output = execute(database, &compiled, &label);
-                let response = assert_output(&output, frontend, expect, &label);
+                let response = assert_output(&output, expect, &label);
                 assert_repeated_response(&baseline, &response, run, &label);
             }
             continue;
@@ -101,7 +101,7 @@ fn run_step(
                     .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}")),
             );
             let output = execute(database, &compiled, &page_label);
-            let response = assert_output(&output, frontend, page_expect, &page_label);
+            let response = assert_output(&output, page_expect, &page_label);
             let response = serde_json::from_value(response).expect("response should deserialize");
             collected.push(&response);
             assert_page_bounds(&response, index, expect.pages.len(), &page_label);
