@@ -256,12 +256,13 @@ impl CommandRegistry {
         commands
     }
 
-    /// Commands as listed to MCP clients: the GQL `query_graph` also carries
-    /// the when-to-use routing lead, which the CLI and inline catalog omit.
+    /// The CLI and inline catalog use `commands_for`, which omits the routing lead.
     pub fn agent_commands_for(frontend: Frontend) -> Vec<ToolDefinition> {
         let mut commands = Self::commands_for(frontend);
         if frontend == Frontend::Gql
-            && let Some(query) = commands.iter_mut().find(|c| c.name == "query_graph")
+            && let Some(query) = commands
+                .iter_mut()
+                .find(|command| command.name == "query_graph")
         {
             query.description = format!(
                 "{} {}",
