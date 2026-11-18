@@ -1,7 +1,7 @@
 mod gql;
 mod toon;
 
-use query_engine::formatters::{FormatName, ResultFormatter};
+use query_engine::formatters::ResultFormatter;
 use query_engine::shared::PipelineOutput;
 use serde::Deserialize;
 use serde_json::Value;
@@ -26,19 +26,10 @@ pub struct OutputExpect {
 }
 
 trait Encoding {
-    fn formatter(&self) -> &'static dyn ResultFormatter;
-    fn name(&self) -> FormatName;
-    fn version(&self) -> String;
-    fn decode(&self, text: &str, output: &PipelineOutput, graph: &Value, label: &str) -> Value;
-}
-
-impl OutputFormat {
-    fn encoding(self) -> &'static dyn Encoding {
-        match self {
-            Self::Toon => &toon::Toon,
-            Self::Gql => &gql::Gql,
-        }
-    }
+    type Formatter: ResultFormatter;
+    const FORMATTER: Self::Formatter;
+    fn decode(text: &str, output: &PipelineOutput) -> Value;
+    fn check(_value: &Value, _graph: &Value, _label: &str) {}
 }
 
 pub(super) fn assert_format(
@@ -48,19 +39,31 @@ pub(super) fn assert_format(
     expect: &OutputExpect,
     label: &str,
 ) {
-    let encoding = format.encoding();
-    let format: &str = format.into();
-    let (formatted, version, name) = encoding.formatter().format_stamped(output);
-    assert_eq!(name, encoding.name(), "{label}: {format} format name");
-    assert_eq!(
-        version,
-        encoding.version(),
-        "{label}: {format} format version"
+    let name = format.into();
+    match format {
+        OutputFormat::Toon => assert_encoded::<toon::Toon>(output, graph, name, expect, label),
+        OutputFormat::Gql => assert_encoded::<gql::Gql>(output, graph, name, expect, label),
+    }
+}
+
+fn assert_encoded<E: Encoding>(
+    output: &PipelineOutput,
+    graph: &Value,
+    format: &str,
+    expect: &OutputExpect,
+    label: &str,
+) {
+    let (formatted, version, name) = E::FORMATTER.format_stamped(output);
+    assert_eq!(name.as_ref(), format, "{label}: {format} format name");
+    assert!(
+        !version.is_empty(),
+        "{label}: {format} output has no format version"
     );
     let Value::String(text) = formatted else {
         panic!("{label}: {format} output must be a string, got {formatted}");
     };
-    let value = encoding.decode(&text, output, graph, label);
+    let value = E::decode(&text, output);
+    E::check(&value, graph, label);
     for fragment in &expect.contains {
         assert!(
             text.contains(fragment),

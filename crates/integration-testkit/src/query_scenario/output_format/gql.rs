@@ -1,6 +1,4 @@
-use query_engine::formatters::{
-    FormatName, GQL_OUTPUT_FORMAT_VERSION, GqlFormatter, ResultFormatter,
-};
+use query_engine::formatters::GqlFormatter;
 use query_engine::shared::PipelineOutput;
 use serde_json::{Map, Value, json};
 
@@ -9,19 +7,10 @@ use super::Encoding;
 pub(super) struct Gql;
 
 impl Encoding for Gql {
-    fn formatter(&self) -> &'static dyn ResultFormatter {
-        &GqlFormatter
-    }
+    type Formatter = GqlFormatter;
+    const FORMATTER: GqlFormatter = GqlFormatter;
 
-    fn name(&self) -> FormatName {
-        FormatName::Gql
-    }
-
-    fn version(&self) -> String {
-        GQL_OUTPUT_FORMAT_VERSION.to_string()
-    }
-
-    fn decode(&self, _: &str, output: &PipelineOutput, _: &Value, _: &str) -> Value {
+    fn decode(_: &str, output: &PipelineOutput) -> Value {
         let (header, rows) = GqlFormatter.table(output);
         let columns: Map<String, Value> = header
             .iter()
