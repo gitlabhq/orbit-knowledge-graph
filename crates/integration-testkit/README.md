@@ -319,8 +319,6 @@ Scenarios with the same `seed`, `extra_seed`, `unmerged_seed`, and `ontology_ove
 | `edge_count` | {TYPE: N} | Per-type edge count |
 | `referential_integrity` | bool | All edge endpoints have nodes |
 | `has_more` | bool | Pagination flag |
-| `gql_columns` | {column: [cell]} | Exact cells of a `gql` format table column, in row order |
-| `gql_column_names` | [column] | Exact `gql` format table header, in order |
 
 Typed edge objects use `{from: User, from_id: 1, to: Group, to_id: 100}`.
 They check endpoint types as well as IDs. Pair arrays such as `[1, 100]` check
@@ -344,6 +342,19 @@ only IDs and the relationship type.
 | `path_destinations` | {Entity: [ids]} | Path endpoint IDs |
 | `path_edges` | `[[{from, from_id, type, to, to_id, step}]]` | Per-path edge structure (all fields optional) |
 | `path_endpoint_absent` | [Entity] | Entities excluded from path edges |
+
+**Formats:**
+
+`format` maps an output format, `toon` or `gql`, to checks on that encoding of the result:
+
+| Field | Type | Description |
+|---|---|---|
+| `contains` | [string] | The encoded text contains every fragment |
+| `ends_with` | string | The encoded text ends with this suffix |
+| `absent` | [key] | The decoded value has none of these top-level keys |
+| `value` | object | A partial match on the decoded value: objects may have extra keys, arrays match item by item |
+
+Each format also checks its format name and version. TOON decodes to its JSON value, must be the canonical encoding, and, for queries other than aggregations, must have the same node and edge counts as the graph response. GQL decodes to `{header, rows, columns}` from its result table: `header` lists the column names, `rows` holds the cells by row, and `columns` maps each column name to its cells. Every format runs for every query language of the case, because a JSON query can also ask for GQL output. A new format is one module in `src/query_scenario/output_format/` that implements `Encoding`, plus one `OutputFormat` variant.
 
 **Compilation:**
 
