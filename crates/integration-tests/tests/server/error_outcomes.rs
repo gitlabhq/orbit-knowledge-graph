@@ -20,7 +20,7 @@ use orbit_server::grpc::OrbitServiceImpl;
 use orbit_server::proto::execute_query_message::Content;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use orbit_server::proto::{
-    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, RedactionExchange,
+    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, QueryLanguage, RedactionExchange,
     RedactionResponse, redaction_exchange,
 };
 use orbit_server_config::AppConfig;
@@ -190,6 +190,7 @@ async fn content_for_more_rows_than_the_resolver_cap_is_a_caller_error() {
     server
         .assert_recorded("compile_error", "caller_error")
         .await;
+    assert!(server.compiler_rejections().is_empty());
 }
 
 #[tokio::test]
@@ -234,6 +235,25 @@ async fn invalid_query_is_a_caller_error() {
     server
         .assert_recorded("compile_error", "caller_error")
         .await;
+    assert_eq!(server.compiler_rejections(), [["ontology"]]);
+}
+
+#[tokio::test]
+async fn malformed_gql_is_a_compiler_rejection() {
+    let mut server = Server::start().await;
+    let request = ExecuteQueryRequest {
+        query: "not a query".to_string(),
+        language: QueryLanguage::Gql.into(),
+        ..Default::default()
+    };
+
+    let error = server.run(request).await.unwrap_err();
+
+    assert_eq!(error.code, "compile_error");
+    server
+        .assert_recorded("compile_error", "caller_error")
+        .await;
+    assert_eq!(server.compiler_rejections(), [["schema"]]);
 }
 
 struct Server {
@@ -315,6 +335,16 @@ impl Server {
             ),
             [[status, outcome]]
         );
+    }
+
+    fn compiler_rejections(&self) -> Vec<Vec<String>> {
+        self.meter_provider.force_flush().unwrap();
+        let metrics = self.metrics.get_finished_metrics().unwrap();
+        metric_labels(
+            &metrics,
+            "gkg.query.engine.compiler.rejected",
+            &["failure_reason"],
+        )
     }
 }
 

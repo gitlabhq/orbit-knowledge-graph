@@ -40,7 +40,6 @@ pub mod constants;
 pub mod data_model;
 pub mod error;
 pub mod input;
-pub mod metrics;
 pub(crate) mod query_limits;
 
 pub mod tp_bounds;
@@ -61,7 +60,6 @@ pub use input::{
     ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, InputNode, QueryType,
     parse_input,
 };
-pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
 pub use query_data_model::EntityAuthConfig;
 
@@ -82,7 +80,6 @@ pub use passes::plan::HydrationCompileOptions;
 pub use passes::result_contract::{EdgeMeta, RedactionNode, ResultContext};
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
-use metrics::CountErr;
 use std::sync::Arc;
 
 use config::CompilerCtx as _;
@@ -91,13 +88,11 @@ fn finish<C: config::CompilerCtx>(
     ctx: &mut C,
     run: impl FnOnce(&mut C) -> Result<()>,
 ) -> Result<CompiledQueryContext> {
-    run(ctx)
-        .and_then(|()| {
-            ctx.take_output().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
-            })
+    run(ctx).and_then(|()| {
+        ctx.take_output().ok_or_else(|| {
+            error::QueryError::PipelineInvariant("pipeline did not produce output".into())
         })
-        .count_err()
+    })
 }
 
 #[must_use = "the compiled query context should be used"]
@@ -167,13 +162,11 @@ pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     let mut ctx = config::ValidateNormalizeCtx::new(data_model);
     ctx.set_raw(json_input.to_string());
-    config::run_validate_normalize(&mut ctx)
-        .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
-            })
+    config::run_validate_normalize(&mut ctx).and_then(|()| {
+        ctx.take_input().ok_or_else(|| {
+            error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
         })
-        .count_err()
+    })
 }
 
 pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Input> {
@@ -181,15 +174,11 @@ pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Inp
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);
     ctx.set_raw(raw.to_string());
-    config::run_validate_normalize_gql(&mut ctx)
-        .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
-                error::QueryError::PipelineInvariant(
-                    "validate_normalize_gql produced no input".into(),
-                )
-            })
+    config::run_validate_normalize_gql(&mut ctx).and_then(|()| {
+        ctx.take_input().ok_or_else(|| {
+            error::QueryError::PipelineInvariant("validate_normalize_gql produced no input".into())
         })
-        .count_err()
+    })
 }
 
 /// Compile a pre-built hydration `Input` into ClickHouse SQL.
@@ -217,13 +206,11 @@ pub fn compile_input_model(
     let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
     ctx.set_input(input);
     ctx.set_hydration_options(options);
-    config::run_ch_hydration(&mut ctx)
-        .and_then(|()| {
-            ctx.take_output().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
-            })
+    config::run_ch_hydration(&mut ctx).and_then(|()| {
+        ctx.take_output().ok_or_else(|| {
+            error::QueryError::PipelineInvariant("pipeline did not produce output".into())
         })
-        .count_err()
+    })
 }
 
 #[cfg(test)]
@@ -300,13 +287,10 @@ mod tests {
     }
 
     #[test]
-    fn malformed_query_increments_compiler_rejected() {
-        use std::sync::atomic::Ordering;
+    fn malformed_query_is_rejected_by_its_frontend() {
         for fe in [Frontend::JsonDsl, Frontend::Gql] {
-            let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
             let err =
                 compile("not a query", fe, &ONTOLOGY, &security_ctx()).expect_err("must reject");
-            let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
             assert!(
                 matches!(
                     (fe, &err),
@@ -315,28 +299,17 @@ mod tests {
                 ),
                 "unexpected error: {err:?}"
             );
-            assert!(
-                after > before,
-                "count_err must run on parse errors (before={before}, after={after})"
-            );
         }
     }
 
     #[test]
-    fn allowlist_rejected_query_increments_compiler_rejected() {
-        use std::sync::atomic::Ordering;
+    fn allowlist_rejection_keeps_its_own_variant() {
         let query = r#"{"query_type":"traversal","nodes":[{"id":"x","entity":"NotARealEntity","columns":["id"]}],"limit":1}"#;
-        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         let err =
             compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).expect_err("must reject");
-        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             !matches!(err, crate::error::QueryError::PipelineInvariant(_)),
             "compile errors from internal passes must surface as their own variant, not PipelineInvariant; got: {err:?}"
-        );
-        assert!(
-            after > before,
-            "count_err must run on allowlist rejections (before={before}, after={after})"
         );
     }
 

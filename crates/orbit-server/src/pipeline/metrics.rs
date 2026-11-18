@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
 
-use orbit_observability::query::pipeline as spec;
+use orbit_observability::query::{engine, pipeline as spec};
+use query_engine::compiler::QueryError;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
 static METRICS: LazyLock<QueryPipelineMetrics> = LazyLock::new(QueryPipelineMetrics::new);
@@ -23,6 +24,7 @@ struct QueryPipelineMetrics {
     ch_read_bytes: Counter<u64>,
     ch_memory_usage: Histogram<u64>,
     failed: Counter<u64>,
+    compiler_rejected: Counter<u64>,
 }
 
 impl QueryPipelineMetrics {
@@ -42,8 +44,19 @@ impl QueryPipelineMetrics {
             ch_read_bytes: spec::CH_READ_BYTES.build_counter_u64(&meter),
             ch_memory_usage: spec::CH_MEMORY_USAGE.build_histogram_u64(&meter),
             failed: spec::FAILED.build_counter_u64(&meter),
+            compiler_rejected: engine::COMPILER_REJECTED.build_counter_u64(&meter),
         }
     }
+}
+
+pub(crate) fn count_compiler_rejection(error: &QueryError) {
+    METRICS.compiler_rejected.add(
+        1,
+        &[KeyValue::new(
+            engine::labels::FAILURE_REASON,
+            <&str>::from(error.rejection_reason()),
+        )],
+    );
 }
 
 /// Closed-enum mapping for `gkg.query.pipeline.failed{failure_reason}`.
@@ -151,6 +164,10 @@ impl PipelineObserver for OTelPipelineObserver {
                 .failed
                 .add(1, &[KeyValue::new(spec::labels::FAILURE_REASON, reason)]);
         }
+    }
+
+    fn compiler_rejected(&self, error: &QueryError) {
+        count_compiler_rejection(error);
     }
 
     fn finish(&self, row_count: usize, redacted_count: usize) {

@@ -6,7 +6,6 @@ mod syntax;
 use std::sync::Arc;
 
 use crate::config::{self, CompilerCtx};
-use crate::metrics::CountErr;
 use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityContext};
 use errors::{invalid, parse_failure, syntax_error};
 use ontology::introspection::{IntrospectionScope, SchemaResponse, build_compact_schema_response};
@@ -77,14 +76,13 @@ pub fn prepare(
 }
 
 pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Result<RoutedStatement> {
-    match parse_statement(raw).count_err()? {
+    match parse_statement(raw)? {
         ast::Statement::Query(query) => lower::lower(*query)
-            .count_err()
             .map(Box::new)
             .map(RoutedStatement::Query),
-        ast::Statement::SchemaCall { node } => resolve_schema(node, ontology, scope)
-            .count_err()
-            .map(RoutedStatement::Schema),
+        ast::Statement::SchemaCall { node } => {
+            resolve_schema(node, ontology, scope).map(RoutedStatement::Schema)
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::error::PipelineError;
-use compiler::CompiledQueryContext;
+use compiler::{CompiledQueryContext, QueryError};
 
 pub trait PipelineObserver: Send {
     fn set_query_type(&mut self, query_type: &'static str);
@@ -16,6 +16,9 @@ pub trait PipelineObserver: Send {
     fn query_executed(&mut self, _label: &str, _read_rows: u64, _read_bytes: u64, _memory: i64) {}
 
     fn record_error(&self, error: &PipelineError);
+
+    /// Called when the compiler rejects the query, in addition to `record_error`.
+    fn compiler_rejected(&self, _error: &QueryError) {}
 
     fn finish(&self, row_count: usize, redacted_count: usize);
 }
@@ -82,6 +85,12 @@ impl PipelineObserver for MultiObserver {
     fn record_error(&self, error: &PipelineError) {
         for o in self.iter() {
             o.record_error(error);
+        }
+    }
+
+    fn compiler_rejected(&self, error: &QueryError) {
+        for o in self.iter() {
+            o.compiler_rejected(error);
         }
     }
 

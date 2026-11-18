@@ -20,6 +20,8 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
+use crate::pipeline::metrics::count_compiler_rejection;
+
 #[derive(Default)]
 pub struct ActiveSchema {
     installed: RwLock<Option<Arc<SchemaSnapshot>>>,
@@ -242,11 +244,15 @@ fn fits_ontology(query: &NamedQuery, ontology: &Arc<Ontology>) -> Result<(), Str
     let json = query
         .render_example_language(Language::Json)
         .map_err(|error| error.to_string())?;
-    validate_normalize(&json, ontology).map_err(|error| error.to_string())?;
+    validate_normalize(&json, ontology)
+        .inspect_err(count_compiler_rejection)
+        .map_err(|error| error.to_string())?;
     let gql = query
         .render_example_language(Language::Gql)
         .map_err(|error| error.to_string())?;
-    validate_normalize_gql(&gql, ontology).map_err(|error| error.to_string())?;
+    validate_normalize_gql(&gql, ontology)
+        .inspect_err(count_compiler_rejection)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 

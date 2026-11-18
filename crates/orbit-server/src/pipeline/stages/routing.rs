@@ -28,6 +28,7 @@ impl PipelineStage for RoutingStage {
                 &ctx.ontology,
                 ontology::introspection::IntrospectionScope::All,
             )
+            .inspect_err(|error| obs.compiler_rejected(error))
             .map_err(PipelineError::from)
             .inspect_err(|error| obs.record_error(error))?
             {

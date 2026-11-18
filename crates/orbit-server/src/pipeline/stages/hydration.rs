@@ -26,6 +26,7 @@ use query_engine::shared::{
 use query_engine::types::QueryResult;
 
 use crate::pipeline::correlation;
+use crate::pipeline::metrics::count_compiler_rejection;
 
 #[derive(Clone)]
 pub struct HydrationStage;
@@ -166,6 +167,7 @@ impl HydrationStage {
             data_model,
             ctx.security_context()?,
         )
+        .inspect_err(count_compiler_rejection)
         .map_err(|e| PipelineError::Compile {
             client_safe: false,
             reason: e.rejection_reason(),
