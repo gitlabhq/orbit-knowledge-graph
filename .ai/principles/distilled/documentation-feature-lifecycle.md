@@ -1,6 +1,6 @@
 ---
-source_checksum: 7d6ef05a9497fe68
-distilled_at_sha: b0b7e1628f9fb689a18cee2ec91c621c6a26dd2d
+source_checksum: e3799e3764d12081
+distilled_at_sha: cf64a3d8f7ef3e3137b983ecedac825dcf82a0b3
 ---
 <!-- Auto-generated from docs.gitlab.com by gitlab-ai-principles-distiller — do not edit manually -->
 
@@ -62,6 +62,7 @@ distilled_at_sha: b0b7e1628f9fb689a18cee2ec91c621c6a26dd2d
 
 - DO NOT merge release note changes until the release manager confirms packages are publicly available (typically ~14:00 UTC on release day).
 - On release day, update the minor release index file: add the `date` metadata, update `description` and `title` metadata, and update the introductory text to reflect the actual release date and version.
+- At the end of the minor release index file, link to the upgrade notes (`gitlab_<major>_changes.md#upgrade-to-<version-without-dots>`) and the deprecations and removals for the release; link the upgrade notes page without an anchor if it has no `Upgrade to <version>` section, and omit the deprecations link if the page has no `GitLab <version>` section.
 - Create the directory and `index.md` for the upcoming release, update the major version `_index.md` cards shortcode, and update `doc/releases/upcoming.md` redirect metadata as part of publishing.
 - Add the current release to `data/en-us/navigation.yaml` in the `docs-gitlab-com` repository.
 - Backport final release notes to the stable branch on release day (not before): open an MR targeting the stable branch, have a maintainer merge it, then trigger a new pipeline in `docs-gitlab-com` for the relevant stable branch.
@@ -77,8 +78,9 @@ distilled_at_sha: b0b7e1628f9fb689a18cee2ec91c621c6a26dd2d
 
 ### Upgrade Notes (Version-Specific Changes)
 
-- Place upgrade notes in `doc/update/versions/gitlab_X_changes.md` (one file per major version); create a new page, a matching section in `doc/update/upgrade_paths.md`, a link in `doc/update/versions/_index.md`, and a navigation entry when a new major version begins.
+- Place upgrade notes in `doc/update/versions/gitlab_X_changes.md` (one file per major version); create a new page, a matching section in `doc/update/upgrade_paths.md`, a link in `doc/update/versions/_index.md`, and a navigation entry when a new major version begins; run `bin/rake gitlab:docs:compile_deprecations` so the deprecations page links each milestone to the new page.
 - In the version index, create a `### Upgrade to X.Y` heading per minor version (descending order); list items in descending patch order; prefix each item with the patch version or affected range in brackets.
+- After each version index list, link to the release notes for that version, and also to the matching `GitLab X.Y` section of the deprecations and removals page when it exists.
 - For an intentional change or new behavior, use the version that introduced it as the bracket version; for a bug or regression affecting multiple consecutive patches, use a range (e.g., `[18.4.0 - 18.4.1]`).
 - DO NOT create separate upgrade note headings for patch releases; list all patch items under the minor version heading.
 - When an item affects multiple minor versions, link each version index entry to the same anchor; use an affected-versions table in the upgrade note body when the item spans two or more minor versions.
@@ -91,6 +93,7 @@ distilled_at_sha: b0b7e1628f9fb689a18cee2ec91c621c6a26dd2d
 - When an issue spans two major versions, document full details on the newer major version page and link from the older page; if cross-page linking becomes confusing due to many affected versions, duplicate the item on both pages.
 - For upgrade notes requiring extensive reference material (SQL queries, data descriptions, configuration options), use H4 sub-headings for internal structure.
 - Add every upgrade note as an H3 in the `## Upgrade notes` section, regardless of length or how many versions it affects.
+- For a removal or breaking change listed on the deprecations and removals page, end the upgrade note with a link to the deprecation notice.
 
 ## Authoritative sources
 
