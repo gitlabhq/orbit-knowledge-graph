@@ -329,8 +329,8 @@ fn anchors_and_links<'a>(root: &'a AstNode<'a>) -> (Vec<String>, Vec<Link>) {
     (top_level_anchors, links)
 }
 
-/// Comrak's `Anchorizer` anchors in linear time, resuming each base after its
-/// last suffix instead of probing from zero.
+/// Same anchors as comrak's `Anchorizer`, in linear time: each base resumes
+/// after its last suffix instead of probing from zero.
 #[derive(Default)]
 struct UniqueAnchors {
     taken: FxHashSet<String>,
