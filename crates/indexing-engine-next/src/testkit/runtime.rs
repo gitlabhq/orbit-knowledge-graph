@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -172,7 +173,9 @@ impl KitRuntime {
             .iter()
             .enumerate()
             .filter(|(_, task)| state.compute_ready_at(task) <= now)
-            .filter(|(_, task)| state.count_busy_slots(task) < self.find_lane_config(task).slots)
+            .filter(|(_, task)| {
+                state.count_busy_slots(task) < self.find_lane_config(task).slots.get()
+            })
             .filter(|(_, task)| {
                 !self.engine.registry.is_exclusive(task.input.worker)
                     || !state.running_keys.contains(&task.worker_key())
@@ -263,7 +266,7 @@ impl KitRuntime {
             .lanes
             .get(&task.format_lane_id())
             .cloned()
-            .unwrap_or_else(|| LaneConfig::new(1, UNCONFIGURED_LANE_TIMEOUT))
+            .unwrap_or_else(|| LaneConfig::new(NonZeroU32::MIN, UNCONFIGURED_LANE_TIMEOUT))
     }
 }
 

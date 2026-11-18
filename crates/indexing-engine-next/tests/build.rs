@@ -5,7 +5,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use indexing_engine_next::prelude::*;
 use indexing_engine_next::{BuildError, Engine, EngineConfig, LaneConfig, PoolConfig};
-use support::{DownstreamPlanner, TestPlanner, TestWorker};
+use support::{DownstreamPlanner, TestPlanner, TestWorker, nonzero};
 
 struct FirstStatusWriter;
 
@@ -46,7 +46,7 @@ fn build_test_flow(config: EngineConfig) -> Option<BuildError> {
 }
 
 fn lane() -> LaneConfig {
-    LaneConfig::new(4, Duration::from_secs(60))
+    LaneConfig::new(nonzero(4), Duration::from_secs(60))
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn an_on_timeout_lane_must_belong_to_the_same_worker() {
 
 #[test]
 fn a_config_pool_must_be_registered_by_a_module() {
-    let config = EngineConfig::default().with_pool("parse", PoolConfig::Pod(4));
+    let config = EngineConfig::default().with_pool("parse", PoolConfig::Pod(nonzero(4)));
 
     assert_eq!(
         build_test_flow(config),

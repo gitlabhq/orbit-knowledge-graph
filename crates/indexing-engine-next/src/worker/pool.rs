@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::{Future, IntoFuture};
+use std::num::NonZeroU32;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -109,12 +110,12 @@ impl Pools {
         &self,
         name: String,
         key: Option<String>,
-        limit: u32,
+        limit: NonZeroU32,
     ) -> Arc<Semaphore> {
         let mut semaphores = self.semaphores.lock();
         let semaphore = semaphores
             .entry(PoolSlot { pool: name, key })
-            .or_insert_with(|| Arc::new(Semaphore::new(limit as usize)));
+            .or_insert_with(|| Arc::new(Semaphore::new(limit.get() as usize)));
         Arc::clone(semaphore)
     }
 }

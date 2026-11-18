@@ -4,7 +4,9 @@ use anyhow::anyhow;
 use indexing_engine_next::prelude::*;
 use indexing_engine_next::testkit::Testkit;
 use indexing_engine_next::{EngineConfig, LaneConfig};
-use support::{BIG, HOUR, MINUTE, Run, SECOND, TestPlanner, TestWorker, events, task_key, tenant};
+use support::{
+    BIG, HOUR, MINUTE, Run, SECOND, TestPlanner, TestWorker, events, nonzero, task_key, tenant,
+};
 
 fn store_did_not_answer() -> Run {
     Run::Error(anyhow!("the store did not answer").into())
@@ -164,7 +166,7 @@ async fn an_incompatible_task_is_redelivered_and_uses_no_attempt() {
 
 #[tokio::test(start_paused = true)]
 async fn a_timed_out_task_moves_to_its_on_timeout_lane_and_uses_an_attempt() {
-    let lane = LaneConfig::new(1, SECOND).on_timeout("test.worker/big");
+    let lane = LaneConfig::new(nonzero(1), SECOND).on_timeout("test.worker/big");
     let worker = TestWorker::default().runs(1, [Run::Sleep(5 * SECOND)]);
     let kit = test_flow(with_default_lane(lane), worker);
 
@@ -185,7 +187,7 @@ async fn a_timed_out_task_moves_to_its_on_timeout_lane_and_uses_an_attempt() {
 
 #[tokio::test(start_paused = true)]
 async fn a_timed_out_task_with_no_on_timeout_lane_retries_and_uses_an_attempt() {
-    let lane = LaneConfig::new(1, SECOND);
+    let lane = LaneConfig::new(nonzero(1), SECOND);
     let worker = TestWorker::default().runs(1, [Run::Sleep(5 * SECOND)]);
     let kit = test_flow(with_default_lane(lane), worker);
 
@@ -208,7 +210,7 @@ async fn a_timed_out_task_with_no_on_timeout_lane_retries_and_uses_an_attempt() 
 async fn a_task_older_than_its_max_age_dead_letters_as_expired() {
     let lane = LaneConfig {
         max_age: HOUR,
-        ..LaneConfig::new(1, MINUTE)
+        ..LaneConfig::new(nonzero(1), MINUTE)
     };
     let not_ready = || Run::Error(TaskError::defer(20 * MINUTE, "not_ready"));
     let worker = TestWorker::default().runs(1, (0..4).map(|_| not_ready()));
@@ -237,7 +239,7 @@ async fn a_task_older_than_its_max_age_dead_letters_as_expired() {
 async fn the_age_of_a_task_counts_from_its_first_start_not_from_its_submit() {
     let lane = LaneConfig {
         max_age: HOUR,
-        ..LaneConfig::new(1, 3 * HOUR)
+        ..LaneConfig::new(nonzero(1), 3 * HOUR)
     };
     let not_ready = TaskError::defer(MINUTE, "not_ready");
     let worker = TestWorker::default()

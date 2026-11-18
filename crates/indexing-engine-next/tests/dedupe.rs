@@ -3,7 +3,8 @@ mod support;
 use indexing_engine_next::testkit::Testkit;
 use indexing_engine_next::{EngineConfig, LaneConfig};
 use support::{
-    ExclusivePlanner, ExclusiveWorker, MINUTE, Run, SECOND, TestPlanner, TestWorker, events, manual,
+    ExclusivePlanner, ExclusiveWorker, MINUTE, Run, SECOND, TestPlanner, TestWorker, events,
+    manual, nonzero,
 };
 
 #[tokio::test(start_paused = true)]
@@ -85,7 +86,7 @@ async fn a_submit_while_the_task_runs_queues_one_more_task() {
 
 #[tokio::test(start_paused = true)]
 async fn two_runs_of_an_exclusive_key_never_overlap_but_other_keys_run_beside_it() {
-    let two_slots = LaneConfig::new(2, MINUTE);
+    let two_slots = LaneConfig::new(nonzero(2), MINUTE);
     let kit = Testkit::new()
         .config(EngineConfig::default().with_lane("exclusive.worker/default", two_slots))
         .module(|engine| {

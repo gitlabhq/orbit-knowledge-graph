@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -51,6 +52,10 @@ pub struct DownstreamPlanner {
 
 pub struct ReplanReconciler {
     keys: Vec<u64>,
+}
+
+pub fn nonzero(count: u32) -> NonZeroU32 {
+    NonZeroU32::new(count).unwrap()
 }
 
 pub fn tenant() -> Tenant {

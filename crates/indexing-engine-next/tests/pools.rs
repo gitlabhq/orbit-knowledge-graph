@@ -2,11 +2,14 @@ mod support;
 
 use indexing_engine_next::testkit::Testkit;
 use indexing_engine_next::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
-use support::{MINUTE, Run, SECOND, TestPlanner, TestWorker, events};
+use support::{MINUTE, Run, SECOND, TestPlanner, TestWorker, events, nonzero};
 
 fn two_slots_and_a_parse_pool(pool: PoolConfig) -> EngineConfig {
     EngineConfig::default()
-        .with_lane("test.worker/default", LaneConfig::new(2, 10 * MINUTE))
+        .with_lane(
+            "test.worker/default",
+            LaneConfig::new(nonzero(2), 10 * MINUTE),
+        )
         .with_pool("parse", pool)
 }
 
@@ -24,7 +27,7 @@ async fn a_pod_pool_lets_only_its_size_of_tasks_hold_it_at_once() {
     let worker = TestWorker::default()
         .runs(1, [Run::HoldPool("parse", 10 * SECOND)])
         .runs(2, [Run::HoldPool("parse", 10 * SECOND)]);
-    let config = two_slots_and_a_parse_pool(PoolConfig::Pod(1));
+    let config = two_slots_and_a_parse_pool(PoolConfig::Pod(nonzero(1)));
     let kit = test_flow_with_parse_pool(config, worker);
 
     kit.fire::<TestPlanner>(events([1, 2])).await;
@@ -47,8 +50,8 @@ async fn a_pod_pool_lets_only_its_size_of_tasks_hold_it_at_once() {
 async fn a_task_that_waits_past_the_max_wait_of_a_cluster_pool_defers_and_uses_no_attempt() {
     let pool = PoolConfig::Cluster(ClusterPoolConfig {
         cluster: true,
-        per_key: 1,
-        unknown_key: 1,
+        per_key: nonzero(1),
+        unknown_key: nonzero(1),
         max_wait: 10 * SECOND,
     });
     let worker = TestWorker::default()
