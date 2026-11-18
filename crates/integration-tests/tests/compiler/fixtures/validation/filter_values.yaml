@@ -92,6 +92,17 @@ cases:
     logical:
       expect: ["(Filter u.public_email = 'test@example.com' (NodeScan User AS u))"]
 
+  - name: Equality on a property that disallows string operators is accepted for an administrator
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"email":"alice@example.com"}}],"limit":10}
+      gql: |
+        MATCH (u:User {email: 'alice@example.com'}) RETURN u LIMIT 10
+    security:
+      admin: true
+    logical:
+      expect: ["(Filter u.email = 'alice@example.com' (NodeScan User AS u))"]
+
   - name: A filter on a filterable Group property passes validation
     query:
       json: |

@@ -157,6 +157,45 @@ cases:
           reason: schema
           contains: ["string operators (contains/starts_with/ends_with) are not allowed on this field"]
 
+  - name: A substring filter on a property that disallows string operators is rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"email":{"contains":"example"}}}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.email CONTAINS 'example' RETURN u LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: [string operators]
+
+  - name: A prefix filter on a property that disallows string operators is rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"email":{"starts_with":"alice"}}}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.email STARTS WITH 'alice' RETURN u LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: [string operators]
+
+  - name: Equality on an administrator-only property is rejected for other users
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"email":"alice@example.com"}}],"limit":10}
+      gql: |
+        MATCH (u:User {email: 'alice@example.com'}) RETURN u LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: restrict
+          reason: restrict
+          contains: [email, administrator]
+
   - name: Substring matching on a timestamp is rejected
     query:
       json: |
