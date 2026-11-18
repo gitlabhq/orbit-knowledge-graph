@@ -1,0 +1,57 @@
+cases:
+  - name: Aggregate functions, a property group, and a measure sort normalize alike
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"Note","node_ids":[1,2]}],"group_by":[{"key":"u.confidential","as":"confidential"}],"aggregations":[{"count":"u","as":"n"},{"sum":"u.id"},{"avg":"u.id"},{"min":"u.created_at"},{"max":"u.created_at"}],"aggregation_sort":"-n","limit":10}
+      gql: |
+        MATCH (u:Note) WHERE u.id IN [1, 2] RETURN u.confidential AS confidential, count(u) AS n, sum(u.id), avg(u.id), min(u.created_at), max(u.created_at) ORDER BY n DESC LIMIT 10
+    logical:
+      expect: ["(Sort n DESC (Aggregate group u.confidential AS confidential, COUNT(u) AS n, SUM(u.id) AS sum_u_id, AVG(u.id) AS avg_u_id, MIN(u.created_at) AS min_u_created_at, MAX(u.created_at) AS max_u_created_at (_)))"]
+    physical:
+      clickhouse: {}
+
+  - name: Null predicates and all properties normalize alike
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":"*","filters":{"created_at":{"is_not_null":true},"state":{"is_null":true}}}]}
+      gql: |
+        MATCH (u:User) WHERE u.created_at IS NOT NULL AND u.state IS NULL RETURN properties(u)
+    logical:
+      expect: ["(Project u.avatar_url, u.public_email, u.user_type, ... (Filter u.created_at IS NOT NULL, u.state IS NULL (NodeScan User AS u)))"]
+    physical:
+      clickhouse: {}
+
+  - name: Repeated node projections merge regardless of property order
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username","name"]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":[{"key":"u","as":"author"},{"key":"u","as":"owner"}],"aggregations":[{"count":"mr","as":"mr_count"}]}
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username, .name} AS author, u{.name, .username} AS owner, count(mr) AS mr_count
+    logical:
+      expect: ["(Aggregate group u AS author, group u AS owner, COUNT(mr) AS mr_count (Input aggregation (Project u.username, u.name (_)) (_) (_)))"]
+    physical:
+      clickhouse: {}
+
+  - name: Repeated node projections in the same property order merge
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username","name"]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":[{"key":"u","as":"author"},{"key":"u","as":"owner"}],"aggregations":[{"count":"mr","as":"mr_count"}]}
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username, .name} AS author, u{.username, .name} AS owner, count(mr) AS mr_count
+    logical:
+      expect: ["(Aggregate group u AS author, group u AS owner, COUNT(mr) AS mr_count (Input aggregation (Project u.username, u.name (_)) (_) (_)))"]
+    physical:
+      clickhouse: {}
+
+  - name: Grouping a node by its projected properties groups by the node identity
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"f","entity":"File","node_ids":[1,2],"columns":["id","content"]}],"group_by":["f"],"aggregations":[{"count":"f","as":"total"}],"limit":5}
+      gql: |
+        MATCH (f:File) WHERE f.id IN [1, 2] RETURN f{.id, .content}, count(f) AS total LIMIT 5
+    logical:
+      expect: ["(Aggregate group f AS f, COUNT(f) AS total (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Aggregate group f.id, group f.project_id, COUNT() AS total, f.id AS f_id (_))"]

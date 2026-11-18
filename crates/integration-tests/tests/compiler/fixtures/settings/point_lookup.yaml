@@ -9,6 +9,9 @@ cases:
     physical:
       clickhouse:
         point_lookup: true
+        emitted:
+          ctes:
+            absent: true
         settings:
           exact:
             max_ast_depth: "10000"

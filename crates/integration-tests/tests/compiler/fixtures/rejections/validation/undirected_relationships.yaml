@@ -1,0 +1,35 @@
+missing_frontends:
+  json: JSON relationships always name a direction.
+
+physical:
+  clickhouse:
+    rejected:
+      phase: gql_parse
+      reason: schema
+      contains: ["undirected relationships are only supported for neighbors"]
+
+cases:
+  - name: A typed undirected relationship between labeled nodes is rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 1})-[:MEMBER_OF]-(u:User) RETURN g, u
+
+  - name: An untyped undirected relationship between labeled nodes is rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 1})--(u:User) RETURN g, u
+
+  - name: An undirected hop range between labeled nodes is rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 1})-[:MEMBER_OF*1..2]-(u:User) RETURN g, u
+
+  - name: An undirected relationship later in a chain is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]-(p:Project) RETURN u, g, p
+
+  - name: An undirected relationship in an aggregation is rejected
+    query:
+      gql: |
+        MATCH (g:Group {id: 1})-[:MEMBER_OF]-(u:User) RETURN count(u)

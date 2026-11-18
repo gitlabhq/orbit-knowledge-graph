@@ -1,15 +1,10 @@
 //! DuckDB dialect end-to-end tests.
 
 use crate::compiler_legacy::setup::test_ontology;
-use crate::compiler_legacy::utils::ParsedSql;
 use compiler::{Frontend, compile_local};
 
 fn compile(json: &str) -> compiler::passes::codegen::CompiledQueryContext {
     compile_local(json, Frontend::JsonDsl, &test_ontology()).unwrap()
-}
-
-fn parse_duckdb(json: &str) -> ParsedSql {
-    ParsedSql::from_query(&compile(json).base)
 }
 
 #[test]
@@ -359,112 +354,6 @@ fn search_uses_positional_params() {
 }
 
 #[test]
-fn no_clickhouse_functions_leak() {
-    let sql = parse_duckdb(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-        "limit": 10
-    }"#,
-    );
-
-    assert!(!sql.has_function("startsWith"));
-    assert!(!sql.has_function("has"));
-    assert!(!sql.has_function("arrayConcat"));
-}
-
-#[test]
-fn no_security_filter() {
-    let sql = parse_duckdb(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-        "limit": 10
-    }"#,
-    );
-
-    assert!(!sql.has_function("startsWith"));
-}
-
-#[test]
-fn traversal() {
-    let sql = parse_duckdb(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "n", "entity": "Note", "columns": ["confidential"]}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "limit": 25
-    }"#,
-    );
-
-    assert!(sql.has_table("gl_edge"));
-    assert!(sql.has_column_ref("relationship_kind"));
-    assert_eq!(sql.limit_value(), Some(26), "limit + 1 probe row");
-}
-
-#[test]
-fn aggregation() {
-    let sql = parse_duckdb(
-        r#"{
-        "query_type": "aggregation",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "n", "entity": "Note"}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "group_by": ["u"],
-        "aggregations": [{"count": "n", "as": "note_count"}],
-        "limit": 10
-    }"#,
-    );
-
-    assert!(
-        sql.has_function("COUNT")
-            || sql.has_function("count")
-            || sql.has_function("countIf")
-            || sql.has_function("count_if"),
-        "expected count function"
-    );
-    assert!(sql.has_group_by());
-}
-
-#[test]
-fn path_finding() {
-    let sql = parse_duckdb(
-        r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [100]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                 "rel_types": ["MEMBER_OF"]}
-    }"#,
-    );
-
-    assert!(sql.has_table("gl_edge"));
-    assert!(sql.has_order_by());
-}
-
-#[test]
-fn neighbors() {
-    let sql = parse_duckdb(
-        r#"{
-        "query_type": "neighbors",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-        "neighbors": {"direction": "outgoing"},
-        "limit": 10
-    }"#,
-    );
-
-    assert!(sql.has_table("gl_edge"));
-    assert_eq!(sql.limit_value(), Some(11), "limit + 1 probe row");
-}
-
-#[test]
 fn group_by_truncate_emits_duckdb_date_trunc() {
     let result = compile(
         r#"{
@@ -515,20 +404,6 @@ fn group_by_truncate_all_units_emit_duckdb_date_trunc() {
             "unit {unit}: expected `{expected}` in DuckDB SQL; got:\n{rendered}"
         );
     }
-}
-
-#[test]
-fn node_ids_expand_params() {
-    let sql = parse_duckdb(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2, 3]}],
-        "limit": 10
-    }"#,
-    );
-
-    assert!(sql.has_operator("IN"));
-    assert!(!sql.raw_contains("Array("));
 }
 
 fn compile_gql(cypher: &str) -> Result<compiler::passes::codegen::CompiledQueryContext, String> {
