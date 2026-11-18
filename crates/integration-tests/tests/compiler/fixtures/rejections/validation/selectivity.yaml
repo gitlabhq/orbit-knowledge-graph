@@ -1,0 +1,171 @@
+cases:
+  - name: A traversal with no selective node names the selector forms and no id_range hint
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}
+      gql: |
+        MATCH (u:User) RETURN u
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ["add filters or node_ids to at least one node, such as (p:Project {full_path: 'group/project'}) or WHERE mr.project_id = 42"]
+          not_contains: [id_range]
+
+  - name: A traversal whose only selector is a wide id range adds the id_range span hint
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":999999999}}]}
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 999999999 RETURN u
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ["add filters or node_ids to at least one node, such as (p:Project {full_path: 'group/project'}) or WHERE mr.project_id = 42 (an id_range counts only with a span of at most 100000)"]
+
+  - name: A two-node traversal with no selective node is rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(p:Project) RETURN u, p
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ["add filters or node_ids to at least one node"]
+
+  - name: A variable-length traversal with no selective node is rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,2]}]}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF*1..2]->(p:Project) RETURN u, p
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ["add filters or node_ids to at least one node"]
+
+  - name: An aggregation with no selective node is rejected
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}],"group_by":["p"],"aggregations":[{"count":"u","as":"c"}]}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(p:Project) RETURN p, count(u) AS c
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ["add filters or node_ids to at least one node"]
+
+  - name: A neighbors query with no selective center node is rejected without an id_range hint
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User"}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (u:User)--(n) RETURN u, n
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ["neighbors requires filters or node_ids on the center node to avoid scanning all edges"]
+          not_contains: [id_range]
+
+  - name: A neighbors query whose center has only a wide id range adds the id_range span hint
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":999999999}}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (u:User)--(n) WHERE u.id >= 1 AND u.id <= 999999999 RETURN u, n
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ["neighbors requires filters or node_ids on the center node to avoid scanning all edges (an id_range counts only with a span of at most 100000)"]
+
+  - name: A path start with no selector is rejected and named
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"a","entity":"User"},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["MEMBER_OF"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (a:User)-[:MEMBER_OF*1..2]->(b:Project {id: 2}) RETURN p
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ['path_finding requires node_ids, filters, or id_range (max span 500) on endpoint "a"']
+
+  - name: A path end with no selector is rejected and named
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"b","entity":"User"}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["MEMBER_OF"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (a:Project {id: 1})-[:MEMBER_OF*1..2]->(b:User) RETURN p
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ['endpoint "b"']
+
+  - name: A path endpoint id range wider than the anchor span is rejected
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","id_range":{"start":1,"end":1000}},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["CONTAINS"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (a:Project)-[:CONTAINS*1..2]->(b:Project {id: 2}) WHERE a.id >= 1 AND a.id <= 1000 RETURN p
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ['endpoint "a"']
+
+  - name: A path endpoint id range inside the traversal span but wider than the anchor span is rejected
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"a","entity":"User","id_range":{"start":1,"end":10000}},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["MEMBER_OF"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (a:User)-[:MEMBER_OF*1..2]->(b:Project {id: 2}) WHERE a.id >= 1 AND a.id <= 10000 RETURN p
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ['endpoint "a"']
+
+  - name: A path with filtered endpoints but no relationship types is rejected
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"a","entity":"User","filters":{"username":"alice"}},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2}}
+      gql: |
+        MATCH p = ANY SHORTEST (a:User {username: 'alice'})-[*1..2]->(b:Project {id: 2}) RETURN p
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: schema
+          contains: { json: ['"rel_types" is a required property at /path'], gql: ["require named relationship types"] }
+
+  - name: A path with pinned endpoints but no relationship types is rejected
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2}}
+      gql: |
+        MATCH p = ANY SHORTEST (a:Project {id: 1})-[*1..2]->(b:Project {id: 2}) RETURN p
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: schema
+          contains: { json: ['"rel_types" is a required property at /path'], gql: ["require named relationship types"] }
