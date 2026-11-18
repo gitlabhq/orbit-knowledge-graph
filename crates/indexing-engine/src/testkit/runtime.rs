@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use tokio::runtime::{Handle, RuntimeFlavor};
 use tokio::sync::Notify;
 use tokio::task::{JoinError, JoinSet};
 use tokio::time::Instant;
@@ -113,6 +114,11 @@ impl KitRuntime {
     }
 
     pub(super) async fn run_until_idle(self: &Arc<Self>) {
+        if Handle::current().runtime_flavor() != RuntimeFlavor::CurrentThread {
+            panic!(
+                "the testkit keeps a fixed order of events only on a current-thread runtime, so use #[tokio::test(start_paused = true)]"
+            );
+        }
         let mut running = JoinSet::new();
         loop {
             self.start_ready_tasks(&mut running);
