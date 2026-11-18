@@ -241,9 +241,6 @@ stages:
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
       - match: '(assignment left: $L:instance_variable right: $R:rb_ref)'
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
-      # Ruby returns the body of begin ... ensure, not the ensure value: leave it untyped
-      - match: '(assignment left: $L:instance_variable right: $R:(begin $$$B (ensure $$$E)))'
-        replace: '(__binding (__ivar @$L|strip=@) (__rhs @$R $R))'
       # begin ... end and ( ... ) stand for their last expression
       - match: '(assignment left: $L:instance_variable right: $R:begin)'
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
@@ -259,8 +256,6 @@ stages:
         replace: '(__binding @$L (__rhs $R))'
       - match: '(assignment left: $L:identifier right: $R:__ssa_branch)'
         replace: '(__binding @$L (__rhs $R))'
-      - match: '(assignment left: $L:identifier right: $R:(begin $$$B (ensure $$$E)))'
-        replace: '(__binding @$L (__rhs @$R $R))'
       - match: '(assignment left: $L:identifier right: $R:begin)'
         replace: '(__binding @$L (__rhs $R))'
       - match: '(assignment left: $L:identifier right: $R:parenthesized_statements)'
@@ -272,11 +267,6 @@ stages:
         tag: { implicit_self: "true" }
         tag_on: __call
       - match: '(assignment left: $L:identifier right: $R)'
-        replace: '(__binding @$L (__rhs @$R $R))'
-      # Ruby returns the body of begin ... ensure, not the ensure value: leave it untyped
-      - match: '(operator_assignment left: $L:instance_variable ("||=") right: $R:(begin $$$B (ensure $$$E)))'
-        replace: '(__binding (__ivar @$L|strip=@) (__rhs @$R $R))'
-      - match: '(operator_assignment left: $L:identifier ("||=") right: $R:(begin $$$B (ensure $$$E)))'
         replace: '(__binding @$L (__rhs @$R $R))'
       # @x ||= v binds only v, ivar types are collected per class
       - match: '(operator_assignment left: $L:instance_variable ("||=") right: $R)'
@@ -300,6 +290,13 @@ stages:
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
       - match: '(case value:? $V $$$W:when|else)'
         replace: '(__ssa_branch $V $$$W->__ssa_arm)'
+      # ensure clauses never supply the value; rescue modifier handlers are not typed on purpose, so x rescue y types from x
+      - match: '(begin $$$BODY $R:rescue $$$ALTS $E:ensure)'
+        replace: '(begin (__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm) (__side_effect $E))'
+      - match: '(begin $$$BODY $E:ensure)'
+        replace: '(begin $$$BODY (__side_effect $E))'
+      - match: '(rescue_modifier body: $B handler: $H)'
+        replace: '(begin $B (__side_effect $H))'
       - match: '(begin $$$BODY $R:rescue $$$ALTS)'
         replace: '(__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm)'
       - match: '(body_statement $$$BODY $R:rescue $$$ALTS)'
