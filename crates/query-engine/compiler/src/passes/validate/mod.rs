@@ -1851,24 +1851,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_edge_column_filter() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"bogus_column": 42}
-                }]
-            }"#,
-            "relationship[0] AUTHORED has no filterable column \"bogus_column\"",
-        );
-    }
-
-    #[test]
     fn edge_filter_type_comes_from_ontology_not_hardcoded() {
         // Build an ontology where source_id is String instead of Int.
         // If types were hardcoded in Rust, this test would FAIL (the hardcoded

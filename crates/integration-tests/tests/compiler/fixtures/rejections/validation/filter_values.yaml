@@ -103,6 +103,34 @@ cases:
           reason: schema
           contains: ["expected String"]
 
+  - name: An unknown edge column names the relationship type and the column, not a table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"bogus_column":42}}]}
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.bogus_column = 42 RETURN u, n
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ['relationship[0] AUTHORED has no filterable column "bogus_column"']
+
+  - name: An edge column that only some endpoint pairs store is rejected without naming tables
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[1,2],"filters":{"project_id":1}}]}
+      gql: |
+        MATCH (g:Group {id: 1})-[r:CONTAINS*1..2 {project_id: 1}]->(p:Project) RETURN g, p
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: validate, gql: gql_parse }
+          reason: schema
+          contains:
+            json: ['relationship[0] CONTAINS column "project_id" is missing or has a different type for some endpoint pairs']
+            gql: ["property filters on variable-length relationships are unsupported"]
+
   - name: An edge IN list with one mismatched element names its index
     query:
       json: |
