@@ -421,6 +421,21 @@ mod tests {
     }
 
     #[test]
+    fn plain_gql_query_graph_description_stays_under_680_bytes() {
+        let description = &CommandRegistry::commands_for(Frontend::Gql)
+            .into_iter()
+            .find(|command| command.name == "query_graph")
+            .expect("query_graph command should be registered")
+            .description;
+
+        assert!(
+            description.len() < 680,
+            "plain description is {} B",
+            description.len()
+        );
+    }
+
+    #[test]
     fn descriptions_are_bounded_and_carry_no_schema() {
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {
             for definition in ToolRegistry::tools_for(frontend)
