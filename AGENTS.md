@@ -65,6 +65,9 @@ Agent-authored MRs follow these steps:
    pipeline. A title edit does not start one.
 3. When the MR is ready for review, add the `~workflow::ready for review` label.
 
+Docs MRs that the docs-write flow opens (branches `docs-write/mr-*`) skip step 1:
+they keep CI on and never carry `[skip ci]`. The flow waits for a green pipeline.
+
 ## Skills and docs
 
 - Before you create or edit a skill, follow the
@@ -73,3 +76,7 @@ Agent-authored MRs follow these steps:
 - For user docs, follow the
   [`gitlab-docs-change`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/gitlab-docs-change/SKILL.md)
   skill.
+- The docs-write flow (`.gitlab/duo/catalog/flows/`) follows the `docs-write`
+  and `docs-review` skills from
+  [`gitlab-org/orbit/team/skills`](https://gitlab.com/gitlab-org/orbit/team/skills)
+  instead.

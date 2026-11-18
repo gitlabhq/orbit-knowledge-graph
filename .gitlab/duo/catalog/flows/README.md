@@ -15,7 +15,7 @@ this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in `docs-write.yml` | `cbd1311942983f90c92f9428ef578ae746d17c49` |
+| `SKILLS_REF` in `docs-write.yml` | `d6b88011f2fe95969c8a00278e52ae481c648425`, the head of `team/skills` MR 30, unmerged. Re-pin to the squash commit once it merges. |
 | `MODE` in `docs-write.yml` | `shadow` |
 | AI Catalog item in this project | Not registered yet |
 
@@ -42,8 +42,10 @@ this table.
    needs a person also gets a thread titled **Needs reviewer decision**.
 1. A fresh fixer agent, one per cycle and four at most, fixes the numbered
    items in one pass, and the unresolved threads from trusted authors: the
-   flow identity, Duo Code Review, the feature MR authors and reviewers, the
-   docs MR reviewers, and project members with the Developer role or higher.
+   flow identity, Duo Code Review, the authors and reviewers of the feature
+   MRs in the group, the docs MR reviewers, and project members with the
+   Developer role or higher. Only MRs from this project join the group, never
+   a fork MR.
    Replies from anyone else inside a trusted thread are dropped. The flow
    never shows other threads to an agent. They stay open for the person who
    merges and do not hold the handoff. The flow replies
@@ -86,8 +88,10 @@ and a write:
   MR, thread, and file text as data.
 - Scripts enforce three rules: the docs-only push guard, that the flow
   never resolves a **Needs reviewer decision** thread, and thread intake.
-  Thread intake limits who can put text in front of a fixer to the trusted
-  authors above. Thread markers count only when the flow identity wrote them.
+  Thread intake limits who can put thread text in front of a fixer to the
+  trusted authors above. Thread markers count only when the flow identity
+  wrote them. The related-MR check groups only MRs from this project, so a
+  fork MR that names the same issue never joins the group.
 - A mention on a docs MR runs the threads stage only when its `docs-write/`
   branch is in this project, not a fork, and the flow identity already has
   a note on the MR.
@@ -95,8 +99,9 @@ and a write:
   `publish` runs `check.py` as a gate, and the flow discards reviewer edits
   outside `.docs-write/`.
 
-Residual risk: a prompt injection in text the agents do read (the feature
-MR diff and code, or a thread from an allowed author) could make an agent
+Residual risk: a prompt injection in text the agents do read (the diffs and
+code of the feature MRs in the group, which no filter checks, or a thread
+from an allowed author) could make an agent
 use the token before any check runs. The token has the scope of the person
 who triggered the run. The checks cannot undo an API write or a push to
 another branch.
@@ -155,7 +160,7 @@ and add these conditions:
 |---|---|---|
 | **Merge request** | **Created** | New MRs. The gate skips drafts. |
 | **Merge request** | **Marked ready** | Draft MRs that become ready. |
-| **Mention** | | On a feature MR: run the gate again on demand. On a docs MR the flow opened in this project: fix open threads from trusted authors (the flow, Duo Code Review, feature MR authors and reviewers, docs MR reviewers, and Developer+ members), then hand off again. |
+| **Mention** | | On a feature MR: run the gate again on demand. On a docs MR the flow opened in this project: fix open threads from trusted authors (the flow, Duo Code Review, authors and reviewers of feature MRs from this project, docs MR reviewers, and Developer+ members), then hand off again. |
 
 Leave **Instructions** empty. GraphQL: `aiFlowTriggerCreate` with
 `eventTypes: [0, 4, 6]` (mention, merge request ready, merge request) and
