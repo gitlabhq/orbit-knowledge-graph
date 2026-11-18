@@ -92,7 +92,7 @@ To create the Secrets:
 
    ```shell
    kubectl -n dip create secret generic dip-clickhouse-dsn \
-     --from-literal=CLICKHOUSE_DSN='clickhouse://dip:<dip_password>@<clickhouse_host>:9000'
+     --from-literal=CLICKHOUSE_DSN='clickhouse://<dip_user>:<dip_password>@<clickhouse_host>:9000'
    kubectl -n dip create secret generic dip-serviceping-exporter \
      --from-literal=password='<exporter_password>'
    kubectl -n dip create secret generic gitlab-service-ping-key \
@@ -102,7 +102,7 @@ To create the Secrets:
    Replace the following values:
 
    - `<clickhouse_host>`: The host name of your ClickHouse server.
-   - `<dip_password>`: The password of the ClickHouse user that DIP runs as. The DIP migrations create the databases, so this user needs the grants listed in the [DIP chart README](https://gitlab.com/gitlab-org/analytics-section/platform-insights/data-insights-platform-helm-charts#clickhouse-user-for-the-migrations).
+   - `<dip_user>` and `<dip_password>`: The ClickHouse user that DIP runs as, and its password. The DIP migrations create the databases, so this user needs the grants listed in the [DIP chart README](https://gitlab.com/gitlab-org/analytics-section/platform-insights/data-insights-platform-helm-charts#clickhouse-user-for-the-migrations).
    - `<exporter_password>`: A new password. The DIP migrations create the `serviceping_exporter` user with it.
    - `<service_ping_key>`: The Service Ping key of your GitLab instance.
 
@@ -177,7 +177,12 @@ To install the exporter:
 
    - `<gitlab_url>`: The GitLab address the cluster reaches, the same as `gitlab.baseUrl` in `orbit-values.yaml`.
    - `<clickhouse_host>`: The host name of your ClickHouse server.
-   - `<orbit_version>`: The GitLab Orbit version you run, from `image.tag` in `orbit-values.yaml`.
+   - `<orbit_version>`: The GitLab Orbit version you run. If you set `image.tag` in `orbit-values.yaml`, use that value. Otherwise read the tag from the running webserver:
+
+     ```shell
+     kubectl -n gitlab-orbit get deployment orbit-webserver -o jsonpath='{.spec.template.spec.containers[0].image}'
+     ```
+
 
 1. Install the chart:
 
