@@ -6,14 +6,18 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use indexing_engine::prelude::*;
-use indexing_engine::testkit::{TaskSummary, Testkit};
+use indexing_engine::testkit::Testkit;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 pub const BIG: Lane = Lane::new("big");
 pub const BIG_DOC_BYTES: u64 = 1_000;
-pub const BIG_SHELF_DOCS: usize = 3;
+pub const BIG_SHELF_DOCS: usize = 1;
 pub const SWEEP_PAGE: usize = 2;
+
+pub const SECOND: Duration = Duration::from_secs(1);
+pub const MINUTE: Duration = Duration::from_secs(60);
+pub const HOUR: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Doc {
@@ -35,7 +39,9 @@ pub struct Indexed {
 }
 
 pub enum Step {
-    Done { rows: u64 },
+    Done {
+        rows: u64,
+    },
     NoChange,
     Fail,
     Permanent,
@@ -43,12 +49,15 @@ pub enum Step {
     Throttle(Duration),
     Incompatible,
     Sleep(Duration),
-    Pool { name: &'static str, hold: Duration },
+    Pool {
+        pool: &'static str,
+        during: Duration,
+    },
 }
 
 #[derive(Default)]
-pub struct Flows {
-    library: Arc<Vec<Doc>>,
+pub struct Library {
+    docs: Arc<Vec<Doc>>,
     script: Arc<Script>,
     board: StatusBoard,
 }
@@ -72,7 +81,7 @@ pub struct ShelfSplit;
 pub struct SummaryBuild;
 
 pub struct DocPlanner {
-    library: Arc<Vec<Doc>>,
+    docs: Arc<Vec<Doc>>,
 }
 
 pub struct ShelfPlanner;
@@ -80,13 +89,13 @@ pub struct ShelfPlanner;
 pub struct SummaryPlanner;
 
 pub struct DocStatus {
-    library: Arc<Vec<Doc>>,
+    docs: Arc<Vec<Doc>>,
     board: StatusBoard,
 }
 
-impl Flows {
-    pub fn with_docs(mut self, docs: Vec<Doc>) -> Self {
-        self.library = Arc::new(docs);
+impl Library {
+    pub fn with_docs(mut self, docs: impl IntoIterator<Item = Doc>) -> Self {
+        self.docs = Arc::new(docs.into_iter().collect());
         self
     }
 
@@ -101,10 +110,7 @@ impl Flows {
     }
 
     pub fn kit(&self) -> Testkit {
-        Testkit::new()
-            .module(|engine| self.register_docs(engine))
-            .module(register_shelves)
-            .module(register_summaries)
+        Testkit::new().module(|engine| self.register_docs(engine))
     }
 
     pub fn register_docs(&self, engine: &mut EngineBuilder) {
@@ -113,10 +119,10 @@ impl Flows {
                 script: Arc::clone(&self.script),
             })
             .planner(DocPlanner {
-                library: Arc::clone(&self.library),
+                docs: Arc::clone(&self.docs),
             })
             .reconciler(DocStatus {
-                library: Arc::clone(&self.library),
+                docs: Arc::clone(&self.docs),
                 board: self.board.clone(),
             })
             .pool("parse");
@@ -139,28 +145,36 @@ pub fn tenant() -> Tenant {
     Tenant::new("tenant-1")
 }
 
-pub fn doc(id: u64, size: u64) -> Doc {
+pub fn doc(id: u64) -> Doc {
     Doc {
         tenant: tenant(),
         id,
-        size,
+        size: 10,
+    }
+}
+
+pub fn big_doc(id: u64) -> Doc {
+    Doc {
+        size: BIG_DOC_BYTES + 1,
+        ..doc(id)
     }
 }
 
 pub fn doc_key(id: u64) -> Key {
-    DocIndex::key(&doc(id, 0))
+    DocIndex::key(&doc(id))
 }
 
-pub fn shelf(id: u64, docs: Vec<Doc>) -> Shelf {
+pub fn shelf(id: u64, docs: impl IntoIterator<Item = Doc>) -> Shelf {
     Shelf {
         tenant: tenant(),
         id,
-        docs,
+        docs: docs.into_iter().collect(),
     }
 }
 
-pub fn changed(docs: &[Doc]) -> Fired {
-    Fired::Events(EventBatch::encode("docs.changed", docs).unwrap())
+pub fn changed(docs: impl IntoIterator<Item = Doc>) -> Fired {
+    let docs: Vec<Doc> = docs.into_iter().collect();
+    Fired::Events(EventBatch::encode("docs.changed", &docs).unwrap())
 }
 
 pub fn shelved(shelf: &Shelf) -> Fired {
@@ -181,22 +195,8 @@ pub fn sweep(cursor: Option<&str>) -> Fired {
     }
 }
 
-pub async fn submit_and_run<P: Planner>(kit: &Testkit, fired: Fired) {
-    kit.plan_and_submit::<P>(fired).await.unwrap();
-    kit.run_until_idle().await;
-}
-
-pub fn find_doc_task(kit: &Testkit, id: u64) -> TaskSummary {
-    let mut tasks = find_doc_tasks(kit, id);
-    assert_eq!(tasks.len(), 1, "doc {id} must have one task");
-    tasks.remove(0)
-}
-
-pub fn find_doc_tasks(kit: &Testkit, id: u64) -> Vec<TaskSummary> {
-    kit.find_tasks::<DocIndex>()
-        .into_iter()
-        .filter(|task| task.key == doc_key(id))
-        .collect()
+pub fn hold(pool: &'static str, during: Duration) -> Step {
+    Step::Pool { pool, during }
 }
 
 impl Script {
@@ -233,9 +233,9 @@ impl Worker for DocIndex {
                 tokio::time::sleep(duration).await;
                 Ok(Outcome::done(Indexed { doc }))
             }
-            Step::Pool { name, hold } => {
-                let _permit = ctx.pool(name).await?;
-                tokio::time::sleep(hold).await;
+            Step::Pool { pool, during } => {
+                let _permit = ctx.pool(pool).await?;
+                tokio::time::sleep(during).await;
                 Ok(Outcome::done(Indexed { doc }))
             }
         }
@@ -288,16 +288,16 @@ impl Planner for DocPlanner {
         let docs: Vec<Doc> = match fired {
             Fired::Events(batch) => batch.decode()?,
             Fired::Manual { keys, .. } => self
-                .library
+                .docs
                 .iter()
                 .filter(|doc| keys.contains(&DocIndex::key(doc)))
                 .cloned()
                 .collect(),
             Fired::Sweep { cursor, .. } => {
                 let start: usize = cursor.as_deref().unwrap_or("0").parse()?;
-                let end = (start + SWEEP_PAGE).min(self.library.len());
-                ctx.continue_from((end < self.library.len()).then(|| end.to_string()));
-                self.library[start..end].to_vec()
+                let end = (start + SWEEP_PAGE).min(self.docs.len());
+                ctx.continue_from((end < self.docs.len()).then(|| end.to_string()));
+                self.docs[start..end].to_vec()
             }
             Fired::Cron => return Ok(()),
         };
@@ -370,7 +370,7 @@ impl Reconciler for DocStatus {
     const EVERY: Duration = Duration::from_secs(60);
 
     async fn reconcile(&self, ctx: &ReconcileContext) -> Result<(), ReconcileError> {
-        for doc in self.library.iter() {
+        for doc in self.docs.iter() {
             let key = DocIndex::key(doc);
             match ctx.last_job::<DocIndex>(&doc.tenant, &key).await? {
                 Some(job) if job.is_done() => self.board.indexed.lock().push(doc.id),

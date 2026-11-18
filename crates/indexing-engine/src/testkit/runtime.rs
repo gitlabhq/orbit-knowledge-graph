@@ -19,6 +19,7 @@ use crate::payload::{Key, TaskInput, Tenant};
 use crate::planner::{Plan, PlanError, PlannedTask};
 use crate::reconciler::{ReconcileBackend, ReconcileContext, ReconcileError};
 use crate::testkit::ledger::{MemoryLedger, TaskSummary};
+use crate::testkit::timeline::{TaskEvent, Timeline};
 use crate::trigger::{EventBatch, Fired};
 use crate::worker::{Completion, EncodedOutcome, Pools, TaskContext, TaskError};
 
@@ -27,7 +28,6 @@ const UNCONFIGURED_LANE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 pub(super) struct KitRuntime {
     engine: Engine,
     pools: Arc<Pools>,
-    started: Instant,
     submitted: Notify,
     state: Mutex<KitState>,
 }
@@ -40,6 +40,7 @@ struct KitState {
     busy_slots: HashMap<String, u32>,
     paused_lanes: HashMap<String, Instant>,
     ledger: MemoryLedger,
+    timeline: Timeline,
 }
 
 struct QueuedTask {
@@ -61,7 +62,6 @@ impl KitRuntime {
         Self {
             engine,
             pools: Arc::new(pools),
-            started: Instant::now(),
             submitted: Notify::new(),
             state: Mutex::new(KitState::default()),
         }
@@ -71,7 +71,7 @@ impl KitRuntime {
         self.find_planner(planner)?.plan(fired).await
     }
 
-    pub(super) async fn plan_and_submit(
+    pub(super) async fn fire(
         &self,
         planner: &str,
         fired: Fired,
@@ -94,7 +94,7 @@ impl KitRuntime {
                 cursor,
                 tag: tag.to_owned(),
             };
-            cursor = self.plan_and_submit(planner, sweep).await?;
+            cursor = self.fire(planner, sweep).await?;
             if cursor.is_none() {
                 return Ok(());
             }
@@ -147,6 +147,10 @@ impl KitRuntime {
         self.state.lock().ledger.find_tasks(worker)
     }
 
+    pub(super) fn list_timeline(&self) -> Vec<String> {
+        self.state.lock().timeline.list_lines()
+    }
+
     fn start_ready_tasks(self: &Arc<Self>, running: &mut JoinSet<()>) {
         while let Some((task, first_started)) = self.take_ready_task() {
             let runtime = Arc::clone(self);
@@ -175,10 +179,14 @@ impl KitRuntime {
     async fn run(&self, task: QueuedTask, first_started: Instant) {
         let lane = self.find_lane_config(&task);
         let attempt = self.run_attempt(&task, &lane).await;
-        self.state.lock().finish_attempt(&task);
-        let started_at = first_started.duration_since(self.started);
-        match Disposition::decide(attempt, task.attempts_used, first_started.elapsed(), &lane) {
-            Disposition::Finish(outcome) => self.apply_outcome(task, outcome, started_at).await,
+        let ended = attempt.describe();
+        let disposition =
+            Disposition::decide(attempt, task.attempts_used, first_started.elapsed(), &lane);
+        self.state
+            .lock()
+            .finish_attempt(&task, ended, disposition.describe_next_step());
+        match disposition {
+            Disposition::Finish(outcome) => self.apply_outcome(task, outcome).await,
             Disposition::Retry { after } => self.state.lock().requeue(task.use_attempt(), after),
             Disposition::Redeliver { after } => self.state.lock().requeue(task, after),
             Disposition::PauseLane { after } => {
@@ -190,10 +198,9 @@ impl KitRuntime {
                 .state
                 .lock()
                 .requeue(task.use_attempt().move_to(to), Duration::ZERO),
-            Disposition::DeadLetter { class, message } => self
-                .state
-                .lock()
-                .dead_letter(task, started_at, class, message),
+            Disposition::DeadLetter { class, message } => {
+                self.state.lock().dead_letter(task, class, message)
+            }
         }
     }
 
@@ -210,8 +217,8 @@ impl KitRuntime {
         }
     }
 
-    async fn apply_outcome(&self, task: QueuedTask, outcome: EncodedOutcome, started_at: Duration) {
-        let output = self.state.lock().record_outcome(&task, outcome, started_at);
+    async fn apply_outcome(&self, task: QueuedTask, outcome: EncodedOutcome) {
+        let output = self.state.lock().record_outcome(&task, outcome);
         let Some(output) = output else {
             return;
         };
@@ -248,7 +255,7 @@ impl KitRuntime {
         self.engine
             .config
             .lanes
-            .get(&task.lane.format_id(task.input.worker))
+            .get(&task.format_lane_id())
             .cloned()
             .unwrap_or_else(|| LaneConfig::new(1, UNCONFIGURED_LANE_TIMEOUT))
     }
@@ -275,7 +282,7 @@ impl ReconcileBackend for KitRuntime {
             tenant: tenant.clone(),
             keys,
         };
-        self.plan_and_submit(planner, manual)
+        self.fire(planner, manual)
             .await
             .map_err(|error| anyhow!("{error}"))?;
         Ok(())
@@ -290,22 +297,38 @@ impl ReconcileBackend for KitRuntime {
 
 impl KitState {
     fn submit(&mut self, task: PlannedTask) {
-        if self
-            .pending
-            .contains(&(task.input.worker, task.input.key.clone()))
-        {
+        if self.is_pending(&task.input) {
+            self.timeline
+                .record(&task.input, &task.lane, TaskEvent::AlreadyPending);
             return;
         }
         let job_id = self
             .ledger
             .open_job(&task.tenant, task.input.worker, &task.input.key);
-        self.enqueue(job_id, task.tenant, task.input, task.lane);
+        self.enqueue(
+            job_id,
+            task.tenant,
+            task.input,
+            task.lane,
+            TaskEvent::Submitted,
+        );
     }
 
-    fn enqueue(&mut self, job_id: Uuid, tenant: Tenant, input: TaskInput, lane: Lane) {
-        if !self.pending.insert((input.worker, input.key.clone())) {
+    fn enqueue(
+        &mut self,
+        job_id: Uuid,
+        tenant: Tenant,
+        input: TaskInput,
+        lane: Lane,
+        event: TaskEvent,
+    ) {
+        if self.is_pending(&input) {
+            self.timeline
+                .record(&input, &lane, TaskEvent::AlreadyPending);
             return;
         }
+        self.timeline.record(&input, &lane, event);
+        self.pending.insert((input.worker, input.key.clone()));
         self.ledger.add_task(job_id);
         self.queue.push(QueuedTask {
             job_id,
@@ -324,10 +347,27 @@ impl KitState {
         self.running_keys.insert(task.worker_key());
         *self.busy_slots.entry(task.format_lane_id()).or_default() += 1;
         let first_started = *task.first_started.get_or_insert(now);
+        let attempt = task.attempts_used + 1;
+        self.timeline
+            .record(&task.input, &task.lane, TaskEvent::Started { attempt });
         (task, first_started)
     }
 
-    fn finish_attempt(&mut self, task: &QueuedTask) {
+    fn is_pending(&self, input: &TaskInput) -> bool {
+        self.pending.contains(&(input.worker, input.key.clone()))
+    }
+
+    fn finish_attempt(
+        &mut self,
+        task: &QueuedTask,
+        attempt: &'static str,
+        next_step: Option<String>,
+    ) {
+        self.timeline.record(
+            &task.input,
+            &task.lane,
+            TaskEvent::Ended { attempt, next_step },
+        );
         self.running_keys.remove(&task.worker_key());
         if let Some(busy) = self.busy_slots.get_mut(&task.format_lane_id()) {
             *busy -= 1;
@@ -355,50 +395,39 @@ impl KitState {
     }
 
     fn pause_lane(&mut self, task: &QueuedTask, after: Duration) {
-        self.paused_lanes.insert(
-            task.lane.format_id(task.input.worker),
-            Instant::now() + after,
-        );
+        self.paused_lanes
+            .insert(task.format_lane_id(), Instant::now() + after);
     }
 
-    fn record_outcome(
-        &mut self,
-        task: &QueuedTask,
-        outcome: EncodedOutcome,
-        started_at: Duration,
-    ) -> Option<Vec<u8>> {
+    fn record_outcome(&mut self, task: &QueuedTask, outcome: EncodedOutcome) -> Option<Vec<u8>> {
         for child in outcome.children {
-            self.enqueue(task.job_id, task.tenant.clone(), child, task.lane.clone());
+            self.enqueue(
+                task.job_id,
+                task.tenant.clone(),
+                child,
+                task.lane.clone(),
+                TaskEvent::Spawned,
+            );
         }
         self.ledger.finish_task(task.job_id, &outcome.rows);
         match outcome.completion {
             Completion::Done(output) => {
                 self.ledger
-                    .record_task(task.input.worker, task.summarize(started_at, None));
+                    .record_task(task.input.worker, task.summarize(None));
                 Some(output)
             }
             Completion::NoChange => None,
         }
     }
 
-    fn dead_letter(
-        &mut self,
-        task: QueuedTask,
-        started_at: Duration,
-        class: &'static str,
-        message: String,
-    ) {
+    fn dead_letter(&mut self, task: QueuedTask, class: &'static str, message: String) {
         self.ledger.fail_task(task.job_id);
-        self.ledger.record_task(
-            task.input.worker,
-            task.summarize(started_at, Some((class, message))),
-        );
+        self.ledger
+            .record_task(task.input.worker, task.summarize(Some((class, message))));
     }
 
     fn compute_ready_at(&self, task: &QueuedTask) -> Instant {
-        let paused_until = self
-            .paused_lanes
-            .get(&task.lane.format_id(task.input.worker));
+        let paused_until = self.paused_lanes.get(&task.format_lane_id());
         match paused_until {
             Some(paused_until) => task.ready_at.max(*paused_until),
             None => task.ready_at,
@@ -425,17 +454,12 @@ impl QueuedTask {
         self.lane.format_id(self.input.worker)
     }
 
-    fn summarize(
-        &self,
-        started_at: Duration,
-        failure: Option<(&'static str, String)>,
-    ) -> TaskSummary {
+    fn summarize(&self, failure: Option<(&'static str, String)>) -> TaskSummary {
         let (error_class, error_message) = failure.unzip();
         TaskSummary {
             key: self.input.key.clone(),
             lane: self.lane.clone(),
             attempts: self.attempts_used + 1,
-            started_at,
             error_class,
             error_message,
         }

@@ -5,7 +5,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use indexing_engine::prelude::*;
 use indexing_engine::{BuildError, Engine, EngineConfig, LaneConfig, PoolConfig};
-use support::{Flows, register_summaries};
+use support::{Library, register_summaries};
 
 struct SecondDocStatus;
 
@@ -21,10 +21,10 @@ impl Reconciler for SecondDocStatus {
 }
 
 fn build_docs(config: EngineConfig) -> Option<BuildError> {
-    let flows = Flows::default();
+    let library = Library::default();
     Engine::builder()
         .config(config)
-        .module(|engine| flows.register_docs(engine))
+        .module(|engine| library.register_docs(engine))
         .build()
         .err()
 }
@@ -54,11 +54,11 @@ fn a_name_must_not_be_empty_or_hold_a_slash_or_a_space() {
 
 #[test]
 fn two_workers_must_not_share_a_name() {
-    let flows = Flows::default();
+    let library = Library::default();
 
     let built = Engine::builder()
-        .module(|engine| flows.register_docs(engine))
-        .module(|engine| flows.register_docs(engine))
+        .module(|engine| library.register_docs(engine))
+        .module(|engine| library.register_docs(engine))
         .build();
 
     assert_eq!(
@@ -135,10 +135,10 @@ fn a_done_trigger_must_wait_on_a_registered_worker() {
 
 #[test]
 fn two_reconcilers_must_not_write_one_table() {
-    let flows = Flows::default();
+    let library = Library::default();
 
     let built = Engine::builder()
-        .module(|engine| flows.register_docs(engine))
+        .module(|engine| library.register_docs(engine))
         .module(|engine| {
             engine.reconciler(SecondDocStatus);
         })

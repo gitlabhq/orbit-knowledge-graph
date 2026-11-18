@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use crate::config::LaneConfig;
+use crate::config::{LaneConfig, format_duration};
 use crate::lane::Lane;
-use crate::worker::{EncodedOutcome, TaskError, TaskErrorKind};
+use crate::worker::{Completion, EncodedOutcome, TaskError, TaskErrorKind};
 
 const RETRY_BACKOFF: [Duration; 4] = [
     Duration::from_secs(1),
@@ -38,6 +38,19 @@ pub(crate) enum Disposition {
     },
 }
 
+impl Attempt {
+    pub(crate) fn describe(&self) -> &'static str {
+        match self {
+            Attempt::Finished(outcome) => match outcome.completion {
+                Completion::Done(_) => "done",
+                Completion::NoChange => "no change",
+            },
+            Attempt::Failed(error) => error.describe(),
+            Attempt::TimedOut => "timed out",
+        }
+    }
+}
+
 impl Disposition {
     pub(crate) fn decide(
         attempt: Attempt,
@@ -53,7 +66,10 @@ impl Disposition {
         if age >= lane.max_age {
             return Self::DeadLetter {
                 class: "expired",
-                message: format!("the task is older than its max age of {:?}", lane.max_age),
+                message: format!(
+                    "the task is older than its max age of {}",
+                    format_duration(lane.max_age)
+                ),
             };
         }
         match failure {
@@ -73,10 +89,25 @@ impl Disposition {
         }
     }
 
+    pub(crate) fn describe_next_step(&self) -> Option<String> {
+        match self {
+            Self::Finish(_) => None,
+            Self::Retry { after } => Some(format!("retry in {}", format_duration(*after))),
+            Self::Redeliver { after } => Some(format!("redeliver in {}", format_duration(*after))),
+            Self::PauseLane { after } => {
+                Some(format!("pause the lane for {}", format_duration(*after)))
+            }
+            Self::MoveLane { to } => Some(format!("move to {to}")),
+            Self::DeadLetter { class, message } => {
+                Some(format!("dead-letter as {class}: {message}"))
+            }
+        }
+    }
+
     fn decide_after_timeout(attempts_used: u16, lane: &LaneConfig) -> Self {
         let message = format!(
-            "the task ran longer than the lane timeout of {:?}",
-            lane.timeout
+            "the task ran longer than the lane timeout of {}",
+            format_duration(lane.timeout)
         );
         let next_lane = lane.on_timeout.as_deref().and_then(Lane::parse_id);
         match next_lane {

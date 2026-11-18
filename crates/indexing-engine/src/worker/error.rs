@@ -36,6 +36,16 @@ impl TaskError {
         Self(TaskErrorKind::Incompatible { reason })
     }
 
+    pub(crate) fn describe(&self) -> &'static str {
+        match self.0 {
+            TaskErrorKind::Failed(_) => "failed",
+            TaskErrorKind::Permanent(_) => "permanent error",
+            TaskErrorKind::Defer { .. } => "deferred",
+            TaskErrorKind::Throttle { .. } => "throttled",
+            TaskErrorKind::Incompatible { .. } => "incompatible",
+        }
+    }
+
     pub(crate) fn into_kind(self) -> TaskErrorKind {
         self.0
     }

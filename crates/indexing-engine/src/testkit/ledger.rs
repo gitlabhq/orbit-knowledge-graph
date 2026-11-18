@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use uuid::Uuid;
 
@@ -12,7 +11,6 @@ pub struct TaskSummary {
     pub key: Key,
     pub lane: Lane,
     pub attempts: u16,
-    pub started_at: Duration,
     pub error_class: Option<&'static str>,
     pub error_message: Option<String>,
 }

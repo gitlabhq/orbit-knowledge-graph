@@ -1,40 +1,36 @@
 mod support;
 
-use std::time::Duration;
-
 use indexing_engine::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
-use support::{DocPlanner, Flows, Step, changed, doc, find_doc_task, submit_and_run};
-use tokio::time::Instant;
+use support::{DocPlanner, Library, MINUTE, SECOND, changed, doc, hold};
 
-fn two_slots_with_pool(pool: PoolConfig) -> EngineConfig {
+fn two_slots_with_parse_pool(pool: PoolConfig) -> EngineConfig {
     EngineConfig::default()
-        .with_lane(
-            "doc.index/default",
-            LaneConfig::new(2, Duration::from_secs(600)),
-        )
+        .with_lane("doc.index/default", LaneConfig::new(2, 10 * MINUTE))
         .with_pool("parse", pool)
-}
-
-fn hold(name: &'static str, seconds: u64) -> Step {
-    Step::Pool {
-        name,
-        hold: Duration::from_secs(seconds),
-    }
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_pod_pool_lets_only_its_size_of_tasks_hold_it_at_once() {
-    let kit = Flows::default()
-        .with_steps(1, [hold("parse", 10)])
-        .with_steps(2, [hold("parse", 10)])
+    let kit = Library::default()
+        .with_steps(1, [hold("parse", 10 * SECOND)])
+        .with_steps(2, [hold("parse", 10 * SECOND)])
         .kit()
-        .config(two_slots_with_pool(PoolConfig::Pod(1)));
-    let started = Instant::now();
+        .config(two_slots_with_parse_pool(PoolConfig::Pod(1)));
 
-    submit_and_run::<DocPlanner>(&kit, changed(&[doc(1, 10), doc(2, 10)])).await;
+    kit.fire::<DocPlanner>(changed([doc(1), doc(2)])).await;
+    kit.run_until_idle().await;
 
-    assert_eq!(find_doc_task(&kit, 2).started_at, Duration::ZERO);
-    assert_eq!(started.elapsed(), Duration::from_secs(20));
+    assert_eq!(
+        kit.timeline(),
+        [
+            "0s doc.index/default doc:1 submitted",
+            "0s doc.index/default doc:2 submitted",
+            "0s doc.index/default doc:1 started attempt 1",
+            "0s doc.index/default doc:2 started attempt 1",
+            "10s doc.index/default doc:1 done",
+            "20s doc.index/default doc:2 done",
+        ]
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -43,45 +39,66 @@ async fn a_task_that_waits_past_the_max_wait_of_a_cluster_pool_defers_and_uses_n
         cluster: true,
         per_key: 1,
         unknown_key: 1,
-        max_wait: Duration::from_secs(10),
+        max_wait: 10 * SECOND,
     });
-    let kit = Flows::default()
-        .with_steps(1, [hold("parse", 60)])
-        .with_steps(2, [hold("parse", 1)])
+    let kit = Library::default()
+        .with_steps(1, [hold("parse", MINUTE)])
+        .with_steps(2, [hold("parse", SECOND)])
         .kit()
-        .config(two_slots_with_pool(pool));
+        .config(two_slots_with_parse_pool(pool));
 
-    submit_and_run::<DocPlanner>(&kit, changed(&[doc(1, 10), doc(2, 10)])).await;
+    kit.fire::<DocPlanner>(changed([doc(1), doc(2)])).await;
+    kit.run_until_idle().await;
 
-    let waited = find_doc_task(&kit, 2);
-    assert_eq!(waited.attempts, 1);
-    assert_eq!(waited.error_class, None);
+    assert_eq!(
+        kit.timeline(),
+        [
+            "0s doc.index/default doc:1 submitted",
+            "0s doc.index/default doc:2 submitted",
+            "0s doc.index/default doc:1 started attempt 1",
+            "0s doc.index/default doc:2 started attempt 1",
+            "10s doc.index/default doc:2 deferred, redeliver in 10s",
+            "20s doc.index/default doc:2 started attempt 1",
+            "20s doc.index/default doc:2 done",
+            "1m doc.index/default doc:1 done",
+        ]
+    );
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_pool_that_no_module_registered_is_a_permanent_error() {
-    let kit = Flows::default().with_steps(1, [hold("missing", 1)]).kit();
+    let kit = Library::default()
+        .with_steps(1, [hold("missing", SECOND)])
+        .kit();
 
-    submit_and_run::<DocPlanner>(&kit, changed(&[doc(1, 10)])).await;
+    kit.fire::<DocPlanner>(changed([doc(1)])).await;
+    kit.run_until_idle().await;
 
-    let task = find_doc_task(&kit, 1);
-    assert_eq!(task.error_class, Some("permanent"));
     assert_eq!(
-        task.error_message.as_deref(),
-        Some("no module registered the pool missing")
+        kit.timeline(),
+        [
+            "0s doc.index/default doc:1 submitted",
+            "0s doc.index/default doc:1 started attempt 1",
+            "0s doc.index/default doc:1 permanent error, dead-letter as permanent: no module registered the pool missing",
+        ]
     );
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_pool_with_no_size_in_the_config_of_the_pod_is_a_permanent_error() {
-    let kit = Flows::default().with_steps(1, [hold("parse", 1)]).kit();
+    let kit = Library::default()
+        .with_steps(1, [hold("parse", SECOND)])
+        .kit();
 
-    submit_and_run::<DocPlanner>(&kit, changed(&[doc(1, 10)])).await;
+    kit.fire::<DocPlanner>(changed([doc(1)])).await;
+    kit.run_until_idle().await;
 
-    let task = find_doc_task(&kit, 1);
-    assert_eq!(task.error_class, Some("permanent"));
     assert_eq!(
-        task.error_message.as_deref(),
-        Some("the config of this pod gives no size to the pool parse")
+        kit.timeline(),
+        [
+            "0s doc.index/default doc:1 submitted",
+            "0s doc.index/default doc:1 started attempt 1",
+            "0s doc.index/default doc:1 permanent error, dead-letter as permanent: the config of this pod gives no size to the pool parse",
+        ]
     );
 }

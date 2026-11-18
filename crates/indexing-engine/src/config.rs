@@ -100,3 +100,22 @@ fn parse_duration<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration
     };
     Ok(Duration::from_secs(seconds))
 }
+
+pub(crate) fn format_duration(duration: Duration) -> String {
+    const UNITS: [(u64, &str); 4] = [(24 * 60 * 60, "d"), (60 * 60, "h"), (60, "m"), (1, "s")];
+    if duration.subsec_millis() != 0 {
+        return format!("{}ms", duration.as_millis());
+    }
+    let mut left = duration.as_secs();
+    let mut text = String::new();
+    for (size, unit) in UNITS {
+        if left >= size {
+            text.push_str(&format!("{}{unit}", left / size));
+            left %= size;
+        }
+    }
+    if text.is_empty() {
+        text.push_str("0s");
+    }
+    text
+}

@@ -1,5 +1,6 @@
 mod ledger;
 mod runtime;
+mod timeline;
 
 use std::sync::{Arc, OnceLock};
 
@@ -8,8 +9,8 @@ use crate::config::EngineConfig;
 use crate::lane::Lane;
 use crate::ledger::JobSummary;
 use crate::payload::{Key, Tenant};
-use crate::planner::{Plan, PlanError, Planner};
-use crate::reconciler::{ReconcileContext, ReconcileError, Reconciler};
+use crate::planner::{Plan, Planner};
+use crate::reconciler::{ReconcileContext, Reconciler};
 use crate::trigger::Fired;
 use crate::worker::Worker;
 
@@ -42,30 +43,39 @@ impl Testkit {
         self
     }
 
-    pub async fn plan<P: Planner>(&self, fired: Fired) -> Result<PlannedTasks, PlanError> {
-        let plan = self.get_or_build_runtime().plan(P::NAME, fired).await?;
-        Ok(PlannedTasks { plan })
+    pub async fn plan<P: Planner>(&self, fired: Fired) -> PlannedTasks {
+        match self.get_or_build_runtime().plan(P::NAME, fired).await {
+            Ok(plan) => PlannedTasks { plan },
+            Err(error) => panic!("the planner {} failed: {error}", P::NAME),
+        }
     }
 
-    pub async fn plan_and_submit<P: Planner>(&self, fired: Fired) -> Result<(), PlanError> {
-        self.get_or_build_runtime()
-            .plan_and_submit(P::NAME, fired)
-            .await?;
-        Ok(())
+    pub async fn fire<P: Planner>(&self, fired: Fired) {
+        if let Err(error) = self.get_or_build_runtime().fire(P::NAME, fired).await {
+            panic!("the planner {} failed: {error}", P::NAME);
+        }
     }
 
-    pub async fn campaign<P: Planner>(&self, tag: &str) -> Result<(), PlanError> {
-        self.get_or_build_runtime().run_campaign(P::NAME, tag).await
+    pub async fn campaign<P: Planner>(&self, tag: &str) {
+        if let Err(error) = self.get_or_build_runtime().run_campaign(P::NAME, tag).await {
+            panic!("the campaign {tag} of {} failed: {error}", P::NAME);
+        }
     }
 
-    pub async fn reconcile<R: Reconciler>(&self) -> Result<(), ReconcileError> {
+    pub async fn reconcile<R: Reconciler>(&self) {
         let runtime = Arc::clone(self.get_or_build_runtime());
         let ctx = ReconcileContext::new(runtime.clone());
-        runtime.reconcile(R::NAME, &ctx).await
+        if let Err(error) = runtime.reconcile(R::NAME, &ctx).await {
+            panic!("the reconciler {} failed: {error}", R::NAME);
+        }
     }
 
     pub async fn run_until_idle(&self) {
         self.get_or_build_runtime().run_until_idle().await;
+    }
+
+    pub fn timeline(&self) -> Vec<String> {
+        self.get_or_build_runtime().list_timeline()
     }
 
     pub fn last_job<W: Worker>(&self, tenant: &Tenant, key: &Key) -> Option<JobSummary> {
@@ -97,12 +107,15 @@ impl PlannedTasks {
             .map(|task| task.lane.clone())
     }
 
-    pub fn inputs<W: Worker>(&self) -> Result<Vec<W::Input>, serde_json::Error> {
+    pub fn inputs<W: Worker>(&self) -> Vec<W::Input> {
         self.plan
             .tasks
             .iter()
             .filter(|task| task.input.worker == W::NAME)
-            .map(|task| serde_json::from_slice(&task.input.bytes))
+            .map(|task| match serde_json::from_slice(&task.input.bytes) {
+                Ok(input) => input,
+                Err(error) => panic!("a planned input of {} does not decode: {error}", W::NAME),
+            })
             .collect()
     }
 
