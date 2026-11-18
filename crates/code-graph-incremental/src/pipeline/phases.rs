@@ -604,8 +604,6 @@ impl Phase<DirtyGraph> for Resolve {
                 touched.insert(edge.from_tree);
             }
         }
-        // A snapshot block stores its files' edges, so a file whose links
-        // changed must be saved again.
         touched.extend(old_links.iter().map(|edge| edge.from_tree));
         state.edges.extend(new_links);
         context.run.check()?;
