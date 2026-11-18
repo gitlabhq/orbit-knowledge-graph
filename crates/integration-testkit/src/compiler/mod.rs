@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use compiler::config::{self, CompilerCtx};
 use compiler::passes::{frontend, normalize, plan};
+use duckdb_client::{DuckDbClient, OpenMode};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel};
 use serde::Deserialize;
 
@@ -489,13 +490,19 @@ type PhaseTable = [(&'static str, &'static [&'static str])];
 struct Models {
     remote: Arc<ClickHouseDataModel>,
     local: Arc<DuckDbDataModel>,
+    local_database: DuckDbClient,
 }
 
 impl Models {
     fn derive(ontology: Arc<ontology::Ontology>) -> Self {
+        let local_database = DuckDbClient::open(OpenMode::InMemory).unwrap();
+        local_database
+            .initialize_schema(&compiler::generate_local_ddl(&ontology, ""))
+            .unwrap();
         Self {
             remote: Arc::new(ClickHouseDataModel::derive(ontology.clone()).unwrap()),
             local: Arc::new(DuckDbDataModel::derive(ontology).unwrap()),
+            local_database,
         }
     }
 }
@@ -549,6 +556,7 @@ fn check_pipeline(
         rejection: scenario.rejected.get(backend),
         frontend: language,
         index_exists: &index_exists,
+        local_database: (backend == "duckdb").then_some(&models.local_database),
         label,
     };
     match (backend, language, scenario.hydration.as_ref()) {
@@ -636,6 +644,7 @@ struct Expectations<'a> {
     rejection: Option<&'a Rejection>,
     frontend: &'a str,
     index_exists: &'a dyn Fn(&str, &str) -> bool,
+    local_database: Option<&'a DuckDbClient>,
     label: &'a str,
 }
 
@@ -667,7 +676,17 @@ impl Expectations<'_> {
                 self.label,
             )),
             (Err(error), None) => failures.push(format!("{}: {error}", self.label)),
-            (Ok(()), None) => {}
+            (Ok(()), None) => {
+                if let (Some(database), Some(output)) = (self.local_database, ctx.output()) {
+                    let sql = output.base.render();
+                    if let Err(error) = database.query_arrow(&sql) {
+                        failures.push(format!(
+                            "{}: DuckDB rejects the SQL: {error}\n{sql}",
+                            self.label
+                        ));
+                    }
+                }
+            }
         }
         failures
     }
@@ -901,6 +920,7 @@ fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
 
 fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
     let models = Models::derive(ontology);
+    let mut overlays = BTreeMap::new();
     let mut cases = 0;
     let mut passed = 0;
     let mut failures = Vec::new();
@@ -918,12 +938,14 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
             failures.push(format!("{}: {error}", path.display()));
             continue;
         }
-        let overlay = scenario
-            .ontology_overlay
-            .as_ref()
-            .map(|name| Models::derive(Arc::new(crate::load_ontology_overlay(name))));
+        let scenario_models = match &scenario.ontology_overlay {
+            Some(name) => &*overlays
+                .entry(name.clone())
+                .or_insert_with(|| Models::derive(Arc::new(crate::load_ontology_overlay(name)))),
+            None => &models,
+        };
         let failure_count = failures.len();
-        failures.extend(check(&scenario, overlay.as_ref().unwrap_or(&models), path));
+        failures.extend(check(&scenario, scenario_models, path));
         if failures.len() == failure_count {
             passed += 1;
             println!("PASS {}", scenario.name.as_deref().unwrap_or("unnamed"));
