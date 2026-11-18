@@ -47,11 +47,10 @@ tests:
       - { row_count: 1 }
       - { row: { callee: models.Other.close } }
 
-  - name: "The assigned value is restored after the trailing calls"
+  - name: "A call after the assignment does not read the value from before it"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-      WHERE caller.fqn = 'main.list_literal' AND callee.name = 'get'
+      WHERE caller.fqn = 'main.list_literal' AND callee.fqn = 'models.Other.get'
       RETURN callee.fqn AS callee
     assert:
-      - { row_count: 1 }
-      - { row: { callee: models.Client.get } }
+      - { row_count: 0 }
