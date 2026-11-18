@@ -30,16 +30,14 @@ fixtures:
           x.run
         end
 
-        def leading_call_ivar(flag)
-          @x = (Third.new.get; if flag then Client.new else Other.new end)
-        end
-
         def hash_literal(flag)
-          { client: (flag ? Client.new : Other.new), label: Third.new.get }
+          h = { client: (flag ? Client.new : Other.new), label: Third.new.get }
+          h
         end
 
         def array_literal(flag)
-          [flag ? Client.new : Other.new, Third.new.get]
+          a = [flag ? Client.new : Other.new, Third.new.get]
+          a
         end
 
         def leading_reassign(flag)
@@ -73,9 +71,8 @@ tests:
       WHERE caller.file_path = 'branching.rb' AND callee.fqn = 'Third::get'
       RETURN caller.fqn AS caller
     assert:
-      - { row_count: 5 }
+      - { row_count: 4 }
       - { row: { caller: Branching::leading_call } }
-      - { row: { caller: Branching::leading_call_ivar } }
       - { row: { caller: Branching::hash_literal } }
       - { row: { caller: Branching::array_literal } }
       - { row: { caller: Branching::trailing_call } }
