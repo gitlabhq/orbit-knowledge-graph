@@ -181,6 +181,9 @@ To install the exporter:
      kubectl -n gitlab-orbit get deployment orbit-webserver -o jsonpath='{.spec.template.spec.containers[0].image}'
      ```
 
+     The output ends with the image tag. Use only the tag.
+     If the running version is earlier than 1.3.0, use the version you plan to upgrade to.
+
 1. Install the chart:
 
    ```shell
