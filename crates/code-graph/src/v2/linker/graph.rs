@@ -475,7 +475,7 @@ impl CodeGraph {
         &mut self,
         sources: Vec<(NodeIndex, Vec<SectionLinkTarget>)>,
         anchors: &FxHashMap<String, FxHashMap<String, NodeIndex>>,
-        inventory: Option<&FileInventory>,
+        inventory: Option<&InventoryFiles>,
     ) -> Vec<PendingFileLink> {
         let mut seen = FxHashSet::default();
         let mut file_links = Vec::new();
@@ -489,7 +489,7 @@ impl CodeGraph {
                 });
                 let Some(&definition) = definition else {
                     if let Some(section) = section
-                        && inventory.is_some_and(|files| files.contains(&target.path))
+                        && inventory.is_some_and(|files| files.entries.contains(&target.path))
                     {
                         section_file_links.push((section, target.path.clone()));
                     }
@@ -516,14 +516,24 @@ impl CodeGraph {
                 }
             }
         }
-        self.link_sections_to_files(section_file_links);
+        if let Some(inventory) = inventory {
+            self.link_sections_to_files(section_file_links, inventory);
+        }
         file_links
     }
 
-    fn link_sections_to_files(&mut self, mut links: Vec<(NodeIndex, String)>) {
+    fn link_sections_to_files(
+        &mut self,
+        mut links: Vec<(NodeIndex, String)>,
+        inventory: &InventoryFiles,
+    ) {
         if links.is_empty() {
             return;
         }
+        debug_assert!(
+            !self.output.writes_repository_structure(),
+            "endpoint File nodes would duplicate the inventory graph's File rows"
+        );
         links.sort_unstable();
         links.dedup();
         let mut file_nodes: FxHashMap<String, NodeIndex> = self
@@ -534,8 +544,8 @@ impl CodeGraph {
             let file = match file_nodes.get(&path) {
                 Some(&file) => file,
                 None => {
-                    // Only an edge endpoint here: the file inventory graph writes the File row.
-                    let file = self.add_unparsed_file(&path, None, 0, FileReason::None);
+                    let language = inventory.languages.get(&path).copied();
+                    let file = self.add_unparsed_file(&path, language, 0, FileReason::None);
                     file_nodes.insert(path, file);
                     file
                 }
@@ -1465,6 +1475,11 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
 }
 
 pub type SectionLinkTarget = (Option<NodeIndex>, LinkTarget);
+
+pub struct InventoryFiles {
+    pub entries: Arc<FileInventory>,
+    pub languages: FxHashMap<String, Language>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PendingFileLink {

@@ -174,3 +174,41 @@ steps:
           - { row: { source: "index#Index", target: "docs/my notes.md" } }
           - { row: { source: "index#Index#Assets", target: "assets/logo.png" } }
           - { row: { source: "index#Index#Assets", target: "assets/diagram.svg" } }
+
+  - name: "section links follow edited source headings"
+    modify:
+      - path: docs/index.md
+        content: |
+          # Home
+
+          See the [guide](guide.md) and [install](guide.md#install-1).
+
+          ## Setup
+
+          The [entry point](/src/main.py) and [notes](my%20notes.md).
+          The [question](faq.md#question) moves in an edit.
+
+          ## Assets
+
+          ![logo](../assets/logo.png "Logo")
+    tests:
+      - name: "file links re-source to the renamed and inserted sections"
+        query: |
+          MATCH (s:Definition)-[:IMPORTS]->(t:File)
+          RETURN s.fqn AS source, t.path AS target
+        assert:
+          - { row_count: 6 }
+          - { row: { source: "index#Home", target: "docs/guide.md" } }
+          - { row: { source: "index#Home#Setup", target: "src/main.py" } }
+          - { row: { source: "index#Home#Setup", target: "docs/my notes.md" } }
+          - { row: { source: "index#Home#Setup", target: "docs/faq.md" } }
+          - { row: { source: "index#Home#Assets", target: "assets/logo.png" } }
+          - { row: { source: "my notes#Notes", target: "docs/index.md" } }
+
+      - name: "section links re-source and a vanished source anchor falls back to the page"
+        query: |
+          MATCH (s:Definition)-[:IMPORTS]->(d:Definition)
+          RETURN s.fqn AS source, d.fqn AS target
+        assert:
+          - { row_count: 1 }
+          - { row: { source: "index#Home", target: "guide#Guide#Install" } }

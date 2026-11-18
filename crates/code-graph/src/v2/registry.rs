@@ -219,7 +219,7 @@ mod tests {
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
             file_links: std::sync::Mutex::new(Vec::new()),
-            file_inventory: None,
+            inventory: None,
         })
     }
 
