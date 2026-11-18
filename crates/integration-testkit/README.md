@@ -316,6 +316,7 @@ Scenarios with the same `seed`, `extra_seed`, `unmerged_seed`, and `ontology_ove
 | `edges` | {TYPE: [[from, to]]} | Exact edge set |
 | `edge_exists` | {TYPE: [edge]} | Subset check; each edge is an ID pair or a typed object |
 | `edge_absent` | {TYPE: [edge]} | Negative check; each edge is an ID pair or a typed object |
+| `edge_prop_absent` | [depth / path_id / step] | No edge in the response has any listed field |
 | `edge_count` | {TYPE: N} | Per-type edge count |
 | `referential_integrity` | bool | All edge endpoints have nodes |
 | `has_more` | bool | Pagination flag |
@@ -333,6 +334,7 @@ only IDs and the relationship type.
 | `empty_aggregation` | bool | Assert empty aggregation result |
 | `row_count` | N | Ungrouped aggregation row count |
 | `row_values` | [{col: val}] | Ungrouped aggregation values by index |
+| `aggregation_columns` | [{name, function, target, property}] | The exact, ordered aggregation `columns`; a missing `property` means the column has none |
 
 **Paths:**
 

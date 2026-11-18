@@ -729,6 +729,31 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if expect.empty_aggregation {
         view.assert_empty_aggregation();
     }
+    if let Some(columns) = &expect.aggregation_columns {
+        assert_eq!(
+            view.response.columns.as_deref().unwrap_or_default(),
+            columns.as_slice(),
+            "{label}: aggregation columns mismatch"
+        );
+    }
+    for field in &expect.edge_prop_absent {
+        assert!(
+            ["depth", "path_id", "step"].contains(&field.as_str()),
+            "{label}: edge_prop_absent takes depth, path_id, or step, got {field}"
+        );
+        for edge in view.edges() {
+            let present = match field.as_str() {
+                "depth" => edge.depth.is_some(),
+                "path_id" => edge.path_id.is_some(),
+                _ => edge.step.is_some(),
+            };
+            assert!(
+                !present,
+                "{label}: {} edge {} {} -> {} {} has {field}",
+                edge.edge_type, edge.from, edge.from_id, edge.to, edge.to_id
+            );
+        }
+    }
     for (name, node_dot_prop) in &expect.group_columns {
         let (node, property) = node_dot_prop.split_once('.').unwrap_or_else(|| {
             panic!("{label}: group_columns value must be 'node.property', got '{node_dot_prop}'")
