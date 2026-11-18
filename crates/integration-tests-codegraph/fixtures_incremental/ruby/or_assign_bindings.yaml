@@ -280,6 +280,16 @@ tests:
       RETURN caller.file_path AS file, caller.fqn AS caller
     assert:
       - { row_count: 10 }
+      - { row: { file: memo_ensure.rb, caller: MemoEnsure::run } }
+      - { row: { file: memo_ensure.rb, caller: MemoEnsure::run_local } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: ParenEnsure::run } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: ParenEnsure::run_local } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: NestedEnsure::run } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: NestedEnsure::run_local } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifier::run } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifier::run_local } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifierNil::run } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifierNil::run_local } }
 
   - name: "||= with begin ... ensure or a rescue modifier is not typed from the ensure or rescue side"
     query: |
