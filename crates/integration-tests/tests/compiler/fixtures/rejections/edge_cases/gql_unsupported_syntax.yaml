@@ -236,7 +236,11 @@ cases:
   - name: An incoming shortest path is rejected
     query:
       gql: |
-        MATCH p = ANY SHORTEST (u:User {id: 1})<-[:MEMBER_OF*1..3]-(p:Project {id: 2}) RETURN p
+        MATCH p = ANY SHORTEST (u:User {id: 1})<-[:MEMBER_OF*1..3]-(q:Project {id: 2}) RETURN p
+    physical:
+      clickhouse:
+        rejected:
+          contains: [path finding supports outgoing paths]
 
   - name: shortestPath() is rejected
     query:
