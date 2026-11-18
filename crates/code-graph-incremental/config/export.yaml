@@ -134,3 +134,5 @@ edges:
     - { edge: Imports, from: Definition, to: ImportedSymbol, kind: CALLS, fallback: true }
     - { edge: Links, from: File, to: File, kind: IMPORTS }
     - { edge: Links, from: File, to: Definition, kind: IMPORTS }
+    - { edge: Links, from: Definition, to: File, kind: IMPORTS }
+    - { edge: Links, from: Definition, to: Definition, kind: IMPORTS }

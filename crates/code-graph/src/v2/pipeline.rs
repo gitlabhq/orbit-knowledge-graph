@@ -271,6 +271,7 @@ pub struct PipelineContext {
     pub file_timings: std::sync::Mutex<Vec<FileTimingEntry>>,
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
     pub file_links: std::sync::Mutex<Vec<crate::v2::linker::graph::PendingFileLink>>,
+    pub file_inventory: Option<Arc<FileInventory>>,
 }
 
 impl PipelineContext {
@@ -797,6 +798,7 @@ impl Pipeline {
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
             file_links: std::sync::Mutex::new(Vec::new()),
+            file_inventory: Some(file_inventory.clone()),
         });
 
         // 2. Process languages with bounded concurrency. At most
@@ -1460,7 +1462,17 @@ impl FamilyPipeline {
                 }
             }
             if !links.targets.is_empty() {
-                link_sources.push((file_node, links.targets));
+                let targets = links
+                    .targets
+                    .into_iter()
+                    .map(|(section, target)| {
+                        (
+                            section.and_then(|index| def_nodes.get(index).copied()),
+                            target,
+                        )
+                    })
+                    .collect();
+                link_sources.push((file_node, targets));
             }
 
             files_with_refs[parsed_file.path_idx] = Some(FileWithRefs {
@@ -1760,7 +1772,8 @@ impl FamilyPipeline {
         graph.indexes.definition_ranges.clear();
         graph.indexes.definition_ranges.shrink_to_fit();
 
-        let file_links = graph.link_anchors(link_sources, &link_anchors);
+        let file_links =
+            graph.link_anchors(link_sources, &link_anchors, ctx.file_inventory.as_deref());
         if !file_links.is_empty()
             && let Ok(mut pending) = ctx.file_links.lock()
         {
@@ -2366,6 +2379,7 @@ namespace MyApp {
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
             file_links: std::sync::Mutex::new(Vec::new()),
+            file_inventory: None,
         });
         ctx.record_skip(
             "src/slow.rs",

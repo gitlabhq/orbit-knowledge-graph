@@ -36,6 +36,7 @@ fn context(root: &Path, cancel: CancellationToken) -> Arc<PipelineContext> {
         file_timings: Mutex::new(Vec::new()),
         language_timings: Mutex::new(Vec::new()),
         file_links: Mutex::new(Vec::new()),
+        file_inventory: None,
     })
 }
 
