@@ -19,6 +19,7 @@ fixtures:
     content: |
       class Third
         def get; end
+        def close; end
       end
 
   - path: branching.rb
@@ -31,6 +32,20 @@ fixtures:
 
         def leading_call_ivar(flag)
           @x = (Third.new.get; if flag then Client.new else Other.new end)
+        end
+
+        def hash_literal(flag)
+          { client: (flag ? Client.new : Other.new), label: Third.new.get }
+        end
+
+        def array_literal(flag)
+          [flag ? Client.new : Other.new, Third.new.get]
+        end
+
+        def leading_reassign(flag)
+          x = Other.new
+          x = (x = Third.new; if flag then Client.new else Client.new end; x.close)
+          x
         end
 
         def trailing_call(flag)
@@ -58,9 +73,11 @@ tests:
       WHERE caller.file_path = 'branching.rb' AND callee.fqn = 'Third::get'
       RETURN caller.fqn AS caller
     assert:
-      - { row_count: 3 }
+      - { row_count: 5 }
       - { row: { caller: Branching::leading_call } }
       - { row: { caller: Branching::leading_call_ivar } }
+      - { row: { caller: Branching::hash_literal } }
+      - { row: { caller: Branching::array_literal } }
       - { row: { caller: Branching::trailing_call } }
 
   - name: "The branch typing survives the extra right-hand side calls"
@@ -82,3 +99,12 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: Other::close } }
+
+  - name: "A call after a leading reassignment sees the reassigned value"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'Branching::leading_reassign' AND callee.name = 'close'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: Third::close } }
