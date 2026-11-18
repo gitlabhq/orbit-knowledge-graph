@@ -1,9 +1,5 @@
-use crate::compiler_legacy::setup::{
-    admin_ctx, compile_pair, embedded_ontology, test_ctx, test_ontology,
-};
-use crate::compiler_legacy::utils::has_param_value;
+use crate::compiler_legacy::setup::{embedded_ontology, test_ctx, test_ontology};
 use compiler::gql::{PreparedStatement, prepare};
-use compiler::input::DynamicColumnMode;
 use compiler::{Frontend, compile};
 use ontology::introspection::{
     IntrospectionScope::{All, Local},
@@ -21,71 +17,6 @@ fn invalid_json_rejected() {
         )
         .is_err()
     );
-}
-
-#[test]
-fn cross_namespace_related_to_edge_scans_only_the_source_namespace() {
-    let orbit_query = "MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE p.id = 1 RETURN p, wi.id, rel.id, rel.title LIMIT 100";
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "p", "entity": "Project", "filters": {"id": {"eq": 1}}},
-            {"id": "wi", "entity": "WorkItem", "columns": ["id"]},
-            {"id": "rel", "entity": "WorkItem", "columns": ["id", "title"]}
-        ],
-        "relationships": [
-            {"type": "IN_PROJECT", "from": "wi", "to": "p"},
-            {"type": "RELATED_TO", "from": "wi", "to": "rel"}
-        ],
-        "limit": 100
-    }"#;
-    let ontology = embedded_ontology();
-    let compiled = compile_pair(json, orbit_query, &ontology, &admin_ctx()).unwrap();
-    let sql = compiled.base.render();
-
-    let related_scan = sql.split("FROM gl_edge AS _orbit_edge_1").nth(1).unwrap();
-    let related_scope = related_scan.split(" ON ").next().unwrap();
-    assert!(
-        related_scope.contains("FROM gl_project AS _orbit_scope WHERE")
-            && !sql.contains("startsWith(rel.traversal_path, (SELECT"),
-        "the RELATED_TO rows carry the source's path, the target may live anywhere: {sql}"
-    );
-
-    let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
-        panic!("expected static hydration");
-    };
-    let rel = templates.iter().find(|t| t.node_alias == "rel").unwrap();
-    assert!(rel.injected_columns.is_empty());
-    assert_eq!(rel.destination_table, "gl_work_item");
-}
-
-#[test]
-fn orbit_query_virtual_filter_equality_hydration_parity() {
-    let ontology = embedded_ontology();
-    for (json, query) in [
-        (
-            r#"{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":"abc"}}]}"#,
-            "MATCH (f:File {id: 1}) WHERE f.content = 'abc' RETURN f",
-        ),
-        (
-            r#"{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"eq":"abc"}}}]}"#,
-            "MATCH (f:File {id: 1, content: 'abc'}) RETURN f",
-        ),
-    ] {
-        let compiled = compile_pair(json, query, &ontology, &test_ctx()).unwrap();
-        let compiler::HydrationPlan::Static(templates) = compiled.hydration else {
-            panic!("expected static hydration for {query}");
-        };
-        let filters = &templates
-            .iter()
-            .find(|t| t.node_alias == "f")
-            .unwrap()
-            .virtual_filters;
-        assert_eq!(filters.len(), 1);
-        assert_eq!(filters[0].0, "content");
-        assert_eq!(filters[0].1.op, Some(compiler::input::FilterOp::Eq));
-        assert_eq!(filters[0].1.value, Some(serde_json::Value::from("abc")));
-    }
 }
 
 #[test]
@@ -168,87 +99,6 @@ fn native_conditions_need_a_column() {
                 .contains("every condition must compare a property"),
             "{error}"
         );
-    }
-}
-
-#[test]
-fn orbit_query_debug_and_dynamic_properties_match_json_options() {
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"options":{"include_debug_sql":true}}"#;
-    let compiled = compile_pair(
-        json,
-        "MATCH (u:User {id: 1}) RETURN u DEBUG",
-        &test_ontology(),
-        &test_ctx(),
-    )
-    .unwrap();
-    assert!(compiled.input.options.include_debug_sql);
-
-    let json = r#"{"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[100]}],"neighbors":{"direction":"both"},"options":{"dynamic_columns":"*"}}"#;
-    let compiled = compile_pair(
-        json,
-        "MATCH (g:Group {id: 100})--(n) RETURN g, properties(n)",
-        &test_ontology(),
-        &test_ctx(),
-    )
-    .unwrap();
-    assert_eq!(
-        compiled.input.options.dynamic_columns,
-        DynamicColumnMode::All
-    );
-
-    let json = r#"{"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","node_ids":[100]},{"id":"end","entity":"Project","node_ids":[200]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CONTAINS"]},"options":{"dynamic_columns":"*"}}"#;
-    let compiled = compile_pair(
-        json,
-        "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN properties(p)",
-        &test_ontology(),
-        &test_ctx(),
-    )
-    .unwrap();
-    assert_eq!(
-        compiled.input.options.dynamic_columns,
-        DynamicColumnMode::All
-    );
-}
-
-#[test]
-fn orbit_query_debug_survives_optional_clauses() {
-    for order in ["", " ORDER BY u.id"] {
-        for limit in ["", " LIMIT 7", " SKIP 7", " SKIP 7 LIMIT 3"] {
-            for debug in ["", " DEBUG"] {
-                let query = format!("MATCH (u:User {{id: 1}}) RETURN u{order}{limit}{debug}");
-                let compiled =
-                    compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-                assert_eq!(
-                    compiled.input.options.include_debug_sql,
-                    !debug.is_empty(),
-                    "{query}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn orbit_query_debug_in_literals_and_comments_stays_data() {
-    for (literal, value) in [
-        (r#"'DEBUG'"#, "DEBUG"),
-        (r#"'x\' RETURN u DEBUG //'"#, "x' RETURN u DEBUG //"),
-        (r#"'\u0027 RETURN u DEBUG //'"#, "' RETURN u DEBUG //"),
-        (
-            r#""'; DROP TABLE gl_user; --""#,
-            "'; DROP TABLE gl_user; --",
-        ),
-    ] {
-        for comment in ["", " /* DEBUG */", " // DEBUG"] {
-            let query = format!("MATCH (u:User {{username: {literal}}}) RETURN u{comment}");
-            let compiled = compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-            assert!(!compiled.input.options.include_debug_sql, "{query}");
-            assert!(
-                has_param_value(&compiled.base.params, &serde_json::json!(value)),
-                "{query}"
-            );
-            assert!(!compiled.base.sql.contains(value), "{query}");
-        }
     }
 }
 

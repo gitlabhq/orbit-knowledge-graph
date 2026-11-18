@@ -148,3 +148,16 @@ cases:
           output:
             sql:
               contains: [a.name != a.fqn]
+
+  - name: DuckDB binds filter values as positional parameters
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[1],"columns":["name"],"filters":{"name":"main"}}],"limit":10}
+      gql: |
+        MATCH (d:Definition {id: 1, name: 'main'}) RETURN d.name LIMIT 10
+    physical:
+      duckdb:
+        duckdb_codegen:
+          output:
+            parameterized_sql: { contains: ["d.name = $"], not_contains: [main] }
+            params: [{ value: main, type: String }]

@@ -66,3 +66,28 @@ cases:
       clickhouse:
         emitted:
           expect: ["(Project u.id AS u_id, 'User' AS u_entity_type, ToJson(Object('id', ToString(u.id), 'username', ToString(u.username), 'state', ToString(u.state))) AS u_props (...))"]
+
+  - name: Hydration binds pinned IDs as one array parameter
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[7777,8888,9999],"columns":["id","confidential","created_at"]}],"limit":3}
+      gql: |
+        MATCH (n:Note) WHERE n.id IN [7777, 8888, 9999] RETURN n.id, n.confidential, n.created_at LIMIT 3
+    physical:
+      clickhouse:
+        params: [{ value: [7777, 8888, 9999], type: Array(Int64) }]
+        parameterized_sql: { not_contains: ["7777"] }
+        sql: { contains: ["7777", "8888", "9999"] }
+
+  - name: Hydrating no properties emits an empty property map
+    hydration:
+      columns: { u: [] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":1}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u LIMIT 1
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Project u.id AS u_id, 'User' AS u_entity_type, '{}' AS u_props (...))"]

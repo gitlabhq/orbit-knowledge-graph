@@ -42,7 +42,12 @@ cases:
       clickhouse:
         sql:
           not_contains: [f_content, f.content]
-        hydration: static
+        hydration:
+          static:
+            - node_alias: f
+              entity_type: File
+              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+              columns: [id, name, project_id, commit_sha, branch, path]
 
   - name: A merge request diff stays out of the SQL and is hydrated
     query:
@@ -54,4 +59,128 @@ cases:
       clickhouse:
         sql:
           not_contains: [mr_diff, mr.diff]
-        hydration: static
+        hydration:
+          static:
+            - node_alias: mr
+              entity_type: MergeRequest
+              virtual_columns: [{ column_name: diff, service: gitaly, lookup: mr_raw_patch }]
+              columns: [project_id, iid]
+              injected_columns: [project_id, iid]
+
+  - name: A search hydrates a selected virtual property and injects its dependencies
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["id","name","content"]}],"limit":5}
+      gql: |
+        MATCH (f:File {id: 1}) RETURN f.id, f.name, f.content LIMIT 5
+    physical:
+      clickhouse:
+        hydration:
+          static:
+            - node_alias: f
+              entity_type: File
+              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+              columns: [project_id, commit_sha, branch, path]
+              injected_columns: [project_id, commit_sha, branch, path]
+
+  - name: An aggregation hydrates a selected virtual property
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["id","content"]}],"aggregations":[{"count":"f","as":"total"}],"limit":5}
+    missing_frontends:
+      gql: GQL cannot select node properties in an aggregation without grouping by the node.
+    physical:
+      clickhouse:
+        hydration:
+          static:
+            - node_alias: f
+              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+
+  - name: A traversal injects the dependencies of a virtual property on the unpinned node
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["id","content"]},{"id":"b","entity":"Branch","node_ids":[1],"columns":["id","name"]}],"relationships":[{"type":"ON_BRANCH","from":"f","to":"b"}],"limit":5}
+      gql: |
+        MATCH (f:File)-[:ON_BRANCH]->(b:Branch {id: 1}) RETURN f.id, f.content, b.id, b.name LIMIT 5
+    physical:
+      clickhouse:
+        hydration:
+          static:
+            - node_alias: f
+              columns: [id, project_id, commit_sha, branch, path]
+              injected_columns: [project_id, commit_sha, branch, path]
+
+  - name: A definition and its file each hydrate their own content
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["id","path","content"]},{"id":"def","entity":"Definition","columns":["id","name","content"]}],"relationships":[{"type":"DEFINES","from":"f","to":"def"}],"limit":5}
+      gql: |
+        MATCH (f:File {id: 1})-[:DEFINES]->(def:Definition) RETURN f.id, f.path, f.content, def.id, def.name, def.content LIMIT 5
+    physical:
+      clickhouse:
+        hydration:
+          static:
+            - node_alias: f
+              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+            - node_alias: def
+              entity_type: Definition
+              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+              columns: [id, name, project_id, commit_sha, branch, file_path, start_byte, end_byte]
+
+  - name: A virtual property filter stays out of the SQL and filters after hydration
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"eq":"x"}},"columns":["path","content"]}],"limit":5}
+      gql: |
+        MATCH (f:File {id: 1}) WHERE f.content = 'x' RETURN f.path, f.content LIMIT 5
+    physical:
+      clickhouse:
+        sql:
+          not_contains: [content]
+        hydration:
+          static:
+            - node_alias: f
+              virtual_filters: [{ property: content, op: eq, value: x }]
+              filter_injected_columns: []
+
+  - name: Inline and WHERE equality on a virtual property hydrate the same filter
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":"abc"}}]}
+      gql: |
+        MATCH (f:File {id: 1, content: 'abc'}) RETURN f
+    physical:
+      clickhouse:
+        hydration:
+          static:
+            - node_alias: f
+              virtual_filters: [{ property: content, op: eq, value: abc }]
+
+  - name: A filter on an unselected virtual property resolves it only for the filter
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1,2],"filters":{"content":{"contains":"needle"},"project_id":{"eq":1000}},"columns":["project_id","path"]}],"limit":10}
+      gql: |
+        MATCH (f:File) WHERE f.id IN [1, 2] AND f.content CONTAINS 'needle' AND f.project_id = 1000 RETURN f.project_id, f.path LIMIT 10
+    physical:
+      clickhouse:
+        hydration:
+          static:
+            - node_alias: f
+              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+              virtual_filters: [{ property: content, op: contains, value: needle }]
+              filter_injected_columns: [content]
+
+  - name: A filter on a selected virtual property resolves it once and keeps it
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"contains":"needle"}},"columns":["path","content"]}],"limit":5}
+      gql: |
+        MATCH (f:File {id: 1}) WHERE f.content CONTAINS 'needle' RETURN f.path, f.content LIMIT 5
+    physical:
+      clickhouse:
+        hydration:
+          static:
+            - node_alias: f
+              virtual_columns: [{ column_name: content, service: gitaly, lookup: blob_content }]
+              filter_injected_columns: []

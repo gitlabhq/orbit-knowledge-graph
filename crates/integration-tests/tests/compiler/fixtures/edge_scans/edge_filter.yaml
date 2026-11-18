@@ -26,6 +26,7 @@ physical:
     emitted:
       expect:
         - (Filter _orbit_edge_0.target_id = 2, ... (_))
+    params: [{ value: 2, type: Int64 }]
   duckdb:
     planned:
       expect:

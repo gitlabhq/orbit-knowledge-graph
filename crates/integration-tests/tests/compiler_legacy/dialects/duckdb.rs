@@ -328,22 +328,6 @@ fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
 }
 
 #[test]
-fn search_uses_positional_params() {
-    let result = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"],
-                   "filters": {"username": "alice"}}],
-        "limit": 10
-    }"#,
-    );
-
-    let sql = &result.base.sql;
-    assert!(sql.contains("$"), "expected positional params: {sql}");
-    assert!(sql.contains("username"), "expected username filter: {sql}");
-}
-
-#[test]
 fn group_by_truncate_emits_duckdb_date_trunc() {
     let result = compile(
         r#"{

@@ -14,6 +14,21 @@ cases:
         emitted:
           expect: ["(Filter StartsWith(wi.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), ... (Bind wi (_)))"]
 
+  - name: A cross-namespace relationship bounds the edge by the source project, not the target
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"id":{"eq":1}}},{"id":"wi","entity":"WorkItem","columns":["id"]},{"id":"rel","entity":"WorkItem","columns":["id","title"]}],"relationships":[{"type":"IN_PROJECT","from":"wi","to":"p"},{"type":"RELATED_TO","from":"wi","to":"rel"}],"limit":100}
+      gql: |
+        MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE p.id = 1 RETURN p, wi.id, rel.id, rel.title LIMIT 100
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Filter StartsWith(_orbit_edge_1.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 1)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 1) = '0/'), ... (_))"]
+          reject: ["(Scan Table(gl_work_item) AS rel)"]
+        hydration:
+          static:
+            - { node_alias: rel, destination_table: gl_work_item, injected_columns: [] }
+
   - name: A project filter on the callee bounds the caller's authorization scan
     query:
       json: |
