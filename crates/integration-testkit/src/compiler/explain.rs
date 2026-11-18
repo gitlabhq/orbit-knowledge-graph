@@ -12,6 +12,7 @@ use super::operator::Operator;
 use super::pattern::Expression as Tree;
 
 fn leaf(label: Operator, text: impl Into<String>) -> Tree {
+    assert!(!label.has_children(), "{label} always has children");
     Tree::node(label, text, vec![])
 }
 

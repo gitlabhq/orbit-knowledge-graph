@@ -401,6 +401,11 @@ impl Assertions {
         let parse = |text: &str, path: &str, captures: &terms::Captures, binding: bool| {
             let parsed = pattern::parse(text)
                 .map_err(|error| format!("{label}.{path}: {error}\npattern: {text}"))?;
+            if let Some(operator) = pattern::childless(&parsed) {
+                return Err(format!(
+                    "{label}.{path}: ({operator} ...) has no child list, so it matches only a {operator} without children, which never occurs; add (_) or (...)\npattern: {text}"
+                ));
+            }
             if !binding {
                 for name in pattern::variables(&parsed)? {
                     if !captures.contains_key(&name) {
@@ -1488,6 +1493,42 @@ fn patterns_match_structure_and_reject_malformed_input() {
         "(Scan $)",
     ] {
         assert!(pattern::parse(text).is_err());
+    }
+}
+
+#[test]
+fn patterns_on_operators_with_children_need_a_child_list() {
+    let actual =
+        pattern::parse("(Union ALL (Filter a.p = 1 (Scan Table(t) AS a)) (Scan Table(u) AS b))")
+            .unwrap();
+    let check = |expect: &str, reject: &str| {
+        Assertions {
+            expect: vec![expect.into()],
+            reject: vec![reject.into()],
+            ..Default::default()
+        }
+        .check(&actual, "childless")
+    };
+    check(
+        "(Union ALL (Filter a.p = 1 (Scan Table(t) AS a)) (...))",
+        "(Join ... (...))",
+    )
+    .unwrap();
+    for (expect, reject, operator) in [
+        ("(Union ALL (...))", "(Union ...)", "Union"),
+        ("(Union ALL (...))", "(Sort ...)", "Sort"),
+        ("(Union ALL)", "(Join ... (...))", "Union"),
+        (
+            "(Union ALL (Filter a.p = 1) (...))",
+            "(Join ... (...))",
+            "Filter",
+        ),
+    ] {
+        let error = check(expect, reject).unwrap_err();
+        assert!(
+            error.contains(&format!("({operator} ...) has no child list")),
+            "{error}"
+        );
     }
 }
 
