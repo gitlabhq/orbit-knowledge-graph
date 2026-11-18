@@ -68,3 +68,44 @@ cases:
             - (Filter mr.state = 'merged', ... (_))
           reject:
             - (Filter Lower(mr.state) = Lower('merged'), ... (_))
+
+  - name: Inequality on a text-indexed string stays a plain comparison
+
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","filters":{"name":{"ne":"compile"}},"columns":["name"]}],"limit":10}
+      gql: |
+        MATCH (d:Definition) WHERE d.name <> 'compile' RETURN d.name LIMIT 10
+
+    logical:
+      expect:
+        - (Filter d.name != 'compile' (_))
+
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter d.name != 'compile', ... (_))
+          reject:
+            - (Filter Lower(d.name) != Lower('compile'), ... (_))
+            - (Filter Lower(d.name) = Lower('compile'), ... (_))
+
+  - name: Equality on a text-indexed string stays plain beside a sort-key filter
+
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","filters":{"project_id":9,"name":"compile"},"columns":["name"]}],"limit":10}
+      gql: |
+        MATCH (d:Definition) WHERE d.project_id = 9 AND d.name = 'compile' RETURN d.name LIMIT 10
+
+    logical:
+      expect:
+        - (Filter d.name = 'compile', d.project_id = 9 (_))
+
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter d.name = 'compile', d.project_id = 9, ... (_))
+          reject:
+            - (Filter Lower(d.name) = Lower('compile'), ... (_))

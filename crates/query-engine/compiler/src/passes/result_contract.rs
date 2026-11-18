@@ -18,7 +18,7 @@ pub struct RedactionNode {
     pub type_column: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EdgeMeta {
     pub column_prefix: String,
     pub path_column: Option<String>,
@@ -33,7 +33,7 @@ pub struct EdgeMeta {
     pub relationship: usize,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResultContext {
     pub query_type: Option<QueryType>,
     nodes: HashMap<String, RedactionNode>,

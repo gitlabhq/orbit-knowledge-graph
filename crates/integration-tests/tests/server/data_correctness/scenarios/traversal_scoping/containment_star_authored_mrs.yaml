@@ -37,7 +37,7 @@ query:
             {"id": "g", "entity": "Group", "filters": {"full_path": "g700"}},
             {"id": "p", "entity": "Project"},
             {"id": "mr", "entity": "MergeRequest"},
-            {"id": "u", "entity": "User", "columns": ["username"]}
+            {"id": "u", "entity": "User", "columns": ["id", "username"]}
         ],
         "relationships": [
             {"type": "CONTAINS", "from": "g", "to": "p"},

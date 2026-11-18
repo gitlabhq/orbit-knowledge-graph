@@ -19,7 +19,7 @@ cases:
   - name: One reached ID set narrows every branch arm
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project"},{"id":"pipe","entity":"Pipeline"}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}]}
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]},{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"p","entity":"Project","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}]}
       gql: |
         MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest),
           (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
@@ -60,7 +60,7 @@ cases:
   - name: Repeated low-cardinality row filters stay inline
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function"}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"a","to":"c"}]}
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function"},"columns":["id"]},{"id":"b","entity":"Definition","columns":["id"]},{"id":"c","entity":"Definition","columns":["id"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"a","to":"c"}]}
       gql: |
         MATCH (a:Definition {definition_type: 'function'})-[:CALLS]->(b:Definition),
           (a)-[:CALLS]->(c:Definition)
