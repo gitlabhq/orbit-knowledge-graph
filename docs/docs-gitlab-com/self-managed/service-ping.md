@@ -26,7 +26,7 @@ Without them, GitLab Orbit runs as before and reports no usage.
 
 Prerequisites:
 
-- GitLab Orbit 1.3.0 or later, with Helm chart `<orbit_chart_version>` or later. <!-- TODO: the chart version that ships analytics.local_collector, from orbit-helm-charts!209 -->
+- GitLab Orbit 1.3.0 or later, with Helm chart 7.1.0 or later. <!-- TODO: confirm once orbit-helm-charts!209 is released -->
 - GitLab 19.6 or later.
   The exporter reads the Service Ping settings through an API that earlier versions do not have.
 - The NATS server and the ClickHouse server that GitLab Orbit uses.
