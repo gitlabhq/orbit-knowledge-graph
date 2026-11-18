@@ -1444,7 +1444,11 @@
           "minimum": 0
         },
         "max_connection_age_secs": {
-          "type": "integer",
+          "description": "Connection age at which the server closes a connection so clients\nreconnect and spread across pods behind an L4 load balancer. Unset or\n`null` turns the maximum age off: behind the Orbit Gateway, which balances\neach request, the closes rebalance nothing and can end running queries.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint64",
           "minimum": 0
         },
@@ -1483,7 +1487,6 @@
         "connection_window_size",
         "stream_window_size",
         "concurrency_limit",
-        "max_connection_age_secs",
         "max_connection_age_grace_secs",
         "stream_timeout_secs",
         "max_header_list_size_bytes",

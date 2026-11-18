@@ -756,6 +756,7 @@ pub struct Grpc {
     pub stream_window_size: ::core::option::Option<u32>,
     #[prost(uint64, optional, tag = "6")]
     pub concurrency_limit: ::core::option::Option<u64>,
+    /// Unset (null) turns the maximum connection age off.
     #[prost(uint64, optional, tag = "7")]
     pub max_connection_age_secs: ::core::option::Option<u64>,
     #[prost(uint64, optional, tag = "8")]

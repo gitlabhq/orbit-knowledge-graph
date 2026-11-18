@@ -45,7 +45,7 @@ pub use engine::{
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
-pub use grpc::GrpcConfig;
+pub use grpc::{GrpcConfig, MaxConnectionAge};
 pub use health_check::{HealthCheckConfig, NamespaceTarget};
 pub use metrics::{ExpandedLogsConfig, MetricsConfig, OtelConfig, PrometheusConfig};
 pub use nats::NatsConfiguration;
