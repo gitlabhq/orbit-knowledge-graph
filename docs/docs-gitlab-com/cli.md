@@ -21,7 +21,7 @@ title: GitLab Orbit CLI
   - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
   - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- GitLab Orbit queries [changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/265010) to accept GQL by default in GitLab 19.4.4, 19.5.2, and 19.6.
+- GitLab Orbit queries [changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/265010) to accept GQL by default in GitLab 19.4.7, 19.5.5, and 19.6.
 
 {{< /history >}}
 
