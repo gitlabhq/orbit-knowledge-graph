@@ -129,7 +129,6 @@ properties:
     type: int64
     source: author_id
     nullable: true
-    mutable: false
     description: "Author user ID."
 
   traversal_path:
@@ -160,6 +159,7 @@ pipelines:
             field: id
             kind: Note
           label: AUTHORED
+          mutable: true
         - from:
             field: id
             kind: Note
