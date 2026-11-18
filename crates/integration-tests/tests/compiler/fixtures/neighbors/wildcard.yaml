@@ -51,3 +51,19 @@ cases:
               count: 2
             - pattern: (Project f.project_id AS _orbit_f_id, f.id AS _orbit_f_pk, ... (_))
               count: 2
+
+  - name: Wildcard neighbors read only the kinds that leave the center entity
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing"},"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(m) RETURN u, r, m LIMIT 10
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=u direction=outgoing directional outgoing=[gl_ci_edge, gl_edge, gl_sec_edge] incoming=? center_filter=false relationships=[APPROVED, ASSIGNED, AUTHORED, CLOSED, CONFIRMED_BY, CONTAINS, CREATOR, DEPLOYED_BY, DISMISSED_BY, LAST_EDITED_BY, MEMBER_OF, MERGED, OWNER, REOPENED, RESOLVED_BY, REVIEWER, TRIGGERED, UPDATED_BY] ... (_))"]
+        emitted:
+          expect: ["(Scan Table(gl_edge) ...)"]
+          reject: ["(Scan Table(gl_code_edge) ...)"]

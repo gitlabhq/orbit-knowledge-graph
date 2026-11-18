@@ -24,3 +24,18 @@ cases:
       clickhouse:
         emitted:
           expect: ["(Aggregate group u.id, COUNT() AS notes, COUNT(DISTINCT n.id) AS distinct_notes, COUNT(DISTINCT n.confidential) AS flags, u.id AS u_id (_))"]
+
+  - name: Counting a property of a target the plan does not read counts edge rows
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"wi","entity":"WorkItem","filters":{"state":"closed"}},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"wi","to":"p"},{"type":"CLOSED","from":"u","to":"wi"}],"group_by":["p"],"aggregations":[{"count":"u.id","as":"closers_count"}],"limit":20}
+      gql: |
+        MATCH (u:User)-[:CLOSED]->(wi:WorkItem {state: 'closed'})-[:IN_PROJECT]->(p:Project) RETURN p, count(u.id) AS closers_count LIMIT 20
+    logical:
+      expect: ["(Aggregate group p AS p, COUNT(u.id) AS closers_count (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Aggregate COUNT() AS closers_count, ... (_))"]
+        emitted:
+          expect: ["(Aggregate COUNT() AS closers_count, ... (_))"]
