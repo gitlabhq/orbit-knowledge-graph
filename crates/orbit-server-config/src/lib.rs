@@ -23,7 +23,6 @@ pub mod nats;
 pub mod object_storage;
 pub mod probe_server;
 pub mod proto;
-pub mod query;
 pub mod resources;
 pub mod schema;
 pub mod secrets;
@@ -51,7 +50,6 @@ pub use metrics::{ExpandedLogsConfig, MetricsConfig, OtelConfig, PrometheusConfi
 pub use nats::NatsConfiguration;
 pub use object_storage::{ObjectStorageAuth, ObjectStorageConfig, ObjectStorageProvider};
 pub use probe_server::{DEFAULT_PROBE_SERVER_PORT, ProbeServerConfig};
-pub use query::{CompilerDerivedSettings, QueryConfig, QuerySettings};
 pub use resources::{ContainerResources, MIN_DATALAKE_BATCH_SIZE, derive_concurrency_groups};
 pub use schema::{SchemaConfig, SchemaConfigError};
 pub use tls::TlsConfig;

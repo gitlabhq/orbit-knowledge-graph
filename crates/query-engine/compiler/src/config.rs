@@ -2,7 +2,7 @@
 //! and pipeline presets. The macro generates the `CompilerCtx` trait,
 //! per-pipeline context structs, and runner functions.
 
-use orbit_server_config::QueryConfig;
+use query_settings::QueryConfig;
 
 use crate::ast::Node;
 use crate::error::{QueryError, Result};

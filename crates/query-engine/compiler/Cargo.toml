@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 chrono = { workspace = true }
 orbit-observability = { workspace = true }
-orbit-server-config = { path = "../../orbit-server-config" }
+query-settings = { path = "../settings" }
 orbit-utils = { path = "../../utils" }
 orbit-versions = { path = "../../orbit-versions" }
 ontology = { path = "../../ontology" }

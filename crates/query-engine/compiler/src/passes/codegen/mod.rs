@@ -5,7 +5,7 @@ pub mod clickhouse;
 pub mod ddl;
 pub mod duckdb;
 
-use orbit_server_config::QueryConfig;
+use query_settings::QueryConfig;
 
 use crate::ast::Node;
 use crate::input::{Input, QueryType};

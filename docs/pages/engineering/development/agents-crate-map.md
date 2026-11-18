@@ -7,12 +7,13 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | Crate | Role |
 |---|---|
 | `orbit-server` | gRPC server, all 5 modes, JWT auth, config loading, schema-version readiness gate (`active_schema.rs`), MCP tool registry, Orbit agent command registry (`CommandRegistry`), and the whole-tree contract of the skill GitLab Orbit serves (`ListSkills`/`GetSkill`) |
-| `orbit-server-config` | All config struct definitions (`AppConfig`, `ClickHouseConfiguration`, `NatsConfiguration`, `EngineConfiguration`, `QuerySettings`, etc.) and `OnceLock` global for query settings; avoids circular dep between server and compiler |
+| `orbit-server-config` | All config struct definitions (`AppConfig`, `ClickHouseConfiguration`, `NatsConfiguration`, `EngineConfiguration`, etc.); `AppConfig.query` embeds `QuerySettings` from `query-engine/settings` |
 | `orbit-analytics` | Consumer-owned Snowplow context types (`OrbitCommonContext`, `OrbitQueryContext`) and tracker infrastructure (`AnalyticsTracker` trait, `SnowplowAnalyticsTracker`, `InMemoryAnalyticsTracker`). Context wrappers implement `labkit_events::SnowplowContext` over typify-codegen'd data types. `build.rs` runs `typify::TypeSpace` over `config/schemas/iglu/<name>/<version>.json` at build time and emits a module per schema (struct + `SCHEMA_URI` + `SCHEMA_JSON` consts) into `OUT_DIR/iglu_schemas.rs`; runtime never reads schema files. `load_schema_json()` returns the embedded JSON for test-time validator compilation. |
 | `orbit-billing` | Snowplow billing-event emission (`BillingObserver`, `BillingTracker`, `BillingInputs`) and CDot quota enforcement (`QuotaService`). Licensed as `LicenseRef-EE`. The billing adapter in `orbit-server/src/billing_adapter.rs` is the single `Claims → BillingInputs` conversion point (SOX auditable surface). Billing event metrics: `gkg.billing.events.{emitted,dropped,rejected,delivered,delivery_failed}`. |
 | `orbit-prompts` | Embeds and validates the versioned YAML prompts under `config/prompts/`, and validates the standalone GitLab Orbit and GitLab Orbit CLI skill trees at build time: matching placeholders and sections, unique combined paths, relative links, and documented CLI commands against the clap source inventory |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
 | `query-engine/compiler` | JSON DSL and typed Input -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
+| `query-engine/settings` | ClickHouse query settings (`QueryConfig`, `QuerySettings`) and the `OnceLock` global the server sets at startup and the compiler reads per query type |
 | `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
 | `query-engine/types` | Type-safe result schema for redaction processing |
 | `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |

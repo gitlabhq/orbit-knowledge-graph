@@ -7,7 +7,7 @@ use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 async fn uncacheable_queries_run_uncached() {
     use_production_query_settings();
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-    let settings = orbit_server_config::query::default_config()
+    let settings = query_settings::default_config()
         .to_http_settings()
         .expect("default settings render");
 

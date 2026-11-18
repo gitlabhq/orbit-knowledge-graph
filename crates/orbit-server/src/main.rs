@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     std::sync::LazyLock::force(&query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION);
 
     orbit_server::config_check::query_keys(&config.query)?;
-    orbit_server_config::query::init(config.query.clone());
+    query_settings::init(config.query.clone());
     orbit_server_config::features::init(config.features.clone());
 
     let mut builder = labkit::Builder::new(args.mode.service_name())

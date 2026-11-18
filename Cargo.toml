@@ -19,6 +19,7 @@ members = [
   "crates/query-engine/formatters",
   "crates/query-engine/profiler",
   "crates/query-engine/compiler-pipeline-macros",
+  "crates/query-engine/settings",
   "crates/orbit-cli",
 
   "crates/orbit-analytics",

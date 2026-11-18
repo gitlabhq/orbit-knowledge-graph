@@ -163,7 +163,7 @@ mod tests {
     use crate::passes::codegen::codegen;
     use crate::passes::plan::{HydrationCompileOptions, plan_clickhouse};
     use crate::passes::result_contract::ResultContext;
-    use orbit_server_config::QueryConfig;
+    use query_settings::QueryConfig;
     use std::sync::Arc;
 
     fn render(node: &Node) -> String {

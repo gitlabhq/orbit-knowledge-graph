@@ -265,7 +265,7 @@ static QUERY_SETTINGS: OnceLock<QuerySettings> = OnceLock::new();
 pub fn init(settings: QuerySettings) {
     QUERY_SETTINGS
         .set(settings)
-        .expect("orbit_server_config::query::init called twice");
+        .expect("query_settings::init called twice");
 }
 
 /// Resolve the effective [`QueryConfig`] for a given query type from
@@ -331,35 +331,6 @@ mod tests {
                     "query_cache_system_table_handling".into(),
                     "'ignore'".into()
                 ),
-                ("use_query_cache".into(), "1".into()),
-            ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn embedded_defaults_emit_every_declared_setting() -> Result<(), String> {
-        let cfg = crate::AppConfig::embedded_defaults()
-            .query
-            .resolve("traversal");
-        let mut settings = cfg.to_clickhouse_settings()?;
-        settings.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(
-            settings,
-            vec![
-                ("max_ast_depth".into(), "10000".into()),
-                ("max_ast_elements".into(), "1000000".into()),
-                ("max_execution_time".into(), "30".into()),
-                ("max_expanded_ast_elements".into(), "10000000".into()),
-                (
-                    "query_cache_nondeterministic_function_handling".into(),
-                    "'ignore'".into()
-                ),
-                (
-                    "query_cache_system_table_handling".into(),
-                    "'ignore'".into()
-                ),
-                ("query_cache_ttl".into(), "10".into()),
                 ("use_query_cache".into(), "1".into()),
             ]
         );

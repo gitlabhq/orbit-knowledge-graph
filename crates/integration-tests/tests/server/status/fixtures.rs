@@ -65,7 +65,7 @@ pub const STALE_FIRST_PASS: CheckpointRow = CheckpointRow {
 };
 
 pub fn use_production_query_settings() {
-    orbit_server_config::query::init(AppConfig::embedded_defaults().query);
+    query_settings::init(AppConfig::embedded_defaults().query);
 }
 
 pub async fn query_cache_usage(ctx: &TestContext) -> Vec<String> {

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use labkit_config::{Format, Loader};
 
+use query_settings::QuerySettings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +25,6 @@ use crate::nats::NatsConfiguration;
 use crate::object_storage::ObjectStorageConfig;
 use crate::probe_server::{ProbeServerConfig, bind_address_for_port, default_bind_address};
 use crate::proto;
-use crate::query::QuerySettings;
 use crate::schema::SchemaConfig;
 use crate::secrets;
 use crate::tls::TlsConfig;
@@ -706,5 +706,32 @@ engine:
         assert_eq!(pipeline.worker_threads, 2);
         assert_eq!(pipeline.max_concurrent_languages, 3);
         assert_eq!(pipeline.per_file_timeout_ms, 2000);
+    }
+
+    #[test]
+    fn embedded_query_defaults_emit_every_declared_setting() -> Result<(), String> {
+        let cfg = AppConfig::embedded_defaults().query.resolve("traversal");
+        let mut settings = cfg.to_clickhouse_settings()?;
+        settings.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            settings,
+            vec![
+                ("max_ast_depth".into(), "10000".into()),
+                ("max_ast_elements".into(), "1000000".into()),
+                ("max_execution_time".into(), "30".into()),
+                ("max_expanded_ast_elements".into(), "10000000".into()),
+                (
+                    "query_cache_nondeterministic_function_handling".into(),
+                    "'ignore'".into()
+                ),
+                (
+                    "query_cache_system_table_handling".into(),
+                    "'ignore'".into()
+                ),
+                ("query_cache_ttl".into(), "10".into()),
+                ("use_query_cache".into(), "1".into()),
+            ]
+        );
+        Ok(())
     }
 }

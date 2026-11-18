@@ -11,7 +11,7 @@
 //! - `if(cond, then, else)` is rewritten to `CASE WHEN ... THEN ... ELSE ... END`.
 //! - Recursive CTE bodies have LIMIT/OFFSET stripped (DuckDB restriction).
 
-use orbit_server_config::QueryConfig;
+use query_settings::QueryConfig;
 
 use crate::ast::{
     Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,

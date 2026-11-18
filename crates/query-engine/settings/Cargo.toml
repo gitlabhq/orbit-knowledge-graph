@@ -1,0 +1,16 @@
+[package]
+name = "query-settings"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+orbit-utils = { path = "../../utils" }
+
+[lints]
+workspace = true

@@ -1605,13 +1605,13 @@ dependencies = [
  "ontology",
  "opentelemetry",
  "orbit-observability",
- "orbit-server-config",
  "orbit-utils",
  "orbit-versions",
  "pest",
  "pest_consume",
  "pest_derive",
  "query-data-model",
+ "query-settings",
  "regex",
  "serde",
  "serde_json",
@@ -3591,6 +3591,7 @@ dependencies = [
  "prost",
  "query-data-model",
  "query-engine",
+ "query-settings",
  "rcgen",
  "regex",
  "reqwest 0.13.4",
@@ -5148,6 +5149,7 @@ dependencies = [
  "prost",
  "query-data-model",
  "query-engine",
+ "query-settings",
  "reqwest 0.13.4",
  "rust-embed",
  "rustls",
@@ -5183,6 +5185,7 @@ dependencies = [
  "orbit-utils",
  "prost",
  "prost-reflect",
+ "query-settings",
  "schemars 1.2.1",
  "serde",
  "serde-saphyr 1.1.0",
@@ -6579,6 +6582,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "types",
+]
+
+[[package]]
+name = "query-settings"
+version = "0.1.0"
+dependencies = [
+ "orbit-utils",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

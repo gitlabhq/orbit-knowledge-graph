@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::net::{AddrParseError, SocketAddr};
 
+use query_settings::{QueryConfig, QuerySettings};
+
 use crate::analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
 use crate::app::AppConfig;
 use crate::billing::{BillingAuthMode, BillingConfig, QuotaAuthMode, QuotaConfig};
@@ -25,7 +27,6 @@ use crate::nats::NatsConfiguration;
 use crate::object_storage::{ObjectStorageAuth, ObjectStorageConfig, ObjectStorageProvider};
 use crate::probe_server::ProbeServerConfig;
 use crate::proto;
-use crate::query::{QueryConfig, QuerySettings};
 use crate::schema::SchemaConfig;
 use crate::tls::{ListenerTlsConfig, TlsConfig};
 

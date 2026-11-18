@@ -16,6 +16,7 @@ orbit-log-fields = { workspace = true }
 labkit-config = { workspace = true }
 prost = { workspace = true }
 prost-reflect = { workspace = true }
+query-settings = { path = "../query-engine/settings" }
 serde-saphyr = { workspace = true }
 
 [dev-dependencies]
