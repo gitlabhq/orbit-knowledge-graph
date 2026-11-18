@@ -265,7 +265,7 @@ impl CommandRegistry {
         {
             query.description = format!(
                 "{} {}",
-                prompt("tools/query_graph_gql_routing").description(),
+                prompt("tools/query_graph_gql_mcp_routing").description(),
                 query.description
             );
         }
