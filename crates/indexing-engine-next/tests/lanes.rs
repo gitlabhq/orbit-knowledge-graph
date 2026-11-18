@@ -1,7 +1,7 @@
 mod support;
 
-use indexing_engine::prelude::*;
-use indexing_engine::testkit::Testkit;
+use indexing_engine_next::prelude::*;
+use indexing_engine_next::testkit::Testkit;
 use support::{
     BIG, DownstreamPlanner, DownstreamWorker, Run, TestPlanner, TestWorker, events, sweep,
 };

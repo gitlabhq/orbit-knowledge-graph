@@ -1,7 +1,7 @@
 mod support;
 
-use indexing_engine::testkit::Testkit;
-use indexing_engine::{EngineConfig, LaneConfig};
+use indexing_engine_next::testkit::Testkit;
+use indexing_engine_next::{EngineConfig, LaneConfig};
 use support::{
     ExclusivePlanner, ExclusiveWorker, MINUTE, Run, SECOND, TestPlanner, TestWorker, events, manual,
 };

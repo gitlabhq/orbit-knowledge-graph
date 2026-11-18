@@ -11,7 +11,7 @@ members = [
   "crates/clickhouse-client",
   "crates/indexer",
   "crates/indexer/duckdb",
-  "crates/indexing-engine",
+  "crates/indexing-engine-next",
   "crates/query-engine",
   "crates/query-engine/compiler",
   "crates/query-engine/types",

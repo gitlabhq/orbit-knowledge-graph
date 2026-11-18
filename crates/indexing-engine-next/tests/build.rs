@@ -3,8 +3,8 @@ mod support;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use indexing_engine::prelude::*;
-use indexing_engine::{BuildError, Engine, EngineConfig, LaneConfig, PoolConfig};
+use indexing_engine_next::prelude::*;
+use indexing_engine_next::{BuildError, Engine, EngineConfig, LaneConfig, PoolConfig};
 use support::{DownstreamPlanner, TestPlanner, TestWorker};
 
 struct FirstStatusWriter;

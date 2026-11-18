@@ -1,6 +1,6 @@
 mod support;
 
-use indexing_engine::testkit::Testkit;
+use indexing_engine_next::testkit::Testkit;
 use support::{TestPlanner, TestWorker, sweep};
 
 #[tokio::test]

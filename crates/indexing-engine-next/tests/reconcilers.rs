@@ -3,8 +3,8 @@ mod support;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use indexing_engine::prelude::*;
-use indexing_engine::testkit::Testkit;
+use indexing_engine_next::prelude::*;
+use indexing_engine_next::testkit::Testkit;
 use support::{ReplanReconciler, TestPlanner, TestWorker};
 
 struct CampaignReconciler;

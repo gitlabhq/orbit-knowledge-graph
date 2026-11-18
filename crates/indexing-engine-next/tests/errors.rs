@@ -1,9 +1,9 @@
 mod support;
 
 use anyhow::anyhow;
-use indexing_engine::prelude::*;
-use indexing_engine::testkit::Testkit;
-use indexing_engine::{EngineConfig, LaneConfig};
+use indexing_engine_next::prelude::*;
+use indexing_engine_next::testkit::Testkit;
+use indexing_engine_next::{EngineConfig, LaneConfig};
 use support::{BIG, HOUR, MINUTE, Run, SECOND, TestPlanner, TestWorker, events, task_key, tenant};
 
 fn store_did_not_answer() -> Run {

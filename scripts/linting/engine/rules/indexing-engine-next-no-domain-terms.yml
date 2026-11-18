@@ -1,10 +1,10 @@
-id: indexing-engine-no-domain-terms
+id: indexing-engine-next-no-domain-terms
 language: rust
 severity: error
 message: The indexing engine knows no domain terms. Put this name in the planner or worker that needs it.
 note: ADR 023, decision 1.
 files:
-  - crates/indexing-engine/**
+  - crates/indexing-engine-next/**
 rule:
   any:
     - kind: identifier

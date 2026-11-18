@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use indexing_engine::prelude::*;
+use indexing_engine_next::prelude::*;
 use parking_lot::Mutex;
 
 pub const SECOND: Duration = Duration::from_secs(1);

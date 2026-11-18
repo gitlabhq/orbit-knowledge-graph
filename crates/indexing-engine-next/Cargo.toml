@@ -1,5 +1,5 @@
 [package]
-name = "indexing-engine"
+name = "indexing-engine-next"
 version.workspace = true
 edition = "2024"
 license = "MIT"

@@ -3433,7 +3433,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "indexing-engine"
+name = "indexing-engine-next"
 version = "0.1.0"
 dependencies = [
  "anyhow",

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use indexing_engine::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
+use indexing_engine_next::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
 
 fn read_lane_timeout(timeout: &str) -> Result<Duration, String> {
     let json =

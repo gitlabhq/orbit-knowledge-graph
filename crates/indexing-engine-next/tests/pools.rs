@@ -1,7 +1,7 @@
 mod support;
 
-use indexing_engine::testkit::Testkit;
-use indexing_engine::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
+use indexing_engine_next::testkit::Testkit;
+use indexing_engine_next::{ClusterPoolConfig, EngineConfig, LaneConfig, PoolConfig};
 use support::{MINUTE, Run, SECOND, TestPlanner, TestWorker, events};
 
 fn two_slots_and_a_parse_pool(pool: PoolConfig) -> EngineConfig {

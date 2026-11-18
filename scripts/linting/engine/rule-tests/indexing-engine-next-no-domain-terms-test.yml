@@ -1,4 +1,4 @@
-id: indexing-engine-no-domain-terms
+id: indexing-engine-next-no-domain-terms
 valid:
   - 'fn key(input: &Doc) -> Key { Key::new("doc", input.id) }'
   - 'let lane = Lane::new("big");'
