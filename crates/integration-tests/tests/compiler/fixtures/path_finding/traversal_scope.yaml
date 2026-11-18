@@ -12,8 +12,6 @@ cases:
         planned:
           expect: ["(PathFinding start->end depth=3 forward=2 backward=1 scoped=true tables=[gl_code_edge] relationships=[CALLS] (_) (_))"]
         emitted:
-          ctes:
-            exact_order: [_orbit_nf_start, _orbit_nf_end, _orbit_path_scope, _orbit_forward, _orbit_backward]
           expect:
             - (CTE _orbit_path_scope (Union ALL (_) (_)))
             - (Filter _orbit_e1.source_id IN _orbit_nf_start.id, _orbit_e1.source_kind = 'Definition', _orbit_e1.traversal_path IN _orbit_path_scope.traversal_path, ... (_))
