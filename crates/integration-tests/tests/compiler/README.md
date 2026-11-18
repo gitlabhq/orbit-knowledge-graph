@@ -116,7 +116,24 @@ takes `dynamic`, `path_segment_budget`, the `paths` of each node alias, and the
 `columns` of a node alias, which replace the columns that the query selects.
 
 Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
-for one fixture. Other fixtures keep the default ontology.
+for one fixture. Other fixtures keep the default ontology. An overlay merges
+its YAML files over the ontology files of the same path, so it can add a
+property, change a table, or add an edge table. Set `schema_version_prefix: v1_`
+to prefix every physical table name, as a schema version does. It combines with
+`ontology_overlay`.
+
+```yaml
+ontology_overlay: renamed_user
+schema_version_prefix: v1_
+```
+
+| Overlay | Change |
+|---|---|
+| `scoped_user` | `User` is scoped by a traversal path instead of global |
+| `renamed_user` | `User` is stored in `gl_renamed_user` |
+| `property_types` | `Group` has a float `score` and a visible `private_note` that cannot be filtered |
+| `string_edge_source` | A `NOTED` edge from `User` to `Note` in a table whose `source_id` is a string |
+| `local_dates` | The local `Definition` has a `created_at` timestamp |
 
 Both `query.json` and `query.gql` are required. If a frontend cannot express the
 tested plan, declare its reason under `missing_frontends`. The runner rejects

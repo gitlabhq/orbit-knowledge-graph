@@ -23,6 +23,7 @@ use crate::query_scenario::{SecurityOverride, rejection_reason, shown_private_de
 struct Scenario {
     name: Option<String>,
     ontology_overlay: Option<String>,
+    schema_version_prefix: Option<String>,
     query: BTreeMap<String, String>,
     missing_frontends: BTreeMap<String, String>,
     language_differs: BTreeMap<String, String>,
@@ -131,6 +132,7 @@ impl Rejection {
 struct RawScenario {
     name: Option<String>,
     ontology_overlay: Option<String>,
+    schema_version_prefix: Option<String>,
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
@@ -178,6 +180,7 @@ impl TryFrom<RawScenario> for Scenario {
         Ok(Self {
             name: raw.name,
             ontology_overlay: raw.ontology_overlay,
+            schema_version_prefix: raw.schema_version_prefix,
             query: raw.query,
             missing_frontends: raw.missing_frontends,
             language_differs: raw.language_differs,
@@ -1363,8 +1366,8 @@ fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
 }
 
 fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
-    let models = Models::derive(ontology);
-    let mut overlays = BTreeMap::new();
+    let models = Models::derive(Arc::clone(&ontology));
+    let mut variants = BTreeMap::new();
     let mut cases = 0;
     let mut passed = 0;
     let mut failures = Vec::new();
@@ -1382,11 +1385,20 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
             failures.push(format!("{}: {error}", path.display()));
             continue;
         }
-        let scenario_models = match &scenario.ontology_overlay {
-            Some(name) => &*overlays
-                .entry(name.clone())
-                .or_insert_with(|| Models::derive(Arc::new(crate::load_ontology_overlay(name)))),
-            None => &models,
+        let scenario_models = match (&scenario.ontology_overlay, &scenario.schema_version_prefix) {
+            (None, None) => &models,
+            (overlay, prefix) => &*variants
+                .entry((overlay.clone(), prefix.clone()))
+                .or_insert_with(|| {
+                    let ontology = overlay
+                        .as_deref()
+                        .map_or_else(|| (*ontology).clone(), crate::load_ontology_overlay);
+                    let ontology = match prefix {
+                        Some(prefix) => ontology.with_schema_version_prefix(prefix),
+                        None => ontology,
+                    };
+                    Models::derive(Arc::new(ontology))
+                }),
         };
         let failure_count = failures.len();
         failures.extend(check(&scenario, scenario_models, path));

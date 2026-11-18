@@ -1,0 +1,9 @@
+properties:
+  created_at:
+    type: datetime
+    source: created_at
+    nullable: true
+    description: "Fixture creation time."
+storage:
+  columns:
+    - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}

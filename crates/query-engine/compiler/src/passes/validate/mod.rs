@@ -1742,7 +1742,6 @@ mod tests {
         }
     }
     use crate::input::parse_input;
-    use ontology::DataType;
 
     fn assert_rejects(json: &str, expected: &str) {
         let input = parse_input(json).unwrap();
@@ -1834,56 +1833,6 @@ mod tests {
     }
 
     #[test]
-    fn accepts_int_on_float_column() {
-        let ontology = Ontology::new()
-            .with_nodes(["Metric"])
-            .with_fields("Metric", [("score", DataType::Float)]);
-
-        let input = parse_input(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "m", "entity": "Metric", "filters": {"score": 42}}]
-            }"#,
-        )
-        .unwrap();
-        validator(&ontology).check_references(&input).unwrap();
-    }
-
-    #[test]
-    fn edge_filter_type_comes_from_ontology_not_hardcoded() {
-        let ontology = ontology::Ontology::new()
-            .with_nodes(["User", "Note"])
-            .with_edges(["AUTHORED"])
-            .with_edge_columns([
-                ("traversal_path", DataType::String),
-                ("relationship_kind", DataType::String),
-                ("source_id", DataType::String),
-                ("source_kind", DataType::String),
-                ("target_id", DataType::Int),
-                ("target_kind", DataType::String),
-            ]);
-        let validator = validator(&ontology);
-
-        let input = parse_input(r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "n", "entity": "Note"}],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "filters": {"source_id": 42}}]
-        }"#)
-        .unwrap();
-
-        let result = validator.check_references(&input);
-        assert!(
-            result.is_err(),
-            "integer filter on String source_id should fail"
-        );
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("source_id"),
-            "error should mention source_id, got: {err}"
-        );
-    }
-
-    #[test]
     fn identifier_regex_rejects_non_ascii() {
         let schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON).unwrap();
         let pattern = schema["$defs"]["Identifier"]["pattern"]
@@ -1899,66 +1848,5 @@ mod tests {
         assert!(!re.is_match("ᴜser")); // Latin small capital U (U+1D1C)
         assert!(!re.is_match("üser")); // Latin u with diaeresis
         assert!(!re.is_match("用户")); // CJK
-    }
-
-    fn ontology_with_unfilterable_field() -> Ontology {
-        Ontology::new()
-            .with_nodes(["Group"])
-            .with_edges(["CONTAINS"])
-            .with_fields(
-                "Group",
-                [
-                    ("name", DataType::String),
-                    ("private_note", DataType::String),
-                    ("traversal_path", DataType::String),
-                ],
-            )
-            .modify_field("Group", "private_note", |f| f.filterable = false)
-            .unwrap()
-            .modify_field("Group", "traversal_path", |f| f.filterable = false)
-            .unwrap()
-    }
-
-    #[test]
-    fn rejects_filter_on_unfilterable_field() {
-        let ont = ontology_with_unfilterable_field();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"private_note": "secret"}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        let err = validator.check_references(&input).unwrap_err();
-        assert!(
-            err.to_string().contains("not filterable"),
-            "expected filterable rejection, got: {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_group_by_property_on_unfilterable_field() {
-        let ont = ontology_with_unfilterable_field();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "node_ids": [1]}],
-            "group_by": ["g.private_note"],
-            "aggregations": [{"count": "g", "as": "group_count"}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        let err = validator.check_references(&input).unwrap_err();
-        assert!(
-            err.to_string().contains("not filterable"),
-            "expected group_by filterable rejection, got: {err}"
-        );
     }
 }
