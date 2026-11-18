@@ -510,6 +510,30 @@ cases:
               rel: ["[:APPROVED]", "[:AUTHORED]", "[:AUTHORED]"]
               type(r): ['"APPROVED"', '"AUTHORED"', '"AUTHORED"']
 
+  - name: traversal_returns_edges
+    description: A JSON traversal over a relationship returns both endpoints and the edges between them
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "node_ids": [1]},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+          ],
+          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+          "limit": 50
+        }
+    expect:
+      node_count: 3
+      referential_integrity: true
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001]
+      edges:
+        AUTHORED:
+          - [1, 2000]
+          - [1, 2001]
+
   - name: variable_returns_edges
     description: RETURN r in a traversal is accepted; the edges table lists its edges and the gql table
       adds an r column
