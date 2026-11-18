@@ -99,8 +99,7 @@ We then compared 18 hours at 100% of GitLab.com users with the same hours one we
 - A query must finish inside one Rails request.
   The default query timeout did not change, but a deployment can no longer raise it past the Rails request timeout.
 - There is no fallback to Workhorse.
-  GitLab 19.6 removed the `orbit_query_in_rails` feature flag, so every instance on 19.6 or later runs the Rails path.
-  GitLab Self-Managed and GitLab Dedicated on 19.4 and 19.5 still use the Workhorse path from ADR 008.
+  GitLab 19.4.7, 19.5.5, and 19.6 removed the `orbit_query_in_rails` feature flag, so every instance on those versions or later runs the Rails path.
 
 ## Why not the alternatives
 
