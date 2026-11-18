@@ -112,6 +112,11 @@ tp_bounds:
 `params` entry must match one bound parameter by its value and its ClickHouse
 type name.
 
+Every case that compiles gets two more checks without an assertion. DuckDB
+runs the rendered SQL of each DuckDB case on an empty database of the local
+schema. For each ClickHouse case, each CTE body, emitted as a statement of its
+own for EXPLAIN, must define every CTE it reads.
+
 The compiler fixtures binary loads the embedded query config, so `settings` sees the
 production settings, such as the query cache. The container suite runs EXPLAIN
 on the seeded ClickHouse for every fixture with `indexes`. It first adds an older

@@ -88,6 +88,41 @@ fn compile(
     }
 }
 
+pub(super) fn undefined_cte_reads(ast: &compiler::Node) -> Result<Vec<String>, String> {
+    fn names(tree: &super::pattern::Expression, found: &mut Vec<String>) {
+        if tree.label == super::operator::Operator::Cte {
+            found.push(tree.head.clone());
+        }
+        for child in &tree.children {
+            names(child, found);
+        }
+    }
+    let mut ctes = Vec::new();
+    names(&super::explain::emitted(ast), &mut ctes);
+    let word = |sql: &str, name: &str| {
+        sql.match_indices(name).any(|(at, _)| {
+            let identifier = |c: char| c.is_ascii_alphanumeric() || c == '_';
+            !sql[..at].ends_with(identifier) && !sql[at + name.len()..].starts_with(identifier)
+        })
+    };
+    Ok(cte_statements(ast)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .flat_map(|(own, sql, _)| {
+            ctes.iter()
+                .filter(|name| {
+                    **name != own
+                        && word(&sql, name)
+                        && ![" AS (", " AS MATERIALIZED ("]
+                            .iter()
+                            .any(|definition| sql.contains(&format!("{name}{definition}")))
+                })
+                .map(|name| format!("CTE statement {own} reads {name} without defining it: {sql}"))
+                .collect::<Vec<_>>()
+        })
+        .collect())
+}
+
 async fn check_indexes(
     ctx: &TestContext,
     compiled: &CompiledQueryContext,

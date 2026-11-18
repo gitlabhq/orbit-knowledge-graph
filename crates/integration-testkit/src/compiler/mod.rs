@@ -1122,14 +1122,25 @@ impl Expectations<'_> {
             )),
             (Err(error), None) => failures.push(format!("{}: {error}", self.label)),
             (Ok(()), None) => {
-                if let (Some(database), Some(output)) = (self.local_database, ctx.output()) {
-                    let sql = output.base.render();
-                    if let Err(error) = database.query_arrow(&sql) {
-                        failures.push(format!(
-                            "{}: DuckDB rejects the SQL: {error}\n{sql}",
-                            self.label
-                        ));
+                match (self.local_database, ctx.output()) {
+                    (Some(database), Some(output)) => {
+                        let sql = output.base.render();
+                        if let Err(error) = database.query_arrow(&sql) {
+                            failures.push(format!(
+                                "{}: DuckDB rejects the SQL: {error}\n{sql}",
+                                self.label
+                            ));
+                        }
                     }
+                    (None, Some(output)) => match clickhouse::undefined_cte_reads(&output.ast) {
+                        Ok(reads) => failures.extend(
+                            reads
+                                .into_iter()
+                                .map(|read| format!("{}: {read}", self.label)),
+                        ),
+                        Err(error) => failures.push(format!("{}: {error}", self.label)),
+                    },
+                    _ => {}
                 }
                 return (failures, ctx.take_output());
             }
