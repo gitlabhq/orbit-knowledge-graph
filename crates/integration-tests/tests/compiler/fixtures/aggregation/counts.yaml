@@ -1,0 +1,26 @@
+cases:
+  - name: Counting a joined node groups by every projected property of the grouped node
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"n","entity":"Note","node_ids":[1]},{"id":"u","entity":"User","columns":["id","username"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}],"group_by":["u"],"aggregations":[{"count":"n","as":"note_count"}],"limit":10}
+      gql: |
+        MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id, .username}, count(n) AS note_count LIMIT 10
+    logical:
+      expect: ["(Aggregate group u AS u, COUNT(n) AS note_count (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 11 (Aggregate group u.id, group u.username, COUNT() AS note_count, ... (Join ON u.id = n.author_id (_) (_))))"]
+
+  - name: Distinct counts over a node and a property sit beside a plain count
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"n","entity":"Note","node_ids":[1]},{"id":"u","entity":"User","columns":["id"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}],"group_by":["u"],"aggregations":[{"count":"n","as":"notes"},{"count":"n","distinct":true,"as":"distinct_notes"},{"count":"n.confidential","distinct":true,"as":"flags"}],"limit":10}
+      gql: |
+        MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id}, count(n) AS notes, count(DISTINCT n) AS distinct_notes, count(DISTINCT n.confidential) AS flags LIMIT 10
+    logical:
+      expect: ["(Aggregate group u AS u, COUNT(n) AS notes, COUNT(n) AS distinct_notes, COUNT(n.confidential) AS flags (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Aggregate group u.id, COUNT() AS notes, COUNT(DISTINCT n.id) AS distinct_notes, COUNT(DISTINCT n.confidential) AS flags, u.id AS u_id (_))"]

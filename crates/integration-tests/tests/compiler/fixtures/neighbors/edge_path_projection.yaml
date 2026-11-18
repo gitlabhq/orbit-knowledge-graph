@@ -1,0 +1,27 @@
+cases:
+  - name: Neighbors take the edge path only for relationship kinds stored under the neighbor's path
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["AUTHORED"]}}
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]-(n) RETURN u, n
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - "(Project If(((_orbit_neighbor_edge.relationship_kind = 'AUTHORED') AND (_orbit_neighbor_edge.target_kind = 'Note')) OR ((_orbit_neighbor_edge.relationship_kind = 'AUTHORED') AND (_orbit_neighbor_edge.target_kind = 'MergeRequest')) OR ((_orbit_neighbor_edge.relationship_kind = 'AUTHORED') AND (_orbit_neighbor_edge.target_kind = 'WorkItem')) OR ((_orbit_neighbor_edge.relationship_kind = 'AUTHORED') AND (_orbit_neighbor_edge.target_kind = 'Vulnerability')), _orbit_neighbor_edge.traversal_path, '') AS _orbit_neighbor_traversal_path, ... (_))"
+
+  - name: Neighbors leave the path empty when the edge path belongs to the center
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT"]}}
+      gql: |
+        MATCH (p:Project {id: 1})-[:IN_PROJECT]-(n) RETURN p, n
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Project '' AS _orbit_neighbor_traversal_path, ... (_))"]
