@@ -1,0 +1,36 @@
+cases:
+  - name: Rendered traversal SQL inlines filter and relationship values
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}},{"id":"u","entity":"User"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'opened'}) RETURN mr, u LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains: ["mr.state = 'opened'", "'AUTHORED'"]
+          not_contains: ["{p"]
+
+  - name: Rendered SQL inlines an IN filter array
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"user_type":{"in":["project_bot","service_account"]}}}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.user_type IN ['project_bot', 'service_account'] RETURN u LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains: ["u.user_type IN ['project_bot', 'service_account']"]
+          not_contains: ["{p"]
+
+  - name: Rendered SQL inlines pinned node IDs
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[100,200,300]}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.id IN [100, 200, 300] RETURN u LIMIT 10
+    physical:
+      clickhouse:
+        sql:
+          contains: ["u.id IN [100, 200, 300]"]
+          not_contains: ["{p"]

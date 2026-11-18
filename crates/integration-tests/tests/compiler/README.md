@@ -143,6 +143,8 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 | Hydration projections and path filters | `hydration/` |
 | Filters and result projections | `filters/`, `projections/` |
 | SKIP/LIMIT windows, tie-breakers, and text budgets | `pagination/` |
+| Parameter values inlined into rendered SQL | `rendering/` |
+| DuckDB plans and generated SQL | `dialects/duckdb/` |
 
 ## Coverage boundaries
 
