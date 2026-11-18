@@ -48,7 +48,7 @@ fixtures:
 
         def trailing_call(flag)
           x = (if flag then Client.new else Other.new end; Third.new.get)
-          x
+          x.get
         end
 
         def ensure_sees_old_binding

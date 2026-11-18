@@ -813,11 +813,7 @@ impl<'t> Fold<'t> {
                 .map(|child| WorkItem::Visit(child.index())),
         );
         if let Some(branch) = branch {
-            let siblings: Vec<_> = branch
-                .parent()
-                .into_iter()
-                .flat_map(Cursor::children_rev)
-                .collect();
+            let siblings: Vec<_> = rhs.into_iter().flat_map(Cursor::children_rev).collect();
             let trailing = siblings
                 .iter()
                 .take_while(|child| child.index() != branch.index())
