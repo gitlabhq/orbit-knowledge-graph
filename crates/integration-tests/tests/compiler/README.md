@@ -18,6 +18,8 @@ physical:
       node: {expect: ["(Limit 3 (Project u.username AS u_username (_)))"]}
     settings:
       query_config: {equals: {transform_null_in: "0"}, absent: [join_order_algorithm]}
+    result_contract:
+      result_ctx: {query_type: traversal, nodes: {u: {entity_type: User}}}
     hydrate_plan:
       hydration_plan: static
     security:
@@ -25,6 +27,8 @@ physical:
     codegen:
       output:
         sql: {contains: [gl_merge_request], not_contains: [gl_edge]}
+        parameterized_sql: {contains: ["{p"], not_contains: [opened]}
+        params: [{value: opened, type: String}]
         indexes: [{table: gl_merge_request, name: idx_title}]
 ```
 
@@ -38,8 +42,9 @@ Common targets have aliases, declared in one table in
 | `emitted` | `response_policy.node` on ClickHouse, `paginate.node` on DuckDB |
 | `final_ast` | `security.node` |
 | `hydration` | `hydrate_plan.hydration_plan` |
+| `result_context` | `result_contract.result_ctx` |
 | `settings` | `settings.query_config` |
-| `sql`, `indexes` | `codegen.output` |
+| `sql`, `parameterized_sql`, `params`, `indexes` | `codegen.output` on ClickHouse |
 
 An alias and an explicit phase entry cannot set the same state field.
 
@@ -53,8 +58,47 @@ contract:
 | `query_plan` | Patterns on the planned tree, and `point_lookup` |
 | `node` | Patterns on the SQL AST |
 | `query_config` | `exact`, `equals`, and `absent` on the resolved ClickHouse settings |
-| `hydration_plan` | `none`, `static`, or `dynamic` |
-| `output` | `sql` text checks, and `indexes` that the layout declares and the final query scans |
+| `hydration_plan` | `none`, `static`, or `dynamic`, or the templates of a static or dynamic plan |
+| `result_ctx` | The query type, node entries, neighbors center, and entity labels of the result context |
+| `output` | `sql` and `parameterized_sql` text checks, bound `params`, and `indexes` that the layout declares and the final query scans |
+
+In `input`, the `Input` head names the query type, then `include_debug_sql`
+and `dynamic_columns=*` when the query sets them. A head without them asserts
+the defaults.
+
+`hydration_plan` also takes a list of templates under the plan kind. Each
+listed template must match one template of the plan on every field it names.
+Field values compare exactly, and unknown fields are rejected. Static templates
+have `entity_type`, `node_alias`, `destination_table`, `columns`,
+`virtual_columns`, `injected_columns`, `has_traversal_path`, `virtual_filters`,
+and `filter_injected_columns`. Dynamic templates have the same fields without
+`node_alias`, `virtual_filters`, and `filter_injected_columns`.
+
+```yaml
+hydration:
+  static:
+    - node_alias: f
+      virtual_columns: [{column_name: content, service: gitaly, lookup: blob_content}]
+      virtual_filters: [{property: content, op: contains, value: needle}]
+      filter_injected_columns: [content]
+```
+
+`result_ctx` checks only the keys it lists. `nodes` must list every node alias
+of the result context, and each entry checks the fields it names:
+`entity_type`, `pk_column`, `id_column`, and `type_column`. `neighbors_center`
+takes `{entity, id}`, or `null` for no center. `labels` maps an entity to its
+label property, or to `null` for no label.
+
+```yaml
+result_context:
+  neighbors_center: {entity: User, id: 1}
+  labels: {User: username}
+```
+
+`sql` checks the rendered SQL, with parameter values inlined.
+`parameterized_sql` checks the SQL that is sent with bound parameters. Each
+`params` entry must match one bound parameter by its value and its ClickHouse
+type name.
 
 The compiler fixtures binary loads the embedded query config, so `settings` sees the
 production settings, such as the query cache. The container suite runs EXPLAIN
@@ -67,7 +111,9 @@ After `paginate`, `Limit` shows the fetched rows (the page plus one probe row)
 and `Offset` shows the lowered SKIP. In `input`, `Limit` and `Offset` show the
 requested LIMIT and SKIP. `security` sets the user, with the same shape as a
 query scenario's `config.security`. Hydration fixtures run the hydration
-pipeline, which has no `normalize` or `paginate` phase.
+pipeline, which has no `normalize` or `paginate` phase. Its `hydration` setup
+takes `dynamic`, `path_segment_budget`, the `paths` of each node alias, and the
+`columns` of a node alias, which replace the columns that the query selects.
 
 Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
 for one fixture. Other fixtures keep the default ontology.
@@ -169,8 +215,7 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
   The YAML fixture independently covers the large dynamic mode.
 - The explain view flattens associative OR expressions. Static prefix fixtures
   verify predicate content, but do not assert the internal balanced-tree depth.
-- Virtual-property hydration and backend code-generation optimizations are
-  outside this harness.
+- Backend code-generation optimizations are outside this harness.
 
 ## Keep in Rust
 

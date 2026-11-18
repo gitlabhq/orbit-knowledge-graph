@@ -237,6 +237,7 @@ struct HydrationSetup {
     dynamic: bool,
     path_segment_budget: Option<usize>,
     paths: BTreeMap<String, Vec<String>>,
+    columns: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Default, Deserialize)]
@@ -246,7 +247,8 @@ struct StateAssertions {
     query_plan: Option<PlanAssertions>,
     node: Option<Assertions>,
     query_config: Option<SettingsAssertions>,
-    hydration_plan: Option<compiler::HydrationKind>,
+    hydration_plan: Option<HydrationAssertions>,
+    result_ctx: Option<ResultContextAssertions>,
     output: Option<OutputAssertions>,
 }
 
@@ -258,6 +260,7 @@ impl StateAssertions {
             ("node", self.node.is_some()),
             ("query_config", self.query_config.is_some()),
             ("hydration_plan", self.hydration_plan.is_some()),
+            ("result_ctx", self.result_ctx.is_some()),
             ("output", self.output.is_some()),
         ]
         .into_iter()
@@ -309,7 +312,254 @@ struct SettingsAssertions {
 #[serde(default, deny_unknown_fields)]
 struct OutputAssertions {
     sql: Option<SqlAssertions>,
+    parameterized_sql: Option<SqlAssertions>,
+    params: Vec<ParamAssertion>,
     indexes: Vec<IndexAssertion>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ParamAssertion {
+    value: serde_json::Value,
+    #[serde(rename = "type")]
+    data_type: String,
+}
+
+#[derive(Deserialize)]
+#[serde(try_from = "serde_json::Value")]
+struct HydrationAssertions {
+    kind: compiler::HydrationKind,
+    templates: Vec<serde_json::Map<String, serde_json::Value>>,
+}
+
+impl TryFrom<serde_json::Value> for HydrationAssertions {
+    type Error = String;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, String> {
+        let usage = || {
+            "hydration_plan takes none, static, dynamic, or {static: [...]} or {dynamic: [...]} with nonempty template field maps".to_string()
+        };
+        let kind = |value| serde_json::from_value(value).map_err(|_| usage());
+        match value {
+            serde_json::Value::String(_) => Ok(Self {
+                kind: kind(value)?,
+                templates: vec![],
+            }),
+            serde_json::Value::Object(entries) if entries.len() == 1 => {
+                let (name, templates) = entries.into_iter().next().unwrap();
+                let kind = kind(serde_json::Value::String(name))?;
+                let templates: Vec<serde_json::Map<_, _>> =
+                    serde_json::from_value(templates).map_err(|_| usage())?;
+                if kind == compiler::HydrationKind::None
+                    || templates.is_empty()
+                    || templates.iter().any(serde_json::Map::is_empty)
+                {
+                    return Err(usage());
+                }
+                Ok(Self { kind, templates })
+            }
+            _ => Err(usage()),
+        }
+    }
+}
+
+impl HydrationAssertions {
+    fn check(&self, plan: &compiler::HydrationPlan, label: &str) -> Result<(), String> {
+        use serde_json::json;
+        if plan.kind() != self.kind {
+            return Err(format!(
+                "{label}: {:?}, expected {:?}",
+                plan.kind(),
+                self.kind
+            ));
+        }
+        let virtual_columns = |columns: &[compiler::VirtualColumnRequest]| {
+            columns
+                .iter()
+                .map(|column| {
+                    json!({"column_name": column.column_name, "service": column.service, "lookup": column.lookup})
+                })
+                .collect::<Vec<_>>()
+        };
+        let actual: Vec<_> = match plan {
+            compiler::HydrationPlan::None => vec![],
+            compiler::HydrationPlan::Static(templates) => templates
+                .iter()
+                .map(|template| {
+                    json!({
+                        "entity_type": template.entity_type,
+                        "node_alias": template.node_alias,
+                        "destination_table": template.destination_table,
+                        "columns": template.columns,
+                        "virtual_columns": virtual_columns(&template.virtual_columns),
+                        "injected_columns": template.injected_columns,
+                        "has_traversal_path": template.has_traversal_path,
+                        "virtual_filters": template.virtual_filters.iter().map(|(property, filter)| {
+                            json!({"property": property, "op": filter.op.map(|op| op.as_ref().to_string()), "value": filter.value})
+                        }).collect::<Vec<_>>(),
+                        "filter_injected_columns": template.filter_injected_columns,
+                    })
+                })
+                .collect(),
+            compiler::HydrationPlan::Dynamic(entities) => entities
+                .iter()
+                .map(|entity| {
+                    json!({
+                        "entity_type": entity.entity_type,
+                        "destination_table": entity.destination_table,
+                        "columns": entity.columns,
+                        "virtual_columns": virtual_columns(&entity.virtual_columns),
+                        "injected_columns": entity.injected_columns,
+                        "has_traversal_path": entity.has_traversal_path,
+                    })
+                })
+                .collect(),
+        };
+        for (index, expected) in self.templates.iter().enumerate() {
+            let label = format!("{label}[{index}]");
+            let found = partial_matches(expected, &actual, &label)?;
+            if found.is_empty() {
+                let related: Vec<_> = actual
+                    .iter()
+                    .filter(|template| {
+                        ["node_alias", "entity_type"].iter().any(|key| {
+                            expected
+                                .get(*key)
+                                .is_some_and(|value| template.get(*key) == Some(value))
+                        })
+                    })
+                    .collect();
+                return Err(format!(
+                    "{label}: no template matches {}\nsame entity or alias: {}",
+                    serde_json::Value::Object(expected.clone()),
+                    serde_json::to_string(&related).unwrap()
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn partial_matches<'a>(
+    expected: &serde_json::Map<String, serde_json::Value>,
+    actual: &'a [serde_json::Value],
+    label: &str,
+) -> Result<Vec<&'a serde_json::Value>, String> {
+    if let Some(known) = actual.first().and_then(serde_json::Value::as_object)
+        && let Some(unknown) = expected.keys().find(|key| !known.contains_key(*key))
+    {
+        return Err(format!(
+            "{label}: unknown field {unknown}; fields: {:?}",
+            known.keys().collect::<Vec<_>>()
+        ));
+    }
+    Ok(actual
+        .iter()
+        .filter(|item| {
+            expected
+                .iter()
+                .all(|(key, value)| item.get(key) == Some(value))
+        })
+        .collect())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResultContextAssertions {
+    query_type: Option<compiler::QueryType>,
+    nodes: Option<BTreeMap<String, serde_json::Map<String, serde_json::Value>>>,
+    #[serde(default, deserialize_with = "present")]
+    neighbors_center: Option<Option<NeighborsCenter>>,
+    #[serde(default)]
+    labels: BTreeMap<String, Option<String>>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct NeighborsCenter {
+    entity: String,
+    id: i64,
+}
+
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+impl ResultContextAssertions {
+    fn check(&self, context: &compiler::ResultContext, label: &str) -> Result<(), String> {
+        if self.query_type.is_none()
+            && self.nodes.is_none()
+            && self.neighbors_center.is_none()
+            && self.labels.is_empty()
+        {
+            return Err(format!(
+                "{label}: needs query_type, nodes, neighbors_center, or labels"
+            ));
+        }
+        if let Some(expected) = self.query_type
+            && context.query_type != Some(expected)
+        {
+            return Err(format!(
+                "{label}.query_type: {:?}, expected {expected:?}",
+                context.query_type
+            ));
+        }
+        if let Some(nodes) = &self.nodes {
+            let actual: BTreeMap<_, _> = context
+                .nodes()
+                .map(|node| {
+                    (
+                        node.alias.as_str(),
+                        serde_json::json!({
+                            "entity_type": node.entity_type,
+                            "pk_column": node.pk_column,
+                            "id_column": node.id_column,
+                            "type_column": node.type_column,
+                        }),
+                    )
+                })
+                .collect();
+            if !actual.keys().copied().eq(nodes.keys().map(String::as_str)) {
+                return Err(format!(
+                    "{label}.nodes: aliases {:?}, expected {:?}",
+                    actual.keys().collect::<Vec<_>>(),
+                    nodes.keys().collect::<Vec<_>>()
+                ));
+            }
+            for (alias, expected) in nodes {
+                let node = std::slice::from_ref(&actual[alias.as_str()]);
+                if partial_matches(expected, node, &format!("{label}.nodes.{alias}"))?.is_empty() {
+                    return Err(format!("{label}.nodes.{alias}: {}", node[0]));
+                }
+            }
+        }
+        if let Some(expected) = &self.neighbors_center {
+            let actual = context
+                .neighbors_center()
+                .map(|(entity, id)| NeighborsCenter {
+                    entity: entity.to_string(),
+                    id,
+                });
+            if actual != *expected {
+                return Err(format!(
+                    "{label}.neighbors_center: {actual:?}, expected {expected:?}"
+                ));
+            }
+        }
+        for (entity, expected) in &self.labels {
+            let actual = context.label(entity);
+            if actual != expected.as_deref() {
+                return Err(format!(
+                    "{label}.labels.{entity}: {actual:?}, expected {expected:?}"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl SqlAssertions {
@@ -761,15 +1011,12 @@ fn hydration_input(
     };
     let mut input = normalize::normalize(input, model)?;
     input.query_type = compiler::input::QueryType::Hydration;
+    for (alias, columns) in &setup.columns {
+        hydration_node(&mut input, alias)?.columns =
+            Some(compiler::ColumnSelection::List(columns.clone()));
+    }
     for (alias, paths) in &setup.paths {
-        let node = input
-            .nodes
-            .iter_mut()
-            .find(|node| &node.id == alias)
-            .ok_or_else(|| {
-                compiler::QueryError::PipelineInvariant(format!("unknown hydration node '{alias}'"))
-            })?;
-        node.traversal_paths = paths
+        hydration_node(&mut input, alias)?.traversal_paths = paths
             .iter()
             .map(|path| orbit_utils::traversal_path::TraversalPath::new_unchecked(path.clone()))
             .collect();
@@ -781,6 +1028,19 @@ fn hydration_input(
             path_segment_budget: setup.path_segment_budget,
         },
     ))
+}
+
+fn hydration_node<'a>(
+    input: &'a mut compiler::input::Input,
+    alias: &str,
+) -> compiler::Result<&'a mut compiler::input::InputNode> {
+    input
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == alias)
+        .ok_or_else(|| {
+            compiler::QueryError::PipelineInvariant(format!("unknown hydration node '{alias}'"))
+        })
 }
 
 struct Expectations<'a> {
@@ -938,18 +1198,20 @@ impl Expectations<'_> {
                 }),
             );
         }
-        if let Some(expected) = state.hydration_plan {
+        if let Some(assertions) = &state.hydration_plan {
             check(
                 "hydration_plan",
-                ctx.hydration_plan().as_ref().map(|plan| {
-                    if plan.kind() == expected {
-                        return Ok(());
-                    }
-                    Err(format!(
-                        "{label}.hydration_plan: {:?}, expected {expected:?}",
-                        plan.kind()
-                    ))
-                }),
+                ctx.hydration_plan()
+                    .as_ref()
+                    .map(|plan| assertions.check(plan, &format!("{label}.hydration_plan"))),
+            );
+        }
+        if let Some(assertions) = &state.result_ctx {
+            check(
+                "result_ctx",
+                ctx.result_ctx()
+                    .as_ref()
+                    .map(|context| assertions.check(context, &format!("{label}.result_ctx"))),
             );
         }
         if let Some(assertions) = &state.output {
@@ -969,16 +1231,53 @@ impl Expectations<'_> {
         output: &compiler::CompiledQueryContext,
         label: &str,
     ) -> Result<(), String> {
-        if assertions.sql.is_none() && assertions.indexes.is_empty() {
-            return Err(format!("{label}: needs sql or indexes"));
+        if assertions.sql.is_none()
+            && assertions.parameterized_sql.is_none()
+            && assertions.params.is_empty()
+            && assertions.indexes.is_empty()
+        {
+            return Err(format!(
+                "{label}: needs sql, parameterized_sql, params, or indexes"
+            ));
         }
-        let sql = &output.base.render();
         let scans = explain::emitted(&output.ast).to_string();
-        let mut failures = assertions
-            .sql
-            .as_ref()
-            .map(|checks| checks.check(sql, &format!("{label}.sql")))
-            .unwrap_or_default();
+        let mut failures = Vec::new();
+        for (field, checks, sql) in [
+            ("sql", &assertions.sql, output.base.render()),
+            (
+                "parameterized_sql",
+                &assertions.parameterized_sql,
+                output.base.sql.clone(),
+            ),
+        ] {
+            if let Some(checks) = checks {
+                failures.extend(checks.check(&sql, &format!("{label}.{field}")));
+            }
+        }
+        let params: BTreeMap<_, _> = output
+            .base
+            .params
+            .iter()
+            .map(|(name, param)| {
+                (
+                    name,
+                    (
+                        orbit_utils::clickhouse::type_name(param.data_type),
+                        &param.value,
+                    ),
+                )
+            })
+            .collect();
+        for expected in &assertions.params {
+            if !params.values().any(|(data_type, value)| {
+                *data_type == expected.data_type && **value == expected.value
+            }) {
+                failures.push(format!(
+                    "{label}.params: no {} parameter {}\nparams: {params:?}",
+                    expected.data_type, expected.value
+                ));
+            }
+        }
         for index in &assertions.indexes {
             if !(self.index_exists)(&index.table, &index.name) {
                 failures.push(format!(
@@ -1407,6 +1706,91 @@ fn rejections_check_the_phase_reason_and_message() {
         "after rejection",
         "does not run after the rejection"
     ));
+}
+
+#[test]
+fn output_hydration_and_result_context_assertions_check_their_fields() {
+    let run = |physical: &str| {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("fields.yaml"),
+            format!(
+                "name: fields\nquery:\n  json: '{{\"query_type\":\"traversal\",\"nodes\":[{{\"id\":\"u\",\"entity\":\"User\",\"node_ids\":[1],\"filters\":{{\"username\":\"alice\"}}}}]}}'\n  gql: \"MATCH (u:User {{id: 1, username: 'alice'}}) RETURN u\"\nphysical:\n  clickhouse: {physical}\n"
+            ),
+        )
+        .unwrap();
+        let ontology = ontology::Ontology::new()
+            .with_nodes(["User"])
+            .with_fields("User", [("username", ontology::DataType::String)]);
+        check_dir(directory.path(), Arc::new(ontology))
+            .err()
+            .unwrap_or_default()
+            .join("\n")
+    };
+    assert_eq!(
+        run(
+            "{params: [{value: alice, type: String}, {value: 1, type: Int64}], parameterized_sql: {contains: ['{p'], not_contains: [alice]}, result_context: {query_type: traversal, nodes: {u: {entity_type: User, id_column: _orbit_u_id}}, neighbors_center: null, labels: {User: null}}, hydration: none}"
+        ),
+        ""
+    );
+    for (physical, expected) in [
+        (
+            "{params: [{value: alice, type: Int64}]}",
+            "no Int64 parameter \"alice\"",
+        ),
+        (
+            "{parameterized_sql: {contains: [alice]}}",
+            "parameterized_sql missing 'alice'",
+        ),
+        (
+            "{result_context: {}}",
+            "needs query_type, nodes, neighbors_center, or labels",
+        ),
+        (
+            "{result_context: {query_type: neighbors}}",
+            "Some(Traversal), expected Neighbors",
+        ),
+        (
+            "{result_context: {nodes: {}}}",
+            "aliases [\"u\"], expected []",
+        ),
+        (
+            "{result_context: {nodes: {u: {entity: User}}}}",
+            "nodes.u: unknown field entity",
+        ),
+        (
+            "{result_context: {nodes: {u: {entity_type: Project}}}}",
+            "nodes.u: {",
+        ),
+        (
+            "{result_context: {neighbors_center: {entity: User, id: 1}}}",
+            "neighbors_center: None",
+        ),
+        (
+            "{result_context: {labels: {User: username}}}",
+            "labels.User: None",
+        ),
+        ("{hydration: static}", "None, expected Static"),
+    ] {
+        let failures = run(physical);
+        assert!(failures.contains(expected), "{physical}: {failures}");
+    }
+    for (state, expected) in [
+        ("output: {params: [{value: alice}]}", "missing field `type`"),
+        ("hydration_plan: {static: []}", "hydration_plan takes"),
+        (
+            "hydration_plan: {none: [{node_alias: u}]}",
+            "hydration_plan takes",
+        ),
+        ("hydration_plan: {static: [{}]}", "hydration_plan takes"),
+        ("result_ctx: {node: {}}", "unknown field `node`"),
+    ] {
+        let error = orbit_utils::yaml::from_str::<StateAssertions>(state)
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        assert!(error.contains(expected), "{state}: {error}");
+    }
 }
 
 #[test]

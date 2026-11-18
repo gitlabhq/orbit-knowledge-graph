@@ -1,5 +1,7 @@
 use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
-use compiler::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
+use compiler::input::{
+    ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, OrderDirection,
+};
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::graph::{
     ExecutionPlan, RelationGraph, RelationId, RelationNode, RelationRef,
@@ -95,7 +97,14 @@ pub fn logical(input: &Input) -> Tree {
             ),
         )
     }));
-    let mut tree = Tree::node(Operator::Input, input.query_type.to_string(), children);
+    let mut head = input.query_type.to_string();
+    if input.options.include_debug_sql {
+        head.push_str(" include_debug_sql");
+    }
+    if input.options.dynamic_columns == DynamicColumnMode::All {
+        head.push_str(" dynamic_columns=*");
+    }
+    let mut tree = Tree::node(Operator::Input, head, children);
     tree = filter(
         input
             .predicates
