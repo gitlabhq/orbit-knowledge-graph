@@ -768,7 +768,7 @@ fn literal(value: &serde_json::Value) -> String {
     }
 }
 
-fn expression(value: &Expr) -> String {
+pub fn expression(value: &Expr) -> String {
     match value {
         Expr::EmptyTupleArray(fields) => format!("empty_tuple_array({fields:?})"),
         Expr::TextSearch { mode, value, query } => {

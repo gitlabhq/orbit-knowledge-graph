@@ -247,6 +247,7 @@ struct HydrationSetup {
 #[serde(default, deny_unknown_fields)]
 struct StateAssertions {
     input: Option<Assertions>,
+    tp_bounds: Option<TpBoundsAssertions>,
     query_plan: Option<PlanAssertions>,
     node: Option<Assertions>,
     query_config: Option<SettingsAssertions>,
@@ -259,6 +260,7 @@ impl StateAssertions {
     fn fields(&self) -> impl Iterator<Item = &'static str> + '_ {
         [
             ("input", self.input.is_some()),
+            ("tp_bounds", self.tp_bounds.is_some()),
             ("query_plan", self.query_plan.is_some()),
             ("node", self.node.is_some()),
             ("query_config", self.query_config.is_some()),
@@ -268,6 +270,42 @@ impl StateAssertions {
         ]
         .into_iter()
         .filter_map(|(field, present)| present.then_some(field))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TpBoundsAssertions {
+    nodes: BTreeMap<String, Option<String>>,
+}
+
+impl TpBoundsAssertions {
+    fn check(&self, bounds: &compiler::tp_bounds::TpBounds, label: &str) -> Result<(), String> {
+        if self.nodes.is_empty() {
+            return Err(format!("{label}: needs nodes"));
+        }
+        for (alias, expected) in &self.nodes {
+            let actual = bounds
+                .node_predicate(alias)
+                .map(|predicate| explain::expression(&predicate));
+            let matched = match (expected, &actual) {
+                (None, None) => true,
+                (Some(expected), Some(actual)) => match expected.strip_suffix("...") {
+                    Some(prefix) => {
+                        terms::match_prefix(prefix.trim_end(), actual, &terms::Captures::new())
+                            .is_some()
+                    }
+                    None => terms::match_text(expected, actual, &terms::Captures::new()).is_some(),
+                },
+                _ => false,
+            };
+            if !matched {
+                return Err(format!(
+                    "{label}.nodes.{alias}: {actual:?}, expected {expected:?}"
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1165,6 +1203,14 @@ impl Expectations<'_> {
                 ctx.input().as_ref().map(|input| {
                     assertions.check(&explain::logical(input), &format!("{label}.input"))
                 }),
+            );
+        }
+        if let Some(assertions) = &state.tp_bounds {
+            check(
+                "tp_bounds",
+                ctx.tp_bounds()
+                    .as_ref()
+                    .map(|bounds| assertions.check(bounds, &format!("{label}.tp_bounds"))),
             );
         }
         if let Some(assertions) = &state.query_plan {

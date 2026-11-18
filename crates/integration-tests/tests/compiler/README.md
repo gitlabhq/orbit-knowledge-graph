@@ -55,6 +55,7 @@ contract:
 | State field | Contract |
 |---|---|
 | `input` | Patterns on the logical tree |
+| `tp_bounds` | The traversal path bound of each listed node alias |
 | `query_plan` | Patterns on the planned tree, and `point_lookup` |
 | `node` | Patterns on the SQL AST |
 | `query_config` | `exact`, `equals`, and `absent` on the resolved ClickHouse settings |
@@ -93,6 +94,17 @@ label property, or to `null` for no label.
 result_context:
   neighbors_center: {entity: User, id: 1}
   labels: {User: username}
+```
+
+`tp_bounds` maps a node alias to the predicate that bounds its traversal path,
+or to `null` for no bound. A trailing `...` matches a prefix of the predicate.
+
+```yaml
+tp_bounds:
+  tp_bounds:
+    nodes:
+      a: StartsWith(a.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 1)) ...
+      b: null
 ```
 
 `sql` checks the rendered SQL, with parameter values inlined.

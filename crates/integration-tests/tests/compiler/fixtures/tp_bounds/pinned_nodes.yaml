@@ -83,3 +83,34 @@ cases:
             - (Filter l.title = 'bug', ... (_))
           reject:
             - (Filter StartsWith(l.traversal_path, scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 7)) OR (scalar(gl_merge_request AS _orbit_scope WHERE _orbit_scope.id = 7) = '0/'), ... (_))
+
+  - name: A pinned prune-to-target endpoint keeps its own bound
+    security: { paths: [1/9970/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project","node_ids":[15846663]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(p:Project {id: 15846663}) RETURN u, p
+    physical:
+      clickhouse:
+        tp_bounds:
+          tp_bounds:
+            nodes:
+              p: "StartsWith(p.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/')"
+              u: null
+
+  - name: A prune-to-target bound does not cross a user hub
+    security: { paths: [1/9970/] }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Project","node_ids":[15846663]},{"id":"u","entity":"User"},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"a"},{"type":"MEMBER_OF","from":"u","to":"b"}]}
+      gql: |
+        MATCH (a:Project {id: 15846663})<-[:MEMBER_OF]-(u:User)-[:MEMBER_OF]->(b:Project) RETURN a, u, b
+    physical:
+      clickhouse:
+        tp_bounds:
+          tp_bounds:
+            nodes:
+              a: "StartsWith(a.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/')"
+              b: null
+              u: null

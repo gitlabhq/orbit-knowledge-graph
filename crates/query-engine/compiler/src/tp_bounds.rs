@@ -48,6 +48,10 @@ impl TpBounds {
         self.nodes.get(alias)
     }
 
+    pub fn node_predicate(&self, alias: &str) -> Option<Expr> {
+        self.node(alias).map(|bound| bound_predicate(bound, alias))
+    }
+
     pub(crate) fn relationship(&self, index: usize) -> Option<&TpBound> {
         self.relationships.get(index).and_then(Option::as_ref)
     }
