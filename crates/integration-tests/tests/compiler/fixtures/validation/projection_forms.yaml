@@ -55,3 +55,54 @@ cases:
       clickhouse:
         emitted:
           expect: ["(Aggregate group f.id, group f.project_id, COUNT() AS total, f.id AS f_id (_))"]
+
+  - name: Unaliased measures derive their output names from the function and target
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1,2]}],"aggregations":[{"count":"mr"},{"avg":"mr.added_lines"},{"max":"mr.removed_lines","as":"biggest"}]}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id IN [1, 2] RETURN count(mr), avg(mr.added_lines), max(mr.removed_lines) AS biggest
+    logical:
+      expect: ["(Aggregate COUNT(mr) AS count_mr, AVG(mr.added_lines) AS avg_mr_added_lines, MAX(mr.removed_lines) AS biggest (_))"]
+    physical:
+      clickhouse: {}
+
+  - name: Group keys derive their output names from the node, property, and bucket unless aliased
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["u","mr.state",{"key":"mr.created_at","truncate":"month"},{"key":"mr.target_branch","as":"branch"}],"aggregations":[{"count":"mr","as":"count"}]}
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr.state, date_trunc('month', mr.created_at), mr.target_branch AS branch, count(mr) AS count
+    logical:
+      expect: ["(Aggregate group u AS u, group mr.state AS mr_state, group date_trunc(month, mr.created_at) AS mr_created_at_month, group mr.target_branch AS branch, COUNT(mr) AS count (_))"]
+    physical:
+      clickhouse: {}
+
+  - name: An omitted limit and omitted columns use the default page size and default properties
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"admin"}}]}
+      gql: |
+        MATCH (u:User) WHERE u.username = 'admin' RETURN u
+    logical:
+      exact: |
+        (Limit 30
+          (Input traversal
+            (Project u.id, u.username, u.name, u.state
+              (Filter u.username = 'admin'
+                (NodeScan User AS u)))))
+    physical:
+      clickhouse: {}
+
+  - name: Each traversal node keeps its own property list or all properties
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"p","entity":"Project","columns":"*"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) RETURN u.username, properties(p)
+    logical:
+      expect:
+        - (Project u.username (Filter u.id IN [1] (NodeScan User AS u)))
+        - (Project p.id, p.full_path, p.name, p.description, p.created_at, p.updated_at, p.visibility_level, p.archived, p.star_count, p.last_activity_at (NodeScan Project AS p))
+    physical:
+      clickhouse: {}

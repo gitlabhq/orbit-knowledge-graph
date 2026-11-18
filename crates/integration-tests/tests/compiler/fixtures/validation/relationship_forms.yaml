@@ -91,3 +91,12 @@ cases:
         MATCH (g:Group {id: 1})--(n) RETURN n
     logical:
       expect: ["(Input neighbors (Project ... (Filter g.id IN [1] (NodeScan Group AS g))))"]
+
+  - name: A relationship type list normalizes to type alternatives
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"MergeRequest"}],"relationships":[{"type":["AUTHORED","ASSIGNED"],"from":"a","to":"b"}]}
+      gql: |
+        MATCH (a:User {id: 1})-[:AUTHORED|ASSIGNED]->(b:MergeRequest) RETURN a, b
+    logical:
+      expect: ["(EdgeScan AUTHORED|ASSIGNED a->b AS e0)"]
