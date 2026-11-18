@@ -5,6 +5,8 @@ use std::time::Duration;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use tokio::sync::Notify;
+use tokio::task::{JoinError, JoinSet};
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -25,6 +27,8 @@ const UNCONFIGURED_LANE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 pub(super) struct KitRuntime {
     engine: Engine,
     pools: Arc<Pools>,
+    started: Instant,
+    submitted: Notify,
     state: Mutex<KitState>,
 }
 
@@ -32,6 +36,8 @@ pub(super) struct KitRuntime {
 struct KitState {
     queue: Vec<QueuedTask>,
     pending: HashSet<(&'static str, Key)>,
+    running_keys: HashSet<(&'static str, Key)>,
+    busy_slots: HashMap<String, u32>,
     paused_lanes: HashMap<String, Instant>,
     ledger: MemoryLedger,
 }
@@ -55,6 +61,8 @@ impl KitRuntime {
         Self {
             engine,
             pools: Arc::new(pools),
+            started: Instant::now(),
+            submitted: Notify::new(),
             state: Mutex::new(KitState::default()),
         }
     }
@@ -69,10 +77,13 @@ impl KitRuntime {
         fired: Fired,
     ) -> Result<Option<String>, PlanError> {
         let plan = self.plan(planner, fired).await?;
-        let mut state = self.state.lock();
-        for task in plan.tasks {
-            state.submit(task);
+        {
+            let mut state = self.state.lock();
+            for task in plan.tasks {
+                state.submit(task);
+            }
         }
+        self.submitted.notify_one();
         Ok(plan.next_page)
     }
 
@@ -101,14 +112,25 @@ impl KitRuntime {
         reconciler.reconcile(ctx).await
     }
 
-    pub(super) async fn run_until_idle(&self) {
+    pub(super) async fn run_until_idle(self: &Arc<Self>) {
+        let mut running = JoinSet::new();
         loop {
-            let Some((ready_at, task)) = self.state.lock().take_earliest_task() else {
+            self.start_ready_tasks(&mut running);
+            let wake_at = self.state.lock().find_next_wake(Instant::now());
+            if running.is_empty() && wake_at.is_none() {
                 return;
+            }
+            let wake = async {
+                match wake_at {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
             };
-            tokio::time::sleep_until(ready_at).await;
-            let (task, first_started) = self.state.lock().mark_started(task);
-            self.run(task, first_started).await;
+            tokio::select! {
+                Some(joined) = running.join_next() => resume_panic(joined),
+                () = wake => {}
+                () = self.submitted.notified() => {}
+            }
         }
     }
 
@@ -125,11 +147,38 @@ impl KitRuntime {
         self.state.lock().ledger.find_tasks(worker)
     }
 
+    fn start_ready_tasks(self: &Arc<Self>, running: &mut JoinSet<()>) {
+        while let Some((task, first_started)) = self.take_ready_task() {
+            let runtime = Arc::clone(self);
+            running.spawn(async move { runtime.run(task, first_started).await });
+        }
+    }
+
+    fn take_ready_task(&self) -> Option<(QueuedTask, Instant)> {
+        let now = Instant::now();
+        let mut state = self.state.lock();
+        let index = state
+            .queue
+            .iter()
+            .enumerate()
+            .filter(|(_, task)| state.compute_ready_at(task) <= now)
+            .filter(|(_, task)| state.count_busy_slots(task) < self.find_lane_config(task).slots)
+            .filter(|(_, task)| {
+                !self.engine.registry.is_exclusive(task.input.worker)
+                    || !state.running_keys.contains(&task.worker_key())
+            })
+            .min_by_key(|(_, task)| state.compute_ready_at(task))
+            .map(|(index, _)| index)?;
+        Some(state.start(index, now))
+    }
+
     async fn run(&self, task: QueuedTask, first_started: Instant) {
         let lane = self.find_lane_config(&task);
         let attempt = self.run_attempt(&task, &lane).await;
+        self.state.lock().finish_attempt(&task);
+        let started_at = first_started.duration_since(self.started);
         match Disposition::decide(attempt, task.attempts_used, first_started.elapsed(), &lane) {
-            Disposition::Finish(outcome) => self.apply_outcome(task, outcome).await,
+            Disposition::Finish(outcome) => self.apply_outcome(task, outcome, started_at).await,
             Disposition::Retry { after } => self.state.lock().requeue(task.use_attempt(), after),
             Disposition::Redeliver { after } => self.state.lock().requeue(task, after),
             Disposition::PauseLane { after } => {
@@ -141,9 +190,10 @@ impl KitRuntime {
                 .state
                 .lock()
                 .requeue(task.use_attempt().move_to(to), Duration::ZERO),
-            Disposition::DeadLetter { class, message } => {
-                self.state.lock().dead_letter(task, class, message)
-            }
+            Disposition::DeadLetter { class, message } => self
+                .state
+                .lock()
+                .dead_letter(task, started_at, class, message),
         }
     }
 
@@ -160,8 +210,8 @@ impl KitRuntime {
         }
     }
 
-    async fn apply_outcome(&self, task: QueuedTask, outcome: EncodedOutcome) {
-        let output = self.state.lock().record_outcome(&task, outcome);
+    async fn apply_outcome(&self, task: QueuedTask, outcome: EncodedOutcome, started_at: Duration) {
+        let output = self.state.lock().record_outcome(&task, outcome, started_at);
         let Some(output) = output else {
             return;
         };
@@ -268,21 +318,35 @@ impl KitState {
         });
     }
 
-    fn take_earliest_task(&mut self) -> Option<(Instant, QueuedTask)> {
-        let (index, ready_at) = self
-            .queue
-            .iter()
-            .enumerate()
-            .map(|(index, task)| (index, self.compute_ready_at(task)))
-            .min_by_key(|(_, ready_at)| *ready_at)?;
-        Some((ready_at, self.queue.remove(index)))
+    fn start(&mut self, index: usize, now: Instant) -> (QueuedTask, Instant) {
+        let mut task = self.queue.remove(index);
+        self.pending.remove(&task.worker_key());
+        self.running_keys.insert(task.worker_key());
+        *self.busy_slots.entry(task.format_lane_id()).or_default() += 1;
+        let first_started = *task.first_started.get_or_insert(now);
+        (task, first_started)
     }
 
-    fn mark_started(&mut self, mut task: QueuedTask) -> (QueuedTask, Instant) {
-        self.pending
-            .remove(&(task.input.worker, task.input.key.clone()));
-        let first_started = *task.first_started.get_or_insert_with(Instant::now);
-        (task, first_started)
+    fn finish_attempt(&mut self, task: &QueuedTask) {
+        self.running_keys.remove(&task.worker_key());
+        if let Some(busy) = self.busy_slots.get_mut(&task.format_lane_id()) {
+            *busy -= 1;
+        }
+    }
+
+    fn count_busy_slots(&self, task: &QueuedTask) -> u32 {
+        self.busy_slots
+            .get(&task.format_lane_id())
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn find_next_wake(&self, now: Instant) -> Option<Instant> {
+        self.queue
+            .iter()
+            .map(|task| self.compute_ready_at(task))
+            .filter(|ready_at| *ready_at > now)
+            .min()
     }
 
     fn requeue(&mut self, mut task: QueuedTask, after: Duration) {
@@ -297,7 +361,12 @@ impl KitState {
         );
     }
 
-    fn record_outcome(&mut self, task: &QueuedTask, outcome: EncodedOutcome) -> Option<Vec<u8>> {
+    fn record_outcome(
+        &mut self,
+        task: &QueuedTask,
+        outcome: EncodedOutcome,
+        started_at: Duration,
+    ) -> Option<Vec<u8>> {
         for child in outcome.children {
             self.enqueue(task.job_id, task.tenant.clone(), child, task.lane.clone());
         }
@@ -305,17 +374,25 @@ impl KitState {
         match outcome.completion {
             Completion::Done(output) => {
                 self.ledger
-                    .record_task(task.input.worker, task.summarize(None));
+                    .record_task(task.input.worker, task.summarize(started_at, None));
                 Some(output)
             }
             Completion::NoChange => None,
         }
     }
 
-    fn dead_letter(&mut self, task: QueuedTask, class: &'static str, message: String) {
+    fn dead_letter(
+        &mut self,
+        task: QueuedTask,
+        started_at: Duration,
+        class: &'static str,
+        message: String,
+    ) {
         self.ledger.fail_task(task.job_id);
-        self.ledger
-            .record_task(task.input.worker, task.summarize(Some((class, message))));
+        self.ledger.record_task(
+            task.input.worker,
+            task.summarize(started_at, Some((class, message))),
+        );
     }
 
     fn compute_ready_at(&self, task: &QueuedTask) -> Instant {
@@ -340,13 +417,35 @@ impl QueuedTask {
         self
     }
 
-    fn summarize(&self, failure: Option<(&'static str, String)>) -> TaskSummary {
+    fn worker_key(&self) -> (&'static str, Key) {
+        (self.input.worker, self.input.key.clone())
+    }
+
+    fn format_lane_id(&self) -> String {
+        self.lane.format_id(self.input.worker)
+    }
+
+    fn summarize(
+        &self,
+        started_at: Duration,
+        failure: Option<(&'static str, String)>,
+    ) -> TaskSummary {
         let (error_class, error_message) = failure.unzip();
         TaskSummary {
+            key: self.input.key.clone(),
             lane: self.lane.clone(),
             attempts: self.attempts_used + 1,
+            started_at,
             error_class,
             error_message,
         }
+    }
+}
+
+fn resume_panic(joined: Result<(), JoinError>) {
+    if let Err(error) = joined
+        && error.is_panic()
+    {
+        std::panic::resume_unwind(error.into_panic());
     }
 }

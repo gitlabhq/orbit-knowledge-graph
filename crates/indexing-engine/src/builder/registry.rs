@@ -18,6 +18,7 @@ pub(crate) struct Registry {
 #[derive(Clone)]
 pub(crate) struct WorkerEntry {
     pub(crate) name: &'static str,
+    exclusive: bool,
     worker: Arc<dyn ErasedWorker>,
 }
 
@@ -78,6 +79,12 @@ impl Registry {
         self.workers.get(name).map(|entry| &entry.worker)
     }
 
+    pub(crate) fn is_exclusive(&self, worker: &str) -> bool {
+        self.workers
+            .get(worker)
+            .is_some_and(|entry| entry.exclusive)
+    }
+
     pub(crate) fn find_planner(&self, name: &str) -> Option<&Arc<dyn ErasedPlanner>> {
         self.planners.get(name).map(|entry| &entry.planner)
     }
@@ -107,6 +114,7 @@ impl WorkerEntry {
     pub(crate) fn of<W: Worker>(worker: W) -> Self {
         Self {
             name: W::NAME,
+            exclusive: W::EXCLUSIVE,
             worker: Arc::new(worker),
         }
     }

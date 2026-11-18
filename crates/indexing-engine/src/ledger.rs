@@ -23,6 +23,10 @@ impl JobSummary {
         }
     }
 
+    pub fn is_running(&self) -> bool {
+        self.status == JobStatus::Running
+    }
+
     pub fn is_done(&self) -> bool {
         self.status == JobStatus::Done
     }
