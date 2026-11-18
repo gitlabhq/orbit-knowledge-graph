@@ -65,6 +65,11 @@ enum WorkItem {
         lhs: Option<u32>,
         first_exit: usize,
     },
+    HideBinding {
+        lhs: u32,
+        old: Value,
+    },
+    RestoreBinding(u32),
     ExitLoop(BlockId),
     EnterLoop(u32, usize),
     ExitLambda(BlockId),
@@ -125,6 +130,7 @@ struct Fold<'t> {
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
+    hidden: Vec<Value>,
     pending_calls: Vec<(Value, u32, u32, Deferred)>,
     shadowed_calls: FxHashSet<u32>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
@@ -224,6 +230,16 @@ impl<'t> Fold<'t> {
                     let exits = self.arm_exits.drain(first_exit..);
                     let exits = exits.chain(lhs.is_none().then_some(pre));
                     self.cur = self.ssa.add_sealed_join(exits);
+                }
+                WorkItem::HideBinding { lhs, old } => {
+                    let assigned = self.read_value(lhs);
+                    self.hidden.push(assigned);
+                    self.ssa.write_variable(lhs, self.cur, old);
+                }
+                WorkItem::RestoreBinding(lhs) => {
+                    if let Some(assigned) = self.hidden.pop() {
+                        self.ssa.write_variable(lhs, self.cur, assigned);
+                    }
                 }
                 WorkItem::ExitLoop(header) => {
                     self.loops.pop();
@@ -793,13 +809,31 @@ impl<'t> Fold<'t> {
                 .map(|child| WorkItem::Visit(child.index())),
         );
         if let Some(branch) = branch {
-            let side_effects = branch.parent().into_iter().flat_map(Cursor::children_rev);
+            let siblings: Vec<_> = branch
+                .parent()
+                .into_iter()
+                .flat_map(Cursor::children_rev)
+                .collect();
+            let trailing = siblings
+                .iter()
+                .take_while(|child| child.index() != branch.index())
+                .count();
+            if trailing > 0 {
+                let old = self.read_value(lhs);
+                stack.push(WorkItem::RestoreBinding(lhs));
+                stack.extend(
+                    siblings[..trailing]
+                        .iter()
+                        .map(|child| WorkItem::Visit(child.index())),
+                );
+                stack.push(WorkItem::HideBinding { lhs, old });
+            }
+            Self::handle_branch(branch, Some(lhs), stack);
             stack.extend(
-                side_effects
-                    .filter(|child| child.is(C::SideEffect))
+                siblings[trailing + 1..]
+                    .iter()
                     .map(|child| WorkItem::Visit(child.index())),
             );
-            Self::handle_branch(branch, Some(lhs), stack);
         } else if let Some(rhs) = rhs {
             Self::push_children(rhs, stack);
         }
@@ -1723,6 +1757,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
+        hidden: Vec::new(),
         pending_calls: Vec::new(),
         shadowed_calls: FxHashSet::default(),
         fields: FxHashMap::default(),

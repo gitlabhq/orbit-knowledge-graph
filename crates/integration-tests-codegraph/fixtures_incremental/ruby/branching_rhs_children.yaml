@@ -1,0 +1,84 @@
+name: "Ruby: calls beside a branch in a right-hand side keep their edges"
+
+fixtures:
+  - path: lib/client.rb
+    content: |
+      class Client
+        def run; end
+        def close; end
+      end
+
+  - path: lib/other.rb
+    content: |
+      class Other
+        def run; end
+        def close; end
+      end
+
+  - path: lib/third.rb
+    content: |
+      class Third
+        def get; end
+      end
+
+  - path: branching.rb
+    content: |
+      class Branching
+        def leading_call(flag)
+          x = (Third.new.get; if flag then Client.new else Other.new end)
+          x.run
+        end
+
+        def leading_call_ivar(flag)
+          @x = (Third.new.get; if flag then Client.new else Other.new end)
+        end
+
+        def trailing_call(flag)
+          x = (if flag then Client.new else Other.new end; Third.new.get)
+          x
+        end
+
+        def ensure_sees_old_binding
+          x = Other.new
+          x = begin
+            Client.new
+          rescue
+            Other.new
+          ensure
+            x.close
+          end
+          x
+        end
+      end
+
+tests:
+  - name: "Calls before and after a branching right-hand side get edges"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'branching.rb' AND callee.fqn = 'Third::get'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: Branching::leading_call } }
+      - { row: { caller: Branching::leading_call_ivar } }
+      - { row: { caller: Branching::trailing_call } }
+
+  - name: "The branch typing survives the extra right-hand side calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'Branching::leading_call'
+        AND callee.name = 'run'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: Branching::leading_call, callee: Client::run } }
+      - { row: { caller: Branching::leading_call, callee: Other::run } }
+
+  - name: "An ensure call reads the binding from before the assignment"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'Branching::ensure_sees_old_binding' AND callee.name = 'close'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: Other::close } }
