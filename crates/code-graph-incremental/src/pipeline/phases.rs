@@ -604,7 +604,7 @@ impl Phase<DirtyGraph> for Resolve {
                 touched.insert(edge.from_tree);
             }
         }
-        touched.extend(old_links.iter().map(|edge| edge.from_tree));
+        debug_assert!(old_links.is_empty(), "stale Links edges: {old_links:?}");
         state.edges.extend(new_links);
         context.run.check()?;
         // Only files parsed in this run have an entry.
