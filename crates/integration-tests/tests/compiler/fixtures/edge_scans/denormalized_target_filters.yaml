@@ -1,0 +1,30 @@
+cases:
+  - name: Pinned target ids and a covered target filter both narrow the edge read
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","node_ids":[1,2,3],"filters":{"state":{"eq":"merged"}}}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr"}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest {state: 'merged'}) WHERE mr.id IN [1, 2, 3] RETURN u, mr LIMIT 10
+    logical:
+      expect: ["(Filter mr.id IN [1, 2, 3], mr.state = 'merged' (NodeScan MergeRequest AS mr))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0._deleted = false, _orbit_edge_0.target_tags HAS ANY ['state:merged'] (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id IN [1, 2, 3], ... (Scan Table(gl_edge) AS _orbit_edge_0))))"]
+
+  - name: A covered target filter in a count reads edge tags without the target node table
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"state":{"eq":"merged"}}}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest {state: 'merged'}) RETURN u, count(mr) AS n LIMIT 10
+    logical:
+      expect: ["(Aggregate group u AS u, COUNT(mr) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['state:merged'], ... (Scan Table(gl_edge) AS _orbit_edge_0))"]
+          reject: ["(Scan Table(gl_merge_request) ...)"]
+        emitted:
+          expect: ["(Filter ArrayContains(_orbit_edge_0.target_tags, 'state:merged'), ... (_))"]
+          reject: ["(Scan Table(gl_merge_request) ...)"]
