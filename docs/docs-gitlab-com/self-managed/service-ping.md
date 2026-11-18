@@ -44,10 +44,22 @@ Set up Service Ping for GitLab Orbit in this order:
 
 ## Create the Secrets
 
-DIP reads its ClickHouse connection from a Secret, and sets the exporter's ClickHouse password from another.
-The exporter reads the Service Ping key of your GitLab instance from a third.
+DIP and the exporter run in their own namespace, `dip` in this page, and read three Secrets from it:
+
+1. `gitlab-service-ping-key`: the Service Ping key of your GitLab instance.
+   The exporter uses it to read the Service Ping settings of your instance.
+1. `dip-clickhouse-dsn`: the ClickHouse connection for DIP, as a user that can create databases and users.
+   The DIP migrations run with it.
+1. `dip-serviceping-exporter`: a new password for the exporter's ClickHouse user.
+   The DIP migrations create the user with it, and the exporter connects with it.
 
 To create the Secrets:
+
+1. Create the namespace:
+
+   ```shell
+   kubectl create namespace dip
+   ```
 
 1. Copy the Service Ping key from GitLab:
 
@@ -73,14 +85,14 @@ To create the Secrets:
 
    {{< /tabs >}}
 
-1. Create the Secrets in the GitLab Orbit namespace:
+1. Create the Secrets:
 
    ```shell
-   kubectl -n gitlab-orbit create secret generic dip-clickhouse-dsn \
+   kubectl -n dip create secret generic dip-clickhouse-dsn \
      --from-literal=CLICKHOUSE_DSN='clickhouse://dip:<dip_password>@<clickhouse_host>:9000'
-   kubectl -n gitlab-orbit create secret generic dip-serviceping-exporter \
+   kubectl -n dip create secret generic dip-serviceping-exporter \
      --from-literal=password='<exporter_password>'
-   kubectl -n gitlab-orbit create secret generic gitlab-service-ping-key \
+   kubectl -n dip create secret generic gitlab-service-ping-key \
      --from-literal=secret='<service_ping_key>'
    ```
 
@@ -110,7 +122,7 @@ To install DIP:
    helm upgrade --install dip data-insights-platform \
      --repo https://gitlab.com/api/v4/projects/70800837/packages/helm/stable \
      --version 2.10.0 \
-     --namespace gitlab-orbit \
+     --namespace dip \
      --values data-insights-platform/values-orbit.yaml \
      --set single.pipeline.nats.addr=nats://nats.nats.svc.cluster.local:4222
    ```
@@ -121,7 +133,7 @@ To install DIP:
 1. Confirm that the `platform-single-0` pod is `Running`:
 
    ```shell
-   kubectl -n gitlab-orbit get pods -l app=platform-single
+   kubectl -n dip get pods -l app=platform-single
    ```
 
 Adjust the values for your environment:
@@ -168,7 +180,7 @@ To install the exporter:
    ```shell
    helm upgrade --install serviceping-exporter \
      oci://registry.gitlab.com/gitlab-org/analytics-section/analytics-instrumentation/serviceping-exporter/charts/serviceping-exporter \
-     --version 0.1.0 --namespace gitlab-orbit --values exporter-values.yaml
+     --version 0.1.0 --namespace dip --values exporter-values.yaml
    ```
 
 Keep `command: dry-run` until [Verify the setup](#verify-the-setup) shows a payload for a closed week with your events.
@@ -194,7 +206,7 @@ To point GitLab Orbit at DIP:
    analytics:
      local_collector:
        enabled: true
-       url: http://platform-single.gitlab-orbit.svc:8082
+       url: http://platform-single.dip.svc:8082
    ```
 
    Replace `<orbit_version>` with GitLab Orbit 1.3.0 or later.
@@ -223,8 +235,8 @@ To verify the setup:
 1. Run the exporter once and read its log:
 
    ```shell
-   kubectl -n gitlab-orbit create job --from=cronjob/serviceping-exporter serviceping-exporter-check
-   kubectl -n gitlab-orbit logs -f job/serviceping-exporter-check
+   kubectl -n dip create job --from=cronjob/serviceping-exporter serviceping-exporter-check
+   kubectl -n dip logs -f job/serviceping-exporter-check
    ```
 
    In `dry-run` mode the log shows the payload for each closed weekly window, with the Service Ping settings it read from GitLab.
