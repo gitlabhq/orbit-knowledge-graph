@@ -1,0 +1,420 @@
+description: Redaction on multi-hop traversals drops every row that holds a denied node, so only fully authorized paths keep their nodes and edges
+
+config:
+  security: { paths: ["1/700/"] }
+  seed: redaction
+
+cases:
+  - name: member_of_all_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 20
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 20
+    expect:
+      node_count: 8
+      referential_integrity: true
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+        Group:
+          ids: [701, 702, 703]
+      edges:
+        MEMBER_OF: [[1, 701], [1, 703], [2, 701], [3, 702], [4, 702], [4, 703], [5, 702]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 701 }
+          - { from: User, from_id: 1, to: Group, to_id: 703 }
+          - { from: User, from_id: 2, to: Group, to_id: 701 }
+          - { from: User, from_id: 3, to: Group, to_id: 702 }
+          - { from: User, from_id: 4, to: Group, to_id: 702 }
+          - { from: User, from_id: 4, to: Group, to_id: 703 }
+          - { from: User, from_id: 5, to: Group, to_id: 702 }
+
+  - name: single_hop_keeps_pairs_with_both_nodes_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2]
+          group: [701]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 20
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 20
+    expect:
+      node_count: 3
+      referential_integrity: true
+      nodes:
+        User:
+          ids: [1, 2]
+          absent: [3, 4, 5]
+        Group:
+          ids: [701]
+          absent: [702, 703]
+      edges:
+        MEMBER_OF: [[1, 701], [2, 701]]
+
+  - name: denied_groups_remove_every_pair_through_them
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701]
+        deny:
+          group: [702, 703]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 20
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 20
+    expect:
+      node_count: 3
+      nodes:
+        User:
+          ids: [1, 2]
+        Group:
+          ids: [701]
+          absent: [702, 703]
+      edges:
+        MEMBER_OF: [[1, 701], [2, 701]]
+
+  - name: edge_endpoints_survive_redaction
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "limit": 20
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 20
+    expect:
+      node_count: 2
+      referential_integrity: true
+      nodes:
+        User:
+          ids: [1]
+          absent: [2, 3, 4, 5]
+        Group:
+          ids: [701]
+          absent: [702, 703]
+      edges:
+        MEMBER_OF: [[1, 701]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 701 }
+
+  - name: contains_all_allowed
+    config:
+      redaction:
+        allow:
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
+            {"id": "p", "entity": "Project"}
+          ],
+          "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+          "limit": 20
+        }
+      gql: |
+        MATCH (g:Group)-[:`CONTAINS`]->(p:Project) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, p LIMIT 20
+    expect:
+      node_count: 8
+      referential_integrity: true
+      nodes:
+        Group:
+          ids: [701, 702, 703]
+        Project:
+          ids: [7100, 7101, 7102, 7103, 7104]
+      edges:
+        CONTAINS: [[701, 7100], [701, 7102], [702, 7101], [702, 7103], [703, 7104]]
+      edge_exists:
+        CONTAINS:
+          - { from: Group, from_id: 701, to: Project, to_id: 7100 }
+          - { from: Group, from_id: 701, to: Project, to_id: 7102 }
+          - { from: Group, from_id: 702, to: Project, to_id: 7101 }
+          - { from: Group, from_id: 702, to: Project, to_id: 7103 }
+          - { from: Group, from_id: 703, to: Project, to_id: 7104 }
+
+  - name: group_project_pairs_with_denied_group_and_projects
+    config:
+      redaction:
+        allow:
+          group: [701, 703]
+          project: [7100, 7102, 7104]
+        deny:
+          group: [702]
+          project: [7101, 7103]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
+            {"id": "p", "entity": "Project"}
+          ],
+          "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+          "limit": 20
+        }
+      gql: |
+        MATCH (g:Group)-[:`CONTAINS`]->(p:Project) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, p LIMIT 20
+    expect:
+      node_count: 5
+      nodes:
+        Group:
+          ids: [701, 703]
+          absent: [702]
+        Project:
+          ids: [7100, 7102, 7104]
+          absent: [7101, 7103]
+      edges:
+        CONTAINS: [[701, 7100], [701, 7102], [703, 7104]]
+
+  - name: group_project_columns_survive_redaction
+    config:
+      redaction:
+        allow:
+          group: [701]
+          project: [7100, 7102]
+        deny:
+          group: [702, 703]
+          project: [7101, 7103, 7104]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
+            {"id": "p", "entity": "Project"}
+          ],
+          "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+          "limit": 20
+        }
+      gql: |
+        MATCH (g:Group)-[:`CONTAINS`]->(p:Project) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, p LIMIT 20
+    expect:
+      node_count: 3
+      referential_integrity: true
+      nodes:
+        Group:
+          ids: [701]
+        Project:
+          ids: [7100, 7102]
+      edges:
+        CONTAINS: [[701, 7100], [701, 7102]]
+      edge_exists:
+        CONTAINS:
+          - { from: Group, from_id: 701, to: Project, to_id: 7100 }
+          - { from: Group, from_id: 701, to: Project, to_id: 7102 }
+
+  - name: three_hop_all_allowed
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7101, 7102, 7103, 7104]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"},
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+          ],
+          "relationships": [
+            {"type": "MEMBER_OF", "from": "u", "to": "g"},
+            {"type": "CONTAINS", "from": "g", "to": "p"}
+          ],
+          "limit": 30
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:`CONTAINS`]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 30
+    expect:
+      node_count: 13
+      referential_integrity: true
+      nodes:
+        User:
+          ids: [1, 2, 3, 4, 5]
+        Group:
+          ids: [701, 702, 703]
+        Project:
+          ids: [7100, 7101, 7102, 7103, 7104]
+      edges:
+        MEMBER_OF: [[1, 701], [1, 703], [2, 701], [3, 702], [4, 702], [4, 703], [5, 702]]
+        CONTAINS: [[701, 7100], [701, 7102], [702, 7101], [702, 7103], [703, 7104]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 701 }
+          - { from: User, from_id: 5, to: Group, to_id: 702 }
+        CONTAINS:
+          - { from: Group, from_id: 701, to: Project, to_id: 7100 }
+          - { from: Group, from_id: 703, to: Project, to_id: 7104 }
+
+  - name: three_hop_keeps_fully_authorized_paths
+    config:
+      redaction:
+        allow:
+          user: [1, 2]
+          group: [701]
+          project: [7100]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"},
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+          ],
+          "relationships": [
+            {"type": "MEMBER_OF", "from": "u", "to": "g"},
+            {"type": "CONTAINS", "from": "g", "to": "p"}
+          ],
+          "limit": 30
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:`CONTAINS`]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 30
+    expect:
+      node_count: 4
+      nodes:
+        User:
+          ids: [1, 2]
+        Group:
+          ids: [701]
+        Project:
+          ids: [7100]
+          absent: [7102]
+      edges:
+        MEMBER_OF: [[1, 701], [2, 701]]
+        CONTAINS: [[701, 7100]]
+
+  - name: three_hop_denied_projects_remove_only_their_paths
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3, 4, 5]
+          group: [701, 702, 703]
+          project: [7100, 7102, 7104]
+        deny:
+          project: [7101, 7103]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"},
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+          ],
+          "relationships": [
+            {"type": "MEMBER_OF", "from": "u", "to": "g"},
+            {"type": "CONTAINS", "from": "g", "to": "p"}
+          ],
+          "limit": 30
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:`CONTAINS`]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 30
+    expect:
+      node_count: 8
+      nodes:
+        User:
+          ids: [1, 2, 4]
+          absent: [3, 5]
+        Group:
+          ids: [701, 703]
+          absent: [702]
+        Project:
+          ids: [7100, 7102, 7104]
+          absent: [7101, 7103]
+      edges:
+        MEMBER_OF: [[1, 701], [1, 703], [2, 701], [4, 703]]
+        CONTAINS: [[701, 7100], [701, 7102], [703, 7104]]
+
+  - name: three_hop_single_path_keeps_ids_types_and_edges
+    config:
+      redaction:
+        allow:
+          user: [1]
+          group: [701]
+          project: [7100]
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group"},
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+          ],
+          "relationships": [
+            {"type": "MEMBER_OF", "from": "u", "to": "g"},
+            {"type": "CONTAINS", "from": "g", "to": "p"}
+          ],
+          "limit": 30
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:`CONTAINS`]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 30
+    expect:
+      node_count: 3
+      referential_integrity: true
+      nodes:
+        User:
+          ids: [1]
+        Group:
+          ids: [701]
+        Project:
+          ids: [7100]
+      edges:
+        MEMBER_OF: [[1, 701]]
+        CONTAINS: [[701, 7100]]
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 701 }
+        CONTAINS:
+          - { from: Group, from_id: 701, to: Project, to_id: 7100 }

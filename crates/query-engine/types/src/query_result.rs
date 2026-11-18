@@ -963,6 +963,34 @@ mod tests {
         }
 
         #[test]
+        fn fail_closed_null_id_or_type_denies_row() {
+            let batch = make_batch(vec![
+                (
+                    "_orbit_u_id",
+                    Arc::new(Int64Array::from(vec![Some(1), None, Some(3)])),
+                ),
+                (
+                    "_orbit_u_type",
+                    Arc::new(StringArray::from(vec![Some("User"), Some("User"), None])),
+                ),
+                (
+                    "_orbit_p_id",
+                    Arc::new(Int64Array::from(vec![100, 200, 300])),
+                ),
+                (
+                    "_orbit_p_type",
+                    Arc::new(StringArray::from(vec!["Project", "Project", "Project"])),
+                ),
+            ]);
+            let mut result = QueryResult::from_batches(&[batch], &test_ctx()).unwrap();
+
+            assert_eq!(result.apply_authorizations(&full_auth()), 2);
+            assert!(result.rows()[0].is_authorized());
+            assert!(!result.rows()[1].is_authorized());
+            assert!(!result.rows()[2].is_authorized());
+        }
+
+        #[test]
         fn already_unauthorized_rows_not_double_counted() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             result.rows[0].set_unauthorized();

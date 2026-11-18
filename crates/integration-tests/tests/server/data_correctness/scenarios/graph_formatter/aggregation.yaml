@@ -1,0 +1,369 @@
+config:
+  security: { paths: ["1/600/"] }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5]
+      group: [100, 101, 102, 200, 300]
+      project: [1000, 1001, 1002]
+      merge_request: [2000, 2001, 2002]
+      note: [3000, 3001, 3002, 3003, 9000]
+  seed: graph_formatter
+
+cases:
+  - name: aggregation_count_exact
+    description: Grouping users counts each user's group memberships
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["u"],
+          "aggregations": [{"count": "g", "as": "group_count"}],
+          "limit": 10
+        }
+    expect:
+      groups:
+        u:
+          entity: User
+          ids: [1, 2, 3, 4, 5]
+          rows:
+            - { entity: User, id: 1, values: { group_count: 2 }, properties: { username: alice } }
+            - { entity: User, id: 2, values: { group_count: 1 }, properties: { username: bob } }
+            - { entity: User, id: 3, values: { group_count: 1 } }
+            - { entity: User, id: 4, values: { group_count: 1 } }
+            - { entity: User, id: 5, values: { group_count: 1 } }
+
+  - name: aggregation_redaction
+    description: Redacted users drop out of a grouped aggregation
+    config:
+      redaction:
+        allow:
+          user: [1, 2]
+          group: [100, 101, 102]
+          project: []
+          merge_request: []
+          note: []
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["u"],
+          "aggregations": [{"count": "g", "as": "group_count"}],
+          "limit": 10
+        }
+    expect:
+      groups:
+        u:
+          entity: User
+          ids: [1, 2]
+          absent:
+            - { entity: User, id: 3 }
+            - { entity: User, id: 4 }
+            - { entity: User, id: 5 }
+          rows:
+            - { entity: User, id: 1, values: { group_count: 2 }, properties: { username: alice } }
+            - { entity: User, id: 2, values: { group_count: 1 }, properties: { username: bob } }
+
+  - name: aggregation_sum
+    description: sum over member ids per group
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["g"],
+          "aggregations": [{"sum": "u.id", "as": "id_sum"}],
+          "limit": 10
+        }
+    expect:
+      groups:
+        g:
+          entity: Group
+          ids: [100, 101, 102]
+          rows:
+            - { entity: Group, id: 100, values: { id_sum: 6 }, properties: { name: Public Group } }
+            - { entity: Group, id: 101, values: { id_sum: 3 }, properties: { name: Private Group } }
+            - { entity: Group, id: 102, values: { id_sum: 7 } }
+
+  - name: aggregation_avg
+    description: avg over member ids per group returns floating point values
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["g"],
+          "aggregations": [{"avg": "u.id", "as": "avg_id"}],
+          "limit": 10
+        }
+    expect:
+      groups:
+        g:
+          entity: Group
+          ids: [100, 101, 102]
+          rows:
+            - { entity: Group, id: 100, values: { avg_id: 3.0 } }
+            - { entity: Group, id: 101, values: { avg_id: 1.5 }, properties: { name: Private Group } }
+            - { entity: Group, id: 102, values: { avg_id: 3.5 } }
+
+  - name: aggregation_min_max
+    description: min and max over member ids per group
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["g"],
+          "aggregations": [
+            {"min": "u.id", "as": "min_id"},
+            {"max": "u.id", "as": "max_id"}
+          ],
+          "limit": 10
+        }
+    expect:
+      groups:
+        g:
+          entity: Group
+          ids: [100, 101, 102]
+          rows:
+            - { entity: Group, id: 100, values: { min_id: 1, max_id: 5 } }
+            - { entity: Group, id: 101, values: { min_id: 1, max_id: 2 } }
+            - { entity: Group, id: 102, values: { min_id: 3, max_id: 4 } }
+
+  - name: aggregation_multiple_functions
+    description: count, avg, and min in one grouped aggregation keep their value types
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["g"],
+          "aggregations": [
+            {"count": "u", "as": "member_count"},
+            {"avg": "u.id", "as": "avg_id"},
+            {"min": "u.id", "as": "min_id"}
+          ],
+          "limit": 10
+        }
+    expect:
+      groups:
+        g:
+          entity: Group
+          ids: [100, 101, 102]
+          rows:
+            - { entity: Group, id: 100, values: { member_count: 2, avg_id: 3.0, min_id: 1 } }
+            - { entity: Group, id: 101, values: { member_count: 2, avg_id: 1.5, min_id: 1 } }
+            - { entity: Group, id: 102, values: { member_count: 2, avg_id: 3.5, min_id: 3 } }
+
+  - name: no_alias_aggregation_with_sort
+    description: A sorted aggregation without an alias exposes and sorts by the derived count_u name
+    steps:
+      - seed:
+          gl_edge:
+            - { traversal_path: "1/600/102/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 102, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:internal"] }
+            - { traversal_path: "1/600/102/", source_id: 2, source_kind: User, relationship_kind: MEMBER_OF, target_id: 102, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:internal"] }
+            - { traversal_path: "1/600/101/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 101, target_kind: Group, source_tags: ["state:active", "user_type:human"], target_tags: ["visibility_level:private"] }
+        query:
+          json: |
+            {
+              "query_type": "aggregation",
+              "nodes": [
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+              ],
+              "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+              "group_by": ["g"],
+              "aggregations": [{"count": "u"}],
+              "aggregation_sort": "-count_u",
+              "limit": 10
+            }
+        expect:
+          groups:
+            g:
+              entity: Group
+              order: [102, 101, 100]
+              rows:
+                - { entity: Group, id: 102, values: { count_u: 4 } }
+                - { entity: Group, id: 101, values: { count_u: 3 } }
+                - { entity: Group, id: 100, values: { count_u: 2 } }
+
+  - name: ungrouped_count_emits_aggregates
+    description: An ungrouped count returns no nodes, one count column, and the total on the first row
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+          "aggregations": [{"count": "g", "as": "total"}],
+          "limit": 10
+        }
+    expect:
+      node_count: 0
+      aggregation_columns:
+        - { name: total, function: count, target: g }
+      row_values:
+        - { total: 5 }
+
+  - name: ungrouped_multiple_functions_emits_aggregates
+    description: Ungrouped count, min, and max report their column metadata and values
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+          "aggregations": [
+            {"count": "g", "as": "total"},
+            {"min": "g.id", "as": "min_id"},
+            {"max": "g.id", "as": "max_id"}
+          ],
+          "limit": 10
+        }
+    expect:
+      node_count: 0
+      aggregation_columns:
+        - { name: total, function: count, target: g }
+        - { name: min_id, function: min, target: g, property: id }
+        - { name: max_id, function: max, target: g, property: id }
+      row_values:
+        - { total: 5, min_id: 100, max_id: 300 }
+
+  - name: grouped_aggregation_uses_node_group_rows
+    description: A grouped count puts User group cells on the rows and describes the count column
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["u"],
+          "aggregations": [{"count": "g", "as": "group_count"}],
+          "limit": 10
+        }
+    expect:
+      aggregation_columns:
+        - { name: group_count, function: count, target: g }
+      groups:
+        u:
+          entity: User
+          ids: [1, 2, 3, 4, 5]
+
+  - name: ungrouped_count_with_redaction
+    description: Redaction does not change an ungrouped count
+    config:
+      redaction:
+        allow:
+          user: []
+          group: [100, 101]
+          project: []
+          merge_request: []
+          note: []
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+          "aggregations": [{"count": "g", "as": "total"}],
+          "limit": 10
+        }
+    expect:
+      node_count: 0
+      aggregation_columns:
+        - { name: total, function: count, target: g }
+      row_values:
+        - { total: 5 }
+
+  - name: no_alias_grouped_count_uses_derived_name
+    description: A grouped count without an alias is named count_g in the columns and on the rows
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["u"],
+          "aggregations": [{"count": "g"}],
+          "limit": 10
+        }
+    expect:
+      aggregation_columns:
+        - { name: count_g, function: count, target: g }
+      groups:
+        u:
+          rows:
+            - { entity: User, id: 1, values: { count_g: 2 } }
+
+  - name: no_alias_ungrouped_count_uses_derived_name
+    description: An ungrouped count without an alias is named count_g in the columns and on the row
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+          "aggregations": [{"count": "g"}],
+          "limit": 10
+        }
+    expect:
+      aggregation_columns:
+        - { name: count_g, function: count, target: g }
+      row_values:
+        - { count_g: 5 }
+
+  - name: no_alias_multi_agg_each_uses_own_derived_name
+    description: Each aggregation without an alias gets its own derived name
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["g"],
+          "aggregations": [
+            {"count": "u"},
+            {"min": "u.id"},
+            {"max": "u.id"}
+          ],
+          "limit": 10
+        }
+    expect:
+      aggregation_columns:
+        - { name: count_u, function: count, target: u }
+        - { name: min_u_id, function: min, target: u, property: id }
+        - { name: max_u_id, function: max, target: u, property: id }
+      groups:
+        g:
+          rows:
+            - { entity: Group, id: 100, values: { count_u: 2, min_u_id: 1, max_u_id: 5 } }
