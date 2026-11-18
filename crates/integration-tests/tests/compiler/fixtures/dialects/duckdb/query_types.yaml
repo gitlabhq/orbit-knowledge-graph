@@ -13,7 +13,7 @@ cases:
           output:
             sql:
               contains: ["gl_definition"]
-              not_contains: [startsWith, arrayConcat, " has("]
+              not_contains: [startsWith, starts_with, "traversal_path,", "traversal_path)", arrayConcat, " has("]
 
   - name: DuckDB traversal filters edges by relationship kind and fetches one probe row
     query:
