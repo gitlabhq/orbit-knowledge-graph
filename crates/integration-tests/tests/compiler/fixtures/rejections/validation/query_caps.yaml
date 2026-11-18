@@ -313,6 +313,30 @@ cases:
           reason: schema
           contains: { json: ["invalid value at /nodes/0/filters/username"], gql: ['filter on "username" needs between 1 and 10 predicates'] }
 
+  - name: Six positive and four negated conditions on one property are accepted by both frontends
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"username":[{"contains":"ab0"},{"contains":"ab1"},{"contains":"ab2"},{"contains":"ab3"},{"contains":"ab4"},{"contains":"ab5"}]},"not":{"username":[{"contains":"zz0"},{"contains":"zz1"},{"contains":"zz2"},{"contains":"zz3"}]}}]}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.username CONTAINS 'ab0' AND u.username CONTAINS 'ab1' AND u.username CONTAINS 'ab2' AND u.username CONTAINS 'ab3' AND u.username CONTAINS 'ab4' AND u.username CONTAINS 'ab5' AND NOT (u.username CONTAINS 'zz0' AND u.username CONTAINS 'zz1' AND u.username CONTAINS 'zz2' AND u.username CONTAINS 'zz3') RETURN u
+    logical:
+      expect: ["(Filter contains(u.username, 'ab0'), ... (NodeScan User AS u))"]
+    physical:
+      clickhouse: {}
+
+  - name: Six positive and five negated conditions on one property exceed the per-property cap
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"username":[{"contains":"ab0"},{"contains":"ab1"},{"contains":"ab2"},{"contains":"ab3"},{"contains":"ab4"},{"contains":"ab5"}]},"not":{"username":[{"contains":"zz0"},{"contains":"zz1"},{"contains":"zz2"},{"contains":"zz3"},{"contains":"zz4"}]}}]}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.username CONTAINS 'ab0' AND u.username CONTAINS 'ab1' AND u.username CONTAINS 'ab2' AND u.username CONTAINS 'ab3' AND u.username CONTAINS 'ab4' AND u.username CONTAINS 'ab5' AND NOT (u.username CONTAINS 'zz0' AND u.username CONTAINS 'zz1' AND u.username CONTAINS 'zz2' AND u.username CONTAINS 'zz3' AND u.username CONTAINS 'zz4') RETURN u
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ['filter entry count (11) on property "username" for node "u" must not exceed 10']
+
   - name: Ten relationship types are accepted by both frontends
     query:
       json: |
