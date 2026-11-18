@@ -146,6 +146,7 @@ Adjust the values for your environment:
 - For ClickHouse over TLS, such as ClickHouse Cloud, add `?secure=true` to the DSN in the `dip-clickhouse-dsn` Secret.
 - DIP runs in single mode and creates its tables on one ClickHouse node.
   On a replicated ClickHouse cluster, point the DIP DSN and the exporter's `clickhouse.host` at the same node, not at a load balancer, because `single.pipeline.clickhouse.selfManaged: true` does not replicate the DIP tables yet.
+  <!-- TODO: once core MR 271 is released and the DIP chart picks it up, replace this bullet with the selfManaged: true instructions and the DIP chart version that has it -->
 
 For every value, see the [DIP chart README](https://gitlab.com/gitlab-org/analytics-section/platform-insights/data-insights-platform-helm-charts#rendering-the-pipeline-config-from-values).
 
