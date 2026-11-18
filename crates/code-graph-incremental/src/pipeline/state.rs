@@ -275,7 +275,7 @@ struct Shared {
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 17;
+pub const SNAPSHOT_VERSION: u32 = 18;
 
 const FILES_PER_BLOCK: usize = 64;
 

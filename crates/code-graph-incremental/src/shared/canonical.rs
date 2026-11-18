@@ -220,6 +220,10 @@ pub enum Canonical {
     FrontMatterCategory,
     #[strum(serialize = "__side_effect")]
     SideEffect,
+    #[strum(serialize = "__link")]
+    Link,
+    #[strum(serialize = "__anchor")]
+    Anchor,
 }
 
 impl From<Canonical> for u16 {
