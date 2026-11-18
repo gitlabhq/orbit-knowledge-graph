@@ -497,7 +497,7 @@ async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, Pi
 
 #[tokio::test]
 async fn corpus_smoke() {
-    query_settings::init(orbit_server_config::AppConfig::embedded_defaults().query);
+    settings::init(orbit_server_config::AppConfig::embedded_defaults().query);
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_if_needed().await;

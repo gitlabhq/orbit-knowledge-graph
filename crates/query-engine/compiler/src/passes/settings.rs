@@ -1,4 +1,4 @@
-use query_settings::QueryConfig;
+use settings::QueryConfig;
 
 use crate::ast::visit::{visit_queries, visit_relations};
 use crate::ast::{Node, TableRef};
@@ -14,7 +14,7 @@ const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 1_000_000;
 
 pub fn resolve(input: &Input, node: &Node, plan: &QueryPlan) -> Result<QueryConfig> {
     let query_type: &str = input.query_type.into();
-    let mut config = query_settings::for_query_type(query_type);
+    let mut config = settings::for_query_type(query_type);
 
     if let Node::Query(query) = node {
         let derived = &mut config.compiler_derived;

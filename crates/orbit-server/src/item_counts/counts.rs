@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use futures::StreamExt;
 use orbit_utils::traversal_path::TraversalPath;
-use query_settings::QueryConfig;
+use settings::QueryConfig;
 use tonic::Status;
 
 use super::visibility::{Visibility, VisibleEntity};
@@ -117,6 +117,6 @@ fn build_scope_parameter_name(index: usize) -> String {
 fn count_query_config() -> QueryConfig {
     QueryConfig {
         query_cache_ttl: Some(COUNT_CACHE_TTL_SECONDS),
-        ..query_settings::default_config()
+        ..settings::default_config()
     }
 }

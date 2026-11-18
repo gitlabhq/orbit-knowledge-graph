@@ -1,5 +1,5 @@
 [package]
-name = "query-settings"
+name = "settings"
 version.workspace = true
 edition = "2024"
 license = "MIT"

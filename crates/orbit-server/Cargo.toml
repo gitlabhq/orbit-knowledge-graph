@@ -32,7 +32,7 @@ orbit-observability = { workspace = true }
 orbit-log-fields = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts" }
 orbit-server-config = { path = "../orbit-server-config" }
-query-settings = { path = "../query-engine/settings" }
+settings = { path = "../query-engine/settings" }
 orbit-utils = { path = "../utils" }
 orbit-arrow = { path = "../utils/arrow" }
 orbit-versions = { path = "../orbit-versions" }

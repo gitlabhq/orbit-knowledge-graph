@@ -65,7 +65,7 @@ pub const STALE_FIRST_PASS: CheckpointRow = CheckpointRow {
 };
 
 pub fn use_production_query_settings() {
-    query_settings::init(AppConfig::embedded_defaults().query);
+    settings::init(AppConfig::embedded_defaults().query);
 }
 
 pub async fn query_cache_usage(ctx: &TestContext) -> Vec<String> {

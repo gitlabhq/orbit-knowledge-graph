@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use labkit_config::{Format, Loader};
 
-use query_settings::QuerySettings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use settings::QuerySettings;
 
 use crate::analytics::AnalyticsConfig;
 use crate::billing::BillingConfig;

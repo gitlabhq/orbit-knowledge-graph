@@ -265,7 +265,7 @@ static QUERY_SETTINGS: OnceLock<QuerySettings> = OnceLock::new();
 pub fn init(settings: QuerySettings) {
     QUERY_SETTINGS
         .set(settings)
-        .expect("query_settings::init called twice");
+        .expect("settings::init called twice");
 }
 
 /// Resolve the effective [`QueryConfig`] for a given query type from

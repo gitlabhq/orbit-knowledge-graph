@@ -1,8 +1,8 @@
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ArrowQuery};
 use orbit_log_fields::debug;
-use query_settings::QueryConfig;
 use serde::Serialize;
+use settings::QueryConfig;
 use tonic::Status;
 
 pub(crate) async fn fetch_status_query_batches(
@@ -59,6 +59,6 @@ pub(crate) fn map_column_extraction_error(error: impl std::fmt::Display) -> Stat
 pub(crate) fn uncached_query_config() -> QueryConfig {
     QueryConfig {
         use_query_cache: Some(false),
-        ..query_settings::default_config()
+        ..settings::default_config()
     }
 }

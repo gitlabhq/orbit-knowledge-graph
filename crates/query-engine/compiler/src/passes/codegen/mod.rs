@@ -5,7 +5,7 @@ pub mod clickhouse;
 pub mod ddl;
 pub mod duckdb;
 
-use query_settings::QueryConfig;
+use settings::QueryConfig;
 
 use crate::ast::Node;
 use crate::input::{Input, QueryType};

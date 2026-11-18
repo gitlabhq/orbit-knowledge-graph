@@ -1,6 +1,6 @@
 //! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax.
 
-use query_settings::QueryConfig;
+use settings::QueryConfig;
 
 use crate::ast::{
     Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,

@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 chrono = { workspace = true }
-query-settings = { path = "../settings" }
+settings = { path = "../settings" }
 orbit-utils = { path = "../../utils" }
 orbit-versions = { path = "../../orbit-versions" }
 ontology = { path = "../../ontology" }

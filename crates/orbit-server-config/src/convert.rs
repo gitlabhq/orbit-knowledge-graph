@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::{AddrParseError, SocketAddr};
 
-use query_settings::{QueryConfig, QuerySettings};
+use settings::{QueryConfig, QuerySettings};
 
 use crate::analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
 use crate::app::AppConfig;

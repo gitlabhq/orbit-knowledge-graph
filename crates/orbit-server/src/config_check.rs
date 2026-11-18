@@ -2,7 +2,7 @@ use std::path::Path;
 
 use orbit_server_config::AppConfig;
 use query_engine::compiler::input::QueryType;
-use query_settings::QuerySettings;
+use settings::QuerySettings;
 use strum::VariantNames;
 
 /// Checks a config the way startup does before it starts anything.
