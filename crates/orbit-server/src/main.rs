@@ -17,7 +17,7 @@ use orbit_server::analytics::{
     SnowplowAnalyticsTracker,
 };
 use orbit_server::auth::JwtValidator;
-use orbit_server::cli::{Args, Mode};
+use orbit_server::cli::{Args, Command, Mode};
 use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::content;
 use orbit_server::grpc::GrpcServer;
@@ -25,8 +25,6 @@ use orbit_server::health_check as health_check_mode;
 use orbit_server::probes;
 use orbit_server::shutdown;
 use orbit_server_config::AppConfig;
-use query_engine::compiler::input::QueryType;
-use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
@@ -34,6 +32,9 @@ async fn main() -> anyhow::Result<()> {
     let aws_lc_version = orbit_server::fips::install_crypto_provider()?;
 
     let args = Args::parse();
+    if let Some(Command::CheckConfig) = args.command {
+        return orbit_server::config_check::run(args.config.as_deref());
+    }
     let config = AppConfig::load(args.config.as_deref())?;
 
     // Force-parse schema/format versions at boot so malformed version files
@@ -41,12 +42,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = orbit_server::tools::ToolService::build_query_dsl_version();
     std::sync::LazyLock::force(&query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION);
 
-    let invalid_keys = config.query.validate_keys(QueryType::VARIANTS);
-    anyhow::ensure!(
-        invalid_keys.is_empty(),
-        "unknown query type(s) in config: {invalid_keys:?} (valid: {:?})",
-        QueryType::VARIANTS,
-    );
+    orbit_server::config_check::query_keys(&config.query)?;
     orbit_server_config::query::init(config.query.clone());
     orbit_server_config::features::init(config.features.clone());
 

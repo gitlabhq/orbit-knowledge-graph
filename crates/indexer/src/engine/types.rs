@@ -117,8 +117,8 @@ impl MessageId {
 ///
 /// # Creating an Envelope
 ///
-/// ```ignore
-/// use etl_engine::types::{Envelope, Event, Subscription};
+/// ```
+/// use indexer::types::{Envelope, Event, Subscription};
 /// use serde::{Serialize, Deserialize};
 ///
 /// #[derive(Serialize, Deserialize)]
@@ -158,8 +158,8 @@ pub struct Envelope {
 ///
 /// # Example
 ///
-/// ```ignore
-/// use etl_engine::types::{Event, Subscription};
+/// ```
+/// use indexer::types::{Event, Subscription};
 /// use serde::{Serialize, Deserialize};
 ///
 /// #[derive(Serialize, Deserialize)]

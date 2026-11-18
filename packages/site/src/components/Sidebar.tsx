@@ -18,6 +18,7 @@ function tree(path: string): NavItem[] {
 const items = (): NavItem[] => [
   { path: "engineering", title: findPage("engineering")?.meta.title ?? "Engineering" },
   ...ENGINEERING.map(({ route, label }) => ({ path: route, title: label, children: tree(route) })),
+  { path: "team", title: "Team" },
 ];
 
 export function Sidebar() {

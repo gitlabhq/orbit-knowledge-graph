@@ -1,4 +1,4 @@
-use orbit_utils::markdown::{LineIndex, sections};
+use orbit_utils::markdown::{Document, FRONT_MATTER_FIELDS, FRONT_MATTER_NAME, LineIndex};
 
 use crate::intern::Lang;
 use crate::tree::{Node, Tree};
@@ -21,13 +21,38 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
             ..Default::default()
         }
     };
-    let sections = sections(source);
+    let Document {
+        front_matter,
+        sections,
+    } = orbit_utils::markdown::parse(source);
+    let front_matter_nodes = front_matter.as_ref().map_or(0, |block| {
+        3 + block
+            .values
+            .iter()
+            .filter(|value| !value.is_empty())
+            .count()
+    });
     let mut tree = Tree::with_capacity(
-        1 + 3 * sections.len(),
+        1 + front_matter_nodes + 3 * sections.len(),
         node("document", lang.syms.intern(label), 0, source.len()),
     );
     tree.label = label.to_string();
     tree.source = std::sync::Arc::from(source);
+
+    if let Some(block) = front_matter {
+        let (start, end) = (block.start, block.end);
+        let root = tree.root;
+        let id = tree.append(root, node("front_matter", 0, start, end));
+        let name = lang.syms.intern(FRONT_MATTER_NAME);
+        tree.append(id, node("name", name, start, end));
+        tree.append(id, node("segment", name, start, end));
+        for (field, value) in FRONT_MATTER_FIELDS.iter().zip(&block.values) {
+            if !value.is_empty() {
+                let kind = format!("__{}", field.column);
+                tree.append(id, node(&kind, lang.syms.intern(value), start, end));
+            }
+        }
+    }
 
     let mut ids = Vec::with_capacity(sections.len());
     for section in &sections {

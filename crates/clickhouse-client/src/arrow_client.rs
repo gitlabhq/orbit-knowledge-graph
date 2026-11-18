@@ -26,6 +26,7 @@ use tracing::Instrument;
 pub use clickhouse::QuerySummary;
 
 use crate::error::ClickHouseError;
+use crate::extract::FromArrowColumn;
 
 /// ClickHouse rejects an async insert that also carries `insert_quorum`.
 const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
@@ -81,6 +82,9 @@ where
     }
 }
 
+const PARALLEL_REPLICA_CLUSTER_SQL: &str =
+    "SELECT toString(getSetting('cluster_for_parallel_replicas')) AS cluster";
+
 #[derive(Clone)]
 pub struct ArrowClickHouseClient {
     client: Client,
@@ -89,6 +93,7 @@ pub struct ArrowClickHouseClient {
     insert_settings: std::collections::HashMap<String, String>,
     quorum_writes: bool,
     replicated: bool,
+    parallel_replica_cluster: Arc<tokio::sync::OnceCell<bool>>,
     circuit_breaker: CircuitBreaker,
 }
 
@@ -113,7 +118,8 @@ impl ArrowClickHouseClient {
             .with_setting("query_plan_join_swap_table", "auto")
             .with_setting("optimize_aggregation_in_order", "1")
             .with_setting("use_statistics", "0")
-            .with_setting("use_text_index_like_evaluation_by_dictionary_scan", "0");
+            .with_setting("use_text_index_like_evaluation_by_dictionary_scan", "0")
+            .with_setting("cancel_http_readonly_queries_on_client_close", "1");
 
         if let Some(password) = password {
             client = client.with_password(password);
@@ -130,6 +136,7 @@ impl ArrowClickHouseClient {
             insert_settings: insert_settings.clone(),
             quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
             replicated: false,
+            parallel_replica_cluster: Arc::default(),
             circuit_breaker: CircuitBreaker::new(
                 service,
                 CircuitConfig::default(),
@@ -149,9 +156,37 @@ impl ArrowClickHouseClient {
         self
     }
 
+    pub async fn has_parallel_replica_cluster(&self) -> Result<bool, ClickHouseError> {
+        self.parallel_replica_cluster
+            .get_or_try_init(|| async {
+                let batches = self
+                    .query(PARALLEL_REPLICA_CLUSTER_SQL)
+                    .with_setting("use_query_cache", "0")
+                    .fetch_arrow()
+                    .await?;
+                Ok(String::extract_column(&batches, 0)?
+                    .iter()
+                    .any(|cluster| !cluster.is_empty()))
+            })
+            .await
+            .copied()
+    }
+
     pub fn without_query_cache(mut self) -> Self {
         self.client = self.client.with_setting("use_query_cache", "0");
         self
+    }
+
+    pub fn with_database(&self, database: &str, service: &'static str) -> Self {
+        let mut client = self.clone();
+        client.client = client.client.with_database(database);
+        client.database = database.to_string();
+        client.circuit_breaker = CircuitBreaker::new(
+            service,
+            CircuitConfig::default(),
+            Arc::new(MetricsObserver::new()),
+        );
+        client
     }
 
     pub fn database(&self) -> &str {
@@ -958,6 +993,20 @@ mod tests {
             Box::pin(client.insert_arrow_streaming("t", vec![one_row_batch()]))
         }),
     ];
+
+    #[tokio::test]
+    async fn clones_share_the_parallel_replica_cluster_answer() {
+        let client = unreachable_client(&circuit_breaker(100));
+        client.parallel_replica_cluster.set(true).unwrap();
+        assert!(client.clone().has_parallel_replica_cluster().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_failed_parallel_replica_cluster_read_is_read_again() {
+        let client = unreachable_client(&circuit_breaker(100));
+        assert!(client.has_parallel_replica_cluster().await.is_err());
+        assert!(client.parallel_replica_cluster.get().is_none());
+    }
 
     #[tokio::test]
     async fn every_network_call_counts_toward_the_circuit() {
