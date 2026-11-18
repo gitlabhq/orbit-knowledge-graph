@@ -1028,17 +1028,21 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         if edge_tables.is_empty() {
             edge_tables = model.relationship_tables(&relationship.types);
         }
-        let mut types = edge_tables
+        let types: Vec<_> = edge_tables
             .iter()
-            .map(|table| model.table_column_type(table, prop));
-        let data_type = types.next().flatten();
-        let Some(data_type) =
-            data_type.filter(|first| types.all(|data_type| data_type == Some(*first)))
-        else {
+            .map(|table| model.table_column_type(table, prop))
+            .collect();
+        let kinds = relationship.types.join("|");
+        let Some(data_type) = types.iter().find_map(|data_type| *data_type) else {
             return Err(QueryError::Validation(format!(
-                "relationship[{index}] filter on unknown edge column \"{prop}\" or incompatible column types across tables {edge_tables:?}"
+                "relationship[{index}] {kinds} has no filterable column \"{prop}\""
             )));
         };
+        if types.iter().any(|other| *other != Some(data_type)) {
+            return Err(QueryError::Validation(format!(
+                "relationship[{index}] {kinds} column \"{prop}\" is missing or has a different type for some endpoint pairs"
+            )));
+        }
         for filter in filters {
             check_condition_column(("", prop), filter)?;
             if filter.rhs_column.is_some() {
@@ -1860,7 +1864,7 @@ mod tests {
                     "filters": {"bogus_column": 42}
                 }]
             }"#,
-            "unknown edge column \"bogus_column\"",
+            "relationship[0] AUTHORED has no filterable column \"bogus_column\"",
         );
     }
 
