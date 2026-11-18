@@ -1,4 +1,6 @@
 use super::*;
+use crate::tools::CommandRegistry;
+use query_engine::compiler::Frontend;
 use serde_json::Value;
 
 fn service_without_schema() -> OrbitServiceImpl {
@@ -463,6 +465,34 @@ async fn list_agent_commands_returns_short_command_descriptions() {
     assert!(!query_graph.description.is_empty());
     assert!(!query_graph.description.contains("<toon>"));
     assert!(!query_graph.description.contains("Query DSL Schema"));
+}
+
+#[tokio::test]
+async fn list_agent_commands_adds_routing_lead_to_gql_query_graph_only() {
+    let service = test_service();
+    let response = service
+        .list_agent_commands(authed_request(ListAgentCommandsRequest {
+            language: QueryLanguage::Gql as i32,
+            command_names: vec![],
+            format: ResponseFormat::Raw as i32,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let listed = response
+        .commands
+        .iter()
+        .find(|command| command.name == "query_graph")
+        .expect("query_graph command should be listed");
+    let base = CommandRegistry::commands_for(Frontend::Gql)
+        .into_iter()
+        .find(|command| command.name == "query_graph")
+        .expect("query_graph command should be registered");
+
+    assert!(listed.description.starts_with("Use for questions"));
+    assert!(listed.description.ends_with(&base.description));
+    assert!(!base.description.contains("Use for questions"));
 }
 
 #[tokio::test]

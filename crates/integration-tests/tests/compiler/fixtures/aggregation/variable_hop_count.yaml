@@ -1,0 +1,19 @@
+name: A variable-hop count aggregates over one union arm per depth
+
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,2]}],"group_by":["u"],"aggregations":[{"count":"p","as":"project_count"}],"limit":10}
+  gql: |
+    MATCH (u:User {id: 1})-[:MEMBER_OF*1..2]->(p:Project) RETURN u{.username}, count(p) AS project_count LIMIT 10
+
+logical:
+  expect: ["(EdgeScan MEMBER_OF u->p AS e0 HOPS 1..2)"]
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Aggregate group u.username, group u.id, COUNT() AS project_count (...))
+        - (Join ON u.id = _orbit_edge_0.source_id (Union ALL AS _orbit_edge_0 (_) (_)) (_))
+        - (Project 1 AS _orbit_depth, ... (_))
+        - (Project 2 AS _orbit_depth, ... (_))

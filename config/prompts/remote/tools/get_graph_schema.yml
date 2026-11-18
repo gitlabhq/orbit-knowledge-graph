@@ -1,7 +1,9 @@
 name: get_graph_schema
-version: 1.1.0
+version: 1.2.0
 summary: Return graph nodes, edges, and expanded node properties.
 description: >-
   Return the graph schema: node types, edge types, and their source and target
   types. Pass expand_nodes (alias entity_types) with the node types you plan to
   query to get their properties and relationships.
+  Issues, epics and tasks are WorkItem; functions, classes and methods are
+  Definition.

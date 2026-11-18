@@ -94,6 +94,7 @@ pub struct ParseFullResult {
     /// After graph finalize, the pipeline resolves these targets and
     /// patches the reaching values.
     pub unresolved_aliases: Vec<(usize, String)>,
+    pub links: crate::v2::types::FileLinks,
     pub phase_cpu: PhaseCpu,
 }
 
@@ -605,13 +606,14 @@ impl LanguageSpec {
 
         if let crate::v2::dsl::types::LanguageParser::Custom(custom) = self.parser {
             let parse_start = cpu_time::ThreadTime::now();
-            let (definitions, imports) = custom(source_str, file_path);
+            let parsed = custom(source_str, file_path);
             return Ok(ParseFullResult {
-                definitions,
-                imports,
+                definitions: parsed.definitions,
+                imports: parsed.imports,
                 refs: Vec::new(),
                 inferred_returns: Vec::new(),
                 unresolved_aliases: Vec::new(),
+                links: parsed.links,
                 phase_cpu: PhaseCpu {
                     parse: parse_start.elapsed(),
                     ..PhaseCpu::default()
@@ -818,6 +820,7 @@ impl LanguageSpec {
             refs,
             inferred_returns,
             unresolved_aliases,
+            links: Default::default(),
             phase_cpu: PhaseCpu {
                 parse: parse_cpu,
                 walk: walk_cpu,

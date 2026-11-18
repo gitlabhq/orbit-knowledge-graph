@@ -1,0 +1,18 @@
+name: Bidirectional shortest paths concatenate typed node tuples from both frontiers
+
+query:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","columns":["name"],"node_ids":[100]},{"id":"end","entity":"Project","columns":["name"],"node_ids":[200]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CONTAINS"]}}
+  gql: |
+    MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN p
+
+logical:
+  expect: ["(Input path_finding (...))"]
+
+physical:
+  clickhouse:
+    planned:
+      expect: ["(PathFinding start->end depth=3 forward=2 backward=1 ... (_) (_))"]
+    emitted:
+      expect:
+        - (Union ALL AS _orbit_paths (Project ArrayConcat(Array(Tuple(_orbit_forward._orbit_anchor_node, 'Project')), _orbit_forward._orbit_path_nodes) AS _orbit_path, ... (_)) (Project ArrayConcat(Array(Tuple(_orbit_forward._orbit_anchor_node, 'Project')), _orbit_forward._orbit_path_nodes, ArrayReverse(_orbit_backward._orbit_path_nodes), Array(Tuple(_orbit_backward._orbit_anchor_node, 'Project'))) AS _orbit_path, ... (Filter (_orbit_forward._orbit_depth + _orbit_backward._orbit_depth) <= 3 (Join ON (_orbit_forward._orbit_end_node = _orbit_backward._orbit_end_node) AND ... (_) (_)))))

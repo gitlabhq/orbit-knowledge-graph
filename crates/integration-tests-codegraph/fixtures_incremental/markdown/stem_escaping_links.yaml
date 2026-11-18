@@ -1,0 +1,36 @@
+name: "Markdown (incremental): links reach files and sections whose stem holds # or \\"
+
+fixtures:
+  - path: docs/C#.md
+    content: |
+      # Basics
+
+      ## Types
+
+  - path: docs/a\#b.md
+    content: |
+      # Intro
+
+  - path: docs/guide.md
+    content: |
+      See [C#](C%23.md), [types](C%23.md#types) and [intro](a%5C%23b.md#intro).
+
+tests:
+  - name: "a bare link to a file with an escaped stem links the file"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(t:File)
+      WHERE f.path = 'docs/guide.md'
+      RETURN t.path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: "docs/C#.md" } }
+
+  - name: "anchored links reach the same section ids as the escaped-stem definitions"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(d:Definition)
+      WHERE f.path = 'docs/guide.md'
+      RETURN d.fqn AS fqn, d.id AS id
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "C\\##Basics#Types", id: 4581922493871891585 } }
+      - { row: { fqn: "a\\\\\\#b#Intro", id: 2925747467374241587 } }

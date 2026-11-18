@@ -793,6 +793,12 @@ impl<'t> Fold<'t> {
                 .map(|child| WorkItem::Visit(child.index())),
         );
         if let Some(branch) = branch {
+            let side_effects = branch.parent().into_iter().flat_map(Cursor::children_rev);
+            stack.extend(
+                side_effects
+                    .filter(|child| child.is(C::SideEffect))
+                    .map(|child| WorkItem::Visit(child.index())),
+            );
             Self::handle_branch(branch, Some(lhs), stack);
         } else if let Some(rhs) = rhs {
             Self::push_children(rhs, stack);
@@ -1465,7 +1471,7 @@ impl<'t> Fold<'t> {
     }
 
     fn producer_of(binding: Cursor) -> u32 {
-        let call = binding.child(C::Rhs).and_then(|r| r.value_child(C::Call));
+        let call = binding.child(C::Rhs).and_then(Cursor::rhs_call);
         let member_call = call
             .filter(|_| !binding.has(C::SsaTyped))
             .filter(|c| c.child(C::Callee).is_some_and(|k| k.has(C::Member)));

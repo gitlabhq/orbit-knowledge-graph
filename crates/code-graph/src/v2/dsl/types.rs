@@ -759,13 +759,14 @@ pub type PathScopeHookFn = fn(
     &'static str,
 ) -> bool;
 pub type ImportScopeNameHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
-pub type CustomParseFn = fn(
-    &str,
-    &str,
-) -> (
-    Vec<crate::v2::types::CanonicalDefinition>,
-    Vec<crate::v2::types::CanonicalImport>,
-);
+pub type CustomParseFn = fn(&str, &str) -> CustomParse;
+
+#[derive(Default)]
+pub struct CustomParse {
+    pub definitions: Vec<crate::v2::types::CanonicalDefinition>,
+    pub imports: Vec<crate::v2::types::CanonicalImport>,
+    pub links: crate::v2::types::FileLinks,
+}
 
 /// `Custom` replaces tree-sitter parsing wholesale. Per-phase CPU budgets cannot
 /// interrupt it, so it must be robust to pathological input on its own.

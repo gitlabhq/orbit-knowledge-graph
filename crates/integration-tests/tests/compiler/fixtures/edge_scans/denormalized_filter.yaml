@@ -1,19 +1,34 @@
-name: Covered node filters use edge tags without node scans
+cases:
+  - name: Covered node filters use edge tags without node scans
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+      gql: |
+        MATCH (a:Definition {definition_type: 'function'})-[:CALLS]->(b:Definition) RETURN a, b
+    logical:
+      expect: ["(Filter a.definition_type = 'function' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0._deleted = false, _orbit_edge_0.source_tags HAS ANY ['definition_type:function'] (Bind _orbit_edge_0 (Filter ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))))"]
+        emitted:
+          expect: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function'), ... (_))"]
+          ctes:
+            absent: true
 
-query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
-  gql: |
-    MATCH (a:Definition {definition_type: 'function'})-[:CALLS]->(b:Definition) RETURN a, b
-
-logical:
-  expect: ["(Filter a.definition_type = 'function' (_))"]
-
-physical:
-  clickhouse:
-    planned:
-      expect: ["(Filter _orbit_edge_0._deleted = false, _orbit_edge_0.source_tags HAS ANY ['definition_type:function'] (Bind _orbit_edge_0 (Filter ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))))"]
-    emitted:
-      expect: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function'), ... (_))"]
-      ctes:
-        absent: true
+  - name: A covered target filter in a count reads edge tags without the target node table
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"state":{"eq":"merged"}}}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest {state: 'merged'}) RETURN u, count(mr) AS n LIMIT 10
+    logical:
+      expect: ["(Aggregate group u AS u, COUNT(mr) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['state:merged'], ... (Scan Table(gl_edge) AS _orbit_edge_0))"]
+          reject: ["(Scan Table(gl_merge_request) ...)"]
+        emitted:
+          expect: ["(Filter ArrayContains(_orbit_edge_0.target_tags, 'state:merged'), ... (_))"]
+          reject: ["(Scan Table(gl_merge_request) ...)"]
