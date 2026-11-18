@@ -290,7 +290,7 @@ stages:
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
       - match: '(case value:? $V $$$W:when|else)'
         replace: '(__ssa_branch $V $$$W->__ssa_arm)'
-      # ensure clauses and rescue modifier handlers run but never supply the value
+      # ensure clauses never supply the value; rescue modifier handlers are not typed on purpose, so x rescue y types from x
       - match: '(begin $$$BODY $R:rescue $$$ALTS $E:ensure)'
         replace: '(begin (__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm) (__side_effect $E))'
       - match: '(begin $$$BODY $E:ensure)'

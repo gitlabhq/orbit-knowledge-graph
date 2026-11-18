@@ -793,6 +793,12 @@ impl<'t> Fold<'t> {
                 .map(|child| WorkItem::Visit(child.index())),
         );
         if let Some(branch) = branch {
+            let side_effects = branch.parent().into_iter().flat_map(Cursor::children_rev);
+            stack.extend(
+                side_effects
+                    .filter(|child| child.is(C::SideEffect))
+                    .map(|child| WorkItem::Visit(child.index())),
+            );
             Self::handle_branch(branch, Some(lhs), stack);
         } else if let Some(rhs) = rhs {
             Self::push_children(rhs, stack);

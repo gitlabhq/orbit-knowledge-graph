@@ -72,8 +72,6 @@ pub enum Canonical {
     SsaReturn,
     #[strum(serialize = "__ssa_typed")]
     SsaTyped,
-    #[strum(serialize = "__side_effect")]
-    SideEffect,
 
     #[strum(serialize = "__module_export")]
     ModuleExport,
@@ -220,6 +218,8 @@ pub enum Canonical {
     FrontMatterVersion,
     #[strum(serialize = "__front_matter_category")]
     FrontMatterCategory,
+    #[strum(serialize = "__side_effect")]
+    SideEffect,
 }
 
 impl From<Canonical> for u16 {
