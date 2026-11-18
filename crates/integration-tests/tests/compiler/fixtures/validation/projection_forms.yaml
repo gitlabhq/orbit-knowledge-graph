@@ -109,10 +109,10 @@ cases:
 
   - name: A property alias used as the sort key is ignored
     query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["iid"]},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"order_by":"mr.iid","limit":5}
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY number LIMIT 5
-    missing_frontends:
-      json: JSON has no projection aliases.
     logical:
       expect: ["(Sort mr.iid (_))"]
     physical:
@@ -123,10 +123,10 @@ cases:
 
   - name: A property alias is ignored when the sort names the property
     query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["iid"]},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"order_by":"mr.iid","limit":5}
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY mr.iid LIMIT 5
-    missing_frontends:
-      json: JSON has no projection aliases.
     logical:
       expect: ["(Sort mr.iid (_))"]
     physical:
@@ -137,10 +137,10 @@ cases:
 
   - name: A map projection alias is ignored with a descending alias sort
     query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["iid"]},{"id":"p","entity":"Project","node_ids":[1],"columns":["full_path"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"order_by":"-mr.iid","limit":5}
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p{.full_path} AS project ORDER BY number DESC LIMIT 5
-    missing_frontends:
-      json: JSON has no projection aliases.
     logical:
       expect: ["(Sort mr.iid DESC (_))"]
     physical:
@@ -154,21 +154,21 @@ cases:
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number ORDER BY number SKIP 5 LIMIT 5
     missing_frontends:
-      json: JSON has no projection aliases.
+      json: JSON has no SKIP.
     logical:
-      expect: ["(Sort mr.iid (_))"]
+      expect: ["(Sort mr.iid (_))", "(Offset 5 (_))", "(Limit 5 (_))"]
     physical:
       clickhouse:
         sql:
           contains: [AS mr_iid]
-          not_contains: [AS number, AS project]
+          not_contains: [AS number]
 
   - name: An alias on a neighbors center is ignored
     query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"outgoing"}}
       gql: |
         MATCH (center:WorkItem {id: 1})-->(n) RETURN center AS item, n
-    missing_frontends:
-      json: JSON has no projection aliases.
     logical:
       expect: ["(Input neighbors (...))"]
     physical:
