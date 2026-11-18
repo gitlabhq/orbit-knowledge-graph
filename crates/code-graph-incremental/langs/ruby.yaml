@@ -273,6 +273,17 @@ stages:
         tag_on: __call
       - match: '(assignment left: $L:identifier right: $R)'
         replace: '(__binding @$L (__rhs @$R $R))'
+      # Ruby returns the body of begin ... ensure, not the ensure value: leave it untyped
+      - match: '(operator_assignment left: $L:instance_variable ("||=") right: $R:(begin $$$B (ensure $$$E)))'
+        replace: '(__binding (__ivar @$L|strip=@) (__rhs @$R $R))'
+      - match: '(operator_assignment left: $L:identifier ("||=") right: $R:(begin $$$B (ensure $$$E)))'
+        replace: '(__binding @$L (__rhs @$R $R))'
+      # @x ||= v binds only v, ivar types are collected per class
+      - match: '(operator_assignment left: $L:instance_variable ("||=") right: $R)'
+        replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
+      # x ||= v leaves a set x alone, so x is its old value or v
+      - match: '(operator_assignment left: $L:identifier ("||=") right: $R)'
+        replace: '(__binding @$L (__rhs (__ssa_branch (__ssa_arm (__call (__callee @$L))) (__ssa_arm $R))))'
 
       # Control flow
       - match: '(if condition: $C consequence:? $Q alternative:? $A)'
