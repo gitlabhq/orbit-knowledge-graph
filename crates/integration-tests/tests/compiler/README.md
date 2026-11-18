@@ -81,6 +81,20 @@ missing_frontends:
   json: The JSON frontend does not expose property-to-property comparisons.
 ```
 
+When every language of a case compiles on a backend, the runner compares each
+language's compiled output with that of the first language, in name order,
+without a `language_differs` entry: the parameterized SQL,
+the bound parameter values and types, the hydration plan, and the result
+context. A failure names the first part that differs. If a language compiles to
+different output by design, declare its reason under `language_differs`. The
+runner rejects an entry that names no query language, has a blank reason, or
+names a language whose output matches on every backend.
+
+```yaml
+language_differs:
+  gql: GQL returns properties in RETURN order, which JSON cannot express.
+```
+
 A file can hold several fixtures in a `cases` list. Every other top-level key
 is a default for each case, and each case needs its own `name`.
 
