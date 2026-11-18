@@ -1,0 +1,208 @@
+cases:
+  - name: A relationship from an undefined node is rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"ghost","to":"n"}]}
+    missing_frontends:
+      gql: A GQL relationship connects two pattern variables, so it cannot name an undefined node.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: reference
+          contains: ['undefined node "ghost"']
+
+  - name: A relationship to an undefined node is rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"ghost"}]}
+    missing_frontends:
+      gql: A GQL relationship connects two pattern variables, so it cannot name an undefined node.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: reference
+          contains: ['undefined node "ghost"']
+
+  - name: A path from an undefined node is rejected
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"ghost","to":"b","max_depth":2,"rel_types":["CONTAINS"]}}
+    missing_frontends:
+      gql: A GQL path pattern binds both endpoints, so it cannot name an undefined node.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: reference
+          contains: ['undefined node "ghost"']
+
+  - name: A path to an undefined node is rejected
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"ghost","max_depth":2,"rel_types":["CONTAINS"]}}
+    missing_frontends:
+      gql: A GQL path pattern binds both endpoints, so it cannot name an undefined node.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: reference
+          contains: ['undefined node "ghost"']
+
+  - name: Counting an undefined node is rejected
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"count":"missing","as":"c"}]}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN count(missing) AS c
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: reference
+          contains: ['undefined node "missing"']
+
+  - name: Grouping by an undefined node is rejected
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"group_by":["missing"],"aggregations":[{"count":"u","as":"c"}]}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN missing, count(u) AS c
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: validate, gql: gql_parse }
+          reason: reference
+          contains: ['undefined node "missing"']
+
+  - name: Grouping by a property of an undefined node is rejected
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["missing.visibility_level"],"aggregations":[{"count":"p","as":"project_count"}]}
+      gql: |
+        MATCH (p:Project {id: 1}) RETURN missing.visibility_level, count(p) AS project_count
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: reference
+          contains: ['undefined node "missing"']
+
+  - name: Summing an unknown property is rejected
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"sum":"u.nonexistent","as":"total"}]}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN sum(u.nonexistent) AS total
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: ontology
+          contains: ["invalid property"]
+
+  - name: Grouping by an unknown property is rejected
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.not_real"],"aggregations":[{"count":"p","as":"project_count"}]}
+      gql: |
+        MATCH (p:Project {id: 1}) RETURN p.not_real, count(p) AS project_count
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: ontology
+          contains: ["invalid property"]
+
+  - name: A group_by on a traversal is rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.visibility_level"]}
+    missing_frontends:
+      gql: GQL groups only when RETURN has an aggregate, which makes the query an aggregation.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          reason: schema
+          contains: ['{"required":["group_by"]} is not allowed']
+
+  - name: Grouping twice by the same property is rejected
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.visibility_level","p.visibility_level"],"aggregations":[{"count":"p","as":"project_count"}]}
+      gql: |
+        MATCH (p:Project {id: 1}) RETURN p.visibility_level, p.visibility_level, count(p) AS project_count
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ["duplicate group_by output column"]
+
+  - name: An aggregate alias that matches a group column name is rejected
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.visibility_level"],"aggregations":[{"count":"p","as":"p_visibility_level"}]}
+      gql: |
+        MATCH (p:Project {id: 1}) RETURN p.visibility_level, count(p) AS p_visibility_level
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: ["conflicts with another output column"]
+
+  - name: Sorting by a property of an undefined node is rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"order_by":"missing.username"}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u ORDER BY missing.username
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: reference
+          contains: ['undefined node "missing"']
+
+  - name: Sorting by an unknown property is rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"order_by":"u.nonexistent"}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u ORDER BY u.nonexistent
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: ontology
+          contains: ["does not exist"]
+
+  - name: Two nodes with the same id are rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"u","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"u"}]}
+      gql: |
+        MATCH (u:User {id: 1}), (u:Project) RETURN u
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: validate, gql: gql_parse }
+          reason: { json: reference, gql: schema }
+          contains: { json: ['duplicate node id "u"'], gql: ["a repeated node must keep its original label"] }
+
+  - name: A traversal node outside the relationship chain fails the n-1 relationship rule
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"orphan","entity":"Note"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project), (orphan:Note) RETURN u, p, orphan
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: validate, gql: gql_parse }
+          reason: schema
+          contains: { json: ["n-1 relationships"], gql: ["all declared nodes must belong to one connected pattern"] }
