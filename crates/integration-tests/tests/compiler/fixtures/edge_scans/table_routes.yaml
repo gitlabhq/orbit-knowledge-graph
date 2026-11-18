@@ -11,7 +11,7 @@ cases:
       clickhouse:
         planned:
           expect: ["(Filter _orbit_edge_0.relationship_kind = 'MEMBER_OF', ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))"]
-          reject: ["(Scan Table(gl_code_edge) ...)", "(Union ...)"]
+          reject: ["(Scan Table(gl_code_edge) ...)", "(Union ... (...))"]
         emitted:
           expect: ["(Limit 26 (Sort ... (_)))"]
 
@@ -27,7 +27,7 @@ cases:
       clickhouse:
         planned:
           expect: ["(Filter _orbit_edge_0.relationship_kind = 'DEFINES', ... (Scan Table(gl_code_edge) AS _orbit_edge_0))"]
-          reject: ["(Scan Table(gl_edge) ...)", "(Union ...)"]
+          reject: ["(Scan Table(gl_edge) ...)", "(Union ... (...))"]
 
   - name: A single-hop wildcard keeps one default-table scan
     query:
@@ -41,7 +41,7 @@ cases:
       clickhouse:
         planned:
           expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]
-          reject: ["(Union ...)"]
+          reject: ["(Union ... (...))"]
 
   - name: Relationship alternatives on two edge tables union one latest-row scan per table
     ontology_overlay: variant_routes
