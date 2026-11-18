@@ -2,7 +2,7 @@ cases:
   - name: Rendered traversal SQL inlines filter and relationship values
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}},{"id":"u","entity":"User"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
       gql: |
         MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'opened'}) RETURN mr, u LIMIT 10
     physical:

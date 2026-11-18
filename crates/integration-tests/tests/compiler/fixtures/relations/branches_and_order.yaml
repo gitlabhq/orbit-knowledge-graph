@@ -71,7 +71,7 @@ cases:
   - name: Convergent stored relations keep selective reads inline
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","node_ids":[2]},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"c"},{"type":"CALLS","from":"b","to":"c"}]}
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["id"]},{"id":"c","entity":"Definition","columns":["id"]},{"id":"b","entity":"Definition","node_ids":[2],"columns":["id"]}],"relationships":[{"type":"CALLS","from":"a","to":"c"},{"type":"CALLS","from":"b","to":"c"}]}
       gql: |
         MATCH (a:Definition {id: 1})-[:CALLS]->(c:Definition)<-[:CALLS]-(b:Definition {id: 2})
         RETURN a.id, b.id, c.id
