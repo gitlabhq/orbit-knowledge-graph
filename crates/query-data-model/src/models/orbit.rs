@@ -239,6 +239,19 @@ pub trait OrbitQueryModel {
         self.query_authorization().redaction_id_column(entity)
     }
 
+    fn property_groups_per_row(&self, entity: &str, property: &str) -> bool {
+        !self.entity_has_traversal_path(entity)
+            && self
+                .property(entity, property)
+                .is_some_and(|property| match property.data_type {
+                    ontology::DataType::Uuid => true,
+                    ontology::DataType::String => {
+                        self.property_selectivity(property.id) != ontology::FieldSelectivity::Low
+                    }
+                    _ => false,
+                })
+    }
+
     fn table_has_path_columns(&self, table: &str) -> bool {
         self.query_backend()
             .table_path_columns(table)

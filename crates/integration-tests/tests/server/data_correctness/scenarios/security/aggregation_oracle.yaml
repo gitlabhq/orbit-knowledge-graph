@@ -208,7 +208,7 @@ cases:
       compile_error: authorization
 
   - name: aggregation_negation_oracle_title_token
-    description: NOT on a Vulnerability title token is no oracle for a Reporter
+    description: NOT on a Vulnerability title token fails the Vulnerability access-level requirement for a Reporter
     config:
       security:
         org_id: 1

@@ -57,14 +57,3 @@ cases:
         MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.title STARTS WITH 'Fix' RETURN w, count(g) AS n
     expect:
       empty_aggregation: true
-
-  - name: text_group_key_rows
-    description: A text group key returns one row per title in the path scope
-    query:
-      gql: |
-        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) RETURN w.title AS title, count(w) AS n ORDER BY title
-    expect:
-      row_count: 2
-      row_values:
-        - { title: Fix auth bug, n: 1 }
-        - { title: Implement login page, n: 1 }

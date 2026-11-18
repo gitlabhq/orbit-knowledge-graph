@@ -1,0 +1,56 @@
+description: A free-text group key on an entity without a traversal path keeps one row per entity and redacts each row
+
+config:
+  security:
+    paths: ["1/"]
+  redaction:
+    allow:
+      user: [98531, 98532]
+    deny:
+      user: [98533]
+  extra_seed:
+    gl_user:
+      - { id: 98531, username: dup-a, name: Dup Name, state: active, user_type: human, email: dup-a@example.com }
+      - { id: 98532, username: dup-b, name: Dup Name, state: active, user_type: human, email: dup-b@example.com }
+      - { id: 98533, username: dup-c, name: Dup Name, state: active, user_type: human, email: dup-c@example.com }
+    gl_merge_request:
+      - { id: 98541, iid: 541, title: A one, state: opened, source_branch: a1, target_branch: main, project_id: 1000, author_id: 98531, traversal_path: "1/100/1000/" }
+      - { id: 98542, iid: 542, title: A two, state: opened, source_branch: a2, target_branch: main, project_id: 1000, author_id: 98531, traversal_path: "1/100/1000/" }
+      - { id: 98543, iid: 543, title: B one, state: opened, source_branch: b1, target_branch: main, project_id: 1000, author_id: 98532, traversal_path: "1/100/1000/" }
+      - { id: 98544, iid: 544, title: C one, state: opened, source_branch: c1, target_branch: main, project_id: 1000, author_id: 98533, traversal_path: "1/100/1000/" }
+      - { id: 98545, iid: 545, title: C two, state: opened, source_branch: c2, target_branch: main, project_id: 1000, author_id: 98533, traversal_path: "1/100/1000/" }
+      - { id: 98546, iid: 546, title: C three, state: opened, source_branch: c3, target_branch: main, project_id: 1000, author_id: 98533, traversal_path: "1/100/1000/" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 98531, source_kind: User, relationship_kind: AUTHORED, target_id: 98541, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+      - { traversal_path: "1/100/1000/", source_id: 98531, source_kind: User, relationship_kind: AUTHORED, target_id: 98542, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+      - { traversal_path: "1/100/1000/", source_id: 98532, source_kind: User, relationship_kind: AUTHORED, target_id: 98543, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+      - { traversal_path: "1/100/1000/", source_id: 98533, source_kind: User, relationship_kind: AUTHORED, target_id: 98544, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+      - { traversal_path: "1/100/1000/", source_id: 98533, source_kind: User, relationship_kind: AUTHORED, target_id: 98545, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+      - { traversal_path: "1/100/1000/", source_id: 98533, source_kind: User, relationship_kind: AUTHORED, target_id: 98546, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+
+cases:
+  - name: username_rows_redact_denied_user
+    description: Each user is one row and the denied user is absent
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[98531,98532,98533]},{"id":"mr","entity":"MergeRequest","filters":{"project_id":1000}}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":[{"key":"u.username","as":"username"}],"aggregations":[{"count":"mr","as":"n"}],"aggregation_sort":"-n"}
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id IN [98531, 98532, 98533] AND mr.project_id = 1000 RETURN u.username AS username, count(mr) AS n ORDER BY n DESC
+    expect:
+      row_count: 2
+      row_values:
+        - { username: dup-a, n: 2 }
+        - { username: dup-b, n: 1 }
+
+  - name: shared_name_rows_per_user
+    description: Users that share a name stay separate rows and the denied user is absent
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[98531,98532,98533]},{"id":"mr","entity":"MergeRequest","filters":{"project_id":1000}}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":[{"key":"u.name","as":"name"}],"aggregations":[{"count":"mr","as":"n"}],"aggregation_sort":"-n"}
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id IN [98531, 98532, 98533] AND mr.project_id = 1000 RETURN u.name AS name, count(mr) AS n ORDER BY n DESC
+    expect:
+      row_count: 2
+      row_values:
+        - { name: Dup Name, n: 2 }
+        - { name: Dup Name, n: 1 }

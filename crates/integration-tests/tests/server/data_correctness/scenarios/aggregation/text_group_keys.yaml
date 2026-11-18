@@ -3,11 +3,6 @@ description: A free-text group key buckets every entity that shares its value in
 config:
   security:
     paths: ["1/"]
-  redaction:
-    allow:
-      ci_pipeline: [98501, 98502, 98503]
-      ci_build: [98511, 98512, 98513, 98514, 98515, 98516]
-      work_item: [98521, 98522, 98523]
   extra_seed:
     gl_pipeline:
       - { id: 98501, iid: 501, ref: main, status: failed, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
