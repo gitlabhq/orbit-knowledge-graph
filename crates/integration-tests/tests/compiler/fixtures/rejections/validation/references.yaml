@@ -129,28 +129,41 @@ cases:
           reason: reference
           contains: ['undefined node "missing"']
 
-  - name: Two nodes with the same id are rejected
+  - name: Two JSON nodes with the same id are rejected as a duplicate node id
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"u","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"u"}]}
-      gql: |
-        MATCH (u:User {id: 1}), (u:Project) RETURN u
+    missing_frontends:
+      gql: A repeated GQL variable refers to the same node, so GQL cannot declare two nodes with one id.
     physical:
       clickhouse:
         rejected:
-          phase: { json: validate, gql: gql_parse }
-          reason: { json: reference, gql: schema }
-          contains: { json: ['duplicate node id "u"'], gql: ["a repeated node must keep its original label"] }
+          phase: validate
+          reason: reference
+          contains: ['duplicate node id "u"']
+
+  - name: A repeated GQL node with a different label is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}), (u:Project) RETURN u
+    missing_frontends:
+      json: JSON nodes have no labels to repeat; each node declares one entity.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains: ["a repeated node must keep its original label"]
 
   - name: A traversal node outside the relationship chain fails the n-1 relationship rule
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"orphan","entity":"Note"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}
-      gql: |
-        MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project), (orphan:Note) RETURN u, p, orphan
+    missing_frontends:
+      gql: GQL rejects a node outside the pattern as a disconnected pattern before validation, as gql_unsupported_syntax.yaml checks.
     physical:
       clickhouse:
         rejected:
-          phase: { json: validate, gql: gql_parse }
+          phase: validate
           reason: schema
-          contains: { json: ["n-1 relationships"], gql: ["all declared nodes must belong to one connected pattern"] }
+          contains: ["traversal requires exactly n-1 relationships for n nodes"]
