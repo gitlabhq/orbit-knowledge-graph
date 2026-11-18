@@ -28,7 +28,8 @@ SELECT
   m.head_pipeline_id AS head_pipeline_id,
   m.latest_merge_request_diff_id AS latest_merge_request_diff_id,
   m.author_id AS author_id,
-  m.merge_user_id AS merge_user_id,
+  -- merge_user_id is set only by auto-merge; GitLab records every merger in metrics.
+  if(m.state_id = 3, coalesce(metrics.metric_merged_by_id, m.merge_user_id), NULL) AS merge_user_id,
   m.updated_by_id AS updated_by_id,
   m.last_edited_by_id AS last_edited_by_id,
   m.milestone_id AS milestone_id,
@@ -89,6 +90,7 @@ LEFT JOIN (
     argMax(latest_build_finished_at, {{version_column}}) AS metric_latest_build_finished_at,
     argMax(first_deployed_to_production_at, {{version_column}}) AS metric_first_deployed_to_production_at,
     argMax(merged_at, {{version_column}}) AS metric_merged_at,
+    argMax(merged_by_id, {{version_column}}) AS metric_merged_by_id,
     argMax(latest_closed_at, {{version_column}}) AS metric_latest_closed_at,
     argMax(latest_closed_by_id, {{version_column}}) AS metric_latest_closed_by_id,
     argMax(first_comment_at, {{version_column}}) AS metric_first_comment_at,
