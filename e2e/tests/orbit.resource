@@ -14,9 +14,22 @@ ${INDEXING_BUDGET_MULTIPLIER}       %{INDEXING_BUDGET_MULTIPLIER=1}
 
 *** Keywords ***
 Orbit Status Is Healthy
+    ${data}=    Orbit GraphQL Data    { orbit { serviceStatus { state } } }
+    Should Be Equal    ${data["orbit"]["serviceStatus"]["state"]}    HEALTHY
+
+Orbit GraphQL Data
+    [Documentation]    POST ${query} to /api/graphql with the bot PAT and return the data object.
+    [Arguments]    ${query}    ${variables}=${None}
     ${headers}=    GitLab Auth Headers
-    ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
-    Should Be Equal    ${resp.json()["system"]["status"]}    healthy
+    ${body}=    Create Dictionary    query=${query}
+    IF    $variables is not None
+        Set To Dictionary    ${body}    variables=${variables}
+    END
+    ${resp}=    POST    ${GITLAB_URL}/api/graphql    headers=${headers}    json=${body}    expected_status=200
+    ${payload}=    Set Variable    ${resp.json()}
+    Should Be True    not $payload.get("errors")    GraphQL error: ${payload}
+    Should Not Be Equal    ${payload["data"]}    ${None}    GraphQL returned no data: ${payload}
+    RETURN    ${payload["data"]}
 
 Orbit Query POST
     [Documentation]    POST /orbit/query expecting ${expected_status}, retrying once on 502: the
@@ -137,26 +150,6 @@ Orbit Query Is Rejected
     ${body}=    Create Dictionary    query=${query}
     ${resp}=    Orbit Query POST    ${headers}    ${body}    expected_status=400
     Should Contain    ${resp.json()["message"]}    ${message}
-
-Orbit Endpoint Smoke
-    [Documentation]    GET /api/v4/orbit/${path} with the bot PAT. When the endpoint is present (200)
-    ...                assert the body contains ${needle} (when given). A 404 is tolerated: the e2e
-    ...                stack pins a gitlab-org/gitlab image (versions.yaml) that can predate newer
-    ...                Orbit endpoints, and those routes are owned upstream, not by this repo. A 5xx
-    ...                or any other status still fails, so a real GKG-side regression is caught.
-    [Arguments]    ${path}    ${needle}=${None}    ${params}=${None}
-    ${headers}=    GitLab Auth Headers
-    ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/${path}
-    ...    headers=${headers}    params=${params}    expected_status=any
-    IF    ${resp.status_code} == 404
-        Log    /orbit/${path} absent in the pinned GitLab image; content check skipped.    level=WARN
-        RETURN
-    END
-    Should Be Equal As Integers    ${resp.status_code}    200
-    ...    /orbit/${path} returned ${resp.status_code}: ${resp.text}
-    IF    $needle is not None
-        Should Contain    ${resp.text}    ${needle}    /orbit/${path} body missing '${needle}'
-    END
 
 Orbit Query LLM
     [Documentation]    POST /orbit/query with response_format=llm. Returns the raw response so the

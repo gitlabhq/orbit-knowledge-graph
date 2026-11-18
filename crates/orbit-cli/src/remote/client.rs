@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use cynic::{GraphQlResponse, Operation};
@@ -13,7 +13,7 @@ use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
 use super::retry::{self, Policy};
 
 const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -25,6 +25,11 @@ const GREP_PATH: &str = "/api/v4/orbit/grep";
 const CONTEXT_PATH: &str = "/api/v4/orbit/context";
 const SHORT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const GREP_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Base URLs whose last connection attempt in this process failed, with the
+/// failure message. Requests to them fail at once instead of each waiting out
+/// its own connect timeout against a host that drops packets.
+static UNREACHABLE: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(Default::default);
 
 pub(crate) struct SkillHttpResponse {
     pub(crate) status: u16,
@@ -186,6 +191,7 @@ impl OrbitClient {
     }
 
     pub(crate) async fn grep_query(&self, body: Vec<u8>) -> Result<(u16, Vec<u8>), RemoteError> {
+        self.ensure_reachable()?;
         let response = self
             .send_raw(
                 self.http
@@ -296,6 +302,7 @@ impl OrbitClient {
         } else {
             0
         };
+        self.ensure_reachable()?;
         let mut retries = 0_u32;
         let mut waited = Duration::ZERO;
         let mut pending = Some(request);
@@ -330,7 +337,9 @@ impl OrbitClient {
                         EXIT_GENERIC,
                         request_failure_message("Orbit request", &error),
                     );
-                    if pending.is_none() || !error.is_connect() {
+                    // A connect timeout means the host drops packets: retrying
+                    // would pay the timeout again, so it fails fast instead.
+                    if pending.is_none() || !error.is_connect() || error.is_timeout() {
                         return Err(failure);
                     }
                     ("connection failed".to_string(), None, failure)
@@ -355,6 +364,7 @@ impl OrbitClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
+        self.ensure_reachable()?;
         self.send_raw(request).await.map_err(|e| {
             RemoteError::new(EXIT_GENERIC, request_failure_message("Orbit request", &e))
         })
@@ -376,7 +386,38 @@ impl OrbitClient {
         if let Some(session_id) = &session_id {
             builder = builder.header("X-Orbit-Session-Id", session_id);
         }
-        builder.send().await
+        let result = builder.send().await;
+        self.remember_reachability(&result);
+        result
+    }
+
+    fn ensure_reachable(&self) -> Result<(), RemoteError> {
+        let unreachable = UNREACHABLE.lock().unwrap_or_else(PoisonError::into_inner);
+        match unreachable.get(&self.endpoint.base_url) {
+            Some(cause) => Err(RemoteError::new(
+                EXIT_GENERIC,
+                format!(
+                    "Orbit request skipped because the GitLab instance is unreachable: {cause}"
+                ),
+            )),
+            None => Ok(()),
+        }
+    }
+
+    fn remember_reachability(&self, result: &reqwest::Result<reqwest::Response>) {
+        let mut unreachable = UNREACHABLE.lock().unwrap_or_else(PoisonError::into_inner);
+        match result {
+            Err(error) if error.is_connect() => {
+                unreachable.insert(
+                    self.endpoint.base_url.clone(),
+                    request_failure_message("an earlier request", error),
+                );
+            }
+            Ok(_) => {
+                unreachable.remove(&self.endpoint.base_url);
+            }
+            Err(_) => {}
+        }
     }
 }
 
@@ -722,6 +763,146 @@ mod tests {
         let message = error.to_string();
         assert!(!message.contains("timed out"), "{message}");
         assert!(message.contains("tcp connect error"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn failed_connection_skips_later_requests_to_the_same_instance() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        let client = OrbitClient::new(ResolvedEndpoint {
+            base_url,
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap()
+        .without_retries();
+
+        let first = client.query_raw(b"{}".to_vec()).await.unwrap_err();
+        let query = client.query_raw(b"{}".to_vec()).await.unwrap_err();
+        let skill = client.get_skill("orbit", None).await.err().unwrap();
+        let grep = client.grep_query(b"{}".to_vec()).await.unwrap_err();
+
+        assert!(first.to_string().contains("tcp connect error"), "{first}");
+        for later in [query, skill, grep] {
+            let message = later.to_string();
+            assert!(
+                message.starts_with(
+                    "Orbit request skipped because the GitLab instance is unreachable"
+                ),
+                "{message}"
+            );
+            assert!(message.contains("tcp connect error"), "{message}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn connect_timeout_fails_once_and_skips_later_requests() {
+        // Linux drops new SYNs once the accept queue is full, like a host that drops packets.
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let listener = socket.listen(0).unwrap();
+        let address = listener.local_addr().unwrap();
+        let _queued = std::net::TcpStream::connect(address).unwrap();
+        let connect_timeout = Duration::from_millis(300);
+        let mut client = OrbitClient::new(ResolvedEndpoint {
+            base_url: format!("http://{address}"),
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap();
+        client.http = reqwest::Client::builder()
+            .connect_timeout(connect_timeout)
+            .build()
+            .unwrap();
+
+        let started = std::time::Instant::now();
+        let first = client.get_grep(&[]).await.unwrap_err();
+        let elapsed = started.elapsed();
+        let later = client.get_grep(&[]).await.unwrap_err();
+
+        assert!(
+            first.to_string().starts_with("Orbit request timed out"),
+            "{first}"
+        );
+        assert!(elapsed < connect_timeout * 2, "retried: took {elapsed:?}");
+        assert!(
+            later
+                .to_string()
+                .starts_with("Orbit request skipped because the GitLab instance is unreachable"),
+            "{later}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_successful_retry_stops_skipping_the_instance() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let client = OrbitClient::new(ResolvedEndpoint {
+            base_url: format!("http://{address}"),
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap();
+
+        let retried = tokio::spawn({
+            let client = client.clone();
+            async move { client.query_raw(b"{}".to_vec()).await }
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while client.ensure_reachable().is_ok() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("the refused first attempt marks the instance");
+        let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+        let server = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.read(&mut [0; 4096]).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .await;
+            }
+        });
+
+        assert_eq!(retried.await.unwrap().unwrap(), b"{}");
+        assert_eq!(client.query_raw(b"{}".to_vec()).await.unwrap(), b"{}");
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn request_timeout_does_not_skip_later_requests() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let client = OrbitClient::new(ResolvedEndpoint {
+            base_url: base_url.clone(),
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap();
+
+        for _ in 0..2 {
+            let error = client
+                .send_authenticated(
+                    client
+                        .http
+                        .get(&base_url)
+                        .timeout(Duration::from_millis(100)),
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                error.to_string().starts_with("Orbit request timed out"),
+                "{error}"
+            );
+        }
+        drop(listener);
     }
 
     fn env_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {

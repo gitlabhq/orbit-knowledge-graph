@@ -1,0 +1,44 @@
+include:
+  - local: .gitlab/ci/rust-job-templates.yml
+  - local: .gitlab/ci/orbit-perf-base.yml
+
+stages:
+  - build
+  - benchmark
+
+variables:
+  CI_MERGE_REQUEST_IID: $ORBIT_PERF_MR_IID
+
+.child-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
+
+docker-build-mr:
+  extends:
+    - .docker-build-mr
+    - .child-rules
+  interruptible: true
+
+orbit-perf:mr:
+  extends:
+    - .orbit-perf-base
+    - .child-rules
+  needs: []
+  interruptible: true
+  resource_group: orbit-perf-mr-$ORBIT_PERF_MR_IID
+  timeout: 45m
+  allow_failure: true
+  variables:
+    GKG_IMAGE_TAG: develop-mr-${ORBIT_PERF_MR_IID}-${CI_COMMIT_SHORT_SHA}-amd64
+  after_script:
+    - |
+      if [ ! -s loadtest-results.md ]; then
+        echo "Skipping MR comment: no loadtest-results.md."
+      elif [ -z "${BENCHMARK_GITLAB_TOKEN:-}" ]; then
+        echo "Skipping MR comment: BENCHMARK_GITLAB_TOKEN unavailable."
+      else
+        mise exec -- gitlab-xtasks comment post --type add-or-edit \
+          --unique-id orbit-perf-loadtest-comment \
+          --token "$BENCHMARK_GITLAB_TOKEN" \
+          --file-path loadtest-results.md || echo "MR comment post failed (non-fatal)."
+      fi
