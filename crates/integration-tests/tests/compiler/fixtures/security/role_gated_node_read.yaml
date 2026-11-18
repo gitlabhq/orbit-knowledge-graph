@@ -4,14 +4,19 @@ security: { admin: true, access_level: 50 }
 
 query:
   json: |
-    {"query_type":"aggregation","nodes":[{"id":"v","entity":"Vulnerability","filters":{"state":{"eq":"detected"}}},{"id":"proj","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"proj"}],"group_by":["proj"],"aggregations":[{"count":"v","as":"n"}],"limit":10}
+    {"query_type":"aggregation","nodes":[{"id":"v","entity":"Vulnerability","filters":{"state":{"eq":"detected"}}},{"id":"proj","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"proj","filters":{"source_id":7}}],"group_by":["proj"],"aggregations":[{"count":"v","as":"n"}],"limit":10}
   gql: |
-    MATCH (v:Vulnerability {state: 'detected'})-[:IN_PROJECT]->(proj:Project {id: 1}) RETURN proj, count(v) AS n LIMIT 10
+    MATCH (v:Vulnerability {state: 'detected'})-[r:IN_PROJECT]->(proj:Project {id: 1}) WHERE r.source_id = 7 RETURN proj, count(v) AS n LIMIT 10
 
 logical:
   expect: ["(Filter v.state = 'detected' (NodeScan Vulnerability AS v))"]
 
 physical:
   clickhouse:
+    planned:
+      expect:
+        - (Filter _orbit_edge_0.source_tags HAS ANY ['state:detected'], ... (Scan Table(gl_sec_edge) AS _orbit_edge_0))
+        - (Scan Table(gl_vulnerability) AS v)
+      reject: ["(Filter v.state = 'detected', ... (_))"]
     final_ast:
-      expect: ["(Join ON proj.id = v.project_id (Bind v (_)) (_))", "(Deduplicate Final (Scan Table(gl_vulnerability) AS v))"]
+      expect: ["(Filter StartsWith(v.traversal_path, '1/'), ... (Scan Table(gl_vulnerability) AS v))"]
