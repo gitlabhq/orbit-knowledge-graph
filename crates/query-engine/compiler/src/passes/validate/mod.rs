@@ -1835,7 +1835,6 @@ mod tests {
 
     #[test]
     fn accepts_int_on_float_column() {
-        // Integers are valid for float columns (widening).
         let ontology = Ontology::new()
             .with_nodes(["Metric"])
             .with_fields("Metric", [("score", DataType::Float)]);
@@ -1852,17 +1851,13 @@ mod tests {
 
     #[test]
     fn edge_filter_type_comes_from_ontology_not_hardcoded() {
-        // Build an ontology where source_id is String instead of Int.
-        // If types were hardcoded in Rust, this test would FAIL (the hardcoded
-        // type is Int, so integer filters would pass). If types are YAML-driven,
-        // the Validator reads String and correctly rejects the integer.
         let ontology = ontology::Ontology::new()
             .with_nodes(["User", "Note"])
             .with_edges(["AUTHORED"])
             .with_edge_columns([
                 ("traversal_path", DataType::String),
                 ("relationship_kind", DataType::String),
-                ("source_id", DataType::String), // deliberately wrong: String instead of Int
+                ("source_id", DataType::String),
                 ("source_kind", DataType::String),
                 ("target_id", DataType::Int),
                 ("target_kind", DataType::String),
@@ -1888,10 +1883,6 @@ mod tests {
         );
     }
 
-    /// Verify the Identifier regex in graph_query.schema.json only matches ASCII.
-    /// This is a defense against homoglyph attacks — the regex engine treats
-    /// [a-zA-Z] as ASCII-only, but this test makes the assumption explicit.
-    /// The pattern is loaded from the schema to prevent staleness.
     #[test]
     fn identifier_regex_rejects_non_ascii() {
         let schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON).unwrap();
