@@ -220,6 +220,41 @@ aws-lc-rs = { version = "1.18.1", default-features = false }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
 orbit-cli-graphql = { path = "crates/orbit-cli/graphql" }
+bolero = "0.13.4"
+crossbeam-channel = "0.5"
+indextree = "4.9"
+itertools = "0.14"
+lasso = "0.7"
+opentelemetry_sdk = "0.32"
+pest_meta = "2.9.1"
+smol_str = "0.3"
+termtree = "1.0"
+tree-sitter = "0.26.3"
+tree-sitter-bash = "0.25.1"
+tree-sitter-c = "0.24.2"
+tree-sitter-c-sharp = "0.23.0"
+tree-sitter-containerfile = "0.9.2"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-elixir = "0.3.5"
+tree-sitter-go = "0.25.0"
+tree-sitter-haskell = "0.23.1"
+tree-sitter-hcl = "1.1.0"
+tree-sitter-java = "0.23.0"
+tree-sitter-kotlin-sg = "0.4.0"
+tree-sitter-kotlin = { package = "tree-sitter-kotlin-sg", version = "0.4.0" }
+tree-sitter-lua = "0.5.0"
+tree-sitter-ocaml = "0.25.0"
+tree-sitter-php = "0.24.2"
+tree-sitter-python = "0.25.0"
+tree-sitter-ruby = "0.23.0"
+tree-sitter-rust = "0.24.0"
+tree-sitter-scala = "0.24.0"
+tree-sitter-swift = "0.7.2"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-yaml = "0.7.2"
+tree-sitter-zig = "1.1.2"
+twox-hash = { version = "2.1", default-features = false }
+zstd = "0.14.3"
 
 [profile.dev]
 debug = "line-tables-only"

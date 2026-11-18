@@ -235,8 +235,11 @@ run = [
 description = "Check log, span and print call sites against the red data rules (scripts/linting/logs)"
 
 [tasks."lint:deps"]
-run = "cargo shear"
-description = "Check for unused workspace and crate dependencies"
+run = [
+  "cargo shear",
+  "python3 scripts/checks/check_workspace_deps.py --registry-only",
+]
+description = "Check for unused dependencies and crate-local dependency declarations"
 
 [tasks."lint:code:fix"]
 run = [
