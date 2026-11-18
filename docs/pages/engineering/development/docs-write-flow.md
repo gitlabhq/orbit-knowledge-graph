@@ -87,23 +87,29 @@ nothing. The flow file ships with `MODE=shadow`, which stops after setup and log
 Script steps enforce these rules:
 
 - The scripts open docs MRs as drafts and never merge or approve.
-- A push happens only when `check.py` reports no errors and the branch changes nothing but
+- The scripts push only when `check.py` reports no errors and the branch changes nothing but
   user docs. Warnings left after the fix cycles are listed on the MR.
-- Agents see only threads and notes from trusted authors. These are the flow's identity, Duo Code
-  Review, feature MR authors and reviewers, docs MR reviewers, and Developer+ members. Other
-  threads stay open for the person who merges. The handoff note links them without their text.
+- The flow hands agents only threads and notes from trusted authors. These are the flow's
+  identity, Duo Code Review, authors and reviewers of feature MRs from this project, docs MR
+  reviewers, and Developer+ members. Other threads stay open for the person who merges. The
+  handoff note links them without their text.
+- The related-MR check groups only MRs from this project. A fork MR that names the same issue
+  never joins the group, so its diff never reaches the writer.
 - The flow resolves only the threads it gave the fixer, and only after the fix is pushed and
   `check.py` is clean. It never resolves a **Needs reviewer decision** thread.
 - The threads path runs only on a docs MR with a branch in this project, not a fork. The
   flow's identity must already have a note on it.
-  Flow markers count only on notes from the flow's identity or GitLab Duo.
+  Flow markers count only on notes from the flow's identity. GitLab Duo counts only for the
+  run's start note.
 - The flow discards any commit the review agent makes, and any edit outside `.docs-write/`.
 
 Prompts set these rules, and the script steps check the result where they can:
 
 - No agent gets a GitLab write tool, but each has a shell with the run's token. The prompts
-  forbid pushes and API writes. A prompt is the only barrier between thread text and that
-  shell, so the intake filter limits who can write the text an agent reads.
+  forbid pushes and API writes. A prompt is the only barrier between the text an agent reads
+  and that shell. The intake filter limits who can write the thread text an agent reads.
+  Feature MR diffs and code reach the agents unfiltered, and the checks cannot undo an API
+  write or a push to another branch.
 - The reviewer is told not to read the writer's notes in `.docs-write/`. Nothing blocks the read.
 
 Other rules:
