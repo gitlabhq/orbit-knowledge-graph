@@ -68,7 +68,9 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
             .filter(move |node| node.is(kind) && node.sym_opt().is_some())
     }
     pub fn last_named(self) -> Option<Self> {
-        self.children().filter(|node| node.named()).last()
+        self.children()
+            .filter(|node| node.named() && !node.is(C::SideEffect))
+            .last()
     }
     pub fn calls(self) -> impl Iterator<Item = Self> + 'a {
         self.descendants().filter(|node| node.is(C::Call))

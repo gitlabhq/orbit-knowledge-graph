@@ -141,10 +141,12 @@ tests:
       - { row: { target: Client::get } }
       - { row: { target: Other::get } }
 
-  - name: "begin ... ensure is not typed from the ensure clause"
+  - name: "begin ... ensure is typed from the body, not the ensure clause"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'begin_ensure.rb' AND callee.name = 'get'
       RETURN caller.name AS caller, callee.fqn AS target
     assert:
-      - { row_count: 0 }
+      - { row_count: 2 }
+      - { row: { caller: run, target: Client::get } }
+      - { row: { caller: run_ivar, target: Client::get } }

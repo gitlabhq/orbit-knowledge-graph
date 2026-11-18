@@ -141,6 +141,86 @@ fixtures:
         end
       end
 
+  - path: memo_ensure_wrapped.rb
+    content: |
+      class ParenEnsure
+        def setup
+          @c ||= (begin; Client.new; ensure; Other.new; end)
+        end
+
+        def run
+          @c.get
+        end
+
+        def run_local
+          c = nil
+          c ||= (begin; Client.new; ensure; Other.new; end)
+          c.get
+        end
+      end
+
+      class NestedEnsure
+        def setup
+          @c ||= begin
+            begin
+              Client.new
+            ensure
+              Other.new
+            end
+          end
+        end
+
+        def run
+          @c.get
+        end
+
+        def run_local
+          c = nil
+          c ||= begin
+            begin
+              Client.new
+            ensure
+              Other.new
+            end
+          end
+          c.get
+        end
+      end
+
+  - path: memo_rescue_modifier.rb
+    content: |
+      class RescueModifier
+        def setup
+          @c ||= Client.new rescue Other.new
+        end
+
+        def run
+          @c.get
+        end
+
+        def run_local
+          c = nil
+          c ||= Client.new rescue Other.new
+          c.get
+        end
+      end
+
+      class RescueModifierNil
+        def setup
+          @c ||= Client.new rescue nil
+        end
+
+        def run
+          @c.get
+        end
+
+        def run_local
+          c = nil
+          c ||= Client.new rescue nil
+          c.get
+        end
+      end
+
 tests:
   - name: "A local assigned with ||= keeps the new value's type"
     query: |
@@ -192,10 +272,30 @@ tests:
       - { row: { caller: run_multi, target: Client::get } }
       - { row: { caller: run_local, target: Client::get } }
 
-  - name: "||= with begin ... ensure is not typed from the ensure clause"
+  - name: "||= with begin ... ensure or a rescue modifier is typed from the body, however it is wrapped"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-      WHERE caller.file_path = 'memo_ensure.rb' AND callee.name = 'get'
-      RETURN caller.name AS caller, callee.fqn AS target
+      WHERE caller.file_path IN ['memo_ensure.rb', 'memo_ensure_wrapped.rb', 'memo_rescue_modifier.rb']
+        AND callee.fqn = 'Client::get'
+      RETURN caller.file_path AS file, caller.fqn AS caller
+    assert:
+      - { row_count: 10 }
+      - { row: { file: memo_ensure.rb, caller: MemoEnsure::run } }
+      - { row: { file: memo_ensure.rb, caller: MemoEnsure::run_local } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: ParenEnsure::run } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: ParenEnsure::run_local } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: NestedEnsure::run } }
+      - { row: { file: memo_ensure_wrapped.rb, caller: NestedEnsure::run_local } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifier::run } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifier::run_local } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifierNil::run } }
+      - { row: { file: memo_rescue_modifier.rb, caller: RescueModifierNil::run_local } }
+
+  - name: "||= with begin ... ensure or a rescue modifier is not typed from the ensure or rescue side"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['memo_ensure.rb', 'memo_ensure_wrapped.rb', 'memo_rescue_modifier.rb']
+        AND callee.fqn = 'Other::get'
+      RETURN caller.fqn AS caller
     assert:
       - { row_count: 0 }
