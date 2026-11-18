@@ -253,17 +253,6 @@ fn aggregation_columns_match_exactly_and_in_order() {
 }
 
 #[test]
-fn seed_presets_replace_the_base_dataset() {
-    let query = json!({"gql": "MATCH (d:Definition) WHERE d.id >= 1 AND d.id <= 10 RETURN d.name"});
-    run_suite_with(
-        json!({"duckdb": true, "seed": "solo"}),
-        query.clone(),
-        "nodes: {Definition: {ids: [9]}}",
-    );
-    run_suite(query, "nodes: {Definition: {ids: [1, 2, 3, 4]}}");
-}
-
-#[test]
 fn toon_expectations_check_text_value_and_absent_keys() {
     let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
     let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  toon:\n";
@@ -297,6 +286,18 @@ fn toon_expectations_check_text_value_and_absent_keys() {
 }
 
 #[test]
+fn gql_format_expectations_also_run_for_json_queries() {
+    let query = json!({"json": r#"{"query_type": "traversal", "nodes": [{"id": "d", "entity": "Definition", "node_ids": [1]}], "limit": 1}"#});
+    let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  gql:\n";
+    run_suite(query.clone(), &format!("{base}    value: {{header: [d]}}"));
+    rejects(
+        query,
+        &format!("{base}    value: {{header: [e]}}"),
+        "gql.header[0] is \"d\", expected \"e\"",
+    );
+}
+
+#[test]
 fn gql_format_expectations_check_text_and_table() {
     let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
     let base = "nodes: {Definition: {ids: [1]}}\nformat:\n  gql:\n";
@@ -316,6 +317,17 @@ fn gql_format_expectations_check_text_and_table() {
         "nodes: {Definition: {ids: [1]}}\nformat: {csv: {}}",
         "unknown variant `csv`",
     );
+}
+
+#[test]
+fn seed_presets_replace_the_base_dataset() {
+    let query = json!({"gql": "MATCH (d:Definition) WHERE d.id >= 1 AND d.id <= 10 RETURN d.name"});
+    run_suite_with(
+        json!({"duckdb": true, "seed": "solo"}),
+        query.clone(),
+        "nodes: {Definition: {ids: [9]}}",
+    );
+    run_suite(query, "nodes: {Definition: {ids: [1, 2, 3, 4]}}");
 }
 
 #[test]

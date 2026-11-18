@@ -11,6 +11,8 @@ mod skill;
 mod sql;
 mod sql_format;
 mod telemetry;
+#[cfg(test)]
+mod test_support;
 mod tui;
 mod version;
 mod workspace;

@@ -1,5 +1,4 @@
 config:
-  unmerged_seed: true
   security: { paths: ["1/500/"] }
   redaction:
     allow:
@@ -101,8 +100,28 @@ cases:
               User:
                 - { name: 'Bob "the Builder"' }
 
+  - name: escaped_strings_round_trip
+    description: A title with a newline and a tab decodes to the same text
+    query:
+      json: |
+        {"query_type": "traversal",
+         "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [5001], "columns": ["title"]}],
+         "limit": 1}
+    expect:
+      nodes:
+        MergeRequest:
+          ids: [5001]
+          rows:
+            - { id: 5001, title: "Multi-line\ntitle\twith escapes" }
+      format:
+        toon:
+          value:
+            nodes:
+              MergeRequest:
+                - { id: 5001, title: "Multi-line\ntitle\twith escapes" }
+
   - name: booleans_round_trip
-    description: Boolean columns decode as booleans, and a null boolean stays absent from the true value
+    description: Boolean columns decode as booleans, and a null boolean decodes as null
     query:
       json: |
         {"query_type": "traversal",
@@ -118,7 +137,7 @@ cases:
             nodes:
               Note:
                 - { id: 5100, internal: true, confidential: true }
-                - { id: 5101, internal: false }
+                - { id: 5101, internal: false, confidential: null }
 
   - name: path_edges_carry_path_and_step
     description: Path-finding edges carry the path id and the step

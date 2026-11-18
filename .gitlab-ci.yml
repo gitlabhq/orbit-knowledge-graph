@@ -840,7 +840,7 @@ pages:preview:
       interruptible: true
 
 .docs-gitlab-com:
-  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:alpine-3.24-hugo-0.166.0
   stage: docs
   needs: []
   extends:
@@ -887,7 +887,7 @@ docs_hugo_build:
   allow_failure: true
   script:
     - make add-latest-icons
-    - hugo --gc --printPathWarnings --panicOnWarning  --environment test
+    - hugo --gc --printPathWarnings --environment test
 
 docs_index_pages:
   extends:

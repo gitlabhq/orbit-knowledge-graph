@@ -6,6 +6,7 @@ use regex::Regex;
 use serde::Deserialize;
 use strum::IntoEnumIterator;
 
+use super::output_format::{OutputExpect, OutputFormat};
 use crate::scenario::Seed;
 
 #[derive(Debug, Deserialize)]
@@ -412,25 +413,6 @@ pub(crate) fn rejection_reason(name: &str) -> Result<RejectionReason, String> {
                 known.join(", ")
             )
         })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, strum::IntoStaticStr)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum OutputFormat {
-    Toon,
-    Gql,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct OutputExpect {
-    #[serde(default)]
-    pub contains: Vec<String>,
-    pub ends_with: Option<String>,
-    #[serde(default)]
-    pub absent: Vec<String>,
-    pub value: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
