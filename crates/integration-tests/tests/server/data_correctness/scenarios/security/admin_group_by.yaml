@@ -22,5 +22,20 @@ cases:
       row_count: 1
       row_values:
         - { members: 9 }
-      gql_columns:
-        is_admin: ["FALSE"]
+
+  - name: admin_group_by_gql_table
+    description: The GQL table names the admin-only group column by its RETURN alias
+    config:
+      security: admin
+    query:
+      gql: |
+        MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN u.is_admin AS is_admin, count(u) AS members LIMIT 10
+    expect:
+      row_count: 1
+      row_values:
+        - { members: 9 }
+      format:
+        gql:
+          value:
+            columns:
+              is_admin: ["FALSE"]

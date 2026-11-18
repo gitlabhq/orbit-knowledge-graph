@@ -1,13 +1,14 @@
 use std::sync::{Arc, LazyLock};
 
-use query_engine::compiler::{CompiledQueryContext, Frontend, Input, QueryType};
+use query_engine::compiler::{CompiledQueryContext, Input, QueryType};
 use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::PipelineOutput;
 use regex::Regex;
 use serde_json::Value;
 
-use super::{QueryExpect, assert_gql_table, assert_response};
+use super::output_format::assert_format;
+use super::{QueryExpect, assert_response};
 
 static RESPONSE_SCHEMA: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(include_str!(concat!(
@@ -134,17 +135,12 @@ pub(super) fn assert_compilation(
     }
 }
 
-pub(super) fn assert_output(
-    output: &PipelineOutput,
-    frontend: Frontend,
-    expect: &QueryExpect,
-    label: &str,
-) -> Value {
+pub(super) fn assert_output(output: &PipelineOutput, expect: &QueryExpect, label: &str) -> Value {
     assert_pagination(output, label);
-    if frontend == Frontend::Gql {
-        assert_gql_table(output, expect, label);
-    }
     let response = GraphFormatter.format(output);
+    for (format, expected) in &expect.format {
+        assert_format(output, &response, *format, expected, label);
+    }
     assert_response(&output.compiled.input, response.clone(), expect, label);
     response
 }
