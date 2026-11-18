@@ -856,6 +856,9 @@ pages:
 pages:preview:
   extends: .engineering-site
   allow_failure: true
+  variables:
+    # Pages serves previews at gitlaborbit.dev/<branch>/; site-kit derives its base path from this.
+    CI_PAGES_URL: https://gitlaborbit.dev/$CI_COMMIT_REF_SLUG/
   pages:
     path_prefix: "$CI_COMMIT_REF_SLUG"
     expire_in: 1 week
