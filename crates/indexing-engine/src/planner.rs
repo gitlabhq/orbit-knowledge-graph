@@ -17,13 +17,12 @@ pub trait Planner: Send + Sync + 'static {
 
 pub struct PlanContext {
     submissions: Vec<Submission>,
-    encode_error: Option<serde_json::Error>,
     routing: Routing,
     next_page: Option<String>,
 }
 
 pub struct Submit<'a> {
-    lane: Option<&'a mut Option<Lane>>,
+    submission: &'a mut Submission,
 }
 
 pub struct PlanError(anyhow::Error);
@@ -41,7 +40,7 @@ pub(crate) struct PlannedTask {
 
 struct Submission {
     tenant: Tenant,
-    input: TaskInput,
+    input: Result<TaskInput, serde_json::Error>,
     lane: Option<Lane>,
 }
 
@@ -52,24 +51,14 @@ enum Routing {
 
 impl PlanContext {
     pub fn submit<W: Worker>(&mut self, tenant: Tenant, input: W::Input) -> Submit<'_> {
-        match TaskInput::encode::<W>(&input) {
-            Ok(input) => {
-                self.submissions.push(Submission {
-                    tenant,
-                    input,
-                    lane: None,
-                });
-                Submit {
-                    lane: self
-                        .submissions
-                        .last_mut()
-                        .map(|submission| &mut submission.lane),
-                }
-            }
-            Err(error) => {
-                self.encode_error.get_or_insert(error);
-                Submit { lane: None }
-            }
+        let index = self.submissions.len();
+        self.submissions.push(Submission {
+            tenant,
+            input: TaskInput::encode::<W>(&input),
+            lane: None,
+        });
+        Submit {
+            submission: &mut self.submissions[index],
         }
     }
 
@@ -89,25 +78,23 @@ impl PlanContext {
         };
         Self {
             submissions: Vec::new(),
-            encode_error: None,
             routing,
             next_page: None,
         }
     }
 
     pub(crate) fn into_plan(self) -> Result<Plan, PlanError> {
-        if let Some(error) = self.encode_error {
-            return Err(error.into());
-        }
         let tasks = self
             .submissions
             .into_iter()
-            .map(|submission| PlannedTask {
-                lane: self.routing.pick_lane(submission.lane),
-                tenant: submission.tenant,
-                input: submission.input,
+            .map(|submission| {
+                Ok(PlannedTask {
+                    lane: self.routing.pick_lane(submission.lane),
+                    tenant: submission.tenant,
+                    input: submission.input?,
+                })
             })
-            .collect();
+            .collect::<Result<_, serde_json::Error>>()?;
         Ok(Plan {
             tasks,
             next_page: self.next_page,
@@ -117,9 +104,7 @@ impl PlanContext {
 
 impl Submit<'_> {
     pub fn lane(self, lane: Lane) {
-        if let Some(slot) = self.lane {
-            *slot = Some(lane);
-        }
+        self.submission.lane = Some(lane);
     }
 }
 

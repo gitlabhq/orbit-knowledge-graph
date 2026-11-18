@@ -9,7 +9,7 @@ const MAX_CHILDREN: usize = 10_000;
 
 pub struct Outcome<O> {
     completion: Completion<O>,
-    children: Result<Vec<TaskInput>, serde_json::Error>,
+    children: Vec<Result<TaskInput, serde_json::Error>>,
     rows: BTreeMap<&'static str, u64>,
 }
 
@@ -34,17 +34,10 @@ impl<O: Payload> Outcome<O> {
     }
 
     pub fn spawn<W: Worker>(mut self, inputs: impl IntoIterator<Item = W::Input>) -> Self {
-        let encoded: Result<Vec<TaskInput>, _> = inputs
+        let encoded = inputs
             .into_iter()
-            .map(|input| TaskInput::encode::<W>(&input))
-            .collect();
-        self.children = match (self.children, encoded) {
-            (Ok(mut children), Ok(more)) => {
-                children.extend(more);
-                Ok(children)
-            }
-            (Err(error), _) | (_, Err(error)) => Err(error),
-        };
+            .map(|input| TaskInput::encode::<W>(&input));
+        self.children.extend(encoded);
         self
     }
 
@@ -54,13 +47,17 @@ impl<O: Payload> Outcome<O> {
     }
 
     pub(crate) fn encode(self) -> Result<EncodedOutcome, TaskError> {
-        let children = self.children.map_err(TaskError::permanent)?;
-        if children.len() > MAX_CHILDREN {
+        if self.children.len() > MAX_CHILDREN {
             return Err(TaskError::permanent(anyhow!(
                 "an outcome spawned {} children, and the limit is {MAX_CHILDREN}",
-                children.len()
+                self.children.len()
             )));
         }
+        let children = self
+            .children
+            .into_iter()
+            .collect::<Result<_, _>>()
+            .map_err(TaskError::permanent)?;
         let completion = match self.completion {
             Completion::Done(output) => {
                 Completion::Done(serde_json::to_vec(&output).map_err(TaskError::permanent)?)
@@ -77,7 +74,7 @@ impl<O: Payload> Outcome<O> {
     fn from_completion(completion: Completion<O>) -> Self {
         Self {
             completion,
-            children: Ok(Vec::new()),
+            children: Vec::new(),
             rows: BTreeMap::new(),
         }
     }
