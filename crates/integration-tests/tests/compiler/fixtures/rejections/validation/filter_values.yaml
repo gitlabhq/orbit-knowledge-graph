@@ -120,16 +120,14 @@ cases:
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[1,2],"filters":{"project_id":1}}]}
-      gql: |
-        MATCH (g:Group {id: 1})-[r:CONTAINS*1..2 {project_id: 1}]->(p:Project) RETURN g, p
+    missing_frontends:
+      gql: GQL rejects any property filter on a variable-length relationship before validation, as variable_length_filters.yaml checks.
     physical:
       clickhouse:
         rejected:
-          phase: { json: validate, gql: gql_parse }
+          phase: validate
           reason: schema
-          contains:
-            json: ['relationship[0] CONTAINS column "project_id" is missing or has a different type for some endpoint pairs']
-            gql: ["property filters on variable-length relationships are unsupported"]
+          contains: ['relationship[0] CONTAINS column "project_id" is missing or has a different type for some endpoint pairs']
 
   - name: An edge IN list with one mismatched element names its index
     query:
