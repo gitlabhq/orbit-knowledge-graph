@@ -46,7 +46,7 @@ tree-sitter-elixir = { workspace = true }
 tree-sitter-go = { workspace = true }
 tree-sitter-hcl = { workspace = true }
 tree-sitter-java = { workspace = true }
-tree-sitter-kotlin-sg = { workspace = true }
+tree-sitter-kotlin = { workspace = true }
 tree-sitter-lua = { workspace = true }
 tree-sitter-php = { workspace = true }
 tree-sitter-python = { workspace = true }

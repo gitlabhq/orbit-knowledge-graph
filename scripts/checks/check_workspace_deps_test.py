@@ -62,6 +62,31 @@ class CheckWorkspaceDepsTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("remove it", result.stdout)
 
+    def test_non_string_reason_fails(self):
+        result = run_check(
+            '[dependencies]\nzstd = "0.14"\n[package.metadata.workspace-deps.allow]\nzstd = true\n'
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("needs a reason", result.stdout)
+
+    def test_reports_the_line_of_the_dependency_in_its_own_table(self):
+        result = run_check(
+            '[features]\nzstd = []\n\n[dependencies]\nserde = { workspace = true }\nzstd = "0.14"\n'
+        )
+        self.assertIn("Cargo.toml:6:", result.stdout)
+
+    def test_reports_the_line_of_a_dependency_table_header(self):
+        result = run_check('[package]\nname = "a"\n\n[dependencies.zstd]\nversion = "0.14"\n')
+        self.assertIn("Cargo.toml:4:", result.stdout)
+
+    def test_allow_entry_for_path_dependency_is_not_stale_in_registry_only_mode(self):
+        result = run_check(
+            '[dependencies]\nsibling = { path = "../sibling" }\n'
+            '[package.metadata.workspace-deps.allow]\nsibling = "pinned locally"\n',
+            "--registry-only",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
