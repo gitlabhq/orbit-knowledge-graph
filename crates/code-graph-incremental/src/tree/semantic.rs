@@ -154,10 +154,19 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn typed(self) -> Option<Self> {
         self.child(C::SsaTyped).or_else(|| {
             let rhs = self.child(C::Rhs)?;
-            rhs.value_child(C::Call)
+            rhs.rhs_call()
                 .and_then(|call| call.child(C::Callee))
                 .or_else(|| rhs.value_child(C::Member))
         })
+    }
+    /// The call an unlabelled right-hand side evaluates to is its tail, as
+    /// for locals: a lifted `begin ... end` body yields its last call.
+    pub fn rhs_call(self) -> Option<Self> {
+        let tail = self.tail_expr();
+        if tail.index() == self.index() {
+            return self.value_child(C::Call);
+        }
+        tail.is(C::Call).then_some(tail)
     }
     pub fn enclosing_def(self, kinds: &'a [C]) -> Option<Self> {
         self.enclosing(move |node| {
