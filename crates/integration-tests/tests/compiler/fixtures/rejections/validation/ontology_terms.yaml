@@ -10,7 +10,10 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: ontology
-          contains: [NotAnEntity]
+          contains:
+            json: [NotAnEntity, "Valid values:", Branch, WorkItem]
+            gql: [NotAnEntity]
+          not_contains: ["more —"]
 
   - name: An unknown projected property is rejected by both frontends
     query:
@@ -23,7 +26,10 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: ontology
-          contains: [missing]
+          contains:
+            json: [missing, /nodes/0/columns, Valid values, username]
+            gql: [missing, Valid fields, username]
+          not_contains: [under any of the schemas]
 
   - name: An unknown filtered property is rejected by both frontends
     query:
@@ -36,7 +42,10 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: ontology
-          contains: [missing]
+          contains:
+            json: [missing, "Valid values:", username]
+            gql: [missing, Valid fields, username]
+          not_contains: ["more —", other candidates]
 
   - name: A number compared with a string property is rejected by both frontends
     query:
@@ -88,4 +97,202 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: ontology
-          contains: [UNKNOWN_EDGE]
+          contains:
+            json: [UNKNOWN_EDGE, /relationships/0/type, Valid values, AUTHORED]
+            gql: [UNKNOWN_EDGE]
+          not_contains: [under any of the schemas]
+
+  - name: An unknown sort property is rejected by both frontends
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":10,"order_by":"u.nonexistent_column"}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u.username ORDER BY u.nonexistent_column LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: ontology
+          contains: [nonexistent_column, does not exist, Valid fields, username]
+
+  - name: An unknown aggregated property is rejected by both frontends
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1],"columns":["name"]}],"aggregations":[{"sum":"p.invalid_property","as":"total"}],"limit":10}
+      gql: |
+        MATCH (p:Project {id: 1}) RETURN sum(p.invalid_property) AS total LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: ontology
+          contains: [invalid_property, does not exist, Valid fields, name]
+
+  - name: An unknown grouped property names the valid fields
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.reviewer_count"],"aggregations":[{"count":"p","as":"c"}],"limit":10}
+      gql: |
+        MATCH (p:Project {id: 1}) RETURN p.reviewer_count, count(p) AS c LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: ontology
+          contains: [reviewer_count, does not exist, Valid fields, name]
+
+  - name: Grouping by an undefined node names the reference
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["name"],"aggregations":[{"count":"p","as":"c"}],"limit":10}
+      gql: |
+        MATCH (p:Project {id: 1}) RETURN name, count(p) AS c LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: validate, gql: gql_parse }
+          reason: reference
+          contains: ['undefined node "name"']
+
+  - name: A group_by object with unknown keys shows the accepted entry shapes
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":[{"node":"p","property":"name"}],"aggregations":[{"count":"p","as":"c"}],"limit":10}
+    missing_frontends:
+      gql: GQL groups by RETURN items and has no group_by entry.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          reason: schema
+          contains: [/group_by/0, '"<node-id>.<property>"', '"truncate"']
+
+  - name: A group_by string with two dots shows the accepted entry shapes
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.name.x"],"aggregations":[{"count":"p","as":"c"}],"limit":10}
+    missing_frontends:
+      gql: GQL groups by RETURN items and has no group_by entry.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          reason: schema
+          contains: [/group_by/0, '"<node-id>"', '"<node-id>.<property>"']
+
+  - name: AgentSession.goal is not queryable
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"AgentSession","columns":["goal"]}],"limit":10}
+      gql: |
+        MATCH (w:AgentSession) RETURN w.goal LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: ontology
+          contains: [goal]
+
+  - name: AgentSession.title is not queryable
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"AgentSession","columns":["title"]}],"limit":10}
+      gql: |
+        MATCH (w:AgentSession) RETURN w.title LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: ontology
+          contains: [title]
+
+  - name: AgentSession.summary is not queryable
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"AgentSession","columns":["summary"]}],"limit":10}
+      gql: |
+        MATCH (w:AgentSession) RETURN w.summary LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: ontology
+          contains: [summary]
+
+  - name: AgentSession.status is not queryable
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"AgentSession","columns":["status"]}],"limit":10}
+      gql: |
+        MATCH (w:AgentSession) RETURN w.status LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: ontology
+          contains: [status]
+
+  - name: AgentSession.user_id is not queryable
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"AgentSession","columns":["user_id"]}],"limit":10}
+      gql: |
+        MATCH (w:AgentSession) RETURN w.user_id LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: ontology
+          contains: [user_id]
+
+  - name: AgentSession.workflow_definition is not queryable
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"AgentSession","columns":["workflow_definition"]}],"limit":10}
+      gql: |
+        MATCH (w:AgentSession) RETURN w.workflow_definition LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: ontology
+          contains: [workflow_definition]
+
+  - name: AgentSession.agent_type is not queryable
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"AgentSession","columns":["agent_type"]}],"limit":10}
+      gql: |
+        MATCH (w:AgentSession) RETURN w.agent_type LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: ontology
+          contains: [agent_type]
+
+  - name: AgentSession.external_xid is not queryable
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"AgentSession","columns":["external_xid"]}],"limit":10}
+      gql: |
+        MATCH (w:AgentSession) RETURN w.external_xid LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: ontology
+          contains: [external_xid]
+
+  - name: AgentSession.session_finished_at is not queryable
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"AgentSession","columns":["session_finished_at"]}],"limit":10}
+      gql: |
+        MATCH (w:AgentSession) RETURN w.session_finished_at LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: validate }
+          reason: ontology
+          contains: [session_finished_at]

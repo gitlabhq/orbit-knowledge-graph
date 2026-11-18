@@ -1,0 +1,48 @@
+physical:
+  clickhouse: {}
+
+cases:
+  - name: Comments, lowercase keywords, a hex id, and a trailing semicolon normalize like JSON
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[16]}]}
+      gql: |
+        /* MATCH nothing */ match(u:User {id: 0x10}) return u; // done
+    logical:
+      expect: ["(Filter u.id IN [16] (NodeScan User AS u))"]
+
+  - name: An octal id normalizes like JSON
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[8]}]}
+      gql: |
+        MATCH (u:User {id: 0o10}) RETURN u
+    logical:
+      expect: ["(Filter u.id IN [8] (NodeScan User AS u))"]
+
+  - name: The smallest 64-bit id normalizes like JSON
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[-9223372036854775808]}]}
+      gql: |
+        MATCH (u:User {id: -9223372036854775808}) RETURN u
+    logical:
+      expect: ["(Filter u.id IN [-9223372036854775808] (NodeScan User AS u))"]
+
+  - name: String escapes and a surrogate pair decode like JSON
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"a'b\\c\n😀"}}]}
+      gql: |
+        MATCH (`u`:User {username: 'a\'b\\c\n😀'}) RETURN u
+    logical:
+      expect: ["(Filter u.username = 'a\\'b\\\\c\n😀' (NodeScan User AS u))"]
+
+  - name: A date() call normalizes like a JSON date string
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"created_at":{"gte":"2024-01-01"}}}]}
+      gql: |
+        MATCH (u:User) WHERE u.created_at >= date('2024-01-01') RETURN u
+    logical:
+      expect: ["(Filter u.created_at >= '2024-01-01' (NodeScan User AS u))"]

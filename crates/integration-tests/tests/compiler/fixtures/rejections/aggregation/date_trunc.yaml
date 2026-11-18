@@ -1,0 +1,26 @@
+cases:
+  - name: Minute buckets need pinned ids or a selective filter
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"Note"}],"aggregations":[{"count":"u","as":"n"}],"group_by":[{"key":"u.created_at","truncate":"minute"}],"limit":10}
+      gql: |
+        MATCH (u:Note) RETURN date_trunc('minute', u.created_at), count(u) AS n LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: [requires either node_ids, minute]
+
+  - name: Truncating a property that is not a date is rejected
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"Note","node_ids":[1]}],"aggregations":[{"count":"u","as":"n"}],"group_by":[{"key":"u.confidential","truncate":"month"}],"limit":10}
+      gql: |
+        MATCH (u:Note {id: 1}) RETURN date_trunc('month', u.confidential), count(u) AS n LIMIT 10
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains: [requires a Date or DateTime property]
