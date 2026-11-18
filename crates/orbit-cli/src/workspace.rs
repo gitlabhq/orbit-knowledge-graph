@@ -389,7 +389,6 @@ pub(crate) fn repository_at(path: &Path) -> CoreGitaliskRepository {
     CoreGitaliskRepository::new(path.clone(), path)
 }
 
-/// The graph cannot hold a path that is not UTF-8, so such paths give `None`.
 fn repo_relative(root: &Path, path: &Path) -> Option<String> {
     path.strip_prefix(root).ok()?.to_str().map(str::to_string)
 }
