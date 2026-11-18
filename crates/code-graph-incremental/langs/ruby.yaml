@@ -294,8 +294,8 @@ stages:
       # the body is the tail; reads in ensure then see bindings from before the begin
       - match: '(begin $$$BODY $R:rescue $$$ALTS $E:ensure)'
         replace: '(__ssa_branch $E (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm)'
-      - match: '(begin $FIRST $$$BODY $E:ensure)'
-        replace: '(begin $E $FIRST $$$BODY)'
+      - match: '(begin $$$BODY $E:ensure)'
+        replace: '(begin $E $$$BODY)'
       - match: '(rescue_modifier body: $B handler: $H)'
         replace: '(begin $H $B)'
       - match: '(begin $$$BODY $R:rescue $$$ALTS)'
