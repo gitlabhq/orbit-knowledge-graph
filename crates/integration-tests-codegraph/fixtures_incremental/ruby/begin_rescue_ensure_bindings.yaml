@@ -77,6 +77,28 @@ fixtures:
         end
       end
 
+  - path: ensure_rebinding.rb
+    content: |
+      class EnsureRebinding
+        def body_rebinds
+          c = Other.new
+          begin
+            c = Client.new
+          ensure
+            c.close
+          end
+        end
+
+        def ensure_rebinds
+          c = Other.new
+          begin
+            c.get
+          ensure
+            c = Client.new
+          end
+        end
+      end
+
 tests:
   - name: "begin ... rescue ... ensure is typed from the body and rescue arms, not the ensure clause"
     query: |
@@ -90,10 +112,21 @@ tests:
       - { row: { caller: RescueEnsureBindings::run, target: Client::get } }
       - { row: { caller: RescueEnsureBindings::run, target: Other::get } }
 
-  - name: "A read in ensure sees bindings from before the begin, so a body-only local is not resolved"
+  - name: "A read in ensure sees bindings assigned in the body"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'ensure_reads.rb' AND callee.name = 'close'
       RETURN caller.fqn AS caller, callee.fqn AS target
     assert:
-      - { row_count: 0 }
+      - { row_count: 1 }
+      - { row: { caller: EnsureReads::run, target: Client::close } }
+
+  - name: "Statement-position begin ... ensure keeps source order for rebinding"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'ensure_rebinding.rb' AND callee.name IN ['close', 'get']
+      RETURN caller.fqn AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: EnsureRebinding::body_rebinds, target: Client::close } }
+      - { row: { caller: EnsureRebinding::ensure_rebinds, target: Other::get } }

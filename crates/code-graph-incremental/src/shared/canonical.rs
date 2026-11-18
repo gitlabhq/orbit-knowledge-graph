@@ -72,6 +72,8 @@ pub enum Canonical {
     SsaReturn,
     #[strum(serialize = "__ssa_typed")]
     SsaTyped,
+    #[strum(serialize = "__side_effect")]
+    SideEffect,
 
     #[strum(serialize = "__module_export")]
     ModuleExport,
