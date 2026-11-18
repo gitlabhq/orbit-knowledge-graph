@@ -21,8 +21,6 @@ On GitLab Self-Managed, two components next to GitLab Orbit do this:
 
 Raw events never leave your cluster.
 The exporter follows the Service Ping settings of your GitLab instance, so nothing is sent while Service Ping is turned off.
-Both components are optional.
-Without them, GitLab Orbit runs as before and reports no usage.
 
 Prerequisites:
 
@@ -177,7 +175,7 @@ To install the exporter:
 
    - `<gitlab_url>`: The GitLab address the cluster reaches, the same as `gitlab.baseUrl` in `orbit-values.yaml`.
    - `<clickhouse_host>`: The host name of your ClickHouse server.
-   - `<orbit_version>`: The GitLab Orbit version you run. If you set `image.tag` in `orbit-values.yaml`, use that value. Otherwise read the tag from the running webserver:
+   - `<orbit_version>`: The GitLab Orbit version you run, 1.3.0 or later. Use the same value you set as `image.tag` in [Point GitLab Orbit at the Data Insights Platform](#point-gitlab-orbit-at-the-data-insights-platform). To see the version that runs today:
 
      ```shell
      kubectl -n gitlab-orbit get deployment orbit-webserver -o jsonpath='{.spec.template.spec.containers[0].image}'
@@ -194,7 +192,6 @@ To install the exporter:
 Keep `command: dry-run` until [Verify the setup](#verify-the-setup) shows a payload for a closed week with your events.
 Then set `command: run` and upgrade the release.
 From then on the CronJob posts every Monday at 03:00 UTC.
-Until GitLab turns on the `component_usage_data` endpoint on `version.gitlab.com`, each run logs a `404` and keeps the payload pending for up to five weeks.
 
 For ClickHouse over TLS, store a full DSN ending in `?secure=true` in a Secret and set `clickhouse.existingSecret` to its name instead of `clickhouse.host` and `clickhouse.passwordSecret`.
 For every value, see the [exporter chart](https://gitlab.com/gitlab-org/analytics-section/analytics-instrumentation/serviceping-exporter/-/tree/main/charts/serviceping-exporter).
@@ -254,6 +251,7 @@ To verify the setup:
 ## Upgrade
 
 Upgrade the DIP and exporter releases with the `helm upgrade` commands above, and GitLab Orbit as in [Upgrade GitLab Orbit](orbit-setup.md#upgrade-gitlab-orbit).
+When you upgrade GitLab Orbit, set `component.version` in `exporter-values.yaml` to the new version and upgrade the exporter release.
 The DIP migrations run again on every upgrade.
 
 ## Related topics
