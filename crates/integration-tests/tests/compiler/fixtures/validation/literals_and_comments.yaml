@@ -34,7 +34,7 @@ cases:
       json: |
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"a'b\\c\n😀"}}]}
       gql: |
-        MATCH (`u`:User {username: 'a\'b\\c\n😀'}) RETURN u
+        MATCH (`u`:User {username: 'a\'b\\c\n\uD83D\uDE00'}) RETURN u
     logical:
       expect: ["(Filter u.username = 'a\\'b\\\\c\n😀' (NodeScan User AS u))"]
 
