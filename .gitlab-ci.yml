@@ -572,6 +572,8 @@ unused-deps-check:
   needs: []
   script:
     - cargo shear
+    - python3 scripts/checks/check_workspace_deps_test.py
+    - python3 scripts/checks/check_workspace_deps.py --registry-only
 
 fmt-check:
   stage: lint
