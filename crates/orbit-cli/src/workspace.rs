@@ -228,8 +228,7 @@ pub fn open_indexed_without_indexing(
 
 fn locate_graph(repo: Option<PathBuf>, db: &Option<PathBuf>) -> Result<(GitInfo, PathBuf)> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
-    let top_level = git_toplevel(&repo_path)
-        .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
+    let top_level = git_toplevel(&repo_path)?;
     let git = git_info(&top_level)
         .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
     let db_path = resolve_db_path(db.clone(), &git)?;
@@ -814,5 +813,19 @@ mod tests {
     fn git_toplevel_fails_outside_a_repository() {
         let temp = tempfile::TempDir::new().unwrap();
         assert!(git_toplevel(temp.path()).is_err());
+    }
+
+    #[test]
+    fn locate_graph_reports_a_missing_repository_once() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let Err(err) = locate_graph(Some(temp.path().to_path_buf()), &None) else {
+            panic!("locate_graph succeeded outside a repository");
+        };
+        let rendered = format!("{err:#}");
+        assert_eq!(
+            rendered.matches("failed to find git top-level").count(),
+            1,
+            "{rendered}"
+        );
     }
 }
