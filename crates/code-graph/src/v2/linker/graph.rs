@@ -469,10 +469,6 @@ impl CodeGraph {
         self.indexes.drop_construction_indexes();
     }
 
-    /// Add a `File -IMPORTS-> Definition` edge for each link whose anchor
-    /// names a definition in `anchors` (`path -> anchor -> definition`).
-    /// Return every other link as a file-to-file link, to resolve against
-    /// the full repository inventory.
     pub fn link_anchors(
         &mut self,
         sources: Vec<(NodeIndex, Vec<LinkTarget>)>,
@@ -511,8 +507,6 @@ impl CodeGraph {
         file_links
     }
 
-    /// Add a `File -IMPORTS-> File` edge for each link between two files in
-    /// this graph. Call before [`Self::drop_construction_indexes`].
     pub fn link_files(&mut self, mut links: Vec<PendingFileLink>) {
         let Some(file_index) = self.indexes.file_index.as_ref() else {
             return;
@@ -1429,7 +1423,6 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
     }
 }
 
-/// A link from one repository file to another, by relative path.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PendingFileLink {
     pub source: String,

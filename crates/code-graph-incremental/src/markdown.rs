@@ -110,10 +110,6 @@ pub fn parse(source: &str, lang: &Lang, label: &str) -> Tree {
     tree
 }
 
-/// The `Links` edges of every parsed Markdown file: to the heading section
-/// its anchor names, else to the linked file. A link to a path with no tree
-/// adds no edge. Recomputed over all trees on each run, so a link follows its
-/// target as files come and go.
 pub fn link_edges(trees: &[Tree<Compact>], lang: &Lang) -> Vec<Edge> {
     let links: Vec<_> = trees
         .iter()

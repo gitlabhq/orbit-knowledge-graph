@@ -75,9 +75,8 @@ pub struct Section {
     /// The section's FQN segment: the escaped name, suffixed `-N` when a
     /// sibling already uses it.
     pub segment: String,
-    /// The URL fragment GitLab renders for the heading. Headings in block
-    /// quotes and list items are not sections but still take part in the
-    /// duplicate suffixes, so anchors are unique across the whole document.
+    /// GitLab's rendered fragment, whose duplicate suffixes also count
+    /// headings in block quotes and list items.
     pub anchor: String,
     pub parent: Option<usize>,
     pub start: usize,
@@ -297,9 +296,6 @@ fn is_null(text: &str, style: ScalarStyle) -> bool {
     style == ScalarStyle::Plain && matches!(text, "" | "~" | "null" | "Null" | "NULL")
 }
 
-/// Every heading's anchor, in document order, as GitLab's renderer (comrak's
-/// header IDs) assigns them; returns those of top-level headings, plus the
-/// document's links and images.
 fn anchors_and_links<'a>(root: &'a AstNode<'a>) -> (Vec<String>, Vec<Link>) {
     let mut anchorizer = UniqueAnchors::default();
     let mut top_level_anchors = Vec::new();
@@ -333,9 +329,8 @@ fn anchors_and_links<'a>(root: &'a AstNode<'a>) -> (Vec<String>, Vec<Link>) {
     (top_level_anchors, links)
 }
 
-/// Same anchors as comrak's `Anchorizer`, which probes `id`, `id-1`, `id-2`, ...
-/// from zero on every call and so is quadratic in repeated headings. Taken
-/// anchors are never released, so each base resumes after its last suffix.
+/// Comrak's `Anchorizer` anchors in linear time, resuming each base after its
+/// last suffix instead of probing from zero.
 #[derive(Default)]
 struct UniqueAnchors {
     taken: FxHashSet<String>,
@@ -363,12 +358,10 @@ impl UniqueAnchors {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Link {
-    /// The destination as written, Markdown escapes resolved.
     pub url: String,
     pub image: bool,
 }
 
-/// A repository file a link points to, and the heading anchor it names.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LinkTarget {
     pub path: String,
@@ -376,11 +369,6 @@ pub struct LinkTarget {
 }
 
 impl Link {
-    /// Where the link points from the file at `source_path`, resolved
-    /// lexically: relative to the file's directory, or to the repository
-    /// root when it starts with `/`. `None` for an external, protocol-relative
-    /// or same-document link, or one that climbs above the root. An image
-    /// targets the file only, never a heading.
     pub fn target(&self, source_path: &str) -> Option<LinkTarget> {
         let url = self.url.trim();
         if url.starts_with("//") || has_scheme(url) {
@@ -688,8 +676,7 @@ mod tests {
         sections(source).into_iter().map(|s| s.anchor).collect()
     }
 
-    /// Expected anchors are what GitLab's renderer (`POST /api/v4/markdown`,
-    /// GitLab 19.6) returned for the same document.
+    /// Expected anchors come from GitLab 19.6's renderer (`POST /api/v4/markdown`).
     #[test]
     fn anchors_match_gitlab_including_quoted_and_listed_headings() {
         let source = "# Edge cases\n\n> ## Install\n\n- ## Install\n\n## Install\n\n\

@@ -270,8 +270,6 @@ pub struct PipelineContext {
     pub faults: std::sync::Mutex<Vec<crate::v2::error::FaultedFile>>,
     pub file_timings: std::sync::Mutex<Vec<FileTimingEntry>>,
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
-    /// File-to-file links from parsed files, resolved against the full
-    /// repository inventory in the structural graph.
     pub file_links: std::sync::Mutex<Vec<crate::v2::linker::graph::PendingFileLink>>,
 }
 
