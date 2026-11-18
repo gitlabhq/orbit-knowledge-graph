@@ -1,0 +1,21 @@
+name: A variable-hop union projects edge tags and filters the anchor by its tags
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"WorkItem","filters":{"state":{"eq":"opened"}},"columns":["iid"]},{"id":"b","entity":"WorkItem","columns":["iid"]}],"relationships":[{"type":"RELATED_TO","from":"a","to":"b","hops":[1,2]}],"limit":50}
+  gql: |
+    MATCH (a:WorkItem {state: 'opened'})-[:RELATED_TO*1..2]->(b:WorkItem) RETURN a.iid, b.iid LIMIT 50
+
+logical:
+  expect: ["(EdgeScan RELATED_TO a->b AS e0 HOPS 1..2)"]
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Union ALL AS _orbit_edge_0 (_) (_))
+        - (Project _orbit_e1.source_tags AS source_tags, _orbit_e1.target_tags AS target_tags, 1 AS _orbit_depth, ... (Filter _orbit_e1._deleted = false, _orbit_e1.source_tags HAS ANY ['state:opened'] (_)))
+        - (Project _orbit_depth_1.source_tags AS source_tags, _orbit_e2.target_tags AS target_tags, 2 AS _orbit_depth, ... (_))
+    emitted:
+      expect:
+        - (Filter _orbit_e1._deleted = false, ArrayContains(_orbit_e1.source_tags, 'state:opened') (_))

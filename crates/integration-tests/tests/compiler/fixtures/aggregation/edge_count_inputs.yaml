@@ -1,0 +1,32 @@
+cases:
+  - name: A single-hop count with a filtered target keeps a plain latest-row edge read
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[490855697]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}
+      gql: |
+        MATCH (mr:MergeRequest {id: 490855697})-[:HAS_LABEL]->(label:Label {title: 'group::source code'}) RETURN count(mr) AS n LIMIT 1
+    logical:
+      expect: ["(Aggregate COUNT(mr) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Project (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_edge) AS _orbit_edge_0))))
+          occurrences:
+            - pattern: (Aggregate ... (...))
+              count: 1
+
+  - name: Counting a property of a target the plan does not read counts edge rows
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"wi","entity":"WorkItem","filters":{"state":"closed"}},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"wi","to":"p"},{"type":"CLOSED","from":"u","to":"wi"}],"group_by":["p"],"aggregations":[{"count":"u.id","as":"closers_count"}],"limit":20}
+      gql: |
+        MATCH (u:User)-[:CLOSED]->(wi:WorkItem {state: 'closed'})-[:IN_PROJECT]->(p:Project) RETURN p, count(u.id) AS closers_count LIMIT 20
+    logical:
+      expect: ["(Aggregate group p AS p, COUNT(u.id) AS closers_count (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Aggregate COUNT() AS closers_count, ... (_))"]
+        emitted:
+          expect: ["(Aggregate COUNT() AS closers_count, ... (_))"]

@@ -1,0 +1,30 @@
+logical:
+  exact: |
+    (Limit 30
+      (Input neighbors
+        (Project w.id, w.iid, w.title, w.state, w.work_item_type
+          (Filter w.id IN [7]
+            (NodeScan WorkItem AS w)))))
+
+physical:
+  clickhouse:
+    planned:
+      exact: |
+        (Neighbors center=w direction=both directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=false relationships=[ASSIGNED, AUTHORED, CLOSED, CLOSES, CONTAINS, HAS_LABEL, HAS_NOTE, IN_GROUP, IN_MILESTONE, IN_PROJECT, MENTIONS, RELATED_TO, REOPENED] incoming_scoped=[] incoming_cross_scope=[ASSIGNED, AUTHORED, CLOSED, CLOSES, CONTAINS, MENTIONS, RELATED_TO, REOPENED]
+          (Filter w.id = 7, w._deleted = false
+            (NodeScan WorkItem AS w)))
+
+cases:
+  - name: An id equality filter on a neighbors center compiles like a pinned id
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","filters":{"id":7}}],"neighbors":{"direction":"both"},"limit":30}
+      gql: |
+        MATCH (w:WorkItem)-[r]-(m) WHERE w.id = 7 RETURN w, r, m LIMIT 30
+
+  - name: A pinned neighbors center
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","node_ids":[7]}],"neighbors":{"direction":"both"},"limit":30}
+      gql: |
+        MATCH (w:WorkItem {id: 7})-[r]-(m) RETURN w, r, m LIMIT 30
