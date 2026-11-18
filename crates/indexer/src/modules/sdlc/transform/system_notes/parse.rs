@@ -127,7 +127,7 @@ impl Action {
 //   path segment matches `[a-zA-Z0-9_][a-zA-Z0-9_\-\.]{0,254}`.
 // * `Issue.reference_pattern` is `(<project>?)#<digits>`.
 // * `MergeRequest.reference_pattern` is `(<project>?)!<digits>`.
-// * `Commit.reference_pattern` is `(<project>@)?<sha 7..40>`.
+// * `Commit.reference_pattern` is `(<project>@)?<sha 7..64>`.
 //
 // We bound the namespace depth at 20 segments to match
 // `Namespace::NUMBER_OF_ANCESTORS_ALLOWED`. The IID is bounded at 20 digits to
@@ -600,7 +600,15 @@ mod tests {
     }
 
     #[test]
-    fn cross_reference_rejects_hex_run_longer_than_sha256() {
+    fn cross_reference_cross_project_commit_with_full_sha256() {
+        let sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let body = format!("mentioned in gitlab-org/gitlab@{sha}");
+        let refs = extract(Action::CrossReference, &body);
+        assert_eq!(refs, vec![commit_ref(Some("gitlab-org/gitlab"), sha)]);
+    }
+
+    #[test]
+    fn body_with_too_long_sha_is_rejected() {
         let body = format!("mentioned in {}", "a".repeat(65));
         let refs = extract(Action::CrossReference, &body);
         assert!(refs.is_empty(), "got refs: {refs:?}");
