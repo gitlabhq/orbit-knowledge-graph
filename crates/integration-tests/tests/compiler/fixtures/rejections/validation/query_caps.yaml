@@ -10,6 +10,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
+          contains: { json: ["value is less than the minimum of 1 at /limit"], gql: ["limit must be between 1 and 1000"] }
 
   - name: LIMIT 1001 is rejected by both frontends
     query:
@@ -22,6 +23,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
+          contains: { json: ["value is greater than the maximum of 1000 at /limit"], gql: ["limit must be between 1 and 1000"] }
 
   - name: Four hops are rejected by both frontends
     query:
@@ -34,6 +36,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
+          contains: { json: ["value is greater than the maximum of 3 at /relationships/0/hops/1"], gql: ["ordered hop bounds between 1 and 3"] }
 
   - name: A 65-character variable name is rejected by both frontends
     query:
@@ -46,6 +49,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: gql_parse }
           reason: schema
+          contains: { json: ["value is longer than 64 characters at /nodes/0/id"], gql: ["invalid identifier"] }
 
   - name: A 64-character variable name is accepted by both frontends
     query:
@@ -69,6 +73,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: gql_parse }
           reason: schema
+          contains: { json: ["invalid value at /nodes/0/filters/username"], gql: ["string literal must not exceed 1024 characters"] }
 
   - name: A shortest path of depth 0 is rejected by both frontends
     query:
@@ -81,6 +86,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: gql_parse }
           reason: schema
+          contains: { json: ["value is less than the minimum of 1 at /path/max_depth"], gql: ["hop bounds must be positive and ordered"] }
 
   - name: A shortest path of depth 1 is accepted by both frontends
     query:
@@ -115,6 +121,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
+          contains: { json: ["value is greater than the maximum of 3 at /path/max_depth"], gql: ["path max_depth must be between 1 and 3"] }
 
   - name: A shortest path of depth 4294967295 is rejected by both frontends
     query:
@@ -127,6 +134,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: gql_parse }
           reason: schema
+          contains: { json: ["value is greater than the maximum of 3 at /path/max_depth"], gql: ["a hop count from 1 to 3"] }
 
   - name: Outgoing neighbors with 1 relationship type are accepted by both frontends
     query:
@@ -161,6 +169,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
+          contains: { json: ["value has more than 10 items at /neighbors/rel_types"], gql: ["neighbors rel_types count (11) must not exceed 10"] }
 
   - name: Incoming neighbors with 1 relationship type are accepted by both frontends
     query:
@@ -195,6 +204,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
+          contains: { json: ["value has more than 10 items at /neighbors/rel_types"], gql: ["neighbors rel_types count (11) must not exceed 10"] }
 
   - name: Both neighbors with 1 relationship type are accepted by both frontends
     query:
@@ -229,6 +239,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
+          contains: { json: ["value has more than 10 items at /neighbors/rel_types"], gql: ["neighbors rel_types count (11) must not exceed 10"] }
 
   - name: A chain of five nodes is accepted by both frontends
     query:
@@ -252,6 +263,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: gql_parse }
           reason: schema
+          contains: { json: ["value has more than 5 items at /nodes"], gql: ["a query declares at most 5 nodes"] }
 
   - name: 500 pinned ids are accepted by both frontends
     query:
@@ -275,6 +287,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
+          contains: { json: ["value has more than 500 items at /nodes/0/node_ids"], gql: ['node_ids count (501) for node "u" must not exceed 500'] }
 
   - name: Ten conditions on one property are accepted by both frontends
     query:
@@ -298,6 +311,7 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
+          contains: { json: ["invalid value at /nodes/0/filters/username"], gql: ['filter on "username" needs between 1 and 10 predicates'] }
 
   - name: Ten relationship types are accepted by both frontends
     query:
@@ -321,3 +335,4 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
+          contains: { json: ["invalid value at /relationships/0/type"], gql: ["relationship type count (11) must not exceed 10"] }
