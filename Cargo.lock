@@ -3598,7 +3598,6 @@ dependencies = [
  "serde",
  "serde_json",
  "siphon-proto",
- "sqlparser",
  "tar",
  "tempfile",
  "testcontainers",

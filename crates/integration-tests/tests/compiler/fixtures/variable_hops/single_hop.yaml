@@ -1,0 +1,16 @@
+name: A one-to-one hop range plans a plain relationship without depth arms
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"n","entity":"Note","columns":["confidential"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","hops":[1,1]}],"limit":25}
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED*1..1]->(n:Note) RETURN u.username, n.confidential LIMIT 25
+
+logical:
+  expect: ["(EdgeScan AUTHORED u->n AS e0)"]
+
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter n.author_id = 1, ... (_))"]
+      reject: ["(Union ... (...))", "(Project 1 AS _orbit_depth, ... (_))"]
