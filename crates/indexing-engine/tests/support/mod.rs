@@ -1,338 +1,252 @@
 #![allow(dead_code)]
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::marker::PhantomData;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use indexing_engine::prelude::*;
-use indexing_engine::testkit::Testkit;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
-
-pub const BIG: Lane = Lane::new("big");
-pub const BIG_DOC_BYTES: u64 = 1_000;
-pub const BIG_SHELF_DOCS: usize = 1;
-pub const SWEEP_PAGE: usize = 2;
 
 pub const SECOND: Duration = Duration::from_secs(1);
 pub const MINUTE: Duration = Duration::from_secs(60);
 pub const HOUR: Duration = Duration::from_secs(60 * 60);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Doc {
-    pub tenant: Tenant,
-    pub id: u64,
-    pub size: u64,
-}
+pub const BIG: Lane = Lane::new("big");
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Shelf {
-    pub tenant: Tenant,
-    pub id: u64,
-    pub docs: Vec<Doc>,
-}
+pub type TestWorker = ScriptedWorker<false>;
+pub type ExclusiveWorker = ScriptedWorker<true>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Indexed {
-    pub doc: Doc,
-}
+pub type TestPlanner = TaskPlanner<TestWorker>;
+pub type ExclusivePlanner = TaskPlanner<ExclusiveWorker>;
 
-pub enum Step {
-    Done {
-        rows: u64,
-    },
+pub enum Run {
+    Done,
+    DoneWithRows(&'static str, u64),
     NoChange,
-    Fail,
-    Permanent,
-    Defer(Duration),
-    Throttle(Duration),
-    Incompatible,
+    Spawn(Vec<u64>),
+    Error(TaskError),
     Sleep(Duration),
-    Pool {
-        pool: &'static str,
-        during: Duration,
-    },
+    HoldPool(&'static str, Duration),
 }
 
 #[derive(Default)]
-pub struct Library {
-    docs: Arc<Vec<Doc>>,
-    script: Arc<Script>,
-    board: StatusBoard,
+pub struct ScriptedWorker<const IS_EXCLUSIVE: bool> {
+    runs: Mutex<HashMap<u64, VecDeque<Run>>>,
 }
+
+pub struct TaskPlanner<W> {
+    keys: Vec<u64>,
+    lanes: HashMap<u64, Lane>,
+    page_size: usize,
+    worker: PhantomData<fn() -> W>,
+}
+
+pub struct DownstreamWorker;
 
 #[derive(Default)]
-struct Script {
-    steps: Mutex<HashMap<u64, VecDeque<Step>>>,
+pub struct DownstreamPlanner {
+    lane: Option<Lane>,
 }
 
-#[derive(Clone, Default)]
-struct StatusBoard {
-    indexed: Arc<Mutex<Vec<u64>>>,
-}
-
-pub struct DocIndex {
-    script: Arc<Script>,
-}
-
-pub struct ShelfSplit;
-
-pub struct SummaryBuild;
-
-pub struct DocPlanner {
-    docs: Arc<Vec<Doc>>,
-}
-
-pub struct ShelfPlanner;
-
-pub struct SummaryPlanner;
-
-pub struct DocStatus {
-    docs: Arc<Vec<Doc>>,
-    board: StatusBoard,
-}
-
-impl Library {
-    pub fn with_docs(mut self, docs: impl IntoIterator<Item = Doc>) -> Self {
-        self.docs = Arc::new(docs.into_iter().collect());
-        self
-    }
-
-    pub fn with_steps(self, doc: u64, steps: impl IntoIterator<Item = Step>) -> Self {
-        self.script
-            .steps
-            .lock()
-            .entry(doc)
-            .or_default()
-            .extend(steps);
-        self
-    }
-
-    pub fn kit(&self) -> Testkit {
-        Testkit::new().module(|engine| self.register_docs(engine))
-    }
-
-    pub fn register_docs(&self, engine: &mut EngineBuilder) {
-        engine
-            .worker(DocIndex {
-                script: Arc::clone(&self.script),
-            })
-            .planner(DocPlanner {
-                docs: Arc::clone(&self.docs),
-            })
-            .reconciler(DocStatus {
-                docs: Arc::clone(&self.docs),
-                board: self.board.clone(),
-            })
-            .pool("parse");
-    }
-
-    pub fn list_indexed_docs(&self) -> Vec<u64> {
-        self.board.indexed.lock().clone()
-    }
-}
-
-pub fn register_shelves(engine: &mut EngineBuilder) {
-    engine.worker(ShelfSplit).planner(ShelfPlanner);
-}
-
-pub fn register_summaries(engine: &mut EngineBuilder) {
-    engine.worker(SummaryBuild).planner(SummaryPlanner);
+pub struct ReplanReconciler {
+    keys: Vec<u64>,
 }
 
 pub fn tenant() -> Tenant {
     Tenant::new("tenant-1")
 }
 
-pub fn doc(id: u64) -> Doc {
-    Doc {
-        tenant: tenant(),
-        id,
-        size: 10,
-    }
+pub fn task_key(task: u64) -> Key {
+    Key::new("task", task)
 }
 
-pub fn big_doc(id: u64) -> Doc {
-    Doc {
-        size: BIG_DOC_BYTES + 1,
-        ..doc(id)
-    }
+pub fn events(tasks: impl IntoIterator<Item = u64>) -> Fired {
+    let tasks: Vec<u64> = tasks.into_iter().collect();
+    Fired::Events(EventBatch::encode("tasks.changed", &tasks).unwrap())
 }
 
-pub fn doc_key(id: u64) -> Key {
-    DocIndex::key(&doc(id))
-}
-
-pub fn shelf(id: u64, docs: impl IntoIterator<Item = Doc>) -> Shelf {
-    Shelf {
-        tenant: tenant(),
-        id,
-        docs: docs.into_iter().collect(),
-    }
-}
-
-pub fn changed(docs: impl IntoIterator<Item = Doc>) -> Fired {
-    let docs: Vec<Doc> = docs.into_iter().collect();
-    Fired::Events(EventBatch::encode("docs.changed", &docs).unwrap())
-}
-
-pub fn shelved(shelf: &Shelf) -> Fired {
-    Fired::Events(EventBatch::encode("shelves.changed", std::slice::from_ref(shelf)).unwrap())
-}
-
-pub fn manual(keys: Vec<Key>) -> Fired {
+pub fn manual(tasks: impl IntoIterator<Item = u64>) -> Fired {
     Fired::Manual {
         tenant: tenant(),
-        keys,
+        keys: tasks.into_iter().map(task_key).collect(),
     }
 }
 
-pub fn sweep(cursor: Option<&str>) -> Fired {
+pub fn sweep() -> Fired {
     Fired::Sweep {
-        cursor: cursor.map(str::to_owned),
+        cursor: None,
         tag: "rebuild".to_owned(),
     }
 }
 
-pub fn hold(pool: &'static str, during: Duration) -> Step {
-    Step::Pool { pool, during }
+impl<const IS_EXCLUSIVE: bool> ScriptedWorker<IS_EXCLUSIVE> {
+    pub fn runs(self, task: u64, runs: impl IntoIterator<Item = Run>) -> Self {
+        self.runs.lock().entry(task).or_default().extend(runs);
+        self
+    }
+
+    fn take_next_run(&self, task: u64) -> Run {
+        self.runs
+            .lock()
+            .get_mut(&task)
+            .and_then(VecDeque::pop_front)
+            .unwrap_or(Run::Done)
+    }
 }
 
-impl Script {
-    fn take_next_step(&self, doc: u64) -> Step {
-        self.steps
-            .lock()
-            .get_mut(&doc)
-            .and_then(VecDeque::pop_front)
-            .unwrap_or(Step::Done { rows: 1 })
+impl<W> Default for TaskPlanner<W> {
+    fn default() -> Self {
+        Self {
+            keys: Vec::new(),
+            lanes: HashMap::new(),
+            page_size: usize::MAX,
+            worker: PhantomData,
+        }
+    }
+}
+
+impl<W> TaskPlanner<W> {
+    pub fn with_keys(mut self, tasks: impl IntoIterator<Item = u64>) -> Self {
+        self.keys.extend(tasks);
+        self
+    }
+
+    pub fn with_lane(mut self, task: u64, lane: Lane) -> Self {
+        self.lanes.insert(task, lane);
+        self
+    }
+
+    pub fn with_page_size(mut self, page_size: usize) -> Self {
+        self.page_size = page_size;
+        self
+    }
+
+    fn read_page(&self, cursor: Option<String>) -> Result<(Vec<u64>, Option<String>), PlanError> {
+        let start: usize = cursor.as_deref().unwrap_or("0").parse()?;
+        let end = start.saturating_add(self.page_size).min(self.keys.len());
+        let next_page = (end < self.keys.len()).then(|| end.to_string());
+        Ok((self.keys[start..end].to_vec(), next_page))
+    }
+}
+
+impl DownstreamPlanner {
+    pub fn in_lane(lane: Lane) -> Self {
+        Self { lane: Some(lane) }
+    }
+}
+
+impl ReplanReconciler {
+    pub fn for_keys(tasks: impl IntoIterator<Item = u64>) -> Self {
+        Self {
+            keys: tasks.into_iter().collect(),
+        }
     }
 }
 
 #[async_trait]
-impl Worker for DocIndex {
-    const NAME: &'static str = "doc.index";
-    const EXCLUSIVE: bool = true;
-    type Input = Doc;
-    type Output = Indexed;
+impl<const IS_EXCLUSIVE: bool> Worker for ScriptedWorker<IS_EXCLUSIVE> {
+    const NAME: &'static str = if IS_EXCLUSIVE {
+        "exclusive.worker"
+    } else {
+        "test.worker"
+    };
+    const EXCLUSIVE: bool = IS_EXCLUSIVE;
+    type Input = u64;
+    type Output = u64;
 
-    fn key(doc: &Doc) -> Key {
-        Key::new("doc", doc.id)
+    fn key(task: &u64) -> Key {
+        task_key(*task)
     }
 
-    async fn run(&self, ctx: &TaskContext, doc: Doc) -> Result<Outcome<Indexed>, TaskError> {
-        match self.script.take_next_step(doc.id) {
-            Step::Done { rows } => Ok(Outcome::done(Indexed { doc }).rows("pages", rows)),
-            Step::NoChange => Ok(Outcome::no_change()),
-            Step::Fail => Err(anyhow::anyhow!("the store did not answer").into()),
-            Step::Permanent => Err(TaskError::permanent(anyhow::anyhow!("the doc is corrupt"))),
-            Step::Defer(after) => Err(TaskError::defer(after, "not_ready")),
-            Step::Throttle(after) => Err(TaskError::throttle(after, "store_busy")),
-            Step::Incompatible => Err(TaskError::incompatible("new_doc_format")),
-            Step::Sleep(duration) => {
+    async fn run(&self, ctx: &TaskContext, task: u64) -> Result<Outcome<u64>, TaskError> {
+        match self.take_next_run(task) {
+            Run::Done => Ok(Outcome::done(task)),
+            Run::DoneWithRows(label, count) => Ok(Outcome::done(task).rows(label, count)),
+            Run::NoChange => Ok(Outcome::no_change()),
+            Run::Spawn(children) => Ok(Outcome::done(task).spawn::<Self>(children)),
+            Run::Error(error) => Err(error),
+            Run::Sleep(duration) => {
                 tokio::time::sleep(duration).await;
-                Ok(Outcome::done(Indexed { doc }))
+                Ok(Outcome::done(task))
             }
-            Step::Pool { pool, during } => {
+            Run::HoldPool(pool, duration) => {
                 let _permit = ctx.pool(pool).await?;
-                tokio::time::sleep(during).await;
-                Ok(Outcome::done(Indexed { doc }))
+                tokio::time::sleep(duration).await;
+                Ok(Outcome::done(task))
             }
         }
     }
 }
 
 #[async_trait]
-impl Worker for ShelfSplit {
-    const NAME: &'static str = "shelf.split";
-    type Input = Shelf;
-    type Output = ();
-
-    fn key(shelf: &Shelf) -> Key {
-        Key::new("shelf", shelf.id)
-    }
-
-    async fn run(&self, _: &TaskContext, shelf: Shelf) -> Result<Outcome<()>, TaskError> {
-        Ok(Outcome::done(()).spawn::<DocIndex>(shelf.docs))
-    }
-}
-
-#[async_trait]
-impl Worker for SummaryBuild {
-    const NAME: &'static str = "summary.build";
-    type Input = Doc;
-    type Output = ();
-
-    fn key(doc: &Doc) -> Key {
-        Key::new("summary", doc.id)
-    }
-
-    async fn run(&self, _: &TaskContext, _: Doc) -> Result<Outcome<()>, TaskError> {
-        Ok(Outcome::done(()))
-    }
-}
-
-#[async_trait]
-impl Planner for DocPlanner {
-    const NAME: &'static str = "doc.planner";
+impl<W: Worker<Input = u64>> Planner for TaskPlanner<W> {
+    const NAME: &'static str = "test.planner";
 
     fn triggers() -> Vec<Trigger> {
         vec![Trigger::Stream {
-            subjects: &["docs.changed"],
+            subjects: &["tasks.changed"],
             batch: 500,
             linger: Duration::from_secs(2),
         }]
     }
 
     async fn plan(&self, ctx: &mut PlanContext, fired: Fired) -> Result<(), PlanError> {
-        let docs: Vec<Doc> = match fired {
+        let tasks: Vec<u64> = match fired {
             Fired::Events(batch) => batch.decode()?,
             Fired::Manual { keys, .. } => self
-                .docs
+                .keys
                 .iter()
-                .filter(|doc| keys.contains(&DocIndex::key(doc)))
-                .cloned()
+                .copied()
+                .filter(|task| keys.contains(&W::key(task)))
                 .collect(),
             Fired::Sweep { cursor, .. } => {
-                let start: usize = cursor.as_deref().unwrap_or("0").parse()?;
-                let end = (start + SWEEP_PAGE).min(self.docs.len());
-                ctx.continue_from((end < self.docs.len()).then(|| end.to_string()));
-                self.docs[start..end].to_vec()
+                let (page, next_page) = self.read_page(cursor)?;
+                ctx.continue_from(next_page);
+                page
             }
             Fired::Cron => return Ok(()),
         };
-        for doc in docs {
-            let lane = if doc.size > BIG_DOC_BYTES {
-                BIG
-            } else {
-                Lane::DEFAULT
-            };
-            ctx.submit::<DocIndex>(doc.tenant.clone(), doc).lane(lane);
+        for task in tasks {
+            let submit = ctx.submit::<W>(tenant(), task);
+            if let Some(lane) = self.lanes.get(&task) {
+                submit.lane(lane.clone());
+            }
         }
         Ok(())
     }
 }
 
 #[async_trait]
-impl Planner for ShelfPlanner {
-    const NAME: &'static str = "shelf.planner";
+impl Worker for DownstreamWorker {
+    const NAME: &'static str = "downstream.worker";
+    type Input = u64;
+    type Output = ();
+
+    fn key(task: &u64) -> Key {
+        task_key(*task)
+    }
+
+    async fn run(&self, _: &TaskContext, _: u64) -> Result<Outcome<()>, TaskError> {
+        Ok(Outcome::done(()))
+    }
+}
+
+#[async_trait]
+impl Planner for DownstreamPlanner {
+    const NAME: &'static str = "downstream.planner";
 
     fn triggers() -> Vec<Trigger> {
-        vec![Trigger::Stream {
-            subjects: &["shelves.changed"],
-            batch: 100,
-            linger: Duration::from_secs(2),
-        }]
+        vec![Trigger::done::<TestWorker>()]
     }
 
     async fn plan(&self, ctx: &mut PlanContext, fired: Fired) -> Result<(), PlanError> {
         match fired {
             Fired::Events(batch) => {
-                for shelf in batch.decode::<Shelf>()? {
-                    let big = shelf.docs.len() > BIG_SHELF_DOCS;
-                    let submit = ctx.submit::<ShelfSplit>(shelf.tenant.clone(), shelf);
-                    if big {
-                        submit.lane(BIG);
+                for task in batch.outputs::<TestWorker>()? {
+                    let submit = ctx.submit::<DownstreamWorker>(tenant(), task);
+                    if let Some(lane) = &self.lane {
+                        submit.lane(lane.clone());
                     }
                 }
             }
@@ -343,39 +257,16 @@ impl Planner for ShelfPlanner {
 }
 
 #[async_trait]
-impl Planner for SummaryPlanner {
-    const NAME: &'static str = "summary.planner";
-
-    fn triggers() -> Vec<Trigger> {
-        vec![Trigger::done::<DocIndex>()]
-    }
-
-    async fn plan(&self, ctx: &mut PlanContext, fired: Fired) -> Result<(), PlanError> {
-        match fired {
-            Fired::Events(batch) => {
-                for indexed in batch.outputs::<DocIndex>()? {
-                    ctx.submit::<SummaryBuild>(indexed.doc.tenant.clone(), indexed.doc);
-                }
-            }
-            Fired::Manual { .. } | Fired::Sweep { .. } | Fired::Cron => {}
-        }
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Reconciler for DocStatus {
-    const NAME: &'static str = "doc.status";
-    const WRITES: &'static [&'static str] = &["doc_status"];
+impl Reconciler for ReplanReconciler {
+    const NAME: &'static str = "replan.reconciler";
+    const WRITES: &'static [&'static str] = &[];
     const EVERY: Duration = Duration::from_secs(60);
 
     async fn reconcile(&self, ctx: &ReconcileContext) -> Result<(), ReconcileError> {
-        for doc in self.docs.iter() {
-            let key = DocIndex::key(doc);
-            match ctx.last_job::<DocIndex>(&doc.tenant, &key).await? {
-                Some(job) if job.is_done() => self.board.indexed.lock().push(doc.id),
-                Some(_) => {}
-                None => ctx.replan::<DocPlanner>(&doc.tenant, vec![key]).await?,
+        for task in &self.keys {
+            let key = task_key(*task);
+            if ctx.last_job::<TestWorker>(&tenant(), &key).await?.is_none() {
+                ctx.replan::<TestPlanner>(&tenant(), vec![key]).await?;
             }
         }
         Ok(())

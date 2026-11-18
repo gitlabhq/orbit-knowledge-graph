@@ -1,36 +1,42 @@
 mod support;
 
-use support::{Doc, DocIndex, DocPlanner, Library, big_doc, doc, sweep};
+use indexing_engine::testkit::Testkit;
+use support::{TestPlanner, TestWorker, sweep};
 
 #[tokio::test]
 async fn a_sweep_plans_one_page_and_keeps_the_cursor_of_the_next_page() {
-    let kit = Library::default().with_docs([doc(1), doc(2), doc(3)]).kit();
+    let kit = Testkit::new().module(|engine| {
+        engine.worker(TestWorker::default()).planner(
+            TestPlanner::default()
+                .with_keys([1, 2, 3])
+                .with_page_size(2),
+        );
+    });
 
-    let planned = kit.plan::<DocPlanner>(sweep(None)).await;
+    let planned = kit.plan::<TestPlanner>(sweep()).await;
 
-    let ids: Vec<u64> = planned
-        .inputs::<DocIndex>()
-        .iter()
-        .map(|doc: &Doc| doc.id)
-        .collect();
-    assert_eq!(ids, [1, 2]);
+    assert_eq!(planned.inputs::<TestWorker>(), [1, 2]);
     assert_eq!(planned.next_page(), Some("2"));
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_campaign_plans_every_page_of_its_planner_in_the_backfill_lane() {
-    let kit = Library::default()
-        .with_docs([doc(1), doc(2), big_doc(3)])
-        .kit();
+    let kit = Testkit::new().module(|engine| {
+        engine.worker(TestWorker::default()).planner(
+            TestPlanner::default()
+                .with_keys([1, 2, 3])
+                .with_page_size(2),
+        );
+    });
 
-    kit.campaign::<DocPlanner>("rebuild").await;
+    kit.campaign::<TestPlanner>("rebuild").await;
 
     assert_eq!(
         kit.timeline(),
         [
-            "0s doc.index/backfill doc:1 submitted",
-            "0s doc.index/backfill doc:2 submitted",
-            "0s doc.index/backfill doc:3 submitted",
+            "0s test.worker/backfill task:1 submitted",
+            "0s test.worker/backfill task:2 submitted",
+            "0s test.worker/backfill task:3 submitted",
         ]
     );
 }
