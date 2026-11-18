@@ -1,19 +1,11 @@
 name: query_graph_gql
-version: 1.9.0
+version: 1.8.0
 summary: >-
   Traverse GitLab relationships and code structure with openCypher 9-based syntax:
   callers, imports, blast radius, joins across entity types, grouped counts.
 description: >-
-  Use for questions spanning many GitLab objects or following relationships:
-  counts, rankings, group-bys, joins across work items, merge requests,
-  users, labels, pipelines, and projects.
-  Also use it for code structure: where
-  a symbol is defined, who calls it, what imports it. One query replaces many list or
-  search calls made in a loop. To fetch one known object by ID or IID, use its
-  get_ tool instead. Use it even when the user does not mention Orbit or the
-  graph.
   Read-only openCypher 9-based syntax (MATCH ... RETURN) over the GitLab
-  Knowledge Graph.
+  Knowledge Graph: relationships, blast radius, joins, grouped counts.
   Schema: CALL db.schema() or CALL db.schema('Node').
   Filter at least one node by ID or literal property, within the project
   or group asked about; LIMIT isn't a filter.

@@ -256,6 +256,22 @@ impl CommandRegistry {
         commands
     }
 
+    /// Commands as listed to MCP clients: the GQL `query_graph` also carries
+    /// the when-to-use routing lead, which the CLI and inline catalog omit.
+    pub fn agent_commands_for(frontend: Frontend) -> Vec<ToolDefinition> {
+        let mut commands = Self::commands_for(frontend);
+        if frontend == Frontend::Gql
+            && let Some(query) = commands.iter_mut().find(|c| c.name == "query_graph")
+        {
+            query.description = format!(
+                "{} {}",
+                prompt("tools/query_graph_gql_routing").description(),
+                query.description
+            );
+        }
+        commands
+    }
+
     fn query_graph(frontend: Frontend) -> ToolDefinition {
         let prompt_key = match frontend {
             Frontend::JsonDsl => "tools/query_graph",
@@ -409,7 +425,7 @@ mod tests {
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {
             for definition in ToolRegistry::tools_for(frontend)
                 .into_iter()
-                .chain(CommandRegistry::commands_for(frontend))
+                .chain(CommandRegistry::agent_commands_for(frontend))
             {
                 assert!(
                     !definition.description.is_empty(),
@@ -418,7 +434,7 @@ mod tests {
                 );
                 if definition.name != "list_commands" {
                     let budget = match (frontend, definition.name.as_str()) {
-                        (Frontend::Gql, "query_graph") => 1100,
+                        (Frontend::Gql, "query_graph") => 1150,
                         _ => 400,
                     };
                     assert!(
