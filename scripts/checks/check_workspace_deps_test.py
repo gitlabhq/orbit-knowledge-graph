@@ -87,6 +87,11 @@ class CheckWorkspaceDepsTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_reports_the_line_of_a_dotted_key_dependency(self):
+        result = run_check('[dependencies]\nserde = { workspace = true }\nzstd.version = "0.14"\n')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Cargo.toml:3:", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

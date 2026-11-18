@@ -42,7 +42,7 @@ def line_of(text, table, name):
             if current == f"{wanted}.{normalize(name)}":
                 return number
             continue
-        if current == wanted and re.match(rf"^\s*[\"']?{re.escape(name)}[\"']?\s*=", line):
+        if current == wanted and re.match(rf"^\s*[\"']?{re.escape(name)}[\"']?(\.[^=]*)?\s*=", line):
             return number
     return 0
 
