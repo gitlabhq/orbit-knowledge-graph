@@ -5,6 +5,7 @@ fixtures:
     content: |
       class Client
         def run; end
+        def get; end
         def close; end
       end
 
@@ -12,6 +13,7 @@ fixtures:
     content: |
       class Other
         def run; end
+        def get; end
         def close; end
       end
 
@@ -60,7 +62,7 @@ fixtures:
           ensure
             x.close
           end
-          x
+          x.get
         end
       end
 
@@ -105,3 +107,13 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: Third::close } }
+
+  - name: "The assigned value is restored after the ensure call"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'Branching::ensure_sees_old_binding' AND callee.name = 'get'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: Client::get } }
+      - { row: { callee: Other::get } }

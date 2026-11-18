@@ -25,6 +25,7 @@ fixtures:
       def list_literal(flag):
           x = Other()
           x = [Client() if flag else Client(), x.close()]
+          x.get()
           return x
 
 tests:
@@ -45,3 +46,12 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: models.Other.close } }
+
+  - name: "The assigned value is restored after the trailing calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.list_literal' AND callee.name = 'get'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: models.Client.get } }
