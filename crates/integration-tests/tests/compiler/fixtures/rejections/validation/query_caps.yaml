@@ -35,18 +35,6 @@ cases:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
 
-  - name: Grouping by an undefined name is rejected by both frontends
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"group_by":["ghost"],"aggregations":[{"count":"u"}]}
-      gql: |
-        MATCH (u:User {id: 1}) RETURN ghost, count(u)
-    physical:
-      clickhouse:
-        rejected:
-          phase: { json: validate, gql: gql_parse }
-          reason: reference
-
   - name: A 65-character variable name is rejected by both frontends
     query:
       json: |

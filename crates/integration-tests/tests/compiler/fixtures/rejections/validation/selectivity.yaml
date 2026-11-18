@@ -168,4 +168,4 @@ cases:
         rejected:
           phase: { json: json_dsl_parse, gql: validate }
           reason: schema
-          contains: { json: ['"rel_types" is a required property at /path'], gql: ["require named relationship types"] }
+          contains: { json: ['"rel_types" is a required property at /path'], gql: ["shortest paths require named relationship types"] }

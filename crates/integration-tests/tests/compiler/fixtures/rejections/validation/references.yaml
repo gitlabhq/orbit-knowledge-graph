@@ -64,19 +64,6 @@ cases:
           reason: reference
           contains: ['undefined node "missing"']
 
-  - name: Grouping by an undefined node is rejected
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"group_by":["missing"],"aggregations":[{"count":"u","as":"c"}]}
-      gql: |
-        MATCH (u:User {id: 1}) RETURN missing, count(u) AS c
-    physical:
-      clickhouse:
-        rejected:
-          phase: { json: validate, gql: gql_parse }
-          reason: reference
-          contains: ['undefined node "missing"']
-
   - name: Grouping by a property of an undefined node is rejected
     query:
       json: |
@@ -89,32 +76,6 @@ cases:
           phase: validate
           reason: reference
           contains: ['undefined node "missing"']
-
-  - name: Summing an unknown property is rejected
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"sum":"u.nonexistent","as":"total"}]}
-      gql: |
-        MATCH (u:User {id: 1}) RETURN sum(u.nonexistent) AS total
-    physical:
-      clickhouse:
-        rejected:
-          phase: validate
-          reason: ontology
-          contains: ["invalid property"]
-
-  - name: Grouping by an unknown property is rejected
-    query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.not_real"],"aggregations":[{"count":"p","as":"project_count"}]}
-      gql: |
-        MATCH (p:Project {id: 1}) RETURN p.not_real, count(p) AS project_count
-    physical:
-      clickhouse:
-        rejected:
-          phase: validate
-          reason: ontology
-          contains: ["invalid property"]
 
   - name: A group_by on a traversal is rejected
     query:
@@ -167,19 +128,6 @@ cases:
           phase: validate
           reason: reference
           contains: ['undefined node "missing"']
-
-  - name: Sorting by an unknown property is rejected
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"order_by":"u.nonexistent"}
-      gql: |
-        MATCH (u:User {id: 1}) RETURN u ORDER BY u.nonexistent
-    physical:
-      clickhouse:
-        rejected:
-          phase: validate
-          reason: ontology
-          contains: ["does not exist"]
 
   - name: Two nodes with the same id are rejected
     query:

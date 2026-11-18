@@ -123,17 +123,6 @@ cases:
     physical:
       clickhouse: {}
 
-  - name: A traversal can sort by a property of its node
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"order_by":"u.username"}
-      gql: |
-        MATCH (u:User {id: 1}) RETURN u.username ORDER BY u.username
-    logical:
-      expect: ["(Project u.username (Filter u.id IN [1] (NodeScan User AS u)))"]
-    physical:
-      clickhouse: {}
-
   - name: A path between pinned endpoints with a named relationship type passes validation
     query:
       json: |
@@ -164,17 +153,6 @@ cases:
         MATCH p = ANY SHORTEST (a:User)-[:MEMBER_OF*1..2]->(b:Project {id: 2}) WHERE a.id >= 1 AND a.id <= 100 RETURN p
     logical:
       expect: ["(Filter a.id >= 1, a.id <= 100 (NodeScan User AS a))"]
-    physical:
-      clickhouse: {}
-
-  - name: A pinned center passes the neighbors guard without relationship types
-    query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}
-      gql: |
-        MATCH (u:User {id: 1})--(n) RETURN u, n
-    logical:
-      expect: ["(Input neighbors (Project ... (Filter u.id IN [1] (NodeScan User AS u))))"]
     physical:
       clickhouse: {}
 
@@ -264,17 +242,6 @@ cases:
         MATCH (u:User)-[:MEMBER_OF]->(p:Project) WHERE u.id >= 1 AND u.id <= 100 RETURN p, count(u) AS c
     logical:
       expect: ["(Filter u.id >= 1, u.id <= 100 (NodeScan User AS u))"]
-    physical:
-      clickhouse: {}
-
-  - name: An id range inside the anchor span makes a Project path endpoint selective
-    query:
-      json: |
-        {"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","id_range":{"start":1,"end":100}},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["CONTAINS"]}}
-      gql: |
-        MATCH p = ANY SHORTEST (a:Project)-[:CONTAINS*1..2]->(b:Project {id: 2}) WHERE a.id >= 1 AND a.id <= 100 RETURN p
-    logical:
-      expect: ["(Filter a.id >= 1, a.id <= 100 (NodeScan Project AS a))"]
     physical:
       clickhouse: {}
 

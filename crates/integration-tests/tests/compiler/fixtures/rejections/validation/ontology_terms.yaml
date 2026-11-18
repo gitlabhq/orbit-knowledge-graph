@@ -126,7 +126,7 @@ cases:
         rejected:
           phase: validate
           reason: ontology
-          contains: [invalid_property, does not exist, Valid fields, name]
+          contains: [invalid property, invalid_property, does not exist, Valid fields, name]
 
   - name: An unknown grouped property names the valid fields
     query:
@@ -139,7 +139,7 @@ cases:
         rejected:
           phase: validate
           reason: ontology
-          contains: [reviewer_count, does not exist, Valid fields, name]
+          contains: [invalid property, reviewer_count, does not exist, Valid fields, name]
 
   - name: Grouping by an undefined node names the reference
     query:

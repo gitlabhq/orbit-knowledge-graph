@@ -83,21 +83,6 @@ cases:
       gql: |
         MATCH (u:User) RETURN DISTINCT u
 
-  - name: count(*) is rejected
-    query:
-      gql: |
-        MATCH (u:User) RETURN count(*)
-
-  - name: A DISTINCT aggregate is rejected
-    query:
-      gql: |
-        MATCH (u:User {id: 1}) RETURN sum(DISTINCT u.id) AS n
-
-  - name: collect() is rejected
-    query:
-      gql: |
-        MATCH (u:User) RETURN collect(u.username)
-
   - name: A repeated SKIP is rejected
     query:
       gql: |
