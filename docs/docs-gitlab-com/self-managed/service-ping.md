@@ -44,7 +44,10 @@ Set up Service Ping for GitLab Orbit in this order:
 
 ## Create the Secrets
 
-DIP and the exporter run in their own namespace, `dip` in this page, and read three Secrets from it:
+DIP and the exporter can run in any namespace.
+This page uses `dip` as the namespace and every command below assumes it.
+To use another namespace, replace `dip` in the commands and in the collector URL in [Point GitLab Orbit at the Data Insights Platform](#point-gitlab-orbit-at-the-data-insights-platform).
+Both components read three Secrets from that namespace:
 
 1. `gitlab-service-ping-key`: the Service Ping key of your GitLab instance.
    The exporter uses it to read the Service Ping settings of your instance.
