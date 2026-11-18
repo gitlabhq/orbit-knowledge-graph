@@ -1465,7 +1465,7 @@ impl<'t> Fold<'t> {
     }
 
     fn producer_of(binding: Cursor) -> u32 {
-        let call = binding.child(C::Rhs).and_then(|r| r.value_child(C::Call));
+        let call = binding.child(C::Rhs).and_then(Cursor::rhs_call);
         let member_call = call
             .filter(|_| !binding.has(C::SsaTyped))
             .filter(|c| c.child(C::Callee).is_some_and(|k| k.has(C::Member)));
