@@ -299,6 +299,7 @@ message Grpc {
   optional uint32 max_header_list_size_bytes = 10 [(buf.validate.field).required = true];
   optional uint64 result_chunk_bytes = 11 [(buf.validate.field).required = true, (buf.validate.field).uint64 = {gte: 65536, lte: 4194304}];
   optional uint64 max_result_bytes = 12 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1048576];
+  optional uint64 shutdown_drain_timeout_secs = 13 [(buf.validate.field).required = true];
 }
 
 message QueryConfig {

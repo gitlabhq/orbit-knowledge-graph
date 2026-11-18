@@ -204,6 +204,7 @@ grpc:
   max_header_list_size_bytes: 65536 # 64 KiB; tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs
   result_chunk_bytes: 524288
   max_result_bytes: 67108864
+  shutdown_drain_timeout_secs: 150 # on SIGTERM, wait this long for in-flight queries (up to 120 s) before exiting
 
 query:
   default:

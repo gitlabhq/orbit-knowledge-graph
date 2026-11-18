@@ -23,6 +23,10 @@ pub struct GrpcConfig {
     pub result_chunk_bytes: usize,
     #[schemars(range(min = 1048576))]
     pub max_result_bytes: usize,
+    /// How long the server waits on shutdown for in-flight requests to
+    /// finish before it cancels them. Keep it above the longest query time
+    /// and below the Kubernetes `terminationGracePeriodSeconds`.
+    pub shutdown_drain_timeout_secs: u64,
 }
 
 const RESULT_CHUNK_BYTES: std::ops::RangeInclusive<usize> = 64 * 1024..=4 * 1024 * 1024;
@@ -103,6 +107,20 @@ mod tests {
         let mut cfg = AppConfig::embedded_defaults().grpc;
         cfg.max_result_bytes = 1024;
         assert!(cfg.validate().is_err());
+    }
+
+    // Queries can run for up to 120 seconds. A shorter drain cuts them off
+    // on every deploy (gitlab-org/orbit/knowledge-graph#1505).
+    #[test]
+    fn default_shutdown_drain_outlasts_the_longest_query() {
+        let defaults = AppConfig::embedded_defaults();
+        let longest_query_secs = std::iter::once(&defaults.query.default)
+            .chain(defaults.query.overrides.values())
+            .filter_map(|query| query.max_execution_time)
+            .chain([120])
+            .max()
+            .unwrap();
+        assert!(defaults.grpc.shutdown_drain_timeout_secs > longest_query_secs);
     }
 
     #[test]

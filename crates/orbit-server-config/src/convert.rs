@@ -470,6 +470,7 @@ fn grpc(value: proto::Grpc) -> Result<GrpcConfig> {
         max_header_list_size_bytes: present(value.max_header_list_size_bytes),
         result_chunk_bytes: present(value.result_chunk_bytes) as usize,
         max_result_bytes: present(value.max_result_bytes) as usize,
+        shutdown_drain_timeout_secs: present(value.shutdown_drain_timeout_secs),
     })
 }
 

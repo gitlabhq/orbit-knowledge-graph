@@ -995,6 +995,7 @@ mod tests {
     mod query_errors;
     mod quota;
     mod request_span;
+    mod shutdown;
     mod skills;
     mod status;
 

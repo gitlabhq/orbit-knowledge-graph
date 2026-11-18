@@ -1473,6 +1473,12 @@
           "type": "integer",
           "format": "uint",
           "minimum": 1048576
+        },
+        "shutdown_drain_timeout_secs": {
+          "description": "How long the server waits on shutdown for in-flight requests to\nfinish before it cancels them. Keep it above the longest query time\nand below the Kubernetes `terminationGracePeriodSeconds`.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "additionalProperties": false,
@@ -1488,7 +1494,8 @@
         "stream_timeout_secs",
         "max_header_list_size_bytes",
         "result_chunk_bytes",
-        "max_result_bytes"
+        "max_result_bytes",
+        "shutdown_drain_timeout_secs"
       ]
     },
     "SchemaConfig": {

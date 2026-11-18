@@ -320,10 +320,10 @@ async fn run_webserver(
     );
     serving.store(true, Ordering::Relaxed);
 
-    let result = tokio::select! {
-        res = grpc_server.run(grpc_listener) => res.map_err(Into::into),
-        _ = shutdown.cancelled() => Ok(()),
-    };
+    let result = grpc_server
+        .run_until_shutdown(grpc_listener, shutdown)
+        .await
+        .map_err(Into::into);
 
     tokio::join!(
         async {
