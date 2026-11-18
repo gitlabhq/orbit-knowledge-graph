@@ -275,6 +275,8 @@ cases:
         MATCH p = ANY SHORTEST (a:Project)-[:CONTAINS*1..2]->(b:Project {id: 2}) WHERE a.id >= 1 AND a.id <= 100 RETURN p
     logical:
       expect: ["(Filter a.id >= 1, a.id <= 100 (NodeScan Project AS a))"]
+    physical:
+      clickhouse: {}
 
   - name: Sorting by a known property passes validation
     query:
