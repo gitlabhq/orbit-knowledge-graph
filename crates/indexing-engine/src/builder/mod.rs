@@ -71,12 +71,8 @@ impl EngineBuilder {
         validate::reject_unregistered_pools(&self)?;
         validate::reject_done_triggers_on_unknown_workers(&self)?;
         validate::reject_tables_with_two_writers(&self)?;
-        let registry = Registry::from_entries(
-            &self.workers,
-            &self.planners,
-            &self.reconcilers,
-            &self.pools,
-        );
+        let registry =
+            Registry::from_entries(self.workers, self.planners, self.reconcilers, self.pools);
         Ok(Engine {
             registry: Arc::new(registry),
             config: self.config,
