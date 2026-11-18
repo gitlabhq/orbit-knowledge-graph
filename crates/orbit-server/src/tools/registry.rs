@@ -256,7 +256,7 @@ impl CommandRegistry {
         commands
     }
 
-    /// The CLI and inline catalog use `commands_for`, which omits the routing lead.
+    /// The inline catalog uses `commands_for`, which omits the routing lead.
     pub fn agent_commands_for(frontend: Frontend) -> Vec<ToolDefinition> {
         let mut commands = Self::commands_for(frontend);
         if frontend == Frontend::Gql
