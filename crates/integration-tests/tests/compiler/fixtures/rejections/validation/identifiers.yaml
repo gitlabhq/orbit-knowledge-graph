@@ -1,0 +1,96 @@
+cases:
+  - name: A traversal without nodes is rejected
+    query:
+      json: |
+        {"query_type": "traversal"}
+    missing_frontends:
+      gql: GQL has no query without a MATCH pattern.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          reason: schema
+
+  - name: A node variable with SQL text is rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --"}]}
+      gql: |
+        MATCH (`n; DROP TABLE users; --`:User) RETURN `n; DROP TABLE users; --`
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: gql_parse }
+          reason: schema
+
+  - name: A relationship endpoint with SQL text is rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "a"}, {"id": "b"}], "relationships": [{"type": "REL", "from": "a' OR '1'='1", "to": "b"}]}
+    missing_frontends:
+      gql: GQL relationship endpoints are pattern variables, so an endpoint cannot name something other than a node.
+    physical:
+      clickhouse:
+        rejected:
+          phase: json_dsl_parse
+          reason: schema
+
+  - name: An empty node variable is rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": ""}]}
+      gql: |
+        MATCH (``:User) RETURN ``
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: gql_parse }
+          reason: schema
+
+  - name: A node variable that starts with a digit is rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "123abc"}]}
+      gql: |
+        MATCH (`123abc`:User) RETURN `123abc`
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: gql_parse }
+          reason: schema
+
+  - name: A filter property with SQL text is rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]}
+      gql: |
+        MATCH (u:User {`foo; DROP TABLE--`: 'value'}) RETURN u
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: gql_parse }
+          reason: schema
+
+  - name: Variables with underscores, capitals, and digits render as SQL identifiers
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"user_node","entity":"User","node_ids":[1],"columns":["username"]},{"id":"_private","entity":"Note","columns":["confidential"]},{"id":"CamelCase","entity":"Project","node_ids":[1],"columns":["name"]},{"id":"node123","entity":"Group","columns":["name"]}],"relationships":[{"type":"AUTHORED","from":"user_node","to":"_private"},{"type":"IN_PROJECT","from":"_private","to":"CamelCase"},{"type":"MEMBER_OF","from":"user_node","to":"node123"}]}
+      gql: |
+        MATCH (user_node:User {id: 1})-[:AUTHORED]->(_private:Note)-[:IN_PROJECT]->(CamelCase:Project {id: 1}), (user_node)-[:MEMBER_OF]->(node123:Group) RETURN user_node.username, _private.confidential, CamelCase.name, node123.name
+    physical:
+      clickhouse:
+        sql:
+          contains: [_orbit_user_node_id, _orbit__private_id, _orbit_CamelCase_id, _orbit_node123_id]
+          not_contains: ["{p"]
+
+  - name: A non-numeric id in an id list is rejected
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":["invalid"],"id_range":{"start":1,"end":3}}]}
+      gql: |
+        MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u
+    physical:
+      clickhouse:
+        rejected:
+          phase: { json: json_dsl_parse, gql: gql_parse }
+          reason: schema

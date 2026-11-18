@@ -275,5 +275,51 @@ cases:
         MATCH p = ANY SHORTEST (a:Project)-[:CONTAINS*1..2]->(b:Project {id: 2}) WHERE a.id >= 1 AND a.id <= 100 RETURN p
     logical:
       expect: ["(Filter a.id >= 1, a.id <= 100 (NodeScan Project AS a))"]
+
+  - name: Sorting by a known property passes validation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":10,"order_by":"u.username"}
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u.username ORDER BY u.username LIMIT 10
+    logical:
+      expect: ["(Limit 10 (Sort u.username (_)))"]
+    physical:
+      clickhouse: {}
+
+  - name: Counting a known property passes validation
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1],"columns":["name"]}],"aggregations":[{"count":"p.name","as":"name_count"}],"limit":10}
+      gql: |
+        MATCH (p:Project {id: 1}) RETURN count(p.name) AS name_count LIMIT 10
+    logical:
+      expect: ["(Aggregate COUNT(p.name) AS name_count (_))"]
+    physical:
+      clickhouse: {}
+
+  - name: CALLS accepts an ImportedSymbol target
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[1],"columns":["name"]},{"id":"sym","entity":"ImportedSymbol","columns":["identifier_name"]}],"relationships":[{"type":"CALLS","from":"caller","to":"sym"}],"limit":10}
+      gql: |
+        MATCH (caller:Definition {id: 1})-[:CALLS]->(sym:ImportedSymbol) RETURN caller.name, sym.identifier_name LIMIT 10
+    security:
+      admin: true
+    logical:
+      expect: ["(EdgeScan CALLS caller->sym AS e0)"]
+    physical:
+      clickhouse: {}
+
+  - name: A CALLS aggregation grouped by the callee passes validation
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"caller","entity":"Definition","node_ids":[1]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"group_by":["callee"],"aggregations":[{"count":"caller","as":"callers"}],"limit":1}
+      gql: |
+        MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition) RETURN callee, count(caller) AS callers LIMIT 1
+    security:
+      admin: true
+    logical:
+      expect: ["(Aggregate group callee AS callee, COUNT(caller) AS callers (_))"]
     physical:
       clickhouse: {}

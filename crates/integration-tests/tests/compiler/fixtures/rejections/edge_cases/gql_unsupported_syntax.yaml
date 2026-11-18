@@ -1,0 +1,431 @@
+missing_frontends:
+  json: The JSON DSL has no syntax for these GQL forms.
+
+physical:
+  clickhouse:
+    rejected:
+      phase: gql_parse
+      reason: schema
+
+cases:
+  - name: CREATE is rejected
+    query:
+      gql: |
+        CREATE (u:User)
+
+  - name: DELETE is rejected
+    query:
+      gql: |
+        MATCH (u:User) DELETE u
+
+  - name: SET is rejected
+    query:
+      gql: |
+        MATCH (u:User) SET u.username = 'x' RETURN u
+
+  - name: Two statements are rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN u; MATCH (p:Project) RETURN p
+
+  - name: UNION is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN u UNION MATCH (p:Project) RETURN p
+
+  - name: A leading OPTIONAL MATCH is rejected
+    query:
+      gql: |
+        OPTIONAL MATCH (u:User) RETURN u
+
+  - name: WITH is rejected
+    query:
+      gql: |
+        MATCH (u:User) WITH u RETURN u
+
+  - name: UNWIND is rejected
+    query:
+      gql: |
+        UNWIND [1] AS u RETURN u
+
+  - name: Disconnected patterns in one MATCH are rejected
+    query:
+      gql: |
+        MATCH (u:User), (p:Project) RETURN u, p
+
+  - name: An anonymous unlabeled node with RETURN * is rejected
+    query:
+      gql: |
+        MATCH () RETURN *
+
+  - name: A label alternative is rejected
+    query:
+      gql: |
+        MATCH (u:User|Project) RETURN u
+
+  - name: The IS label form is rejected
+    query:
+      gql: |
+        MATCH (u IS User) RETURN u
+
+  - name: OR is rejected
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u
+
+  - name: A typed DATE literal is rejected
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u
+
+  - name: RETURN DISTINCT is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN DISTINCT u
+
+  - name: count(*) is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN count(*)
+
+  - name: A DISTINCT aggregate is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN sum(DISTINCT u.id) AS n
+
+  - name: collect() is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN collect(u.username)
+
+  - name: A repeated SKIP is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u SKIP 1 SKIP 1
+
+  - name: A negative SKIP is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u SKIP -1
+
+  - name: A SKIP past the maximum is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u SKIP 10001
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+
+  - name: A repeated DEBUG is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN u DEBUG DEBUG
+
+  - name: DEBUG before LIMIT is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN u DEBUG LIMIT 1
+
+  - name: ORDER BY after LIMIT is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN u LIMIT 1 ORDER BY u.id
+
+  - name: PAGE is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u PAGE 1
+
+  - name: An AFTER cursor is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u LIMIT 1 AFTER 'token'
+
+  - name: DEBUG after a statement separator is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN u; DEBUG
+
+  - name: Two aliases on one item are rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN count(u) AS n AS other
+
+  - name: Two sort keys are rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN u ORDER BY u.id, u.username
+    physical:
+      clickhouse:
+        rejected:
+          contains: [ORDER BY accepts one sort key]
+
+  - name: Two sort keys with directions are rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.updated_at DESC, mr.iid DESC
+    physical:
+      clickhouse:
+        rejected:
+          contains: [ORDER BY accepts one sort key]
+
+  - name: Two sort keys without a space and before LIMIT are rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.updated_at,mr.iid LIMIT 5
+    physical:
+      clickhouse:
+        rejected:
+          contains: [ORDER BY accepts one sort key]
+
+  - name: A repeated property alias is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u.username AS a, u.name AS a
+
+  - name: ORDER BY an undefined name is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) RETURN u.username ORDER BY missing
+
+  - name: A map projection followed by a property of the same node is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN u{.username}, u.state
+
+  - name: A property followed by a map projection of the same node is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN u.username, u{.state}
+
+  - name: date_trunc() without an aggregate is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN date_trunc('month', u.created_at)
+
+  - name: An unbounded hop range is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF*]->(p:Project) RETURN u
+
+  - name: A hop range without an upper bound is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF*1..]->(p:Project) RETURN u
+
+  - name: A hop range from zero is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF*0..3]->(p:Project) RETURN u
+
+  - name: A descending hop range is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF*3..1]->(p:Project) RETURN u
+
+  - name: A hop range past the maximum depth is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF*1..4]->(p:Project) RETURN u
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+
+  - name: A filter on the neighbors endpoint is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-->(n) WHERE n.id = 2 RETURN n
+
+  - name: An aggregate over the neighbors endpoint is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-->(n) RETURN count(n)
+
+  - name: A WHERE filter on a variable-length relationship is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(p:Project) WHERE r.target_id = 2 RETURN u
+
+  - name: An incoming shortest path is rejected
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (u:User {id: 1})<-[:MEMBER_OF*1..3]-(p:Project {id: 2}) RETURN p
+
+  - name: shortestPath() is rejected
+    query:
+      gql: |
+        MATCH p = shortestPath((u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group)) RETURN p
+
+  - name: ALL SHORTEST is rejected
+    query:
+      gql: |
+        MATCH p = ALL SHORTEST (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p
+
+  - name: SHORTEST k is rejected
+    query:
+      gql: |
+        MATCH p = SHORTEST 2 (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p
+
+  - name: A path variable without a shortest-path selector is rejected
+    query:
+      gql: |
+        MATCH p = (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p
+
+  - name: A relationship back to the same node is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-->(u) RETURN u
+
+  - name: A repeated key in a property map is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1, id: 2}) RETURN u
+
+  - name: WHERE on an undefined variable is rejected
+    query:
+      gql: |
+        MATCH (u:User) WHERE missing.username = 'abc' RETURN u
+
+  - name: RETURN of an undefined variable is rejected
+    query:
+      gql: |
+        MATCH (u:User) RETURN missing
+    physical:
+      clickhouse:
+        rejected:
+          reason: reference
+
+  - name: A query parameter is rejected
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.username = $missing RETURN u
+
+  - name: A variable name with SQL text is rejected
+    query:
+      gql: |
+        MATCH (`u; DROP TABLE users`:User) RETURN *
+
+  - name: An unknown string escape is rejected
+    query:
+      gql: |
+        MATCH (u:User {username: '\q'}) RETURN u
+
+  - name: A lone surrogate escape is rejected
+    query:
+      gql: |
+        MATCH (u:User {username: '\uD800'}) RETURN u
+
+  - name: A reserved SKIP word as a variable needs backticks
+    query:
+      gql: |
+        MATCH (offset:User {id: 1}) RETURN offset
+
+  - name: Patterns in two MATCH clauses must connect
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) MATCH (p:Project {id: 2}) RETURN u, p
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["all declared nodes must belong to one connected pattern"]
+
+  - name: A shortest path must be the only MATCH pattern
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (a:User {id: 1})-[*1..3]->(b:Project {id: 2}) MATCH (b)-[:IN_GROUP]->(g:Group) RETURN p
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["a shortest path must be the only MATCH pattern"]
+
+  - name: OPTIONAL MATCH after MATCH is rejected
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) OPTIONAL MATCH (u)-[:AUTHORED]->(mr:MergeRequest) RETURN u
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["Orbit query syntax"]
+
+  - name: ORDER BY a node alias is rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid, p AS project ORDER BY project
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["not a node alias"]
+
+  - name: A node alias repeated on a property is rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS x, p AS x
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["duplicate alias"]
+
+  - name: A property alias repeated on another property is rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS x, p.full_path AS x
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["duplicate alias"]
+
+  - name: ORDER BY a name that is neither a property nor an alias is rejected
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid ORDER BY missing
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["or a property alias"]
+
+  - name: properties() on an undirected neighbors center is rejected
+    query:
+      gql: |
+        MATCH (center:User {id: 1})--(n) RETURN properties(center), n
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["dynamic graph results cannot be renamed or projected as properties"]
+
+  - name: properties() on an outgoing neighbors center is rejected
+    query:
+      gql: |
+        MATCH (center:File {id: 1})-->(n) RETURN properties(center)
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["dynamic graph results cannot be renamed or projected as properties"]
+
+  - name: properties() on an incoming neighbors center is rejected
+    query:
+      gql: |
+        MATCH (center:User {id: 1})<--(n) RETURN n, properties(center)
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["dynamic graph results cannot be renamed or projected as properties"]
+
+  - name: An aggregation cannot return the path variable
+    query:
+      gql: |
+        MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project) RETURN path, count(u)
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["aggregation cannot return the path variable"]
+
+  - name: An aggregation cannot return the path properties
+    query:
+      gql: |
+        MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project) RETURN properties(path), count(u)
+    physical:
+      clickhouse:
+        rejected:
+          contains: ["aggregation cannot return the path variable"]

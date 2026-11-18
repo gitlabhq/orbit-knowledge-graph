@@ -106,3 +106,72 @@ cases:
         - (Project p.id, p.full_path, p.name, p.description, p.created_at, p.updated_at, p.visibility_level, p.archived, p.star_count, p.last_activity_at (NodeScan Project AS p))
     physical:
       clickhouse: {}
+
+  - name: A property alias used as the sort key is ignored
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY number LIMIT 5
+    missing_frontends:
+      json: JSON has no projection aliases.
+    logical:
+      expect: ["(Sort mr.iid (_))"]
+    physical:
+      clickhouse:
+        sql:
+          contains: [AS mr_iid]
+          not_contains: [AS number, AS project]
+
+  - name: A property alias is ignored when the sort names the property
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY mr.iid LIMIT 5
+    missing_frontends:
+      json: JSON has no projection aliases.
+    logical:
+      expect: ["(Sort mr.iid (_))"]
+    physical:
+      clickhouse:
+        sql:
+          contains: [AS mr_iid]
+          not_contains: [AS number, AS project]
+
+  - name: A map projection alias is ignored with a descending alias sort
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p{.full_path} AS project ORDER BY number DESC LIMIT 5
+    missing_frontends:
+      json: JSON has no projection aliases.
+    logical:
+      expect: ["(Sort mr.iid DESC (_))"]
+    physical:
+      clickhouse:
+        sql:
+          contains: [AS mr_iid]
+          not_contains: [AS number, AS project]
+
+  - name: A property alias sort keeps SKIP
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number ORDER BY number SKIP 5 LIMIT 5
+    missing_frontends:
+      json: JSON has no projection aliases.
+    logical:
+      expect: ["(Sort mr.iid (_))"]
+    physical:
+      clickhouse:
+        sql:
+          contains: [AS mr_iid]
+          not_contains: [AS number, AS project]
+
+  - name: An alias on a neighbors center is ignored
+    query:
+      gql: |
+        MATCH (center:WorkItem {id: 1})-->(n) RETURN center AS item, n
+    missing_frontends:
+      json: JSON has no projection aliases.
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse:
+        sql:
+          not_contains: [AS item]
