@@ -56,7 +56,7 @@ define:
     '(_ $K:__callee)': 'known($K | type)'
     '_': 'opaque'
 
-  visible(name, at): "first(enclose(at), s => select(s, '(__def $N:__defname)', name)) or select_all(file(at), '(__import $ROOT:__name)' by $ROOT, name) | follow(imports) or select_all(file(at), '(__import $ROOT:__name)' by $ROOT, \"*\") | follow(imports) | exported(name)"
+  visible(name, at): "first(enclose(at), s => select(s, '(__def $N:__defname)', name)) or select_all(file(at), '(__import $ROOT:__name)' by default($ROOT | child_sym(\"__alias\"), default($ROOT | child_sym(\"__ssa_hint\"), $ROOT)), name) | follow(imports) or select_all(file(at), '(__import $ROOT:__name)' by $ROOT, \"*\") | follow(imports) | exported(name)"
   resolved(ROOT): 'visible(@ROOT, ROOT)'
   supertypes(ROOT):
     '(__def $$$S:__supertype)': '$S | type | is_def'
