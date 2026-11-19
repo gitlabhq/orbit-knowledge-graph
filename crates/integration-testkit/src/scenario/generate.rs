@@ -12,11 +12,11 @@ enum Generate {
         count: usize,
     },
     Rows {
-        table: String,
+        into: String,
         count: usize,
         #[serde(default)]
         start: i64,
-        row: Map<String, Value>,
+        row: Value,
     },
 }
 
@@ -44,7 +44,7 @@ pub(crate) fn expand(mut case: Value, kinds: &[&str]) -> Result<Vec<Value>, Stri
     let name = case
         .get("name")
         .and_then(Value::as_str)
-        .ok_or("a generated case needs a name")?
+        .unwrap_or_default()
         .to_string();
     let generators = match generate {
         Value::Array(items) => items
@@ -76,6 +76,9 @@ pub(crate) fn expand(mut case: Value, kinds: &[&str]) -> Result<Vec<Value>, Stri
 fn apply(generator: &Generate, mut case: Value, name: &str) -> Result<Vec<Value>, String> {
     match generator {
         Generate::NamedQueries => {
+            if name.is_empty() {
+                return Err("named_queries needs a case name".into());
+            }
             if case.get("query").is_some() {
                 return Err(format!("{name}: named_queries supplies the query"));
             }
@@ -119,13 +122,13 @@ fn apply(generator: &Generate, mut case: Value, name: &str) -> Result<Vec<Value>
             Ok(vec![case])
         }
         Generate::Rows {
-            table,
+            into,
             count,
             start,
             row,
         } => {
             let rows = (*start..*start + *count as i64).map(|index| {
-                let mut row = Value::Object(row.clone());
+                let mut row = row.clone();
                 replace_strings(&mut row, &mut |text| match text {
                     "$i" => Some(Value::from(index)),
                     text if text.contains("$i") => {
@@ -135,23 +138,21 @@ fn apply(generator: &Generate, mut case: Value, name: &str) -> Result<Vec<Value>
                 });
                 row
             });
-            let seed = case
-                .as_object_mut()
-                .ok_or_else(|| format!("{name}: a case must be a mapping"))?
-                .entry("config")
-                .or_insert_with(|| Value::Object(Map::new()))
-                .as_object_mut()
-                .ok_or_else(|| format!("{name}: config must be a mapping"))?
-                .entry("extra_seed")
-                .or_insert_with(|| Value::Object(Map::new()))
-                .as_object_mut()
-                .ok_or_else(|| format!("{name}: extra_seed must be a mapping"))?
-                .entry(table.clone())
-                .or_insert_with(|| Value::Array(vec![]));
-            let Value::Array(seed) = seed else {
-                return Err(format!("{name}: extra_seed.{table} must be a list"));
+            let mut target = &mut case;
+            for key in into.split('.') {
+                target = target
+                    .as_object_mut()
+                    .ok_or_else(|| format!("{name}: {into} must lead through mappings"))?
+                    .entry(key)
+                    .or_insert_with(|| Value::Object(Map::new()));
+            }
+            if target.as_object().is_some_and(Map::is_empty) {
+                *target = Value::Array(vec![]);
+            }
+            let Value::Array(list) = target else {
+                return Err(format!("{name}: {into} must be a list"));
             };
-            seed.extend(rows);
+            list.extend(rows);
             Ok(vec![case])
         }
     }
@@ -196,13 +197,17 @@ fn generators_expand_cases_and_reject_misuse() {
         && case["query"]["gql"].is_string()
         && case["name"].as_str().unwrap().starts_with("generated: ")));
     let rows = expand(
-        case("generate:\n  - {kind: rows, table: gl_note, count: 2, start: 7, row: {id: $i, traversal_path: 1/$i/}}\n  - {kind: rows, table: gl_note, count: 1, row: {id: $i}}\nconfig: {extra_seed: {gl_note: [{id: 1}]}}"),
+        case("generate:\n  - {kind: rows, into: config.extra_seed.gl_note, count: 2, start: 7, row: {id: $i, traversal_path: 1/$i/}}\n  - {kind: rows, into: config.extra_seed.gl_note, count: 1, row: {id: $i}}\n  - {kind: rows, into: config.redaction.allow.project, count: 2, start: 5, row: $i}\nconfig: {extra_seed: {gl_note: [{id: 1}]}}"),
         &all,
     )
     .unwrap();
     assert_eq!(
         rows[0]["config"]["extra_seed"]["gl_note"],
         serde_json::json!([{"id": 1}, {"id": 7, "traversal_path": "1/7/"}, {"id": 8, "traversal_path": "1/8/"}, {"id": 0}])
+    );
+    assert_eq!(
+        rows[0]["config"]["redaction"]["allow"]["project"],
+        serde_json::json!([5, 6])
     );
     for (extra, kinds, expected) in [
         (
@@ -221,7 +226,7 @@ fn generators_expand_cases_and_reject_misuse() {
             "unknown variant `sweep`",
         ),
         (
-            "generate: {kind: rows, table: t, count: 1, row: {}}",
+            "generate: {kind: rows, into: t, count: 1, row: {}}",
             &["repeat"][..],
             "generate kind rows is not one of",
         ),

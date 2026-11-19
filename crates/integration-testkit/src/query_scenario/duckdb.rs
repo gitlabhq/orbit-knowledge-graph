@@ -26,6 +26,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
     discover(root, &mut files);
     files.sort();
     let mut ran = 0;
+    let mut coverage = super::coverage::Coverage::default();
     for (name, scenario) in files.iter().flat_map(|file| read_scenarios(root, file)) {
         if !scenario.config.backends.contains(&Backend::Duckdb) {
             continue;
@@ -57,11 +58,17 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
                 &ontology,
                 step,
                 &step_label(&name, index, steps.len()),
+                &mut coverage,
             );
         }
         ran += 1;
     }
     assert!(ran > 0, "no duckdb scenarios under {}", root.display());
+    let unreached = coverage.unreached();
+    assert!(
+        unreached.is_empty(),
+        "no DuckDB scenario renders these compiler constructs: {unreached:?}"
+    );
 }
 
 fn run_step(
@@ -69,6 +76,7 @@ fn run_step(
     ontology: &Arc<ontology::Ontology>,
     step: &QueryStep,
     name: &str,
+    coverage: &mut super::coverage::Coverage,
 ) {
     for (key, query) in &step.query {
         let frontend: Frontend = key
@@ -84,7 +92,7 @@ fn run_step(
             continue;
         };
         if expect.pages.is_empty() {
-            let output = execute(database, &compiled, &label);
+            let output = execute(database, &compiled, &label, coverage);
             let baseline = assert_output(&output, expect, &label);
             for run in 2..=repeat_count(expect, &label) {
                 let compiled = compile_local(query, frontend, ontology)
@@ -92,7 +100,7 @@ fn run_step(
                     .map_err(PipelineError::from);
                 let compiled = assert_compilation(compiled, expect, ("duckdb", key), &label)
                     .expect("repeated query should compile");
-                let output = execute(database, &compiled, &label);
+                let output = execute(database, &compiled, &label, coverage);
                 let response = assert_output(&output, expect, &label);
                 assert_repeated_response(&baseline, &response, run, &label);
             }
@@ -105,7 +113,7 @@ fn run_step(
                 compile_local(&page_query(frontend, query, index), frontend, ontology)
                     .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}")),
             );
-            let output = execute(database, &compiled, &page_label);
+            let output = execute(database, &compiled, &page_label, coverage);
             let response = assert_output(&output, page_expect, &page_label);
             let response = serde_json::from_value(response).expect("response should deserialize");
             collected.push(&response);
@@ -118,7 +126,7 @@ fn run_step(
                 let compiled = Arc::new(compile_local(&query, frontend, ontology).unwrap_or_else(
                     |error| panic!("{label}: unpaginated compile failed: {error}"),
                 ));
-                let output = execute(database, &compiled, &label);
+                let output = execute(database, &compiled, &label, coverage);
                 assert_pagination(&output, &label);
                 let response =
                     validate_response(&compiled.input, GraphFormatter.format(&output), &label);
@@ -132,7 +140,9 @@ fn execute(
     database: &DuckDbClient,
     compiled: &Arc<CompiledQueryContext>,
     label: &str,
+    coverage: &mut super::coverage::Coverage,
 ) -> PipelineOutput {
+    coverage.record(&compiled.ast);
     let sql = compiled.base.render();
     let batches = database
         .query_arrow(&sql)

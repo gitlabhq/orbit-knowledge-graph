@@ -665,7 +665,7 @@ impl ResponseView {
                     }
                     Value::String(text) => self.assert_row_value_str(index, column, text),
                     Value::Null => self.assert_row_value_null(index, column),
-                    _ => panic!("{label}: unsupported row_values type for {column}"),
+                    value => self.assert_row_value(index, column, value),
                 }
             }
         }
@@ -685,6 +685,19 @@ impl ResponseView {
         assert_eq!(
             actual, expected,
             "row {row_index} column '{key}': expected {expected}, got {actual}"
+        );
+    }
+
+    pub fn assert_row_value(&self, row_index: usize, key: &str, expected: &Value) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .get(row_index)
+            .unwrap_or_else(|| panic!("row {row_index} not found in {:?}", self.rows()));
+        assert_eq!(
+            row.get(key),
+            Some(expected),
+            "row {row_index} column '{key}' mismatch: {row:?}"
         );
     }
 

@@ -565,7 +565,7 @@ impl InputAggregationMetric {
 #[strum_discriminants(
     name(AggFunction),
     vis(pub),
-    derive(strum::Display),
+    derive(strum::Display, strum::EnumIter),
     strum(serialize_all = "lowercase")
 )]
 pub enum AggExpr {
@@ -799,7 +799,7 @@ fn parse_group_by_object(
     parse_group_by_spec(&spec, truncate, alias)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames, strum::EnumIter)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum TruncateUnit {

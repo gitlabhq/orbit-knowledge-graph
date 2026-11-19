@@ -1,0 +1,41 @@
+config:
+  backends: [clickhouse, duckdb]
+
+cases:
+  - name: measures_over_rows
+    description: Sum, average, minimum, and maximum of a property over three definitions
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[12000,12001,12002]}],"aggregations":[{"sum":"d.start_line","as":"total"},{"avg":"d.start_line","as":"mean"},{"min":"d.start_line","as":"low"},{"max":"d.start_line","as":"high"}]}
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [12000, 12001, 12002] RETURN sum(d.start_line) AS total, avg(d.start_line) AS mean, min(d.start_line) AS low, max(d.start_line) AS high
+    expect:
+      row_count: 1
+      row_values:
+        - { total: 72, mean: 24.0, low: 10, high: 40 }
+
+  - name: collect_and_distinct_count
+    description: Collecting a property of one definition, and counting distinct file paths of three
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[12000,12001,12002]}],"aggregations":[{"count":"d.file_path","distinct":true,"as":"files"},{"count":"d","as":"definitions"}]}
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [12000, 12001, 12002] RETURN count(DISTINCT d.file_path) AS files, count(d) AS definitions
+    expect:
+      row_count: 1
+      row_values:
+        - { files: 2, definitions: 3 }
+
+  - name: measures_over_no_rows
+    description: Over no rows, DuckDB counts zero and returns null for the other measures
+    config:
+      backends: [duckdb]
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","node_ids":[99999]}],"aggregations":[{"count":"d","as":"definitions"},{"sum":"d.start_line","as":"total"},{"avg":"d.start_line","as":"mean"},{"min":"d.start_line","as":"low"},{"max":"d.start_line","as":"high"}]}
+      gql: |
+        MATCH (d:Definition {id: 99999}) RETURN count(d) AS definitions, sum(d.start_line) AS total, avg(d.start_line) AS mean, min(d.start_line) AS low, max(d.start_line) AS high
+    expect:
+      row_count: 1
+      row_values:
+        - { definitions: 0, total: null, mean: null, low: null, high: null }

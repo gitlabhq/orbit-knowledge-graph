@@ -275,14 +275,16 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `steps` | [`QueryStep`] | one of `query`/`steps` | Ordered steps, each with an optional `seed` (rows inserted before the step runs), a `query` map, and an `expect`. Use it when a later query must observe a write made after an earlier one |
 | `generate` | generator or [generators] | no | Seed rows built before the scenario runs (below) |
 
-`generate` takes one generator or a list. `kind: rows` appends `count` rows to
-`config.extra_seed.<table>`. In each row, a string that is exactly `$i` becomes
-the integer `start + index`, and `$i` inside a longer string becomes that number
-as text. `start` defaults to 0.
+`generate` takes one generator or a list. `kind: rows` appends `count` copies
+of `row` to the list at the dotted path `into`, such as a seed table or a
+redaction allow list. In each copy, a string that is exactly `$i` becomes the
+integer `start + index`, and `$i` inside a longer string becomes that number as
+text. `start` defaults to 0.
 
 ```yaml
 generate:
-  - {kind: rows, table: gl_project, count: 900, start: 20000, row: {id: $i, traversal_path: "1/100/$i/"}}
+  - {kind: rows, into: config.extra_seed.gl_project, count: 900, start: 20001, row: {id: $i, traversal_path: "1/100/$i/"}}
+  - {kind: rows, into: config.redaction.allow.project, count: 900, start: 20001, row: $i}
 ```
 
 #### `config` — `ScenarioConfig`
@@ -294,7 +296,7 @@ generate:
 | `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert each row as its own part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
-| `backends` | [`clickhouse`, `duckdb`] | Default `[clickhouse]`. The backends that run the scenario, each once. `duckdb` runs it in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology and `ontology_overlay`, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with code edge rows in `gl_edge`. List only `duckdb` when ClickHouse behaves differently by an open bug. |
+| `backends` | [`clickhouse`, `duckdb`] | Default `[clickhouse]`. The backends that run the scenario, each once. `duckdb` runs it in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology and `ontology_overlay`, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with code edge rows in `gl_edge`. List only `duckdb` when ClickHouse behaves differently by an open bug. After the DuckDB scenarios run, every function, aggregate, time bucket unit, and construct that the DuckDB code generator renders must have appeared in some scenario's compiled query. |
 
 Scenarios with the same `seed`, `extra_seed`, `unmerged_seed`, and `ontology_overlay` share one database. The runner builds it for the first case and drops it after the last. A scenario whose steps add seed rows gets its own database.
 
@@ -344,7 +346,7 @@ only IDs and the relationship type.
 | `group_columns` | {name: "node.property"} | Group column metadata |
 | `empty_aggregation` | bool | Assert empty aggregation result |
 | `row_count` | N | Ungrouped aggregation row count |
-| `row_values` | [{col: val}] | Ungrouped aggregation values by index |
+| `row_values` | [{col: val}] | Aggregation row values by index; numbers, strings, lists, and null compare exactly |
 | `aggregation_columns` | [{name, function, target, property}] | The exact, ordered aggregation `columns`; a missing `property` means the column has none |
 
 **Paths:**
