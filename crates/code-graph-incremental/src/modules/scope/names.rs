@@ -233,6 +233,15 @@ impl<'t, S: Store> Cx<'_, 't, Scope, S> {
         found
     }
 
+    /// The import names through which `file` may re-export `name`: those
+    /// bound to it, and wildcards. Rules resolve each like its own import.
+    pub(super) fn reexports(&self, file: Cursor<'t, S>, name: u32) -> Vals {
+        of(self.import_names(file, true).filter(|n| {
+            let bound = self.bound(*n);
+            bound.local == name || (bound.imported.is_none() && n.child(C::Alias).is_none())
+        }))
+    }
+
     pub(super) fn foreign(&self, v: Val) -> bool {
         v.loc().is_some_and(|l| l.fi != self.fi())
     }

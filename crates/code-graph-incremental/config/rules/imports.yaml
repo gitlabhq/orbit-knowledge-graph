@@ -18,7 +18,16 @@ functions:
     cases:
       - when: '$ROOT | export($N)'
         value: '$ROOT | export($N)'
+      - when: '$ROOT | reexports($N)'
+        value: '$ROOT | reexports($N) | reexported($N)'
       - value: $ROOT
+  reexported:
+    params: [$N]
+    cases:
+      - match: '$I:(%import_kinds $ROOT:(__name "*"))'
+        value: '$I | modules | offered($N)'
+      - match: '$I:(%import_kinds $ROOT:__name)'
+        value: '$I | modules | offered($ROOT)'
 
 imports:
   - group: name

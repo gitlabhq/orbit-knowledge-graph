@@ -92,6 +92,13 @@ static FUNCTIONS: &[Function<Scope>] = &[
             _ => Vals::new(),
         }
     ),
+    function!(Pure, "reexports", [one, one], |cx, a| match (
+        arg(cx, a, 0),
+        a[1].first().and_then(|&v| cx.text(v))
+    ) {
+        (Some(file), Some(name)) => cx.reexports(file, name),
+        _ => Vals::new(),
+    }),
     function!(
         Pure, "export", [one, one],
         @uses ["scope"."exported", "scope"."files", "scope"."keys", "scope"."roots"],
