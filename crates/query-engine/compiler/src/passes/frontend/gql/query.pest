@@ -58,13 +58,17 @@ RangeStart = { HopCount }
 RangeEnd = { HopCount }
 RangeDots = { ".." }
 
-Where = { ^"WHERE" ~ SP ~ AndExpression }
+Where = { ^"WHERE" ~ SP ~ OrExpression }
+
+// OR binds looser than AND. The seventeenth branch is a sentinel for the shared 16-predicate query limit.
+OrExpression = { AndExpression ~ (SP ~ Disjunction ~ SP ~ AndExpression){0,16} }
+Disjunction = @{ ^"OR" ~ !IdentifierPart }
 
 // The seventeenth condition is a sentinel for the shared 16-predicate query limit.
 AndExpression = { NotExpression ~ (SP ~ (^"AND" | UnsupportedBooleanOperator) ~ SP ~ NotExpression){0,16} }
 
-// OR and XOR are named tokens only so syntax.rs can explain the supported alternatives.
-UnsupportedBooleanOperator = @{ (^"XOR" | ^"OR") ~ !IdentifierPart }
+// XOR is a named token only so syntax.rs can explain the supported alternatives.
+UnsupportedBooleanOperator = @{ ^"XOR" ~ !IdentifierPart }
 
 // The thirty-third NOT is a sentinel that syntax.rs rejects with the shared depth wording.
 NotExpression = { Negation{0,33} ~ Predicate }
@@ -74,7 +78,7 @@ Negation = { ^"NOT" ~ !IdentifierPart ~ SP? }
 
 // Specialized predicates precede the generic function fallback because their prefixes overlap.
 Predicate = _{ ParenthesizedExpression | TokenPredicate | ComparisonExpression | TypePredicate | FunctionPredicate }
-ParenthesizedExpression = { "(" ~ SP? ~ AndExpression ~ SP? ~ ")" }
+ParenthesizedExpression = { "(" ~ SP? ~ OrExpression ~ SP? ~ ")" }
 ComparisonExpression = { PropertyExpression ~ Comparison }
 TypePredicate = { RelationshipType ~ Comparison }
 

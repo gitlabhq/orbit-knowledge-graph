@@ -1223,7 +1223,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             {
                 let hint = wide_id_range_hint(input.nodes.iter().any(has_wide_id_range));
                 let negation_hint = if input.has_negation() {
-                    " (NOT conditions do not count)"
+                    " (NOT and OR conditions do not count)"
                 } else {
                     ""
                 };

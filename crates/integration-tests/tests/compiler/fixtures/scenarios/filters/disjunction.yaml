@@ -1,0 +1,159 @@
+cases:
+  - name: or_on_one_node
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.weight = 3 OR wi.weight = 13)
+        RETURN wi.weight LIMIT 10
+    missing_frontends:
+      json: The JSON frontend has no OR.
+    security:
+      paths:
+        - 1/
+    logical:
+      expect: ["(Filter NOT ((wi.weight != 3) AND (wi.weight != 13)) (_))"]
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - NOT ((wi.weight != 3) AND (wi.weight != 13))
+          not_contains: []
+
+  - name: or_across_two_nodes
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.state = 'closed' OR u.username = 'charlie')
+        RETURN wi.id, u.username LIMIT 10
+    missing_frontends:
+      json: The JSON frontend has no OR.
+    security:
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - NOT ((wi.state != 'closed') AND (u.username != 'charlie'))
+          not_contains: []
+
+  - name: or_binds_looser_than_and
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.state = 'closed' OR wi.state = 'opened' AND wi.weight = 13)
+        RETURN wi.weight LIMIT 10
+    missing_frontends:
+      json: The JSON frontend has no OR.
+    security:
+      paths:
+        - 1/
+    logical:
+      expect: ["(Filter NOT ((wi.state != 'closed') AND (NOT ((wi.state = 'opened') AND (wi.weight = 13)))) (_))"]
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - NOT ((wi.state != 'closed') AND (NOT ((wi.state = 'opened') AND (wi.weight = 13))))
+          not_contains: []
+
+  - name: or_with_null_values
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.weight = 3 OR wi.weight IS NULL)
+        RETURN wi.weight LIMIT 10
+    missing_frontends:
+      json: The JSON frontend has no OR.
+    security:
+      paths:
+        - 1/
+    logical:
+      expect: ["(Filter NOT ((wi.weight != 3) AND (wi.weight IS NOT NULL)) (_))"]
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - NOT ((wi.weight != 3) AND (wi.weight IS NOT NULL))
+          not_contains: []
+
+  - name: or_alone_is_not_selective
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id = 4000 OR wi.id = 4001
+        RETURN wi.state LIMIT 10
+    missing_frontends:
+      json: The JSON frontend has no OR.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains:
+            - NOT and OR conditions do not count
+          not_contains:
+            - "4001"
+
+  - name: or_on_traversal_path_rejected
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.traversal_path = '1/100/' OR wi.weight = 3)
+        RETURN wi.weight LIMIT 10
+    missing_frontends:
+      json: The JSON frontend has no OR.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: ontology
+          contains:
+            - field "traversal_path" does not exist on node type "WorkItem"
+
+  - name: or_branches_count_against_the_predicate_limit
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000})
+        WHERE wi.weight = 0 OR wi.weight = 1 OR wi.weight = 2 OR wi.weight = 3 OR wi.weight = 4 OR wi.weight = 5 OR wi.weight = 6 OR wi.weight = 7 OR wi.weight = 8 OR wi.weight = 9 OR wi.weight = 10 OR wi.weight = 11 OR wi.weight = 12 OR wi.weight = 13 OR wi.weight = 14 OR wi.weight = 15 OR wi.weight = 16
+        RETURN wi.weight LIMIT 10
+    missing_frontends:
+      json: The JSON frontend has no OR.
+    physical:
+      clickhouse:
+        rejected:
+          phase: validate
+          reason: schema
+          contains:
+            - the maximum is 16 across the entire query
+
+  - name: or_negations_count_against_the_depth_limit
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000})
+        WHERE ((((((((((wi.weight = 0 OR wi.iid = 1) OR wi.weight = 2) OR wi.iid = 3) OR wi.weight = 4) OR wi.iid = 5) OR wi.weight = 6) OR wi.iid = 7) OR wi.weight = 8) OR wi.iid = 9) OR wi.weight = 10) OR wi.iid = 11
+        RETURN wi.weight LIMIT 10
+    missing_frontends:
+      json: The JSON frontend has no OR.
+    physical:
+      clickhouse:
+        rejected:
+          phase: gql_parse
+          reason: schema
+          contains:
+            - expression nesting is too deep
+
+  - name: nested_or_within_the_depth_limit_compiles
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4000})
+        WHERE (((((((((wi.weight = 0 OR wi.iid = 1) OR wi.weight = 2) OR wi.iid = 3) OR wi.weight = 4) OR wi.iid = 5) OR wi.weight = 6) OR wi.iid = 7) OR wi.weight = 8) OR wi.iid = 9) OR wi.weight = 10
+        RETURN wi.weight LIMIT 10
+    missing_frontends:
+      json: The JSON frontend has no OR.
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - ((wi.iid != 9) AND (wi.weight != 10))
+          not_contains: []
