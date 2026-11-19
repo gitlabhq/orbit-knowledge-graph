@@ -1428,18 +1428,26 @@ impl Phase {
                                 None,
                                 &mut |i, _| texts[i],
                             );
-                            for id in built {
-                                at.append(id, &mut tree.storage.0);
-                            }
+                            drop(built);
                         }
                     }
                     Out::Replace(tpl) => {
                         let mv = rule.unique.is_none().then_some(at);
                         let texts = &fired.texts[0];
-                        let built =
-                            pattern::build(tree, lang, at, tpl, &fired.caps, mv, &mut |i, _| {
-                                texts[i]
-                            });
+                        let holder = tree.storage.0.new_node(crate::tree::Node::default());
+                        let built = pattern::build(
+                            tree,
+                            lang,
+                            holder,
+                            tpl,
+                            &fired.caps,
+                            mv,
+                            &mut |i, _| texts[i],
+                        );
+                        for &n in &built {
+                            n.detach(&mut tree.storage.0);
+                        }
+                        holder.remove(&mut tree.storage.0);
                         if let Some(unique) = &rule.unique
                             && taken(tree, lang, at, built.first().copied(), unique)
                         {
