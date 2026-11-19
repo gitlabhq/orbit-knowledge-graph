@@ -482,21 +482,17 @@ pub(crate) fn function_name(function: Function) -> &'static str {
         Function::ByteLength => "length",
         Function::Substring => "substringUTF8",
         Function::Concat => "concat",
-        Function::CountSubstrings => "countSubstrings",
         Function::Array => "array",
         Function::Tuple => "tuple",
         Function::ArrayConcat => "arrayConcat",
         Function::ArrayReverse => "arrayReverse",
-        Function::ArrayResize => "arrayResize",
         Function::ArrayContains => "has",
         Function::ArrayContainsAny => "hasAny",
-        Function::ArrayContainsAll => "hasAll",
         Function::ArrayFilter => "arrayFilter",
         Function::ArrayMap => "arrayMap",
         Function::ArrayExists => "arrayExists",
         Function::Unnest => "arrayJoin",
         Function::TupleElement => "tupleElement",
-        Function::ArgMax => "argMax",
         Function::ArgMaxOrNull => "argMaxOrNull",
     }
 }
@@ -916,7 +912,7 @@ mod tests {
             group_by: vec![Expr::col("e", "source_id")],
             having: Some(Expr::eq(
                 Expr::func(
-                    Function::ArgMax,
+                    Function::ArgMaxOrNull,
                     vec![Expr::col("e", "_deleted"), Expr::col("e", "_version")],
                 ),
                 Expr::lit(false),

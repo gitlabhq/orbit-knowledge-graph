@@ -384,14 +384,10 @@ impl Context {
             | Function::ByteLength
             | Function::Substring
             | Function::Concat
-            | Function::CountSubstrings
-            | Function::ArrayResize
             | Function::ArrayContains
             | Function::ArrayContainsAny
-            | Function::ArrayContainsAll
             | Function::ArrayMap
             | Function::ArrayExists
-            | Function::ArgMax
             | Function::ArgMaxOrNull => {
                 self.error = Some(format!("{name} is not supported by the DuckDB backend"));
                 return String::new();
