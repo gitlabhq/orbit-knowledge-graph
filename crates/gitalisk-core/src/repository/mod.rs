@@ -539,10 +539,10 @@ mod tests {
         let repo = repo_handle(&local_repo);
         let target = local_repo.path.join("injected");
 
-        assert!(
-            repo.changes_since(&format!("--output={}", target.display()))
-                .is_err()
-        );
+        let error = repo
+            .changes_since(&format!("--output={}", target.display()))
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
         assert!(!target.exists());
     }
 

@@ -39,12 +39,7 @@ pub fn is_ignored(repo_path: &Path, path: &Path) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// Resolve the root path of the repository this checkout belongs to.
-///
-/// For worktrees, follows `git rev-parse --git-common-dir` back to the
-/// shared `.git` directory and returns its parent (the origin repo root).
-/// For regular repos, returns `repo_path` itself. The result is
-/// canonicalized.
+/// The origin repository root for a checkout; for a worktree, the main repo.
 pub fn parent_repo_path(repo_path: &Path) -> Result<PathBuf, std::io::Error> {
     let output = Command::new("git")
         .args(["rev-parse", "--git-common-dir"])

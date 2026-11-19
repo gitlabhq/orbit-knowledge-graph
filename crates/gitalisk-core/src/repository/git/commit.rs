@@ -38,6 +38,17 @@ pub fn get_current_commit_hash(repo_path: &Path) -> Result<String, std::io::Erro
     }
 }
 
+/// Refuse a revision that git would read as an option.
+pub(crate) fn reject_option_like_revision(revision: &str) -> Result<(), std::io::Error> {
+    if revision.starts_with('-') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid revision {revision:?}: must not start with '-'"),
+        ));
+    }
+    Ok(())
+}
+
 /// Get commit info for multiple commits in a single git command for better performance
 pub fn get_commits_info(
     repo_path: &Path,
@@ -45,6 +56,10 @@ pub fn get_commits_info(
 ) -> Result<Vec<CommitInfo>, std::io::Error> {
     if commit_hashes.is_empty() {
         return Ok(Vec::new());
+    }
+
+    for hash in commit_hashes {
+        reject_option_like_revision(hash)?;
     }
 
     // Use ASCII Unit Separator (0x1f) as delimiter - safer than pipe for commit messages
@@ -56,8 +71,7 @@ pub fn get_commits_info(
         .arg(repo_path)
         .arg("show")
         .arg("-s")
-        .arg(format!("--format={format}"))
-        .arg("--end-of-options");
+        .arg(format!("--format={format}"));
 
     for hash in commit_hashes {
         cmd.arg(hash);
@@ -299,11 +313,13 @@ mod tests {
 
     #[test]
     fn option_like_revision_is_rejected_without_side_effects() {
-        let repo = init_test_repo();
+        let mut repo = init_test_repo();
+        create_commit(&mut repo, "a.txt", "a", "base").unwrap();
         let target = repo.path.join("injected");
         let arg = format!("--output={}", target.display());
 
-        assert!(get_commits_info(repo.path.as_path(), &[arg.as_str()]).is_err());
+        let error = get_commits_info(repo.path.as_path(), &[arg.as_str()]).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
         assert!(!target.exists());
     }
 }

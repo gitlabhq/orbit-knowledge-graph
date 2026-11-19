@@ -1,4 +1,6 @@
-use crate::repository::git::commit::{CommitInfo, get_commits_info, get_current_commit_hash};
+use crate::repository::git::commit::{
+    CommitInfo, get_commits_info, get_current_commit_hash, reject_option_like_revision,
+};
 use crate::repository::git::current_branch::{get_current_branch, get_current_branch_name};
 use crate::repository::git::path_from_bytes;
 use crate::repository::git::remote::remote_url;
@@ -245,6 +247,7 @@ impl CoreGitaliskRepository {
     /// shape `get_status` uses: the diff letter is the index status, a rename
     /// carries its old path in `original_path`.
     pub fn changes_since(&self, base: &str) -> Result<Vec<FileStatusInfo>, std::io::Error> {
+        reject_option_like_revision(base)?;
         let output = Command::new("git")
             .args([
                 "diff",
