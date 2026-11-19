@@ -92,11 +92,11 @@ cases:
           not_contains:
             - undefined
 
-  - name: GQL rejects OR with a message that points to AND, NOT, and IN
+  - name: GQL rejects XOR with a message that points to AND, OR, and NOT
     query:
       gql: |
         MATCH (wi:WorkItem)
-        WHERE wi.id = 4000 OR wi.id = 4001
+        WHERE wi.id = 4000 XOR wi.id = 4001
         RETURN wi.state LIMIT 10
     missing_frontends:
       json: The source scenario supplies only GQL.
@@ -106,7 +106,7 @@ cases:
           phase: gql_parse
           reason: schema
           contains:
-            - OR and XOR are not supported; combine conditions with AND and NOT, or use IN [...] to match one of several values
+            - XOR is not supported; combine conditions with AND, OR, and NOT
           not_contains:
             - Orbit query syntax
             - "4001"

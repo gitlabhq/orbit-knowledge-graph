@@ -134,6 +134,11 @@ fn main() {
     );
     check_grammar_bound(
         &grammar,
+        "OrExpression",
+        &format!("AndExpression){{0,{MAX_PREDICATES}}}"),
+    );
+    check_grammar_bound(
+        &grammar,
         "AndExpression",
         &format!("NotExpression){{0,{MAX_PREDICATES}}}"),
     );
