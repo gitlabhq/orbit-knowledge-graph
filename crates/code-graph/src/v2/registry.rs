@@ -9,6 +9,7 @@ use crate::v2::langs::generic::bash::{BashDsl, BashRules};
 use crate::v2::langs::generic::c::{CDsl, CRules};
 use crate::v2::langs::generic::cpp::{CppDsl, CppRules};
 use crate::v2::langs::generic::csharp::{CSharpDsl, CSharpRules};
+use crate::v2::langs::generic::dockerfile::{DockerfileDsl, DockerfileRules};
 use crate::v2::langs::generic::elixir::{ElixirDsl, ElixirRules};
 use crate::v2::langs::generic::go::{GoDsl, GoRules};
 use crate::v2::langs::generic::hcl::{HclDsl, HclRules};
@@ -112,6 +113,7 @@ register_v2_pipelines! {
     Yaml    => [GenericPipeline<YamlDsl, YamlRules>],
     Zig     => [GenericPipeline<ZigDsl, ZigRules>],
     Markdown => [GenericPipeline<MarkdownDsl, NoRules<MarkdownDsl>>],
+    Dockerfile => [GenericPipeline<DockerfileDsl, DockerfileRules>],
     Tag("js") => [JsPipeline],
 }
 
