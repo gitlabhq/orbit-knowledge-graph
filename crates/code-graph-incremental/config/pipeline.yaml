@@ -18,7 +18,7 @@ phases:
     walk: flow
     outputs: [emit]
     modules: [core, ssa, text]
-    bind: { core.read: ssa.read, core.slot: ssa.slot }
+    bind: { core.read: ssa.read }
     resolve: { imports: resolution, type_flow: resolution }
     budget: { tree: file_link_ms }
   - name: project

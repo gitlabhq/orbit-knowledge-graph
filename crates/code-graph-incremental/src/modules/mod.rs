@@ -1,9 +1,14 @@
+pub mod core;
 pub mod ssa;
 pub mod text;
 
 use crate::engine::{Cursor, Cx, Module, Registration, Store, Vals, register};
 
-pub static ALL: &[Registration] = &[register::<text::Text>()];
+pub static ALL: &[Registration] = &[
+    register::<core::Core>(),
+    register::<ssa::Ssa>(),
+    register::<text::Text>(),
+];
 
 fn node<'t, M: Module, S: Store>(cx: &Cx<'_, 't, M, S>, args: &[Vals], at: usize) -> Cursor<'t, S> {
     cx.jump(args[at][0].loc().expect("this argument is a node"))
@@ -18,6 +23,13 @@ fn arg<'t, M: Module, S: Store>(
         .first()
         .and_then(|v| v.loc())
         .map(|loc| cx.jump(loc))
+}
+
+fn top_level<S: Store>(root: Cursor<'_, S>) -> impl Iterator<Item = Cursor<'_, S>> {
+    std::iter::once(root).chain(
+        root.children()
+            .filter(|c| c.is(crate::canonical::Canonical::SourceFile)),
+    )
 }
 
 macro_rules! function {
