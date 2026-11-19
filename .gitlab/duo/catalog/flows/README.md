@@ -16,9 +16,9 @@ this table.
 | Setting | Value |
 |---|---|
 | `SKILLS_REF` in `docs-write.yml` | `7ff82867e8bb0b036dd0292af3db469141fa411b`, the squash commit of `team/skills` MR 30 on main |
-| `MODE` in `docs-write.yml` | `shadow` |
+| `MODE` in `docs-write.yml` | `full` |
 | `DOCS_REVIEWERS` in `docs-write.yml` | `fneill,z_painter`: technical writers who approve and merge the docs MRs |
-| AI Catalog item in this project | Not registered yet |
+| AI Catalog item in this project | `docs-write` (item 1020976), private, enabled. Trigger: **Mention** only during rollout. Service account `ai-docs-write-gitlab-org_510eee`, Reporter in `team/skills`. |
 
 ## How the flow runs
 
