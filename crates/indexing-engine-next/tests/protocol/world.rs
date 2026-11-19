@@ -3,7 +3,7 @@ use std::fmt::{self, Write};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use indexing_engine_next::protocol::{
-    Claim, Hold, Lease, LeaseEntry, LeaseRules, PodId, Publish, Renewal, Revision, TaskId,
+    Claim, Hold, HolderId, Lease, LeaseEntry, LeaseRules, Publish, Renewal, Revision, TaskId,
     decide_submit,
 };
 use rand::rngs::Xoshiro256PlusPlus;
@@ -152,7 +152,7 @@ struct LastHold {
 }
 
 struct Pod {
-    id: PodId,
+    id: HolderId,
     offset: u64,
     stalled: bool,
     step: Step,
@@ -195,7 +195,7 @@ impl World {
     fn init(rng: &mut Xoshiro256PlusPlus) -> Self {
         let pods = (1..=PODS)
             .map(|n| Pod {
-                id: PodId::new(format!("p{n}")),
+                id: HolderId::new(format!("p{n}")),
                 offset: OFFSETS[rng.random_range(0..OFFSETS.len())],
                 stalled: false,
                 step: Step::Idle,

@@ -1,17 +1,17 @@
 use std::time::SystemTime;
 
-use super::lease::{Fence, Lease, LeaseEntry, LeaseRules, PodId, Revision};
+use super::lease::{Fence, HolderId, Lease, LeaseEntry, LeaseRules, Revision};
 use super::marker::TaskId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Claim {
-    pod: PodId,
+    holder: HolderId,
     task: TaskId,
 }
 
 impl Claim {
-    pub fn deliver(pod: PodId, task: TaskId) -> Self {
-        Self { pod, task }
+    pub fn deliver(holder: HolderId, task: TaskId) -> Self {
+        Self { holder, task }
     }
 
     pub fn acquire_lease(
@@ -22,7 +22,7 @@ impl Claim {
     ) -> Option<Lease> {
         rules
             .is_free(entry, local_now)
-            .then(|| rules.lease_for(&self.pod, local_now))
+            .then(|| rules.lease_for(&self.holder, local_now))
     }
 
     pub fn hold(
@@ -33,7 +33,7 @@ impl Claim {
         local_now: SystemTime,
     ) -> Hold {
         Hold {
-            pod: self.pod,
+            holder: self.holder,
             task: self.task,
             fence: Fence(written.0),
             seen: written,
@@ -51,7 +51,7 @@ pub enum Renewal {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hold {
-    pod: PodId,
+    holder: HolderId,
     task: TaskId,
     fence: Fence,
     seen: Revision,
@@ -89,8 +89,8 @@ impl Hold {
     }
 
     pub fn renew(&self, rules: &LeaseRules, entry: &LeaseEntry, local_now: SystemTime) -> Renewal {
-        if entry.is_held_by(&self.pod, self.seen) {
-            Renewal::Extend(rules.lease_for(&self.pod, local_now))
+        if entry.is_held_by(&self.holder, self.seen) {
+            Renewal::Extend(rules.lease_for(&self.holder, local_now))
         } else {
             Renewal::Lost
         }
@@ -110,7 +110,7 @@ impl Hold {
 
     pub fn release(&self, entry: &LeaseEntry) -> Option<Revision> {
         entry
-            .is_held_by(&self.pod, self.seen)
+            .is_held_by(&self.holder, self.seen)
             .then_some(entry.revision)
     }
 }

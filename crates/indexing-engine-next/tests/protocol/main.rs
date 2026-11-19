@@ -3,7 +3,8 @@ mod world;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use indexing_engine_next::protocol::{
-    Claim, Lease, LeaseEntry, LeaseRules, PodId, Publish, Renewal, Revision, TaskId, decide_submit,
+    Claim, HolderId, Lease, LeaseEntry, LeaseRules, Publish, Renewal, Revision, TaskId,
+    decide_submit,
 };
 use uuid::Uuid;
 use world::{Coverage, walk, write_runs_module};
@@ -25,14 +26,14 @@ fn task(n: u128) -> TaskId {
     TaskId::new(Uuid::from_u128(n))
 }
 
-fn pod(name: &str) -> PodId {
-    PodId::new(name)
+fn holder(name: &str) -> HolderId {
+    HolderId::new(name)
 }
 
 fn held_by(name: &str, expires_at: u64, revision: u64) -> LeaseEntry {
     LeaseEntry {
         lease: Some(Lease {
-            holder: pod(name),
+            holder: holder(name),
             expires_at: at(expires_at),
         }),
         revision: Revision(revision),
@@ -41,22 +42,22 @@ fn held_by(name: &str, expires_at: u64, revision: u64) -> LeaseEntry {
 
 #[test]
 fn an_expired_lease_is_free_only_after_the_skew_margin() {
-    let claim = Claim::deliver(pod("p2"), task(1));
+    let claim = Claim::deliver(holder("p2"), task(1));
     let entry = held_by("p1", 100, 7);
 
     assert_eq!(claim.acquire_lease(&RULES, &entry, at(104)), None);
     assert_eq!(
         claim.acquire_lease(&RULES, &entry, at(105)),
         Some(Lease {
-            holder: pod("p2"),
+            holder: holder("p2"),
             expires_at: at(165)
         })
     );
 }
 
 #[test]
-fn the_fence_is_the_lease_revision_when_the_pod_took_it() {
-    let claim = Claim::deliver(pod("p1"), task(1));
+fn the_fence_is_the_lease_revision_when_the_holder_took_it() {
+    let claim = Claim::deliver(holder("p1"), task(1));
     let lease = claim
         .acquire_lease(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
@@ -73,8 +74,8 @@ fn the_fence_is_the_lease_revision_when_the_pod_took_it() {
 }
 
 #[test]
-fn a_renewal_is_lost_once_another_pod_took_the_lease() {
-    let claim = Claim::deliver(pod("p1"), task(1));
+fn a_renewal_is_lost_once_another_holder_took_the_lease() {
+    let claim = Claim::deliver(holder("p1"), task(1));
     let lease = claim
         .acquire_lease(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
@@ -89,8 +90,8 @@ fn a_renewal_is_lost_once_another_pod_took_the_lease() {
 }
 
 #[test]
-fn a_renewal_is_lost_once_the_same_pod_took_the_lease_again_for_another_run() {
-    let claim = Claim::deliver(pod("p1"), task(1));
+fn a_renewal_is_lost_once_the_same_holder_took_the_lease_again_for_another_run() {
+    let claim = Claim::deliver(holder("p1"), task(1));
     let lease = claim
         .acquire_lease(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();
@@ -105,7 +106,7 @@ fn a_renewal_is_lost_once_the_same_pod_took_the_lease_again_for_another_run() {
 
 #[test]
 fn a_start_clears_only_the_marker_of_its_own_task() {
-    let claim = Claim::deliver(pod("p1"), task(1));
+    let claim = Claim::deliver(holder("p1"), task(1));
     let lease = claim
         .acquire_lease(&RULES, &held_by("p0", 0, 3), at(10))
         .unwrap();

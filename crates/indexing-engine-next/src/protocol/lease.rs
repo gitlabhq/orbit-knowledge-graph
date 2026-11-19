@@ -1,9 +1,9 @@
 use std::time::{Duration, SystemTime};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct PodId(String);
+pub struct HolderId(String);
 
-impl PodId {
+impl HolderId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
@@ -21,7 +21,7 @@ pub struct Fence(pub u64);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Lease {
-    pub holder: PodId,
+    pub holder: HolderId,
     pub expires_at: SystemTime,
 }
 
@@ -32,12 +32,12 @@ pub struct LeaseEntry {
 }
 
 impl LeaseEntry {
-    pub(super) fn is_held_by(&self, pod: &PodId, revision: Revision) -> bool {
+    pub(super) fn is_held_by(&self, holder: &HolderId, revision: Revision) -> bool {
         self.revision == revision
             && self
                 .lease
                 .as_ref()
-                .is_some_and(|lease| lease.holder == *pod)
+                .is_some_and(|lease| lease.holder == *holder)
     }
 }
 
@@ -49,7 +49,7 @@ pub struct LeaseRules {
 }
 
 impl LeaseRules {
-    pub(super) fn lease_for(&self, holder: &PodId, local_now: SystemTime) -> Lease {
+    pub(super) fn lease_for(&self, holder: &HolderId, local_now: SystemTime) -> Lease {
         Lease {
             holder: holder.clone(),
             expires_at: local_now + self.ttl,
