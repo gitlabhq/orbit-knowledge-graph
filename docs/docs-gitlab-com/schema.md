@@ -75,6 +75,7 @@ Most languages also get imports and cross-file calls.
 | C | `.c`, `.h` | None |
 | C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` | None |
 | C# | `.cs` | None |
+| Dockerfile | `Dockerfile`, `Containerfile`, `Dockerfile.*`, `Containerfile.*`, `*.dockerfile`, `*.containerfile` | Stages, `ARG` and `ENV` variables, and base images, with references inside one file. File names are case-insensitive. Names with a template or backup suffix, such as `.erb`, `.tt`, `.md`, or `.yml`, are ignored. No `EXPOSE`, `ENTRYPOINT`, or `CMD`. No cross-file references. |
 | Elixir | `.ex`, `.exs` | None |
 | Go | `.go` | None |
 | HCL (Terraform) | `.tf`, `.tfvars` | None |
@@ -82,6 +83,7 @@ Most languages also get imports and cross-file calls.
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, `.json` | None |
 | Kotlin | `.kt`, `.kts` | None |
 | Lua | `.lua` | Cross-file calls on module tables loaded with `require` only. No cross-file calls to global functions. |
+| Markdown | `.md`, `.markdown` | Headings become sections, and front matter becomes a definition. Links to other Markdown files and sections. No imports or calls. |
 | PHP | `.php`, `.phtml`, `.php3`, `.php4`, `.php5`, `.php7`, `.phps` | None |
 | Python | `.py` | None |
 | Ruby | `.rb`, `.rbw`, `.rake`, `.gemspec` | None |
