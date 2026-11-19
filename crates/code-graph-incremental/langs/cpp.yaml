@@ -144,6 +144,8 @@ stages:
       # ending in > (Ptr<T>::operator->) is marked with # first, so its qualifier keeps <T>.
       - match: '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: $Q:qualified_identifier parameters: $P)) body: $B)'
         replace: '(__def (__defname @$Q|regex_replace("(\boperator\s*(?:->|>>|>))$", "${1}#")|regex_loop("<[^<>]*>([^<]*>)$", "${1}")|regex_replace("\s*<([^<>=][^<>]*)?>$", "")|regex_replace("#$", "") $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - match: '(function_definition type:? $RT:type_identifier declarator: (reference_declarator (function_declarator declarator: $Q:qualified_identifier parameters: $P)) body: $B)'
+        replace: '(__def (__defname @$Q|regex_replace("(\boperator\s*(?:->|>>|>))$", "${1}#")|regex_loop("<[^<>]*>([^<]*>)$", "${1}")|regex_replace("\s*<([^<>=][^<>]*)?>$", "")|regex_replace("#$", "") $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $Q:qualified_identifier parameters: $P) body: $B)'
         replace: '(__def (__defname @$Q|regex_replace("(\boperator\s*(?:->|>>|>))$", "${1}#")|regex_loop("<[^<>]*>([^<]*>)$", "${1}")|regex_replace("\s*<([^<>=][^<>]*)?>$", "")|regex_replace("#$", "") $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition declarator: $Q:qualified_identifier body: $B)'

@@ -29,6 +29,11 @@ fixtures:
       template<> int Foo::member_type<std::vector<int>::value_type>(int a) { return a; }
       template<> int Stack<int>::assign<std::vector<int>, std::string>(int a) { return a; }
       template<class T> T* Nest<std::vector<int>>::operator->() const { return p; }
+      int& Foo::plain_ref() { return x; }
+      template<> int& Foo::ref_member<int>(int a) { return a; }
+      template<> int& Stack<int>::ref_assign<std::vector<int>, std::string>(int a) { return a; }
+      template<class T> T& Ref<T>::operator*() const { return *p; }
+      template<class T> T& Ref<T>::operator>(int n) const { return *p; }
 
 tests:
   - name: "Explicit specialization of a free function template drops the template arguments"
@@ -48,9 +53,11 @@ tests:
                        'Foo::mixed<std::vector<int>, std::string>', 'Foo::member_type<std::vector<int>::value_type>',
                        'Stack<int>::assign<std::vector<int>, std::string>', 'Foo::bar<int>', 'A::B::deep<int>',
                        'Foo::ptr_member<int>', 'Foo::nested<std::vector<int>>',
-                       'Foo::deeper<std::map<int, std::vector<int>>>']
+                       'Foo::deeper<std::map<int, std::vector<int>>>', 'Foo::ref_member<int>',
+                       'Stack<int>::ref_assign<std::vector<int>, std::string>']
       RETURN d.name AS name
-    assert: []
+    assert:
+      - { empty: true }
 
   - name: "Pointer-returning specialization unwraps the declarator and drops the arguments"
     query: |
@@ -99,7 +106,8 @@ tests:
       MATCH (d:Definition)
       WHERE d.name IN ['plain_proto', 'spec_proto', 'spec_proto<int>']
       RETURN d.name AS name
-    assert: []
+    assert:
+      - { empty: true }
 
   - name: "Operators ending in > on a class template keep the qualifier's arguments"
     query: |
@@ -141,6 +149,20 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { name: "Nest<std::vector<int>>::operator->" } }
+
+  - name: "Qualified definitions that return a reference are indexed and named like the others"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.file_path = 'members.cpp'
+        AND d.name IN ['Foo::plain_ref', 'Foo::ref_member', 'Stack<int>::ref_assign', 'Ref<T>::operator*', 'Ref<T>::operator>']
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { row: { name: "Foo::plain_ref", fqn: "members::Foo::plain_ref" } }
+      - { row: { name: "Foo::ref_member", fqn: "members::Foo::ref_member" } }
+      - { row: { name: "Stack<int>::ref_assign", fqn: "members::Stack<int>::ref_assign" } }
+      - { row: { name: "Ref<T>::operator*", fqn: "members::Ref<T>::operator*" } }
+      - { row: { name: "Ref<T>::operator>", fqn: "members::Ref<T>::operator>" } }
 
   - name: "Three-way comparison operator keeps its name"
     query: |
