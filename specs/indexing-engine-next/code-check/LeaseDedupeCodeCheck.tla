@@ -1,5 +1,5 @@
 ------------------------- MODULE LeaseDedupeCodeCheck -------------------------
-\* why: TLC follows each run of the Rust protocol code, which the cargo test writes to LeaseDedupeRuns, and deadlocks at the first step that LeaseDedupe can't take.
+\* why: TLC follows each run of the Rust protocol code, which the cargo test writes to LeaseDedupeRuns. It deadlocks at the first step that LeaseDedupe can't take, and fails when the code allows a different set of actions than the spec.
 EXTENDS LeaseDedupeRuns
 
 VARIABLES run, step
@@ -46,4 +46,27 @@ EndOfRun ==
 CheckSpec == CheckInit /\ [][FollowRun \/ EndOfRun]_<<vars, run, step>>
 
 StartsAtInit == step = 1 => Init
+
+PodAction(name, p) == name \o "(" \o ToString(p) \o ")"
+
+SpecEnabled ==
+    (IF ENABLED Tick THEN {"Tick"} ELSE {})
+    \cup (IF ENABLED Submit THEN {"Submit"} ELSE {})
+    \cup (IF ENABLED Publish THEN {"Publish"} ELSE {})
+    \cup (IF ENABLED PlannerCrash THEN {"PlannerCrash"} ELSE {})
+    \cup {"Redeliver(" \o ToString(c) \o ")" : c \in {c \in DOMAIN copies : ENABLED Redeliver(c)}}
+    \cup {"Deliver(" \o ToString(pc2[1]) \o "," \o ToString(pc2[2]) \o ")" :
+            pc2 \in {pc2 \in Pods \X DOMAIN copies : ENABLED Deliver(pc2[1], pc2[2])}}
+    \cup {PodAction("AcquireLease", p) : p \in {p \in Pods : ENABLED AcquireLease(p)}}
+    \cup {PodAction("StartTask", p) : p \in {p \in Pods : ENABLED StartTask(p)}}
+    \cup {PodAction("Renew", p) : p \in {p \in Pods : ENABLED Renew(p)}}
+    \cup {PodAction("RenewFails", p) : p \in {p \in Pods : ENABLED RenewFails(p)}}
+    \cup {PodAction("BeginWrite", p) : p \in {p \in Pods : ENABLED BeginWrite(p)}}
+    \cup {PodAction("CommitWrite", p) : p \in {p \in Pods : ENABLED CommitWrite(p)}}
+    \cup {PodAction("Finish", p) : p \in {p \in Pods : ENABLED Finish(p)}}
+    \cup {PodAction("Stall", p) : p \in {p \in Pods : ENABLED Stall(p)}}
+    \cup {PodAction("Resume", p) : p \in {p \in Pods : ENABLED Resume(p)}}
+    \cup {PodAction("Crash", p) : p \in {p \in Pods : ENABLED Crash(p)}}
+
+CodeAllowsWhatSpecAllows == Runs[run][step].enabled = SpecEnabled
 =============================================================================

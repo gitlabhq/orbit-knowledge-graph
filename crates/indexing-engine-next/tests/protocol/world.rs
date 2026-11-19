@@ -41,6 +41,29 @@ pub enum Action {
     Crash(usize),
 }
 
+impl fmt::Display for Action {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Action::Tick => f.write_str("Tick"),
+            Action::Submit => f.write_str("Submit"),
+            Action::Publish => f.write_str("Publish"),
+            Action::PlannerCrash => f.write_str("PlannerCrash"),
+            Action::Redeliver(c) => write!(f, "Redeliver({})", c + 1),
+            Action::Deliver(p, c) => write!(f, "Deliver(p{},{})", p + 1, c + 1),
+            Action::AcquireLease(p) => write!(f, "AcquireLease(p{})", p + 1),
+            Action::StartTask(p) => write!(f, "StartTask(p{})", p + 1),
+            Action::Renew(p) => write!(f, "Renew(p{})", p + 1),
+            Action::RenewFails(p) => write!(f, "RenewFails(p{})", p + 1),
+            Action::BeginWrite(p) => write!(f, "BeginWrite(p{})", p + 1),
+            Action::CommitWrite(p) => write!(f, "CommitWrite(p{})", p + 1),
+            Action::Finish(p) => write!(f, "Finish(p{})", p + 1),
+            Action::Stall(p) => write!(f, "Stall(p{})", p + 1),
+            Action::Resume(p) => write!(f, "Resume(p{})", p + 1),
+            Action::Crash(p) => write!(f, "Crash(p{})", p + 1),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Coverage {
     pub republished_markers: u32,
@@ -660,10 +683,18 @@ impl fmt::Display for Tla<'_> {
         f.write_str(", stalled |-> ")?;
         self.per_pod(f, |pod| tla_bool(pod.stalled).to_string())?;
 
+        let enabled: Vec<String> = world
+            .enabled_actions()
+            .iter()
+            .map(|action| format!("\"{action}\""))
+            .collect();
         write!(
             f,
-            ", stallsLeft |-> {}, crashesLeft |-> {}, storeFence |-> {}, staleWrite |-> FALSE]",
-            world.stalls_left, world.crashes_left, world.store_fence
+            ", stallsLeft |-> {}, crashesLeft |-> {}, storeFence |-> {}, staleWrite |-> FALSE, enabled |-> {{{}}}]",
+            world.stalls_left,
+            world.crashes_left,
+            world.store_fence,
+            enabled.join(", ")
         )
     }
 }
