@@ -15,7 +15,7 @@ this table.
 
 | Setting | Value |
 |---|---|
-| `SKILLS_REF` in `docs-write.yml` | `d6b88011f2fe95969c8a00278e52ae481c648425`, the head of `team/skills` MR 30, unmerged. Re-pin to the squash commit once it merges. |
+| `SKILLS_REF` in `docs-write.yml` | `d35fda0be667e34926f32b3b8f74c4b464af3653`, the head of `team/skills` MR 30, unmerged. Re-pin to the squash commit once it merges. |
 | `MODE` in `docs-write.yml` | `shadow` |
 | AI Catalog item in this project | Not registered yet |
 
@@ -171,8 +171,8 @@ the flow (`Ai::FlowTriggers::FilterEvaluator` in `gitlab-org/gitlab`).
 
 Events that a flow causes start triggers too, so the docs MR the flow opens
 starts the flow again. The gate ends that run with no model call: it skips
-MRs on a `docs-write/` branch or with the docs-write marker, and MRs with
-`~documentation` or `~"docs-factory::skip"`. Each run still spends about
+fork MRs, MRs on a `docs-write/` branch or with the docs-write marker, and
+MRs with `~documentation` or `~"docs-factory::skip"`. Each run still spends about
 100 seconds of runner time on setup.
 
 ## Shadow mode (rollout stage 1)

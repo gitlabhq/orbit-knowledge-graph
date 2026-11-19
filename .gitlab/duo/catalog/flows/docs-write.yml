@@ -1,3 +1,4 @@
+# MODE and SKILLS_REF in setup: README.md in this folder.
 # Each step writes .docs-write/route/<file>; a read_file step reads it and the
 # router branches on the exact token. A missing file ends the flow.
 # The image has no python3: steps run through .docs-write/step, which uses uv.
@@ -11,7 +12,7 @@ components:
     inputs:
       - from: >-
           SKILLS_REPO=gitlab-org/orbit/team/skills;
-          SKILLS_REF=d6b88011f2fe95969c8a00278e52ae481c648425;
+          SKILLS_REF=d35fda0be667e34926f32b3b8f74c4b464af3653;
           MODE=shadow;
           D=.docs-write; rm -rf $D; mkdir -p $D/route; U="${GITLAB_BASE_URL:-https://gitlab.com}";
           X=$(git rev-parse --git-path info/exclude); mkdir -p "${X%/*}";

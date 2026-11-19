@@ -65,8 +65,8 @@ Agent-authored MRs follow these steps:
    pipeline. A title edit does not start one.
 3. When the MR is ready for review, add the `~workflow::ready for review` label.
 
-Docs MRs that the docs-write flow opens (branches `docs-write/mr-*`) skip step 1:
-they keep CI on and never carry `[skip ci]`. The flow waits for a green pipeline.
+Docs MRs that the docs-write flow opens (branches `docs-write/mr-*`) open as Draft
+but never carry `[skip ci]`. The flow waits for a green pipeline.
 
 ## Skills and docs
 
