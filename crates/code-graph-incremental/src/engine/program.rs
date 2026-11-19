@@ -132,6 +132,7 @@ pub struct Phase {
     pub after: Vec<String>,
     pub(super) modules: Vec<u8>,
     pub(super) links: super::Links,
+    pub(super) data: Vec<Vec<Vals>>,
     rules: Vec<Rule>,
     by_kind: Vec<SmallVec<[u16; 4]>>,
     slots: usize,
@@ -141,8 +142,41 @@ pub struct Pipeline {
     pub phases: Vec<Phase>,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum DataSpec {
+    Bool(bool),
+    Num(u32),
+    Str(String),
+    List(Vec<DataSpec>),
+}
+
+impl DataSpec {
+    fn vals(&self, lang: &Lang, out: &mut Vals) {
+        match self {
+            DataSpec::Bool(b) => out.push(Val::Bool(*b)),
+            DataSpec::Num(n) => out.push(Val::Sym(*n)),
+            DataSpec::Str(s) => out.push(match s.parse::<C>() {
+                Ok(kind) => Val::Kind(kind as u16),
+                Err(_) => Val::Sym(lang.syms.intern(s)),
+            }),
+            DataSpec::List(items) => items.iter().for_each(|i| i.vals(lang, out)),
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CanonicalFile {
+    #[serde(default)]
+    data: BTreeMap<String, DataSpec>,
+    #[serde(flatten)]
+    phases: HashMap<String, Vec<RuleSpec>>,
+}
+
 #[derive(serde::Deserialize, Default)]
 struct LangRules {
+    #[serde(default)]
+    data: BTreeMap<String, DataSpec>,
     #[serde(default)]
     link: Vec<RuleSpec>,
 }
@@ -161,21 +195,48 @@ impl Pipeline {
     pub fn load(lang: &Lang, languages: &[Option<&str>]) -> Result<Self, LoadError> {
         let spec: PipelineSpec =
             orbit_utils::yaml::from_str(include_str!("../../config/pipeline.yaml"))?;
-        let mut canonical: HashMap<String, Vec<RuleSpec>> =
-            orbit_utils::yaml::from_str(include_str!("../../config/canonical.yaml"))?;
+        let CanonicalFile {
+            data,
+            phases: mut canonical,
+        } = orbit_utils::yaml::from_str(include_str!("../../config/canonical.yaml"))?;
         let languages: Vec<LangRules> = languages
             .iter()
             .map(|yaml| yaml.map_or_else(|| Ok(LangRules::default()), orbit_utils::yaml::from_str))
             .collect::<Result<_, _>>()?;
+        let names: HashMap<String, u16> = data
+            .keys()
+            .enumerate()
+            .map(|(at, name)| (name.clone(), at as u16))
+            .collect();
+        let values = languages
+            .iter()
+            .map(|l| {
+                if let Some(name) = l.data.keys().find(|n| !names.contains_key(*n)) {
+                    return Err(LoadError(format!(
+                        "data {name} is not declared in canonical.yaml"
+                    )));
+                }
+                Ok(data
+                    .iter()
+                    .map(|(name, shared)| {
+                        let mut vals = Vals::new();
+                        l.data.get(name).unwrap_or(shared).vals(lang, &mut vals);
+                        vals
+                    })
+                    .collect::<Vec<Vals>>())
+            })
+            .collect::<Result<Vec<_>, LoadError>>()?;
         let phases = spec
             .phases
             .into_iter()
             .map(|p| {
                 let rules = canonical.remove(&p.name).unwrap_or_default();
                 let own: Vec<&[RuleSpec]> = languages.iter().map(|l| l.phase(&p.name)).collect();
-                Phase::load(p, &rules, &own, lang)
+                let mut phase = Phase::load(p, &rules, &own, &names, lang)?;
+                phase.data = values.clone();
+                Ok(phase)
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<_, LoadError>>()?;
         if let Some(name) = canonical.keys().next() {
             return Err(LoadError(format!("canonical.yaml: no phase named {name}")));
         }
@@ -206,6 +267,7 @@ impl Phase {
         spec: PhaseSpec,
         rules: &[RuleSpec],
         languages: &[&[RuleSpec]],
+        names: &HashMap<String, u16>,
         lang: &Lang,
     ) -> Result<Self, LoadError> {
         let links = super::Links::load(&binds(&spec)?)?;
@@ -225,6 +287,7 @@ impl Phase {
             after: spec.after.clone(),
             modules,
             links,
+            data: Vec::new(),
             rules: Vec::new(),
             by_kind: Vec::new(),
             slots: 1,
@@ -263,7 +326,7 @@ impl Phase {
                 .filter(|g| *g < 64)
                 .ok_or_else(|| at(LoadError("more than 64 rule groups".into())))?;
             let mut rule =
-                Rule::load(rule, group, &spec, &phase.links, &defaults, lang).map_err(at)?;
+                Rule::load(rule, group, &spec, &phase.links, &defaults, names, lang).map_err(at)?;
             rule.lang = owner;
             let kind = rule.kind().map_err(at)?;
             if !matches!(rule.children, Children::Visit)
@@ -413,6 +476,7 @@ impl Rule {
         phase: &PhaseSpec,
         links: &super::Links,
         defaults: &[(EdgeKind, FnId)],
+        names: &HashMap<String, u16>,
         lang: &Lang,
     ) -> Result<Self, LoadError> {
         let mut ctx = Ctx::new(lang);
@@ -424,6 +488,7 @@ impl Rule {
             modules: &phase.modules,
             links,
             lang,
+            data: names,
             effects,
         };
         let expr = |src: &str| Expr::parse(src, &scope(false));

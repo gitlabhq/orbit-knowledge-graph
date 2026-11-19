@@ -350,6 +350,7 @@ pub struct Run<'t> {
     killed: Option<Killed>,
     max_edges: usize,
     lang: usize,
+    data: &'t [Vals],
     edges: Vec<Edge>,
     defs: Vec<u32>,
     states: Box<[Box<dyn Any>]>,
@@ -365,9 +366,11 @@ impl<'t> Run<'t> {
         fi: u32,
         env: &'t Env,
         links: &'t Links,
+        data: &'t [Vec<Vals>],
         budget: &'t Sentinel,
         file: Sentinel,
     ) -> Self {
+        let lang = env.rules_index(&trees[fi as usize].label);
         Self {
             trees,
             fi,
@@ -378,7 +381,8 @@ impl<'t> Run<'t> {
             file,
             killed: None,
             max_edges: env.limits.max_file_edges,
-            lang: env.rules_index(&trees[fi as usize].label),
+            lang,
+            data: data.get(lang).map_or(&[], Vec::as_slice),
             edges: Vec::new(),
             defs: Vec::new(),
             states: modules::ALL.iter().map(|m| (m.state)()).collect(),
@@ -560,6 +564,7 @@ pub fn run_tree(
         0,
         env,
         &phase.links,
+        &phase.data,
         budget,
         file,
     );

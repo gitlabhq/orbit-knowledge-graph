@@ -13,6 +13,7 @@ pub enum Expr {
     Text(u16),
     Lit(Val),
     Empty,
+    Data(u16),
     Call(FnId, Box<[Expr]>),
 }
 
@@ -21,6 +22,7 @@ pub struct Scope<'a> {
     pub modules: &'a [String],
     pub links: &'a super::Links,
     pub lang: &'a Lang,
+    pub data: &'a HashMap<String, u16>,
     pub effects: bool,
 }
 
@@ -49,6 +51,7 @@ impl Expr {
                 .collect(),
             Expr::Lit(val) => SmallVec::from_elem(*val, 1),
             Expr::Empty => Vals::new(),
+            Expr::Data(at) => cx.data[usize::from(*at)].clone(),
             Expr::Call(id, args) => {
                 let args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
                 apply(cx, *id, &args)
@@ -149,6 +152,11 @@ impl<'s> Parser<'s, '_> {
         }
         if self.eat("$$$") || self.eat("$") {
             return Ok(Expr::Cap(self.capture()?));
+        }
+        if self.eat("%") {
+            let name = self.ident();
+            let at = self.scope.data.get(name).copied();
+            return at.map(Expr::Data).ok_or_else(|| self.error("unknown data"));
         }
         if self.eat("\"") {
             let len = self

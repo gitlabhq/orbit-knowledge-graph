@@ -1,11 +1,15 @@
+data:
+  shadows_locals: true
+  inline_modules: false
+
 link:
   - group: imports
     match: '(__import)'
-    enter: ['mod.ssa.bind_import($ROOT, true, false)']
+    enter: ['mod.ssa.bind_import($ROOT, %shadows_locals, %inline_modules)']
     children: skip
   - group: imports
     match: '(__import_type)'
-    enter: ['mod.ssa.bind_import($ROOT, true, false)']
+    enter: ['mod.ssa.bind_import($ROOT, %shadows_locals, %inline_modules)']
     children: skip
 
   - group: impl
@@ -14,7 +18,7 @@ link:
 
   - group: super_imports
     match: '(__def (__defname "/./") $$$S:__supertype)'
-    enter: ['mod.ssa.bind_inline($S, true, false)']
+    enter: ['mod.ssa.bind_inline($S, %shadows_locals, %inline_modules)']
 
   - group: def
     match: '(__def (__defname "/./") $$$S:__supertype)'
@@ -51,10 +55,10 @@ link:
 
   - group: inline
     match: '(__call)'
-    enter: ['mod.ssa.bind_inline($ROOT, true, false)']
+    enter: ['mod.ssa.bind_inline($ROOT, %shadows_locals, %inline_modules)']
   - group: inline
     match: '(__supertype)'
-    enter: ['mod.ssa.bind_inline($ROOT, true, false)']
+    enter: ['mod.ssa.bind_inline($ROOT, %shadows_locals, %inline_modules)']
 
   - group: shadow
     match: '(__call $C:__callee (__property))'
