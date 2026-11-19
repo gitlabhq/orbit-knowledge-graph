@@ -147,6 +147,16 @@ fixtures:
     content: |
       {"image": "json:1"}
 
+  - path: reference_tag/.gitlab-ci.yml
+    content: |
+      test:
+        services: !reference [.x, services]
+        image: !reference [.base, image]
+        variables:
+          TAGGED_IMAGE: !reference [.v, image]
+      real:
+        image: kept:1
+
   - path: ci/other.yml
     content: |
       image: not-indexed:1
@@ -337,3 +347,12 @@ tests:
       - { row_count: 5 }
       - { row: { path: "names/build.gitlab-ci.yml", language: "yaml" } }
       - { row: { path: "names/values.json", language: "json" } }
+
+  - name: "YAML-tagged values are not images"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = "reference_tag/.gitlab-ci.yml"
+      RETURN i.import_path AS image
+    assert:
+      - { row_count: 1 }
+      - { row: { image: "kept" } }
