@@ -8,7 +8,6 @@
 
 config:
   stdlib: []
-  max_imports: 1000
 
 stages:
   - name: normalize

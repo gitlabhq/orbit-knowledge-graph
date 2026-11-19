@@ -227,16 +227,31 @@ fn gitlab_ci_services(count: usize, limits: Limits) -> (Vec<Canonical>, Vec<Kill
 }
 
 #[test]
-fn a_gitlab_ci_file_keeps_only_the_first_images_up_to_the_cap() {
-    let (items, skipped, env) = gitlab_ci_services(1_100, Limits::UNLIMITED);
+fn a_large_gitlab_ci_file_keeps_every_image_in_linear_time() {
+    const JOBS: usize = 700;
+    let job = |index: usize| {
+        format!(
+            "job{index}:\n  stage: build\n  image: img{index}:1\n  services:\n    - svc{index}:1\n  variables:\n    DB_IMAGE: db{index}:1\n    LEVEL: 3\n  script:\n{}",
+            "    - echo line\n".repeat(30)
+        )
+    };
+    let repo = tempfile::tempdir().unwrap();
+    let content: String = (0..JOBS).map(job).collect();
+    std::fs::write(repo.path().join(".gitlab-ci.yml"), content).unwrap();
+    let env = Env::with_limits(
+        SupportLang::Yaml,
+        Limits {
+            file_rewrite_ms: 5_000,
+            ..Limits::UNLIMITED
+        },
+    )
+    .unwrap();
 
-    assert!(skipped.is_empty());
+    let (items, skipped) = rewrite_repo(&env, repo.path());
+
+    assert!(skipped.is_empty(), "{skipped:?}");
     let Canonical(tree, _) = &items[0];
-    let mut images: Vec<_> = nodes(tree, C::Import).map(|i| name_of(&env, i)).collect();
-    assert_eq!(images.len(), 1_000);
-    images.sort();
-    assert!(images.contains(&"svc0".to_string()));
-    assert!(!images.contains(&"svc1099".to_string()));
+    assert_eq!(nodes(tree, C::Import).count(), 3 * JOBS);
 }
 
 #[test]
