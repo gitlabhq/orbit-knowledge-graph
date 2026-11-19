@@ -6,14 +6,14 @@ functions:
     cases:
       - when: '$ROOT | alias'
         value: '$ROOT | alias | files | foreign'
-      - when: '$ROOT | source | under(%external)'
+      - when: '$ROOT | mod.scope.source | under(%external)'
         value: none
       - value: '$ROOT | tag("resolved_source") | files | foreign'
   submodule:
     params: [$N]
     cases:
       - value: '$ROOT | tag("resolved_source") | concat("/", @$N) | files | foreign'
-  named:
+  offered:
     params: [$N]
     cases:
       - when: '$ROOT | export($N)'
@@ -24,10 +24,10 @@ imports:
   - group: name
     match: '$I:(%import_kinds $ROOT:__name)'
     when: '$I | modules'
-    emit: { imports: { from: $ROOT, to: '$I | modules | named($ROOT) | foreign' } }
+    emit: { imports: { from: $ROOT, to: '$I | modules | offered($ROOT) | foreign' } }
   - group: name
     match: '$I:(%import_kinds $ROOT:__name)'
-    when: '$I | source | under(%stdlib)'
+    when: '$I | mod.scope.source | under(%stdlib)'
   - group: name
     match: '$I:(%import_kinds $ROOT:__name)'
-    emit: { imports: { from: $ROOT, to: '$I | submodule($ROOT) | named($ROOT) | foreign' } }
+    emit: { imports: { from: $ROOT, to: '$I | submodule($ROOT) | offered($ROOT) | foreign' } }

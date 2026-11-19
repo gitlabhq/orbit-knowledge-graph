@@ -8,7 +8,7 @@ resolve:
     emit: { calls: { from: enclosing, to: '$O | type | member($M) | foreign', site: $ROOT } }
   - group: call
     match: '(__call (__callee $I:__ivar))'
-    emit: { calls: { from: enclosing, to: 'enclosing | class | members(@$I, $ROOT) | foreign', site: $ROOT } }
+    emit: { calls: { from: enclosing, to: 'lookup(@$I, $ROOT, enclosing | class) | foreign', site: $ROOT } }
   - group: call
     match: '(__call (__callee "/./"))'
     emit: { calls: { from: enclosing, to: '$ROOT | targets | callable | foreign', site: $ROOT } }
