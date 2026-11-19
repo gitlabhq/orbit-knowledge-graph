@@ -120,13 +120,7 @@ impl CompilerDerivedSettings {
             ));
         }
         if self.final_scan {
-            for setting in [
-                "optimize_move_to_prewhere_if_final",
-                "use_skip_indexes_if_final",
-                "use_skip_indexes_if_final_exact_mode",
-            ] {
-                out.push((setting.into(), "1".into()));
-            }
+            out.push(("optimize_move_to_prewhere_if_final".into(), "1".into()));
         }
         if let Some(max) = self.use_index_for_in_with_subqueries_max_values {
             out.push((
@@ -382,11 +376,6 @@ mod tests {
             vec![
                 (
                     "optimize_move_to_prewhere_if_final".to_string(),
-                    "1".to_string()
-                ),
-                ("use_skip_indexes_if_final".to_string(), "1".to_string()),
-                (
-                    "use_skip_indexes_if_final_exact_mode".to_string(),
                     "1".to_string()
                 ),
                 (

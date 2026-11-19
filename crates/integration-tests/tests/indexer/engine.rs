@@ -233,6 +233,9 @@ impl TestContext {
                 url: self.clickhouse_endpoint.clone(),
                 username: USERNAME.to_string(),
                 password: Some(PASSWORD.to_string()),
+                compatibility: orbit_server_config::AppConfig::embedded_defaults()
+                    .graph
+                    .compatibility,
                 session_settings: std::collections::HashMap::new(),
                 replicated: false,
                 insert_settings: std::collections::HashMap::new(),

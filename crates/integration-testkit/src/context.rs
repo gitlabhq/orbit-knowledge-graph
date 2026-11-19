@@ -375,6 +375,7 @@ fn test_configuration(url: &str, database: &str) -> ClickHouseConfiguration {
         url: url.to_string(),
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
+        compatibility: AppConfig::embedded_defaults().graph.compatibility,
         session_settings: test_settings(),
         replicated: false,
         insert_settings: HashMap::new(),

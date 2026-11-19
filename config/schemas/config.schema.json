@@ -272,6 +272,10 @@
             "null"
           ]
         },
+        "compatibility": {
+          "description": "ClickHouse version whose setting defaults every query uses. Sent as the\n`compatibility` session setting, so it overrides the version pinned on the server.",
+          "type": "string"
+        },
         "session_settings": {
           "type": "object",
           "additionalProperties": {
@@ -299,6 +303,7 @@
         "database",
         "url",
         "username",
+        "compatibility",
         "replicated",
         "profiling"
       ]

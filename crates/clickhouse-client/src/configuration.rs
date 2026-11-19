@@ -23,7 +23,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             &self.database,
             &self.username,
             self.password.as_deref(),
-            &build_session_settings_with_quorum_defaults(self),
+            &build_session_settings(self),
             &self.insert_settings,
             service,
         )
@@ -31,16 +31,15 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
     }
 }
 
-fn build_session_settings_with_quorum_defaults(
-    config: &ClickHouseConfiguration,
-) -> HashMap<String, String> {
-    if !config.replicated {
-        return config.session_settings.clone();
+/// Explicit `session_settings` win over the defaults derived here.
+fn build_session_settings(config: &ClickHouseConfiguration) -> HashMap<String, String> {
+    let mut settings = HashMap::from([("compatibility".to_string(), config.compatibility.clone())]);
+    if config.replicated {
+        let quorum = QUORUM_SESSION_SETTINGS
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()));
+        settings.extend(quorum);
     }
-    let mut settings: HashMap<String, String> = QUORUM_SESSION_SETTINGS
-        .iter()
-        .map(|(key, value)| (key.to_string(), value.to_string()))
-        .collect();
     settings.extend(
         config
             .session_settings
@@ -63,6 +62,7 @@ mod tests {
             "url": "http://127.0.0.1:8123",
             "username": "default",
             "password": "secret",
+            "compatibility": "26.6",
             "replicated": false,
             "profiling": {
                 "enabled": false, "explain": false, "query_log": false,
@@ -81,6 +81,7 @@ mod tests {
             "database": "test",
             "url": "http://127.0.0.1:8123",
             "username": "default",
+            "compatibility": "26.6",
             "replicated": false,
             "profiling": {
                 "enabled": false, "explain": false, "query_log": false,
@@ -99,6 +100,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            compatibility: AppConfig::embedded_defaults().graph.compatibility,
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
@@ -115,6 +117,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            compatibility: AppConfig::embedded_defaults().graph.compatibility,
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
@@ -132,6 +135,7 @@ mod tests {
             url: "".to_string(),
             username: "default".to_string(),
             password: None,
+            compatibility: AppConfig::embedded_defaults().graph.compatibility,
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
@@ -149,6 +153,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "".to_string(),
             password: None,
+            compatibility: AppConfig::embedded_defaults().graph.compatibility,
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
@@ -182,7 +187,7 @@ mod tests {
             ..AppConfig::embedded_defaults().graph
         };
 
-        let settings = build_session_settings_with_quorum_defaults(&config);
+        let settings = build_session_settings(&config);
 
         assert_eq!(
             settings.get("insert_quorum").map(String::as_str),
@@ -217,21 +222,53 @@ mod tests {
             ..AppConfig::embedded_defaults().graph
         };
 
-        let settings = build_session_settings_with_quorum_defaults(&config);
+        let settings = build_session_settings(&config);
 
         assert_eq!(settings.get("insert_quorum").map(String::as_str), Some("3"));
     }
 
     #[test]
-    fn replicated_unset_leaves_session_settings_alone() {
+    fn replicated_unset_adds_only_compatibility() {
         let config = ClickHouseConfiguration {
+            compatibility: "26.6".to_string(),
             session_settings: std::collections::HashMap::new(),
             ..AppConfig::embedded_defaults().graph
         };
 
-        let settings = build_session_settings_with_quorum_defaults(&config);
+        let settings = build_session_settings(&config);
 
-        assert!(settings.is_empty());
+        assert_eq!(
+            settings,
+            HashMap::from([("compatibility".to_string(), "26.6".to_string())])
+        );
+    }
+
+    #[test]
+    fn compatibility_reaches_the_built_client() {
+        let config = ClickHouseConfiguration {
+            compatibility: "26.6".to_string(),
+            ..AppConfig::embedded_defaults().graph
+        };
+
+        let client = config.build_client("graph");
+
+        assert_eq!(client.inner().get_setting("compatibility"), Some("26.6"));
+    }
+
+    #[test]
+    fn explicit_session_setting_overrides_compatibility() {
+        let config = ClickHouseConfiguration {
+            compatibility: "26.6".to_string(),
+            session_settings: HashMap::from([("compatibility".to_string(), "26.8".to_string())]),
+            ..AppConfig::embedded_defaults().graph
+        };
+
+        let settings = build_session_settings(&config);
+
+        assert_eq!(
+            settings.get("compatibility").map(String::as_str),
+            Some("26.8")
+        );
     }
 
     #[tokio::test]
@@ -286,6 +323,7 @@ mod tests {
             url: "https://localhost:1".to_string(),
             username: "default".to_string(),
             password: None,
+            compatibility: AppConfig::embedded_defaults().graph.compatibility,
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),

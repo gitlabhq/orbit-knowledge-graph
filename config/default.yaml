@@ -47,6 +47,8 @@ datalake:
   database: default
   username: default
   # password: ""
+  # Oldest supported ClickHouse version. Keep in step with the version requirements docs.
+  compatibility: "26.6"
   replicated: false
   session_settings: {}
   insert_settings: {}
@@ -62,6 +64,8 @@ graph:
   database: default
   username: default
   # password: ""
+  # Oldest supported ClickHouse version. Keep in step with the version requirements docs.
+  compatibility: "26.6"
   replicated: false
   # Universal graph defaults, also set by the Helm chart in production.
   session_settings:
