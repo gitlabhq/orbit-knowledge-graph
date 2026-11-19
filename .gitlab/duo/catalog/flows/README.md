@@ -90,8 +90,9 @@ and a write:
   never resolves a **Needs reviewer decision** thread, and thread intake.
   Thread intake limits who can put thread text in front of a fixer to the
   trusted authors above. Thread markers count only when the flow identity
-  wrote them. The related-MR check groups only MRs from this project, so a
-  fork MR that names the same issue never joins the group.
+  wrote them. The gate ends the run on a fork MR, and the related-MR check
+  groups only MRs from this project, so a fork MR that names the same issue
+  never joins the group.
 - A mention on a docs MR runs the threads stage only when its `docs-write/`
   branch is in this project, not a fork, and the flow identity already has
   a note on the MR.
@@ -158,7 +159,7 @@ and add these conditions:
 
 | Event | Run when | Why |
 |---|---|---|
-| **Merge request** | **Created** | New MRs. The gate skips drafts. |
+| **Merge request** | **Created** | New MRs. The gate skips drafts and fork MRs. |
 | **Merge request** | **Marked ready** | Draft MRs that become ready. |
 | **Mention** | | On a feature MR: run the gate again on demand. On a docs MR the flow opened in this project: fix open threads from trusted authors (the flow, Duo Code Review, authors and reviewers of feature MRs from this project, docs MR reviewers, and Developer+ members), then hand off again. |
 
