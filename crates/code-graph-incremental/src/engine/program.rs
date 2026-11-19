@@ -370,6 +370,7 @@ struct Loader<'a> {
     names: &'a HashMap<String, u16>,
     defs: HashMap<String, (u16, usize)>,
     data: &'a BTreeMap<String, DataSpec>,
+    lang_data: Vec<BTreeMap<String, DataSpec>>,
     lang: &'a Lang,
 }
 
@@ -414,6 +415,17 @@ impl Phase {
             defs,
             names,
             data: &files.shared.data,
+            lang_data: files
+                .langs
+                .iter()
+                .map(|file| {
+                    let mut merged = files.shared.data.clone();
+                    if let Some(file) = file {
+                        merged.extend(file.data.clone());
+                    }
+                    merged
+                })
+                .collect(),
             lang,
         };
         let shared = files.shared.phases.get(&spec.name);
@@ -434,7 +446,8 @@ impl Phase {
                 let stages = files
                     .langs
                     .iter()
-                    .map(|file| loader.stages(own(file, &spec.name), shared))
+                    .enumerate()
+                    .map(|(at, file)| loader.stages(own(file, &spec.name), shared, at as u8))
                     .collect::<Result<Vec<_>, _>>()?;
                 let slots = stages
                     .iter()
@@ -619,8 +632,12 @@ impl Loader<'_> {
         for p in params {
             slots.slot(p.trim_start_matches('$'));
         }
+        let values = match lang {
+            Some(l) => &self.lang_data[usize::from(l)],
+            None => self.data,
+        };
         let data = |name: &str| {
-            let spec = self.data.get(name)?;
+            let spec = values.get(name)?;
             let mut out = Vec::new();
             data_texts(spec, &mut out);
             Some(out)
@@ -703,7 +720,12 @@ impl Loader<'_> {
         for (at, rules) in langs.iter().enumerate() {
             ordered.extend(rules_of(*rules)?.iter().map(|r| (Some(at as u8), r)));
         }
-        ordered.extend(shared.iter().map(|r| (None, r)));
+        for r in shared {
+            match r.pattern.contains('%') {
+                true => ordered.extend((0..langs.len()).map(|at| (Some(at as u8), r))),
+                false => ordered.push((None, r)),
+            }
+        }
         let mut rules = Vec::new();
         let mut steering: BTreeMap<u16, u8> = BTreeMap::new();
         let mut by_kind: Vec<SmallVec<[u16; 4]>> = Vec::new();
@@ -860,6 +882,7 @@ impl Loader<'_> {
         &self,
         own: Option<&PhaseRules>,
         shared: Option<&PhaseRules>,
+        lang: u8,
     ) -> Result<Vec<Stage>, LoadError> {
         fn listed(rules: Option<&PhaseRules>) -> Vec<(&[RuleSpec], bool)> {
             match rules {
@@ -874,17 +897,17 @@ impl Loader<'_> {
         listed(own)
             .into_iter()
             .chain(listed(shared))
-            .map(|(rules, repeat)| self.stage(rules, repeat))
+            .map(|(rules, repeat)| self.stage(rules, repeat, lang))
             .collect()
     }
 
-    fn stage(&self, specs: &[RuleSpec], repeat: bool) -> Result<Stage, LoadError> {
+    fn stage(&self, specs: &[RuleSpec], repeat: bool, lang: u8) -> Result<Stage, LoadError> {
         let mut rules = Vec::new();
         let mut by_kind: HashMap<u16, Vec<u16>> = HashMap::new();
         for spec in specs {
             let at = self.at(spec);
             self.check_hooks(spec).map_err(&at)?;
-            let rule = self.rewrite(spec).map_err(&at)?;
+            let rule = self.rewrite(spec, lang).map_err(&at)?;
             if repeat && matches!(rule.out, Out::Append(_)) {
                 return Err(at(LoadError("a repeat stage cannot append".into())));
             }
@@ -900,8 +923,8 @@ impl Loader<'_> {
         })
     }
 
-    fn rewrite(&self, spec: &RuleSpec) -> Result<Rewrite, LoadError> {
-        let at = self.matcher(spec, None)?;
+    fn rewrite(&self, spec: &RuleSpec, lang: u8) -> Result<Rewrite, LoadError> {
+        let at = self.matcher(spec, Some(lang))?;
         let scope = self.scope(&at.slots, false);
         let mut text = |src: &str| Expr::parse(src, &scope);
         let template = |src: &str, text: &mut dyn FnMut(&str) -> Result<Expr, LoadError>| {

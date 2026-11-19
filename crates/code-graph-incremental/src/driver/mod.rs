@@ -198,6 +198,8 @@ impl Stage {
 /// Keeps only canonical nodes with their text frozen into symbols, and drops
 /// the source.
 fn canonical(env: &Env, mut tree: Tree<Mutable>) -> Tree<Compact> {
+    let root = tree.root;
+    tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
     tree.prune();
     for id in tree.preorder() {
         let sym = tree.sym_of(id, &env.lang);
