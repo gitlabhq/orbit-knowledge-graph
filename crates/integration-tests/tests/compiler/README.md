@@ -116,8 +116,10 @@ type name.
 
 Every case that compiles gets two more checks without an assertion. DuckDB
 runs the rendered SQL of each DuckDB case on an empty database of the local
-schema. For each ClickHouse case, each CTE body, emitted as a statement of its
-own for EXPLAIN, must define every CTE it reads.
+schema. For each ClickHouse case, the query and each CTE body, emitted as a
+statement of its own for EXPLAIN, must define every CTE that their AST reads
+and render each read under that CTE's name. The run fails if no case has a CTE
+body that reads another CTE.
 
 The compiler fixtures binary loads the embedded query config, so `settings` sees the
 production settings, such as the query cache. The container suite runs EXPLAIN

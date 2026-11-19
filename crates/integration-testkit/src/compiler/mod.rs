@@ -803,6 +803,7 @@ struct Models {
     remote: Arc<ClickHouseDataModel>,
     local: Arc<DuckDbDataModel>,
     local_database: DuckDbClient,
+    reads_other_cte: std::cell::Cell<bool>,
 }
 
 impl Models {
@@ -815,6 +816,7 @@ impl Models {
             remote: Arc::new(ClickHouseDataModel::derive(ontology.clone()).unwrap()),
             local: Arc::new(DuckDbDataModel::derive(ontology).unwrap()),
             local_database,
+            reads_other_cte: std::cell::Cell::default(),
         }
     }
 }
@@ -974,6 +976,7 @@ fn check_pipeline(
         frontend: language,
         index_exists: &index_exists,
         local_database: (backend == "duckdb").then_some(&models.local_database),
+        reads_other_cte: &models.reads_other_cte,
         label,
     };
     match (backend, language, scenario.hydration.as_ref()) {
@@ -1075,6 +1078,7 @@ struct Expectations<'a> {
     frontend: &'a str,
     index_exists: &'a dyn Fn(&str, &str) -> bool,
     local_database: Option<&'a DuckDbClient>,
+    reads_other_cte: &'a std::cell::Cell<bool>,
     label: &'a str,
 }
 
@@ -1117,14 +1121,22 @@ impl Expectations<'_> {
                             ));
                         }
                     }
-                    (None, Some(output)) => match clickhouse::undefined_cte_reads(&output.ast) {
-                        Ok(reads) => failures.extend(
-                            reads
-                                .into_iter()
-                                .map(|read| format!("{}: {read}", self.label)),
-                        ),
-                        Err(error) => failures.push(format!("{}: {error}", self.label)),
-                    },
+                    (None, Some(output)) => {
+                        match clickhouse::check_cte_reads(&output.ast, &output.base.render()) {
+                            Ok(reads) => {
+                                if reads.reads_other {
+                                    self.reads_other_cte.set(true);
+                                }
+                                failures.extend(
+                                    reads
+                                        .failures
+                                        .into_iter()
+                                        .map(|read| format!("{}: {read}", self.label)),
+                                );
+                            }
+                            Err(error) => failures.push(format!("{}: {error}", self.label)),
+                        }
+                    }
                     _ => {}
                 }
                 return (failures, ctx.take_output());
@@ -1384,7 +1396,14 @@ pub use clickhouse::run_index_explains;
 pub use schema::run_schema_dir;
 
 pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
-    if let Err(failures) = check_dir(directory, ontology) {
+    let (mut failures, reads_other_cte) = check_fixtures(directory, ontology);
+    if !reads_other_cte {
+        failures.push(
+            "no ClickHouse fixture has a CTE statement that reads another CTE, so the CTE read check checks nothing"
+                .into(),
+        );
+    }
+    if !failures.is_empty() {
         panic!(
             "{} plan fixture failure(s):\n\n{}",
             failures.len(),
@@ -1417,7 +1436,7 @@ fn read_fixtures(directory: &Path) -> Vec<(std::path::PathBuf, Scenario)> {
         .collect()
 }
 
-fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
+fn check_fixtures(directory: &Path, ontology: Arc<ontology::Ontology>) -> (Vec<String>, bool) {
     let models = Models::derive(Arc::clone(&ontology));
     let mut variants = BTreeMap::new();
     let mut cases = 0;
@@ -1460,6 +1479,14 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
         }
     }
     println!("{passed}/{cases} plan fixtures passed");
+    let reads_other_cte = std::iter::once(&models)
+        .chain(variants.values())
+        .any(|models| models.reads_other_cte.get());
+    (failures, reads_other_cte)
+}
+
+fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
+    let (failures, _) = check_fixtures(directory, ontology);
     if failures.is_empty() {
         Ok(())
     } else {
