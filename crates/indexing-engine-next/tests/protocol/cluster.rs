@@ -8,7 +8,8 @@ use indexing_engine_next::protocol::{
     Claim, Hold, HolderId, Lease, LeaseRules, Publish, Renewal, TaskId, decide_submit,
 };
 use indexing_engine_next::testkit::simulator::{
-    FaultBudget, SimulatedBroker, SimulatedClock, SimulatedKeyValue, SimulatedStore, StoreWrite,
+    DatabaseWrite, FaultBudget, SimulatedBroker, SimulatedClock, SimulatedDatabase,
+    SimulatedKeyValue,
 };
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::{RngExt, SeedableRng};
@@ -182,7 +183,7 @@ struct Cluster {
     lease: SimulatedKeyValue<Lease>,
     marker: SimulatedKeyValue<TaskId>,
     broker: SimulatedBroker,
-    store: SimulatedStore,
+    database: SimulatedDatabase,
     faults: FaultBudget,
     next_id: u64,
     publishing: Option<TaskId>,
@@ -215,7 +216,7 @@ impl Cluster {
             lease: SimulatedKeyValue::default(),
             marker: SimulatedKeyValue::default(),
             broker: SimulatedBroker::new(ACKNOWLEDGE_WAIT),
-            store: SimulatedStore::default(),
+            database: SimulatedDatabase::default(),
             faults: FaultBudget::new(MAX_STALLS, MAX_CRASHES),
             next_id: 1,
             publishing: None,
@@ -443,9 +444,9 @@ impl Cluster {
         let Some(fence) = self.holds(h).map(Hold::fence) else {
             return;
         };
-        match self.store.write(fence) {
-            StoreWrite::Kept => self.advance(h),
-            StoreWrite::Rejected => {
+        match self.database.write(fence) {
+            DatabaseWrite::Kept => self.advance(h),
+            DatabaseWrite::Rejected => {
                 self.coverage.fence_rejections += 1;
                 self.drop_run(h);
             }

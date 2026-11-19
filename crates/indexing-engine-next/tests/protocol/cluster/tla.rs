@@ -119,7 +119,7 @@ impl fmt::Display for Tla<'_> {
             ", stallsLeft |-> {}, crashesLeft |-> {}, storeFence |-> {}, staleWrite |-> FALSE, enabled |-> {{{}}}]",
             cluster.faults.stalls_left(),
             cluster.faults.crashes_left(),
-            cluster.store.highest_fence().0,
+            cluster.database.highest_fence().0,
             enabled.join(", ")
         )
     }

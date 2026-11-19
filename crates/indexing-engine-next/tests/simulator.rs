@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use indexing_engine_next::protocol::{Fence, Revision, TaskId};
 use indexing_engine_next::testkit::simulator::{
-    MessageState, RevisionConflict, SimulatedBroker, SimulatedClock, SimulatedKeyValue,
-    SimulatedStore, StoreWrite,
+    DatabaseWrite, MessageState, RevisionConflict, SimulatedBroker, SimulatedClock,
+    SimulatedDatabase, SimulatedKeyValue,
 };
 use uuid::Uuid;
 
@@ -56,13 +56,13 @@ fn a_message_comes_back_after_the_acknowledge_wait_unless_its_consumer_acknowled
 }
 
 #[test]
-fn the_store_rejects_a_write_with_a_lower_fence_than_one_it_kept() {
-    let mut store = SimulatedStore::default();
+fn the_database_rejects_a_write_with_a_lower_fence_than_one_it_kept() {
+    let mut database = SimulatedDatabase::default();
 
-    assert_eq!(store.write(Fence(4)), StoreWrite::Kept);
-    assert_eq!(store.write(Fence(3)), StoreWrite::Rejected);
-    assert_eq!(store.write(Fence(4)), StoreWrite::Kept);
-    assert_eq!(store.highest_fence(), Fence(4));
+    assert_eq!(database.write(Fence(4)), DatabaseWrite::Kept);
+    assert_eq!(database.write(Fence(3)), DatabaseWrite::Rejected);
+    assert_eq!(database.write(Fence(4)), DatabaseWrite::Kept);
+    assert_eq!(database.highest_fence(), Fence(4));
 }
 
 #[test]

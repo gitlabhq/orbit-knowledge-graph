@@ -1,17 +1,17 @@
 use crate::protocol::Fence;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StoreWrite {
+pub enum DatabaseWrite {
     Kept,
     Rejected,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct SimulatedStore {
+pub struct SimulatedDatabase {
     highest_fence: Fence,
 }
 
-impl Default for SimulatedStore {
+impl Default for SimulatedDatabase {
     fn default() -> Self {
         Self {
             highest_fence: Fence(0),
@@ -19,13 +19,13 @@ impl Default for SimulatedStore {
     }
 }
 
-impl SimulatedStore {
-    pub fn write(&mut self, fence: Fence) -> StoreWrite {
+impl SimulatedDatabase {
+    pub fn write(&mut self, fence: Fence) -> DatabaseWrite {
         if fence < self.highest_fence {
-            return StoreWrite::Rejected;
+            return DatabaseWrite::Rejected;
         }
         self.highest_fence = fence;
-        StoreWrite::Kept
+        DatabaseWrite::Kept
     }
 
     pub fn highest_fence(&self) -> Fence {
