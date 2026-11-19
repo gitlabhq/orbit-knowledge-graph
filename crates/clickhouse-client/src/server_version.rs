@@ -1,7 +1,9 @@
 //! The oldest ClickHouse server that the graph schema and the compiled SQL run on.
 
 use std::fmt;
+use std::time::Duration;
 
+use orbit_log_fields::warn;
 use orbit_server_config::ClickHouseConfiguration;
 use thiserror::Error;
 
@@ -78,6 +80,32 @@ pub async fn require_minimum_server_version(
     check_server_version(&reported)
 }
 
+/// Retries a server that does not answer yet, and stops on a version that Orbit cannot run on.
+pub async fn wait_for_minimum_server_version(
+    config: &ClickHouseConfiguration,
+    retry_backoff: Duration,
+) -> Result<ServerVersion, ServerVersionError> {
+    loop {
+        match require_minimum_server_version(config).await {
+            Ok(version) => return Ok(version),
+            Err(
+                error @ (ServerVersionError::BelowMinimum { .. }
+                | ServerVersionError::Unparsable(_)),
+            ) => {
+                return Err(error);
+            }
+            Err(error @ ServerVersionError::Unreadable(_)) => {
+                warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&error),
+                    expanded(ERROR_MESSAGE) = %error,
+                    "ClickHouse version unreadable; retrying"
+                );
+            }
+        }
+        tokio::time::sleep(retry_backoff).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,5 +172,19 @@ mod tests {
         let error = check_server_version("26.2.1.788").unwrap_err();
 
         assert_eq!(<&str>::from(&error), "clickhouse_version_below_minimum");
+    }
+
+    #[tokio::test]
+    async fn waiting_keeps_retrying_while_the_server_does_not_answer() {
+        let mut config = orbit_server_config::AppConfig::embedded_defaults().graph;
+        config.url = "http://127.0.0.1:1".to_string();
+
+        let waited = tokio::time::timeout(
+            Duration::from_millis(300),
+            wait_for_minimum_server_version(&config, Duration::from_millis(10)),
+        )
+        .await;
+
+        assert!(waited.is_err(), "{waited:?}");
     }
 }

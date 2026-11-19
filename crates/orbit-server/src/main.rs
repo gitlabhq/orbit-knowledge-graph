@@ -176,7 +176,12 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
-    clickhouse_client::require_minimum_server_version(&config.graph).await?;
+    let version_retry_backoff =
+        std::time::Duration::from_secs(config.schema.version_poll_interval_secs);
+    tokio::select! {
+        version = clickhouse_client::wait_for_minimum_server_version(&config.graph, version_retry_backoff) => version?,
+        _ = shutdown.cancelled() => return Ok(()),
+    };
     let graph = config.graph.build_client("graph");
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),
