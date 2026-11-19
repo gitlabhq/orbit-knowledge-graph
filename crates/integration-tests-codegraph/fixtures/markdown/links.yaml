@@ -1,4 +1,4 @@
-name: "Markdown: links become File IMPORTS edges to files and heading sections"
+name: "Markdown: links become File and Section IMPORTS edges to files and heading sections"
 fixture_tree: markdown_links
 
 tests:
@@ -65,3 +65,60 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { source: 3150211441383902751, target: 4354769340535525246 } }
+
+  - name: "links inside a heading section also link from its innermost section"
+    query: |
+      MATCH (s:Definition)-[:IMPORTS]->(t:File)
+      RETURN s.fqn AS source, t.path AS target
+    assert:
+      - { row_count: 7 }
+      - { row: { source: "index#Index", target: "docs/guide.md" } }
+      - { row: { source: "index#Index", target: "docs/other.md" } }
+      - { row: { source: "index#Index", target: "src/main.py" } }
+      - { row: { source: "index#Index", target: "docs/my notes.md" } }
+      - { row: { source: "index#Index#Assets", target: "assets/logo.png" } }
+      - { row: { source: "index#Index#Assets", target: "assets/diagram.svg" } }
+      - { row: { source: "other#Other", target: "docs/my notes.md" } }
+
+  - name: "resolved anchors also link the heading section from the innermost source section"
+    query: |
+      MATCH (s:Definition)-[:IMPORTS]->(d:Definition)
+      RETURN s.fqn AS source, d.fqn AS target
+    assert:
+      - { row_count: 5 }
+      - { row: { source: "index#Index", target: "guide#Guide#Install" } }
+      - { row: { source: "index#Index", target: "guide#Guide#Install 1" } }
+      - { row: { source: "index#Index", target: "guide#Guide#Café über" } }
+      - { row: { source: "index#Index", target: "faq#FAQ#Question" } }
+      - { row: { source: "my notes#Notes", target: "index#Index" } }
+
+  - name: "a link before the first heading links only from the file"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(t:File)
+      WHERE f.path = 'docs/other.md'
+      RETURN t.path AS target
+    assert:
+      - { row_count: 2 }
+      - column_values:
+          field: target
+          values:
+            - docs/guide.md
+            - docs/my notes.md
+
+  - name: "section-sourced file link endpoint ids match across engines"
+    query: |
+      MATCH (s:Definition)-[:IMPORTS]->(t:File)
+      WHERE s.fqn = 'index#Index#Assets' AND t.path = 'assets/logo.png'
+      RETURN s.id AS source, t.id AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: 6227688384652585182, target: 5169802220678377662 } }
+
+  - name: "section-sourced section link endpoint ids match across engines"
+    query: |
+      MATCH (s:Definition)-[:IMPORTS]->(d:Definition)
+      WHERE d.name = 'Install'
+      RETURN s.id AS source, d.id AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: 2826921626353384516, target: 4354769340535525246 } }

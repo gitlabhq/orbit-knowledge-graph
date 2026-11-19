@@ -1,4 +1,4 @@
-use named_queries::{BindingValues, Language, NamedQueries};
+use named_queries::NamedQueries;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -8,8 +8,10 @@ enum Generate {
     NamedQueries,
     Repeat {
         placeholder: String,
-        text: String,
+        repeat: String,
         count: usize,
+        #[serde(default)]
+        suffix: String,
     },
     Rows {
         into: String,
@@ -29,10 +31,6 @@ impl Generate {
         }
     }
 }
-
-const BINDINGS: BindingValues = BindingValues {
-    current_user_id: 42,
-};
 
 pub(crate) fn expand(mut case: Value, kinds: &[&str]) -> Result<Vec<Value>, String> {
     let Some(generate) = case
@@ -83,36 +81,32 @@ fn apply(generator: &Generate, mut case: Value, name: &str) -> Result<Vec<Value>
                 return Err(format!("{name}: named_queries supplies the query"));
             }
             let queries = NamedQueries::load_embedded().map_err(|error| error.to_string())?;
-            queries
-                .iter()
-                .map(|query| {
-                    let params = query.example_parameters();
-                    let render = |language| {
-                        query
-                            .render_language(language, &BINDINGS, &params)
-                            .map(Value::String)
-                            .map_err(|error| format!("{name}: {}: {error}", query.name))
-                    };
+            let examples = crate::named_query_examples(&queries, 42)
+                .map_err(|error| format!("{name}: {error}"))?;
+            Ok(examples
+                .into_iter()
+                .map(|example| {
                     let mut generated = case.clone();
                     let fields = generated.as_object_mut().unwrap();
-                    fields.insert("name".into(), format!("{name}: {}", query.name).into());
+                    fields.insert("name".into(), format!("{name}: {}", example.name).into());
                     fields.insert(
                         "query".into(),
                         Value::Object(Map::from_iter([
-                            ("json".into(), render(Language::Json)?),
-                            ("gql".into(), render(Language::Gql)?),
+                            ("json".into(), example.json.into()),
+                            ("gql".into(), example.gql.into()),
                         ])),
                     );
-                    Ok(generated)
+                    generated
                 })
-                .collect()
+                .collect())
         }
         Generate::Repeat {
             placeholder,
-            text,
+            repeat,
             count,
+            suffix,
         } => {
-            let replacement = text.repeat(*count);
+            let replacement = super::repeat_text(repeat, *count, suffix);
             if !replace_strings(&mut case, &mut |text| {
                 text.contains(placeholder.as_str())
                     .then(|| Value::String(text.replace(placeholder.as_str(), &replacement)))
@@ -184,12 +178,12 @@ fn generators_expand_cases_and_reject_misuse() {
     };
     let all = ["named_queries", "repeat", "rows"];
     let repeated = expand(
-        case("generate: {kind: repeat, placeholder: LONG, text: ab, count: 3}\nquery: {gql: \"x LONG y\"}\nexpect: {v: LONG}"),
+        case("generate: {kind: repeat, placeholder: LONG, repeat: ab, count: 3, suffix: c}\nquery: {gql: \"x LONG y\"}\nexpect: {v: LONG}"),
         &all,
     )
     .unwrap();
-    assert_eq!(repeated[0]["query"]["gql"], "x ababab y");
-    assert_eq!(repeated[0]["expect"]["v"], "ababab");
+    assert_eq!(repeated[0]["query"]["gql"], "x abababc y");
+    assert_eq!(repeated[0]["expect"]["v"], "abababc");
     assert!(repeated[0].get("generate").is_none());
     let named = expand(case("generate: {kind: named_queries}"), &all).unwrap();
     assert!(named.len() > 1);
@@ -211,7 +205,7 @@ fn generators_expand_cases_and_reject_misuse() {
     );
     for (extra, kinds, expected) in [
         (
-            "generate: {kind: repeat, placeholder: LONG, text: a, count: 2}\nquery: {gql: x}",
+            "generate: {kind: repeat, placeholder: LONG, repeat: a, count: 2}\nquery: {gql: x}",
             &all[..],
             "no string contains LONG",
         ),

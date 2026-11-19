@@ -115,7 +115,7 @@ cases:
             - "line 1, column 363: a node projects at most 50 properties"
 
   - name: A query past the byte limit is rejected before parsing
-    generate: { kind: repeat, placeholder: LONG_NAME, text: x, count: 40000 }
+    generate: { kind: repeat, placeholder: LONG_NAME, repeat: x, count: 40000 }
     query:
       gql: |
         MATCH (u:User {username: 'LONG_NAME'}) RETURN u

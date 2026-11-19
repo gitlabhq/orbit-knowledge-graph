@@ -17,7 +17,7 @@ tests/
   common/               # shared helpers
   canary/               # TestContext canary
   compiler/             # compiler fixtures in compiler/fixtures/
-  duckdb/               # DuckDB codegen, security, and transform tests in the local binary
+  duckdb/               # DuckDB security and transform tests in the local binary
   indexer/              # indexer tests; indexer scenarios in indexer/scenarios/
   server/               # server tests; query scenarios in server/data_correctness/scenarios/
   fixtures/             # CLI fixtures

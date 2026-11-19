@@ -1,0 +1,9 @@
+properties:
+  rank:
+    type: int64
+    source: rank
+    nullable: true
+    description: "Fixture rank that can be null."
+storage:
+  columns:
+    - {name: rank, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}

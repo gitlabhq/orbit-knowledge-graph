@@ -704,7 +704,7 @@ impl ResponseView {
             .get(row_index)
             .unwrap_or_else(|| panic!("row {row_index} not found in {:?}", self.rows()));
         assert!(
-            row.get(key).is_none_or(Value::is_null),
+            row.get(key).is_some_and(Value::is_null),
             "row {row_index} column '{key}': expected null, got {row:?}"
         );
     }
@@ -1223,6 +1223,18 @@ pub(crate) mod tests {
             rows: None,
             pagination: None,
         }
+    }
+
+    #[test]
+    fn null_row_values_need_the_column() {
+        let mut response = sample_response();
+        response.rows = Some(vec![json!({"total": null}).as_object().unwrap().clone()]);
+        let view = ResponseView::new(response);
+        view.assert_row_value_null(0, "total");
+        let missing = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            view.assert_row_value_null(0, "mean")
+        }));
+        assert!(missing.is_err());
     }
 
     #[test]

@@ -242,7 +242,6 @@ properties:
     type: int64
     source: author_id
     nullable: true
-    mutable: false
     description: "Author user ID."
 
   merge_user_id:
@@ -360,6 +359,7 @@ pipelines:
             field: id
             kind: MergeRequest
           label: AUTHORED
+          mutable: true
         - from:
             field: merge_user_id
             kind: User

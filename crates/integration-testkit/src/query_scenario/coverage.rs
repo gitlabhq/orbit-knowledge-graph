@@ -3,23 +3,43 @@ use std::collections::BTreeSet;
 use query_engine::compiler::ast::{Expr, Function, Node, Query, SelectExpr, SqlType, TableRef};
 use query_engine::compiler::input::{AggFunction, TruncateUnit};
 use query_engine::compiler::passes::codegen::duckdb;
-use strum::IntoEnumIterator;
+use strum::{IntoEnumIterator, VariantNames};
 
 #[derive(Default)]
-pub(super) struct Coverage(BTreeSet<String>);
+pub struct Coverage(BTreeSet<String>);
 
 impl Coverage {
-    pub(super) fn record(&mut self, ast: &Node) {
+    pub(crate) fn record(&mut self, ast: &Node) {
         if let Node::Query(query) = ast {
             self.query(query);
         }
     }
 
-    pub(super) fn unreached(&self) -> Vec<String> {
-        renderable()
-            .into_iter()
-            .filter(|construct| !self.0.contains(construct))
-            .collect()
+    pub fn problems(&self, compiler_fixtures: &std::path::Path) -> Vec<String> {
+        let mut fixtures = Coverage::default();
+        crate::compiler::record_duckdb_fixtures(compiler_fixtures, &mut fixtures);
+        let renderable = renderable();
+        let excluded = |construct: &str| EXCLUDED.iter().any(|(name, _)| *name == construct);
+        let unreached = renderable
+            .iter()
+            .filter(|construct| !excluded(construct) && !self.0.contains(*construct))
+            .map(|construct| format!("no scenario reaches {construct}"));
+        let stale = EXCLUDED.iter().filter_map(|(construct, _)| {
+            if !renderable.iter().any(|name| name == construct) {
+                Some(format!(
+                    "{construct} is excluded but DuckDB does not render it"
+                ))
+            } else if self.0.contains(*construct) {
+                Some(format!("{construct} is excluded but a scenario reaches it"))
+            } else if fixtures.0.contains(*construct) {
+                Some(format!(
+                    "{construct} is excluded but a DuckDB compiler fixture reaches it"
+                ))
+            } else {
+                None
+            }
+        });
+        unreached.chain(stale).collect()
     }
 
     fn insert(&mut self, construct: String) {
@@ -111,7 +131,6 @@ impl Coverage {
                 self.expr(value);
             }
             Expr::TextSearch { value, query, .. } => {
-                self.insert("text search".into());
                 self.expr(value);
                 self.expr(query);
             }
@@ -136,6 +155,11 @@ impl Coverage {
         }
     }
 }
+
+const EXCLUDED: &[(&str, &str)] = &[
+    ("DISTINCT", "no lowering emits"),
+    ("scalar subquery", "tp_bounds and security check only"),
+];
 
 fn renderable() -> Vec<String> {
     let renders = |expr: Expr| {
@@ -163,10 +187,17 @@ fn renderable() -> Vec<String> {
     functions
         .map(|function| format!("function {function}"))
         .chain(aggregates.map(|function| format!("aggregate {function}")))
-        .chain(TruncateUnit::iter().map(|unit| format!("time bucket {}", unit.name())))
+        .chain(
+            TruncateUnit::VARIANTS
+                .iter()
+                .map(|unit| format!("time bucket {unit}")),
+        )
         .chain(
             [
                 "UNION ALL",
+                "DISTINCT",
+                "IN subquery",
+                "scalar subquery",
                 "aggregate DISTINCT",
                 "aggregate FILTER",
                 "timestamp parameter",

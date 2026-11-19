@@ -16,6 +16,20 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 123
+  scope: "*"
+  note: >-
+    MergeRequest takes merge_user_id from the metrics merger, falls back to the MR
+    field, and sets it only for merged MRs, so manual merges get a MERGED edge.
+    AUTHORED and author_id become mutable on WorkItem, MergeRequest, Note and
+    Vulnerability, so the stale-edge sweep drops the old edge after GitLab moves a
+    deleted user's records to the Ghost user. The rebuild fixes the rows already indexed.
+- version: 122
+  scope: code
+  note: >-
+    Markdown links under a heading also emit Definition(Section) IMPORTS File and
+    Definition(Section) IMPORTS Definition(Section) edges from their innermost
+    section; re-index code to backfill them.
 - version: 121
   scope: code
   note: >-

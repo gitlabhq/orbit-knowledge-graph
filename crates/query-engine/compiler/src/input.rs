@@ -799,7 +799,7 @@ fn parse_group_by_object(
     parse_group_by_spec(&spec, truncate, alias)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames, strum::EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum TruncateUnit {

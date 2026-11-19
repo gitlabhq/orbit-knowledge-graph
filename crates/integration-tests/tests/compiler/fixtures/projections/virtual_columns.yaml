@@ -143,7 +143,7 @@ cases:
               virtual_filters: [{ property: content, op: eq, value: x }]
               filter_injected_columns: []
 
-  - name: Inline and WHERE equality on a virtual property hydrate the same filter
+  - name: A bare JSON value and an inline GQL property on a virtual property hydrate the same equality filter
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":"abc"}}]}

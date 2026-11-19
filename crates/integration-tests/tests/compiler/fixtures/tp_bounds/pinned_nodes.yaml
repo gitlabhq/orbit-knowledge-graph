@@ -97,7 +97,6 @@ cases:
           tp_bounds:
             nodes:
               p: "StartsWith(p.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/')"
-              u: null
 
   - name: A prune-to-target bound does not cross a user hub
     security: { paths: [1/9970/] }
@@ -113,4 +112,3 @@ cases:
             nodes:
               a: "StartsWith(a.traversal_path, scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663)) OR (scalar(gl_project AS _orbit_scope WHERE _orbit_scope.id = 15846663) = '0/')"
               b: null
-              u: null

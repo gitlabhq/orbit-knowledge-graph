@@ -264,3 +264,40 @@ pub(crate) fn database_name(scenario_name: &str) -> String {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect()
 }
+
+pub(crate) fn subset_mismatch(
+    path: &str,
+    expected: &serde_json::Value,
+    actual: &serde_json::Value,
+) -> Option<String> {
+    match (expected, actual) {
+        (serde_json::Value::Object(expected), serde_json::Value::Object(actual)) => expected
+            .iter()
+            .find_map(|(key, value)| match actual.get(key) {
+                Some(found) => subset_mismatch(&format!("{path}.{key}"), value, found),
+                None => Some(format!("{path}.{key} is missing")),
+            }),
+        (serde_json::Value::Array(expected), serde_json::Value::Array(actual))
+            if expected.len() == actual.len() =>
+        {
+            expected
+                .iter()
+                .zip(actual)
+                .enumerate()
+                .find_map(|(index, (value, found))| {
+                    subset_mismatch(&format!("{path}[{index}]"), value, found)
+                })
+        }
+        (serde_json::Value::Array(expected), serde_json::Value::Array(actual)) => Some(format!(
+            "{path} has {} items, expected {}",
+            actual.len(),
+            expected.len()
+        )),
+        _ if expected == actual => None,
+        _ => Some(format!("{path} is {actual}, expected {expected}")),
+    }
+}
+
+pub(crate) fn repeat_text(text: &str, count: usize, suffix: &str) -> String {
+    format!("{}{suffix}", text.repeat(count))
+}

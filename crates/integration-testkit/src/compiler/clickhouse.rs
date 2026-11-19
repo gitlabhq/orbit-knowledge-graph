@@ -32,6 +32,13 @@ pub async fn run_index_explains(ctx: &TestContext, directory: &Path) {
             ));
             continue;
         }
+        if let Some(prefix) = &scenario.schema_version_prefix {
+            failures.push(format!(
+                "{}: index EXPLAIN runs on the default schema, so drop schema_version_prefix {prefix} or the indexes check",
+                path.display()
+            ));
+            continue;
+        }
         for (language, raw) in &scenario.query {
             let label = format!(
                 "{}: {} [{language}/clickhouse]",
@@ -88,39 +95,136 @@ fn compile(
     }
 }
 
-pub(super) fn undefined_cte_reads(ast: &compiler::Node) -> Result<Vec<String>, String> {
-    fn names(tree: &super::pattern::Expression, found: &mut Vec<String>) {
-        if tree.label == super::operator::Operator::Cte {
-            found.push(tree.head.clone());
-        }
-        for child in &tree.children {
-            names(child, found);
+pub(super) struct CteReads {
+    pub(super) failures: Vec<String>,
+    pub(super) reads_other: bool,
+}
+
+pub(super) fn check_cte_reads(ast: &compiler::Node, main_sql: &str) -> Result<CteReads, String> {
+    let compiler::Node::Query(query) = ast else {
+        return Ok(CteReads {
+            failures: vec![],
+            reads_other: false,
+        });
+    };
+    let statements = cte_statements(ast).map_err(|error| error.to_string())?;
+    let bodies = query
+        .ctes
+        .iter()
+        .map(|cte| (cte.name.as_str(), cte.query.as_ref()));
+    let main = std::iter::once(("main", query.as_ref()));
+    let rendered: Vec<String> = std::iter::once(main_sql.to_string())
+        .chain(statements.into_iter().map(|(_, sql, _)| sql))
+        .collect();
+    let mut failures = Vec::new();
+    let mut reads_other = false;
+    for ((own, body), sql) in main.chain(bodies).zip(&rendered) {
+        let mut reads = Vec::new();
+        query_cte_reads(body, &mut reads);
+        for (name, alias) in reads {
+            reads_other |= own != "main" && name != own;
+            let defined = [" AS (", " AS MATERIALIZED ("]
+                .iter()
+                .any(|definition| sql.contains(&format!("{name}{definition}")));
+            let read = alias
+                .as_ref()
+                .is_none_or(|alias| sql.contains(&format!("{name} AS {alias}")));
+            if !defined || !read {
+                failures.push(format!(
+                    "statement {own} reads CTE {name} that it does not define or render: {sql}"
+                ));
+            }
         }
     }
-    let mut ctes = Vec::new();
-    names(&super::explain::emitted(ast), &mut ctes);
-    let word = |sql: &str, name: &str| {
-        sql.match_indices(name).any(|(at, _)| {
-            let identifier = |c: char| c.is_ascii_alphanumeric() || c == '_';
-            !sql[..at].ends_with(identifier) && !sql[at + name.len()..].starts_with(identifier)
-        })
-    };
-    Ok(cte_statements(ast)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .flat_map(|(own, sql, _)| {
-            ctes.iter()
-                .filter(|name| {
-                    **name != own
-                        && word(&sql, name)
-                        && ![" AS (", " AS MATERIALIZED ("]
-                            .iter()
-                            .any(|definition| sql.contains(&format!("{name}{definition}")))
-                })
-                .map(|name| format!("CTE statement {own} reads {name} without defining it: {sql}"))
-                .collect::<Vec<_>>()
-        })
-        .collect())
+    Ok(CteReads {
+        failures,
+        reads_other,
+    })
+}
+
+fn query_cte_reads(query: &compiler::Query, reads: &mut Vec<(String, Option<String>)>) {
+    for cte in &query.ctes {
+        query_cte_reads(&cte.query, reads);
+    }
+    table_cte_reads(&query.from, reads);
+    for select in &query.select {
+        expr_cte_reads(&select.expr, reads);
+    }
+    for expr in query
+        .where_clause
+        .iter()
+        .chain(&query.group_by)
+        .chain(&query.having)
+        .chain(query.order_by.iter().map(|order| &order.expr))
+    {
+        expr_cte_reads(expr, reads);
+    }
+    for arm in &query.union_all {
+        query_cte_reads(arm, reads);
+    }
+}
+
+fn table_cte_reads(table: &compiler::TableRef, reads: &mut Vec<(String, Option<String>)>) {
+    match table {
+        compiler::TableRef::Scan { .. } => {}
+        compiler::TableRef::Cte { name, alias } => reads.push((name.clone(), Some(alias.clone()))),
+        compiler::TableRef::Join {
+            left, right, on, ..
+        } => {
+            table_cte_reads(left, reads);
+            table_cte_reads(right, reads);
+            expr_cte_reads(on, reads);
+        }
+        compiler::TableRef::Union { queries, .. } => {
+            for query in queries {
+                query_cte_reads(query, reads);
+            }
+        }
+        compiler::TableRef::Subquery { query, .. } => query_cte_reads(query, reads),
+    }
+}
+
+fn expr_cte_reads(expr: &compiler::Expr, reads: &mut Vec<(String, Option<String>)>) {
+    use compiler::Expr;
+    match expr {
+        Expr::InSubquery { expr, cte_name, .. } => {
+            reads.push((cte_name.clone(), None));
+            expr_cte_reads(expr, reads);
+        }
+        Expr::InSelect { expr, query } => {
+            expr_cte_reads(expr, reads);
+            query_cte_reads(query, reads);
+        }
+        Expr::Scalar(query) => query_cte_reads(query, reads),
+        Expr::FuncCall { args, .. } => args.iter().for_each(|arg| expr_cte_reads(arg, reads)),
+        Expr::Aggregate {
+            argument,
+            condition,
+            ..
+        } => {
+            for value in argument.iter().chain(condition) {
+                expr_cte_reads(value, reads);
+            }
+        }
+        Expr::TimeBucket { value, .. } | Expr::Lambda { body: value, .. } => {
+            expr_cte_reads(value, reads)
+        }
+        Expr::TextSearch { value, query, .. } => {
+            expr_cte_reads(value, reads);
+            expr_cte_reads(query, reads);
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            expr_cte_reads(left, reads);
+            expr_cte_reads(right, reads);
+        }
+        Expr::UnaryOp { expr, .. } => expr_cte_reads(expr, reads),
+        Expr::Column { .. }
+        | Expr::Identifier(_)
+        | Expr::Literal(_)
+        | Expr::Param { .. }
+        | Expr::EmptyTupleArray(_)
+        | Expr::Star => {}
+    }
 }
 
 async fn check_indexes(
@@ -292,4 +396,45 @@ fn skip_index<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {
         Value::Array(items) => items.iter().find_map(|child| skip_index(child, name)),
         _ => None,
     }
+}
+
+#[test]
+fn cte_read_check_catches_dangling_reads_and_reports_cross_reads() {
+    use compiler::ast::Cte;
+    use compiler::{Node, Query, SelectExpr, TableRef};
+    let scan = |table: &str| Query {
+        select: vec![SelectExpr::col("t", "id")],
+        from: TableRef::scan(table, "t"),
+        ..Default::default()
+    };
+    let read = |cte: &str| Query {
+        select: vec![SelectExpr::col("r", "id")],
+        from: TableRef::Cte {
+            name: cte.into(),
+            alias: "r".into(),
+        },
+        ..Default::default()
+    };
+    let statement = |ctes: Vec<Cte>, body: Query| {
+        let ast = Node::Query(Box::new(Query { ctes, ..body }));
+        let (sql, _) = compiler::emit_simple_query(&ast).unwrap();
+        check_cte_reads(&ast, &sql).unwrap()
+    };
+    let chained = statement(
+        vec![
+            Cte::new("first", scan("gl_user")),
+            Cte::new("second", read("first")),
+        ],
+        read("second"),
+    );
+    assert!(chained.failures.is_empty(), "{:?}", chained.failures);
+    assert!(chained.reads_other);
+    let alone = statement(vec![Cte::new("first", scan("gl_user"))], read("first"));
+    assert!(alone.failures.is_empty() && !alone.reads_other);
+    let dangling = statement(vec![Cte::new("first", scan("gl_user"))], read("missing"));
+    assert!(
+        dangling.failures[0].contains("reads CTE missing"),
+        "{:?}",
+        dangling.failures
+    );
 }

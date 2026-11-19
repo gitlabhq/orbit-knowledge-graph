@@ -42,7 +42,7 @@ Common targets have aliases, declared in one table in
 | `emitted` | `response_policy.node` on ClickHouse, `paginate.node` on DuckDB |
 | `final_ast` | `security.node` |
 | `hydration` | `hydrate_plan.hydration_plan` |
-| `result_context` | `result_contract.result_ctx` |
+| `result_context` | `result_contract.result_ctx` on ClickHouse |
 | `settings` | `settings.query_config` |
 | `sql`, `parameterized_sql`, `params`, `indexes` | `codegen.output` on ClickHouse |
 
@@ -69,7 +69,9 @@ the defaults.
 
 `hydration_plan` also takes a list of templates under the plan kind. Each
 listed template must match one template of the plan on every field it names.
-Field values compare exactly, and unknown fields are rejected. Static templates
+Fields match like a format `value` check: a map matches on the keys it lists,
+a list matches by length and position, and other values compare exactly. A
+field the template does not have is reported missing. Static templates
 have `entity_type`, `node_alias`, `destination_table`, `columns`,
 `virtual_columns`, `injected_columns`, `has_traversal_path`, `virtual_filters`,
 and `filter_injected_columns`. Dynamic templates have the same fields without
@@ -114,8 +116,10 @@ type name.
 
 Every case that compiles gets two more checks without an assertion. DuckDB
 runs the rendered SQL of each DuckDB case on an empty database of the local
-schema. For each ClickHouse case, each CTE body, emitted as a statement of its
-own for EXPLAIN, must define every CTE it reads.
+schema. For each ClickHouse case, the query and each CTE body, emitted as a
+statement of its own for EXPLAIN, must define every CTE that their AST reads
+and render each read under that CTE's name. The run fails if no case has a CTE
+body that reads another CTE.
 
 The compiler fixtures binary loads the embedded query config, so `settings` sees the
 production settings, such as the query cache. The container suite runs EXPLAIN
@@ -151,6 +155,7 @@ schema_version_prefix: v1_
 | `property_types` | `Group` has a float `score` and a visible `private_note` that cannot be filtered |
 | `string_edge_source` | A `NOTED` edge from `User` to `Note` in a table whose `source_id` is a string |
 | `local_dates` | The local `Definition` has a `created_at` timestamp |
+| `local_nulls` | The local `Definition` has a nullable `rank` |
 
 Both `query.json` and `query.gql` are required. If a frontend cannot express the
 tested plan, declare its reason under `missing_frontends`. The runner rejects
@@ -182,12 +187,13 @@ A case with `generate` expands before it runs. `kind: named_queries` makes one
 case per embedded named query. Each case renders the query in JSON and GQL with
 its example parameters, keeps every other key of the case, and appends the
 query name to the case name. `kind: repeat` replaces `placeholder` in every
-query string with `text` repeated `count` times, so a fixture can check a large
-input without embedding it.
+string of the case with `repeat` repeated `count` times and then `suffix`, the
+same expansion as a scenario's `{repeat, count, suffix}` value, so a fixture
+can check a large input without embedding it.
 
 ```yaml
 - name: A query past the byte limit is rejected before parsing
-  generate: {kind: repeat, placeholder: LONG_NAME, text: x, count: 40000}
+  generate: {kind: repeat, placeholder: LONG_NAME, repeat: x, count: 40000}
   query:
     gql: |
       MATCH (u:User {username: 'LONG_NAME'}) RETURN u

@@ -958,6 +958,30 @@ mod tests {
     }
 
     #[test]
+    fn decimal_values_read_as_integers_or_floats() {
+        for (scale, value, expected) in [
+            (0, 42, ColumnValue::Int64(42)),
+            (0, -7, ColumnValue::Int64(-7)),
+            (2, 12345, ColumnValue::Float64(123.45)),
+            (3, -1500, ColumnValue::Float64(-1.5)),
+            (
+                0,
+                i128::from(i64::MAX) + 1,
+                ColumnValue::Float64(9_223_372_036_854_775_808.0),
+            ),
+        ] {
+            let array = Decimal128Array::from(vec![value])
+                .with_precision_and_scale(38, scale)
+                .unwrap();
+            assert_eq!(
+                ArrowUtils::extract_value(&array, 0),
+                expected,
+                "{value} at scale {scale}"
+            );
+        }
+    }
+
+    #[test]
     fn column_value_accessors() {
         let i = ColumnValue::Int64(42);
         assert_eq!(i.as_int64().copied(), Some(42));

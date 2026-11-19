@@ -5,7 +5,7 @@ mod querying_pipeline;
 
 #[test]
 fn query_scenarios_run_on_duckdb() {
-    let unreached = integration_testkit::query_scenario::run_duckdb_dir(
+    let coverage = integration_testkit::query_scenario::run_duckdb_dir(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/server/data_correctness/scenarios"
@@ -16,10 +16,11 @@ fn query_scenarios_run_on_duckdb() {
         ),
         "data_correctness",
     );
-    assert!(
-        unreached.is_empty(),
-        "no DuckDB scenario renders these constructs: {unreached:?}"
-    );
+    let problems = coverage.problems(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/compiler/fixtures"
+    )));
+    assert!(problems.is_empty(), "DuckDB coverage: {problems:?}");
 }
 
 #[test]
