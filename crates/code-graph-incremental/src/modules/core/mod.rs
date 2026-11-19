@@ -1,11 +1,11 @@
 mod members;
 mod values;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::canonical::Canonical as C;
 use crate::engine::{
-    Cursor, Cx, Derive, Function, IndexDecl, KeyPart, Loc, Module, Store, Val, Vals, of, one, yes,
+    Cursor, Cx, Derive, Function, IndexDecl, KeyPart, Loc, Module, Store, Val, Vals, of, one,
 };
 use crate::modules::{arg, function, node};
 use crate::tree::{Compact, EdgeKind, Mutable, Role, Tree};
@@ -13,11 +13,7 @@ use crate::tree::{Compact, EdgeKind, Mutable, Role, Tree};
 pub struct Core;
 
 #[derive(Default)]
-pub struct State {
-    defs: FxHashMap<u32, Vec<Loc>>,
-    supers: FxHashMap<Loc, Vec<Loc>>,
-    shadowed: FxHashSet<Loc>,
-}
+pub struct State {}
 
 type DefsByName = FxHashMap<u32, Vec<Loc>>;
 
@@ -163,24 +159,15 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         class_of(self.at(enclosing))
     }
 
-    fn define(&mut self, def: Cursor<'_, S>) {
-        let Some(name) = def.child_sym(C::DefName) else {
-            return;
-        };
-        let loc = Loc::from(def);
-        let known = self
-            .state()
-            .defs
-            .get(&name)
-            .is_some_and(|d| d.contains(&loc));
-        if !known {
-            self.write().defs.entry(name).or_default().push(loc);
-        }
-    }
-
-    // A family run sees other files' supertypes only as the extends edges link emitted.
     fn supers(&mut self, def: Loc) -> Vec<Loc> {
-        let mut supers = self.state().supers.get(&def).cloned().unwrap_or_default();
+        let found = self.call(crate::fn_id!("core", "supertypes"), &[one(Val::Node(def))]);
+        let mut supers: Vec<Loc> = found
+            .iter()
+            .filter_map(|&v| match self.view(v) {
+                Some(Ref::Def(d)) => Some(d),
+                _ => None,
+            })
+            .collect();
         for &s in self.targets(EdgeKind::Extends, def) {
             if !supers.contains(&s) {
                 supers.push(s);
@@ -190,49 +177,27 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
     }
 
     fn named_defs(&mut self, name: u32) -> Vec<Loc> {
-        let mut defs = self.state().defs.get(&name).cloned().unwrap_or_default();
-        if let Some(index) = self.index::<DefsByName>("defs") {
-            for &d in index.get(&name).into_iter().flatten() {
-                if !defs.contains(&d) {
-                    defs.push(d);
-                }
-            }
-        }
-        defs
+        self.index::<DefsByName>("defs")
+            .and_then(|index| index.get(&name).cloned())
+            .unwrap_or_default()
     }
 
-    fn inherit(&mut self, def: Loc, supers: &[Val]) {
-        let supers: Vec<Loc> = supers
-            .iter()
-            .filter_map(|&v| match self.view(v) {
-                Some(Ref::Def(d)) => Some(d),
-                _ => None,
-            })
-            .collect();
-        let known = self.write().supers.entry(def).or_default();
-        for s in supers {
-            if !known.contains(&s) {
-                known.push(s);
-            }
-        }
-    }
-
-    fn shadow(&mut self, call: Cursor<'t, S>) {
+    /// A call whose callee root reads a local value, so a name-only target
+    /// is not what it calls.
+    fn shadowed(&mut self, call: Cursor<'t, S>) -> bool {
         let Some(callee) = call.child(C::Callee) else {
-            return;
+            return false;
         };
         let root = callee
             .child(C::Member)
             .and_then(|m| m.child(C::Object))
             .map_or(callee, |o| o.chain_root());
         if callee.has(C::Ivar) || root.is(C::Call) || root.value_child(C::Call).is_some() {
-            return;
+            return false;
         }
         let found = self.read(root);
         let named = |v: &Val| !matches!(self.view(*v), Some(Ref::Call(_)) | None);
-        if !found.iter().all(named) {
-            self.write().shadowed.insert(call.into());
-        }
+        !found.iter().all(named)
     }
 
     fn field(&mut self, attr: u32) -> Vals {
@@ -260,21 +225,11 @@ impl Module for Core {
             build: defs_by_name,
         }]
     }
-
-    fn start<'t, S: Store>(cx: &mut Cx<'_, 't, Self, S>, root: Cursor<'t, S>) {
-        for scope in crate::modules::top_level(root) {
-            for def in scope
-                .children()
-                .filter(|d| d.is(C::Def) && !d.has(C::Declaration))
-            {
-                cx.define(def);
-            }
-        }
-    }
 }
 
 static FUNCTIONS: &[Function<Core>] = &[
     function!(required Flow, "read", [one]),
+    function!(required Flow, "supertypes", [one]),
     function!(Flow, "enclosing", [], |cx, _| {
         let node = cx.enclosing();
         one(cx.node(node))
@@ -441,24 +396,13 @@ static FUNCTIONS: &[Function<Core>] = &[
             false => Vals::new(),
         }
     }),
-    function!(Flow, "resolution", [one, set], |cx, a| {
+    function!(Flow, "resolution", [one, set], @uses ["core"."read"], |cx, a| {
         let target = node(cx, a, 0);
-        let shadowed = cx.state().shadowed.contains(&Loc::from(target));
+        let site = arg(cx, a, 1).filter(|s| s.is(C::Call));
+        let shadowed = site.is_some_and(|s| cx.shadowed(s));
         match shadowed && !target.is(C::Def) && !target.is(C::Name) {
             true => one(Val::Sym(cx.lang().syms.intern(NON_CALLABLE))),
             false => Vals::new(),
         }
-    }),
-    function!(Effect, "define", [one], |cx, a| {
-        cx.define(node(cx, a, 0));
-        yes(true)
-    }),
-    function!(Effect, "inherit", [one, set], |cx, a| {
-        cx.inherit(node(cx, a, 0).into(), &a[1]);
-        yes(true)
-    }),
-    function!(Effect, "shadow", [one], @uses ["core"."read"], |cx, a| {
-        cx.shadow(node(cx, a, 0));
-        yes(true)
     }),
 ];

@@ -58,3 +58,5 @@ define:
 
   visible(name, at): "first(enclose(at), s => select(s, '(__def $N:__defname)', name)) or select_all(file(at), '(__import $ROOT:__name)' by $ROOT, name) | follow(imports) or select_all(file(at), '(__import $ROOT:__name)' by $ROOT, \"*\") | follow(imports) | exported(name)"
   resolved(ROOT): 'visible(@ROOT, ROOT)'
+  supertypes(ROOT):
+    '(__def $$$S:__supertype)': '$S | type | is_def'

@@ -6,13 +6,13 @@ phases:
   - name: link
     over: tree
     does: edges
-    bind: { core.read: ssa.flow, ssa.value_of: core.value_of, ssa.valued: core.valued, ssa.source: source }
+    bind: { core.read: ssa.flow, core.supertypes: supertypes, ssa.value_of: core.value_of, ssa.valued: core.valued, ssa.source: source }
     budget: { tree: file_link_ms }
   - { name: project, over: project, does: rewrite }
   - name: resolve
     over: family
     does: edges
     until: stable
-    bind: { core.read: resolved }
+    bind: { core.read: resolved, core.supertypes: supertypes }
   - { name: display, over: tree, does: tags }
   - { name: export, over: graph, does: rows }
