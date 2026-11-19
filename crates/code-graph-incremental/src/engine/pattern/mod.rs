@@ -131,6 +131,7 @@ pub enum Pat {
         kind: KindFilter,
         field: u16,
         text: Text,
+        tags: Box<[u32]>,
         kids: Box<[Pat]>,
         optional: bool,
     },

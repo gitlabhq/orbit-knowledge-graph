@@ -69,12 +69,14 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
                 kind,
                 field,
                 text,
+                tags,
                 kids,
                 ..
             } => {
                 kind.admits(n.kind)
                     && (*field == 0 || *field == n.field)
                     && self.text(raw, n, text)
+                    && self.tagged(raw, tags)
                     && self.kids(raw, kids, caps)
             }
             Pat::Cap {
@@ -98,6 +100,15 @@ impl<S: Storage<Node = Node>> Matcher<'_, S> {
             }
             Pat::Var { .. } | Pat::Not(_) | Pat::Desc(_) => false,
         }
+    }
+
+    fn tagged(&self, raw: u32, tags: &[u32]) -> bool {
+        tags.is_empty()
+            || self
+                .t
+                .tags
+                .get(&raw)
+                .is_some_and(|own| tags.iter().all(|key| own.iter().any(|t| t.key == *key)))
     }
 
     fn text(&self, raw: u32, n: &Node, text: &Text) -> bool {
