@@ -864,7 +864,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if let Some(n) = expect.row_count {
         view.assert_row_count(n);
     }
-    view.assert_row_values(&expect.row_values, label);
+    view.assert_row_values(&expect.row_values);
     if let Some(expected) = expect.has_more {
         let pagination = view.response.pagination.as_ref();
         assert!(

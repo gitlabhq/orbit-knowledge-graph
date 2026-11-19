@@ -652,11 +652,7 @@ impl ResponseView {
 
     /// Assert row values by position. Satisfies [`Requirement::AggregationSort`]
     /// when every row is listed.
-    pub fn assert_row_values(
-        &self,
-        expected: &[std::collections::BTreeMap<String, Value>],
-        label: &str,
-    ) {
+    pub fn assert_row_values(&self, expected: &[std::collections::BTreeMap<String, Value>]) {
         for (index, row) in expected.iter().enumerate() {
             for (column, value) in row {
                 match value {
