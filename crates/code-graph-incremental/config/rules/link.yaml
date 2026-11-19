@@ -1,10 +1,6 @@
 link:
   - group: imports
-    match: '(__import)'
-    enter: ['mod.ssa.bind_import($ROOT, %shadows_locals, %inline_modules)']
-    children: skip
-  - group: imports
-    match: '(__import_type)'
+    match: '$ROOT:__import|__import_type'
     enter: ['mod.ssa.bind_import($ROOT, %shadows_locals, %inline_modules)']
     children: skip
 
@@ -12,24 +8,26 @@ link:
     match: '(__def $N:(__defname "/./") (__impl))'
     emit: { imports: { from: $N, to: $N | reference, resolution: reference, resolve: none } }
 
-  - group: super_imports
+  - group: inline
     match: '(__def (__defname "/./") $$$S:__supertype)'
-    enter: ['mod.ssa.bind_inline($S, %shadows_locals, %inline_modules)']
+    enter:
+      - 'mod.ssa.bind_import($S | child("__import"), %shadows_locals, %inline_modules)'
+      - 'mod.ssa.bind_import($S | child("__import_type"), %shadows_locals, %inline_modules)'
+  - group: inline
+    match: '(__call $$$I:__import|__import_type)'
+    enter: ['mod.ssa.bind_import($I, %shadows_locals, %inline_modules)']
 
   - group: def
     match: '(__def (__defname "/./") $$$S:__supertype)'
-    enter:
-      - define($ROOT)
-      - inherit($ROOT, $S | type)
-      - mod.ssa.enter_def($ROOT)
+    enter: [define($ROOT), 'inherit($ROOT, $S | type)', mod.ssa.enter_def($ROOT)]
     emit:
       defines: { from: enclosing_def, to: $ROOT }
       extends: { from: $ROOT, to: $ROOT | supers }
 
   - group: def_children
     match: '(__def (__defname "/./"))'
-    when: $ROOT | tagged("scoped")
-    exit: [mod.ssa.leave()]
+    when: $ROOT | tag("scoped")
+    exit: [mod.ssa.leave]
   - group: def_children
     match: '(__def (__defname "/./") $$$D:__decorator)'
     children: $D
@@ -44,17 +42,10 @@ link:
       imports: { from: $D, to: $ROOT | type | imported, site: $ROOT }
   - group: decorator_children
     match: '$D:(__def $ROOT:__decorator)'
-    when: $D | tagged("scoped")
+    when: $D | tag("scoped")
   - group: decorator_children
     match: '(__decorator)'
     children: skip
-
-  - group: inline
-    match: '(__call)'
-    enter: ['mod.ssa.bind_inline($ROOT, %shadows_locals, %inline_modules)']
-  - group: inline
-    match: '(__supertype)'
-    enter: ['mod.ssa.bind_inline($ROOT, %shadows_locals, %inline_modules)']
 
   - group: shadow
     match: '(__call $C:__callee (__property))'
@@ -77,15 +68,15 @@ link:
     emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT } }
   - group: call
     match: '(__call $C:(__callee $M?:__member))'
-    when: $C | mod.ssa.phi
+    when: $C | mod.ssa.pending
     enter:
       - emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT } }
       - mod.ssa.defer($ROOT)
     late:
       - emit:
-          calls: { from: enclosing, to: $ROOT | mod.ssa.deferred_callee | callable, site: $ROOT }
-          imports: { from: enclosing, to: $ROOT | mod.ssa.deferred_callee | imported, site: $ROOT }
-          type_flow: { from: enclosing, to: $ROOT | mod.ssa.deferred_callee | produced, site: $ROOT }
+          calls: { from: enclosing, to: $ROOT | mod.ssa.deferred | callable, site: $ROOT }
+          imports: { from: enclosing, to: $ROOT | mod.ssa.deferred | imported, site: $ROOT }
+          type_flow: { from: enclosing, to: $ROOT | mod.ssa.deferred | produced, site: $ROOT }
   - group: call
     match: '(__call (__callee $M:(__member $O:(__object $VC?:__call))))'
     enter:
@@ -99,11 +90,11 @@ link:
       - emit: { type_flow: { from: enclosing, to: $O | chain_head | type | typed_calls, site: $ROOT } }
       - mod.ssa.defer($ROOT)
     late:
-      - emit: { calls: { from: enclosing, to: $ROOT | mod.ssa.deferred_receiver | member($M), site: $ROOT } }
+      - emit: { calls: { from: enclosing, to: $ROOT | mod.ssa.deferred | member($M), site: $ROOT } }
       - emit:
-          calls: { from: enclosing, to: $ROOT | mod.ssa.deferred_receiver | unmatched($M) | callable, site: $ROOT }
-          imports: { from: enclosing, to: $ROOT | mod.ssa.deferred_receiver | unmatched($M) | imported, site: $ROOT }
-          type_flow: { from: enclosing, to: $ROOT | mod.ssa.deferred_receiver | unmatched($M) | produced, site: $ROOT }
+          calls: { from: enclosing, to: $ROOT | mod.ssa.deferred | unmatched($M) | callable, site: $ROOT }
+          imports: { from: enclosing, to: $ROOT | mod.ssa.deferred | unmatched($M) | imported, site: $ROOT }
+          type_flow: { from: enclosing, to: $ROOT | mod.ssa.deferred | unmatched($M) | produced, site: $ROOT }
   - group: call
     match: '(__call (__callee (__member)))'
   - group: call
@@ -117,9 +108,21 @@ link:
       imports: { from: enclosing, to: $ROOT | targets | imported, site: $ROOT }
       type_flow: { from: enclosing, to: $ROOT | targets | produced, site: $ROOT }
   - group: call
+    match: '(__call (__callee %builtins))'
+    when: '$ROOT | unresolved | tag("implicit_self")'
+    emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT, resolution: reference, resolve: none } }
+  - group: call
     match: '(__call (__callee "/./"))'
-    when: '$ROOT | unresolved | tagged("implicit_self")'
+    when: '$ROOT | unresolved | tag("implicit_self")'
     emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT } }
+  - group: call
+    match: '(__call (__callee %builtins))'
+    when: $ROOT | unresolved
+    emit: { imports: { from: enclosing, to: mod.ssa.wildcards, site: $ROOT, resolution: reference, resolve: none } }
+  - group: call
+    match: '(__call (__callee %providers))'
+    when: $ROOT | unresolved
+    emit: { imports: { from: enclosing, to: mod.ssa.wildcards, site: $ROOT, resolution: reference, resolve: none } }
   - group: call
     match: '(__call (__callee "/./"))'
     when: $ROOT | unresolved
@@ -143,15 +146,14 @@ link:
 
   - group: bind
     match: '(__binding (__qualifier))'
-    enter: [mod.ssa.bind_static($ROOT)]
+    enter: ['mod.ssa.bind($ROOT, $ROOT, none)']
     children: skip
   - group: bind
-    match: '(__def $ROOT:__binding)'
-    when: $ROOT | initializer
+    match: '(__def $K:__class|__struct|__impl|__interface|__trait|__enum $ROOT:(__binding "/^$/"))'
     children: skip
   - group: bind
     match: '(__destructure $ROOT:(__binding "/./" $RHS?:__rhs))'
-    enter: [mod.ssa.declare($ROOT), 'mod.ssa.bind($ROOT, $ROOT, $RHS | tail)']
+    enter: ['mod.ssa.bind($ROOT, $ROOT, $RHS | source)']
     children: skip
   - group: bind
     match: '(__destructure $ROOT:__binding)'
@@ -159,7 +161,7 @@ link:
   - group: bind
     match: '(__ssa_loop (__arr $$$E:__call) $ROOT:(__binding !(__rhs)))'
     when: $E
-    enter: ['mod.ssa.bind($ROOT, $E, none)', mod.ssa.declare($ROOT | plain_declaration)]
+    enter: ['mod.ssa.bind($ROOT, $E, none)']
     children: skip
   - group: bind
     match: '(__ssa_loop $ROOT:(__binding !(__rhs) (__declaration "/./")))'
@@ -174,14 +176,12 @@ link:
     match: '(__binding $$$PRE:__call (__rhs $BR:__ssa_branch $$$FX:__side_effect))'
     when: $ROOT | mod.ssa.slot
     children: [$BR, $FX, $PRE]
-    exit: [mod.ssa.declare($ROOT | plain_declaration)]
+    exit: ['mod.ssa.bind($ROOT, none, none)']
   - group: bind
     match: '(__binding $$$PRE:__call $RHS?:(__rhs $$$R))'
     when: $ROOT | mod.ssa.slot
     children: [$R, $PRE]
-    exit:
-      - 'mod.ssa.bind($ROOT, $ROOT | assigned, $RHS | tail | source)'
-      - mod.ssa.declare($ROOT | plain_declaration)
+    exit: ['mod.ssa.bind($ROOT, $ROOT | value_of, $RHS | source)']
 
   - group: bare
     match: '(__binding $B:(__rhs !$ANY))'
@@ -197,39 +197,39 @@ link:
 
   - group: hoist
     match: '(__scope $$$D:__def)'
-    when: $ROOT | tagged("hoisted")
+    when: $ROOT | tag("hoisted")
     enter: [define($D)]
 
   - group: revisit
     match: '(__ssa_loop)'
-    when: $ROOT | outermost
+    when: mod.ssa.in_loop
+  - group: revisit
+    match: '(__ssa_loop)'
     exit: [revisit]
 
   - group: flow
     match: '(__scope)'
     enter: [mod.ssa.enter_scope($ROOT)]
-    exit: [mod.ssa.leave()]
+    exit: [mod.ssa.leave]
   - group: flow
     match: '(__lambda)'
-    enter: [mod.ssa.fork($ROOT | sink)]
-    exit: [mod.ssa.leave()]
+    enter: [mod.ssa.fork(none)]
+    exit: [mod.ssa.leave]
   - group: flow
     match: '(__ssa_branch $$$C $A:__ssa_arm $$$REST:__ssa_arm)'
     children: [$C, $A, $REST]
     between: [mod.ssa.fork($ROOT | sink)]
-    exit: [mod.ssa.leave()]
+    exit: [mod.ssa.leave]
   - group: flow
     match: '(__ssa_branch $ROOT:__ssa_arm)'
-    exit:
-      - 'mod.ssa.bind($ROOT | arm_target, $ROOT | arm_value, $ROOT | tail | source)'
-      - mod.ssa.join()
+    exit: ['mod.ssa.bind($ROOT | valued | sink, $ROOT | value_of, $ROOT | source)', mod.ssa.join]
   - group: flow
     match: '(__ssa_loop $$$H $B:(__binding (__declaration)) $$$R)'
     when: $B | unlifted
     children: [$H, $B, $R]
     between: [mod.ssa.loop_header($ROOT)]
-    exit: [mod.ssa.leave()]
+    exit: [mod.ssa.leave]
   - group: flow
     match: '(__ssa_loop)'
     enter: [mod.ssa.loop_header($ROOT)]
-    exit: [mod.ssa.leave()]
+    exit: [mod.ssa.leave]
