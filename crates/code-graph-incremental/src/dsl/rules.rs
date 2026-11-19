@@ -54,28 +54,12 @@ pub struct Config {
     pub resolve: ResolveConfig,
 }
 
+#[derive(Default)]
 pub struct LinkConfig {
     /// Names the language defines everywhere without an import. An unresolved
     /// call to one does not fall back to wildcard imports.
     pub builtins: rustc_hash::FxHashSet<u32>,
     pub providers: Vec<(u32, rustc_hash::FxHashSet<u32>)>,
-    /// Whether an import may rebind a name already defined in the same scope.
-    /// Ruby autoloads must not; a local class always wins.
-    pub imports_shadow_locals: bool,
-    /// Whether an import path may name a def in the current file, as
-    /// `use crate::dep::Service` does for an inline `mod dep {}`.
-    pub inline_modules: bool,
-}
-
-impl Default for LinkConfig {
-    fn default() -> Self {
-        Self {
-            builtins: Default::default(),
-            providers: Vec::new(),
-            imports_shadow_locals: true,
-            inline_modules: false,
-        }
-    }
 }
 
 #[derive(Default)]
@@ -126,18 +110,7 @@ struct ConfigSection {
     #[serde(default)]
     frameworks: Vec<Framework>,
     #[serde(default)]
-    link: Option<LinkSection>,
-    #[serde(default)]
     resolve: Option<ResolveSettingsSection>,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LinkSection {
-    #[serde(default = "default_true")]
-    imports_shadow_locals: bool,
-    #[serde(default)]
-    inline_modules: bool,
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -184,22 +157,11 @@ enum LibraryPrecedence {
     Runtime,
 }
 
-fn default_true() -> bool {
-    true
-}
-
 fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config, LoadError> {
     let Some(section) = section else {
         return Ok(Config::default());
     };
-    let mut link = section
-        .link
-        .as_ref()
-        .map_or_else(LinkConfig::default, |l| LinkConfig {
-            imports_shadow_locals: l.imports_shadow_locals,
-            inline_modules: l.inline_modules,
-            ..LinkConfig::default()
-        });
+    let mut link = LinkConfig::default();
     let default_resolve = ResolveSettingsSection::default();
     let r = section.resolve.as_ref().unwrap_or(&default_resolve);
     let parse_file = |pf: &ParseFileEntry| -> Result<ParseFileSpec, LoadError> {

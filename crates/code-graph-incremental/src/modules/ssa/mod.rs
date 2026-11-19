@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
-use crate::engine::{Cursor, Cx, Function, Loc, Module, Val, Vals, of, one, yes};
+use crate::engine::{Cursor, Cx, Function, Loc, Module, Val, Vals, of, one, truthy, yes};
 use crate::modules::{function, node};
 pub use engine::{BlockId, SsaEngine, Value};
 
@@ -225,17 +225,18 @@ static FUNCTIONS: &[Function<Ssa>] = &[
         cx.declare_static(c, c.sym(), Value::Call(c.index()));
         yes(true)
     }),
-    function!(Effect, "bind_import", [one], |cx, a| {
-        cx.bind_import(node(cx, a, 0));
+    function!(Effect, "bind_import", [one, one, one], |cx, a| {
+        cx.bind_import(node(cx, a, 0), truthy(&a[1]), truthy(&a[2]));
         yes(true)
     }),
-    function!(Effect, "bind_inline", [one], |cx, a| {
+    function!(Effect, "bind_inline", [one, one, one], |cx, a| {
         let c = node(cx, a, 0);
+        let (shadows, inline) = (truthy(&a[1]), truthy(&a[2]));
         for import in c
             .children()
             .filter(|i| i.is(C::Import) || i.is(C::ImportType))
         {
-            cx.bind_import(import);
+            cx.bind_import(import, shadows, inline);
         }
         yes(true)
     }),

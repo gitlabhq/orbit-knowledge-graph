@@ -71,7 +71,7 @@ impl Env {
             rules.insert(member, index);
         }
         Ok(Self {
-            pipeline: crate::engine::Pipeline::load(&lang)?,
+            pipeline: crate::engine::Pipeline::load(&lang, &sources)?,
             resolve_rules: Program::load(include_str!("../config/resolve.yaml"), &lang)?,
             export_config: crate::export::ExportConfig::embedded().clone(),
             lang,
@@ -91,9 +91,14 @@ impl Env {
     /// The file-level rules for a path: rewrite, link and display come from
     /// the file's own language.
     pub fn rules_for(&self, path: &str) -> &LangConfig {
+        &self.compiled[self.rules_index(path)]
+    }
+
+    /// The index of a path's language rules, shared by languages that share a file.
+    pub fn rules_index(&self, path: &str) -> usize {
         let lang = SupportLang::from_path(path)
             .filter(|l| self.in_family(*l))
             .unwrap_or(self.lang_id);
-        &self.compiled[self.rules[&lang]]
+        self.rules[&lang]
     }
 }

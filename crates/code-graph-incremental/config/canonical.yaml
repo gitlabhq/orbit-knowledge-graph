@@ -1,22 +1,25 @@
 link:
   - group: imports
     match: '(__import)'
-    enter: [mod.ssa.bind_import($ROOT)]
+    enter: ['mod.ssa.bind_import($ROOT, true, false)']
     children: skip
   - group: imports
     match: '(__import_type)'
-    enter: [mod.ssa.bind_import($ROOT)]
+    enter: ['mod.ssa.bind_import($ROOT, true, false)']
     children: skip
 
   - group: impl
     match: '(__def $N:(__defname "/./") (__impl))'
     emit: { imports: { from: $N, to: $N | reference, resolution: reference, resolve: none } }
 
+  - group: super_imports
+    match: '(__def (__defname "/./") $$$S:__supertype)'
+    enter: ['mod.ssa.bind_inline($S, true, false)']
+
   - group: def
     match: '(__def (__defname "/./") $$$S:__supertype)'
     enter:
       - define($ROOT)
-      - mod.ssa.bind_inline($S)
       - inherit($ROOT, $S | type)
       - mod.ssa.enter_def($ROOT)
     emit:
@@ -48,10 +51,10 @@ link:
 
   - group: inline
     match: '(__call)'
-    enter: [mod.ssa.bind_inline($ROOT)]
+    enter: ['mod.ssa.bind_inline($ROOT, true, false)']
   - group: inline
     match: '(__supertype)'
-    enter: [mod.ssa.bind_inline($ROOT)]
+    enter: ['mod.ssa.bind_inline($ROOT, true, false)']
 
   - group: shadow
     match: '(__call $C:__callee (__property))'

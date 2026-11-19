@@ -27,8 +27,6 @@ config:
         - { module: action_mailbox, precedence: runtime }
         - { module: action_text, precedence: runtime }
         - { module: arel, precedence: runtime }
-  link:
-    imports_shadow_locals: false
   stdlib: [
       { module: kernel, availability: implicit, symbols: [abort, at_exit, autoload, binding, 'block_given?', caller,
       caller_locations, catch, chomp, chop, eval, exec, exit, exit!, fail, fork,
@@ -479,3 +477,22 @@ display:
       - match: '(__name)'
         tag:
           resolved: '@$ROOT|has_incoming("Imports")'
+
+link:
+  - group: imports
+    match: '(__import)'
+    enter: ['mod.ssa.bind_import($ROOT, false, false)']
+    children: skip
+  - group: imports
+    match: '(__import_type)'
+    enter: ['mod.ssa.bind_import($ROOT, false, false)']
+    children: skip
+  - group: super_imports
+    match: '(__def (__defname "/./") $$$S:__supertype)'
+    enter: ['mod.ssa.bind_inline($S, false, false)']
+  - group: inline
+    match: '(__call)'
+    enter: ['mod.ssa.bind_inline($ROOT, false, false)']
+  - group: inline
+    match: '(__supertype)'
+    enter: ['mod.ssa.bind_inline($ROOT, false, false)']

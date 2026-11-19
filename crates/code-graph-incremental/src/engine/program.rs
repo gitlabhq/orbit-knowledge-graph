@@ -112,6 +112,7 @@ enum Children {
 }
 
 struct Rule {
+    lang: Option<u8>,
     group: u8,
     pat: Pat,
     depth: u8,
@@ -140,18 +141,39 @@ pub struct Pipeline {
     pub phases: Vec<Phase>,
 }
 
+#[derive(serde::Deserialize, Default)]
+struct LangRules {
+    #[serde(default)]
+    link: Vec<RuleSpec>,
+}
+
+impl LangRules {
+    fn phase(&self, name: &str) -> &[RuleSpec] {
+        match name {
+            "link" => &self.link,
+            _ => &[],
+        }
+    }
+}
+
 impl Pipeline {
-    pub fn load(lang: &Lang) -> Result<Self, LoadError> {
+    /// `languages` holds each language's rule file, by its index in the env.
+    pub fn load(lang: &Lang, languages: &[Option<&str>]) -> Result<Self, LoadError> {
         let spec: PipelineSpec =
             orbit_utils::yaml::from_str(include_str!("../../config/pipeline.yaml"))?;
         let mut canonical: HashMap<String, Vec<RuleSpec>> =
             orbit_utils::yaml::from_str(include_str!("../../config/canonical.yaml"))?;
+        let languages: Vec<LangRules> = languages
+            .iter()
+            .map(|yaml| yaml.map_or_else(|| Ok(LangRules::default()), orbit_utils::yaml::from_str))
+            .collect::<Result<_, _>>()?;
         let phases = spec
             .phases
             .into_iter()
             .map(|p| {
                 let rules = canonical.remove(&p.name).unwrap_or_default();
-                Phase::load(p, &rules, lang)
+                let own: Vec<&[RuleSpec]> = languages.iter().map(|l| l.phase(&p.name)).collect();
+                Phase::load(p, &rules, &own, lang)
             })
             .collect::<Result<_, _>>()?;
         if let Some(name) = canonical.keys().next() {
@@ -177,7 +199,15 @@ fn hooks_allowed(walk: &str) -> &'static [&'static str] {
 }
 
 impl Phase {
-    fn load(spec: PhaseSpec, rules: &[RuleSpec], lang: &Lang) -> Result<Self, LoadError> {
+    /// Language rules come first in each kind's list, so within a group a
+    /// language's rule wins over the shared one; groups keep the order the
+    /// shared rules declare.
+    fn load(
+        spec: PhaseSpec,
+        rules: &[RuleSpec],
+        languages: &[&[RuleSpec]],
+        lang: &Lang,
+    ) -> Result<Self, LoadError> {
         let links = super::Links::load(&binds(&spec)?)?;
         let modules = spec
             .modules
@@ -199,9 +229,23 @@ impl Phase {
             by_kind: Vec::new(),
             slots: 1,
         };
-        let mut groups: Vec<&str> = Vec::new();
+        let mut groups: Vec<&str> = rules
+            .iter()
+            .map(|r| r.group.as_deref().unwrap_or("default"))
+            .fold(Vec::new(), |mut groups, g| {
+                if !groups.contains(&g) {
+                    groups.push(g);
+                }
+                groups
+            });
         let mut steering: BTreeMap<u16, u8> = BTreeMap::new();
-        for rule in rules {
+        let mut kinds: Vec<(u16, u16)> = Vec::new();
+        let ordered = languages
+            .iter()
+            .enumerate()
+            .flat_map(|(at, rules)| rules.iter().map(move |r| (Some(at as u8), r)))
+            .chain(rules.iter().map(|r| (None, r)));
+        for (owner, rule) in ordered {
             let at = |e: LoadError| {
                 LoadError(format!("{} rule {:?}: {}", phase.name, rule.pattern, e.0))
             };
@@ -218,7 +262,9 @@ impl Phase {
                 .ok()
                 .filter(|g| *g < 64)
                 .ok_or_else(|| at(LoadError("more than 64 rule groups".into())))?;
-            let rule = Rule::load(rule, group, &spec, &phase.links, &defaults, lang).map_err(at)?;
+            let mut rule =
+                Rule::load(rule, group, &spec, &phase.links, &defaults, lang).map_err(at)?;
+            rule.lang = owner;
             let kind = rule.kind().map_err(at)?;
             if !matches!(rule.children, Children::Visit)
                 && let Some(other) = steering.insert(kind, group)
@@ -229,13 +275,16 @@ impl Phase {
                     groups[other as usize]
                 ))));
             }
+            kinds.push((kind, phase.rules.len() as u16));
+            phase.slots = phase.slots.max(rule.slots);
+            phase.rules.push(rule);
+        }
+        for (kind, rule) in kinds {
             let index = usize::from(kind - CANONICAL_BASE);
             if phase.by_kind.len() <= index {
                 phase.by_kind.resize(index + 1, SmallVec::new());
             }
-            phase.by_kind[index].push(phase.rules.len() as u16);
-            phase.slots = phase.slots.max(rule.slots);
-            phase.rules.push(rule);
+            phase.by_kind[index].push(rule);
         }
         Ok(phase)
     }
@@ -414,6 +463,7 @@ impl Rule {
         };
         let (depth, _) = anchor(&pat, 0).unwrap_or((0, 0));
         Ok(Rule {
+            lang: None,
             group,
             slots: ctx.slots.len(),
             filters: ctx.filters.clone(),
@@ -585,7 +635,8 @@ impl Phase {
         for &index in self.candidates(c.kind()) {
             let rule = &self.rules[index as usize];
             let bit = 1u64 << rule.group;
-            if fired & bit != 0 || !w.matches(cx, rule, c) {
+            let foreign = rule.lang.is_some_and(|l| usize::from(l) != cx.lang);
+            if foreign || fired & bit != 0 || !w.matches(cx, rule, c) {
                 continue;
             }
             if let Some(when) = &rule.when

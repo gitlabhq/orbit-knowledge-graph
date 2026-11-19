@@ -176,14 +176,13 @@ impl<'t> Cx<'_, 't, Ssa> {
         }
     }
 
-    pub(super) fn bind_import(&mut self, c: Cursor<'t>) {
+    pub(super) fn bind_import(&mut self, c: Cursor<'t>, shadows_locals: bool, inline: bool) {
         if self.state().bound.contains(&c.index()) {
             return;
         }
         self.write().bound.insert(c.index());
-        let module = self.inline_module(c);
+        let module = inline.then(|| self.inline_module(c)).flatten();
         let type_only = self.tags().type_only;
-        let link = &self.env().rules_for(&self.tree().label).config.link;
         for n in c.names() {
             let local = n
                 .child_sym(C::Alias)
@@ -200,7 +199,7 @@ impl<'t> Cx<'_, 't, Ssa> {
             {
                 continue;
             }
-            if !link.imports_shadow_locals
+            if !shadows_locals
                 && self
                     .lookup(local)
                     .iter()
@@ -224,9 +223,6 @@ impl<'t> Cx<'_, 't, Ssa> {
 
     fn inline_module(&mut self, import: Cursor<'t>) -> Option<Cursor<'t>> {
         let env = self.env();
-        if !env.rules_for(&self.tree().label).config.link.inline_modules {
-            return None;
-        }
         let path = env.lang.syms.resolve(import.child_sym(C::SourcePath)?);
         let mut segments = path.split(PATH_SEP).filter(|s| !s.is_empty());
         let Some(first) = segments.next() else {
