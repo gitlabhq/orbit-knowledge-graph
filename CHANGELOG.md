@@ -1,3 +1,24 @@
+## [1.7.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.6.0...v1.7.0) (2026-11-19)
+
+### Features
+
+* **code-graph:** index Dockerfiles in the v2 engine ([21b1294](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/21b1294ae2d1538f0166d263cf609bef2832b1c0)) by Dmitry Gruzd
+* **code-graph:** source Markdown link edges from the containing Section ([b6d12a5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b6d12a5d5fc80e0043a367452a5e3a3f292c0c58)) by Dmitry Gruzd
+* **dev:** use the Orbit chart resource names in the Caproni dev loop ([39a6a60](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/39a6a60c5764bb60bfb89692cfea91ae04e4cc44)) by Michael Angelo Rivera
+* **indexing-engine-next:** add the engine API, build checks and testkit ([4703972](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/470397223d14c044a8edbc3f1c3e97a973bce26b)) by Jean-Gabriel Doyon
+* **site:** make the home page and Orbit Next discoverable in search and AI answers ([b35af37](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b35af3774893a84884886ea69bac9c78bffb7aed)) by Gabriel Engel
+
+### Fixes
+
+* **code-graph-incremental:** visit every child of a branching assignment right-hand side ([40754f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/40754f2fe92c2a6d39b420b0af2c050858f2479c)) by Dmitry Gruzd
+* **indexer:** tag incremental edges to files of other language families ([6e86054](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6e86054b7a719ace582e3928a532d2973606c4a0)) by Dmitry Gruzd
+
+### Other
+
+* **dev:** use the Orbit chart resource names in the local development guide ([36a0f7a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/36a0f7a47c22d67294a02c116479b93c8913640d)) by Michael Angelo Rivera
+* document workspace-level Cargo dependencies and the opt-out ([c41b76a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c41b76af48dfcbea0637cdc369d48adc94d062ee)) by Dmitry Gruzd
+* **gitalisk-core:** vendor gitalisk-core into the workspace ([d6c9496](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d6c94962f2af6ec05a7e1bb5ea22c031d112e6ec)) by Dmitry Gruzd
+
 ## [1.6.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v1.5.0...v1.6.0) (2026-11-19)
 
 ### Features
