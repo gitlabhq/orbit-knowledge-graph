@@ -2,6 +2,7 @@
 # Each step writes .docs-write/route/<file>; a read_file step reads it and the
 # router branches on the exact token. A missing file ends the flow.
 # The image has no python3: steps run through .docs-write/step, which uses uv.
+# .docs-write/ must stay readable: read_file refuses git-ignored paths, so never exclude it.
 version: v1
 environment: ambient
 components:
@@ -16,8 +17,6 @@ components:
           MODE=full;
           DOCS_REVIEWERS=fneill,z_painter;
           D=.docs-write; rm -rf $D; mkdir -p $D/route; U="${GITLAB_BASE_URL:-https://gitlab.com}";
-          X=$(git rev-parse --git-path info/exclude); mkdir -p "${X%/*}";
-          grep -qxF "$D/" "$X" 2>/dev/null || echo "$D/" >> "$X";
           printf '#!/bin/sh\nexport LEFTHOOK=0\nexec uv run -q --no-project --python 3.12 python
           .docs-write/skills/docs-write/scripts/flow_step.py "$@"\n' > $D/step;
           if git -C "$D" init -q ts && git -C "$D/ts" fetch -q --depth 1
