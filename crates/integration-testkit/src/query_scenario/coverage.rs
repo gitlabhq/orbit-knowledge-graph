@@ -6,16 +6,18 @@ use query_engine::compiler::passes::codegen::duckdb;
 use strum::{IntoEnumIterator, VariantNames};
 
 #[derive(Default)]
-pub(super) struct Coverage(BTreeSet<String>);
+pub struct Coverage(BTreeSet<String>);
 
 impl Coverage {
-    pub(super) fn record(&mut self, ast: &Node) {
+    pub(crate) fn record(&mut self, ast: &Node) {
         if let Node::Query(query) = ast {
             self.query(query);
         }
     }
 
-    pub(super) fn problems(&self) -> Vec<String> {
+    pub fn problems(&self, compiler_fixtures: &std::path::Path) -> Vec<String> {
+        let mut fixtures = Coverage::default();
+        crate::compiler::record_duckdb_fixtures(compiler_fixtures, &mut fixtures);
         let renderable = renderable();
         let excluded = |construct: &str| EXCLUDED.iter().any(|(name, _)| *name == construct);
         let unreached = renderable
@@ -29,6 +31,10 @@ impl Coverage {
                 ))
             } else if self.0.contains(*construct) {
                 Some(format!("{construct} is excluded but a scenario reaches it"))
+            } else if fixtures.0.contains(*construct) {
+                Some(format!(
+                    "{construct} is excluded but a DuckDB compiler fixture reaches it"
+                ))
             } else {
                 None
             }
@@ -125,7 +131,6 @@ impl Coverage {
                 self.expr(value);
             }
             Expr::TextSearch { value, query, .. } => {
-                self.insert("text search".into());
                 self.expr(value);
                 self.expr(query);
             }
@@ -173,6 +178,8 @@ const EXCLUDED: &[(&str, &str)] = &[
     ("function ArrayResize", "no lowering emits"),
     ("function ArrayContainsAll", "no lowering emits"),
     ("function ArgMax", "no lowering emits"),
+    ("DISTINCT", "no lowering emits"),
+    ("scalar subquery", "tp_bounds and security check only"),
 ];
 
 fn renderable() -> Vec<String> {
@@ -209,6 +216,9 @@ fn renderable() -> Vec<String> {
         .chain(
             [
                 "UNION ALL",
+                "DISTINCT",
+                "IN subquery",
+                "scalar subquery",
                 "aggregate DISTINCT",
                 "aggregate FILTER",
                 "timestamp parameter",

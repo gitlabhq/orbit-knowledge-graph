@@ -2,7 +2,7 @@
 //! tests but exercises the full query path: compile, execute, redact,
 //! hydrate, paginate, format, assert.
 
-mod coverage;
+pub mod coverage;
 mod datasets;
 mod duckdb;
 mod format;
