@@ -1,0 +1,65 @@
+name: "Markdown (incremental): @path imports in agent instruction files become IMPORTS edges, identical across engines"
+pipeline: markdown
+
+fixture_tree: markdown_agent_imports
+
+tests:
+  - name: "imports link the importing file to the file it names, relative to the importing file"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(t:File)
+      RETURN f.path AS source, t.path AS target
+    assert:
+      - { row_count: 4 }
+      - { row: { source: "CLAUDE.md", target: "AGENTS.md" } }
+      - { row: { source: "CLAUDE.md", target: "docs/x.md" } }
+      - { row: { source: "crates/indexer/CLAUDE.local.md", target: "crates/indexer/AGENTS.md" } }
+      - { row: { source: "crates/indexer/CLAUDE.local.md", target: "docs/x.md" } }
+
+  - name: "an import under a heading also links from its section"
+    query: |
+      MATCH (s:Definition)-[:IMPORTS]->(t:File)
+      RETURN s.fqn AS source, t.path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { source: "CLAUDE#Claude", target: "docs/x.md" } }
+
+  - name: "an import fragment is dropped, so the whole file is the target"
+    query: |
+      MATCH (s)-[:IMPORTS]->(d:Definition)
+      RETURN d.fqn AS target
+    assert:
+      - { empty: true }
+
+  - name: "imports in code spans and code blocks add no edges"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(t:File)
+      WHERE t.path IN ['docs/code.md', 'docs/fenced.md']
+      RETURN f.path AS source, t.path AS target
+    assert:
+      - { empty: true }
+
+  - name: "the same import text in README.md and SKILL.md adds no edges"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(t:File)
+      WHERE f.path IN ['README.md', '.claude/skills/review/SKILL.md']
+      RETURN f.path AS source, t.path AS target
+    assert:
+      - { empty: true }
+
+  - name: "import endpoint ids match across engines"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(t:File)
+      WHERE f.path = 'CLAUDE.md'
+      RETURN t.path AS target, f.id AS source_id, t.id AS target_id
+    assert:
+      - { row_count: 2 }
+      - { row: { target: "AGENTS.md", source_id: 2068215165460998143, target_id: 187653310028978220 } }
+      - { row: { target: "docs/x.md", source_id: 2068215165460998143, target_id: 3516714206273220064 } }
+
+  - name: "section import endpoint ids match across engines"
+    query: |
+      MATCH (s:Definition)-[:IMPORTS]->(t:File)
+      RETURN s.id AS source_id, t.id AS target_id
+    assert:
+      - { row_count: 1 }
+      - { row: { source_id: 936025788233832803, target_id: 3516714206273220064 } }

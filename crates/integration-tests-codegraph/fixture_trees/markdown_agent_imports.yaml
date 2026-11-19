@@ -1,0 +1,50 @@
+- path: AGENTS.md
+  content: |
+    # Agents
+
+    Run `mise test` before you push.
+
+- path: CLAUDE.md
+  content: |
+    @AGENTS.md
+
+    # Claude
+
+    Also read @docs/x.md#setup.
+
+    Ignore `@docs/code.md` and this block:
+
+    ```
+    @docs/fenced.md
+    ```
+
+    Skip @missing.md, ask @someone, and mail team@example.com.
+
+- path: crates/indexer/CLAUDE.local.md
+  content: |
+    @AGENTS.md
+    @../../docs/x.md
+
+- path: crates/indexer/AGENTS.md
+  content: |
+    # Indexer
+
+- path: docs/x.md
+  content: |
+    # Setup
+
+- path: docs/code.md
+  content: |
+    # Code
+
+- path: docs/fenced.md
+  content: |
+    # Fenced
+
+- path: README.md
+  content: |
+    See @AGENTS.md and @docs/x.md.
+
+- path: .claude/skills/review/SKILL.md
+  content: |
+    See @AGENTS.md and @docs/x.md.

@@ -87,7 +87,8 @@ pub struct Section {
 
 /// Only headings at the top level of the document count as sections: a heading
 /// inside a block quote or list item is quoted content, not document structure.
-pub fn parse(source: &str) -> Document {
+/// Agent instruction files also turn their `@path` imports into links.
+pub fn parse(source: &str, agent_file: Option<AgentFile>) -> Document {
     let arena = Arena::new();
     let mut options = Options::default();
     options.extension.front_matter_delimiter = Some(FRONT_MATTER_DELIMITER.to_string());
@@ -95,7 +96,8 @@ pub fn parse(source: &str) -> Document {
     let lines = LineIndex::new(source);
 
     let mut front_matter = None;
-    let (top_level_anchors, links) = anchors_and_links(root, &lines);
+    let imports = agent_file == Some(AgentFile::Instructions);
+    let (top_level_anchors, links) = anchors_and_links(root, &lines, imports);
     let mut top_level_anchors = top_level_anchors.into_iter();
     let mut sections: Vec<Section> = Vec::new();
     let mut open: Vec<(u8, usize)> = Vec::new();
@@ -316,13 +318,20 @@ fn innermost_section(sections: &[Section], offset: usize) -> Option<usize> {
 fn anchors_and_links<'a>(
     root: &'a AstNode<'a>,
     lines: &LineIndex,
+    imports: bool,
 ) -> (Vec<String>, Vec<(usize, Link)>) {
     let mut anchorizer = UniqueAnchors::default();
     let mut top_level_anchors = Vec::new();
     let mut links = Vec::new();
+    let link = |url, image| Link {
+        url,
+        image,
+        section: None,
+    };
     for node in root.descendants() {
         let data = node.data.borrow();
-        let link = match &data.value {
+        let room = MAX_LINKS_PER_FILE - links.len();
+        let found = match &data.value {
             NodeValue::Heading(_) => {
                 let anchor = anchorizer.anchorize(&collect_text(node));
                 if node
@@ -333,23 +342,64 @@ fn anchors_and_links<'a>(
                 }
                 continue;
             }
-            NodeValue::Link(link) => Link {
-                url: link.url.clone(),
-                image: false,
-                section: None,
-            },
-            NodeValue::Image(link) => Link {
-                url: link.url.clone(),
-                image: true,
-                section: None,
-            },
+            NodeValue::Link(target) => vec![link(target.url.clone(), false)],
+            NodeValue::Image(target) => vec![link(target.url.clone(), true)],
+            NodeValue::Text(text) if imports && room > 0 => import_paths(text, room)
+                .into_iter()
+                .map(|path| link(path, false))
+                .collect(),
             _ => continue,
         };
-        if links.len() < MAX_LINKS_PER_FILE {
-            links.push((lines.byte(data.sourcepos.start), link));
-        }
+        let start = lines.byte(data.sourcepos.start);
+        links.extend(found.into_iter().take(room).map(|found| (start, found)));
     }
     (top_level_anchors, links)
+}
+
+/// Claude Code's import syntax: `@` at the start of a text run or after
+/// whitespace, then non-space characters or `\ `, with any `#` fragment
+/// dropped. Only file-relative paths are kept: `~/` and `/` paths point
+/// outside the repository.
+fn import_paths(text: &str, limit: usize) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut offset = 0;
+    while paths.len() < limit
+        && let Some(at) = text[offset..].find('@').map(|index| offset + index)
+    {
+        offset = at + 1;
+        let after_space = text[..at]
+            .chars()
+            .next_back()
+            .is_none_or(char::is_whitespace);
+        if !after_space {
+            continue;
+        }
+        let length = import_length(&text[offset..]);
+        let path = &text[offset..offset + length];
+        offset += length;
+        let path = path.split_once('#').map_or(path, |(path, _)| path);
+        let relative = path
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+        if relative {
+            paths.push(path.replace("\\ ", " "));
+        }
+    }
+    paths
+}
+
+fn import_length(text: &str) -> usize {
+    let mut chars = text.char_indices().peekable();
+    while let Some((index, c)) = chars.next() {
+        if c == '\\' && chars.next_if(|&(_, next)| next == ' ').is_some() {
+            continue;
+        }
+        if c == '\\' || c.is_whitespace() {
+            return index;
+        }
+    }
+    text.len()
 }
 
 /// Same anchors as comrak's `Anchorizer`, in linear time: each base resumes
@@ -635,11 +685,11 @@ mod tests {
     use super::*;
 
     fn sections(source: &str) -> Vec<Section> {
-        parse(source).sections
+        parse(source, None).sections
     }
 
     fn front_matter(source: &str) -> FrontMatter {
-        parse(source).front_matter.expect("front matter")
+        parse(source, None).front_matter.expect("front matter")
     }
 
     fn fqns(source: &str) -> Vec<String> {
@@ -870,7 +920,7 @@ mod tests {
     fn links_and_images_are_collected_from_the_whole_document() {
         let source = "# A [one](one.md)\n\n> [two](two.md)\n\n- ![three](three.png)\n\n\
             [four][ref]\n\n```\n[not](code.md)\n```\n\n[ref]: <four four.md>\n";
-        let links: Vec<(String, bool)> = parse(source)
+        let links: Vec<(String, bool)> = parse(source, None)
             .links
             .into_iter()
             .map(|link| (link.url, link.image))
@@ -886,8 +936,64 @@ mod tests {
         );
     }
 
+    fn link_urls(source: &str, agent_file: Option<AgentFile>) -> Vec<String> {
+        parse(source, agent_file)
+            .links
+            .into_iter()
+            .map(|link| link.url)
+            .collect()
+    }
+
+    #[test]
+    fn agent_instruction_files_turn_at_imports_into_links() {
+        let source = "@AGENTS.md\n\n# Rules\n\nRead @docs/x.md#setup, then @./my\\ notes.md.\n\
+            Ask @someone or mail a@example.com.\n\
+            [@linked.md](target.md) and *@emphasis.md*\n";
+        assert_eq!(
+            link_urls(source, Some(AgentFile::Instructions)),
+            vec![
+                "AGENTS.md",
+                "docs/x.md",
+                "./my notes.md.",
+                "someone",
+                "target.md",
+                "linked.md",
+                "emphasis.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn at_imports_skip_code_and_paths_outside_the_repository() {
+        let source = "Use `@code.md` here.\n\n```\n@fenced.md\n```\n\n    @indented.md\n\n\
+            @~/home.md @/etc/abs.md (@paren.md) x@glued.md @#only @@double.md @\n";
+        assert!(link_urls(source, Some(AgentFile::Instructions)).is_empty());
+    }
+
+    #[test]
+    fn at_imports_stop_at_the_limit() {
+        assert_eq!(import_paths("@a @b @c @d", 2), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn at_imports_only_count_in_agent_instruction_files() {
+        let source = "@AGENTS.md and [link](a.md)\n";
+        assert_eq!(link_urls(source, Some(AgentFile::Skill)), vec!["a.md"]);
+        assert_eq!(link_urls(source, None), vec!["a.md"]);
+    }
+
+    #[test]
+    fn at_imports_belong_to_the_innermost_section() {
+        let document = parse(
+            "@top.md\n\n# One\n\n@one.md\n",
+            Some(AgentFile::Instructions),
+        );
+        let sections: Vec<Option<usize>> = document.links.iter().map(|link| link.section).collect();
+        assert_eq!(sections, vec![None, Some(0)]);
+    }
+
     fn link_sections(source: &str) -> Vec<(String, Option<String>)> {
-        let document = parse(source);
+        let document = parse(source, None);
         document
             .links
             .into_iter()
@@ -962,7 +1068,7 @@ mod tests {
             format!("{block}\n# Real\n"),
             format!("{block}\n\n\n# Real\n"),
         ] {
-            let parsed = parse(&source);
+            let parsed = parse(&source, None);
             let front_matter = parsed.front_matter.expect("front matter");
             assert_eq!((front_matter.start, front_matter.end), (0, block.len()));
             assert_eq!(parsed.sections[0].start, source.find("# Real").unwrap());
@@ -987,7 +1093,7 @@ mod tests {
     fn a_blank_front_matter_block_counts_and_adjacent_delimiters_do_not() {
         let blank = "---\n\n---\n\nBody\n";
         assert_eq!(front_matter(blank).end, "---\n\n---\n".len());
-        assert!(parse("---\n---\n\nBody\n").front_matter.is_none());
+        assert!(parse("---\n---\n\nBody\n", None).front_matter.is_none());
     }
 
     #[test]
@@ -1107,7 +1213,7 @@ mod tests {
             "---\n\n---\n",
         ] {
             assert!(values(source).is_empty(), "{source:?}");
-            assert!(parse(source).front_matter.is_some(), "{source:?}");
+            assert!(parse(source, None).front_matter.is_some(), "{source:?}");
         }
         let huge = format!(
             "---\nname: a\nfiller: {}\n---\n",
@@ -1144,8 +1250,8 @@ mod tests {
 
     #[test]
     fn a_skill_is_named_by_front_matter_then_directory_then_file() {
-        let named = parse("---\nname: review\n---\n");
-        let unnamed = parse("---\nname: ''\n---\n");
+        let named = parse("---\nname: review\n---\n", None);
+        let unnamed = parse("---\nname: ''\n---\n", None);
         let skill = AgentFile::Skill;
         assert_eq!(
             skill.name("a/b/SKILL.md", named.front_matter.as_ref()),

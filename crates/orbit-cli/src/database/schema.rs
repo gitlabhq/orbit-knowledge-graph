@@ -8,7 +8,7 @@ use super::read_lock_database;
 
 const LOCAL_DDL_META_KEY: &str = "local_ddl";
 const CODE_INDEX_META_KEY: &str = "code_index_revision";
-const CODE_INDEX_REVISION: &str = "4";
+const CODE_INDEX_REVISION: &str = "5";
 
 pub fn graph_lacks_commit(db: &Path, commit_sha: &str) -> Result<bool> {
     let Some(_lock) = read_lock_database(db)? else {

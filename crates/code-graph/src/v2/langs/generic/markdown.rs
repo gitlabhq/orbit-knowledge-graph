@@ -43,10 +43,11 @@ fn parse_markdown(source: &str, file_path: &str) -> CustomParse {
             (start, end),
         )
     };
-    let document = parse(source);
+    let agent_file = AgentFile::classify(file_path);
+    let document = parse(source, agent_file);
     let sections = document.sections;
     let mut definitions = Vec::with_capacity(sections.len() + 2);
-    if let Some(agent_file) = AgentFile::classify(file_path) {
+    if let Some(agent_file) = agent_file {
         let front_matter = document.front_matter.as_ref();
         definitions.push(CanonicalDefinition {
             definition_type: agent_file.definition_type(),
