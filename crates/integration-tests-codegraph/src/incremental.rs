@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use code_graph_incremental::driver::{self, Report};
 use code_graph_incremental::export::{self, ExportPlan};
-use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Envelope, Killed, Limits, Scalar, Sentinel, State};
 use ontology::Ontology;
 

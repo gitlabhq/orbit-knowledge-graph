@@ -7,9 +7,8 @@ use rustc_hash::FxHashMap;
 use crate::engine::lang::DataSpec;
 use crate::error::LoadError;
 use crate::intern::Lang;
+use crate::language::SupportLang;
 use crate::sentinel::Limits;
-use crate::treesitter;
-use crate::treesitter::SupportLang;
 
 pub struct Env {
     pub export_config: crate::export::ExportConfig,
@@ -60,7 +59,7 @@ impl Env {
         let mut rules: FxHashMap<SupportLang, usize> = FxHashMap::default();
         let mut sources: Vec<Option<&'static str>> = Vec::new();
         for &member in &members {
-            let yaml = treesitter::lang_yaml(member);
+            let yaml = crate::language::lang_yaml(member);
             let index = match sources
                 .iter()
                 .position(|s| s.map(str::as_ptr) == yaml.map(str::as_ptr))

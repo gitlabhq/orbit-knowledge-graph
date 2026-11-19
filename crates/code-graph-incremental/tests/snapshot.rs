@@ -3,7 +3,7 @@ use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::driver::{self, SNAPSHOT_VERSION};
-use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Sentinel, State};
 mod common;
 

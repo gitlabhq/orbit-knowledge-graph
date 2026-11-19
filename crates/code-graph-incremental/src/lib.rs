@@ -7,10 +7,10 @@ pub mod export;
 pub mod file_tree;
 pub mod frontend;
 pub mod intern;
+pub mod language;
 pub mod modules;
 pub mod shared;
 pub mod tree;
-pub mod treesitter;
 
 pub use shared::error::{Error, LoadError};
 pub use shared::sentinel::{Killed, Limits, Sentinel};

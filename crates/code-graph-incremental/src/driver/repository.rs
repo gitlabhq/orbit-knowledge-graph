@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::Report;
+use crate::language::SupportLang;
 use crate::sentinel::Sentinel;
-use crate::treesitter::SupportLang;
 use crate::{Env, Envelope, Error, Limits, LoadError};
 use arrow::record_batch::RecordBatch;
 use rustc_hash::FxHashSet;

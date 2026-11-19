@@ -3,9 +3,10 @@ use smallvec::SmallVec;
 
 use super::*;
 use crate::error::LoadError;
+use crate::frontend::treesitter::parse;
 use crate::intern::Lang;
+use crate::language::SupportLang;
 use crate::tree::{Node, Storage, Tree};
-use crate::treesitter::{SupportLang, parse};
 
 fn no_data(_: &str) -> Option<Vec<String>> {
     None
@@ -128,8 +129,8 @@ fn every_rule_file_pattern_and_template_parses() {
             DataSpec::List(items) => items.iter().for_each(|i| texts(i, out)),
         }
     }
-    let yamls: Vec<_> = crate::treesitter::all_languages()
-        .map(|(id, _)| crate::treesitter::lang_yaml(id))
+    let yamls: Vec<_> = crate::language::all_languages()
+        .map(|(id, _)| crate::language::lang_yaml(id))
         .collect();
     let files = load(&yamls).unwrap_or_else(|e| panic!("{e}"));
     let (mut patterns, mut templates, mut exprs) = (0, 0, 0);

@@ -3,7 +3,7 @@ use std::path::Path;
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::tree::{Compact, EdgeKind};
 type Cursor<'a> = code_graph_incremental::tree::Cursor<'a, Compact>;
-use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::language::SupportLang;
 use code_graph_incremental::{Env, Limits, Sentinel, State, driver};
 mod common;
 

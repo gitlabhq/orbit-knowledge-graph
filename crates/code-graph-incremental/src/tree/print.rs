@@ -86,7 +86,8 @@ fn label<S: super::Storage<Node = super::Node>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::treesitter::{SupportLang, parse};
+    use crate::frontend::treesitter::parse;
+    use crate::language::SupportLang;
 
     fn termtree_print<S: super::super::Storage<Node = super::super::Node>>(
         cursor: Cursor<'_, S>,

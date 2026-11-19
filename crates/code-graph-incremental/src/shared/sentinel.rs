@@ -64,7 +64,7 @@ pub struct Killed {
     pub cancelled: bool,
     pub label: Cow<'static, str>,
     pub path: String,
-    pub family: Option<crate::treesitter::SupportLang>,
+    pub family: Option<crate::language::SupportLang>,
     pub elapsed: Duration,
     pub budget: Duration,
     pub stop: Option<Stop>,

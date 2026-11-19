@@ -34,7 +34,7 @@ const DEFINITIONS: &[&str] = &[
 ];
 const VALUE_KINDS: &[&str] = &["Variable", "Var", "Constant", "Const", "Static", "Local"];
 pub(super) fn languages(requested: &mut Vec<String>) -> Vec<String> {
-    use code_graph_incremental::treesitter::{SupportLang, all_languages};
+    use code_graph_incremental::language::{SupportLang, all_languages};
     let mut builder = ignore::types::TypesBuilder::new();
     builder.add_defaults();
     let definitions = builder.definitions();

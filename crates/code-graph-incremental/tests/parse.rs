@@ -1,7 +1,7 @@
 use std::path::Path;
 
+use code_graph_incremental::language::{SupportLang, all_languages};
 use code_graph_incremental::tree::Tree;
-use code_graph_incremental::treesitter::{SupportLang, all_languages};
 use code_graph_incremental::{Env, Limits, Sentinel, driver, frontend};
 use orbit_utils::vfs::{Decision, Vfs};
 mod common;

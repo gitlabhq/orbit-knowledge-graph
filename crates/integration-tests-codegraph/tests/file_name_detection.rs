@@ -1,5 +1,5 @@
 use code_graph::v2::config::{Language, detect_language_from_path};
-use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::language::SupportLang;
 
 #[test]
 fn both_engines_agree_which_file_names_are_dockerfiles() {

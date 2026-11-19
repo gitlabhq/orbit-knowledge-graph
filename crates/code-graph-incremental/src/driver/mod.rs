@@ -17,9 +17,9 @@ pub use state::{SNAPSHOT_VERSION, SourceFile, State};
 use crate::engine::{self, EdgeIndex, Phase, Walk};
 use crate::env::Env;
 use crate::error::Error;
+use crate::language::SupportLang;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Edge, Mutable, Tree};
-use crate::treesitter::SupportLang;
 
 #[derive(Default)]
 pub struct Report {
