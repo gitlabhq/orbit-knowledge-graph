@@ -826,8 +826,6 @@ pages:
     - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
     - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
 
-# Tells Bing and other IndexNow search engines which pages changed. They check the key against
-# indexnow-key.txt on the site, so it is public by design.
 pages:indexnow:
   stage: docs
   image: alpine:latest

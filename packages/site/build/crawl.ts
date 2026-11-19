@@ -5,8 +5,6 @@ import { HOME, USER_DOCS } from "../src/sections";
 const SITE = "https://gitlaborbit.dev/";
 const DEMO = "https://about.gitlab.com/sales/?contact-topic=request-demo";
 
-// What the home page and Orbit Next show, for readers that do not run the app. Keep it to what the
-// pages say, and describe each picture by what it shows.
 const HOME_MARKDOWN = `
 ## One context layer for all your agents
 
