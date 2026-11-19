@@ -30,7 +30,7 @@ Prerequisites:
 - The NATS server and the ClickHouse server that GitLab Orbit uses.
 - A ClickHouse account that can create databases and users, for the DIP migrations.
 - Outbound HTTPS from the exporter pod to `version.gitlab.com`.
-- Outbound access from the DIP pod to `iglucentral.com` and `gitlab-org.gitlab.io`, to resolve event schemas.
+- Outbound HTTP (port 80) from the DIP pod to `iglucentral.com`, and outbound HTTPS to `gitlab-org.gitlab.io`, to resolve event schemas.
 
 Set up Service Ping for GitLab Orbit in this order:
 
@@ -196,7 +196,7 @@ Keep `command: dry-run` until [Verify the setup](#verify-the-setup) shows a payl
 Then set `command: run` and upgrade the release.
 From then on the CronJob posts every Monday at 03:00 UTC.
 
-For ClickHouse over TLS, store a full DSN ending in `?secure=true` in a Secret and set `clickhouse.existingSecret` to its name instead of `clickhouse.host` and `clickhouse.passwordSecret`.
+For ClickHouse over TLS, store a full DSN for the `serviceping_exporter` user, ending in `?secure=true`, under the key `CLICKHOUSE_DSN` in a Secret. Then set `clickhouse.existingSecret` to its name instead of `clickhouse.host` and `clickhouse.passwordSecret`.
 For every value, see the [exporter chart](https://gitlab.com/gitlab-org/analytics-section/analytics-instrumentation/serviceping-exporter/-/tree/main/charts/serviceping-exporter).
 
 ## Point GitLab Orbit at the Data Insights Platform
