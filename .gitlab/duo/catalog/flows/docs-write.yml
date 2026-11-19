@@ -16,9 +16,10 @@ components:
           SKILLS_REF=7ff82867e8bb0b036dd0292af3db469141fa411b;
           MODE=full;
           DOCS_REVIEWERS=fneill,z_painter;
+          FLOW_USER=ai-docs-write-gitlab-org_510eee;
           D=.docs-write; rm -rf $D; mkdir -p $D/route; U="${GITLAB_BASE_URL:-https://gitlab.com}";
-          printf '#!/bin/sh\nexport LEFTHOOK=0\nexec uv run -q --no-project --python 3.12 python
-          .docs-write/skills/docs-write/scripts/flow_step.py "$@"\n' > $D/step;
+          printf '#!/bin/sh\nexport LEFTHOOK=0 DOCS_WRITE_FLOW_USER=%s\nexec uv run -q --no-project --python 3.12 python
+          .docs-write/skills/docs-write/scripts/flow_step.py "$@"\n' "$FLOW_USER" > $D/step;
           if git -C "$D" init -q ts && git -C "$D/ts" fetch -q --depth 1
           "https://${DUO_WORKFLOW_GIT_HTTP_USER:-oauth2}:${GITLAB_TOKEN}@${U#https://}/$SKILLS_REPO.git"
           "$SKILLS_REF" >/dev/null 2>&1 && git -C "$D/ts" checkout -q FETCH_HEAD; then
