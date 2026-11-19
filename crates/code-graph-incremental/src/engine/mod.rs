@@ -465,8 +465,12 @@ const WALK: usize = 7;
 
 type Key = (FnId, SmallVec<[Val; 4]>);
 
+/// A bound on reruns of one cycle; sets only grow, so a cycle over finite
+/// trees converges well before it.
+const MAX_FIXPOINT_ROUNDS: u32 = 64;
+
 enum Memo {
-    Busy,
+    Busy(Vals),
     Done { vals: Vals, deps: u8, stamp: u64 },
 }
 
@@ -506,7 +510,7 @@ pub struct Run<'t, S: Store = Compact> {
     epochs: [u64; WALK + 1],
     reading: u8,
     memo: Table,
-    cut: bool,
+    reads: FxHashSet<Key>,
 }
 
 impl<'t, S: Store> Run<'t, S> {
@@ -562,7 +566,7 @@ impl<'t, S: Store> Run<'t, S> {
             epochs: [0; WALK + 1],
             reading: u8::MAX,
             memo: Table::default(),
-            cut: false,
+            reads: FxHashSet::default(),
         }
     }
 
@@ -649,7 +653,7 @@ impl<'t, S: Store> Run<'t, S> {
         }
         let epochs = &self.epochs;
         table.entries.retain(|_, memo| match memo {
-            Memo::Busy => true,
+            Memo::Busy(_) => true,
             Memo::Done {
                 deps, stamp: at, ..
             } => stamp(epochs, *deps) == *at,
@@ -657,11 +661,8 @@ impl<'t, S: Store> Run<'t, S> {
         table.swept = table.entries.len();
     }
 
-    /// Cached calls share one cycle guard: a call already in progress yields
-    /// nothing and marks the result in progress as cut. A result stays valid
-    /// until a state its function can read is written. A cut Pure result is
-    /// never stored; a cut Flow result lives until its states change, which
-    /// keeps self-referential chains (`n = n.next()`) linear.
+    /// A module function's result, cached; it stays valid until a state the
+    /// function can read is written.
     fn call(&mut self, id: FnId, args: &[Vals]) -> Vals {
         let links = self.links;
         let (id, deps) = (links.to[usize::from(id.0)], links.deps[usize::from(id.0)]);
@@ -693,14 +694,17 @@ impl<'t, S: Store> Run<'t, S> {
         found
     }
 
-    /// Cached calls share one cycle guard: a call already in progress yields
-    /// nothing and marks the result in progress as cut. A cut Pure result is
-    /// never stored; a cut Flow result lives until its states change.
-    fn memoized(&mut self, key: Key, deps: u8, compute: impl FnOnce(&mut Self) -> Vals) -> Vals {
+    /// Cached calls compute least fixpoints. A call already in progress
+    /// yields its value so far (empty at first) and is noted as read; when the
+    /// call it heads finishes, the call reruns with the union of its results
+    /// until nothing grows. A result that read an unfinished call is never
+    /// stored if Pure; a Flow one lives until its states change.
+    fn memoized(&mut self, key: Key, deps: u8, mut compute: impl FnMut(&mut Self) -> Vals) -> Vals {
         match self.memo.entries.get(&key) {
-            Some(Memo::Busy) => {
-                self.cut = true;
-                return Vals::new();
+            Some(Memo::Busy(partial)) => {
+                let partial = partial.clone();
+                self.reads.insert(key);
+                return partial;
             }
             Some(Memo::Done { vals, deps, stamp }) if self.stamp(*deps) == *stamp => {
                 return vals.clone();
@@ -708,12 +712,36 @@ impl<'t, S: Store> Run<'t, S> {
             _ => {}
         }
         self.sweep();
-        self.memo.entries.insert(key.clone(), Memo::Busy);
+        self.memo
+            .entries
+            .insert(key.clone(), Memo::Busy(Vals::new()));
         let epochs = self.epochs;
-        let outer = std::mem::take(&mut self.cut);
-        let found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || compute(self));
-        let cut = self.cut;
-        self.cut |= outer;
+        let outer = std::mem::take(&mut self.reads);
+        let mut found;
+        let mut rounds = 0;
+        loop {
+            found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || compute(self));
+            if !self.reads.remove(&key) || rounds == MAX_FIXPOINT_ROUNDS {
+                break;
+            }
+            let Some(Memo::Busy(partial)) = self.memo.entries.get(&key) else {
+                break;
+            };
+            let mut grown = partial.clone();
+            for v in &found {
+                if !grown.contains(v) {
+                    grown.push(*v);
+                }
+            }
+            if grown.len() == partial.len() {
+                found = grown;
+                break;
+            }
+            self.memo.entries.insert(key.clone(), Memo::Busy(grown));
+            rounds += 1;
+        }
+        let cut = !self.reads.is_empty();
+        self.reads.extend(outer);
         if (cut && deps == 0) || epochs != self.epochs {
             self.memo.entries.remove(&key);
         } else {
