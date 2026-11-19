@@ -17,7 +17,7 @@ use crate::modules;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{Compact, Edge, EdgeKind, Mutable, Node, Storage};
-pub use program::{Phase, Pipeline, Walk, resolution};
+pub use program::{Def, Phase, Pipeline, Walk, resolution};
 
 pub type Tree<S = Compact> = crate::tree::Tree<S>;
 pub type Cursor<'a, S = Compact> = crate::tree::Cursor<'a, S>;
@@ -407,6 +407,7 @@ pub struct Run<'t, S: Store = Compact> {
     killed: Option<Killed>,
     max_edges: usize,
     graph: Option<&'t EdgeIndex>,
+    fns: &'t [program::Def],
     graph_fi: u32,
     lang: usize,
     data: &'t [Vals],
@@ -424,16 +425,16 @@ impl<'t, S: Store> Run<'t, S> {
         trees: &'t [Tree<S>],
         fi: u32,
         env: &'t Env,
-        links: &'t Links,
-        data: &'t [Vec<Vals>],
+        phase: &'t Phase,
         budget: &'t Sentinel,
         file: &'t Sentinel,
     ) -> Self {
         let rules = env.rules_index(&trees[fi as usize].label);
-        let mut run = Self::detached(trees, fi, &env.lang, links, budget, file);
+        let mut run = Self::detached(trees, fi, &env.lang, &phase.links, budget, file);
         run.max_edges = env.limits.max_file_edges;
         run.lang = rules;
-        run.data = data.get(rules).map_or(&[], Vec::as_slice);
+        run.data = phase.data.get(rules).map_or(&[], Vec::as_slice);
+        run.fns = &phase.defs;
         run
     }
 
@@ -458,6 +459,7 @@ impl<'t, S: Store> Run<'t, S> {
             killed: None,
             max_edges: 0,
             graph: None,
+            fns: &[],
             graph_fi: 0,
             lang: 0,
             data: &[],
@@ -571,14 +573,38 @@ impl<'t, S: Store> Run<'t, S> {
             return found;
         }
         let key = self.key(id, f, args);
+        let found = self.memoized(key, deps, |run| invoke(run, f.slot, f.index, args));
+        self.reading = reading;
+        found
+    }
+
+    /// A YAML function's result, cached like a module function's.
+    pub(crate) fn call_def(&mut self, def: u16, args: &[Vals]) -> Vals {
+        let defs = self.fns;
+        let deps = defs[usize::from(def)].deps;
+        let mut key: SmallVec<[Val; 4]> = SmallVec::new();
+        for vals in args {
+            key.push(Val::Sym(vals.len() as u32));
+            key.extend_from_slice(vals);
+        }
+        let reading = std::mem::replace(&mut self.reading, deps);
+        let found = self.memoized((FnId(u16::MAX - def), key), deps, |run| {
+            defs[usize::from(def)].eval(run, args)
+        });
+        self.reading = reading;
+        found
+    }
+
+    /// Cached calls share one cycle guard: a call already in progress yields
+    /// nothing and marks the result in progress as cut. A cut Pure result is
+    /// never stored; a cut Flow result lives until its states change.
+    fn memoized(&mut self, key: Key, deps: u8, compute: impl FnOnce(&mut Self) -> Vals) -> Vals {
         match self.memo.entries.get(&key) {
             Some(Memo::Busy) => {
                 self.cut = true;
-                self.reading = reading;
                 return Vals::new();
             }
             Some(Memo::Done { vals, deps, stamp }) if self.stamp(*deps) == *stamp => {
-                self.reading = reading;
                 return vals.clone();
             }
             _ => {}
@@ -587,12 +613,9 @@ impl<'t, S: Store> Run<'t, S> {
         self.memo.entries.insert(key.clone(), Memo::Busy);
         let epochs = self.epochs;
         let outer = std::mem::take(&mut self.cut);
-        let found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
-            invoke(self, f.slot, f.index, args)
-        });
+        let found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || compute(self));
         let cut = self.cut;
         self.cut |= outer;
-        self.reading = reading;
         if (cut && deps == 0) || epochs != self.epochs {
             self.memo.entries.remove(&key);
         } else {
@@ -620,6 +643,10 @@ pub fn required(module: &str) -> impl Iterator<Item = FnId> + '_ {
 }
 
 impl Links {
+    pub(crate) fn deps_of(&self, id: FnId) -> u8 {
+        self.deps[usize::from(id.0)]
+    }
+
     pub(crate) fn to(&self, id: FnId) -> FnId {
         self.to[usize::from(id.0)]
     }
@@ -643,15 +670,7 @@ pub fn run_tree<S: Store>(
     budget: &Sentinel,
 ) -> Result<Vec<Edge>, Killed> {
     let file = &tree_budget(phase, env, &tree.label);
-    let mut run = Run::new(
-        std::slice::from_ref(tree),
-        0,
-        env,
-        &phase.links,
-        &phase.data,
-        budget,
-        file,
-    );
+    let mut run = Run::new(std::slice::from_ref(tree), 0, env, phase, budget, file);
     let root = tree.root();
     for &slot in &phase.modules {
         (S::hooks(&modules::ALL[usize::from(slot)]).start)(&mut run, slot, root.index());
@@ -708,15 +727,7 @@ pub fn run_family(
         .into_par_iter()
         .map(|fi| {
             let file = tree_budget(phase, env, &trees[fi].label);
-            let mut run = Run::new(
-                trees,
-                fi as u32,
-                env,
-                &phase.links,
-                &phase.data,
-                &scope,
-                &file,
-            );
+            let mut run = Run::new(trees, fi as u32, env, phase, &scope, &file);
             run.graph = Some(graph);
             run.graph_fi = fi as u32;
             let root = Cursor::new(trees, fi as u32, 0);

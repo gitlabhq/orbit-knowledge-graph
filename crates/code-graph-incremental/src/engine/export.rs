@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+
+static EMPTY_DEFS: std::sync::LazyLock<HashMap<String, (u16, usize)>> =
+    std::sync::LazyLock::new(HashMap::new);
 use std::sync::LazyLock;
 
 use smallvec::SmallVec;
@@ -27,6 +30,7 @@ impl NodeExpr {
             modules: &modules,
             links,
             lang,
+            defs: &EMPTY_DEFS,
             data: &HashMap::new(),
             effects: false,
         };

@@ -54,7 +54,7 @@ pub enum ActionSpec {
     Expr(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuleSpec {
     pub group: Option<String>,

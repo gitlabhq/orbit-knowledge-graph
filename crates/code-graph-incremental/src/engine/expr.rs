@@ -15,6 +15,7 @@ pub enum Expr {
     Empty,
     Data(u16),
     Union(Box<[Expr]>),
+    Def(u16, Box<[Expr]>),
     Call(FnId, Box<[Expr]>),
 }
 
@@ -24,6 +25,7 @@ pub struct Scope<'a> {
     pub links: &'a super::Links,
     pub lang: &'a Lang,
     pub data: &'a HashMap<String, u16>,
+    pub defs: &'a HashMap<String, (u16, usize)>,
     pub effects: bool,
 }
 
@@ -35,6 +37,22 @@ impl Expr {
         match p.at == src.len() {
             true => Ok(expr),
             false => Err(p.error("trailing input")),
+        }
+    }
+
+    /// Every module function and YAML function this expression calls.
+    pub fn calls(&self, f: &mut dyn FnMut(Result<FnId, u16>)) {
+        match self {
+            Expr::Call(id, args) => {
+                f(Ok(*id));
+                args.iter().for_each(|a| a.calls(f));
+            }
+            Expr::Def(def, args) => {
+                f(Err(*def));
+                args.iter().for_each(|a| a.calls(f));
+            }
+            Expr::Union(parts) => parts.iter().for_each(|p| p.calls(f)),
+            _ => {}
         }
     }
 
@@ -50,6 +68,20 @@ impl Expr {
             Expr::Empty => Vals::new(),
             Expr::Data(at) => cx.data[usize::from(*at)].clone(),
             Expr::Union(parts) => parts.iter().flat_map(|p| p.eval(cx, caps)).collect(),
+            Expr::Def(def, args) => {
+                let mut args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
+                let heads = std::mem::take(&mut args[0]);
+                let mut out = Vals::new();
+                for head in heads {
+                    args[0] = SmallVec::from_elem(head, 1);
+                    for found in cx.call_def(*def, &args) {
+                        if !out.contains(&found) {
+                            out.push(found);
+                        }
+                    }
+                }
+                out
+            }
             Expr::Call(id, args) => {
                 let args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
                 apply(cx, *id, &args)
@@ -184,6 +216,27 @@ impl<'s> Parser<'s, '_> {
     }
 
     fn call(&mut self, piped: Option<Expr>) -> Result<Expr, LoadError> {
+        let start = self.at;
+        let word = self.ident();
+        if let Some(&(def, arity)) = self.scope.defs.get(word) {
+            let mut args: Vec<Expr> = piped.into_iter().collect();
+            if self.eat("(") && !self.eat(")") {
+                loop {
+                    args.push(self.expr()?);
+                    if self.eat(")") {
+                        break;
+                    }
+                    if !self.eat(",") {
+                        return Err(self.error("expected , or )"));
+                    }
+                }
+            }
+            if args.len() != arity {
+                return Err(self.error(&format!("{word} takes {arity} arguments")));
+            }
+            return Ok(Expr::Def(def, args.into()));
+        }
+        self.at = start;
         let (module, name) = match self.ident() {
             "mod" if self.eat(".") => {
                 let module = self.ident();

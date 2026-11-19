@@ -149,6 +149,63 @@ enum Body {
     },
 }
 
+/// A function written in the rule files: cases tried in order on its first
+/// argument, the first that matches gives the value.
+pub struct Def {
+    cases: Vec<Case>,
+    pub(super) deps: u8,
+    slots: usize,
+}
+
+struct Case {
+    at: Match,
+    params: Vec<u16>,
+    value: Expr,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DefSpec {
+    #[serde(default)]
+    params: Vec<String>,
+    cases: Vec<CaseSpec>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CaseSpec {
+    #[serde(rename = "match", default = "any_node")]
+    pattern: String,
+    when: Option<String>,
+    value: String,
+}
+
+fn any_node() -> String {
+    "(_)".into()
+}
+
+impl Def {
+    pub(super) fn eval<S: Store>(&self, run: &mut Run<S>, args: &[Vals]) -> Vals {
+        let Some(head) = args[0].first().and_then(|v| v.loc()) else {
+            return Vals::new();
+        };
+        let c = Cursor::new(run.trees, head.fi, head.node);
+        let mut w = Scratch::<S>::new(self.slots);
+        for case in &self.cases {
+            if !w.matches(run, &case.at, c) {
+                continue;
+            }
+            for (&slot, arg) in case.params.iter().zip(&args[1..]) {
+                w.vals[usize::from(slot)] = arg.clone();
+            }
+            if w.holds(run, &case.at) {
+                return case.value.eval(run, &w.vals);
+            }
+        }
+        Vals::new()
+    }
+}
+
 pub struct Phase {
     pub name: String,
     pub label: &'static str,
@@ -159,6 +216,7 @@ pub struct Phase {
     pub(super) modules: Vec<u8>,
     pub(super) links: super::Links,
     pub(super) data: Vec<Vec<Vals>>,
+    pub(super) defs: Vec<Def>,
     body: Body,
     slots: usize,
 }
@@ -287,6 +345,7 @@ struct Loader<'a> {
     links: &'a super::Links,
     defaults: Vec<(EdgeKind, FnId)>,
     names: &'a HashMap<String, u16>,
+    defs: HashMap<String, (u16, usize)>,
     data: &'a BTreeMap<String, DataSpec>,
     lang: &'a Lang,
 }
@@ -310,11 +369,26 @@ impl Phase {
             .iter()
             .map(|(kind, f)| Ok((edge_kind(kind)?, resolver(f, &links)?)))
             .collect::<Result<Vec<_>, LoadError>>()?;
+        let specs: Vec<(String, DefSpec)> = files
+            .functions
+            .iter()
+            .map(|(name, value)| {
+                let spec = serde_json::from_value(value.clone())
+                    .map_err(|e| LoadError(format!("function {name}: {e}")))?;
+                Ok((name.clone(), spec))
+            })
+            .collect::<Result<_, LoadError>>()?;
+        let defs: HashMap<String, (u16, usize)> = specs
+            .iter()
+            .enumerate()
+            .map(|(at, (name, spec))| (name.clone(), (at as u16, spec.params.len() + 1)))
+            .collect();
         let loader = Loader {
             spec,
             walk,
             links: &links,
             defaults,
+            defs,
             names,
             data: &files.shared.data,
             lang,
@@ -362,9 +436,11 @@ impl Phase {
             .label
             .clone()
             .unwrap_or_else(|| spec.name.clone());
+        let defs = loader.defs(&specs)?;
         Ok(Phase {
             name: spec.name.clone(),
             label: Box::leak(label.into_boxed_str()),
+            defs,
             budget: spec.budget.clone(),
             scope: spec.scope.clone(),
             after: spec.after.clone(),
@@ -389,6 +465,67 @@ fn rules_of(rules: Option<&PhaseRules>) -> Result<&[RuleSpec], LoadError> {
 }
 
 impl Loader<'_> {
+    /// Compiles the rule files' functions for this phase, with the states
+    /// each can read through its calls.
+    fn defs(&self, specs: &[(String, DefSpec)]) -> Result<Vec<Def>, LoadError> {
+        let mut defs = Vec::new();
+        let mut calls: Vec<Vec<Result<FnId, u16>>> = Vec::new();
+        for (name, spec) in specs {
+            let at = |e: LoadError| LoadError(format!("function {name}: {}", e.0));
+            let mut cases = Vec::new();
+            let mut used = Vec::new();
+            for case in &spec.cases {
+                let rule = RuleSpec {
+                    pattern: case.pattern.clone(),
+                    when: case.when.clone(),
+                    ..RuleSpec::default()
+                };
+                let mut at_ = self.matcher(&rule, None).map_err(at)?;
+                let params = spec
+                    .params
+                    .iter()
+                    .map(|p| at_.slots.slot(p.trim_start_matches('$')))
+                    .collect();
+                if let Some(when) = case.when.as_deref() {
+                    at_.when = Some(Expr::parse(when, &self.scope(&at_.slots, false)).map_err(at)?);
+                }
+                let value = Expr::parse(&case.value, &self.scope(&at_.slots, false)).map_err(at)?;
+                value.calls(&mut |c| used.push(c));
+                if let Some(when) = &at_.when {
+                    when.calls(&mut |c| used.push(c));
+                }
+                cases.push(Case {
+                    at: at_,
+                    params,
+                    value,
+                });
+            }
+            let slots = cases.iter().map(|c| c.at.slots.len()).max().unwrap_or(1);
+            defs.push(Def {
+                cases,
+                deps: 0,
+                slots,
+            });
+            calls.push(used);
+        }
+        loop {
+            let mut changed = false;
+            for i in 0..defs.len() {
+                let deps = calls[i].iter().fold(defs[i].deps, |acc, c| match c {
+                    Ok(id) => acc | self.links.deps_of(*id),
+                    Err(d) => acc | defs[usize::from(*d)].deps,
+                });
+                if deps != defs[i].deps {
+                    defs[i].deps = deps;
+                    changed = true;
+                }
+            }
+            if !changed {
+                return Ok(defs);
+            }
+        }
+    }
+
     fn scope<'s>(&'s self, slots: &'s Slots, effects: bool) -> Scope<'s> {
         Scope {
             slots,
@@ -396,6 +533,7 @@ impl Loader<'_> {
             links: self.links,
             lang: self.lang,
             data: self.names,
+            defs: &self.defs,
             effects,
         }
     }
@@ -1170,15 +1308,7 @@ impl Phase {
         budget: &'t Sentinel,
         file: &'t Sentinel,
     ) -> Run<'t, S> {
-        Run::new(
-            std::slice::from_ref(tree),
-            0,
-            env,
-            &self.links,
-            &self.data,
-            budget,
-            file,
-        )
+        Run::new(std::slice::from_ref(tree), 0, env, self, budget, file)
     }
 
     fn pass(
