@@ -66,6 +66,7 @@ impl BillingObserver {
     }
 
     fn build_metadata(&self) -> serde_json::Value {
+        let is_saas = self.inputs.realm.as_deref().and_then(normalize_realm) == Some(REALM_SAAS);
         let metadata = BillingMetadata {
             metrics: &self.metrics,
             query_type: self.query_type,
@@ -73,7 +74,7 @@ impl BillingObserver {
             source_type: &self.inputs.source_type,
             coding_agent: self.inputs.coding_agent.as_deref(),
             is_gitlab_team_member: self.inputs.is_gitlab_team_member,
-            orbit_quota_exempt: self.inputs.orbit_quota_exempt,
+            orbit_quota_exempt: self.inputs.orbit_quota_exempt.filter(|_| is_saas),
             orbit_version: orbit_utils::version::get(),
         };
         serde_json::to_value(&metadata).unwrap_or_else(|e| {
@@ -352,6 +353,22 @@ mod tests {
         assert!(metadata["coding_agent"].is_null());
         assert!(metadata["is_gitlab_team_member"].is_null());
         assert!(metadata["orbit_quota_exempt"].is_null());
+    }
+
+    #[test]
+    fn metadata_orbit_quota_exempt_null_off_saas() {
+        for realm in ["SM", "self-managed", "Dedicated"] {
+            let inputs = BillingInputs {
+                realm: Some(realm.into()),
+                orbit_quota_exempt: Some(true),
+                ..test_inputs()
+            };
+            let obs = BillingObserver::new(None, inputs);
+
+            let metadata = obs.build_metadata();
+
+            assert!(metadata["orbit_quota_exempt"].is_null(), "realm {realm}");
+        }
     }
 
     #[test]
