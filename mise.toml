@@ -461,7 +461,7 @@ shell = "bash -c"
 run = """
 set -euo pipefail
 for config in specs/indexing-engine-next/*.cfg; do
-  java -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine-next/LeaseDedupe.tla
+  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine-next/LeaseDedupe.tla
 done
 """
 
@@ -473,7 +473,7 @@ shell = "bash -c"
 run = """
 set -uo pipefail
 for config in specs/indexing-engine-next/counterexamples/*.cfg; do
-  java -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine-next/LeaseDedupe.tla > /dev/null
+  java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-states -config "$config" specs/indexing-engine-next/LeaseDedupe.tla > /dev/null
   [ $? -eq 12 ] || { echo "$config: expected an invariant violation (TLC exit 12)"; exit 1; }
   echo "$config: violation found, as expected"
 done
@@ -488,7 +488,7 @@ run = """
 set -euo pipefail
 cargo test -p indexing-engine-next --test protocol
 dir="${CARGO_TARGET_DIR:-target}/tmp/indexing-engine-next-spec"
-cp specs/indexing-engine-next/LeaseDedupe.tla specs/indexing-engine-next/LeaseDedupeCodeCheck.tla specs/indexing-engine-next/LeaseDedupeCodeCheck.cfg "$dir/"
+cp specs/indexing-engine-next/LeaseDedupe.tla specs/indexing-engine-next/code-check/* "$dir/"
 java -XX:+UseParallelGC -cp target/tla2tools-1.7.4.jar tlc2.TLC -workers auto -cleanup -metadir target/tlc-code -config "$dir/LeaseDedupeCodeCheck.cfg" "$dir/LeaseDedupeCodeCheck.tla"
 """
 
