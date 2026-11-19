@@ -27,9 +27,29 @@ phases:
     walk: fixpoint
     outputs: [replace, append, tag]
     modules: [text]
+  - name: imports
+    scope: family
+    after: [project]
+    walk: each
+    outputs: [emit]
+    modules: [scope, text]
+  - name: resolve
+    scope: family
+    after: [imports]
+    walk: each
+    outputs: [emit]
+    modules: [core, scope, text]
+    bind: { core.read: scope.read }
+  - name: dispatch
+    scope: family
+    after: [resolve]
+    walk: fixpoint
+    outputs: [emit]
+    modules: [core, scope, text]
+    bind: { core.read: scope.read }
   - name: display
     scope: tree
-    after: [project]
+    after: [dispatch]
     walk: each
     outputs: [tag]
     modules: [text]

@@ -1,9 +1,10 @@
+pub mod scope;
 pub mod ssa;
 pub mod text;
 
 use crate::engine::{Cursor, Cx, Module, Registration, Store, Vals, register};
 
-pub static ALL: &[Registration] = &[register::<text::Text>()];
+pub static ALL: &[Registration] = &[register::<text::Text>(), register::<scope::Scope>()];
 
 fn node<'t, M: Module, S: Store>(cx: &Cx<'_, 't, M, S>, args: &[Vals], at: usize) -> Cursor<'t, S> {
     cx.jump(args[at][0].loc().expect("this argument is a node"))
