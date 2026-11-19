@@ -112,7 +112,7 @@ impl DuckDbClient {
             })
             .unwrap_or_default();
         conn.execute_batch(&format!(
-            "{allowed} SET enable_external_access = false; SET lock_configuration = true;"
+            "{allowed} SET TimeZone = 'UTC'; SET enable_external_access = false; SET lock_configuration = true;"
         ))
         .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         Ok(Self { conn })
