@@ -23,7 +23,7 @@ impl DslLanguage for MarkdownDsl {
     }
 
     fn parser() -> LanguageParser {
-        LanguageParser::Custom(parse_markdown)
+        LanguageParser::Custom(|source, file_path, _| Ok(parse_markdown(source, file_path)))
     }
 }
 
@@ -91,6 +91,7 @@ fn parse_markdown(source: &str, file_path: &str) -> CustomParse {
     CustomParse {
         definitions,
         imports: Vec::new(),
+        refs: Vec::new(),
         links,
     }
 }

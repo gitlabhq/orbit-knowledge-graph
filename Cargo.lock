@@ -9767,6 +9767,7 @@ dependencies = [
  "tree-sitter-bash",
  "tree-sitter-c",
  "tree-sitter-c-sharp",
+ "tree-sitter-containerfile",
  "tree-sitter-cpp",
  "tree-sitter-elixir",
  "tree-sitter-go",
