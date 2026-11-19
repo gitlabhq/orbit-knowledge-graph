@@ -22,30 +22,30 @@ functions:
       - match: '(_ (__object !(__call) !(__object) !(__qualifier) !(__member) !(__ivar)))'
         value: 'on_named($ROOT, $SITE)'
       - match: '(_ $O:__object)'
-        value: 'lookup($ROOT, $SITE, $O | type, $O | type | type_node | type)'
+        value: 'lookup($ROOT, $SITE, %callable_kinds, %value_kinds, %type_kinds, $O | type, $O | type | type_node | type)'
 
   on_named:
     params: [$SITE]
     key: ['$ROOT | child("__object") | sym', '$ROOT | sym', '$SITE | role']
     cases:
       - match: '(_ $O:__object)'
-        value: 'lookup($ROOT, $SITE, $O | type, $O | type | type_node | type)'
+        value: 'lookup($ROOT, $SITE, %callable_kinds, %value_kinds, %type_kinds, $O | type, $O | type | type_node | type)'
 
   named:
     cases:
       - match: '(_ (__qualifier))'
         value: '$ROOT | name'
       - match: '(_ $I:__ivar)'
-        value: '$I | ivar | meaning($ROOT)'
+        value: '$I | ivar | meaning($ROOT, %callable_kinds, %value_kinds, %type_kinds)'
       - when: '$ROOT | read'
-        value: '$ROOT | name | meaning($ROOT)'
-      - value: '$ROOT | ivar | meaning($ROOT)'
+        value: '$ROOT | name | meaning($ROOT, %callable_kinds, %value_kinds, %type_kinds)'
+      - value: '$ROOT | ivar | meaning($ROOT, %callable_kinds, %value_kinds, %type_kinds)'
 
   member:
     params: [$M]
     cases:
       - match: '(__def)'
-        value: 'lookup($M, $M, $ROOT)'
+        value: 'lookup($M, $M, %callable_kinds, %value_kinds, %type_kinds, $ROOT)'
       - match: '(__name)'
         value: none
       - value: '$ROOT | type_node | type | member($M)'

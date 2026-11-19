@@ -6,6 +6,7 @@
 import: [canonical, display, roots, shapes, statements]
 
 data:
+  value_kinds: [__class, __struct, __trait, __enum, __enum_variant, __field_def, __property, __constant, __static_constant, __variable, __type_alias, __interface, __function]
   builtins: [
     assert, assume, classOf, identity, implicitly, locally, print, printf, println, require,
     summon, synchronized, valueOf

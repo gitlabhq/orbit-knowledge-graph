@@ -13,6 +13,7 @@
 import: [canonical, display, roots, shapes, statements]
 
 data:
+  callable_kinds: [__function, __method, __class, __lambda, __enum_variant, __property]
   kotlin_symbols: [
     require, requireNotNull, check, checkNotNull, error, TODO, lazy, run, with, repeat, arrayOf,
     assert, arrayOfNulls, booleanArrayOf, byteArrayOf, charArrayOf, doubleArrayOf, floatArrayOf,

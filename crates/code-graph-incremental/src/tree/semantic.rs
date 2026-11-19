@@ -11,7 +11,6 @@ pub const CLASS_LIKE: &[C] = &[
 
 use super::{Cursor, Edge, EdgeKind, Node, Storage};
 use crate::canonical::Canonical as C;
-use crate::tags::ReservedTags;
 
 impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn kind(self) -> u16 {
@@ -271,16 +270,10 @@ pub fn members_named<'a, S: Storage<Node = Node>>(
 pub fn find_member_in<'a, S: Storage<Node = Node>>(
     owner: Cursor<'a, S>,
     defs: impl Iterator<Item = Cursor<'a, S>>,
-    role: Role,
-    tags: &ReservedTags,
+    fills: impl Fn(Cursor<'a, S>) -> bool,
+    both: impl Fn(Cursor<'a, S>) -> bool,
 ) -> Option<u32> {
-    let tag = match role {
-        Role::Value => tags.value,
-        Role::Callable => tags.callable,
-        Role::Type => tags.declares_type,
-    };
-    let both = |def: Cursor<'a, S>| def.has_tag(tags.value) && def.has_tag(tags.callable);
-    let mut defs = defs.filter(|def| def.has_tag(tag) && def.is_member_of(owner));
+    let mut defs = defs.filter(|def| fills(*def) && def.is_member_of(owner));
     let first = defs.next()?;
     let best = match both(first) {
         true => defs.find(|def| !both(*def)).unwrap_or(first),

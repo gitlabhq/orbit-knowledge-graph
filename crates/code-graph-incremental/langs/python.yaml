@@ -4,6 +4,7 @@
 import: [canonical, display, roots, shapes]
 
 data:
+  value_kinds: [__class, __struct, __trait, __enum, __enum_variant, __field_def, __property, __constant, __static_constant, __variable, __type_alias, __interface, __function, __method]
   builtins: [
     __import__, abs, aiter, all, anext, any, ascii, bin, bool, breakpoint, bytearray, bytes,
     callable, chr, classmethod, compile, complex, delattr, dict, dir, divmod, enumerate, eval,

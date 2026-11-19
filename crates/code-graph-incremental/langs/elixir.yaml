@@ -6,6 +6,7 @@
 import: [canonical, display, shapes]
 
 data:
+  callable_kinds: [__function, __method, __lambda, __enum_variant]
   builtins: [
     abs, apply, binary_part, bit_size, byte_size, ceil, div, elem, exit, floor, hd, inspect,
     is_atom, is_binary, is_bitstring, is_boolean, is_float, is_function, is_integer, is_list,

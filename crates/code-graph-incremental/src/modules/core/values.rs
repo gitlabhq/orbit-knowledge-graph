@@ -1,4 +1,4 @@
-use super::{Core, Ref};
+use super::{Core, Ref, Roles};
 use crate::canonical::Canonical as C;
 use crate::engine::{Cursor, Cx, Store, Val, Vals, of, one};
 use crate::tree::is_name_text;
@@ -87,7 +87,12 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
         found
     }
 
-    pub(super) fn call_targets(&mut self, call: Cursor<'t, S>, implicit: bool) -> Vals {
+    pub(super) fn call_targets(
+        &mut self,
+        call: Cursor<'t, S>,
+        implicit: bool,
+        roles: &Roles,
+    ) -> Vals {
         let Some(callee) = call.child(C::Callee).filter(|c| c.sym_opt().is_some()) else {
             return Vals::new();
         };
@@ -100,24 +105,30 @@ impl<'t, S: Store> Cx<'_, 't, Core, S> {
             .collect();
         let bound: Vals = named
             .into_iter()
-            .map(|v| self.member_for(v, call))
+            .map(|v| self.member_for(v, call, roles))
             .collect();
         if read_any || !implicit {
             return bound;
         }
         match self.enclosing_class() {
-            Some(class) => of(self.members(class, callee.sym(), call.role())),
+            Some(class) => of(self.members(class, callee.sym(), call.role(), roles)),
             None => Vals::new(),
         }
     }
 
-    pub(super) fn unresolved(&mut self, call: Cursor<'t, S>, implicit: bool) -> bool {
+    pub(super) fn unresolved(
+        &mut self,
+        call: Cursor<'t, S>,
+        implicit: bool,
+        roles: &Roles,
+    ) -> bool {
         let Some(callee) = call.child(C::Callee).filter(|c| c.sym_opt().is_some()) else {
             return false;
         };
         if !is_name_text(self.lang().syms.resolve(callee.sym())) {
             return false;
         }
-        self.read(callee).is_empty() && (!implicit || self.call_targets(call, true).is_empty())
+        self.read(callee).is_empty()
+            && (!implicit || self.call_targets(call, true, roles).is_empty())
     }
 }

@@ -6,6 +6,9 @@
 
 import: [canonical, display, shapes]
 
+data:
+  callable_kinds: [__function, __method, __class, __lambda, __enum_variant, __variable]
+
 canonicalize:
   - name: normalize
     rules:

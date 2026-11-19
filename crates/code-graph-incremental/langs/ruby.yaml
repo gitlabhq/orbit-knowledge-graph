@@ -12,6 +12,7 @@
 import: [canonical, display, shapes]
 
 data:
+  callable_kinds: [__function, __method, __class, __lambda, __enum_variant, __property]
   builtins: [
     abort, at_exit, autoload, binding, 'block_given?', caller, caller_locations, catch, chomp,
     chop, eval, exec, exit, 'exit!', fail, fork, format, gets, global_variables, 'iterator?',

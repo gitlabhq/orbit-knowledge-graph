@@ -72,24 +72,24 @@ link:
     emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT } }
   - group: call
     match: '(__call #implicit_self (__callee "/./"))'
-    when: 'targets($ROOT, true)'
+    when: 'targets($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)'
     emit:
-      calls: { from: enclosing, to: 'targets($ROOT, true) | callable', site: $ROOT }
-      imports: { from: enclosing, to: 'targets($ROOT, true) | imported', site: $ROOT }
-      type_flow: { from: enclosing, to: 'targets($ROOT, true) | produced', site: $ROOT }
+      calls: { from: enclosing, to: 'targets($ROOT, true, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
+      imports: { from: enclosing, to: 'targets($ROOT, true, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT }
+      type_flow: { from: enclosing, to: 'targets($ROOT, true, %callable_kinds, %value_kinds, %type_kinds) | produced', site: $ROOT }
   - group: call
     match: '(__call #implicit_self (__callee %builtins))'
-    when: 'unresolved($ROOT, true)'
+    when: 'unresolved($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)'
     emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT, resolution: reference, resolve: none } }
   - group: call
     match: '(__call #implicit_self (__callee %providers))'
-    when: 'unresolved($ROOT, true)'
+    when: 'unresolved($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)'
     enter:
       - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | callable_import | sourced(%providers, true)', site: $ROOT, resolution: reference, resolve: none } }
       - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | callable_import | sourced(%providers, false)', site: $ROOT } }
   - group: call
     match: '(__call #implicit_self (__callee "/./"))'
-    when: 'unresolved($ROOT, true)'
+    when: 'unresolved($ROOT, true, %callable_kinds, %value_kinds, %type_kinds)'
     emit: { imports: { from: enclosing, to: mod.ssa.wildcards | callable_import, site: $ROOT } }
   - group: call
     match: '(__call #implicit_self (__callee "/./"))'
@@ -101,7 +101,7 @@ link:
       - mod.ssa.defer($ROOT)
     late:
       - emit:
-          calls: { from: enclosing, to: $ROOT | mod.ssa.deferred | callable, site: $ROOT }
+          calls: { from: enclosing, to: '$ROOT | mod.ssa.deferred | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
           imports: { from: enclosing, to: $ROOT | mod.ssa.deferred | imported, site: $ROOT }
           type_flow: { from: enclosing, to: $ROOT | mod.ssa.deferred | produced, site: $ROOT }
   - group: call
@@ -111,42 +111,42 @@ link:
       - emit: { type_flow: { from: enclosing, to: $M | receiver_calls, site: $ROOT } }
       - emit: { calls: { from: enclosing, to: $O | type | member($M), site: $ROOT } }
       - emit:
-          calls: { from: enclosing, to: $O | type | unmatched($M) | callable, site: $ROOT }
-          imports: { from: enclosing, to: $O | type | unmatched($M) | imported, site: $ROOT }
-          type_flow: { from: enclosing, to: $O | type | unmatched($M) | produced, site: $ROOT }
+          calls: { from: enclosing, to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
+          imports: { from: enclosing, to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT }
+          type_flow: { from: enclosing, to: '$O | type | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | produced', site: $ROOT }
       - emit: { type_flow: { from: enclosing, to: $O | chain_head | type | typed_calls, site: $ROOT } }
       - mod.ssa.defer($ROOT)
     late:
       - emit: { calls: { from: enclosing, to: $ROOT | mod.ssa.deferred | member($M), site: $ROOT } }
       - emit:
-          calls: { from: enclosing, to: $ROOT | mod.ssa.deferred | unmatched($M) | callable, site: $ROOT }
-          imports: { from: enclosing, to: $ROOT | mod.ssa.deferred | unmatched($M) | imported, site: $ROOT }
-          type_flow: { from: enclosing, to: $ROOT | mod.ssa.deferred | unmatched($M) | produced, site: $ROOT }
+          calls: { from: enclosing, to: '$ROOT | mod.ssa.deferred | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
+          imports: { from: enclosing, to: '$ROOT | mod.ssa.deferred | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT }
+          type_flow: { from: enclosing, to: '$ROOT | mod.ssa.deferred | unmatched($M, %callable_kinds, %value_kinds, %type_kinds) | produced', site: $ROOT }
   - group: call
     match: '(__call (__callee (__member)))'
   - group: call
     match: '(__call (__callee $I:__ivar))'
-    emit: { calls: { from: enclosing, to: 'lookup(@$I, $ROOT, enclosing | class)', site: $ROOT } }
+    emit: { calls: { from: enclosing, to: 'lookup(@$I, $ROOT, %callable_kinds, %value_kinds, %type_kinds, enclosing | class)', site: $ROOT } }
   - group: call
     match: '(__call (__callee "/./"))'
-    when: 'targets($ROOT, false)'
+    when: 'targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds)'
     emit:
-      calls: { from: enclosing, to: 'targets($ROOT, false) | callable', site: $ROOT }
-      imports: { from: enclosing, to: 'targets($ROOT, false) | imported', site: $ROOT }
-      type_flow: { from: enclosing, to: 'targets($ROOT, false) | produced', site: $ROOT }
+      calls: { from: enclosing, to: 'targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', site: $ROOT }
+      imports: { from: enclosing, to: 'targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT }
+      type_flow: { from: enclosing, to: 'targets($ROOT, false, %callable_kinds, %value_kinds, %type_kinds) | produced', site: $ROOT }
   - group: call
     match: '(__call (__callee %builtins))'
-    when: 'unresolved($ROOT, false)'
+    when: 'unresolved($ROOT, false, %callable_kinds, %value_kinds, %type_kinds)'
     emit: { imports: { from: enclosing, to: mod.ssa.wildcards, site: $ROOT, resolution: reference, resolve: none } }
   - group: call
     match: '(__call (__callee %providers))'
-    when: 'unresolved($ROOT, false)'
+    when: 'unresolved($ROOT, false, %callable_kinds, %value_kinds, %type_kinds)'
     enter:
       - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | sourced(%providers, true)', site: $ROOT, resolution: reference, resolve: none } }
       - emit: { imports: { from: enclosing, to: 'mod.ssa.wildcards | sourced(%providers, false)', site: $ROOT } }
   - group: call
     match: '(__call (__callee "/./"))'
-    when: 'unresolved($ROOT, false)'
+    when: 'unresolved($ROOT, false, %callable_kinds, %value_kinds, %type_kinds)'
     emit: { imports: { from: enclosing, to: mod.ssa.wildcards, site: $ROOT } }
 
   - group: member
@@ -161,9 +161,9 @@ link:
     enter:
       - emit: { calls: { from: enclosing, to: $O | type | member($ROOT), resolution: reference } }
       - emit:
-          calls: { from: enclosing, to: $O | type | unmatched($ROOT) | callable, resolution: reference }
-          imports: { from: enclosing, to: $O | type | unmatched($ROOT) | imported, site: $ROOT | binding_site, resolution: reference, resolve: none }
-          type_flow: { from: enclosing, to: $O | type | unmatched($ROOT) | produced, resolution: reference }
+          calls: { from: enclosing, to: '$O | type | unmatched($ROOT, %callable_kinds, %value_kinds, %type_kinds) | callable(%callable_kinds, %value_kinds, %type_kinds)', resolution: reference }
+          imports: { from: enclosing, to: '$O | type | unmatched($ROOT, %callable_kinds, %value_kinds, %type_kinds) | imported', site: $ROOT | binding_site, resolution: reference, resolve: none }
+          type_flow: { from: enclosing, to: '$O | type | unmatched($ROOT, %callable_kinds, %value_kinds, %type_kinds) | produced', resolution: reference }
 
   - group: bind
     match: '(__binding (__qualifier))'
