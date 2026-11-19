@@ -61,7 +61,7 @@ mod tests {
             ),
             (
                 "modules/core/names.rs",
-                include_str!("../modules/core/names.rs"),
+                include_str!("../modules/core/chain.rs"),
             ),
             ("resolve/mod.rs", include_str!("../resolve/mod.rs")),
             ("resolve/types.rs", include_str!("../resolve/types.rs")),

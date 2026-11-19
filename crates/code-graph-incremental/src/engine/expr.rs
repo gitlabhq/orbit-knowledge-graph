@@ -12,6 +12,7 @@ pub enum Expr {
     Cap(u16),
     Text(u16),
     Lit(Val),
+    Empty,
     Call(FnId, Box<[Expr]>),
 }
 
@@ -47,6 +48,7 @@ impl Expr {
                 .map(|loc| Val::Sym(super::Cursor::new(cx.trees, loc.fi, loc.node).sym()))
                 .collect(),
             Expr::Lit(val) => SmallVec::from_elem(*val, 1),
+            Expr::Empty => Vals::new(),
             Expr::Call(id, args) => {
                 let args: SmallVec<[Vals; 3]> = args.iter().map(|a| a.eval(cx, caps)).collect();
                 apply(cx, *id, &args)
@@ -164,6 +166,8 @@ impl<'s> Parser<'s, '_> {
         let word = self.ident();
         match word {
             "true" | "false" => return Ok(Expr::Lit(Val::Bool(word == "true"))),
+            "opaque" => return Ok(Expr::Lit(Val::Opaque)),
+            "none" => return Ok(Expr::Empty),
             _ if !word.is_empty() && word.bytes().all(|b| b.is_ascii_digit()) => {
                 return Ok(Expr::Lit(Val::Sym(
                     word.parse().map_err(|_| self.error("number"))?,

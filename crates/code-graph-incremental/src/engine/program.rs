@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use smallvec::SmallVec;
 
 use super::expr::{Expr, Scope};
-use super::matching::matches;
+use super::matching::{matches, matches_anchored};
 use super::{Cursor, FnId, Kind, Loc, Run, Val, Vals};
 use crate::canonical::{CANONICAL_BASE, Canonical as C};
 use crate::dsl::parser::parse;
@@ -24,6 +24,8 @@ struct PhaseSpec {
     modules: Vec<String>,
     #[serde(default)]
     bind: BTreeMap<String, String>,
+    #[serde(default)]
+    resolve: BTreeMap<String, String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -59,15 +61,24 @@ enum ActionSpec {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RuleSpec {
+    group: Option<String>,
     #[serde(rename = "match")]
     pattern: String,
-    when: Option<List>,
+    when: Option<String>,
     enter: Option<Vec<ActionSpec>>,
     children: Option<List>,
     between: Option<Vec<ActionSpec>>,
     exit: Option<Vec<ActionSpec>>,
     emit: Option<EmitMap>,
 }
+
+const EMIT_KINDS: [(&str, EdgeKind); 5] = [
+    ("calls", EdgeKind::Calls),
+    ("imports", EdgeKind::Imports),
+    ("extends", EdgeKind::Extends),
+    ("defines", EdgeKind::Defines),
+    ("type_flow", EdgeKind::TypeFlow),
+];
 
 struct Emit {
     kind: EdgeKind,
@@ -99,9 +110,12 @@ enum Children {
 }
 
 struct Rule {
+    group: u8,
     pat: Pat,
+    depth: u8,
+    filters: Vec<Vec<u16>>,
     slots: usize,
-    when: Box<[Expr]>,
+    when: Option<Expr>,
     enter: Box<[Action]>,
     children: Children,
     between: Box<[Action]>,
@@ -151,54 +165,66 @@ impl Pipeline {
     }
 }
 
+fn hooks_allowed(walk: &str) -> &'static [&'static str] {
+    match walk {
+        "flow" => &["enter", "children", "between", "exit", "emit"],
+        "each" => &["emit"],
+        _ => &[],
+    }
+}
+
 impl Phase {
     fn load(spec: PhaseSpec, rules: &[RuleSpec], lang: &Lang) -> Result<Self, LoadError> {
         let links = super::Links::load(&binds(&spec)?)?;
+        let modules = spec
+            .modules
+            .iter()
+            .map(|m| super::slot_of(m).ok_or_else(|| LoadError(format!("no module named {m}"))))
+            .collect::<Result<_, _>>()?;
+        let defaults = spec
+            .resolve
+            .iter()
+            .map(|(kind, f)| Ok((edge_kind(kind)?, resolver(f, &links)?)))
+            .collect::<Result<Vec<_>, LoadError>>()?;
         let mut phase = Phase {
-            name: spec.name,
-            scope: spec.scope,
-            after: spec.after,
-            modules: spec
-                .modules
-                .iter()
-                .map(|m| super::slot_of(m).ok_or_else(|| LoadError(format!("no module named {m}"))))
-                .collect::<Result<_, _>>()?,
+            name: spec.name.clone(),
+            scope: spec.scope.clone(),
+            after: spec.after.clone(),
+            modules,
             links,
             rules: Vec::new(),
             by_kind: Vec::new(),
             slots: 1,
         };
+        let mut groups: Vec<&str> = Vec::new();
+        let mut steering: BTreeMap<u16, u8> = BTreeMap::new();
         for rule in rules {
             let at = |e: LoadError| {
                 LoadError(format!("{} rule {:?}: {}", phase.name, rule.pattern, e.0))
             };
-            let hooks = [
-                ("enter", rule.enter.is_some()),
-                ("children", rule.children.is_some()),
-                ("between", rule.between.is_some()),
-                ("exit", rule.exit.is_some()),
-                ("emit", rule.emit.is_some()),
-            ];
-            let allowed: &[&str] = match spec.walk.as_str() {
-                "flow" => &["enter", "children", "between", "exit", "emit"],
-                "each" => &["emit"],
-                _ => &[],
-            };
-            for (hook, used) in hooks {
-                let output = hook != "emit" || spec.outputs.iter().any(|o| o == "emit");
-                if used && (!allowed.contains(&hook) || !output) {
-                    return Err(at(LoadError(format!(
-                        "hook {hook} is not allowed in a {} phase",
-                        spec.walk
-                    ))));
+            rule.check_hooks(&spec).map_err(at)?;
+            let name = rule.group.as_deref().unwrap_or("default");
+            let group = match groups.iter().position(|g| *g == name) {
+                Some(at) => at,
+                None => {
+                    groups.push(name);
+                    groups.len() - 1
                 }
-            }
-            let rule = Rule::load(rule, &spec.modules, &phase.links, lang).map_err(at)?;
-            let Pat::Node { kind, .. } = rule.pat else {
-                return Err(at(LoadError("must match a node kind".into())));
             };
-            if kind < CANONICAL_BASE {
-                return Err(at(LoadError("must match a canonical kind".into())));
+            let group = u8::try_from(group)
+                .ok()
+                .filter(|g| *g < 64)
+                .ok_or_else(|| at(LoadError("more than 64 rule groups".into())))?;
+            let rule = Rule::load(rule, group, &spec, &phase.links, &defaults, lang).map_err(at)?;
+            let kind = rule.kind().map_err(at)?;
+            if !matches!(rule.children, Children::Visit)
+                && let Some(other) = steering.insert(kind, group)
+                && other != group
+            {
+                return Err(at(LoadError(format!(
+                    "groups {} and {name} both choose children for one kind",
+                    groups[other as usize]
+                ))));
             }
             let index = usize::from(kind - CANONICAL_BASE);
             if phase.by_kind.len() <= index {
@@ -209,6 +235,28 @@ impl Phase {
             phase.rules.push(rule);
         }
         Ok(phase)
+    }
+}
+
+fn edge_kind(name: &str) -> Result<EdgeKind, LoadError> {
+    EMIT_KINDS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, kind)| *kind)
+        .ok_or_else(|| LoadError(format!("unknown edge kind {name}")))
+}
+
+fn resolver(name: &str, links: &super::Links) -> Result<FnId, LoadError> {
+    let (module, f) = name
+        .strip_prefix("mod.")
+        .and_then(|n| n.split_once('.'))
+        .unwrap_or(("core", name));
+    let id =
+        super::lookup(module, f).ok_or_else(|| LoadError(format!("unknown resolve {name}")))?;
+    let id = links.to(id);
+    match super::function(id).sig == [super::Arg::One, super::Arg::Set] {
+        true => Ok(id),
+        false => Err(LoadError(format!("resolve {name} takes (target, site)"))),
     }
 }
 
@@ -260,11 +308,58 @@ fn binds(spec: &PhaseSpec) -> Result<Vec<(FnId, FnId)>, LoadError> {
     Ok(binds)
 }
 
+impl RuleSpec {
+    fn check_hooks(&self, phase: &PhaseSpec) -> Result<(), LoadError> {
+        let used = [
+            ("enter", self.enter.is_some()),
+            ("children", self.children.is_some()),
+            ("between", self.between.is_some()),
+            ("exit", self.exit.is_some()),
+            ("emit", self.emit.is_some()),
+        ];
+        let allowed = hooks_allowed(&phase.walk);
+        let emits = phase.outputs.iter().any(|o| o == "emit");
+        for (hook, used) in used {
+            if used && (!allowed.contains(&hook) || hook == "emit" && !emits) {
+                return Err(LoadError(format!(
+                    "hook {hook} is not allowed in a {} phase",
+                    phase.walk
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// How far above the matched node the pattern starts, and the kind of the
+/// node it fires on: the `$ROOT` capture, or the pattern's own root.
+fn anchor(p: &Pat, depth: u8) -> Option<(u8, u16)> {
+    match p {
+        Pat::Cap {
+            slot: 0,
+            kind,
+            guard,
+            ..
+        } => {
+            let guarded = guard.as_deref().and_then(|g| match g {
+                Pat::Node { kind, .. } => Some(*kind),
+                _ => None,
+            });
+            Some((depth, kind.or(guarded)?))
+        }
+        Pat::Cap { guard: Some(g), .. } => anchor(g, depth),
+        Pat::Node { kids, .. } => kids.iter().find_map(|kid| anchor(kid, depth + 1)),
+        _ => None,
+    }
+}
+
 impl Rule {
     fn load(
         spec: &RuleSpec,
-        modules: &[String],
+        group: u8,
+        phase: &PhaseSpec,
         links: &super::Links,
+        defaults: &[(EdgeKind, FnId)],
         lang: &Lang,
     ) -> Result<Self, LoadError> {
         let mut ctx = Ctx::new(lang);
@@ -273,21 +368,15 @@ impl Rule {
         let slots = &ctx.slots;
         let scope = |effects| Scope {
             slots,
-            modules,
+            modules: &phase.modules,
             links,
             lang,
             effects,
         };
-        let exprs = |list: &Option<List>| -> Result<Box<[Expr]>, LoadError> {
-            let items = list.as_ref().map_or(&[][..], List::items);
-            items
-                .iter()
-                .map(|s| Expr::parse(s, &scope(false)))
-                .collect()
-        };
+        let expr = |src: &str| Expr::parse(src, &scope(false));
         let emit = |map: &EmitMap| -> Result<Box<[Emit]>, LoadError> {
             map.iter()
-                .map(|(kind, fields)| Emit::load(kind, fields, &scope(false)))
+                .map(|(kind, fields)| Emit::load(kind, fields, &scope(false), links, defaults))
                 .collect()
         };
         let actions = |list: &Option<Vec<ActionSpec>>| -> Result<Vec<Action>, LoadError> {
@@ -297,9 +386,9 @@ impl Rule {
                 .map(|item| match item {
                     ActionSpec::Emit { emit: map } => Ok(Action::Emit(emit(map)?)),
                     ActionSpec::Expr(src) => {
-                        let expr = Expr::parse(src, &scope(true))?;
-                        match expr.ends_in_effect() {
-                            true => Ok(Action::Do(expr)),
+                        let parsed = Expr::parse(src, &scope(true))?;
+                        match parsed.ends_in_effect() {
+                            true => Ok(Action::Do(parsed)),
                             false => {
                                 Err(LoadError(format!("action {src:?} must end in an effect")))
                             }
@@ -316,17 +405,35 @@ impl Rule {
             None => Children::Visit,
             Some([one]) if one == "visit" => Children::Visit,
             Some([one]) if one == "skip" => Children::Skip,
-            Some(_) => Children::Of(exprs(&spec.children)?),
+            Some(items) => Children::Of(items.iter().map(|s| expr(s)).collect::<Result<_, _>>()?),
         };
+        let (depth, _) = anchor(&pat, 0).unwrap_or((0, 0));
         Ok(Rule {
+            group,
             slots: ctx.slots.len(),
-            pat,
-            when: exprs(&spec.when)?,
+            filters: ctx.filters.clone(),
+            when: spec.when.as_deref().map(expr).transpose()?,
             enter: enter.into(),
             children,
             between: actions(&spec.between)?.into(),
             exit: actions(&spec.exit)?.into(),
+            depth,
+            pat,
         })
+    }
+
+    fn kind(&self) -> Result<u16, LoadError> {
+        let kind = match anchor(&self.pat, 0) {
+            Some((_, kind)) => kind,
+            None => match self.pat {
+                Pat::Node { kind, .. } => kind,
+                _ => return Err(LoadError("must match a node kind".into())),
+            },
+        };
+        match kind >= CANONICAL_BASE {
+            true => Ok(kind),
+            false => Err(LoadError("must fire on a canonical kind".into())),
+        }
     }
 }
 
@@ -335,49 +442,31 @@ impl Emit {
         kind: &str,
         fields: &BTreeMap<String, String>,
         scope: &Scope,
+        links: &super::Links,
+        defaults: &[(EdgeKind, FnId)],
     ) -> Result<Self, LoadError> {
-        let edge = match kind {
-            "calls" => EdgeKind::Calls,
-            "imports" => EdgeKind::Imports,
-            "extends" => EdgeKind::Extends,
-            "defines" => EdgeKind::Defines,
-            "type_flow" => EdgeKind::TypeFlow,
-            _ => return Err(LoadError(format!("unknown emit kind {kind}"))),
-        };
+        let edge = edge_kind(kind)?;
+        for name in fields.keys() {
+            if !["from", "to", "site", "resolution", "resolve"].contains(&name.as_str()) {
+                return Err(LoadError(format!("emit {kind}: unknown field {name}")));
+            }
+        }
         let field = |name: &str| {
             fields
                 .get(name)
                 .map(|src| Expr::parse(src, scope))
                 .transpose()
         };
-        for name in fields.keys() {
-            if !["from", "to", "site", "resolution", "resolve"].contains(&name.as_str()) {
-                return Err(LoadError(format!("emit {kind}: unknown field {name}")));
-            }
-        }
         let resolution = match fields.get("resolution").map(String::as_str) {
             None => CallResolution::Unknown,
             Some(name) => {
                 resolution(name).ok_or_else(|| LoadError(format!("unknown resolution {name}")))?
             }
         };
-        let resolve = match fields.get("resolve") {
-            None => None,
-            Some(name) => {
-                let (module, f) = name
-                    .strip_prefix("mod.")
-                    .and_then(|n| n.split_once('.'))
-                    .unwrap_or(("core", name));
-                let id = super::lookup(module, f)
-                    .ok_or_else(|| LoadError(format!("emit {kind}: unknown resolve {name}")))?;
-                let id = scope.links.to(id);
-                if super::function(id).sig != [super::Arg::One, super::Arg::Set] {
-                    return Err(LoadError(format!(
-                        "emit {kind}: resolve {name} takes (target, site)"
-                    )));
-                }
-                Some(id)
-            }
+        let resolve = match fields.get("resolve").map(String::as_str) {
+            Some("none") => None,
+            Some(name) => Some(resolver(name, links)?),
+            None => defaults.iter().find(|(k, _)| *k == edge).map(|(_, f)| *f),
         };
         Ok(Emit {
             kind: edge,
@@ -397,6 +486,9 @@ impl Emit {
             .unwrap_or_default();
         let site = sites.first().and_then(|v| v.loc()).map(|l| l.node);
         let from = self.from.eval(run, caps);
+        if from.is_empty() {
+            return;
+        }
         let to = self.to.eval(run, caps);
         for from in from.iter().filter_map(|v| v.loc()) {
             for (&target, to) in to.iter().filter_map(|v| Some((v, v.loc()?))) {
@@ -461,39 +553,51 @@ impl Phase {
     }
 
     fn visit(&self, cx: &mut Run, w: &mut Walk, c: Cursor<'_>) {
+        let mut fired = 0u64;
+        let mut exits: SmallVec<[u16; 4]> = SmallVec::new();
+        let mut chosen: Option<(u16, Option<Vec<Vals>>)> = None;
         for &index in self.candidates(c.kind()) {
             let rule = &self.rules[index as usize];
-            if !w.matches(cx, rule, c)
-                || !rule
-                    .when
-                    .iter()
-                    .all(|e| super::truthy(&e.eval(cx, &w.vals)))
+            let bit = 1u64 << rule.group;
+            if fired & bit != 0 || !w.matches(cx, rule, c) {
+                continue;
+            }
+            if let Some(when) = &rule.when
+                && !super::truthy(&when.eval(cx, &w.vals))
             {
                 continue;
             }
+            fired |= bit;
             w.run(cx, &rule.enter);
             if !rule.exit.is_empty() {
-                w.stack.push(Item::Exit(index, c.index()));
+                exits.push(index);
             }
-            w.enter(cx, c);
             match &rule.children {
-                Children::Visit => w.push_children(c),
-                Children::Skip => {}
+                Children::Visit => {}
+                Children::Skip => chosen = Some((index, None)),
                 Children::Of(groups) => {
-                    let groups: Vec<Vals> = groups.iter().map(|g| g.eval(cx, &w.vals)).collect();
-                    for (at, group) in groups.iter().enumerate().rev() {
-                        let nodes = group.iter().rev().filter_map(|v| v.loc());
-                        w.stack.extend(nodes.map(|loc| Item::Visit(loc.node)));
-                        if at == 1 && !rule.between.is_empty() {
-                            w.stack.push(Item::Between(index, c.index()));
-                        }
+                    let groups = groups.iter().map(|g| g.eval(cx, &w.vals)).collect();
+                    chosen = Some((index, Some(groups)));
+                }
+            }
+        }
+        w.stack
+            .extend(exits.iter().map(|&rule| Item::Exit(rule, c.index())));
+        w.enter(cx, c);
+        match chosen {
+            None => w.push_children(c),
+            Some((_, None)) => {}
+            Some((rule, Some(groups))) => {
+                let between = !self.rules[rule as usize].between.is_empty();
+                for (at, group) in groups.iter().enumerate().rev() {
+                    let nodes = group.iter().rev().filter_map(|v| v.loc());
+                    w.stack.extend(nodes.map(|loc| Item::Visit(loc.node)));
+                    if at == 1 && between {
+                        w.stack.push(Item::Between(rule, c.index()));
                     }
                 }
             }
-            return;
         }
-        w.enter(cx, c);
-        w.push_children(c);
     }
 }
 
@@ -508,14 +612,38 @@ impl Walk {
         for cap in &mut self.caps[..rule.slots] {
             cap.clear();
         }
-        if !matches(c.tree(), &cx.env.lang, c.index(), &rule.pat, &mut self.caps) {
+        let tree = c.tree();
+        let lang = &cx.env.lang;
+        let found = match rule.depth {
+            0 => matches(tree, lang, c.index(), &rule.pat, &mut self.caps),
+            depth => {
+                let top = (0..depth).try_fold(c, |node, _| node.parent());
+                top.is_some_and(|top| {
+                    matches_anchored(
+                        tree,
+                        lang,
+                        top.index(),
+                        c.index(),
+                        &rule.pat,
+                        &mut self.caps,
+                    )
+                })
+            }
+        };
+        if !found {
             return false;
         }
         let fi = c.fi();
         self.vals[0] = SmallVec::from_elem(Val::Node(c.into()), 1);
-        for (val, cap) in self.vals[1..rule.slots].iter_mut().zip(&self.caps[1..]) {
+        for (slot, (val, cap)) in self.vals[1..rule.slots]
+            .iter_mut()
+            .zip(&self.caps[1..])
+            .enumerate()
+        {
+            let filter = rule.filters.get(slot + 1).map_or(&[][..], Vec::as_slice);
             *val = cap
                 .iter()
+                .filter(|&&node| filter.is_empty() || filter.contains(&c.jump(fi, node).kind()))
                 .map(|&node| Val::Node(Loc { fi, node }))
                 .collect();
         }

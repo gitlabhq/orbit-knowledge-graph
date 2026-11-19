@@ -206,56 +206,43 @@ impl<'t> Cx<'_, 't, Core> {
         member.map_or(value, |m| Val::Node(m.into()))
     }
 
-    pub(super) fn callee_targets(&mut self, call: Cursor<'t>) -> Vals {
+    /// What a named call's callee means: a binding in scope, or for an
+    /// implicit-self call a member of the enclosing class.
+    pub(super) fn targets(&mut self, call: Cursor<'t>) -> Vals {
         let Some(callee) = call.child(C::Callee).filter(|c| c.sym_opt().is_some()) else {
             return Vals::new();
         };
-        match call.has_tag(self.tags().implicit_self) {
-            true => self.implicit_targets(callee, call),
-            false => self.name_targets(callee, call, false),
-        }
-    }
-
-    fn implicit_targets(&mut self, callee: Cursor<'t>, site: Cursor<'t>) -> Vals {
         let bound = self.read(callee);
-        {
-            if !bound.is_empty() {
-                let named: Vals = bound
-                    .into_iter()
-                    .filter(|v| matches!(self.view(*v), Some(Ref::Def(_) | Ref::Import(_))))
-                    .collect();
-                return named
-                    .into_iter()
-                    .map(|r| self.member_for(r, site))
-                    .collect();
-            }
+        let implicit = call.has_tag(self.tags().implicit_self);
+        let read_any = !bound.is_empty();
+        let named: Vals = bound
+            .into_iter()
+            .filter(|v| *v != Val::Opaque)
+            .filter(|v| !implicit || matches!(self.view(*v), Some(Ref::Def(_) | Ref::Import(_))))
+            .collect();
+        let bound: Vals = named
+            .into_iter()
+            .map(|r| self.member_for(r, call))
+            .collect();
+        if read_any || !implicit {
+            return bound;
         }
-        if let Some(class) = self.enclosing_class() {
-            let members = ops::members(self, class, callee.sym(), site.role());
-            if !members.is_empty() {
-                return of(members);
-            }
+        match self.enclosing_class() {
+            Some(class) => of(ops::members(self, class, callee.sym(), call.role())),
+            None => Vals::new(),
         }
-        self.name_targets(callee, site, true)
     }
 
-    fn name_targets(&mut self, callee: Cursor<'t>, site: Cursor<'t>, callable_only: bool) -> Vals {
-        let targets: Vals = self
-            .read(callee)
-            .into_iter()
-            .map(|r| self.member_for(r, site))
-            .collect();
-        if !targets.is_empty() || !is_name_text(self.env().lang.syms.resolve(callee.sym())) {
-            return targets;
+    /// A named call nothing in scope binds, whose name may come from a
+    /// wildcard import.
+    pub(super) fn unresolved(&mut self, call: Cursor<'t>) -> bool {
+        let Some(callee) = call.child(C::Callee).filter(|c| c.sym_opt().is_some()) else {
+            return false;
+        };
+        if !is_name_text(self.env().lang.syms.resolve(callee.sym())) {
+            return false;
         }
-        let callable = self.tags().callable;
-        let mut wild = self.call(crate::fn_id!("core", "wildcards"), &[]);
-        wild.retain(|v| {
-            !callable_only
-                || v.loc()
-                    .and_then(|loc| self.jump(loc).parent())
-                    .is_some_and(|import| import.has_tag(callable))
-        });
-        wild
+        let implicit = call.has_tag(self.tags().implicit_self);
+        self.read(callee).is_empty() && (!implicit || self.targets(call).is_empty())
     }
 }

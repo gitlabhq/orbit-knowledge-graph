@@ -4,7 +4,7 @@ mod values;
 
 use std::rc::Rc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use crate::canonical::Canonical as C;
@@ -62,6 +62,7 @@ pub struct State {
     wildcard: u32,
     wildcards: Rc<Vec<u32>>,
     pending: Vec<(Value, u32, u32, Deferred)>,
+    bound: FxHashSet<u32>,
 }
 
 fn to_vals<'v>(values: impl IntoIterator<Item = &'v Value>) -> Vals {
@@ -229,6 +230,16 @@ static FUNCTIONS: &[Function<Ssa>] = &[
     }),
     function!(Effect, "bind_import", [one], |cx, a| {
         cx.bind_import(node(cx, a, 0));
+        yes(true)
+    }),
+    function!(Effect, "bind_inline", [one], |cx, a| {
+        let c = node(cx, a, 0);
+        for import in c
+            .children()
+            .filter(|i| i.is(C::Import) || i.is(C::ImportType))
+        {
+            cx.bind_import(import);
+        }
         yes(true)
     }),
     function!(Effect, "enter_scope", [one], |cx, a| {

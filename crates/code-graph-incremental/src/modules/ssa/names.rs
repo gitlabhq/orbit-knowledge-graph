@@ -177,6 +177,10 @@ impl<'t> Cx<'_, 't, Ssa> {
     }
 
     pub(super) fn bind_import(&mut self, c: Cursor<'t>) {
+        if self.state().bound.contains(&c.index()) {
+            return;
+        }
+        self.write().bound.insert(c.index());
         let module = self.inline_module(c);
         let type_only = self.tags().type_only;
         let link = &self.env().rules_for(&self.tree().label).config.link;
