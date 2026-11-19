@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use orbit_utils::markdown::{
-    FQN_SEPARATOR, FRONT_MATTER_NAME, LineIndex, escape_segment, parse, segment_path,
+    AgentFile, FQN_SEPARATOR, FRONT_MATTER_NAME, LineIndex, escape_segment, parse, segment_path,
 };
 
 use crate::v2::config::Language;
@@ -45,7 +45,24 @@ fn parse_markdown(source: &str, file_path: &str) -> CustomParse {
     };
     let document = parse(source);
     let sections = document.sections;
-    let mut definitions = Vec::with_capacity(sections.len() + 1);
+    let mut definitions = Vec::with_capacity(sections.len() + 2);
+    if let Some(agent_file) = AgentFile::classify(file_path) {
+        let front_matter = document.front_matter.as_ref();
+        definitions.push(CanonicalDefinition {
+            definition_type: agent_file.definition_type(),
+            kind: DefKind::Other,
+            name: agent_file.name(file_path, front_matter).to_string(),
+            fqn: Fqn::from_segments(&[stem.as_str()], FQN_SEPARATOR),
+            range: range(0, source.len()),
+            is_top_level: true,
+            metadata: front_matter.map(|block| {
+                Box::new(DefinitionMetadata {
+                    front_matter: Some(Box::new(block.values.clone())),
+                    ..Default::default()
+                })
+            }),
+        });
+    }
     if let Some(front_matter) = document.front_matter {
         definitions.push(CanonicalDefinition {
             definition_type: "FrontMatter",

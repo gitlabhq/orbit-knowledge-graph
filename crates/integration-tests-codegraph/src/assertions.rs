@@ -6,8 +6,10 @@ use std::fmt;
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureFile {
     pub path: String,
-    #[serde(deserialize_with = "joined_parts")]
+    #[serde(default, deserialize_with = "joined_parts")]
     pub content: String,
+    #[serde(default)]
+    pub symlink: Option<String>,
 }
 
 #[derive(Deserialize)]

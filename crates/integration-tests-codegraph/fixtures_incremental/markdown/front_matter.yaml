@@ -20,7 +20,7 @@ tests:
   - name: "front matter keys do not become definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type <> 'FrontMatter' AND d.definition_type <> 'Section'
+      WHERE NOT d.definition_type IN ['FrontMatter', 'Section', 'Skill']
       RETURN d.fqn AS fqn, d.definition_type AS definition_type
     assert:
       - { empty: true }
@@ -139,14 +139,14 @@ tests:
           - { row: { file: "doc/ci/yaml.md", group_name: "Pipeline Authoring" } }
       - query: |
           MATCH (d:Definition)
-          WHERE d.front_matter_metadata CONTAINS '"author":"example-org"'
+          WHERE d.definition_type = 'FrontMatter' AND d.front_matter_metadata CONTAINS '"author":"example-org"'
           RETURN d.file_path AS file, d.front_matter_name AS name
         assert:
           - { row_count: 1 }
           - { row: { file: "skills/pdf/SKILL.md", name: "pdf-processing" } }
       - query: |
           MATCH (d:Definition)
-          WHERE d.definition_type <> 'FrontMatter'
+          WHERE d.definition_type = 'Section'
           RETURN d.front_matter_name AS name, d.front_matter_title AS title, d.front_matter_metadata AS metadata
         assert:
           - { column_values: { field: name, values: [""] } }

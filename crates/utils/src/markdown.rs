@@ -472,6 +472,58 @@ pub fn escape_segment(name: &str) -> String {
     name.replace('\\', "\\\\").replace('#', "\\#")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentFile {
+    Instructions,
+    Skill,
+}
+
+impl AgentFile {
+    pub fn classify(path: &str) -> Option<Self> {
+        match split_file_name(path).1 {
+            "AGENTS.md" | "CLAUDE.md" | "CLAUDE.local.md" => Some(Self::Instructions),
+            "SKILL.md" => Some(Self::Skill),
+            _ => None,
+        }
+    }
+
+    pub fn definition_type(self) -> &'static str {
+        match self {
+            Self::Instructions => "AgentInstructions",
+            Self::Skill => "Skill",
+        }
+    }
+
+    /// A skill without a front matter `name` is named after its directory, as
+    /// skill loaders do.
+    pub fn name<'a>(self, path: &'a str, front_matter: Option<&'a FrontMatter>) -> &'a str {
+        let (directory, file_name) = split_file_name(path);
+        if self == Self::Instructions {
+            return file_name;
+        }
+        let declared = front_matter.and_then(|block| {
+            FRONT_MATTER_FIELDS
+                .iter()
+                .zip(&block.values)
+                .find(|(field, _)| field.key == "name")
+                .map(|(_, value)| value.as_str())
+        });
+        match declared {
+            Some(name) if !name.is_empty() => name,
+            _ => directory
+                .and_then(|directory| directory.rsplit('/').next())
+                .unwrap_or(file_name),
+        }
+    }
+}
+
+fn split_file_name(path: &str) -> (Option<&str>, &str) {
+    path.rsplit_once('/')
+        .map_or((None, path), |(directory, file_name)| {
+            (Some(directory), file_name)
+        })
+}
+
 fn assign_unique_segments(sections: &mut [Section], reserved_top_level: Option<&str>) {
     let mut siblings: FxHashMap<Option<usize>, SiblingSegments> = FxHashMap::default();
     for section in sections.iter() {
@@ -1062,5 +1114,52 @@ mod tests {
             "x".repeat(MAX_FRONT_MATTER_YAML_BYTES)
         );
         assert!(values(&huge).is_empty());
+    }
+
+    #[test]
+    fn agent_files_are_classified_by_exact_file_name() {
+        let classified = [
+            "AGENTS.md",
+            "a/CLAUDE.md",
+            "a/b/CLAUDE.local.md",
+            "skills/x/SKILL.md",
+            "agents.md",
+            "Skill.md",
+            "README.md",
+        ]
+        .map(AgentFile::classify);
+        assert_eq!(
+            classified,
+            [
+                Some(AgentFile::Instructions),
+                Some(AgentFile::Instructions),
+                Some(AgentFile::Instructions),
+                Some(AgentFile::Skill),
+                None,
+                None,
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_skill_is_named_by_front_matter_then_directory_then_file() {
+        let named = parse("---\nname: review\n---\n");
+        let unnamed = parse("---\nname: ''\n---\n");
+        let skill = AgentFile::Skill;
+        assert_eq!(
+            skill.name("a/b/SKILL.md", named.front_matter.as_ref()),
+            "review"
+        );
+        assert_eq!(
+            skill.name("a/b/SKILL.md", unnamed.front_matter.as_ref()),
+            "b"
+        );
+        assert_eq!(skill.name("a/b/SKILL.md", None), "b");
+        assert_eq!(skill.name("SKILL.md", None), "SKILL.md");
+        assert_eq!(
+            AgentFile::Instructions.name("a/AGENTS.md", named.front_matter.as_ref()),
+            "AGENTS.md"
+        );
     }
 }

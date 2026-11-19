@@ -1,0 +1,48 @@
+- path: AGENTS.md
+  content: |
+    # AGENTS
+
+    Run `mise test` before you push.
+
+- path: CLAUDE.md
+  symlink: AGENTS.md
+
+- path: CLAUDE.local.md
+  content: |
+    # Local overrides
+
+- path: crates/indexer/AGENTS.md
+  content: |
+    ---
+    description: Rules for the indexer crate.
+    ---
+    # Indexer
+
+- path: crates/indexer/CLAUDE.md
+  content: |
+    @AGENTS.md
+
+- path: .claude/skills/orbit/SKILL.md
+  content: |
+    ---
+    name: orbit-query
+    description: Query the knowledge graph.
+    license: MIT
+    ---
+    # Orbit
+
+- path: .claude/skills/broken/SKILL.md
+  content: |
+    ---
+    name: [unclosed
+    description: Never read.
+    ---
+    # Broken
+
+- path: skills/plain/SKILL.md
+  content: |
+    # Plain
+
+- path: docs/agents.md
+  content: |
+    # Not instructions

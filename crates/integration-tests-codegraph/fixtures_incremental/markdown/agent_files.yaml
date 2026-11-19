@@ -1,0 +1,96 @@
+name: "Markdown (incremental): agent instruction and skill files get one definition each, identical across engines"
+
+fixture_tree: markdown_agent_files
+
+tests:
+  - name: "agent instruction and skill files get one file-level definition each"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['AgentInstructions', 'Skill']
+      RETURN d.file_path AS file, d.definition_type AS definition_type, d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 7 }
+      - { row: { file: "AGENTS.md", definition_type: "AgentInstructions", name: "AGENTS.md", fqn: "AGENTS" } }
+      - { row: { file: "CLAUDE.local.md", definition_type: "AgentInstructions", name: "CLAUDE.local.md", fqn: "CLAUDE.local" } }
+      - { row: { file: "crates/indexer/AGENTS.md", definition_type: "AgentInstructions", name: "AGENTS.md", fqn: "AGENTS" } }
+      - { row: { file: "crates/indexer/CLAUDE.md", definition_type: "AgentInstructions", name: "CLAUDE.md", fqn: "CLAUDE" } }
+      - { row: { file: ".claude/skills/orbit/SKILL.md", definition_type: "Skill", name: "orbit-query", fqn: "SKILL" } }
+      - { row: { file: ".claude/skills/broken/SKILL.md", definition_type: "Skill", name: "broken", fqn: "SKILL" } }
+      - { row: { file: "skills/plain/SKILL.md", definition_type: "Skill", name: "plain", fqn: "SKILL" } }
+
+  - name: "a symlinked CLAUDE.md and other Markdown files get no agent definition"
+    queries:
+      - query: |
+          MATCH (f:File)
+          WHERE f.path IN ['CLAUDE.md', 'docs/agents.md']
+          RETURN f.path AS file
+        assert:
+          - { row_count: 2 }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path IN ['CLAUDE.md', 'docs/agents.md'] AND d.definition_type <> 'Section'
+          RETURN d.file_path AS file, d.definition_type AS definition_type
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.file_path = 'CLAUDE.md'
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+
+  - name: "the file-level definition does not collide with a heading named like the file"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'AGENTS.md'
+      RETURN d.fqn AS fqn, d.definition_type AS definition_type
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "AGENTS", definition_type: "AgentInstructions" } }
+      - { row: { fqn: "AGENTS#AGENTS", definition_type: "Section" } }
+
+  - name: "sections stay defined by the file, next to the file-level definition"
+    queries:
+      - query: |
+          MATCH (f:File)-[:DEFINES]->(d:Definition)
+          WHERE f.path = 'crates/indexer/AGENTS.md'
+          RETURN d.fqn AS fqn, d.definition_type AS definition_type
+        assert:
+          - { row_count: 3 }
+          - { row: { fqn: "AGENTS", definition_type: "AgentInstructions" } }
+          - { row: { fqn: "AGENTS#front_matter", definition_type: "FrontMatter" } }
+          - { row: { fqn: "AGENTS#Indexer", definition_type: "Section" } }
+      - query: |
+          MATCH (p:Definition)-[:DEFINES]->(d:Definition)
+          WHERE p.definition_type IN ['AgentInstructions', 'Skill']
+          RETURN p.fqn AS parent, d.fqn AS child
+        assert:
+          - { empty: true }
+
+  - name: "skill and instruction rows copy the raw front matter values"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['AgentInstructions', 'Skill']
+      RETURN d.file_path AS file, d.front_matter_name AS front_matter_name, d.front_matter_description AS description, d.front_matter_license AS license
+    assert:
+      - { row_count: 7 }
+      - { row: { file: ".claude/skills/orbit/SKILL.md", front_matter_name: "orbit-query", description: "Query the knowledge graph.", license: "MIT" } }
+      - { row: { file: ".claude/skills/broken/SKILL.md", front_matter_name: "", description: "", license: "" } }
+      - { row: { file: "skills/plain/SKILL.md", front_matter_name: "", description: "", license: "" } }
+      - { row: { file: "crates/indexer/AGENTS.md", front_matter_name: "", description: "Rules for the indexer crate.", license: "" } }
+      - { row: { file: "AGENTS.md", front_matter_name: "", description: "", license: "" } }
+
+  - name: "agent definitions cover the whole file, with the same ids in both engines"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['AgentInstructions', 'Skill']
+      RETURN d.file_path AS file, d.id AS id, d.start_byte AS start_byte, d.end_byte AS end_byte, d.start_line AS start_line, d.end_line AS end_line
+    assert:
+      - { row_count: 7 }
+      - { row: { file: "AGENTS.md", id: 5116907058377800229, start_byte: 0, end_byte: 43, start_line: 1, end_line: 3 } }
+      - { row: { file: "CLAUDE.local.md", id: 2017842434075986094, start_byte: 0, end_byte: 18, start_line: 1, end_line: 1 } }
+      - { row: { file: "crates/indexer/AGENTS.md", id: 7067339142166962289, start_byte: 0, end_byte: 60, start_line: 1, end_line: 4 } }
+      - { row: { file: "crates/indexer/CLAUDE.md", id: 6119213924572857443, start_byte: 0, end_byte: 11, start_line: 1, end_line: 1 } }
+      - { row: { file: ".claude/skills/orbit/SKILL.md", id: 2738211937582029805, start_byte: 0, end_byte: 87, start_line: 1, end_line: 6 } }
+      - { row: { file: ".claude/skills/broken/SKILL.md", id: 7131094605272694271, start_byte: 0, end_byte: 58, start_line: 1, end_line: 5 } }
+      - { row: { file: "skills/plain/SKILL.md", id: 2827924595113532369, start_byte: 0, end_byte: 8, start_line: 1, end_line: 1 } }

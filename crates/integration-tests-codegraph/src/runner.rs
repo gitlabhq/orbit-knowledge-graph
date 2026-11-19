@@ -53,11 +53,22 @@ pub fn run_yaml_suite(yaml: &str) {
     let tmp = tempfile::tempdir().expect("Failed to create temp dir");
     let file_inventory: Vec<FileInventoryEntry> = write_suite_files(&suite, tmp.path())
         .into_iter()
-        .map(|(path, size)| FileInventoryEntry {
-            path,
-            size,
-            decision: Decision::Parse,
-            label: Default::default(),
+        .map(|(path, size)| {
+            let is_symlink = tmp
+                .path()
+                .join(&path)
+                .symlink_metadata()
+                .is_ok_and(|metadata| metadata.is_symlink());
+            FileInventoryEntry {
+                path,
+                size,
+                decision: if is_symlink {
+                    Decision::ListOnly
+                } else {
+                    Decision::Parse
+                },
+                label: Default::default(),
+            }
         })
         .collect();
 

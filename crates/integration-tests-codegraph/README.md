@@ -52,6 +52,15 @@ Use parts for large inputs, such as deep nesting or long chains:
       - "}\n"
 ```
 
+A fixture with `symlink: <target>` instead of `content` is written as a
+symbolic link to that target. The `code-graph` runner lists it without parsing,
+as the production walk does.
+
+```yaml
+  - path: CLAUDE.md
+    symlink: AGENTS.md
+```
+
 Suites that share the same source tree set `fixture_tree` to a YAML file under
 `fixture_trees/`. Inline `fixtures` can add or replace files from that tree.
 
