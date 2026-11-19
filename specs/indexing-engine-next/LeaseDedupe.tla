@@ -269,6 +269,7 @@ Crash(p) ==
     /\ UNCHANGED <<now, offset, lease, copies, started, stallsLeft>>
     /\ UNCHANGED <<token, seenRev, expiry, renewAt, plannerVars, storeVars>>
 
+\* why: code-check/LeaseDedupeCodeCheck.tla lists every action of Next in SpecEnabled by hand. When you add an action here, add it to SpecEnabled and to the Rust world in crates/indexing-engine-next/tests/protocol/world.rs.
 Next ==
     \/ Tick
     \/ Submit
